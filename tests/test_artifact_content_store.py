@@ -31,13 +31,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mozaiksai.core.artifacts.content_store import (
-    ArtifactContentStore,
     ContentNotFoundError,
     GridFSArtifactContentStore,
     LocalArtifactContentStore,
     get_artifact_content_store,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -175,6 +173,34 @@ class TestReadArtifactZipBytes:
         from_path = read_artifact_zip(zip_path)
         from_bytes = read_artifact_zip_bytes(data)
         assert from_path == from_bytes
+
+    def test_artifact_workspace_readers_skip_sensitive_and_dependency_paths(self, tmp_path):
+        from factory_app.control_plane.tools._artifact_workspace import (
+            read_artifact_zip,
+            read_workspace_dir,
+        )
+
+        workspace = tmp_path / "workspace"
+        (workspace / "app").mkdir(parents=True)
+        (workspace / "node_modules" / "pkg").mkdir(parents=True)
+        (workspace / "app" / "main.py").write_text("def main():\n    return True\n", encoding="utf-8")
+        (workspace / ".env").write_text("API_KEY=raw", encoding="utf-8")
+        (workspace / "node_modules" / "pkg" / "index.js").write_text("module.exports = {}", encoding="utf-8")
+
+        file_map = read_workspace_dir(workspace)
+        assert file_map == {"app/main.py": "def main():\n    return True\n"}
+
+        zip_path = tmp_path / "bundle.zip"
+        zip_path.write_bytes(
+            _make_zip_bytes(
+                {
+                    "app/main.py": "def main():\n    return True\n",
+                    ".env": "API_KEY=raw",
+                    "node_modules/pkg/index.js": "module.exports = {}",
+                }
+            )
+        )
+        assert read_artifact_zip(zip_path) == {"main.py": "def main():\n    return True\n"}
 
 
 # ---------------------------------------------------------------------------

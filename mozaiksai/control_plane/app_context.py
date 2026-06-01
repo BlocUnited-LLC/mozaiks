@@ -14,7 +14,7 @@ from mozaiksai.core.app_context.models import (
     OwnershipClass,
     SourceRef,
 )
-from mozaiksai.core.app_context.store import get_current_app_context_version
+from mozaiksai.core.app_context.store import get_app_context_version, get_current_app_context_version
 from mozaiksai.core.artifacts.store import ArtifactStore
 
 APP_CONTEXT_MISSING_WARNING = (
@@ -126,13 +126,65 @@ async def get_current_app_context_graph(
         else await get_current_app_context_summary(app_id=resolved_app_id, artifact_store=artifact_store)
     )
     graph_ref = next((ref for ref in summary.artifact_refs if ref.kind == "app_context_graph"), None)
+    return await _load_app_context_graph_ref(
+        app_id=resolved_app_id,
+        graph_ref=graph_ref,
+        artifact_store=artifact_store,
+    )
+
+
+async def get_app_context_graph_for_version(
+    *,
+    app_id: str | None,
+    context_version_id: str | None,
+    artifact_store: ArtifactStore | None = None,
+) -> AppContextGraphLookupResult:
+    """Best-effort load of an AppContextGraph for a specific AppContextVersion."""
+    resolved_app_id = str(app_id or "").strip() or None
+    resolved_context_version_id = str(context_version_id or "").strip() or None
+    if not resolved_app_id or not resolved_context_version_id:
+        return AppContextGraphLookupResult()
+
+    try:
+        context_version = await get_app_context_version(
+            app_id=resolved_app_id,
+            context_version_id=resolved_context_version_id,
+            artifact_store=artifact_store,
+        )
+    except Exception as exc:
+        return AppContextGraphLookupResult(
+            warnings=[f"{APP_CONTEXT_GRAPH_LOAD_WARNING} Context version lookup failed: {exc}"]
+        )
+    if context_version is None:
+        return AppContextGraphLookupResult(
+            warnings=[
+                f"{APP_CONTEXT_GRAPH_LOAD_WARNING} Context version '{resolved_context_version_id}' was not found."
+            ]
+        )
+    graph_ref = next(
+        (ref for ref in summarize_app_context_version(context_version).artifact_refs if ref.kind == "app_context_graph"),
+        None,
+    )
+    return await _load_app_context_graph_ref(
+        app_id=resolved_app_id,
+        graph_ref=graph_ref,
+        artifact_store=artifact_store,
+    )
+
+
+async def _load_app_context_graph_ref(
+    *,
+    app_id: str,
+    graph_ref: AppContextRefSummary | None,
+    artifact_store: ArtifactStore | None = None,
+) -> AppContextGraphLookupResult:
     if graph_ref is None:
         return AppContextGraphLookupResult()
 
     try:
         store = artifact_store or ArtifactStore()
         artifact = await store.get_artifact_version(
-            app_id=resolved_app_id,
+            app_id=app_id,
             artifact_version_id=graph_ref.ref_id,
         )
     except Exception as exc:
@@ -258,6 +310,7 @@ __all__ = [
     "AppContextSummary",
     "app_context_summary_dump",
     "app_context_warnings",
+    "get_app_context_graph_for_version",
     "get_current_app_context_graph",
     "get_current_app_context_summary",
     "summarize_app_context_version",

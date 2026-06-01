@@ -236,7 +236,7 @@ class TestInjectModuleFileManifestGuard:
             name="ConfigMiddlewareAgent",
             context_variables={
                 "current_build_task": {
-                    "task_type": "backend_foundation",
+                    "task_type": "service_foundation",
                     "capability_pack_id": "orders",
                     "owned_paths": [],
                 }

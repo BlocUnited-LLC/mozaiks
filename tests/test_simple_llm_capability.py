@@ -100,6 +100,42 @@ async def test_generate_json_completion_keeps_chat_completions_for_non_codex_mod
     assert payload["messages"][1]["role"] == "user"
 
 
+@pytest.mark.asyncio
+async def test_generate_json_completion_omits_temperature_when_not_provided() -> None:
+    service = SimpleLLMCapabilityService()
+    service._client = _FakeClient(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            '{"summary":"Classify request.","owned_paths":[],"validation_strategy":"skip",'
+                            '"validation_commands":[],"start_preview":false,'
+                            '"needs_human_review":false,"rationale":"Non-coding classification."}'
+                        )
+                    }
+                }
+            ],
+            "usage": {"total_tokens": 21},
+        }
+    )
+    service._select_provider = _fake_select_provider  # type: ignore[method-assign]
+
+    response = await service.generate_json_completion(
+        system_prompt="system prompt",
+        user_prompt="user prompt",
+        llm_config={"model": "gpt-5"},
+        app_id="factory_app",
+        user_id="user_1",
+    )
+
+    assert response["parsed"]["summary"] == "Classify request."
+    assert service._client.calls[0]["url"].endswith("/chat/completions")
+    payload = service._client.calls[0]["json"]
+    assert payload["model"] == "gpt-5"
+    assert "temperature" not in payload
+
+
 async def _fake_select_provider(llm_config=None):  # noqa: ANN001
     return {
         "model": (llm_config or {}).get("model") or "gpt-5-nano",

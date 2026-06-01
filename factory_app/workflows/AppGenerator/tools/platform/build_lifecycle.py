@@ -32,9 +32,12 @@ async def _read_build_mode(*, app_id: str, chat_id: str) -> Optional[str]:
         coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
         doc = await coll.find_one(
             {"_id": str(chat_id), **build_app_scope_filter(str(app_id))},
-            {"context_variables.build_mode": 1},
+            {"context_variables.build_mode": 1, "build_mode": 1},
         )
         if isinstance(doc, dict):
+            raw_top_level = doc.get("build_mode")
+            if isinstance(raw_top_level, str) and raw_top_level.strip():
+                return raw_top_level.strip().lower()
             ctx = doc.get("context_variables")
             if isinstance(ctx, dict):
                 raw = ctx.get("build_mode")

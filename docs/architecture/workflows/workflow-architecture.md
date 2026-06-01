@@ -101,13 +101,13 @@ themselves, not by generated bundles.
 
 Workflow files live under:
 
-- `app/workflows/*` — workflows owned by one app workspace
+- `workflows/*` — workflows owned by one app workspace
 - `factory_app/workflows/*` — shared factory workflows owned by the builder system, not by individual app workspaces
 - `factory_app/workflows/_shared/*.py` — factory-owned shared Python infrastructure consumed by multiple factory workflows; not part of generated workflow bundles
 - `factory_app/workflows/extended_orchestration/` — shared build launcher, journeys, and transition UI
-- `<active app root>/workflows/extended_orchestration/extension_registry.json` — optional app-local registry used when that app workflow root is selected
+- `workspace-root workflows/extended_orchestration/extension_registry.json` — optional app-local registry used when that app workflow root is selected
 
-For the factory dogfood workspace specifically, `factory_app/app/workflows/*`
+For the factory dogfood workspace specifically, `factory_app/workflows/*`
 is only an app-local overlay path. It is not the canonical location for shared
 generation-core workflows, and the directory should stay absent until the
 factory app actually owns a workflow that is not part of the shared builder
@@ -140,23 +140,22 @@ The current file contract:
 - `tools.yaml`
 - `ui_config.yaml`
 - `hooks.yaml`
-- `extended_orchestration/mfj_extension.json` — required when the workflow uses mid-flight journeys (MFJ)
+- `extended_orchestration/task_batches.yaml` — optional workflow-local AG2 task batch contract
 - `tools/*.py`
 - `ui/*`
 
-## Mid-Flight Journeys
+## Task Batches
 
-When a workflow needs to decompose work into parallel child runs and then
-fan-in, it declares a mid-flight journey in `extended_orchestration/mfj_extension.json`.
+When a workflow needs to process many typed work items in parallel, it declares
+a task batch in `extended_orchestration/task_batches.yaml`.
 
 The runtime handles:
 
-- fan-out: spawning N child workflow runs from the trigger agent's output
-- fan-in: waiting for all children, merging results, resuming the parent
-- resume override: forcing the parent back to the declared `resume_agent`
-- context injection: writing merged child results under the `inject_as` key
-- auto-synthesis: registering context variables for MFJ keys so agents can
-  read them without manual declarations in `context_variables.yaml`
+- task source resolution from context variables or structured output
+- bounded AG2 agent calls for each task item
+- dependency, retry, timeout, and failure policy enforcement
+- context injection through the declared `result.context_key`
+- downstream synthesis by normal workflow agents
 
 ## Practical Rule
 
@@ -172,3 +171,5 @@ Mozaiks should feel like:
 - [../foundations/events-and-data/event-system.md](../foundations/events-and-data/event-system.md)
 - [../app/surface-model.md](../app/surface-model.md)
 - [orchestration-control-loops.md](orchestration-control-loops.md)
+
+

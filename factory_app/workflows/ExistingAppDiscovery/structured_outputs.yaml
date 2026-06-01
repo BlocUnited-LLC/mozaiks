@@ -46,7 +46,7 @@ models:
 
   ServiceSurface:
     type: model
-    description: A backend-facing surface the host app already exposes.
+    description: A service-facing surface the host app already exposes.
     fields:
       name:
         type: str
@@ -223,7 +223,7 @@ models:
         description: How users authenticate today.
       api_surface:
         type: str
-        description: Summary of the app's current backend/API surface.
+        description: Summary of the app's current service/API surface.
       existing_experience_summary:
         type: str
         description: Short summary of the current frontend experience and user-facing modules.
@@ -236,7 +236,7 @@ models:
       service_surfaces:
         type: list
         items: ServiceSurface
-        description: Existing backend-facing surfaces available for augmentation or bridge access.
+        description: Existing service-facing surfaces available for augmentation or bridge access.
       route_surfaces:
         type: list
         items: RouteSurface
@@ -492,7 +492,7 @@ models:
     type: model
     description: >
       An external provider adapter proposed for the implementation.
-      Provider-specific app adapters belong under backend/adapters/ in the app
+      Provider-specific app adapters belong under services/adapters/ in the app
       workspace. Generic provider-neutral utilities may belong in OSS runtime.
     fields:
       provider_id:
@@ -614,3 +614,4 @@ models:
       artifact_version:
         type: str
         description: Schema version of this artifact.
+

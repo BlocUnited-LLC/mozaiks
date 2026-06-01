@@ -402,8 +402,8 @@ class MyModuleService:
 Pure data access. No business logic, no events, no validation.
 
 Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
-with module/entity values aligned to `database_intent_bundle` and staged
-`config/database_intent.json`. It must not use `ctx.db`, call
+with module/entity values aligned to `data_contract` and staged
+`config/data.json`. It must not use `ctx.db`, call
 `get_mongo_client()`, or hardcode database names.
 
 ```python
@@ -419,7 +419,7 @@ class ProjectsRepo:
         return await collection.find_many(query or {}, limit=limit)
 ```
 
-The collection pair must match `config/database_intent.json`, for example
+The collection pair must match `config/data.json`, for example
 `module_id: projects` and `entity_name: projects`. Non-persistent modules should
 not invent database logic.
 
@@ -602,3 +602,4 @@ contract shape. The runtime loader will be updated to support the new paths.
 - [capability-pack-model.md](capability-pack-model.md) — reusable capability packs
 - [../app/canonical-app-structure.md](../app/canonical-app-structure.md) — full app workspace layout
 - [../app/app-bundle-declaratives.md](../app/app-bundle-declaratives.md) — declarative contract reference
+

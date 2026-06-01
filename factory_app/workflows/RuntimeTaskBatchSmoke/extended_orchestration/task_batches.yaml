@@ -1,0 +1,29 @@
+version: 1
+batches:
+  - id: runtime_smoke_tasks
+    trigger_agent: TaskPlannerAgent
+    source:
+      kind: structured_output
+      path: RuntimeTaskBatchPlan.work_units
+      task_model: RuntimeTaskBatchWorkUnit
+    worker:
+      mode: ag2_agent
+      agent_field: initial_agent
+      prompt_field: initial_message
+      context_fields:
+        - task_id
+        - kind
+        - name
+        - objective
+        - owned_paths
+    execution:
+      concurrency: 4
+      dependency_field: depends_on
+      failure_policy: fail_batch
+      retry_limit: 1
+      timeout_seconds: 180
+    result:
+      context_key: task_batch_results
+      status_key: task_batch_status
+      merge_strategy: collect_task_outputs
+      require_owned_paths: false

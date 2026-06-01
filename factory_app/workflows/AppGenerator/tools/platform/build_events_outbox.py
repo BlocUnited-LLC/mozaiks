@@ -171,6 +171,15 @@ async def mark_attempt(
     await coll.update_one({"_id": outbox_id}, {"$set": update})
 
 
+async def get_outbox_event(*, outbox_id: str) -> Optional[Dict[str, Any]]:
+    event_id = str(outbox_id or "").strip()
+    if not event_id:
+        return None
+    coll = await _coll()
+    doc = await coll.find_one({"_id": event_id})
+    return doc if isinstance(doc, dict) else None
+
+
 async def list_due_events(*, limit: int = 25) -> List[Dict[str, Any]]:
     await ensure_indexes()
     coll = await _coll()
@@ -193,6 +202,7 @@ __all__ = [
     "ensure_indexes",
     "upsert_outbox_event",
     "mark_attempt",
+    "get_outbox_event",
     "list_due_events",
     "build_outbox_id",
 ]

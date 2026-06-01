@@ -75,6 +75,13 @@ checkpoints:
       - get_revision_context
       - get_artifact_summary
       - get_artifact_workspace_catalog
+      - get_context_graph_catalog
+  - id: contract_surface_planning
+    event: contract_surface_requested
+    entrypoint: mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner
+    prompt_id: contract_surface_selection_system
+    tool_ids:
+      - get_contract_surface_context
   - id: coding_refinement
     event: coding_requested
     entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
@@ -83,3 +90,4 @@ checkpoints:
       - get_revision_context
       - get_artifact_summary
       - get_artifact_workspace_scope
+      - get_context_graph_scope

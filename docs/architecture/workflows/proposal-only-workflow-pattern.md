@@ -53,7 +53,7 @@ workflow_name: ContentReviewWorkflow
 max_turns: 30
 human_in_the_loop: true          # Always true for proposal_only
 workflow_startup_mode: AgentDriven
-orchestration_pattern: DefaultPattern
+orchestration_pattern: ag2_network
 initial_agent: IntakeAgent
 ```
 
@@ -329,10 +329,8 @@ handoff_rules:
   - source_agent: user
     target_agent: terminate
     handoff_type: condition
-    condition_type: string_llm
-    condition: >
-      When the operator confirms they have reviewed the proposal and
-      are done with this session.
+    condition_type: expression
+    condition: ${proposal_review_complete} == true
     transition_target: TerminateTarget
 ```
 
@@ -407,7 +405,7 @@ issued, dependency released):
 | `proposal_only` | Plan, assess, recommend | No — output is a proposal |
 | `standard` | Execute tasks with HITL scope gate | Yes — after scope confirmation |
 | Quality gate (AppGenerator) | Validate generated artifacts | No — sets passed/blocked status |
-| Mid-flight journey (MFJ) | Fan-out parallel child workflows | Depends on child archetype |
+| Task batch | Workflow-local parallel task execution | Depends on worker archetype |
 
 ---
 

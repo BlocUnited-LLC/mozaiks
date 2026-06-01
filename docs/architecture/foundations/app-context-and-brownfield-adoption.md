@@ -1,6 +1,6 @@
 ---
 title: App Context and Brownfield Adoption
-status: Target Architecture - Pre-Implementation Contract
+status: Active Architecture - Context Graph Refactor
 created: 2026-05-24
 depends_on: graph-authority-boundaries.md, ../workflows/refinement-control-plane.md, ../builder/artifact-staleness-and-routing.md, distribution-and-workspace-model.md
 ---
@@ -23,16 +23,20 @@ App and code context should become a first-class Studio/control-plane substrate.
 Workflows produce context artifacts. The control plane selects, versions, checks,
 and consumes the current context when it classifies and stages future changes.
 
-The target durable object is `AppContextVersion`. The target deterministic graph
+The target durable object is `AppContextVersion`. The target graph intelligence
 artifact is `AppContextGraph`.
 
-`CodeContext` remains prompt-time retrieval infrastructure. It is not app
-context authority.
+`AppContextGraph` is the primary code-context and app-context intelligence
+layer for Studio and the control plane. It powers LLM context planning, coding
+scope selection, impact explanation, related-file retrieval, and build review.
+It is still derived from canonical artifacts and source refs; runtime execution,
+permissions, artifact state, persistence, and route rendering continue to read
+their deterministic contracts directly.
 
-FalkorDB and any other knowledge graph are optional derived mirrors only. They
-must not become source of truth for runtime behavior, workflow routing,
-refinement decisions, permissions, connector secrets, generated app persistence,
-or UI route rendering.
+FalkorDB and other graph databases are optional backends for mirroring and
+querying this graph at scale. They do not require a hosted API key when
+self-hosted, but they are operational infrastructure and should be configured as
+advanced backend choices rather than exposed as build-sequence decisions.
 
 ## Contract Location
 
@@ -72,20 +76,41 @@ current for governed refinement.
 
 ## AppContextGraph
 
-`AppContextGraph` is a deterministic derived artifact or context graph. It is
-not FalkorDB and does not require a graph database.
+`AppContextGraph` is a deterministic derived artifact and the canonical Context
+Graph contract. It does not require a graph database.
 
 It should be built from authoritative source refs and accepted artifacts. Every
 node and edge should carry enough provenance to be audited back to a source file,
 database record, or artifact version.
+
+Source-code symbol extraction should prefer Tree-sitter when the optional
+`tree-sitter` extra is installed. The default OSS path must still build a useful
+graph without that extra by falling back to deterministic Python AST extraction
+and conservative JavaScript/TypeScript parsing.
+
+The code-intelligence pipeline is:
+
+1. Extract deterministic syntax facts from files: symbols, qualified names,
+   imports, references, and call relationships.
+2. Map those facts onto Mozaiks contracts: module action handlers, services,
+   repos, policies, schemas, page components, workflow tools, workflow agents,
+   and declared module actions.
+3. Build bounded LLM semantic annotation requests from graph facts. The model
+   may tag symbols with purpose, domain concepts, side effects, invariants,
+   risk, and likely tests.
+4. Merge accepted annotations back as `semantic_annotation` metadata on symbol
+   nodes. These annotations are advisory only; deterministic contracts and
+   stores remain authoritative.
 
 Neutral node examples:
 
 - `app`
 - `repo`
 - `source_ref`
+- `artifact`
 - `file`
 - `route`
+- `page`
 - `component`
 - `api_endpoint`
 - `data_entity`
@@ -93,6 +118,11 @@ Neutral node examples:
 - `capability`
 - `module`
 - `workflow`
+- `agent`
+- `tool`
+- `symbol`
+- `config`
+- `prompt`
 - `generated_overlay`
 - `staged_patch`
 - `risk`
@@ -101,19 +131,26 @@ Neutral node examples:
 Neutral edge examples:
 
 - `declares`
+- `defines`
 - `contains`
 - `imports`
 - `renders`
 - `calls`
 - `reads`
 - `writes`
+- `references`
 - `depends_on`
-- `owns`
-- `mirrors`
-- `stages`
+- `produces`
+- `consumes`
+- `triggers`
+- `uses_integration`
+- `protected_by`
+- `implements_capability`
+- `generated_from`
+- `staged_patch_touches`
+- `wraps`
 - `replaces`
-- `has_risk`
-- `has_unknown`
+- `blocks`
 
 Each graph snapshot should carry:
 
@@ -125,9 +162,10 @@ Each graph snapshot should carry:
 - ownership class
 - validation evidence refs
 
-The graph is useful for impact explanation, scope selection, audit, and agent
-retrieval. It must not replace deterministic config, source files, app bundle
-artifacts, or control-plane records as authority.
+The graph is used for impact explanation, scope selection, audit, agent
+retrieval, and Context Graph prompt packs. It must not replace deterministic
+config, source files, app bundle artifacts, workflow contracts, permissions, or
+control-plane records as authority.
 
 ## Greenfield Context Producers
 
@@ -138,9 +176,9 @@ across workflow artifacts.
 | --- | --- |
 | `ValueEngine` | Product concept, value manifest, concept blueprint, and surface candidate hints. |
 | `ThemeCapture` | Brand and theme context. |
-| `DesignDocs` | `ExperienceSpec`, design docs, `surface_map`, and database intent. |
+| `DesignDocs` | `ExperienceSpec`, design docs, `surface_map`, and data contract. |
 | `AgentGenerator` | Workflow bundle, agent roster, tools, handoffs, structured outputs, context variables, and workflow triggers. |
-| `AppGenerator` | Generated app context: app bundle, modules, pages, APIs, integration manifests, database intent, database migrations, route manifests, shell config, and generated files. |
+| `AppGenerator` | Generated app context: app bundle, modules, pages, APIs, integration manifests, data contract, Data migrations, route manifests, shell config, and generated files. |
 
 AppGenerator produces generated app context, but AppGenerator is not the entire
 build system. It consumes upstream concept, brand, design, experience,
@@ -166,7 +204,7 @@ Implemented greenfield helper behavior:
 - derive `ApplicationInventory` from generated bundle paths such as
   `ui/pages/*.yaml`, `ui/route_manifest.json`, `modules/*/module.yaml`,
   `workflows/*/orchestrator.yaml`, generated integration clients, database
-  intent, database migrations, app config, shell config, and theme config
+  intent, Data migrations, app config, shell config, and theme config
 - create `OwnershipBoundary` records that default generated bundle files to
   `generated_overlay`
 - create `external_system` boundaries for external integrations referenced by
@@ -174,12 +212,12 @@ Implemented greenfield helper behavior:
 - derive secret-free `IntegrationInventory` entries from generated integration
   client/config paths
 - create a low-risk `RiskReport` for missing integration config, migrations
-  without database intent, or custom route files without route registration
+  without data contract, or custom route files without route registration
   evidence
 - create a deterministic `AppContextGraph` from generated bundle manifest paths
   and, when manifest content is available, from lightweight structured files
   such as `ui/route_manifest.json`, page YAML, `modules/*/module.yaml`,
-  `config/database_intent.json`, and workflow YAML
+  `config/data.json`, and workflow YAML
 - add source-backed graph edges for route-to-page rendering, page-to-component
   rendering, page-to-module calls, module-to-integration usage, explicit
   module-to-data read/write intent, workflow-to-module dependencies, and
@@ -189,10 +227,13 @@ Implemented greenfield helper behavior:
 - mark the new `app_context_version` current only through the explicit current
   selection helper
 
-Graph enrichment does not parse arbitrary Python or JavaScript code. It remains
-advisory control-plane metadata: it does not change route selection,
-`workflow_sequence` selection, `affected_bundle_paths`, generated app output, or
-runtime authority. FalkorDB and any future KG remain optional mirrors only.
+Greenfield registration derives a baseline graph from artifact manifests and
+structured files. Control-plane Context Graph tools can enrich that baseline
+from artifact workspace content, including Python, JavaScript, TypeScript,
+YAML, and JSON structure. This improves coding context and review quality, but
+it does not change route selection, `workflow_sequence` selection,
+`affected_bundle_paths`, generated app output, runtime authority, permission
+checks, or artifact promotion state.
 
 The AppGenerator save-path registration is best-effort. If context registration
 fails because the app-context store is unavailable, the app bundle remains
@@ -203,6 +244,42 @@ Greenfield and brownfield now converge on the same management substrate:
 greenfield starts from generated artifacts and app bundle refs; brownfield starts
 from discovery snapshots and source refs. Both become `AppContextVersion` plus
 `AppContextGraph` records for future control-plane impact and staleness work.
+
+## Workspace Snapshot Context Registration
+
+For dogfooding and local product development, the control plane can register a
+local workspace directly as a code-context snapshot through
+`mozaiksai/control_plane/workspace_snapshot.py`.
+
+Workspace snapshot registration:
+
+- scans local source roots through the shared Context Graph scan policy
+- excludes generated output, dependency directories, unsupported files, and
+  secret-sensitive paths
+- prioritizes app modules, services, UI, config, workflows, and control-plane
+  code before docs, tests, and scripts
+- persists a code-context `app_bundle` snapshot artifact with an artifact zip
+- builds an `app_context_graph` artifact from deterministic syntax and contract
+  facts
+- registers a current `hybrid` `AppContextVersion`
+- records `scan_health` with selected file count, limit status, skipped-file
+  counts, parser availability, and warnings
+- records a `context_graph_health_report` with `healthy`, `warning`, or
+  `blocked` status based on indexed-file coverage, core-surface coverage, scan
+  limits, sensitive-path skips, and parser fallback
+
+This is the fastest path for using Mozaiks against its own local app
+workspace. It creates durable control-plane context for scoped coding and
+impact explanation without requiring ExistingAppDiscovery to rerun first.
+
+The same path is available from the local developer CLI:
+
+```bash
+mozaiks context snapshot --app-id <app_id> --workspace <workspace_root> --json
+```
+
+The CLI is a dogfood/bootstrap convenience. Studio remains the management
+surface for reviewing app context, artifacts, run history, and promotion.
 
 ## Control-Plane Consumption And Stale-Context Policy
 
@@ -245,8 +322,8 @@ surfaces, read-only discovered ownership boundaries, or brownfield
 source-affecting changes.
 
 This is a planning/control-plane gate, not a graph-runtime dependency. It does
-not reroute and does not ask FalkorDB or any KG for authority. Refresh execution
-is available only through an explicit operator/caller action.
+not reroute and does not ask a graph backend for execution authority. Refresh
+execution is available only through an explicit operator/caller action.
 
 ## Human Override For Context Policy Blocks
 
@@ -269,7 +346,8 @@ override metadata. It does not mutate source files, run workflows, promote or
 restore artifacts, change route selection, change `workflow_sequence`
 selection, rewrite `affected_bundle_paths`, bypass validation requirements, or
 make promotion automatic. `require_refresh_first` and `reject` keep planning
-blocked. FalkorDB and any future KG are not involved.
+blocked. A graph backend may serve context queries, but it does not authorize
+the override.
 
 ## Context Refresh Contract
 
@@ -363,9 +441,9 @@ expected canonical artifacts. Missing current context, no context-version
 change, stale/unknown new context, or missing expected artifacts keep
 `stale_resolved` false.
 
-FalkorDB and any future KG remain optional mirrors only. Context refresh must
-read and write deterministic app-context artifacts and source refs, not KG
-authority.
+A graph backend may mirror context refresh output for query and visualization.
+Context refresh must read and write deterministic app-context artifacts and
+source refs, not graph-backend authority.
 
 ## Studio Operator API
 
@@ -373,7 +451,15 @@ Studio exposes a minimal manual API for app-context operator actions:
 
 - `GET /api/studio/apps/{app_id}/context` reads the current
   `AppContextVersion` summary, stale status, warnings, artifact refs, and
-  ownership counts.
+  ownership counts. It also returns a compact `context_graph_status` with graph
+  availability, id, hash, stale status, node count, edge count, source ref
+  count, and graph-load warnings.
+- `POST /api/studio/apps/{app_id}/context/workspace-snapshot` registers a local
+  workspace as a deterministic code-context snapshot for dogfooding and scoped
+  refinement. It creates a current `app_bundle` snapshot artifact, an
+  `app_context_graph` artifact, and a current `hybrid` `AppContextVersion`.
+  The response includes artifact ids, indexed file count, `scan_health`,
+  `health_report`, warnings, and the generated snapshot artifact path.
 - `POST /api/studio/apps/{app_id}/context/refresh-plan` builds a non-mutating
   `ContextRefreshRequest` and `ContextRefreshPlan`. It does not launch a
   workflow.
@@ -391,8 +477,8 @@ do not mutate source files, promote or restore artifacts, bypass validation
 requirements, bypass promotion gates, change route selection, change
 `workflow_sequence` selection, or change generated app behavior. Override
 records remain audited and non-mutating. Refresh and override decisions continue
-to use deterministic app-context artifacts and source refs; FalkorDB and any
-future KG are not involved.
+to use deterministic app-context artifacts and source refs. A graph backend may
+provide graph lookup context, but it does not authorize the decision.
 
 ## Brownfield Context Producers
 
@@ -440,7 +526,7 @@ these contracts. They are not canonical artifact kinds and should not become
 control-plane source of truth. Workflow sequence cleanup and brownfield sequence
 renaming remain later work.
 
-Brownfield `AppContextGraph` edges are derived only from discovery evidence that
+Brownfield `AppContextGraph` edges start from discovery evidence that
 `ExistingAppDiscovery` already has: product/spec surfaces, `CapabilitySpec[]`,
 detected integrations, data entity evidence, ownership boundaries, risks, and
 unknowns. The graph can connect capabilities to explicit API, integration, and
@@ -448,12 +534,13 @@ data evidence, connect discovered route/API overlaps, and attach risk or unknown
 nodes to affected capabilities or source areas. Internal
 `module_decomposition_plan` context may add candidate module, page, adapter, or
 workflow nodes marked as `internal_evidence`, but it remains workflow-local
-evidence rather than a canonical artifact.
+evidence rather than a canonical artifact. When source refs or artifact
+workspaces are available, the shared Context Graph builder can add file, symbol,
+import, agent, tool, module, page, and workflow nodes.
 
 These brownfield graph enrichments are provenance-backed and advisory. They do
-not parse arbitrary source code, mutate source repositories, change workflow
-sequence routing, replace deterministic affected-path logic, or give
-FalkorDB/KG any authority.
+not mutate source repositories, change workflow sequence routing, replace
+deterministic affected-path logic, or give a graph backend execution authority.
 
 ## AppContextVersion Registration
 
@@ -515,7 +602,9 @@ Generated overlays are Mozaiks-owned only for overlay artifacts. Staged patches
 are proposals. A migrated surface becomes `migrated_owned` only after explicit
 approval, merge, or promotion.
 
-Future KG mirrors are never source of truth. KG/FalkorDB is optional mirror only.
+Graph backend mirrors are never source of truth for runtime execution,
+permissions, secrets, artifact state, or route rendering. They are allowed to be
+the backing store for graph-scale code-context queries when configured.
 
 ## Ownership Classes
 
@@ -586,7 +675,7 @@ contract is implemented.
 | `native_migration` as a top-level adoption level | Replace with an `AdoptionPlan` plus explicit modernization or migration phases. |
 | `module_decomposition_plan` as the canonical brownfield artifact | Replace with typed inventory, ownership, graph, adoption, and modernization contracts. |
 | `workspace_app` private sibling discovery shortcut | Replace with neutral source refs, scan policies, and explicit repo/app connection inputs. |
-| `hook_workflow_artifacts.py` stale workflow-artifact indexing hook | Remove or rebuild only if workflow artifacts are deliberately indexed under the new app-context or retrieval-index contract. |
+| AppGenerator-local `code_context` package and stale workflow-artifact indexing hooks | Removed. Shared Context Graph builders and control-plane tools own code-context retrieval. |
 
-These replacements should happen in later slices. This document only defines
-the contract boundary.
+These replacements are owned by the shared Context Graph and AppContextVersion
+contracts rather than workflow-local context systems.

@@ -148,8 +148,8 @@ def _database_bundle_files(*, valid_intent: bool = True, valid_migration: bool =
     if not valid_migration:
         migration = '{"migration_id": "001_initial", "changes": [}\n'
     return {
-        "config/database_intent.json": intent,
-        "config/database_migrations/001_initial.json": migration,
+        "config/data.json": intent,
+        "config/data_migrations/001_initial.json": migration,
     }
 
 
@@ -182,7 +182,7 @@ def _hosted_bundle_files() -> dict[str, str]:
 
 def _integration_bundle_files() -> dict[str, str]:
     return {
-        "backend/integrations/analytics_provider_client.py": "def fetch_metrics():\n    return {}\n",
+        "services/integrations/analytics_provider_client.py": "def fetch_metrics():\n    return {}\n",
     }
 
 
@@ -268,7 +268,7 @@ def test_ui_theme_primitive_validation_fails_on_local_primitive_clone(tmp_path: 
     assert "ui_theme_primitive_validation" in result.evidence.failed
 
 
-def test_database_intent_validation_passes_valid_json(tmp_path: Path) -> None:
+def test_data_contract_validation_passes_valid_json(tmp_path: Path) -> None:
     files = _database_bundle_files()
     _, plan, staging_result = _stage_workspace(
         tmp_path,
@@ -281,11 +281,11 @@ def test_database_intent_validation_passes_valid_json(tmp_path: Path) -> None:
 
     result = run_refinement_validations(plan, staging_result)
 
-    assert _item(result, "database_intent_validation").status == "passed"
-    assert "database_intent_validation" in result.evidence.completed
+    assert _item(result, "data_contract_validation").status == "passed"
+    assert "data_contract_validation" in result.evidence.completed
 
 
-def test_database_intent_validation_fails_invalid_json(tmp_path: Path) -> None:
+def test_data_contract_validation_fails_invalid_json(tmp_path: Path) -> None:
     files = _database_bundle_files(valid_intent=False)
     _, plan, staging_result = _stage_workspace(
         tmp_path,
@@ -298,8 +298,8 @@ def test_database_intent_validation_fails_invalid_json(tmp_path: Path) -> None:
 
     result = run_refinement_validations(plan, staging_result)
 
-    assert _item(result, "database_intent_validation").status == "failed"
-    assert "database_intent_validation" in result.evidence.failed
+    assert _item(result, "data_contract_validation").status == "failed"
+    assert "data_contract_validation" in result.evidence.failed
 
 
 def test_migration_plan_validation_passes_valid_json_migration_file(tmp_path: Path) -> None:

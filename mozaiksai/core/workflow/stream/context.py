@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Set
 from collections import Counter
 
 if TYPE_CHECKING:
-    from autogen import ConversableAgent
     from mozaiksai.core.data.persistence import AG2PersistenceManager
     from mozaiksai.core.workflow.execution.lifecycle import LifecycleToolManager
     from mozaiksai.core.workflow.context.derived import DerivedContextManager
@@ -48,7 +47,7 @@ class StreamContext:
     dispatcher: Any  # UnifiedEventDispatcher instance
 
     # Workflow configuration
-    agents: Dict[str, "ConversableAgent"]
+    agents: Dict[str, Any]
     structured_registry: Dict[str, Any]
     validated_output_agents: Set[str]
     auto_tool_agents: Set[str]

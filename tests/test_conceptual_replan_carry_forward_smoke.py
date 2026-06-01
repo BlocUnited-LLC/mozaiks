@@ -136,7 +136,7 @@ def _minimal_plan(**overrides) -> dict[str, Any]:
         "agent_message": "CRM-to-Marketplace conceptual replan.",
         "app_kind": "marketplace",
         "pages": [{"name": "Home", "route": "/", "purpose": "Landing"}],
-        "entities": [], "roles": ["user"], "backend_scope": [], "frontend_scope": [],
+        "entities": [], "roles": ["user"], "service_scope": [], "frontend_scope": [],
         "capability_packs": [], "external_integrations": [], "agent_backend_required": False,
         "build_tasks": [], "generation_order": [],
     }

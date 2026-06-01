@@ -17,7 +17,7 @@ The builder should feel like:
 
 The user should not need to understand:
 
-- hidden groupchat switches
+- hidden workflow-run switches
 - build graph internals
 - runtime substrate boundaries
 
@@ -121,7 +121,7 @@ Internally, the builder may still use specialized workflows for:
 - bundle compilation
 - validation
 
-In practice, those internal workflows may be AG2 groupchats.
+In practice, those internal workflows may be AG2 beta workflow runs.
 
 That is acceptable only if they stay behind typed builder contracts such as:
 
@@ -174,7 +174,7 @@ It is expressed as:
 - `app/config/*`
 - `app/ui/pages/*`
 - `app/modules/*`
-- `app/workflows/*`
+- `workflows/*`
 - `app/brand/*`
 
 During build, those families are written first under
@@ -188,3 +188,4 @@ During build, those families are written first under
 - [app-planning-contracts.md](app-planning-contracts.md)
 - [canonical-app-structure.md](../app/canonical-app-structure.md)
 - [orchestration-control-loops.md](../workflows/orchestration-control-loops.md)
+

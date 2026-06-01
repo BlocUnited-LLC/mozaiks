@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from tests.import_utils import import_module_directly
 
@@ -65,6 +66,10 @@ async def test_emit_build_started_accepts_runtime_hook_kwargs_and_emits_for_firs
     )
 
     assert len(events) == 1
+    assert events[0]["event_type"] == "build.started"
+    assert events[0]["status"] == "started"
+    assert events[0]["user_id"] == "user_1"
+    assert events[0]["workflow_name"] == "ValueEngine"
     payload = events[0]["payload"]
     assert payload["buildId"] == "journey_1"
     assert payload["journeyId"] == "build"
@@ -150,7 +155,49 @@ async def test_emit_build_completed_emits_for_terminal_journey_workflow(monkeypa
     )
 
     assert len(events) == 1
+    assert events[0]["event_type"] == "build.completed"
+    assert events[0]["status"] == "completed"
+    assert events[0]["user_id"] == "user_1"
+    assert events[0]["workflow_name"] == "AppGenerator"
     payload = events[0]["payload"]
     assert payload["buildId"] == "journey_1"
     assert payload["buildRegistryId"] == "build_reg_1"
     assert payload["artifacts"]["exportDownloadUrl"] == "/api/apps/app_1/builds/build_reg_1/export"
+
+
+@pytest.mark.asyncio
+async def test_deliver_outbox_event_posts_payload_and_marks_attempt(monkeypatch):
+    attempts = []
+    posted = []
+
+    async def fake_get_outbox_event(**kwargs):  # noqa: ANN003
+        assert kwargs == {"outbox_id": "outbox_1"}
+        return {
+            "_id": "outbox_1",
+            "app_id": "app_1",
+            "payload": {"eventType": "build.started"},
+        }
+
+    async def fake_mark_attempt(**kwargs):  # noqa: ANN003
+        attempts.append(kwargs)
+
+    class _FakeClient:
+        async def post_build_event(self, **kwargs):  # noqa: ANN003
+            posted.append(kwargs)
+            return SimpleNamespace(ok=True, status_code=202, error=None)
+
+    monkeypatch.setattr(_build_lifecycle, "get_outbox_event", fake_get_outbox_event)
+    monkeypatch.setattr(_build_lifecycle, "mark_attempt", fake_mark_attempt)
+    monkeypatch.setattr(_build_lifecycle, "_build_events_client", lambda: _FakeClient())
+
+    await _build_lifecycle._deliver_outbox_event_once(outbox_event_id="outbox_1")
+
+    assert posted == [{"app_id": "app_1", "payload": {"eventType": "build.started"}}]
+    assert attempts == [
+        {
+            "outbox_id": "outbox_1",
+            "ok": True,
+            "status_code": 202,
+            "error": None,
+        }
+    ]

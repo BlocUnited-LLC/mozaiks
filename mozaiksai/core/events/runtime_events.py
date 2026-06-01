@@ -7,7 +7,6 @@ from mozaiksai.core.events.event_serialization import serialize_event_content
 
 
 RUNTIME_AGENT_OUTPUT_VALIDATED = "runtime.agent_output_validated"
-RUNTIME_DECOMPOSITION_PLANNED = "runtime.decomposition_planned"
 RUNTIME_PROCESS_COMPLETED = "runtime.process_completed"
 ARTIFACT_EVENT_CREATED = "artifact.created"
 ARTIFACT_EVENT_UPDATED = "artifact.updated"
@@ -92,27 +91,6 @@ def build_runtime_agent_output_validated_event(
     return payload
 
 
-def build_runtime_decomposition_planned_event(
-    *,
-    agent: str,
-    model_name: str,
-    structured_data: Any,
-    context: Optional[Dict[str, Any]] = None,
-    source: str = "runtime",
-) -> Dict[str, Any]:
-    """Build the canonical runtime payload for decomposition planning."""
-    return {
-        "kind": RUNTIME_DECOMPOSITION_PLANNED,
-        "runtime_event_type": RUNTIME_DECOMPOSITION_PLANNED,
-        "agent": agent,
-        "agent_name": agent,
-        "model_name": model_name,
-        "structured_data": serialize_event_content(structured_data),
-        "context": context or {},
-        "source": source,
-    }
-
-
 def build_artifact_lifecycle_event(
     *,
     event_type: str,
@@ -157,7 +135,7 @@ def build_artifact_lifecycle_event(
 
 __all__ = [
     "RUNTIME_AGENT_OUTPUT_VALIDATED",
-    "RUNTIME_DECOMPOSITION_PLANNED",
+    "RUNTIME_PROCESS_COMPLETED",
     "ARTIFACT_EVENT_CREATED",
     "ARTIFACT_EVENT_UPDATED",
     "ARTIFACT_EVENT_READY",
@@ -165,6 +143,5 @@ __all__ = [
     "build_turn_idempotency_key",
     "build_runtime_context_payload",
     "build_runtime_agent_output_validated_event",
-    "build_runtime_decomposition_planned_event",
     "build_artifact_lifecycle_event",
 ]

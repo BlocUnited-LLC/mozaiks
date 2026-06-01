@@ -105,9 +105,9 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
     assert models["ConfigMiddlewareOutput"]["fields"]["mode"]["values"] == [
         "module_contract_bundle",
-        "backend_foundation",
+        "service_foundation",
     ]
-    assert models["ConfigMiddlewareOutput"]["fields"]["backend_foundation_bundle"]["variants"] == [
+    assert models["ConfigMiddlewareOutput"]["fields"]["service_foundation_bundle"]["variants"] == [
         "BackendFoundationBundle",
         "null",
     ]
@@ -192,7 +192,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "`current_build_task_type` must equal `control_plane_pack`" in source
     assert "ControlPlanePackBundle" in source
     assert "Routes use workflow_sequence only" in source
-    assert "backend_foundation_bundle" in source
+    assert "service_foundation_bundle" in source
     assert "Do NOT include an `admin_config` build task." in source
     assert "Fail the task rather than guessing a fallback mode." in source
     assert "backend/handler.py" in source
@@ -213,7 +213,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "\"mode\": \"app_backend_admin_surface\"" in source
     assert "\"app_backend_admin_config\"" in source
     assert "backend/admin_config.py" in source
-    assert "backend/routes/admin.py" in source
+    assert "services/routes/admin.py" in source
     assert "APIRouter" in source
     assert "self-contained FastAPI" in source
     assert "`app/app.json` `admins`" in source
@@ -243,7 +243,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "`app/config/admin.json`" not in source
     assert "Module contract file set (Mode A)" not in source
     assert "Mode A (module_contract) example" not in source
-    assert "Mode B (backend_foundation) example" not in source
+    assert "Mode B (service_foundation) example" not in source
     assert "Split app-backend admin surface example" not in source
     assert "states.yaml" not in source
     assert "transitions.yaml" not in source
@@ -267,7 +267,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "admin_surfaces" not in source
     assert "removed standalone" not in source
     assert "backend/main.py" not in source
-    assert "backend/routes/api_router.py" not in source
+    assert "services/routes/api_router.py" not in source
     assert "RouteAgent" not in source
     assert "EntryPointAgent" not in source
     assert "page_component" not in _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
@@ -315,7 +315,7 @@ def test_appgenerator_prompt_time_contract_artifacts_align_with_structured_outpu
     assert set(file_contracts["task_contracts"].keys()).issubset(set(task_type_values))
     assert file_contracts["task_contracts"]["page_bundle"]["owner_agent"] == "AppSchemaAgent"
     assert file_contracts["task_contracts"]["module_contract"]["owner_agent"] == "ConfigMiddlewareAgent"
-    assert file_contracts["task_contracts"]["backend_foundation"]["owner_agent"] == "ConfigMiddlewareAgent"
+    assert file_contracts["task_contracts"]["service_foundation"]["owner_agent"] == "ConfigMiddlewareAgent"
     assert file_contracts["task_contracts"]["control_plane_pack"]["owner_agent"] == "ControlPlaneAgent"
     assert file_contracts["task_contracts"]["api_surface"]["owner_agent"] == "ControllerAgent"
 

@@ -132,7 +132,7 @@ async def save_build_plan(
     except Exception as exc:
         logger.warning("[ValueEngine] Generic build-plan artifact persistence failed: %s", exc)
 
-    # Store in context for MFJ to pick up
+    # Store in context for downstream build sequence/task-batch consumers.
     _set_context_value(context_variables, "build_plan", build_plan)
     _set_context_value(context_variables, "capability_packs", build_plan["capability_packs"])
     _set_context_value(
@@ -158,7 +158,7 @@ async def get_build_plan(
     """
     Retrieve the BuildPlan for an app.
 
-    Used by MFJ orchestration to spawn child workflows.
+    Used by the build sequence to load the planned generator tasks.
     """
     # Check context first
     if context_variables and hasattr(context_variables, "get"):
@@ -186,7 +186,7 @@ async def get_feature_context(
     """
     Get context for a specific feature from the manifest.
 
-    Used by child workflows (AgentGenerator/AppGenerator) to understand
+    Used by downstream generator workflows to understand
     what they're building.
     """
     manifest = None

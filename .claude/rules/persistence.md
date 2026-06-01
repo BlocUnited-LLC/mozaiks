@@ -15,10 +15,10 @@ artifacts, or module persistence boundaries.
 
 ## Canonical Persistence Artifacts
 
-- `database_intent_bundle` is the canonical planning object.
-- Generated app bundles persist it as `config/database_intent.json`.
+- `data_contract` is the canonical planning object.
+- Generated app bundles persist it as `config/data.json`.
 - Additive revisions belong under
-  `config/database_migrations/{migration_id}.json`.
+  `config/data_migrations/{migration_id}.json`.
 
 ## Module Persistence Boundary
 

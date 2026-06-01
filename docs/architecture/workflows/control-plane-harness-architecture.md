@@ -15,7 +15,7 @@ The harness exists for requests that are not well modeled as:
 
 - normal runtime chat
 - workflow-local handoffs
-- MFJ decomposition
+- workflow-local task batching
 - workflow transition routing
 
 Examples:
@@ -126,7 +126,7 @@ It should not own the runtime engines.
 The harness is not:
 
 - a workflow
-- an AG2 groupchat
+- an AG2 beta workflow run
 - a module handler under `app/modules/*`
 - a global prompt wrapped around every message
 - a replacement for `extension_registry.json`

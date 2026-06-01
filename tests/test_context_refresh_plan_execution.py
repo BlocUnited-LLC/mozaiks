@@ -263,7 +263,7 @@ def test_stale_context_policy_does_not_launch_refresh() -> None:
         app_context_summary=summary,
         change_class="feature",
         refinement_lane="integration",
-        affected_bundle_paths=["backend/integrations/email_client.py"],
+        affected_bundle_paths=["services/integrations/email_client.py"],
     )
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH

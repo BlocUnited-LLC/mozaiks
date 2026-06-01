@@ -53,8 +53,8 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
     assert "route_manifest.json" in frontend_rule
     assert "admin/index.js" in frontend_rule
 
-    assert "database_intent.json" in persistence_rule
-    assert "database_migrations" in persistence_rule
+    assert "config/data.json" in persistence_rule
+    assert "data_migrations" in persistence_rule
     assert "ModuleContext.persistence" in persistence_rule
     assert "ctx.db" in persistence_rule
 
@@ -116,8 +116,8 @@ def test_high_value_skill_stubs_anchor_current_truth() -> None:
     assert "RefinementWorkflow" in control_plane_skill
     assert "factory_control_plane" in control_plane_skill
 
-    assert "database_intent_bundle" in persistence_skill
-    assert "database_intent.json" in persistence_skill
+    assert "data_contract" in persistence_skill
+    assert "config/data.json" in persistence_skill
     assert "ModuleContext.persistence" in persistence_skill
     assert "ctx.db" in persistence_skill
     assert "backend/models.py" in persistence_skill

@@ -6,13 +6,15 @@ handoff_rules:
   condition_scope: null
   condition: ${interview_complete} == False
   transition_target: AgentTarget
+
 - source_agent: InterviewAgent
   target_agent: user
   handoff_type: after_work
-  condition_scope: null
   condition_type: null
+  condition_scope: null
   condition: null
   transition_target: RevertToUserTarget
+
 - source_agent: InterviewAgent
   target_agent: PatternAgent
   handoff_type: condition
@@ -20,41 +22,15 @@ handoff_rules:
   condition_scope: null
   condition: ${interview_complete} == True
   transition_target: AgentTarget
+
 - source_agent: PatternAgent
-  target_agent: WorkflowStrategyAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: WorkflowStrategyAgent
-  target_agent: DatabaseIntentAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: DatabaseIntentAgent
-  target_agent: AgentRosterAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: AgentRosterAgent
-  target_agent: ToolPlanningAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: ToolPlanningAgent
   target_agent: ProjectOverviewAgent
   handoff_type: after_work
   condition_type: null
   condition_scope: null
   condition: null
   transition_target: AgentTarget
+
 - source_agent: ProjectOverviewAgent
   target_agent: user
   handoff_type: after_work
@@ -62,13 +38,15 @@ handoff_rules:
   condition_scope: null
   condition: null
   transition_target: RevertToUserTarget
+
 - source_agent: user
-  target_agent: ContextVariablesAgent
+  target_agent: PackBuildCoordinator
   handoff_type: condition
   condition_type: expression
   condition_scope: pre
   condition: ${workflow_review_approved} == True
   transition_target: AgentTarget
+
 - source_agent: user
   target_agent: PatternAgent
   handoff_type: condition
@@ -76,97 +54,15 @@ handoff_rules:
   condition_scope: pre
   condition: ${workflow_review_revision_requested} == True
   transition_target: AgentTarget
-- source_agent: ContextVariablesAgent
-  target_agent: ToolsManagerAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: ToolsManagerAgent
-  target_agent: UIFileGenerator
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: UIFileGenerator
-  target_agent: WorkflowUIQualityAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: WorkflowUIQualityAgent
-  target_agent: UIFileGenerator
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${workflow_ui_quality_status} == "needs_revision"
-  transition_target: AgentTarget
-- source_agent: WorkflowUIQualityAgent
-  target_agent: AgentToolsFileGenerator
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${workflow_ui_quality_status} == "passed"
-  transition_target: AgentTarget
-- source_agent: WorkflowUIQualityAgent
-  target_agent: user
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${workflow_ui_quality_status} == "blocked"
-  transition_target: RevertToUserTarget
-- source_agent: AgentToolsFileGenerator
-  target_agent: AgentsAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: AgentsAgent
-  target_agent: StructuredOutputsAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: StructuredOutputsAgent
-  target_agent: HookAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: HookAgent
-  target_agent: HandoffsAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: HandoffsAgent
-  target_agent: OrchestratorAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: OrchestratorAgent
-  target_agent: WorkflowStrategyAgent
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${pack_generation_complete} == False
-  transition_target: AgentTarget
-- source_agent: OrchestratorAgent
+
+- source_agent: PackBuildCoordinator
   target_agent: PackMetadataAgent
-  handoff_type: condition
-  condition_type: expression
+  handoff_type: after_work
+  condition_type: null
   condition_scope: null
-  condition: ${pack_generation_complete} == True
+  condition: null
   transition_target: AgentTarget
+
 - source_agent: PackMetadataAgent
   target_agent: DownloadAgent
   handoff_type: after_work
@@ -174,6 +70,7 @@ handoff_rules:
   condition_scope: null
   condition: null
   transition_target: AgentTarget
+
 - source_agent: DownloadAgent
   target_agent: user
   handoff_type: after_work
@@ -181,19 +78,3 @@ handoff_rules:
   condition_scope: null
   condition: null
   transition_target: RevertToUserTarget
-- source_agent: user
-  target_agent: InterviewAgent
-  handoff_type: condition
-  condition_type: string_llm
-  condition_scope: null
-  condition: When the user requests further changes after reviewing the delivered
-    bundle.
-  transition_target: AgentTarget
-- source_agent: user
-  target_agent: terminate
-  handoff_type: condition
-  condition_type: string_llm
-  condition_scope: null
-  condition: When the user confirms the download is complete and no further changes
-    are needed.
-  transition_target: TerminateTarget

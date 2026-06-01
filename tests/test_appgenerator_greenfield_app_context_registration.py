@@ -176,7 +176,7 @@ def _write_generated_app(app_dir: Path) -> list[str]:
         "app/ui/route_manifest.json": '{"routes": []}\n',
         "app/ui/pages/home.yaml": "title: Home\n",
         "app/modules/work_orders/module.yaml": "id: work_orders\n",
-        "app/backend/integrations/email_gateway_client.py": "class EmailGatewayClient: pass\n",
+        "app/services/integrations/email_gateway_client.py": "class EmailGatewayClient: pass\n",
         "app/config/integrations/email_gateway.json": '{"provider": "email_gateway"}\n',
     }
     for rel_path, content in files.items():

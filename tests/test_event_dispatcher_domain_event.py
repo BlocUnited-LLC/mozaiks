@@ -11,13 +11,11 @@ _ports_mod = importlib.import_module("mozaiksai.core.ports.orchestration")
 _serialization_mod = importlib.import_module("mozaiksai.core.events.event_serialization")
 _runtime_events_mod = importlib.import_module("mozaiksai.core.events.runtime_events")
 _ag2_events_mod = importlib.import_module("mozaiksai.core.events.ag2_events")
-_ag2_bridge_mod = importlib.import_module("mozaiksai.core.events.ag2_event_bridge")
 
 UnifiedEventDispatcher = _dispatcher_mod.UnifiedEventDispatcher
 DomainEvent = _ports_mod.DomainEvent
 serialize_event_content = _serialization_mod.serialize_event_content
 RUNTIME_AGENT_OUTPUT_VALIDATED = _runtime_events_mod.RUNTIME_AGENT_OUTPUT_VALIDATED
-RUNTIME_DECOMPOSITION_PLANNED = _runtime_events_mod.RUNTIME_DECOMPOSITION_PLANNED
 ARTIFACT_EVENT_CREATED = _runtime_events_mod.ARTIFACT_EVENT_CREATED
 ARTIFACT_EVENT_UPDATED = _runtime_events_mod.ARTIFACT_EVENT_UPDATED
 ARTIFACT_EVENT_READY = _runtime_events_mod.ARTIFACT_EVENT_READY
@@ -25,10 +23,8 @@ build_runtime_agent_output_validated_event = _runtime_events_mod.build_runtime_a
 build_artifact_lifecycle_event = _runtime_events_mod.build_artifact_lifecycle_event
 build_runtime_context_payload = _runtime_events_mod.build_runtime_context_payload
 build_turn_idempotency_key = _runtime_events_mod.build_turn_idempotency_key
-DecompositionPlannedEvent = _ag2_events_mod.DecompositionPlannedEvent
 ArtifactUpdatedEvent = _ag2_events_mod.ArtifactUpdatedEvent
 ArtifactReadyEvent = _ag2_events_mod.ArtifactReadyEvent
-AG2EventBridge = _ag2_bridge_mod.AG2EventBridge
 
 
 @pytest.mark.asyncio
@@ -204,104 +200,3 @@ def test_artifact_lifecycle_builder_rejects_removed_alias_names() -> None:
         )
 
 
-@pytest.mark.asyncio
-async def test_register_runtime_handler_listens_on_canonical_names() -> None:
-    dispatcher = UnifiedEventDispatcher()
-    seen = []
-
-    async def _listener(payload):  # type: ignore[no-untyped-def]
-        seen.append(payload)
-
-    dispatcher.register_runtime_handler(RUNTIME_DECOMPOSITION_PLANNED, _listener)
-
-    await dispatcher.emit(RUNTIME_DECOMPOSITION_PLANNED, {"kind": RUNTIME_DECOMPOSITION_PLANNED, "value": 1})
-    await asyncio.sleep(0)
-
-    assert seen == [{"kind": RUNTIME_DECOMPOSITION_PLANNED, "value": 1}]
-
-
-@pytest.mark.asyncio
-async def test_register_runtime_handler_does_not_listen_on_removed_aliases() -> None:
-    dispatcher = UnifiedEventDispatcher()
-    seen = []
-
-    async def _listener(payload):  # type: ignore[no-untyped-def]
-        seen.append(payload)
-
-    dispatcher.register_runtime_handler(RUNTIME_DECOMPOSITION_PLANNED, _listener)
-
-    await dispatcher.emit("chat.decomposition_planned", {"kind": "chat.decomposition_planned", "value": 1})
-    await asyncio.sleep(0)
-
-    assert seen == []
-
-
-@pytest.mark.asyncio
-async def test_ag2_bridge_maps_decomposition_checkpoint_to_runtime_event() -> None:
-    dispatcher = UnifiedEventDispatcher()
-    seen = []
-
-    async def _listener(payload):  # type: ignore[no-untyped-def]
-        seen.append(payload)
-
-    dispatcher.register_runtime_handler(RUNTIME_DECOMPOSITION_PLANNED, _listener)
-    bridge = AG2EventBridge(dispatcher)
-
-    event = DecompositionPlannedEvent(
-        agent_name="Planner",
-        chat_id="chat-bridge",
-        workflow_name="BuildParent",
-        model_name="BuildPlan",
-        structured_data={"workflows": ["A", "B"]},
-        context={"chat_id": "chat-bridge", "workflow_name": "BuildParent"},
-    )
-
-    handled = await bridge.handle(event)
-    await asyncio.sleep(0)
-
-    assert handled is True
-    assert len(seen) == 1
-    assert seen[0]["kind"] == RUNTIME_DECOMPOSITION_PLANNED
-    assert seen[0]["structured_data"] == {"workflows": ["A", "B"]}
-    assert seen[0]["context"]["workflow_name"] == "BuildParent"
-
-
-@pytest.mark.asyncio
-async def test_ag2_bridge_maps_artifact_lifecycle_events() -> None:
-    dispatcher = UnifiedEventDispatcher()
-    seen = []
-
-    async def _listener(payload):  # type: ignore[no-untyped-def]
-        seen.append(payload)
-
-    dispatcher.register_handler(ARTIFACT_EVENT_CREATED, _listener)
-    dispatcher.register_handler(ARTIFACT_EVENT_READY, _listener)
-    bridge = AG2EventBridge(dispatcher)
-
-    created_event = ArtifactUpdatedEvent(
-        artifact_id="artifact-1",
-        artifact_type="app_bundle",
-        chat_id="chat-bridge",
-        workflow_name="AppGenerator",
-        action="created",
-        artifact_version_id="av_1",
-    )
-    ready_event = ArtifactReadyEvent(
-        artifact_id="artifact-1",
-        artifact_type="app_bundle",
-        chat_id="chat-bridge",
-        workflow_name="AppGenerator",
-        artifact_version_id="av_1",
-    )
-
-    created_handled = await bridge.handle(created_event)
-    ready_handled = await bridge.handle(ready_event)
-    await asyncio.sleep(0)
-
-    assert created_handled is True
-    assert ready_handled is True
-    assert len(seen) == 2
-    assert seen[0]["kind"] == ARTIFACT_EVENT_CREATED
-    assert seen[0]["artifact_version_id"] == "av_1"
-    assert seen[1]["kind"] == ARTIFACT_EVENT_READY
-    assert seen[1]["artifact_id"] == "artifact-1"

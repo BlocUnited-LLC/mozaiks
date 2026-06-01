@@ -124,7 +124,7 @@
   "source_snapshot": {
     "after": {
       "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-      "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+      "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
       "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
       "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
       "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -137,7 +137,7 @@
     },
     "before": {
       "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-      "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+      "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
       "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
       "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
       "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",

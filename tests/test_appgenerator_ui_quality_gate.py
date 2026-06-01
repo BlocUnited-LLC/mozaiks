@@ -365,10 +365,10 @@ async def test_assemble_app_tasks_requires_passed_ui_quality_gate() -> None:
     context = _Context(
         {
             "app_id": "ops-portal",
+            "app_schema_ready": True,
             "app_ui_quality_status": "needs_revision",
             "app_ui_quality_warnings": ["Dashboard repeats low-value metrics."],
-            "_mfj_resume_inject_as": "mfj_app_task_results",
-            "mfj_app_task_results": {},
+            "app_task_batch_results": {},
         }
     )
 
@@ -377,7 +377,7 @@ async def test_assemble_app_tasks_requires_passed_ui_quality_gate() -> None:
 
 
 @pytest.mark.asyncio
-async def test_assemble_app_tasks_prefers_persisted_schema_artifacts(tmp_path: Path) -> None:
+async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs(tmp_path: Path) -> None:
     app_dir = tmp_path / "generated" / "apps" / "support" / "build-1" / "app"
     (app_dir / "ui" / "pages").mkdir(parents=True)
     (app_dir / "app.json").write_text('{"appName":"Support"}\n', encoding="utf-8")
@@ -392,17 +392,65 @@ async def test_assemble_app_tasks_prefers_persisted_schema_artifacts(tmp_path: P
             "app_ui_quality_status": "passed",
             "app_schema_ready": True,
             "generated_app_dir": str(app_dir),
-            "_mfj_resume_inject_as": "mfj_app_task_results",
-            "mfj_app_task_results": {},
+            "app_task_batch_results": {
+                "tickets_module": {
+                    "code_files": [
+                        {
+                            "filename": "modules/tickets/module.yaml",
+                            "content": "id: tickets\n",
+                        }
+                    ]
+                }
+            },
         }
     )
 
     result = await assemble_module.assemble_app_tasks(context_variables=context)
 
     filenames = {item["filename"] for item in result["code_files"]}
-    assert filenames == {"app.json", "ui/pages/Tickets.yaml"}
-    assert context.data["assembled_source"] == "schema_artifacts"
+    assert filenames == {
+        "app.json",
+        "ui/pages/Tickets.yaml",
+        "modules/tickets/module.yaml",
+    }
+    assert context.data["assembled_source"] == "schema_and_task_batch_outputs"
     assert context.data["generated_files"]["app.json"] == '{"appName":"Support"}\n'
+    assert context.data["app_task_batch_results"]["assembled"] is True
+    assert context.data["app_task_batch_results_summary"]["result_keys"] == ["tickets_module"]
+
+
+@pytest.mark.asyncio
+async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_quality_gate() -> None:
+    context = _Context(
+        {
+            "app_id": "support",
+            "app_task_batch_status": "completed",
+            "app_task_batch_results": {
+                "_meta": {
+                    "status": "completed",
+                    "task_count": 1,
+                    "completed_tasks": ["tickets_module"],
+                    "failed_tasks": [],
+                },
+                "tickets_module": {
+                    "code_files": [
+                        {
+                            "filename": "modules/tickets/module.yaml",
+                            "content": "id: tickets\n",
+                        }
+                    ]
+                },
+            },
+        }
+    )
+
+    result = await assemble_module.assemble_app_tasks(context_variables=context)
+
+    assert result["code_files"] == [
+        {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"}
+    ]
+    assert context.data["app_task_batch_results"]["assembled"] is True
+    assert context.data["app_task_batch_results_summary"]["completed_tasks"] == ["tickets_module"]
 
 
 def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
@@ -435,8 +483,8 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     )
     assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
     assert ("AssemblyAgent", "IntegrationReadinessAgent") in handoff_pairs
-    assert ("IntegrationReadinessAgent", "DownloadAgent") in handoff_pairs
     assert ("IntegrationReadinessAgent", "AppValidationAgent") in handoff_pairs
+    assert ("AppValidationAgent", "DownloadAgent") in handoff_pairs
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition"] == (
         '${app_ui_quality_status} == "blocked"'
     )

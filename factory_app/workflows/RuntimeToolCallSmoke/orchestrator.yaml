@@ -2,7 +2,8 @@ workflow_name: RuntimeToolCallSmoke
 max_turns: 8
 human_in_the_loop: false
 workflow_startup_mode: AgentDriven
-orchestration_pattern: DefaultPattern
+orchestration_pattern: ag2_network
 initial_message_to_user: null
 initial_message: Ask for a runtime tool call confirmation, then report the confirmed response.
 initial_agent: RuntimeToolCallSmokeAgent
+

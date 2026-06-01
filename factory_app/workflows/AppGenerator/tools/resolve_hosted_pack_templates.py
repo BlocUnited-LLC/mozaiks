@@ -1,7 +1,7 @@
 """
 Hosted Pack Template Resolver
 ==============================
-Resolves backend template files from hosted capability pack sources into
+Resolves service template files from hosted capability pack sources into
 generated app code_files entries at assembly time.
 
 This module is build/assembly-time only. It:
@@ -11,7 +11,9 @@ This module is build/assembly-time only. It:
 
 Template resolution rules:
 1. pack_sources must be non-empty with at least one filesystem source.
-2. Only api_surface tasks with owned_paths under backend/integrations/ are expanded.
+2. Only api_surface tasks with app-bundle-relative owned_paths under
+   services/integrations/ are expanded; generated workspaces place these under
+   app/services/integrations/.
 3. Template source is: {pack_source_path}/{pack_id}/{tpl_relative_path}
 4. Generated path is taken directly from the task's owned_paths entry.
 5. pack_id must be a safe identifier (no slashes, no .., non-empty).
@@ -32,7 +34,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-_INTEGRATIONS_PREFIX = "backend/integrations/"
+_INTEGRATIONS_PREFIX = "services/integrations/"
 _MANIFEST_FILENAME = "manifest.yaml"
 
 
@@ -77,7 +79,7 @@ def _read_pack_manifest(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
 
 
 def _is_adapter_task(task: dict[str, Any]) -> bool:
-    """Return True when task is an api_surface adapter task targeting backend/integrations/."""
+    """Return True for api_surface adapter tasks targeting app-bundle services/integrations/."""
     if str(task.get("task_type") or "").strip() != "api_surface":
         return False
     owned_paths = task.get("owned_paths") or []
@@ -98,7 +100,7 @@ def resolve_templates_for_task(
     pack_source_path: Path,
 ) -> list[dict[str, str]]:
     """
-    Resolve backend template files for a single hosted adapter task.
+    Resolve service template files for a single hosted adapter task.
 
     Args:
         task: An api_surface build task dict.
@@ -138,13 +140,13 @@ def resolve_templates_for_task(
         logger.info("Skipping template expansion for inactive pack '%s' (status=%s)", pack_id, status)
         return []
 
-    backend_templates = manifest.get("backend_templates") or []
-    if not isinstance(backend_templates, list):
+    service_templates = manifest.get("service_templates") or []
+    if not isinstance(service_templates, list):
         return []
 
     # Map output filename → manifest-relative template path
     template_map: dict[str, str] = {}
-    for tpl in backend_templates:
+    for tpl in service_templates:
         tpl_str = str(tpl).strip()
         if tpl_str:
             template_map[PurePosixPath(tpl_str).name] = tpl_str
@@ -156,7 +158,7 @@ def resolve_templates_for_task(
         out_filename = PurePosixPath(owned_path).name
         if out_filename not in template_map:
             raise HostedPackTemplateError(
-                f"Pack '{pack_id}' has no backend template matching '{out_filename}'. "
+                f"Pack '{pack_id}' has no service template matching '{out_filename}'. "
                 f"Available templates: {list(template_map.keys())}"
             )
 
@@ -175,7 +177,7 @@ def resolve_templates_for_task(
 
         if not tpl_path.exists():
             raise HostedPackTemplateError(
-                f"Backend template file not found: {tpl_path}"
+                f"Service template file not found: {tpl_path}"
             )
 
         content = tpl_path.read_text(encoding="utf-8")

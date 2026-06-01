@@ -8,6 +8,8 @@ import pytest
 from factory_app.control_plane.tools.get_artifact_summary import get_artifact_summary
 from factory_app.control_plane.tools.get_artifact_workspace_catalog import get_artifact_workspace_catalog
 from factory_app.control_plane.tools.get_artifact_workspace_scope import get_artifact_workspace_scope
+from factory_app.control_plane.tools.get_context_graph_catalog import get_context_graph_catalog
+from factory_app.control_plane.tools.get_context_graph_scope import get_context_graph_scope
 from mozaiksai.control_plane.tools.get_revision_context import get_revision_context
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
@@ -475,3 +477,107 @@ async def test_workspace_catalog_tool_ranks_request_matched_files(tmp_path: Path
     assert "dashboard" in catalog["request_keywords"]
     assert any(match["path"] == "app/ui/pages/Dashboard.jsx" for match in catalog["matches"])
     assert any(match["path"] == "app/ui/components/ExportPanel.jsx" for match in catalog["matches"])
+
+
+@pytest.mark.asyncio
+async def test_context_graph_catalog_tool_ranks_graph_files_from_artifact_zip(tmp_path: Path) -> None:
+    zip_path = tmp_path / "artifact.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "GeneratedApp/app/ui/pages/Dashboard.jsx",
+            "export default function Dashboard() { return <div>Dashboard analytics export panel</div>; }\n",
+        )
+        archive.writestr(
+            "GeneratedApp/app/ui/components/ExportPanel.jsx",
+            "export default function ExportPanel() { return <button>Export CSV</button>; }\n",
+        )
+
+    class _ZipArtifactStore(_FakeArtifactStore):
+        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                version_number=6,
+                lineage_root_id="av_root",
+                parent_version_id="av_parent",
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.PASSED,
+                source_workflow="AppGenerator",
+                commit_metadata={
+                    "metadata": {"artifact_path": str(zip_path)},
+                },
+            )
+
+    catalog = await get_context_graph_catalog(
+        context=ControlPlaneToolContext(
+            checkpoint="scope_requested",
+            app_id="app_1",
+            artifact_kind="app_bundle",
+            artifact_key="app_bundle",
+            artifact_version_id="av_graph_1",
+            raw_user_request="Add export csv controls to the dashboard",
+        ),
+        artifact_store=_ZipArtifactStore(),
+    )
+
+    assert catalog["present"] is True
+    assert catalog["node_counts"]["file"] == 2
+    assert any(match["path"] == "app/ui/pages/Dashboard.jsx" for match in catalog["candidate_files"])
+    assert any(node["label"] == "ExportPanel" for node in catalog["matched_nodes"])
+    assert any(
+        item["contract_role"] in {"page_component", "ui_component"}
+        for item in catalog["semantic_annotation_candidates"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_context_graph_scope_tool_returns_symbols_and_related_imports(tmp_path: Path) -> None:
+    zip_path = tmp_path / "artifact.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "GeneratedApp/src/App.jsx",
+            "import Header from './Header';\nexport default function App() { return <Header />; }\n",
+        )
+        archive.writestr(
+            "GeneratedApp/src/Header.jsx",
+            "export default function Header() { return <h1>Header</h1>; }\n",
+        )
+
+    class _ZipArtifactStore(_FakeArtifactStore):
+        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+            return ArtifactVersionDoc(
+                _id=artifact_version_id,
+                app_id=app_id,
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                version_number=7,
+                lineage_root_id="av_root",
+                parent_version_id="av_parent",
+                lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+                validation_status=ArtifactValidationStatus.PASSED,
+                source_workflow="AppGenerator",
+                commit_metadata={
+                    "metadata": {"artifact_path": str(zip_path)},
+                },
+            )
+
+    scope = await get_context_graph_scope(
+        context=ControlPlaneToolContext(
+            checkpoint="coding_requested",
+            app_id="app_1",
+            artifact_kind="app_bundle",
+            artifact_key="app_bundle",
+            artifact_version_id="av_graph_2",
+            raw_user_request="Update the app header behavior",
+            extra={"selected_file_paths": ["src/App.jsx"]},
+        ),
+        artifact_store=_ZipArtifactStore(),
+    )
+
+    assert scope["present"] is True
+    assert scope["selected_scope"]["src/App.jsx"]["symbols"][0]["label"] == "App"
+    assert "src/Header.jsx" in scope["related_file_paths"]
+    assert any(edge["edge_type"] == "imports" for edge in scope["related_edges"])
+    assert scope["semantic_annotation_request"]["schema_version"] == "mozaiks.context_graph.semantic_annotations.v1"

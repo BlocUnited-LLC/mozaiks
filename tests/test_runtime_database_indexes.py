@@ -259,7 +259,7 @@ async def test_apply_database_indexes_does_not_mark_migrations_applied() -> None
 
 
 @pytest.mark.asyncio
-async def test_platform_startup_applies_indexes_when_database_intent_is_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_platform_startup_applies_indexes_when_data_contract_is_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
     from mozaiksai.hosts import platform
 
     calls: list[dict[str, Any]] = []
@@ -269,12 +269,12 @@ async def test_platform_startup_applies_indexes_when_database_intent_is_loaded(m
         return AppLoadResult(
             definition=AppDefinition(name="Intent Test", version="1.0"),
             modules=[],
-            database_intent=intent,
-            database_entities_by_key={},
+            data_contract=intent,
+            data_entities_by_key={},
         )
 
-    async def fake_apply(database_intent, *, app_id=None):
-        calls.append({"intent": database_intent, "app_id": app_id})
+    async def fake_apply(data_contract, *, app_id=None):
+        calls.append({"intent": data_contract, "app_id": app_id})
         return 1
 
     class FakeHooks:
@@ -301,8 +301,8 @@ async def test_platform_startup_best_effort_index_failure_logs_and_continues(mon
         return AppLoadResult(
             definition=AppDefinition(name="Intent Test", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent=intent,
-            database_entities_by_key={},
+            data_contract=intent,
+            data_entities_by_key={},
         )
 
     async def fail_apply(_intent, *, app_id=None):
@@ -315,7 +315,7 @@ async def test_platform_startup_best_effort_index_failure_logs_and_continues(mon
     monkeypatch.delenv("MOZAIKS_DATABASE_STARTUP_POLICY", raising=False)
     monkeypatch.setattr(platform.AppLoader, "load", fake_load)
     monkeypatch.setattr(platform, "apply_database_indexes", fail_apply)
-    monkeypatch.setattr(platform, "load_database_migrations", lambda _root: [])
+    monkeypatch.setattr(platform, "load_data_migrations", lambda _root: [])
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: FakeHooks())
     monkeypatch.setattr(platform.logger, "warning", lambda message, *args: warnings.append(message % args))
 
@@ -334,8 +334,8 @@ async def test_platform_startup_required_index_failure_raises(monkeypatch: pytes
         return AppLoadResult(
             definition=AppDefinition(name="Intent Test", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent=intent,
-            database_entities_by_key={},
+            data_contract=intent,
+            data_entities_by_key={},
         )
 
     async def fail_apply(_intent, *, app_id=None):

@@ -156,7 +156,7 @@ def test_migrations_status_does_not_call_mutation_helper(monkeypatch: pytest.Mon
         raise AssertionError("migration status must not apply migrations")
 
     monkeypatch.setattr(migrations_command, "get_migration_health_report", fake_report)
-    monkeypatch.setattr(migrations_command, "apply_database_migrations", fail_mutation, raising=False)
+    monkeypatch.setattr(migrations_command, "apply_data_migrations", fail_mutation, raising=False)
     args = create_parser().parse_args(["migrations", "status"])
 
     assert migrations_command.run(args) == 0

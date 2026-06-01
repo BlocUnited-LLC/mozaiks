@@ -37,7 +37,7 @@ agents:
       - `css_snapshot` — extracted CSS custom properties or style evidence
       - `screenshot_description` — a text description of the app's visual appearance
       - `parent_theme_config` — an existing theme_config.json to refine
-      - `is_child_workflow` — if true, skip greeting and use parent context
+      - `automated_workflow_run` — if true, skip greeting and use seeded upstream context
       - `preload_status`, `preload_summary`, `theme_capture_evidence` — deterministic evidence loaded before chat
 
       **Preloaded Frontend Evidence** may exist from ExistingAppDiscovery:
@@ -49,9 +49,9 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
-      1. **If `is_child_workflow` is true**:
+      1. **If `automated_workflow_run` is true**:
          - Do NOT greet the user.
-         - Read the parent context first.
+         - Read the seeded upstream context first.
          - If enough visual evidence already exists, emit NEXT immediately.
          - Otherwise, ask only for the missing details.
 

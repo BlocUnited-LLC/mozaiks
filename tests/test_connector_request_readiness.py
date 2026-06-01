@@ -189,7 +189,7 @@ async def test_collect_missing_connector_needs_reuses_ready_connectors(monkeypat
     assert context.data["ready_connector_services"] == ["analytics_provider"]
 
 
-def test_collect_integration_needs_dedupes_mfj_child_results() -> None:
+def test_collect_integration_needs_dedupes_task_batch_results() -> None:
     context = _Context(
         {
             "app_build_plan": {
@@ -206,9 +206,9 @@ def test_collect_integration_needs_dedupes_mfj_child_results() -> None:
                     }
                 ]
             },
-            "mfj_app_task_results": {
-                "children": {
-                    "payments_child": {
+            "app_task_batch_results": {
+                "task_results": {
+                    "payments_task": {
                         "integration_needs": [
                             {
                                 "service": "Payment Provider",
@@ -217,7 +217,7 @@ def test_collect_integration_needs_dedupes_mfj_child_results() -> None:
                             }
                         ]
                     },
-                    "email_child": {
+                    "email_task": {
                         "integration_needs": [
                             {
                                 "service": "email_provider",

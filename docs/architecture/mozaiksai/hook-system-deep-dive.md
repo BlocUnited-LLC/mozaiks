@@ -2,24 +2,21 @@
 
 ## Overview
 
-mozaiksai uses AG2 hook points plus declarative registration from `hooks.yaml`.
+Mozaiks uses `hooks.yaml` for AG2 beta prompt injection. The only canonical
+workflow hook type is `update_agent_state`.
 
-Canonical hook declarations live in:
+Canonical declarations live in:
 
-- `app/workflows/{workflow}/hooks.yaml`
+- `workflows/{workflow}/hooks.yaml`
 
-Builder workflows use the same contract under `factory_app/workflows/{workflow}/hooks.yaml`.
+Builder workflows use the same contract under
+`factory_app/workflows/{workflow}/hooks.yaml`.
 
-No workflow hook JSON files are used in the canonical runtime contract.
+Workflow hook JSON files are not part of the runtime contract.
 
 ## Supported Hook Types
 
-`hooks.yaml` supports:
-
-- `process_message_before_send`
-- `update_agent_state`
-- `process_last_received_message`
-- `process_all_messages_before_reply`
+`hooks.yaml` supports `update_agent_state` only.
 
 ## Declarative Contract
 
@@ -41,20 +38,18 @@ Fields are required per entry:
 ## Runtime Registration Model
 
 1. `load_hook_entries()` reads and validates `hooks.yaml`.
-2. For `update_agent_state` entries:
-   - functions are pre-loaded before `ConversableAgent(...)` construction.
-   - hooks are passed through `update_agent_state_before_reply`.
-3. Other hook types are registered via `register_hook(...)` post-construction.
-
-This split exists because AG2 `update_agent_state_before_reply` behavior is
-bound during agent setup.
+2. `create_agents()` resolves `update_agent_state` functions before beta agent
+   construction.
+3. `MozaiksHookPolicy` runs those functions before each AG2 `agent.ask()` call.
+4. If a hook calls `agent.update_system_message(...)`, that message becomes the
+   prompt for the current turn.
 
 ## Execution Timing
 
-- `update_agent_state`: before agent reply generation.
-- `process_all_messages_before_reply`: before reply using full message list.
-- `process_last_received_message`: before reply, focused on latest message.
-- `process_message_before_send`: right before outbound send.
+`update_agent_state` runs before agent reply generation. It is for context
+injection, prompt guards, and deterministic runtime guidance. Message
+transforms, output validation, persistence, and side effects belong in
+structured outputs, lifecycle tools, runtime validators, or ordinary tools.
 
 ## Troubleshooting
 
@@ -63,4 +58,7 @@ If a hook does not fire:
 1. Verify the `hooks.yaml` entry validates.
 2. Confirm `hook_agent` exactly matches the runtime agent name.
 3. Confirm `filename` and `function` resolve to an importable callable.
-4. Check agent hook snapshots from runtime logs (`register_hooks` diagnostics).
+4. Confirm the hook calls `agent.update_system_message(...)` when it needs to
+   change the current-turn prompt.
+
+

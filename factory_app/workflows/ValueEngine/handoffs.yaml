@@ -55,12 +55,3 @@ handoff_rules:
   condition_scope: null
   condition: ${concept_presented} == True
   transition_target: AgentTarget
-
-# User → terminate (when user approves and generation completes)
-- source_agent: user
-  target_agent: terminate
-  handoff_type: condition
-  condition_type: string_llm
-  condition_scope: null
-  condition: When the user confirms completion and is ready to proceed to the next workflow (AgentGenerator or AppGenerator).
-  transition_target: TerminateTarget

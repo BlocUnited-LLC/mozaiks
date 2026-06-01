@@ -344,7 +344,7 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
 def test_generated_output_references_connector_id_without_raw_secret() -> None:
     generated_files = [
         {
-            "filename": "modules/analytics/backend/integrations/analytics_provider_client.py",
+            "filename": "modules/analytics/services/integrations/analytics_provider_client.py",
             "content": (
                 "CONNECTOR_ID = 'analytics_provider'\n"
                 "def build_client(connector_config):\n"

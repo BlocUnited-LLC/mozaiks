@@ -200,4 +200,4 @@ Not:
 
 - `workflow_sequence restart`
 - `control-plane reroute`
-- `groupchat resume`
+- `workflow-run resume`

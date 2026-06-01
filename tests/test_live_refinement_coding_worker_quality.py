@@ -31,7 +31,7 @@ EXPECTED_SCENARIOS: dict[str, dict[str, object]] = {
         "rationale_contains": ["no-op", "stub"],
     },
     "integration_adapter": {
-        "path": "backend/integrations/analytics_provider_client.py",
+        "path": "services/integrations/analytics_provider_client.py",
         "content_contains": ["Retry behavior", "backoff", "retry storms"],
         "content_not_contains": ["token", "secret", "password", "endpoint"],
         "summary_contains": ["retry behavior", "analytics provider"],
@@ -43,7 +43,7 @@ EXPECTED_SCENARIOS: dict[str, dict[str, object]] = {
             "TODO: project_phase will require a future migration",
             'PROJECT_PHASE = "draft"',
         ],
-        "content_not_contains": ["database_intent", "migration.json", "repo.py"],
+        "content_not_contains": ["data_contract", "migration.json", "repo.py"],
         "summary_contains": ["future migration", "project_phase"],
         "rationale_contains": ["todo", "schema"],
     },

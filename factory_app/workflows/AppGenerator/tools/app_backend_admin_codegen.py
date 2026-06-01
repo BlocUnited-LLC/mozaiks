@@ -8,15 +8,15 @@ from factory_app.workflows.AppGenerator.tools.app_backend_admin_contract import 
 )
 
 
-_ADMIN_CONFIG_PATH = "backend/admin_config.py"
-_ADMIN_ROUTE_PATH = "backend/routes/admin.py"
+_ADMIN_CONFIG_PATH = "services/admin_config.py"
+_ADMIN_ROUTE_PATH = "services/routes/admin.py"
 
 # Self-contained route — no mozaiksai import required in the generated app.
 _ADMIN_ROUTE_MODULE = (
     "from fastapi import APIRouter, HTTPException\n"
     "from inspect import isawaitable\n\n"
-    "from backend.admin_config import get_admin_config\n\n"
-    "router = APIRouter(prefix=\"/api/admin\", tags=[\"app-backend-admin\"])\n\n\n"
+    "from app.services.admin_config import get_admin_config\n\n"
+    "router = APIRouter(prefix=\"/api/admin\", tags=[\"service-admin\"])\n\n\n"
     "@router.get(\"/config\")\n"
     "async def _get_admin_config():\n"
     "    try:\n"
@@ -48,7 +48,7 @@ def _render_admin_config_module(payload: Dict[str, Any]) -> str:
 
 
 def build_app_backend_admin_code_files(raw: Any) -> List[Dict[str, str]]:
-    """Render the canonical split app-backend admin surface from typed config."""
+    """Render the canonical split service admin surface from typed config."""
 
     config = validate_app_backend_admin_config(raw)
     payload = config.model_dump(mode="python", exclude_none=True)

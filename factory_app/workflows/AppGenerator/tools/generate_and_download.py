@@ -324,7 +324,7 @@ async def _persist_pending_schema_migration(
     migration_path = (
         Path(generated_app_dir)
         / "config"
-        / "database_migrations"
+        / "data_migrations"
         / f"{migration_id}.json"
     )
     migration_path.parent.mkdir(parents=True, exist_ok=True)
@@ -360,7 +360,7 @@ async def _persist_pending_schema_migration(
             context_variables.set("persisted_database_migration", record)
             context_variables.set(
                 "staged_database_migration_path",
-                f"config/database_migrations/{migration_id}.json",
+                f"config/data_migrations/{migration_id}.json",
             )
         except Exception:
             pass
@@ -854,6 +854,8 @@ async def generate_and_download(
         raise UIToolError("Failed during file download UI interaction")
 
     if response.get("status") == "cancelled":
+        _context_set(context_variables, "download_status", "cancelled")
+        _context_set(context_variables, "app_download_ready", False)
         return {
             "status": "cancelled",
             "ui_response": response,
@@ -937,15 +939,29 @@ async def generate_and_download(
     except Exception as deploy_err:
         wf_logger.warning(f"GitHub export flow failed: {deploy_err}")
 
+    download_result = {
+        "bundle_dir": str(app_dir.resolve()),
+        "bundle_zip": str(zip_path.resolve()),
+        "file_count": len(written_paths),
+        "files_written": written_paths,
+        "storage_backend": storage_backend,
+    }
+    _context_set(context_variables, "generated_app_dir", download_result["bundle_dir"])
+    _context_set(context_variables, "generated_app_zip", download_result["bundle_zip"])
+    _context_set(context_variables, "download_status", "ready")
+    _context_set(context_variables, "app_download_ready", True)
+    _context_set(context_variables, "download_result", download_result)
+
     return {
         "status": "success",
         "ui_response": response,
         "agent_message_id": agent_message_id,
         "ui_files": ui_files,
-        "bundle_dir": str(app_dir.resolve()),
-        "bundle_zip": str(zip_path.resolve()),
+        "bundle_dir": download_result["bundle_dir"],
+        "bundle_zip": download_result["bundle_zip"],
         **({"deployment": deployment_result} if deployment_result is not None else {}),
-        "file_count": len(written_paths),
-        "files_written": written_paths,
+        "file_count": download_result["file_count"],
+        "files_written": download_result["files_written"],
         "storage_backend": storage_backend,
     }
+

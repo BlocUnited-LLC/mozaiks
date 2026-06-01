@@ -211,7 +211,7 @@ def _risky_signals(
 
 
 def _touches_module_or_backend(paths: list[str]) -> bool:
-    return any(path.startswith("modules/") or "/backend/" in f"/{path}" or path.startswith("backend/") for path in paths)
+    return any(path.startswith("modules/") or "/backend/" in f"/{path}" or path.startswith("services/") for path in paths)
 
 
 def _touches_sensitive_boundary(paths: list[str]) -> bool:
@@ -294,3 +294,4 @@ __all__ = [
     "enrich_app_context_policy_with_graph_hints",
     "evaluate_app_context_policy",
 ]
+

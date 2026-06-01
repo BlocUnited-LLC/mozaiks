@@ -48,7 +48,7 @@ def test_sync_agent_guidance_write_missing_creates_guidance(tmp_path) -> None:
     assert {status.status for status in current_statuses} == {"current"}
 
 
-def test_generated_agent_guidance_declares_app_backend_support_lane() -> None:
+def test_generated_agent_guidance_declares_app_service_support_lane() -> None:
     assert init_command.build_agent_guidance_files is agent_guidance.build_agent_guidance_files
 
     files = init_command.build_agent_guidance_files("Backend Lane App", "integrated")
@@ -56,22 +56,22 @@ def test_generated_agent_guidance_declares_app_backend_support_lane() -> None:
     agents = files[Path("AGENTS.md")]
     claude = files[Path("CLAUDE.md")]
 
-    assert "`app/backend/` - optional app-owned support code" in agents
-    assert "app/backend/integrations/" in agents
-    assert "app/backend/adapters/" in agents
-    assert "app/backend/security/" in agents
-    assert "app/backend/routes/" in agents
+    assert "`app/services/` - optional app-owned support code" in agents
+    assert "app/services/integrations/" in agents
+    assert "app/services/adapters/" in agents
+    assert "app/services/security/" in agents
+    assert "app/services/routes/" in agents
     assert "app/config/secrets.yaml" in agents
     assert "Never store raw API keys" in agents
-    assert "app/config/shared_persistence.json" in agents
+    assert "app/config/data.json" in agents
     assert "workflows/" in agents
     assert "business actions, lifecycle state, emitted events, or persistence authority" in agents
     assert "auth/" in agents and "dns/" in agents and "registrar/" in agents and "secrets/" in agents
-    assert "backend/  # optional integrations/adapters/security/routes support code" in claude
-    assert "app/backend/integrations/<service>_client.py" in claude
-    assert "app/backend/adapters/<area>/<provider>.py" in claude
-    assert "app/backend/adapters/auth/<provider>.py" in claude
-    assert "app/backend/security/" in claude
+    assert "services/  # optional integrations/adapters/security/routes/data support code" in claude
+    assert "app/services/integrations/<service>_client.py" in claude
+    assert "app/services/adapters/<area>/<provider>.py" in claude
+    assert "app/services/adapters/auth/<provider>.py" in claude
+    assert "app/services/security/" in claude
     assert "Secret management contract, names only" in claude
     assert "app/config/secrets.yaml" in claude
     assert "workflows/<WorkflowName>/" in claude

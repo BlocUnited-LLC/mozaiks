@@ -83,8 +83,8 @@ def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tm
     assert fake_store.calls[0]["artifact_version_id"] == "artifact_123"
     assert fake_store.calls[0]["change_class"] == "feature"
     assert context.data["persisted_database_migration"]["status"] == "staged"
-    assert context.data["staged_database_migration_path"] == "config/database_migrations/m_1.json"
-    assert (tmp_path / "config" / "database_migrations" / "m_1.json").exists()
+    assert context.data["staged_database_migration_path"] == "config/data_migrations/m_1.json"
+    assert (tmp_path / "config" / "data_migrations" / "m_1.json").exists()
 
 
 def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatch, tmp_path: Path) -> None:

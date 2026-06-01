@@ -414,3 +414,5 @@ The production-ready target is:
 5. no overlap between page primitives and workflow-local React ownership
 
 That gives Mozaiks the protocol discipline of AG-UI where it matters, while preserving the broader generated-app architecture that CopilotKit alone does not cover.
+
+

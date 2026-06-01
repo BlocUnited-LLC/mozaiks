@@ -70,7 +70,7 @@ models:
         items: DesignSurface
         description: Realization surfaces declared for the app.
 
-  DatabaseIntentField:
+  DataContractField:
     type: model
     fields:
       name:
@@ -104,7 +104,7 @@ models:
         - 'null'
         description: Null or true when the field may be set to null.
 
-  DatabaseIntentIndex:
+  DataContractIndex:
     type: model
     fields:
       keys:
@@ -130,7 +130,7 @@ models:
         - 'null'
         description: Null or explicit Mongo index name.
 
-  DatabaseIntentOwnership:
+  DataContractOwnership:
     type: model
     fields:
       surface_id:
@@ -146,7 +146,7 @@ models:
         - ui_only
         description: Surface kind that owns the collection.
 
-  DatabaseIntentLifecycle:
+  DataContractLifecycle:
     type: model
     fields:
       write_mode:
@@ -164,7 +164,7 @@ models:
         - destructive_allowed
         description: Allowed migration policy for future revisions.
 
-  DatabaseIntentCollection:
+  DataContractCollection:
     type: model
     fields:
       name:
@@ -178,15 +178,15 @@ models:
         - hosted
         description: Scope of the collection namespace.
       ownership:
-        type: DatabaseIntentOwnership
+        type: DataContractOwnership
         description: Surface ownership for the collection.
       fields:
         type: list
-        items: DatabaseIntentField
+        items: DataContractField
         description: Declared document fields for the collection.
       indexes:
         type: optional_list
-        items: DatabaseIntentIndex
+        items: DataContractIndex
         description: Declared Mongo indexes for the collection.
       search_by:
         type: union
@@ -195,10 +195,10 @@ models:
         - 'null'
         description: Null or primary lookup field used for updates.
       lifecycle:
-        type: DatabaseIntentLifecycle
+        type: DataContractLifecycle
         description: Write and migration rules for this collection.
 
-  DatabaseIntentSurface:
+  DataContractSurface:
     type: model
     fields:
       surface_id:
@@ -215,10 +215,10 @@ models:
         description: Surface kind mirrored from surface_map.
       collections:
         type: list
-        items: DatabaseIntentCollection
+        items: DataContractCollection
         description: Collection intents owned by the surface.
 
-  DatabaseIntentPolicies:
+  DataContractPolicies:
     type: model
     fields:
       default_scope_field:
@@ -228,7 +228,7 @@ models:
         type: bool
         description: False unless the product explicitly permits destructive migrations.
 
-  DatabaseIntentBundle:
+  DataContractBundle:
     type: model
     fields:
       version:
@@ -248,14 +248,14 @@ models:
         description: Null during greenfield design passes or the artifact version being refined.
       surfaces:
         type: list
-        items: DatabaseIntentSurface
+        items: DataContractSurface
         description: Database ownership grouped by realization surface.
       shared_collections:
         type: optional_list
-        items: DatabaseIntentCollection
-        description: Collections intentionally shared outside a single owning surface.
+        items: DataContractCollection
+        description: Collections intentionally shared across surfaces or modules.
       policies:
-        type: DatabaseIntentPolicies
+        type: DataContractPolicies
         description: Global migration and scoping policies for the app.
 
   UIPageSection:
@@ -356,13 +356,14 @@ models:
         description: Complete backend design document in Markdown.
       database_markdown:
         type: str
-        description: Complete database design document in Markdown.
+        description: Complete data design document in Markdown.
       experience_spec:
         type: ExperienceSpec
         description: Typed UI experience specification — navigation model, brand direction, and the complete declarative page structure with primitive-level section intent. This is the machine-readable contract that AppPlanAgent uses as the authoritative page source.
       surface_map:
         type: DesignSurfaceMap
         description: Canonical typed surface realization contract mirrored into the saved backend and ui_schema docs.
-      database_intent_bundle:
-        type: DatabaseIntentBundle
-        description: Canonical typed database ownership and migration contract persisted separately and staged into generated app bundles.
+      data_contract:
+        type: DataContractBundle
+        description: Canonical typed database ownership and migration contract persisted separately and staged as config/data.json in generated app bundles.
+

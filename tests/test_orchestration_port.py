@@ -127,9 +127,10 @@ class TestOrchestrationPortProtocol:
         assert isinstance(caps["version"], str)
         assert caps["supports_pause"] is True
         assert caps["supports_resume"] is True
-        assert caps["supports_fan_out"] is True
+        assert caps["supports_task_batches"] is True
         assert caps["supports_cancel"] is True
         assert caps["supports_bidirectional_stream"] is False
+        assert caps["supports_network_transition_graph"] is True
 
     def test_interpret_result_completed(self):
         from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter

@@ -41,7 +41,7 @@ class AG2TerminationHandler:
     - 'completed'  : Chat ended/completed (not resumable)
     
     Integration Points:
-    - AG2 GroupChat termination callbacks
+    - AG2 beta workflow completion callbacks
     - PersistenceManager status updates
     - Workflow completion notifications
     """

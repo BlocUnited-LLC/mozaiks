@@ -20,6 +20,7 @@ Commands:
     mozaiks add <feature>     Add feature to existing project
     mozaiks gen <mode>        Convenience shortcut: generate from a prompt
     mozaiks migrations status Read-only generated-app migration health
+    mozaiks context snapshot Register a local workspace Context Graph snapshot
     mozaiks sync-agent-guidance  Sync app-local coding-agent guidance safely
     mozaiks info              Show current config and available presets
 """
@@ -29,6 +30,7 @@ import sys
 
 from mozaiks_cli.commands import (
     add_command,
+    context_command,
     gen_command,
     info_command,
     init_command,
@@ -346,7 +348,7 @@ def create_parser():
     migrations_parser = subparsers.add_parser(
         "migrations",
         help="Inspect generated-app migration health",
-        description="Read-only diagnostics for generated-app database migration history.",
+        description="Read-only diagnostics for generated-app Data migration history.",
     )
     migrations_subparsers = migrations_parser.add_subparsers(
         dest="migrations_action",
@@ -383,6 +385,59 @@ def create_parser():
         dest="json_output",
         action="store_true",
         help="Emit the exact migration health report as JSON",
+    )
+
+    # mozaiks context
+    context_parser = subparsers.add_parser(
+        "context",
+        help="Manage local app context snapshots",
+        description=(
+            "Developer operations for registering local workspace app context. "
+            "Studio remains the management UI; this command is a local dogfood/bootstrap helper."
+        ),
+    )
+    context_subparsers = context_parser.add_subparsers(
+        dest="context_action",
+        help="Context actions",
+    )
+    context_snapshot_parser = context_subparsers.add_parser(
+        "snapshot",
+        help="Register a local workspace Context Graph snapshot",
+        description=(
+            "Scan a local workspace, persist a code-context app_bundle artifact, "
+            "build an app_context_graph, and register a current AppContextVersion."
+        ),
+    )
+    context_snapshot_parser.add_argument(
+        "--app-id",
+        required=True,
+        help="Managed app id to register the snapshot under",
+    )
+    context_snapshot_parser.add_argument(
+        "--workspace",
+        default=".",
+        help="Workspace root to scan (default: current directory)",
+    )
+    context_snapshot_parser.add_argument(
+        "--artifact-key",
+        default="workspace_snapshot",
+        help="Artifact key for the snapshot app_bundle (default: workspace_snapshot)",
+    )
+    context_snapshot_parser.add_argument(
+        "--draft",
+        action="store_true",
+        help="Create the AppContextVersion as draft instead of making it current",
+    )
+    context_snapshot_parser.add_argument(
+        "--generated-artifacts-root",
+        default=None,
+        help="Override generated artifact output root for the snapshot zip",
+    )
+    context_snapshot_parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit the snapshot registration result as JSON",
     )
 
     # mozaiks sync-agent-guidance
@@ -470,6 +525,10 @@ def main():
                 sys.exit(result)
         elif args.command == "migrations":
             result = migrations_command.run(args)
+            if result:
+                sys.exit(result)
+        elif args.command == "context":
+            result = context_command.run(args)
             if result:
                 sys.exit(result)
         elif args.command == "sync-agent-guidance":

@@ -219,7 +219,7 @@ def test_integration_graph_returns_integration_hints_without_secrets() -> None:
                 label="analytics_provider",
                 metadata={
                     "paths": [
-                        "backend/integrations/analytics_provider_client.py",
+                        "services/integrations/analytics_provider_client.py",
                         ".env",
                         "config/integrations.credentials.json",
                     ]
@@ -238,7 +238,7 @@ def test_integration_graph_returns_integration_hints_without_secrets() -> None:
     )
 
     assert "integration" in {node.node_type for node in hints.related_nodes}
-    assert "backend/integrations/analytics_provider_client.py" in hints.additional_path_hints
+    assert "services/integrations/analytics_provider_client.py" in hints.additional_path_hints
     assert all(".env" not in path for path in hints.additional_path_hints)
     assert all("credential" not in path.lower() for path in hints.additional_path_hints)
 
@@ -262,7 +262,7 @@ def test_data_entity_graph_returns_data_model_hints() -> None:
                 "data:project",
                 GraphNodeType.DATA_ENTITY,
                 label="project record",
-                metadata={"path": "config/database_intent.json"},
+                metadata={"path": "config/data.json"},
             ),
         ],
         edges=[
@@ -280,7 +280,7 @@ def test_data_entity_graph_returns_data_model_hints() -> None:
     )
 
     assert {"module", "data_entity"} <= {node.node_type for node in hints.related_nodes}
-    assert "config/database_intent.json" in hints.additional_path_hints
+    assert "config/data.json" in hints.additional_path_hints
     assert "modules/projects/backend/schemas.py" in hints.additional_path_hints
 
 

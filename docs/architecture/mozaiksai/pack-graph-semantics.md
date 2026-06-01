@@ -31,7 +31,7 @@ This is a **v3 schema**: there are no `nodes`/`edges` and no alternate historica
 ### Workflow Sequence
 - An ordered sequence of workflow phases meant to auto-advance after completion.
 - JSON field: `workflow_sequences[]`.
-- This is not workflow-local MFJ.
+- This is not workflow-local task batching.
 
 ### Dependency (prerequisite rule)
 - A directed prerequisite relationship between two workflow types.
@@ -189,5 +189,5 @@ UX outcome:
 ## 5) Notes (avoid confusion)
 
 - `workflows/extended_orchestration/extension_registry.json` is the global config.
-- Per-workflow decomposition uses `workflows/<WorkflowName>/extended_orchestration/mfj_extension.json`.
-- Do not confuse global workflow sequences with workflow-local MFJ graphs.
+- Per-workflow task batching uses `workflows/<WorkflowName>/extended_orchestration/task_batches.yaml`.
+- Do not confuse global workflow sequences with workflow-local task batch graphs.

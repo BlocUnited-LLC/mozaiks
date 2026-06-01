@@ -21,7 +21,7 @@ compose app-local hosts on top of Studio instead of adding product hosts here.
 
 ## What This Layer Owns
 
-- Executes AI agent conversations (AG2 GroupChat)
+- Executes AI workflow runs with AG2 beta Agents and Network transition graphs
 - Streams events to frontend via WebSocket
 - Persists chat sessions to MongoDB
 - Handles tool calls from agents
@@ -103,9 +103,9 @@ run_workflow_orchestration(workflow_name, chat_id, ...)
     ↓
 Load workflow config from factory_app/workflows/{name}/
     ↓
-Create AG2 pattern (agents, handoffs, tools)
+Create AG2 beta agents and compile handoffs.yaml to a TransitionGraph
     ↓
-AG2 GroupChat.a_run_group_chat()
+Run agent turns through the AG2 orchestration adapter
     ↓
 Stream events via SimpleTransport.broadcast_event()
     ↓
@@ -164,17 +164,17 @@ the shared smoke workflows under `factory_app/workflows/`:
 Run them through the live harness:
 
 ```bash
-python scripts/run_live_mfj_smoke.py --workflow RuntimeSmoke --workflows-root factory_app/workflows
-python scripts/run_live_mfj_smoke.py --workflow RuntimeToolCallSmoke --workflows-root factory_app/workflows --tool-response-text approved
-python scripts/run_live_mfj_smoke.py --workflow RuntimeUIPrimitiveSmoke --workflows-root factory_app/workflows --tool-response-file factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json
-python scripts/run_live_mfj_smoke.py --workflow AgentGenerator --workflows-root factory_app/workflows --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json --timeout-seconds 300
+python scripts/run_live_workflow_smoke.py --workflow RuntimeSmoke --workflows-root factory_app/workflows
+python scripts/run_live_workflow_smoke.py --workflow RuntimeToolCallSmoke --workflows-root factory_app/workflows --tool-response-text approved
+python scripts/run_live_workflow_smoke.py --workflow RuntimeUIPrimitiveSmoke --workflows-root factory_app/workflows --tool-response-file factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json
+python scripts/run_live_workflow_smoke.py --workflow AgentGenerator --workflows-root factory_app/workflows --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json --timeout-seconds 300
 ```
 
 For real multi-turn workflows that pause on AG2 input requests, the same
 harness can answer the canonical response-required lane with scripted replies:
 
 ```bash
-python scripts/run_live_mfj_smoke.py --workflow ValueEngine --workflows-root factory_app/workflows ^
+python scripts/run_live_workflow_smoke.py --workflow ValueEngine --workflows-root factory_app/workflows ^
   --prompt "I want to build a task prioritization app for independent consultants." ^
   --user-reply "Independent consultants juggling multiple client deadlines." ^
   --user-reply "The biggest pain is deciding what to work on each morning." ^

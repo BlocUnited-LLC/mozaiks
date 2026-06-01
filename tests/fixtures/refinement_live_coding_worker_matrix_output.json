@@ -139,7 +139,7 @@
       "source_snapshot": {
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -152,7 +152,7 @@
         },
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -367,7 +367,7 @@
       "source_snapshot": {
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -380,7 +380,7 @@
         },
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -477,7 +477,7 @@
       },
       "coding_worker_result": {
         "applied_files": {
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
         },
         "blocked_reason": null,
         "eligible": true,
@@ -486,7 +486,7 @@
         "metadata": {
           "applied_file_count": 1,
           "applied_paths": [
-            "backend/integrations/analytics_provider_client.py"
+            "services/integrations/analytics_provider_client.py"
           ],
           "artifact_kind": "app_bundle",
           "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmps0y1wlbb\\generated_refinements\\refinement-live-worker-smoke-integration\\app_bundle\\app_bundle\\9380a237e5b2\\artifact.zip",
@@ -500,13 +500,13 @@
         "plan": {
           "needs_human_review": false,
           "owned_paths": [
-            "backend/integrations/analytics_provider_client.py"
+            "services/integrations/analytics_provider_client.py"
           ],
           "rationale": "Request is a simple documentation comment update in the specified file.",
           "start_preview": false,
           "summary": "Added comment describing analytics provider retry behavior.",
           "updated_files": {
-            "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
+            "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
           },
           "validation_commands": [],
           "validation_strategy": "skip"
@@ -525,14 +525,14 @@
         }
       },
       "expected_changed_paths": [
-        "backend/integrations/analytics_provider_client.py"
+        "services/integrations/analytics_provider_client.py"
       ],
       "failure_category": null,
       "failure_detail": null,
       "name": "integration_adapter",
       "plan": {
         "affected_bundle_paths": [
-          "backend/integrations/analytics_provider_client.py"
+          "services/integrations/analytics_provider_client.py"
         ],
         "affected_declarative_families": [
           "app_bundle"
@@ -601,7 +601,7 @@
       "source_snapshot": {
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -614,7 +614,7 @@
         },
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -628,15 +628,15 @@
       },
       "staged_snapshot": {
         "workspace": {
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n"
         }
       },
       "staging_result": {
         "changed_files": [
           {
-            "path": "backend/integrations/analytics_provider_client.py",
+            "path": "services/integrations/analytics_provider_client.py",
             "reason": "live worker output for staged refinement smoke",
-            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmps0y1wlbb/.refinement_staging/refinement-live-worker-smoke-integration/req_refinement_live_worker_integration_001/workspace/backend/integrations/analytics_provider_client.py",
+            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmps0y1wlbb/.refinement_staging/refinement-live-worker-smoke-integration/req_refinement_live_worker_integration_001/workspace/services/integrations/analytics_provider_client.py",
             "status": "updated"
           }
         ],
@@ -660,18 +660,18 @@
         "change_class": "patch",
         "context_seed": {
           "affected_bundle_paths": [
-            "backend/integrations/analytics_provider_client.py"
+            "services/integrations/analytics_provider_client.py"
           ],
           "refinement_lane": "integration",
           "request_id": "req_refinement_live_worker_integration_001",
           "scenario_name": "integration_adapter"
         },
         "files": {
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n"
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n"
         },
         "metadata": {
           "affected_bundle_paths": [
-            "backend/integrations/analytics_provider_client.py"
+            "services/integrations/analytics_provider_client.py"
           ],
           "request_id": "req_refinement_live_worker_integration_001",
           "scenario_name": "integration_adapter",
@@ -688,7 +688,7 @@
         "changes": [
           {
             "new_content": "\"\"\"Analytics provider client.\"\"\"\n\n# Retry behavior: transient failures from the analytics provider should be retried\n# with backoff to avoid dropping events while preventing rapid retry storms.\n",
-            "path": "backend/integrations/analytics_provider_client.py",
+            "path": "services/integrations/analytics_provider_client.py",
             "reason": "live worker output for staged refinement smoke"
           }
         ],
@@ -817,14 +817,14 @@
             },
             {
               "id": "database_migration_review",
-              "label": "Database migration review",
-              "reason": "Required when database intent, migrations, or destructive data changes are in scope.",
+              "label": "Data migration review",
+              "reason": "Required when data contract, migrations, or destructive data changes are in scope.",
               "required": true
             }
           ]
         },
         "warnings": [
-          "Database migration review is required before mutation.",
+          "Data migration review is required before mutation.",
           "Human review is required before mutation.",
           "Staged mode reserves a metadata path only; no app files are copied or mutated."
         ],
@@ -837,7 +837,7 @@
       "source_snapshot": {
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -850,7 +850,7 @@
         },
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -1071,7 +1071,7 @@
       "source_snapshot": {
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -1084,7 +1084,7 @@
         },
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-          "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+          "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
           "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",

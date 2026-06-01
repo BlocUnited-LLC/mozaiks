@@ -326,7 +326,6 @@ def test_docs_and_prompts_do_not_describe_removed_custom_route_ownership() -> No
             "docs/architecture/builder/appgenerator-output-assembly-contract.md"
         ),
         "adding_pages": _read("docs/guides/adding-pages/01-overview.md"),
-        "quality_checklist": _read("docs/guides/ui-and-brand/ui-quality-checklist.md"),
     }
 
     forbidden_phrases = (
@@ -351,7 +350,6 @@ def test_docs_and_prompts_state_no_implicit_custom_route_discovery() -> None:
             _read(".claude/skills/add-page/SKILL.md"),
             _read(".claude/rules/frontend.md"),
             _read("docs/guides/adding-pages/01-overview.md"),
-            _read("docs/guides/ui-and-brand/ui-quality-checklist.md"),
         ]
     ).lower()
 

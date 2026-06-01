@@ -12,3 +12,4 @@ Mozaiks. They follow the 4-layer contract (handler → service → repo → poli
 auto-discovered by the platform host at startup.
 
 See: `.claude/skills/add-module/SKILL.md`
+

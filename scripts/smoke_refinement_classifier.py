@@ -55,12 +55,12 @@ def base_manifest() -> list[dict[str, Any]]:
     return [
         {"path": "app.json"},
         {"path": "config/shell.json"},
-        {"path": "config/database_intent.json"},
-        {"path": "config/database_migrations/001_initial.json"},
+        {"path": "config/data.json"},
+        {"path": "config/data_migrations/001_initial.json"},
         {"path": "config/integrations.json"},
         {"path": "docs/integrations.md"},
-        {"path": "backend/integrations/analytics_provider_client.py"},
-        {"path": "backend/integrations/analytics_provider_secret.py"},
+        {"path": "services/integrations/analytics_provider_client.py"},
+        {"path": "services/integrations/analytics_provider_secret.py"},
         {"path": "config/integrations.credentials.json"},
         {"path": "modules/projects/module.yaml"},
         {"path": "modules/projects/contracts/events.yaml"},
@@ -89,7 +89,7 @@ def base_manifest() -> list[dict[str, Any]]:
 
 def hosted_manifest() -> list[dict[str, Any]]:
     return [
-        {"path": "backend/integrations/hosted_analytics_client.py"},
+        {"path": "services/integrations/hosted_analytics_client.py"},
         {"path": "modules/analytics_dashboard/module.yaml"},
         {"path": "modules/analytics_dashboard/contracts/events.yaml"},
         {"path": "modules/analytics_dashboard/backend/handler.py"},
@@ -377,7 +377,7 @@ def validate_case(case: dict[str, Any]) -> list[str]:
             violations.append(f"{case_id}: missing module/backend paths {missing}")
     elif case_id == "external_integration":
         required = {
-            "backend/integrations/analytics_provider_client.py",
+            "services/integrations/analytics_provider_client.py",
             "modules/reports/backend/service.py",
             "modules/reports/backend/schemas.py",
         }
@@ -388,7 +388,7 @@ def validate_case(case: dict[str, Any]) -> list[str]:
             violations.append(f"{case_id}: missing integration readiness scope note")
     elif case_id == "data_model_migration":
         required = {
-            "config/database_intent.json",
+            "config/data.json",
             "modules/projects/module.yaml",
             "modules/projects/backend/repo.py",
             "modules/projects/backend/policy.py",
@@ -397,13 +397,13 @@ def validate_case(case: dict[str, Any]) -> list[str]:
         missing = sorted(required.difference(paths))
         if missing:
             violations.append(f"{case_id}: missing data model paths {missing}")
-        if not any(path.startswith("config/database_migrations/") for path in paths):
+        if not any(path.startswith("config/data_migrations/") for path in paths):
             violations.append(f"{case_id}: missing database migration path")
         if "Destructive changes require explicit review." not in scope_summary:
             violations.append(f"{case_id}: missing destructive-review warning")
     elif case_id == "hosted_capability_facade":
         required = {
-            "backend/integrations/hosted_analytics_client.py",
+            "services/integrations/hosted_analytics_client.py",
             "modules/analytics_dashboard/module.yaml",
             "modules/analytics_dashboard/backend/service.py",
             "ui/pages/analytics.yaml",

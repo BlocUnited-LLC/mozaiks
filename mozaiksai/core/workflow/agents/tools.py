@@ -266,12 +266,16 @@ def _wrap_with_validation(
 
     return _sync_wrapper
 
-def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
+def load_agent_tool_functions(
+    workflow_name: str,
+    *,
+    include_auto_only: bool = False,
+) -> Dict[str, List[Callable]]:
     """Discover and import per-agent tool functions for a workflow.
 
     Reads workflows/<workflow_name>/tools.yaml and returns a mapping of
-    agent_name -> list[callable] so callers can pass functions=... to
-    ConversableAgent at construction time.
+    agent_name -> list[callable] so callers can bind tools during AG2 beta
+    agent construction.
 
     Loads ALL tools (both Agent_Tool and UI_Tool types) as agent functions.
     UI_Tools get special handling during execution but still need to be
@@ -327,6 +331,13 @@ def load_agent_tool_functions(workflow_name: str) -> Dict[str, List[Callable]]:
         # NOTE: We load ALL tools (including UI_Tools) as agent functions here.
         # UI_Tools get special handling during execution but still need to be
         # registered with the agent for proper function binding.
+        if tool.get("bind_to_agent") is False and not include_auto_only:
+            logger.debug(
+                "[TOOLS][TRACE] Skipping agent binding for auto-only tool entry #%s: %s",
+                idx,
+                tool.get("function"),
+            )
+            continue
         file_name = tool.get('file')
         func_name = tool.get('function')
         agent_field = tool.get('agent')

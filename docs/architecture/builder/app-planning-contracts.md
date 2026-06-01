@@ -185,7 +185,7 @@ The target canonical families are:
 - `app/config/*`
 - `app/ui/pages/*`
 - `app/modules/*`
-- `app/workflows/*`
+- `workflows/*`
 - `app/brand/*`
 
 Build outputs are materialized under
@@ -214,7 +214,7 @@ Important rule:
 - tasks that plan do not write bundle paths
 - tasks that write bundle paths must declare which declarative family they own
 
-This is what lets AG2 groupchats operate as constrained implementation workers
+This is what lets AG2 beta workflow runs operate as constrained implementation workers
 instead of becoming the architecture themselves.
 
 ## `BuildGraph`
@@ -226,7 +226,7 @@ Its job is to answer:
 - what can run in parallel
 - what must run first
 - which workflow owns which bundle paths
-- where fan-in happens before validation
+- where task result merging happens before validation
 
 `BuildGraph` should be the builder's conveyor belt. It should not be confused
 with workflow-local DAGs, runtime execution graphs, or the refinement worker
@@ -311,3 +311,4 @@ top, rather than a generator pretending to be a framework.
 
 - [builder-execution-model.md](builder-execution-model.md)
 - [orchestration-control-loops.md](../workflows/orchestration-control-loops.md)
+

@@ -24,7 +24,7 @@ Validated invariants (fixture replay):
     1. Plan validates with app_build_plan.py without raising.
     2. wallet in capability_packs as hosted_pack / external_integration.
     3. No module_contract task for wallet.
-    4. api_surface adapter task exists for backend/integrations/wallet_client.py.
+    4. api_surface adapter task exists for services/integrations/wallet_client.py.
     5. module_contract task exists for an app-owned facade module (not wallet).
     6. page_bundle task exists.
     7. No owned_paths under modules/wallet/.
@@ -279,7 +279,7 @@ class TestAppPlanAgentFixtureReplay:
     def test_adapter_task_exists_for_wallet_client(self) -> None:
         adapter = _find_adapter_task(self.build_tasks)
         assert adapter is not None, (
-            "Missing api_surface task with backend/integrations/wallet_client.py. "
+            "Missing api_surface task with services/integrations/wallet_client.py. "
             "AppPlanAgent must generate a thin hosted-wallet adapter task."
         )
 
@@ -302,9 +302,9 @@ class TestAppPlanAgentFixtureReplay:
         if adapter is None:
             pytest.skip("adapter task not present")
         paths = adapter.get("owned_paths") or []
-        backend_paths = [p for p in paths if "backend/integrations/" in str(p)]
+        backend_paths = [p for p in paths if "services/integrations/" in str(p)]
         assert backend_paths, (
-            f"adapter owned_paths has no backend/integrations/ entry: {paths}"
+            f"adapter owned_paths has no services/integrations/ entry: {paths}"
         )
 
     # --- Facade module ---

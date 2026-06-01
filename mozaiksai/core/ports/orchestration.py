@@ -5,10 +5,11 @@
 #
 # This is the single boundary between the runtime layer and the execution engine.
 # Everything above this contract (transport, API routes, websocket handlers) is
-# engine-agnostic.  Everything below it (AG2 GroupChat, a_run_group_chat, events)
-# is engine-specific and isolated in adapters/.
+# engine-agnostic. Everything below it (autogen.beta Agent loop, MemoryStream,
+# AG2 beta Network transition graph execution) is engine-specific and isolated
+# in adapters/.
 #
-# When AG2 ships bidirectional streaming, ONLY the adapter changes.
+# When the engine changes, ONLY the adapter changes.
 # When a second engine is added, a NEW adapter is written.
 # This file never changes for engine reasons.
 # ==============================================================================
@@ -16,11 +17,11 @@
 
 The port defines three verbs:
     run      — start a new workflow execution
-    resume   — continue a paused workflow (handoff-to-user, fan-in resume, etc.)
+    resume   — continue a paused workflow (handoff-to-user, checkpoint resume, etc.)
     cancel   — abort a running workflow
 
 And one query:
-    capabilities — what the adapter supports (pause, fan-out, streaming, etc.)
+    capabilities — what the adapter supports (pause, task batches, streaming, etc.)
 
 Data flows through typed request/result objects and a DomainEvent envelope so the
 runtime never imports AG2 types directly.
@@ -43,7 +44,7 @@ class RunStatus(Enum):
     """Outcome of a single run/resume invocation."""
 
     COMPLETED = "completed"
-    PAUSED = "paused"          # explicit pause (fan-out, budget, etc.)
+    PAUSED = "paused"          # explicit pause (user input, checkpoint, budget, etc.)
     FAILED = "failed"
     CANCELLED = "cancelled"
     IN_PROGRESS = "in_progress"
@@ -105,7 +106,7 @@ class RunResult:
     status: RunStatus
     chat_id: str
     workflow_name: str
-    # Merged child outputs (populated after fan-in).
+    # Context injected by callers before resume.
     merged_context: Optional[Dict[str, Any]] = None
     # Token / cost accounting.
     usage: Optional[Dict[str, Any]] = None
@@ -122,13 +123,13 @@ class OrchestrationPort(Protocol):
     """Engine-agnostic contract for workflow execution.
 
     Implementors:
-        AG2OrchestrationAdapter  — wraps AG2 a_run_group_chat + resume + cancel
+        AG2OrchestrationAdapter  — wraps autogen.beta Agent loop + Network graph
         (future)                 — wraps a second engine
 
     Consumers:
         SimpleTransport          — calls run/resume/cancel from websocket/REST handlers
-        WorkflowPackCoordinator  — calls run/resume for child and parent GroupChats
-        JourneyOrchestrator      — calls run for next-step workflows
+        Workflow runners         — call run/resume/cancel for runtime sessions
+        Sequence routers         — call run for the next workflow in a build sequence
     """
 
     async def run(self, request: RunRequest) -> RunResult:
@@ -136,10 +137,10 @@ class OrchestrationPort(Protocol):
 
         The adapter is responsible for:
         - loading workflow config
-        - building the AG2 pattern (agents, handoffs, context variables)
-        - running the GroupChat
+        - creating beta Agent instances with tools and context
+        - running the AG2 beta Network TransitionGraph-driven agent loop
         - streaming events to the transport via DomainEvent
-        - returning a RunResult when the GroupChat finishes (or pauses)
+        - returning a RunResult when the loop finishes or pauses for user input
         """
         ...
 
@@ -147,7 +148,7 @@ class OrchestrationPort(Protocol):
         """Resume a paused workflow.
 
         Typical triggers:
-        - Fan-in complete — parent resumes with merged child context
+        - Task batch complete — workflow resumes with injected result context
         - User clicked "continue" after a checkpoint
         """
         ...
@@ -167,7 +168,7 @@ class OrchestrationPort(Protocol):
                 "engine": "ag2",
                 "version": "0.11.2",
                 "supports_pause": True,
-                "supports_fan_out": True,
+                "supports_task_batches": True,
                 "supports_bidirectional_stream": False,
                 "supports_cancel": True,
             }

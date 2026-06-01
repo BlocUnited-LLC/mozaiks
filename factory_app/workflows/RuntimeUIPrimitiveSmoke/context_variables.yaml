@@ -10,7 +10,7 @@ definitions:
         agent: IntakeAgent
         ui_hidden: true
         match:
-          equals: NEXT
+          contains: NEXT
 
 agents:
   IntakeAgent:

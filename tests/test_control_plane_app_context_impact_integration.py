@@ -9,13 +9,17 @@ from mozaiksai.control_plane.app_context import (
     AppContextGraphLookupResult,
     AppContextRefSummary,
     AppContextSummary,
+    get_app_context_graph_for_version,
     get_current_app_context_graph,
 )
 from mozaiksai.core.app_context.models import (
+    AppContextMode,
     AppContextGraph,
     AppContextGraphEdge,
     AppContextGraphNode,
     AppContextStaleStatus,
+    AppContextVersion,
+    ArtifactRef,
     GraphEdgeType,
     GraphNodeType,
 )
@@ -43,6 +47,16 @@ class _MemoryArtifactStore:
         if artifact is None or artifact.app_id != app_id:
             return None
         return artifact
+
+    async def list_artifact_versions(self, *, app_id: str, artifact_kind=None, artifact_key=None, limit=50, **_kwargs):
+        versions = [
+            artifact
+            for artifact in self.versions.values()
+            if artifact.app_id == app_id
+            and (artifact_kind is None or artifact.artifact_kind == artifact_kind)
+            and (artifact_key is None or artifact.artifact_key == artifact_key)
+        ]
+        return versions[:limit]
 
 
 class _FailingArtifactStore:
@@ -139,12 +153,58 @@ def _graph_artifact(graph: AppContextGraph) -> ArtifactVersionDoc:
     )
 
 
+def _context_version_artifact(context_version: AppContextVersion) -> ArtifactVersionDoc:
+    return ArtifactVersionDoc(
+        _id="av_ctx_1",
+        app_id="sample_app",
+        artifact_kind="app_context_version",
+        artifact_key="app_context_version",
+        version_number=1,
+        lineage_root_id="av_ctx_1",
+        lifecycle_status=ArtifactLifecycleStatus.DRAFT,
+        validation_status=ArtifactValidationStatus.PENDING,
+        commit_metadata={"metadata": {"summary_payload": context_version.model_dump(mode="json")}},
+    )
+
+
 async def test_current_app_context_graph_loads_from_artifact_payload() -> None:
     graph = _graph()
     result = await get_current_app_context_graph(
         app_id="sample_app",
         app_context_summary=_summary(),
         artifact_store=_MemoryArtifactStore({"av_graph": _graph_artifact(graph)}),
+    )
+
+    assert result.graph is not None
+    assert result.graph.graph_id == "graph_sample_app"
+    assert result.warnings == []
+
+
+async def test_app_context_graph_loads_for_specific_context_version() -> None:
+    graph = _graph()
+    context_version = AppContextVersion(
+        context_version_id="ctx_before_refresh",
+        app_id="sample_app",
+        mode=AppContextMode.BROWNFIELD,
+        artifact_refs=[
+            ArtifactRef(
+                artifact_kind="app_context_graph",
+                artifact_key="app_context_graph",
+                artifact_version_id="av_graph",
+            )
+        ],
+        graph_snapshot_ref="av_graph",
+        stale_status=AppContextStaleStatus.STALE,
+    )
+    result = await get_app_context_graph_for_version(
+        app_id="sample_app",
+        context_version_id="ctx_before_refresh",
+        artifact_store=_MemoryArtifactStore(
+            {
+                "av_ctx_1": _context_version_artifact(context_version),
+                "av_graph": _graph_artifact(graph),
+            }
+        ),
     )
 
     assert result.graph is not None

@@ -25,4 +25,4 @@ Do not use them for:
 ## Related Docs
 
 - [Workflow Authoring Contracts](../../architecture/workflows/workflow-authoring-contracts.md)
-- [Mid-Flight Journeys](mid-flight-journeys.md)
+- [Workflow Task Batches](task-batches.md)

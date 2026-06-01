@@ -293,7 +293,7 @@ def collect_integration_needs(context_variables: Any = None) -> list[dict[str, A
     collected: list[dict[str, Any]] = []
     collected.extend(_extract_needs_from_plan(_context_get(context_variables, "app_build_plan")))
     collected.extend(_extract_needs_from_nested(_context_get(context_variables, "current_build_task"), source="current_build_task"))
-    collected.extend(_extract_needs_from_nested(_context_get(context_variables, "mfj_app_task_results"), source="mfj_app_task_results"))
+    collected.extend(_extract_needs_from_nested(_context_get(context_variables, "app_task_batch_results"), source="app_task_batch_results"))
     collected.extend(_extract_needs_from_nested(_context_get(context_variables, "integration_needs"), source="context.integration_needs"))
     return dedupe_integration_needs(collected)
 
@@ -311,7 +311,7 @@ async def record_integration_need(
     optional: bool = False,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    """Record a discovered integration need in context for later fan-in."""
+    """Record a discovered integration need in context for later readiness checks."""
 
     existing = _context_get(context_variables, "integration_needs", [])
     needs = list(existing) if isinstance(existing, list) else []

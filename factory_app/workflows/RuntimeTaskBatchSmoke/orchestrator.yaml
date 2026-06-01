@@ -1,0 +1,8 @@
+workflow_name: RuntimeTaskBatchSmoke
+max_turns: 8
+human_in_the_loop: false
+workflow_startup_mode: AgentDriven
+orchestration_pattern: ag2_network
+initial_message_to_user: null
+initial_message: Plan a bounded workflow-local task batch, execute it with AG2 worker asks, and summarize the result.
+initial_agent: TaskPlannerAgent

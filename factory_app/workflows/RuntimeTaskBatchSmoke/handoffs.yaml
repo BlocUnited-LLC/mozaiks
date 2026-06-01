@@ -1,0 +1,7 @@
+handoff_rules:
+- source_agent: TaskPlannerAgent
+  target_agent: SynthesisAgent
+  handoff_type: after_work
+- source_agent: SynthesisAgent
+  target_agent: terminate
+  handoff_type: after_work

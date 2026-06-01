@@ -16,7 +16,6 @@
     "llm_profiles": {
       "classifier": {
         "purpose": "Classify refinement requests into the stable control-plane change classes.",
-        "default_temperature": 0.0,
         "expected_behavior": "deterministic structured classification",
         "llm_config": {
           "model": "gpt-5-nano",
@@ -25,11 +24,9 @@
       },
       "impact_analyzer": {
         "purpose": "Support artifact impact analysis and refinement routing decisions.",
-        "default_temperature": 0.0,
         "expected_behavior": "deterministic structured impact analysis",
         "llm_config": {
-          "model": "gpt-5-nano",
-          "temperature": 0.0
+          "model": "gpt-5-nano"
         }
       },
       "architecture": {
@@ -72,6 +69,10 @@
       "llm_profile": "classifier"
     },
     "coding": {
+      "enabled": true,
+      "llm_profile": "codegen"
+    },
+    "contract_surface": {
       "enabled": true,
       "llm_profile": "codegen"
     }

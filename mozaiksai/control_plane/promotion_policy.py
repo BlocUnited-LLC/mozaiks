@@ -45,8 +45,8 @@ _DATA_MODEL_BACKEND_PATTERNS = (
     "modules/*/backend/schemas.py",
 )
 _INTEGRATION_PATTERNS = (
-    "backend/integrations/*_client.py",
-    "backend/adapters/**/*.py",
+    "services/integrations/*_client.py",
+    "services/adapters/**/*.py",
     "modules/*/backend/service.py",
     "modules/*/backend/schemas.py",
     "modules/*/module.yaml",
@@ -65,7 +65,7 @@ _VALIDATION_ALIASES: dict[str, set[str]] = {
     "experience_spec_update": {"experience_spec_update", "experience_spec_validation", "experience_spec"},
     "experience_spec_validation": {"experience_spec_validation", "experience_spec_update", "experience_spec"},
     "app_bundle_validation": {"app_bundle_validation"},
-    "database_intent_validation": {"database_intent_validation"},
+    "data_contract_validation": {"data_contract_validation"},
     "migration_plan_validation": {"migration_plan_validation"},
     "integration_readiness_validation": {"integration_readiness_validation", "integration_readiness"},
     "hosted_facade_boundary_validation": {"hosted_facade_boundary_validation", "hosted_facade_validation"},
@@ -145,7 +145,7 @@ def _required_validation_names(*, lane: str, path: str) -> list[str]:
             ]
         return ["hosted_facade_boundary_validation"]
     if _matches_any(path, _DATA_MODEL_BACKEND_PATTERNS):
-        return ["database_intent_validation", "migration_plan_validation"]
+        return ["data_contract_validation", "migration_plan_validation"]
     if _matches_any(path, _INTEGRATION_PATTERNS):
         return ["integration_readiness_validation"]
     if _matches_any(path, _MODULE_GENERATED_PATTERNS):
@@ -177,7 +177,7 @@ def _required_artifacts_for(*, lane: str, path: str) -> list[str]:
     if lane == "experience_design":
         return ["experience_spec"]
     if _matches_any(path, _DATA_MODEL_BACKEND_PATTERNS):
-        return ["config/database_intent.json", "config/database_migrations/*.json"]
+        return ["config/data.json", "config/data_migrations/*.json"]
     return []
 
 
@@ -190,12 +190,12 @@ def _has_required_artifact_evidence(required_artifacts: list[str], artifact_name
             if any("experience_spec" in artifact for artifact in artifact_names):
                 return True
             return False
-        if required_lower == "config/database_intent.json":
-            if any("database_intent" in artifact for artifact in artifact_names):
+        if required_lower == "config/data.json":
+            if any("data_contract" in artifact or artifact == "config/data.json" for artifact in artifact_names):
                 continue
             return False
-        if required_lower == "config/database_migrations/*.json":
-            if any("database_migrations/" in artifact for artifact in artifact_names):
+        if required_lower == "config/data_migrations/*.json":
+            if any("data_migrations/" in artifact for artifact in artifact_names):
                 continue
             return False
     return True
@@ -363,7 +363,7 @@ def evaluate_refinement_promotion_policy(
             return _build_blocked_decision(
                 path=normalized_path,
                 mode="blocked_requires_upstream_artifact",
-                reason="Database-backed module changes require database intent or migration artifacts.",
+                reason="Database-backed module changes require data contract or migration artifacts.",
                 required_artifacts=required_artifacts,
                 required_validation=required_validation,
             )
@@ -509,3 +509,4 @@ __all__ = [
     "PromotionPolicyMode",
     "evaluate_refinement_promotion_policy",
 ]
+

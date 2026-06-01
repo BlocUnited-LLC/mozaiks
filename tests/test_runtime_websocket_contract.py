@@ -186,7 +186,7 @@ def _patch_runtime_websocket_harness(
     monkeypatch.setattr(workflow_manager, "get_all_workflow_names", lambda: list(loaded_workflow_names))
     monkeypatch.setattr(workflow_manager, "get_config", lambda workflow_name: {"workflow_startup_mode": workflow_startup_mode})
     monkeypatch.setattr(workflow_manager, "reload_workflow", lambda workflow_name: None)
-    monkeypatch.setattr(workflow_graph_module, "workflow_has_mid_flight_journeys", lambda workflow_name: False)
+    monkeypatch.setattr(workflow_graph_module, "workflow_declares_task_batches", lambda workflow_name: False)
 
     return SimpleNamespace(
         runtime_app=runtime_app,

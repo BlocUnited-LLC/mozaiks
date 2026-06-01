@@ -262,7 +262,7 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit() -> None:
+async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit(tmp_path: Path) -> None:
     class _WideScopeService(_FakeCapabilityService):
         async def generate_json_completion(self, **kwargs):  # noqa: ANN003
             self.calls.append(kwargs)
@@ -293,12 +293,33 @@ async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit(
             )
         }
     )
+    for rel_path in [
+        "app/ui/pages/Dashboard.jsx",
+        "app/ui/components/ExportPanel.jsx",
+        "app/ui/components/Header.jsx",
+        "app/ui/components/Footer.jsx",
+    ]:
+        path = tmp_path / "scope_workspace" / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("export default function Component() { return null; }\n", encoding="utf-8")
+
+    class _LocalArtifactStore(_FakeArtifactStore):
+        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+            return SimpleNamespace(
+                id=artifact_version_id,
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                commit_metadata=SimpleNamespace(
+                    metadata={"workspace_dir": str((tmp_path / "scope_workspace").resolve())}
+                ),
+            )
+
     proposer = ArtifactScopeProposer(
         capability_service=_WideScopeService(),
         config_loader=_enabled_control_plane,
         pack_loader=lambda: pack,
         tool_executor=_FakeToolExecutor(),
-        artifact_store=_FakeArtifactStore(),
+        artifact_store=_LocalArtifactStore(),
     )
 
     proposal = await proposer.propose(
@@ -310,3 +331,57 @@ async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit(
     assert proposal.resolution == "clarify"
     assert proposal.clarification_question is not None
     assert "scope_limit_exceeded" in proposal.signals
+
+
+@pytest.mark.asyncio
+async def test_scope_proposer_rejects_paths_missing_from_artifact_workspace(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "scope_workspace" / "app" / "ui" / "pages"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "Dashboard.jsx").write_text(
+        'export default function Dashboard() { return <h1>Old Title</h1>; }\n',
+        encoding="utf-8",
+    )
+
+    class _HallucinatedScopeService(_FakeCapabilityService):
+        async def generate_json_completion(self, **kwargs):  # noqa: ANN003
+            self.calls.append(kwargs)
+            return {
+                "parsed": {
+                    "resolution": "scoped_files",
+                    "selected_paths": ["app/ui/pages/MissingDashboard.jsx"],
+                    "rationale": "The dashboard page appears to be the target.",
+                    "confidence": 0.9,
+                    "clarification_question": None,
+                    "signals": ["dashboard_surface"],
+                }
+            }
+
+    class _LocalArtifactStore(_FakeArtifactStore):
+        async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
+            return SimpleNamespace(
+                id=artifact_version_id,
+                artifact_kind="app_bundle",
+                artifact_key="app_bundle",
+                commit_metadata=SimpleNamespace(
+                    metadata={"workspace_dir": str((tmp_path / "scope_workspace").resolve())}
+                ),
+            )
+
+    proposer = ArtifactScopeProposer(
+        capability_service=_HallucinatedScopeService(),
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        tool_executor=_FakeToolExecutor(),
+        artifact_store=_LocalArtifactStore(),
+    )
+
+    proposal = await proposer.propose(
+        refinement_request=_request(),
+        routing_decision=_routing_decision(),
+        payload={},
+    )
+
+    assert proposal.resolution == "clarify"
+    assert proposal.selected_paths == []
+    assert "selected_paths_unavailable" in proposal.signals
+    assert "MissingDashboard.jsx" in proposal.rationale

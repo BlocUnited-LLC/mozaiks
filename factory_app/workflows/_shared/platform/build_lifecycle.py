@@ -22,6 +22,14 @@ async def mark_attempt(**kwargs: Any) -> None:
     await _mark_attempt(**kwargs)
 
 
+async def get_outbox_event(**kwargs: Any) -> Optional[Dict[str, Any]]:
+    from factory_app.workflows.AppGenerator.tools.platform.build_events_outbox import (
+        get_outbox_event as _get_outbox_event,
+    )
+
+    return await _get_outbox_event(**kwargs)
+
+
 async def upsert_outbox_event(**kwargs: Any) -> str:
     from factory_app.workflows.AppGenerator.tools.platform.build_events_outbox import (
         upsert_outbox_event as _upsert_outbox_event,
@@ -358,13 +366,33 @@ def _base_payload(
     return payload
 
 
+async def _deliver_outbox_event_once(*, outbox_event_id: str) -> None:
+    doc = await get_outbox_event(outbox_id=outbox_event_id)
+    if not isinstance(doc, dict):
+        return
+
+    app_id = _normalize_text(doc.get("app_id"))
+    payload = doc.get("payload")
+    if not app_id or not isinstance(payload, dict):
+        return
+
+    try:
+        client = _build_events_client()
+        result = await client.post_build_event(app_id=app_id, payload=payload)
+        await mark_attempt(
+            outbox_id=outbox_event_id,
+            ok=result.ok,
+            status_code=result.status_code,
+            error=result.error,
+        )
+    except Exception as exc:
+        logger.exception("Failed to deliver build lifecycle outbox event %s", outbox_event_id)
+        await mark_attempt(outbox_id=outbox_event_id, ok=False, error=str(exc))
+
+
 def _spawn_delivery(*, outbox_event_id: str) -> None:
     async def _deliver() -> None:
-        try:
-            client = _build_events_client()
-            await client.deliver_outbox_event(outbox_event_id)
-        except Exception:
-            logger.exception("Failed to deliver build lifecycle outbox event %s", outbox_event_id)
+        await _deliver_outbox_event_once(outbox_event_id=outbox_event_id)
 
     try:
         loop = asyncio.get_running_loop()
@@ -411,6 +439,9 @@ async def emit_build_started(
         app_id=context["app_id"],
         build_id=context["build_id"],
         event_type="build.started",
+        status="started",
+        user_id=user_id,
+        workflow_name=workflow_name,
         idempotency_key=_idempotency_key(
             app_id=context["app_id"],
             build_id=context["build_id"],
@@ -466,6 +497,9 @@ async def emit_build_completed(
         app_id=context["app_id"],
         build_id=context["build_id"],
         event_type="build.completed",
+        status="completed",
+        user_id=user_id,
+        workflow_name=workflow_name,
         idempotency_key=_idempotency_key(
             app_id=context["app_id"],
             build_id=context["build_id"],
@@ -516,6 +550,9 @@ async def emit_build_failed(
         app_id=context["app_id"],
         build_id=context["build_id"],
         event_type="build.failed",
+        status="failed",
+        user_id=user_id,
+        workflow_name=workflow_name,
         idempotency_key=_idempotency_key(
             app_id=context["app_id"],
             build_id=context["build_id"],

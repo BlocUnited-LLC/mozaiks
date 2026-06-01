@@ -41,16 +41,16 @@ def test_extract_code_file_map_materializes_typed_database_output() -> None:
     payload = {
         "database_files": [
             {
-                "path": "config/database_intent.json",
-                "kind": "database_intent_json",
-                "purpose": "Database intent artifact.",
+                "path": "config/data.json",
+                "kind": "data_contract_json",
+                "purpose": "Data contract artifact.",
                 "entity_refs": ["project"],
                 "content": "{\"collections\":[]}\n",
             }
         ],
         "code_files": [
             {
-                "filename": "config/database_intent.json",
+                "filename": "config/data.json",
                 "content": "BROKEN",
             }
         ],
@@ -58,7 +58,121 @@ def test_extract_code_file_map_materializes_typed_database_output() -> None:
 
     file_map = extract_code_file_map_from_payload(payload)
 
-    assert file_map["config/database_intent.json"] == "{\"collections\":[]}\n"
+    assert file_map["config/data.json"] == "{\"collections\":[]}\n"
+
+
+def test_extract_code_file_map_unwraps_provider_output_envelope() -> None:
+    payload = {
+        "DatabaseOutput": {
+            "database_files": [
+                {
+                    "path": "config/data.json",
+                    "kind": "data_contract_json",
+                    "purpose": "Data contract artifact.",
+                    "entity_refs": ["ticket"],
+                    "content": "{\"surfaces\":[]}\n",
+                }
+            ],
+            "pending_schema_migration": None,
+            "agent_message": "Staged data contract.",
+        }
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert file_map == {"config/data.json": "{\"surfaces\":[]}\n"}
+
+
+def test_extract_code_file_map_canonicalizes_module_contract_paths() -> None:
+    payload = {
+        "code_files": [
+            {"filename": "modules/tickets/events.yaml", "content": "events: []\n"},
+            {"filename": "modules/tickets/admin.yaml", "content": "panels: []\n"},
+            {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"},
+        ]
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert file_map == {
+        "modules/tickets/contracts/admin.yaml": "panels: []\n",
+        "modules/tickets/contracts/events.yaml": "events: []\n",
+        "modules/tickets/module.yaml": "id: tickets\n",
+    }
+
+
+def test_extract_code_file_map_materializes_typed_module_contract_bundle() -> None:
+    payload = {
+        "module_contract": {
+            "module_id": "tickets",
+            "module_yaml": {
+                "schema_version": "mozaiks.module.v1",
+                "id": "tickets",
+                "actions": [],
+            },
+            "events_yaml": {
+                "schema_version": "mozaiks.events.v1",
+                "events": [],
+            },
+            "settings_yaml": {
+                "schema_version": "mozaiks.settings.v1",
+                "settings": [],
+            },
+            "admin_yaml": {
+                "schema_version": "mozaiks.admin.v2",
+                "panels": [],
+            },
+            "reactions_yaml": {"schema_version": "mozaiks.reactions.v1", "reactions": []},
+            "notifications_yaml": None,
+            "runtime_extensions_yaml": None,
+        }
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert set(file_map) == {
+        "modules/tickets/module.yaml",
+        "modules/tickets/contracts/events.yaml",
+        "modules/tickets/contracts/settings.yaml",
+        "modules/tickets/contracts/admin.yaml",
+        "modules/tickets/contracts/reactions.yaml",
+    }
+    assert yaml.safe_load(file_map["modules/tickets/module.yaml"])["id"] == "tickets"
+
+
+def test_extract_code_file_map_materializes_app_schema_output() -> None:
+    payload = {
+        "AppSchemaOutput": {
+            "agent_message": "Generated pages.",
+            "manifest": {
+                "app_name": "Support Operations",
+                "default_route": "/tickets",
+                "auth_strategy": "role-based",
+            },
+            "pages": [
+                {
+                    "name": "Tickets",
+                    "route": "/tickets",
+                    "sections": [],
+                }
+            ],
+            "custom_route_bundle": None,
+            "theme_config_patch": {"theme": {"appearance": "dark"}},
+            "shell_config": None,
+            "asset_manifest": None,
+            "data_contract": None,
+        }
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert set(file_map) == {
+        "app.json",
+        "brand/theme_config.json",
+        "ui/pages/tickets.yaml",
+    }
+    assert '"appName": "Support Operations"' in file_map["app.json"]
+    assert "name: Tickets" in file_map["ui/pages/tickets.yaml"]
 
 
 def test_extract_code_file_map_materializes_typed_model_output() -> None:
@@ -84,15 +198,15 @@ def test_extract_code_file_map_materializes_typed_model_output() -> None:
     assert file_map["modules/projects/backend/schemas.py"] == "class ProjectRecord(TypedDict):\n    project_id: str\n"
 
 
-def test_extract_code_file_map_materializes_typed_backend_foundation_output() -> None:
+def test_extract_code_file_map_materializes_typed_service_foundation_output() -> None:
     payload = {
-        "backend_foundation_bundle": {
+        "service_foundation_bundle": {
             "files": [
                 {
                     "path": "backend/config.py",
                     "kind": "config",
                     "purpose": "Config loader.",
-                    "contract_refs": ["build_tasks[backend_foundation].owned_paths"],
+                    "contract_refs": ["build_tasks[service_foundation].owned_paths"],
                     "content": "SETTINGS = {}\n",
                 }
             ]
@@ -308,15 +422,15 @@ def test_assembly_phase_merges_typed_service_and_frontend_outputs() -> None:
     assert file_map["ui/index.js"] == "export function register() {}\n"
 
 
-def test_assembly_phase_merges_typed_database_model_and_backend_foundation_outputs() -> None:
+def test_assembly_phase_merges_typed_database_model_and_service_foundation_outputs() -> None:
     merged = _merge_code_files(
         [
             {
                 "database_files": [
                     {
-                        "path": "config/database_intent.json",
-                        "kind": "database_intent_json",
-                        "purpose": "Database intent artifact.",
+                        "path": "config/data.json",
+                        "kind": "data_contract_json",
+                        "purpose": "Data contract artifact.",
                         "entity_refs": ["project"],
                         "content": "{\"collections\":[]}\n",
                     }
@@ -335,13 +449,13 @@ def test_assembly_phase_merges_typed_database_model_and_backend_foundation_outpu
                 "code_files": [],
             },
             {
-                "backend_foundation_bundle": {
+                "service_foundation_bundle": {
                     "files": [
                         {
                             "path": "backend/config.py",
                             "kind": "config",
                             "purpose": "Config loader.",
-                            "contract_refs": ["build_tasks[backend_foundation].owned_paths"],
+                            "contract_refs": ["build_tasks[service_foundation].owned_paths"],
                             "content": "SETTINGS = {}\n",
                         }
                     ]
@@ -353,6 +467,6 @@ def test_assembly_phase_merges_typed_database_model_and_backend_foundation_outpu
 
     file_map = {entry["filename"]: entry["content"] for entry in merged}
 
-    assert file_map["config/database_intent.json"] == "{\"collections\":[]}\n"
+    assert file_map["config/data.json"] == "{\"collections\":[]}\n"
     assert file_map["modules/projects/backend/schemas.py"] == "class ProjectRecord(TypedDict):\n    project_id: str\n"
     assert file_map["backend/config.py"] == "SETTINGS = {}\n"

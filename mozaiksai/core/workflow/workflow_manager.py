@@ -82,7 +82,6 @@ class UnifiedWorkflowManager:
         self._ui_registry: Dict[str, Dict[str, Any]] = {}
         self._ui_tool_path_cache: Dict[str, str] = {}
         self._ui_loaded_workflows: set[str] = set()
-        self._hooks_loaded_workflows: set[str] = set()
         # Runtime handler and metadata registries
         self._handlers: Dict[str, Callable[..., Awaitable[Any]]] = {}
         self._handler_metadata: Dict[str, Dict[str, Any]] = {}
@@ -727,7 +726,6 @@ class UnifiedWorkflowManager:
         self._workflows.clear()
         self._workflow_paths.clear()
         self._config_cache.clear()
-        self._hooks_loaded_workflows.clear()
         self._load_all_workflows()
         return self.get_status_summary()
 
@@ -934,97 +932,6 @@ class UnifiedWorkflowManager:
             "metadata": self._handler_metadata.copy(),
             **self.get_status_summary(),
         }
-
-    # ========================================================================
-    # HOOKS API
-    # ========================================================================
-    def register_hooks(self, workflow_name: str, agents: Dict[str, Any], force: bool = False) -> List[Any]:
-        """Register hooks for a workflow using hooks config.
-
-        Parameters
-        ----------
-        workflow_name: str
-            Name of the workflow directory under the base path.
-        agents: dict[str, ConversableAgent]
-            Mapping of agent names to instantiated ConversableAgent objects.
-        force: bool
-            If True, re-read and re-register even if hooks were already loaded.
-        """
-        logger.info(f"Registering hooks for workflow '{workflow_name}' (force={force})")
-        # Pre-registration introspection (best-effort)
-        pre_snapshot: Dict[str, Dict[str, Any]] = {}
-        try:
-            for aname, agent in agents.items():
-                hook_map: Dict[str, Any] = {}
-                # Common patterns: agent._hooks (dict[str,list]) or agent.hooks
-                for attr in ("_hooks", "hooks"):
-                    if hasattr(agent, attr):
-                        raw = getattr(agent, attr)
-                        if isinstance(raw, dict):
-                            for htype, fns in raw.items():
-                                try:
-                                    hook_map[htype] = len(fns) if hasattr(fns, '__len__') else 'unknown'
-                                except Exception:
-                                    hook_map[htype] = 'err'
-                        break
-                pre_snapshot[aname] = hook_map
-            logger.debug(f"[HOOKS] Pre-registration snapshot for '{workflow_name}': {pre_snapshot}")
-        except Exception as _pre_err:
-            logger.debug(f"[HOOKS] Pre-registration introspection failed: {_pre_err}")
-
-        if (workflow_name in self._hooks_loaded_workflows) and not force:
-            logger.debug(f"Hooks already registered for {workflow_name}; skipping")
-            return []
-
-        try:
-            from .execution.hooks import register_hooks_for_workflow
-            workflow_path = self.resolve_workflow_path(workflow_name)
-            base_path = str(workflow_path.parent if workflow_path is not None else self.workflows_base_path)
-            registered = register_hooks_for_workflow(workflow_name, agents, base_path=base_path)
-            if registered:
-                self._hooks_loaded_workflows.add(workflow_name)
-                logger.info(f"Added '{workflow_name}' to hooks-loaded set; total loaded workflows={len(self._hooks_loaded_workflows)}")
-            else:
-                logger.debug(f"No hooks registered for '{workflow_name}' (empty or errors)")
-            # Post-registration introspection to compute deltas
-            try:
-                post_snapshot: Dict[str, Dict[str, Any]] = {}
-                for aname, agent in agents.items():
-                    hook_map: Dict[str, Any] = {}
-                    for attr in ("_hooks", "hooks"):
-                        if hasattr(agent, attr):
-                            raw = getattr(agent, attr)
-                            if isinstance(raw, dict):
-                                for htype, fns in raw.items():
-                                    try:
-                                        hook_map[htype] = len(fns) if hasattr(fns, '__len__') else 'unknown'
-                                    except Exception:
-                                        hook_map[htype] = 'err'
-                            break
-                    post_snapshot[aname] = hook_map
-                # Compute naive delta counts
-                deltas: Dict[str, Dict[str, Any]] = {}
-                for aname, after in post_snapshot.items():
-                    before = pre_snapshot.get(aname, {})
-                    delta_map: Dict[str, Any] = {}
-                    for htype, count_after in after.items():
-                        count_before = before.get(htype, 0)
-                        if isinstance(count_after, int) and isinstance(count_before, int):
-                            delta = count_after - count_before
-                        else:
-                            delta = 'n/a'
-                        if delta:
-                            delta_map[htype] = delta
-                    if delta_map:
-                        deltas[aname] = delta_map
-                logger.debug(f"[HOOKS] Post-registration snapshot for '{workflow_name}': {post_snapshot}")
-                logger.debug(f"[HOOKS] Registration deltas for '{workflow_name}': {deltas}")
-            except Exception as _post_err:
-                logger.debug(f"[HOOKS] Post-registration introspection failed: {_post_err}")
-            return registered
-        except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to register hooks for {workflow_name}: {e}", exc_info=True)
-            return []
 
 # ========================================================================
 # GLOBAL INSTANCE & API

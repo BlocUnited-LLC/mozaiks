@@ -5,7 +5,7 @@ Verifies:
 1. Hosted packs have capability_source="hosted_pack" in AppBuildPlan.
 2. App-owned façade modules have capability_source="generated_module".
 3. Pages bind to app-owned façade module endpoints, not hosted-pack endpoints.
-4. Adapter paths follow app/modules/{facade_id}/backend/integrations/ pattern.
+4. Adapter paths follow app/modules/{facade_id}/services/integrations/ pattern.
 5. Hosted-pack internals are not copied into generated modules.
 6. Generic adapter fixtures use neutral names (hosted_analytics, external_reporting, etc.).
 
@@ -145,13 +145,13 @@ class TestAdapterPathPatterns:
     """Verify adapter code follows the correct path structure."""
 
     def test_adapter_path_follows_module_convention(self):
-        """Adapter client must be at app/modules/{facade_id}/backend/integrations/."""
+        """Adapter client must be at app/modules/{facade_id}/services/integrations/."""
         facade_id = "analytics_dashboard"
-        adapter_path = f"app/modules/{facade_id}/backend/integrations/hosted_analytics_client.py"
+        adapter_path = f"app/modules/{facade_id}/services/integrations/hosted_analytics_client.py"
         # Validate path structure
         assert adapter_path.startswith("app/modules/")
         assert facade_id in adapter_path
-        assert "/backend/integrations/" in adapter_path
+        assert "/services/integrations/" in adapter_path
         assert adapter_path.endswith(".py")
 
     def test_adapter_client_names_use_host_prefix(self):
@@ -164,7 +164,7 @@ class TestAdapterPathPatterns:
     def test_adapter_path_is_module_local(self):
         """Adapter paths must not leak across modules."""
         facade_id = "analytics_dashboard"
-        adapter_path = f"app/modules/{facade_id}/backend/integrations/hosted_analytics_client.py"
+        adapter_path = f"app/modules/{facade_id}/services/integrations/hosted_analytics_client.py"
         # Extract the module_id from the path
         module_id = adapter_path.split("/")[2]
         assert module_id == facade_id
@@ -250,10 +250,10 @@ class TestFacadeModuleGenerationPattern:
 
     def test_facade_module_has_adapter_client(self):
         """Every façade module must have a backend adapter client."""
-        # Pattern: app/modules/{facade_id}/backend/integrations/{hosted_pack_id}_client.py
+        # Pattern: app/modules/{facade_id}/services/integrations/{hosted_pack_id}_client.py
         facade_id = "analytics_dashboard"
         hosted_pack_id = "hosted_analytics"
-        adapter_path = f"app/modules/{facade_id}/backend/integrations/{hosted_pack_id}_client.py"
+        adapter_path = f"app/modules/{facade_id}/services/integrations/{hosted_pack_id}_client.py"
         assert "/integrations/" in adapter_path
         assert adapter_path.endswith("_client.py")
 
@@ -274,7 +274,7 @@ class TestFacadeModuleGenerationPattern:
             f"modules/{facade_id}/backend/handler.py",
             f"modules/{facade_id}/backend/service.py",
             f"modules/{facade_id}/backend/repo.py",
-            f"modules/{facade_id}/backend/integrations/hosted_analytics_client.py",
+            f"modules/{facade_id}/services/integrations/hosted_analytics_client.py",
         ]
         # Paths that MUST NOT be in owned_paths for a hosted pack
         prohibited_paths = [

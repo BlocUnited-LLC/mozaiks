@@ -30,7 +30,7 @@ Those are Mozaiks layers that exist before a workflow starts.
 | `hooks.yaml` | lifecycle and hook registration | AG2-native hooks plus Mozaiks convenience |
 | `structured_outputs.yaml` | typed runtime validation | Mozaiks layer |
 | `ui_config.yaml` | frontend exposure metadata | frontend-only |
-| `extended_orchestration/mfj_extension.json` | MFJ or journey graph input | Mozaiks orchestration layer |
+| `extended_orchestration/task_batches.yaml` | workflow-local task batch input | Mozaiks orchestration layer |
 
 ## Native or Near-Native Mappings
 
@@ -47,6 +47,10 @@ Maps to workflow-local execution concerns such as:
 Canonical startup key is `workflow_startup_mode` (`AgentDriven`, `UserDriven`,
 `BackendOnly`).
 
+`orchestration_pattern` is metadata describing the selected AG2 Network
+patternbook label. The runtime does not route from this string; it routes from
+the compiled `handoffs.yaml` transition graph.
+
 ### `agents.yaml`
 
 Each agent entry becomes an AG2 agent definition after prompt composition and
@@ -54,7 +58,18 @@ tool binding.
 
 ### `handoffs.yaml`
 
-Maps to AG2 handoff conditions and targets.
+Maps to AG2 beta Network transition conditions and targets.
+
+Runtime compilation rules:
+
+- unconditional `after_work` rules compile to `FromSpeaker`
+- deterministic context expressions compile to Mozaiks AG2 condition objects
+- `target_agent: user` pauses the run for user input
+- `target_agent: terminate` compiles to `TerminateTarget`
+- `condition_type: llm` and `condition_type: string_llm` are invalid
+
+LLM classification belongs before routing: a control-plane route, agent tool, or
+structured output sets context state; the graph then routes deterministically.
 
 ### `context_variables.yaml`
 
@@ -142,45 +157,46 @@ Used for:
 - frontend rendering metadata
 - agent visibility rules
 
-### `extended_orchestration/mfj_extension.json`
+### `extended_orchestration/task_batches.yaml`
 
 Used for:
 
-- MFJ: declaring which agent triggers fan-out, the spawn mode, and where the
-  parent resumes after fan-in completes
-- multi-stage MFJ via `stages` — one `decomposition_agent`, multiple sequential
-  fan-out → fan-in phases separated by an in-flight `gate_agent`
-- `inject_as` — the context variable key under which the runtime writes merged
-  child outputs before resuming the parent
-- journey-level graph execution across workflows (global pack graph)
+- declaring which agent produces or exposes a typed task list
+- mapping each task item to an AG2 worker agent and prompt
+- bounding concurrency, retries, timeouts, dependencies, and failure policy
+- declaring the result context key consumed by later workflow agents
 
 These are workflow-runtime features around AG2, not AG2-native concepts.
 
-**Minimal MFJ authored form:**
+**Minimal task batch authored form:**
 
-```json
-{
-  "version": 3,
-  "mid_flight_journeys": [{
-    "id": "my_journey",
-    "decomposition_agent": "DecompositionAgent",
-    "fan_out": { "spawn_mode": "workflow", "max_children": 5 },
-    "fan_in": {
-      "resume_agent": "SummaryAgent",
-      "inject_as": "mfj_my_results"
-    }
-  }]
-}
+```yaml
+version: 1
+batches:
+  - id: my_tasks
+    trigger_agent: PlanningAgent
+    source:
+      kind: context_variable
+      path: plan.tasks
+      task_model: MyTask
+    worker:
+      mode: ag2_agent
+      agent_field: initial_agent
+      prompt_field: initial_message
+    result:
+      context_key: my_task_results
+      status_key: my_task_status
 ```
 
 Schema defaults that do not need to be authored:
-- `aggregation_strategy` defaults to `collect_all`
-- `resume_entry_agent` defaults to `resume_agent` when omitted
+- `worker.mode` defaults to `ag2_agent`
+- `execution.concurrency` defaults to `4`
+- `execution.failure_policy` defaults to `fail_batch`
+- `result.merge_strategy` defaults to `collect_task_outputs`
 
-Context variable auto-synthesis: the runtime reads `extended_orchestration/mfj_extension.json`
-at plan-load time and registers `inject_as` keys plus the five `_mfj_resume_*`
-handshake fields as context variables automatically. Manual declarations in
-`context_variables.yaml` are not required.
+Declare result keys in `context_variables.yaml` when agents need to read them.
+`task_batches.yaml` is execution config; it is not a substitute for typed shared
+workflow state.
 
 ## What Sits Before AG2
 
@@ -189,7 +205,7 @@ The following app-bundle families are consumed before AG2 is involved:
 - `app/data/*`
 - `app/modules/*`
 - `app/config/*`
-- workflow `triggers:` declared in `app/workflows/*/orchestrator.yaml` for app-owned workflows, or `factory_app/workflows/*/orchestrator.yaml` for builder/system workflows
+- workflow `triggers:` declared in `workflows/*/orchestrator.yaml` for app-owned workflows, or `factory_app/workflows/*/orchestrator.yaml` for builder/system workflows
 
 Most importantly:
 
@@ -214,6 +230,10 @@ Use AG2 for what it is good at:
 - tool use
 - agent coordination inside a workflow
 
+AgentGenerator selects workflow shapes from the shared
+[AG2 Network Patternbook](ag2-network-patternbook.md). The patternbook guides
+generation; the generated YAML remains the runtime contract.
+
 ## Authoring Note
 
 Use `*.yaml` declaratives in workflow bundles.
@@ -223,4 +243,6 @@ Use `*.yaml` declaratives in workflow bundles.
 - [workflow-architecture.md](workflow-architecture.md)
 - [../foundations/events-and-data/event-system.md](../foundations/events-and-data/event-system.md)
 - [../foundations/core-product-app-bundle-boundary.md](../foundations/core-product-app-bundle-boundary.md)
+
+
 

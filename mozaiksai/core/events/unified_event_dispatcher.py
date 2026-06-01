@@ -29,7 +29,6 @@ from mozaiksai.core.ports.orchestration import DomainEvent
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
 from mozaiksai.core.events.runtime_events import (
     RUNTIME_AGENT_OUTPUT_VALIDATED,
-    RUNTIME_DECOMPOSITION_PLANNED,
     RUNTIME_PROCESS_COMPLETED,
 )
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
@@ -173,21 +172,14 @@ class UnifiedEventDispatcher:
             "events_by_category": {"business": 0, "tool_call": 0},
             "created": datetime.now(UTC).isoformat(),
         }
-        from mozaiksai.core.workflow.pack.workflow_pack_coordinator import WorkflowPackCoordinator
         from mozaiksai.core.workflow.pack.journey_orchestrator import JourneyOrchestrator
         self._auto_tool_handler = AutoToolEventHandler()
-        self._pack_coordinator = WorkflowPackCoordinator()
         self._journey_orchestrator = JourneyOrchestrator()
         # Advisory-only usage ingest (measurement signals only; no billing mutations).
         self._usage_ingest = get_usage_ingest_client()
         self._setup_default_handlers()
-        # Multiple runtime features consume validated agent outputs. Auto-tools
-        # stay coupled to validated outputs, while MFJ now listens to a more
-        # explicit decomposition event emitted by the runtime.
         self.register_runtime_handler(RUNTIME_AGENT_OUTPUT_VALIDATED, self._auto_tool_handler.handle_tool_dispatch)
-        self.register_runtime_handler(RUNTIME_DECOMPOSITION_PLANNED, self._pack_coordinator.handle_journey_triggered)
-        self.register_runtime_handler(RUNTIME_PROCESS_COMPLETED, self._pack_coordinator.handle_run_complete)
-        # Journey auto-advance (pack v2)
+        # Journey auto-advance
         self.register_runtime_handler(RUNTIME_PROCESS_COMPLETED, self._journey_orchestrator.handle_run_complete)
         # Best-effort control-plane notification; must never block execution.
         self.register_handler("chat.usage_summary", self._usage_ingest.handle_usage_summary)
@@ -444,7 +436,7 @@ class UnifiedEventDispatcher:
                     "timestamp": timestamp,
                 }
 
-            # Check 0.5: UserDriven synthetic trigger (the "." message used to start groupchat)
+            # Check 0.5: UserDriven synthetic trigger (the "." message used to start a workflow run)
             # This should never be shown to users - it's an internal AG2 mechanism
             if isinstance(content, str) and content.strip() == ".":
                 # Check if this is a userdriven workflow

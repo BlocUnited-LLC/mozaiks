@@ -470,3 +470,5 @@ The right move is not to replace Mozaiks with CopilotKit.
 The right move is to make Mozaiks feel more like AG-UI/CopilotKit at the
 protocol and frontend contract layer while preserving Mozaiks’ stronger
 app-generation model.
+
+

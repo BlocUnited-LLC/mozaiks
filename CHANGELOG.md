@@ -12,6 +12,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Fixed
+
+- Fixed strict structured-output schemas for workflow planners by marking
+  declared fields as truly required in generated Pydantic models. This restores
+  provider-enforced `response_format` compatibility for live AG2 workflow runs
+  such as `RuntimeTaskBatchSmoke` and related planner-driven smokes.
+- Fixed live control-plane classifier calls against models that only support
+  the provider default temperature. `SimpleLLMCapabilityService` now omits the
+  `temperature` field for JSON completions when no explicit value is configured.
+
 ## 0.1.7 - 2026-05-27
 
 ### Added
@@ -24,8 +34,10 @@ This project follows a practical pre-1.0 changelog format:
   `mozaiks serve` and `mozaiks studio` startup so builders get updated guidance
   after a package upgrade without running `mozaiks sync-agent-guidance` manually.
 - Generated workspace scaffolds now include `app/config/secrets.yaml`
-  (names-only secret contract with inline comments), `app/config/shared_persistence.json`
-  (disabled placeholder), and `app/shared_persistence/` directory.
+  (names-only secret contract with inline comments), `app/config/data.json`
+  (canonical app data contract when needed), `app/config/data_migrations/`
+  (additive migration artifacts), and `app/services/data/` helper lanes when
+  needed.
 - Generated workspace scaffolds now seed a complete `app/config/shell.json`
   with full navigation, chrome, and shortcuts blocks sourced from the factory
   app template — matching the layout the Studio shell expects on first run.

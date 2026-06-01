@@ -38,7 +38,7 @@ _CAPABILITY_SOURCE_GUIDANCE = """\
 Capability source taxonomy:
   host_universal  — Built-in platform feature already provided by the runtime host.
                     Do NOT scaffold or generate code for these. Reference them in
-                    backend_scope or external_integrations, never as capability packs.
+                    service_scope or external_integrations, never as capability packs.
   framework_pack  — Reusable OSS capability pack selected by the app. Generate ONLY
                     app-specific wiring (pack_overlay task): event-flow bindings,
                     facade module actions, page composition. Never regenerate pack internals.
@@ -47,8 +47,8 @@ Capability source taxonomy:
                     entry with implementation_mode: external_integration and
                     surface_kind: external_integration or module (as declared).
                     The pack is already deployed; only wire it into the generated app.
-  generated_module — AppGenerator must generate full module contracts and backend files.
-  external_adapter — Generate adapter / client wiring only. The actual backend is
+  generated_module — AppGenerator must generate full module contracts and module backend files.
+  external_adapter — Generate adapter / client wiring only. The actual service is
                     third-party or separately deployed."""
 
 
@@ -284,7 +284,7 @@ def _build_hosted_context_body(
             "   a) task_type: api_surface — surface_kind: external_integration\n"
             "      capability_pack_id: {pack_id}  (REQUIRED — do NOT set to null)\n"
             "      initial_agent: ControllerAgent\n"
-            "      owned_paths: [\"backend/integrations/{pack_id}_client.py\"]\n"
+            "      owned_paths: [\"services/integrations/{pack_id}_client.py\"]\n"
             "      This thin adapter wraps calls to the hosted pack API.\n"
             "      The capability_pack_id identifies which hosted pack template to copy.\n"
             "   b) task_type: module_contract — surface_kind: module  (NOT external_integration)\n"
@@ -385,3 +385,4 @@ def inject_hosted_capabilities_context(
 
 
 __all__ = ["inject_hosted_capabilities_context"]
+

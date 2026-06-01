@@ -111,8 +111,8 @@ The private hosted service logic should live separately under product service
 roots such as:
 
 ```text
-services/hosted_analytics/
-services/managed_search/
+app/services/hosted_analytics/
+app/services/managed_search/
 ```
 
 ### 4. Generated app-specific output
@@ -301,7 +301,7 @@ Hosted and external packs may also provide build-time metadata:
 | `branding` | Optional display metadata, never implementation logic |
 | `generation_rules` | Builder constraints that agents must follow when composing the app |
 | `supersedes` | Pack ids this pack replaces when both are available |
-| `adapter_template` | Optional backend integration template copied into `backend/integrations/` |
+| `adapter_template` | Optional backend integration template copied into `app/services/integrations/` |
 
 ### Hosted-pack facade path
 
@@ -309,7 +309,7 @@ Hosted packs must be consumed through generated app-owned facades:
 
 ```text
 hosted_pack
-  -> backend/integrations/{pack_id}_client.py
+  -> app/services/integrations/{pack_id}_client.py
   -> app-owned facade module
   -> ui/pages bind to the facade module
 ```
@@ -318,7 +318,7 @@ Provider-neutral example:
 
 ```text
 hosted_analytics
-  -> backend/integrations/hosted_analytics_client.py
+  -> app/services/integrations/hosted_analytics_client.py
   -> modules/analytics_dashboard/
   -> ui/pages/analytics.yaml
   -> /api/modules/analytics_dashboard/get_metrics
@@ -382,7 +382,7 @@ Recommended locations:
 
 ```text
 capability_packs/licensed/generic_hosted_analytics/
-services/hosted_analytics/
+app/services/hosted_analytics/
 ```
 
 Recommended shape:
@@ -417,12 +417,13 @@ hosted-product-workspace/
 │           │   └── inject_hosted_analytics_context.py
 │           └── tests/
 │               └── test_hosted_analytics_pack.py
-└── services/
-    └── hosted_analytics/
-        ├── api/
-        ├── aggregation/
-        ├── reports/
-        └── callbacks/
+└── app/
+    └── services/
+        └── hosted_analytics/
+            ├── api/
+            ├── aggregation/
+            ├── reports/
+            └── callbacks/
 ```
 
 Notes:
@@ -561,3 +562,4 @@ If yes, it may need a workflow component in addition to any deterministic pack.
 - [../foundations/core-product-app-bundle-boundary.md](../foundations/core-product-app-bundle-boundary.md)
 - [../foundations/distribution-and-workspace-model.md](../foundations/distribution-and-workspace-model.md)
 - [../app/app-bundle-declaratives.md](../app/app-bundle-declaratives.md)
+

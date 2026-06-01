@@ -53,18 +53,21 @@ Canonical target workspace shape:
 
 ```text
 my-app/
-└── app/
-    ├── app.json
-    ├── config/
-    ├── ui/
-    ├── workflows/
-    ├── modules/
-    └── brand/
+├── app/
+│   ├── app.json
+│   ├── config/
+│   ├── ui/
+│   ├── modules/
+│   ├── brand/
+│   └── services/
+└── workflows/
 ```
 
 - The first-party factory layer lives under `factory_app/`
 - Hosted product workspaces consume the same self-contained app-root contract
 - `app/config/ai.json` is the canonical app-level AI boot contract, including optional `control_plane` settings for builder-session harnesses and future coding-agent refinement workers
+- `app/config/data.json` is the canonical app data contract
+- `app/services/` is the canonical app-owned service implementation lane
 
 ## What Mozaiks Is
 
@@ -272,7 +275,7 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 Shared factory workflows live in `factory_app/workflows/`. A running host resolves one workflow root by default. `MOZAIKS_WORKFLOWS_PATH` may override explicitly.
 
 - Studio uses `factory_app/workflows/` as the shared builder workflow root
-- Product/app hosts use `<active app root>/workflows/` when present
+- Product/app hosts use workspace-root `workflows/` when present
 - Build is coordinated by `workflow_sequences` in `factory_app/workflows/extended_orchestration/extension_registry.json`; `ValueEngine`, `ThemeCapture`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` are individual workflows inside those sequences
 - `ExistingAppDiscovery` belongs to the brownfield adoption sequence rather than the default greenfield build path
 - Refinement today is checkpoint/control-plane re-entry driven by `app/config/ai.json` plus `factory_app/control_plane/config/control_plane.yaml`, not a dedicated `RefinementWorkflow`
@@ -350,7 +353,7 @@ The control plane is **Studio-owned**. It is mounted by `mozaiksai.hosts.studio`
 | Mechanism | Layer | Purpose |
 |-----------|-------|---------|
 | `triggers` in `orchestrator.yaml` | Workflow | External events that start/resume a specific workflow |
-| `mfj_extension.json` (Mid-Flight Journeys) | Intra-workflow | Fan-out/fan-in of child workflows from inside a running parent |
+| `task_batches.yaml` | Intra-workflow | AG2 task batches for bounded parallel work inside one workflow |
 | `extension_registry.json` transitions | Pre-workflow | Static graph of build-step transitions between workflows |
 | **Control plane checkpoints** | **Above all workflows** | **Semantic classification of user intent → dynamic workflow routing** |
 
@@ -493,7 +496,7 @@ App workspaces and generated app output must not bundle their own copies of Reac
 **What it does:** Executes multi-agent AI workflows using AG2 (AutoGen).
 
 **Key responsibilities:**
-- Run AI agent conversations (GroupChat orchestration)
+- Run AI workflow executions with AG2 beta agents and transition graphs
 - Stream events to frontend via WebSocket
 - Persist chat sessions to MongoDB
 - Handle tool calls from agents
@@ -585,7 +588,7 @@ Events are **distributed**, not centralized. No separate `automations/` director
 
 ### CRUD → AI (workflow triggers)
 
-Workflows declare what app events start or resume them. Modules declare the domain events they publish and any app-level reactions they own. The platform host/runtime ingress resolves event facts to workflow triggers; modules do not encode AG2/groupchat semantics directly.
+Workflows declare what app events start or resume them. Modules declare the domain events they publish and any app-level reactions they own. The platform host/runtime ingress resolves event facts to workflow triggers; modules do not encode AG2 workflow-run semantics directly.
 
 ### AI → CRUD (event publishing)
 
@@ -602,62 +605,51 @@ The framework scans module contracts and `orchestrator.yaml` files to build the 
 `mozaiksai.hosts.platform` composes an active app workspace. In this repo, `factory_app/app/` is the first-party Studio app bundle using the same top-level contract.
 
 ```text
-app/
-├── app.json                    # App identity + startup intent + admins bootstrap
-├── config/
-│   ├── ai.json                 # LLM provider, model, temperature, optional control_plane key
-│   └── shell.json              # Header/footer/profile/notification chrome
-├── backend/
-│   ├── integrations/           # Thin external or hosted API clients
-│   └── adapters/               # Provider-specific implementation boundaries
-├── workflows/
-│   └── {WorkflowName}/
-│       ├── orchestrator.yaml   # Config + triggers + events.emits
-│       ├── agents.yaml         # Agent definitions
-│       ├── context_variables.yaml  # Default/schema for shared state
-│       ├── structured_outputs.yaml # Output models + registry
-│       ├── handoffs.yaml       # Agent-to-agent transitions
-│       ├── tools.yaml          # Tool declarations + UI metadata
-│       ├── ui_config.yaml      # Frontend exposure metadata (visual_agents)
-│       ├── hooks.yaml          # Lifecycle hooks (optional)
-│       ├── extended_orchestration/
-│       │   └── mfj_extension.json   # Optional MFJ fan-out/fan-in config (intra-workflow only)
-│       ├── tools/*.py          # Tool implementations
-│       └── ui/{WorkflowName}/  # React UI components (Optional)
-├── modules/
-
-`ui_config.yaml` defines `visual_agents`, which is the workflow-to-UI visibility contract.
-Only those agents have chat-visible messages and websocket-forwarded outputs rendered to the user.
-
-│   └── {module_name}/
-│       ├── module.yaml              # Required: identity, actions, capabilities
-│       ├── contracts/               # Optional companion manifests
-│       │   ├── events.yaml          # Domain events this module may publish
-│       │   ├── reactions.yaml       # Event reactions owned by this module
-│       │   ├── notifications.yaml   # Notification rules per event
-│       │   ├── settings.yaml        # User/app settings schema
-│       │   ├── admin.yaml           # Admin panels mounted into /admin/*
-│       │   ├── profile.yaml         # User profile page panels (optional)
-│       │   └── entitlements.yaml    # Optional capability gates
-│       ├── backend/
-│       │   ├── handler.py           # Required: thin dispatch, one method per action
-│       │   ├── service.py           # Recommended: business logic and event emission
-│       │   ├── repo.py              # Recommended: MongoDB access layer, no logic
-│       │   ├── policy.py            # Recommended: query scoping for multi-tenancy
-│       │   ├── schemas.py           # Recommended: typed request/response + document shapes
-│       │   ├── {helper_files}.py    # Optional: declared, justified, module-local support
-│       │   ├── settings.py          # Optional: settings hooks
-│       │   └── admin.py             # Optional: admin panel hooks
-│       └── ui/                      # Optional: module-specific UI surfaces
-├── ui/
-│   ├── route_manifest.json     # Custom full-page route ownership metadata
-│   ├── pages/
-│   │   ├── {page_name}.yaml    # Declarative page schema
-│   │   └── custom/             # Optional hand-authored full-page React routes
-│   └── index.js                # React registration barrel
-└── brand/
-    ├── theme_config.json       # Visual identity tokens: colors, radius, density, typography, assets
-    └── assets/
+workspace/
+├── app/
+│   ├── app.json                    # App identity + startup intent + admins bootstrap
+│   ├── config/
+│   │   ├── ai.json                 # LLM provider, model, optional control_plane key
+│   │   ├── shell.json              # Header/footer/profile/notification chrome
+│   │   ├── data.json               # Unified data contract
+│   │   ├── secrets.yaml            # Names-only secret contract
+│   │   ├── integrations.yaml       # External/hosted capability requirements
+│   │   └── targets.json            # Runtime/deployment/domain target intent
+│   ├── modules/
+│   │   └── {module_name}/
+│   │       ├── module.yaml
+│   │       ├── contracts/
+│   │       ├── runtime_extensions.yaml
+│   │       └── backend/
+│   │           ├── handler.py
+│   │           ├── service.py
+│   │           ├── repo.py
+│   │           ├── policy.py
+│   │           └── schemas.py
+│   ├── ui/
+│   │   ├── route_manifest.json
+│   │   ├── pages/
+│   │   ├── pages/custom/
+│   │   └── index.js
+│   ├── brand/
+│   └── services/
+│       ├── integrations/
+│       ├── adapters/
+│       ├── security/
+│       ├── routes/
+│       └── data/
+└── workflows/
+    └── {WorkflowName}/
+        ├── orchestrator.yaml
+        ├── agents.yaml
+        ├── context_variables.yaml
+        ├── structured_outputs.yaml
+        ├── handoffs.yaml
+        ├── tools.yaml
+        ├── ui_config.yaml
+        ├── hooks.yaml
+        ├── tools/
+        └── ui/
 ```
 
 `app/brand/theme_config.json` is the visual authority for generated apps.
@@ -666,8 +658,8 @@ pages and custom route React must consume shared primitives and semantic
 tokens/classes instead of hardcoded colors, literal font families, or
 page-local visual systems.
 
-`app/backend/` is optional app-owned support code. `backend/integrations/`
-contains thin clients for external or hosted APIs. `backend/adapters/` contains
+`app/services/` is optional app-owned support code. `app/services/integrations/`
+contains thin clients for external or hosted APIs. `app/services/adapters/` contains
 provider-specific implementation boundaries such as auth/OIDC/OAuth,
 source-control, deployment, DNS, registrar, cloud, storage, search, email, or
 payment provider mechanics. These files are not modules: they must not own
@@ -682,7 +674,7 @@ Every bundle (module, workflow, page) declares a `visibility`: `public` (all use
 ## Key Concepts
 
 ### Workflow
-A multi-agent AI conversation executed by AG2. Declared in `app/workflows/` for app-owned workflows, or `factory_app/workflows/` for shared builder workflows. Declares `events.emits` (what its tools publish) and `triggers` (what external events start or resume it).
+A multi-agent AI conversation executed by AG2. Declared in workspace-root `workflows/` for app-owned workflows, or `factory_app/workflows/` for shared builder workflows. Declares `events.emits` (what its tools publish) and `triggers` (what external events start or resume it).
 
 ### Lifecycle Tools (`lifecycle_tools` in `tools.yaml`)
 
@@ -788,7 +780,7 @@ These invariants guide every implementation decision in this repo.
 - Don't put CRUD/user-state logic in mozaiksai
 - Don't hardcode workflow behavior in the runtime (use declarative configs)
 - Don't add duplicate interfaces or aliases (make canonical changes)
-- Don't confuse `mfj_extension.json` (internal fan-out), `triggers` (external events), `extension_registry.json` (static transitions), and control plane (semantic routing) — see the comparison table in the Control Plane section
+- Don't confuse `task_batches.yaml` (workflow-local parallel task work), `triggers` (external events), `extension_registry.json` (static transitions), and control plane (semantic routing) — see the comparison table in the Control Plane section
 - Don't let generators write into active runtime paths — all output goes to `generated/`
 - Don't grow CLI into Studio concerns (management state, artifacts, run history) or Studio into CLI concerns (filesystem, scaffolding)
 
@@ -822,3 +814,5 @@ These invariants guide every implementation decision in this repo.
 | change classification | intent class assigned by the control plane classifier: `patch` (small fix), `design` (visual/structural), `feature` (new capability), `core` (architectural) |
 | `factory_app/control_plane/` | declarative builder harness pack: checkpoint config, classifier prompts, routing policies, and context-loading tool implementations |
 | `mozaiksai/control_plane/` | runtime implementation of the control plane harness: `ControlPlaneHarness`, classifier, checkpoint evaluation, and router |
+
+

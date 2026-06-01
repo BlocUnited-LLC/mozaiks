@@ -40,8 +40,8 @@ Persistent modules use `backend/repo.py`, `backend/policy.py`, and
 
 - `backend/schemas.py` is the typed shape layer; do not introduce
   `backend/models.py` or `backend/models/*.py`
-- `config/database_intent.json` and
-  `config/database_migrations/{migration_id}.json` are the canonical collection
+- `config/data.json` and
+  `config/data_migrations/{migration_id}.json` are the canonical collection
   planning artifacts
 - generated repo code must use `ModuleContext.persistence`
   (`ctx.persistence.collection(module_id, entity_name)`), not `ctx.db`
@@ -73,8 +73,8 @@ Backend helper files are allowed only when they are declared before generation,
 module-local under `backend/`, justified by a specific purpose, and imported by a
 canonical layer or referenced by `runtime_extensions.yaml`.
 
-App-level support code is a separate lane. Use `app/backend/integrations/` for
-external or hosted API clients and `app/backend/adapters/` for provider-specific
+App-level support code is a separate lane. Use `services/integrations/` for
+external or hosted API clients and `services/adapters/` for provider-specific
 implementation boundaries that modules or workflows call. Do not create a module
 just to house a provider adapter, and do not put module business state or actions
 in app-level backend support code.
@@ -124,3 +124,4 @@ Entrypoints must be module-local backend files and must be represented in
 generated backend outputs or Python stubs. Do not use runtime extensions for
 generic business logic, persistence, auth/scope helpers, transport
 infrastructure, or workflow orchestration.
+

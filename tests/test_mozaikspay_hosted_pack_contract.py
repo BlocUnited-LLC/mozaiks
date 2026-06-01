@@ -13,7 +13,7 @@ _PACKS_ROOT_ENV = os.getenv("MOZAIKS_HOSTED_PACKS_ROOT", "").strip()
 PACKS_ROOT = Path(_PACKS_ROOT_ENV) if _PACKS_ROOT_ENV else WORKSPACE / ".missing-hosted-packs"
 MOZAIKSPAY_ROOT = PACKS_ROOT / "mozaikspay"
 MOZAIKSPAY_MANIFEST = MOZAIKSPAY_ROOT / "manifest.yaml"
-MOZAIKSPAY_TEMPLATE = MOZAIKSPAY_ROOT / "backend_templates" / "mozaikspay_client.py"
+MOZAIKSPAY_TEMPLATE = MOZAIKSPAY_ROOT / "service_templates" / "mozaikspay_client.py"
 
 
 pytestmark = pytest.mark.skipif(
@@ -113,13 +113,13 @@ def test_mozaikspay_template_resolves_to_backend_integrations() -> None:
     task = {
         "task_type": "api_surface",
         "capability_pack_id": "mozaikspay",
-        "owned_paths": ["backend/integrations/mozaikspay_client.py"],
+        "owned_paths": ["services/integrations/mozaikspay_client.py"],
     }
 
     result = resolver.resolve_hosted_pack_templates(pack_sources, [task])
 
     assert len(result) == 1
-    assert result[0]["filename"] == "backend/integrations/mozaikspay_client.py"
+    assert result[0]["filename"] == "services/integrations/mozaikspay_client.py"
     assert result[0]["content"] == _template_source()
     assert not result[0]["filename"].startswith("modules/mozaikspay/")
     assert "capability_packs" not in result[0]["filename"]

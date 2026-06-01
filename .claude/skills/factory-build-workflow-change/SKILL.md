@@ -73,7 +73,7 @@ Boundary rules:
 - Do not add `workflow_sequence` steps for operator-review or HITL checkpoints that should remain explicit surfaced review boundaries.
 - Do not route to workflows that are not declared in the registry.
 - Do not modify generated app file contracts casually; inspect downstream AppGenerator or AgentGenerator contract tests first.
-- Do not describe transition routing, workflow sequencing, refinement routing, and MFJ as the same layer.
+- Do not describe transition routing, workflow sequencing, refinement routing, and workflow-local task batches as the same layer.
 
 Common change types:
 
@@ -147,3 +147,4 @@ Return:
 4. control-plane or refinement linkage impact
 5. tests required or run
 6. rollback or contract drift risk
+

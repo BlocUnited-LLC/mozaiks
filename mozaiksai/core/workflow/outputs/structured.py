@@ -5,7 +5,7 @@
 
 import logging
 from pydantic import BaseModel, Field, create_model
-from typing import List, Dict, Any, Optional, Union, Tuple, Set, get_args, get_origin
+from typing import List, Dict, Any, Optional, Union, Tuple, Set, Literal, get_args, get_origin
 from enum import Enum
 from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
@@ -15,6 +15,7 @@ _workflow_models: Dict[str, Dict[str, type]] = {}
 _workflow_registries: Dict[str, Dict[str, type]] = {}
 # Cache of workflow -> set(agent_names) that have structured output models
 _workflow_structured_agents: Dict[str, Set[str]] = {}
+_provider_response_model_cache: Dict[type[BaseModel], type[BaseModel]] = {}
 logger = logging.getLogger(__name__)
 
 # Type mapping for consistent field resolution
@@ -183,6 +184,70 @@ def _is_pydantic_model(value: Any) -> bool:
         return False
 
 
+def _strictify_response_annotation(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+
+    if _is_pydantic_model(annotation):
+        return get_provider_response_model(annotation)
+
+    try:
+        if isinstance(annotation, type) and issubclass(annotation, Enum):
+            values = tuple(member.value for member in annotation)
+            if values:
+                return Literal[values]  # type: ignore[valid-type]
+    except Exception:
+        pass
+
+    if origin in (list, List):
+        args = get_args(annotation)
+        if not args:
+            return annotation
+        return List[_strictify_response_annotation(args[0])]  # type: ignore[valid-type]
+
+    if origin in (set, Set):
+        args = get_args(annotation)
+        if not args:
+            return annotation
+        return Set[_strictify_response_annotation(args[0])]  # type: ignore[valid-type]
+
+    if origin in (tuple, Tuple):
+        args = get_args(annotation)
+        if not args:
+            return annotation
+        return Tuple[tuple(_strictify_response_annotation(arg) for arg in args)]  # type: ignore[misc]
+
+    if origin is Union:
+        strict_args = tuple(_strictify_response_annotation(arg) for arg in get_args(annotation))
+        return Union[strict_args]  # type: ignore[misc]
+
+    return annotation
+
+
+def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
+    cached = _provider_response_model_cache.get(model_cls)
+    if cached is not None:
+        return cached
+
+    fields: Dict[str, Tuple[Any, Any]] = {}
+    for field_name, field_info in getattr(model_cls, "model_fields", {}).items():
+        raw_annotation = getattr(field_info, "annotation", Any)
+        field_annotation = _strictify_response_annotation(raw_annotation)
+        field_kwargs: Dict[str, Any] = {}
+        description = getattr(field_info, "description", None)
+        if (
+            isinstance(description, str)
+            and description.strip()
+            and not _is_pydantic_model(field_annotation)
+        ):
+            field_kwargs["description"] = description
+        fields[field_name] = (field_annotation, Field(..., **field_kwargs))
+
+    strict_model = create_model(model_cls.__name__, **fields)  # type: ignore[arg-type]
+    _patch_model_schema(strict_model)
+    _provider_response_model_cache[model_cls] = strict_model
+    return strict_model
+
+
 def _find_open_ended_object_path(
     annotation: Any,
     *,
@@ -256,6 +321,13 @@ def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool,
     return True, None
 
 
+def _build_field(field_kwargs: Dict[str, Any]) -> Any:
+    if 'default' in field_kwargs:
+        default = field_kwargs.pop('default')
+        return Field(default, **field_kwargs)
+    return Field(..., **field_kwargs)
+
+
 def resolve_field_type(
     field_def: Dict[str, Any],
     available_models: Dict[str, type],
@@ -271,9 +343,7 @@ def resolve_field_type(
     if 'default' in field_def:
         field_kwargs['default'] = field_def['default']
     if field_type_str == 'optional_dict':
-        if 'default' not in field_kwargs:
-            field_kwargs['default'] = None
-        return Optional[Dict[str, Any]], Field(**field_kwargs)  # type: ignore[return-value]
+        return Optional[Dict[str, Any]], _build_field(field_kwargs)  # type: ignore[return-value]
     # Primitive
     if field_type_str in {'list', 'optional_list'}:
         items_type = field_def.get('items')
@@ -285,24 +355,21 @@ def resolve_field_type(
         else:
             raise ValueError("Unsupported list items spec")
         if field_type_str == 'optional_list':
-            # Don't pass default=None if field_kwargs already has a default
-            if 'default' not in field_kwargs:
-                field_kwargs['default'] = None
-            return Optional[base], Field(**field_kwargs)  # type: ignore[return-value]
-        return base, Field(**field_kwargs)  # type: ignore[return-value]
+            return Optional[base], _build_field(field_kwargs)  # type: ignore[return-value]
+        return base, _build_field(field_kwargs)  # type: ignore[return-value]
     if field_type_str in TYPE_MAP:
-        return TYPE_MAP[field_type_str], Field(**field_kwargs)
+        return TYPE_MAP[field_type_str], _build_field(field_kwargs)
     # Literal -> Enum
     if field_type_str == 'literal':
         values = field_def.get('values') or []
         if not values:
             raise ValueError("Literal type requires 'values'")
         LiteralEnum = _build_literal_enum("Literal", values)
-        return LiteralEnum, Field(**field_kwargs)
+        return LiteralEnum, _build_field(field_kwargs)
     # list type
     # dict primitive support (already mapped in TYPE_MAP earlier, but handle explicit 'dict' path if missed)
     if field_type_str == 'dict':
-        return Dict[str, Any], Field(**field_kwargs)  # type: ignore
+        return Dict[str, Any], _build_field(field_kwargs)  # type: ignore
     if field_type_str == 'union':
         variants = field_def.get('variants') or []
         if not isinstance(variants, list) or not variants:
@@ -329,15 +396,15 @@ def resolve_field_type(
         base_type = unique_types[0] if len(unique_types) == 1 else Union[tuple(unique_types)]  # type: ignore[misc]
         if optional_variant:
             base_type = Optional[base_type]  # type: ignore[arg-type]
-        return base_type, Field(**field_kwargs)
+        return base_type, _build_field(field_kwargs)
     # direct model ref
     if field_type_str in available_models or field_type_str in alias_defs:
-        return _resolve_named_type(field_type_str, available_models, alias_defs, alias_cache), Field(**field_kwargs)
+        return _resolve_named_type(field_type_str, available_models, alias_defs, alias_cache), _build_field(field_kwargs)
     # list[Model]
     if field_type_str.startswith('list[') and field_type_str.endswith(']'):
         inner = field_type_str[5:-1].strip()
         inner_type = _resolve_named_type(inner, available_models, alias_defs, alias_cache)
-        return List[inner_type], Field(**field_kwargs)  # type: ignore
+        return List[inner_type], _build_field(field_kwargs)  # type: ignore
     raise ValueError(f"Unknown field type: {field_type_str}")
 
 def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
@@ -588,7 +655,10 @@ async def get_llm_for_workflow(
             model_cls = structured_registry[lookup_key]
             supports_strict, offending_path = supports_provider_response_format(model_cls)
             if supports_strict:
-                return await get_llm_config(response_format=model_cls, extra_config=extra_config)
+                return await get_llm_config(
+                    response_format=get_provider_response_model(model_cls),
+                    extra_config=extra_config,
+                )
 
             logger.warning(
                 "[STRUCTURED_OUTPUTS] Provider strict response_format disabled for %s/%s (%s uses open-ended object fields)",

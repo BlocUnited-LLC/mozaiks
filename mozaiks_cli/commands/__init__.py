@@ -3,6 +3,7 @@ CLI command modules.
 """
 
 from mozaiks_cli.commands import add as add_command
+from mozaiks_cli.commands import context as context_command
 from mozaiks_cli.commands import gen as gen_command
 from mozaiks_cli.commands import info as info_command
 from mozaiks_cli.commands import init as init_command
@@ -20,6 +21,7 @@ __all__ = [
     "serve_command",
     "studio_command",
     "sync_agent_guidance_command",
+    "context_command",
     "add_command",
     "info_command",
     "gen_command",

@@ -23,11 +23,6 @@
       "action": "download_complete",
       "download_accepted": true
     },
-    "AgentAPIKeysBundleInput": {
-      "status": "submitted",
-      "action": "cancel",
-      "services": []
-    },
     "*": {
       "status": "submitted",
       "action": "approve",

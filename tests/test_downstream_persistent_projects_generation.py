@@ -16,8 +16,8 @@ from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import (
     apply_database_indexes,
-    apply_database_migrations,
-    load_database_migrations,
+    apply_data_migrations,
+    load_data_migrations,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -259,7 +259,7 @@ def _load_plan() -> dict[str, Any]:
     return raw.get("AppBuildPlan", raw)
 
 
-def _canonical_database_intent() -> dict[str, Any]:
+def _canonical_data_contract() -> dict[str, Any]:
     return {
         "version": "1",
         "app_id": "project_management",
@@ -343,14 +343,14 @@ def _database_output(plan: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "database_files": [
             {
-                "path": "config/database_intent.json",
-                "kind": "database_intent_json",
-                "purpose": "Canonical generated database intent.",
+                "path": "config/data.json",
+                "kind": "data_contract_json",
+                "purpose": "Canonical generated data contract.",
                 "entity_refs": ["projects", "tasks"],
-                "content": json.dumps(_canonical_database_intent(), indent=2) + "\n",
+                "content": json.dumps(_canonical_data_contract(), indent=2) + "\n",
             },
             {
-                "path": f"config/database_migrations/{migration['migration_id']}.json",
+                "path": f"config/data_migrations/{migration['migration_id']}.json",
                 "kind": "database_migration_json",
                 "purpose": "Additive generated project/task indexes.",
                 "entity_refs": ["projects", "tasks"],
@@ -359,9 +359,9 @@ def _database_output(plan: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "pending_schema_migration": migration,
         "code_files": [
-            {"filename": "config/database_intent.json", "content": "BROKEN_MIRROR\n"},
+            {"filename": "config/data.json", "content": "BROKEN_MIRROR\n"},
             {
-                "filename": f"config/database_migrations/{migration['migration_id']}.json",
+                "filename": f"config/data_migrations/{migration['migration_id']}.json",
                 "content": "BROKEN_MIRROR\n",
             },
         ],
@@ -485,7 +485,7 @@ def _module_output(module_id: str) -> dict[str, Any]:
                 "path": f"modules/{module_id}/backend/repo.py",
                 "kind": "repo",
                 "purpose": "Persistence access through ctx.persistence.",
-                "contract_refs": ["database_intent_bundle.surfaces[*].collections[*]"],
+                "contract_refs": ["data_contract.surfaces[*].collections[*]"],
                 "content": textwrap.dedent(
                     f"""
                     class {class_name}Repo:
@@ -529,7 +529,7 @@ def _module_output(module_id: str) -> dict[str, Any]:
                 "path": f"modules/{module_id}/backend/schemas.py",
                 "kind": "schemas",
                 "purpose": "Typed document shapes and pure helpers.",
-                "contract_refs": ["database_intent_bundle"],
+                "contract_refs": ["data_contract"],
                 "content": textwrap.dedent(
                     f"""
                     from datetime import UTC, datetime
@@ -659,15 +659,15 @@ def test_live_fixture_replay_has_downstream_persistence_tasks() -> None:
     ]
     assert len(persistence_tasks) == 1
     assert persistence_tasks[0]["initial_agent"] == "DatabaseAgent"
-    assert plan["database_intent_bundle"]
+    assert plan["data_contract"]
     assert plan["pending_schema_migration"]["migration_id"] == "001_projects_tasks_indexes"
     assert any(task.get("surface_id") == "projects" for task in tasks.values())
     assert any(task.get("surface_id") == "tasks" for task in tasks.values())
     assert any(task.get("task_type") == "page_bundle" for task in tasks.values())
 
     expected_paths = {
-        "config/database_intent.json",
-        "config/database_migrations/001_projects_tasks_indexes.json",
+        "config/data.json",
+        "config/data_migrations/001_projects_tasks_indexes.json",
         "modules/projects/backend/repo.py",
         "modules/projects/backend/policy.py",
         "modules/projects/backend/schemas.py",
@@ -691,8 +691,8 @@ def test_deterministic_downstream_outputs_assemble_canonical_tree() -> None:
 
     expected_paths = {
         "app.json",
-        "config/database_intent.json",
-        "config/database_migrations/001_projects_tasks_indexes.json",
+        "config/data.json",
+        "config/data_migrations/001_projects_tasks_indexes.json",
         "modules/projects/module.yaml",
         "modules/projects/contracts/events.yaml",
         "modules/projects/backend/handler.py",
@@ -711,8 +711,8 @@ def test_deterministic_downstream_outputs_assemble_canonical_tree() -> None:
         "ui/pages/tasks.yaml",
     }
     assert expected_paths <= set(file_map)
-    assert file_map["config/database_intent.json"] != "BROKEN_MIRROR\n"
-    assert file_map["config/database_migrations/001_projects_tasks_indexes.json"] != "BROKEN_MIRROR\n"
+    assert file_map["config/data.json"] != "BROKEN_MIRROR\n"
+    assert file_map["config/data_migrations/001_projects_tasks_indexes.json"] != "BROKEN_MIRROR\n"
     assert file_map["modules/projects/backend/repo.py"] != "BROKEN_MIRROR\n"
     assert file_map["modules/tasks/backend/repo.py"] != "BROKEN_MIRROR\n"
     assert all("backend/models.py" not in path for path in file_map)
@@ -755,8 +755,8 @@ def test_backend_layers_use_ctx_persistence_boundary() -> None:
 
 def test_assembled_database_artifacts_align_with_repo_collections() -> None:
     file_map = _assembled_file_map()
-    intent = json.loads(file_map["config/database_intent.json"])
-    migration = json.loads(file_map["config/database_migrations/001_projects_tasks_indexes.json"])
+    intent = json.loads(file_map["config/data.json"])
+    migration = json.loads(file_map["config/data_migrations/001_projects_tasks_indexes.json"])
     intent_keys = {
         (collection["module_id"], collection.get("entity_name") or collection["name"])
         for surface in intent["surfaces"]
@@ -783,19 +783,19 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
     _write_file_map(tmp_path, file_map)
 
     load_result = await AppLoader.load(str(tmp_path))
-    assert load_result.database_intent is not None
-    assert ("projects", "projects") in load_result.database_entities_by_key
-    assert ("tasks", "tasks") in load_result.database_entities_by_key
+    assert load_result.data_contract is not None
+    assert ("projects", "projects") in load_result.data_entities_by_key
+    assert ("tasks", "tasks") in load_result.data_entities_by_key
 
     FakePersistenceContext.reset()
     persistence = FakePersistenceContext(app_id="app_downstream")
     applied_indexes = await apply_database_indexes(
-        load_result.database_intent,
+        load_result.data_contract,
         app_id="app_downstream",
         persistence=persistence,
     )
-    migrations = load_database_migrations(tmp_path)
-    applied_migrations = await apply_database_migrations(
+    migrations = load_data_migrations(tmp_path)
+    applied_migrations = await apply_data_migrations(
         app_id="app_downstream",
         migrations=migrations,
         persistence=persistence,

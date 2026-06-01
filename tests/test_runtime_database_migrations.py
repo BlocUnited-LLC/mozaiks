@@ -9,12 +9,12 @@ import pytest
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.loader import AppLoadResult
 from mozaiksai.core.runtime.persistence import (
-    APP_DATABASE_MIGRATIONS_COLLECTION,
-    apply_database_migrations,
+    APP_DATA_MIGRATIONS_COLLECTION,
+    apply_data_migrations,
     collection_name_for,
     get_database_startup_policy,
     get_migration_health_report,
-    load_database_migrations,
+    load_data_migrations,
     migration_hash,
 )
 from mozaiksai.core.runtime.persistence.migrations import DatabaseMigrationError
@@ -156,7 +156,7 @@ def _migration(migration_id: str = "m_001", operations: list[dict[str, Any]] | N
 
 
 def _write_migration(root: Path, filename: str, migration: dict[str, Any] | str) -> None:
-    path = root / "config" / "database_migrations" / filename
+    path = root / "config" / "data_migrations" / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(migration, str):
         path.write_text(migration, encoding="utf-8")
@@ -175,7 +175,7 @@ def _app_collection(client: FakeMongoClient) -> FakeMongoCollection:
 
 
 def _history_collection(client: FakeMongoClient) -> FakeMongoCollection:
-    return client["mozaiksai"][APP_DATABASE_MIGRATIONS_COLLECTION]
+    return client["mozaiksai"][APP_DATA_MIGRATIONS_COLLECTION]
 
 
 def _history_doc(
@@ -196,44 +196,44 @@ def _history_doc(
     }
 
 
-def test_load_database_migrations_returns_empty_when_directory_missing(tmp_path: Path) -> None:
-    assert load_database_migrations(tmp_path) == []
+def test_load_data_migrations_returns_empty_when_directory_missing(tmp_path: Path) -> None:
+    assert load_data_migrations(tmp_path) == []
 
 
-def test_load_database_migrations_reads_json_files_in_filename_order(tmp_path: Path) -> None:
+def test_load_data_migrations_reads_json_files_in_filename_order(tmp_path: Path) -> None:
     _write_migration(tmp_path, "002.json", _migration("m_002", []))
     _write_migration(tmp_path, "001.json", _migration("m_001", []))
 
-    migrations = load_database_migrations(tmp_path)
+    migrations = load_data_migrations(tmp_path)
 
     assert [migration["migration_id"] for migration in migrations] == ["m_001", "m_002"]
 
 
-def test_load_database_migrations_invalid_json_raises_clear_error(tmp_path: Path) -> None:
+def test_load_data_migrations_invalid_json_raises_clear_error(tmp_path: Path) -> None:
     _write_migration(tmp_path, "001.json", "{bad json")
 
     with pytest.raises(DatabaseMigrationError, match="Failed to read"):
-        load_database_migrations(tmp_path)
+        load_data_migrations(tmp_path)
 
 
-def test_load_database_migrations_missing_migration_id_raises_error(tmp_path: Path) -> None:
+def test_load_data_migrations_missing_migration_id_raises_error(tmp_path: Path) -> None:
     _write_migration(tmp_path, "001.json", {"version": "1", "operations": []})
 
     with pytest.raises(DatabaseMigrationError, match="migration_id is required"):
-        load_database_migrations(tmp_path)
+        load_data_migrations(tmp_path)
 
 
-def test_load_database_migrations_allows_unsupported_operation_for_apply_time_failure(tmp_path: Path) -> None:
+def test_load_data_migrations_allows_unsupported_operation_for_apply_time_failure(tmp_path: Path) -> None:
     _write_migration(tmp_path, "001.json", _migration(operations=[{"type": "rewrite_documents"}]))
 
-    assert load_database_migrations(tmp_path)[0]["operations"][0]["type"] == "rewrite_documents"
+    assert load_data_migrations(tmp_path)[0]["operations"][0]["type"] == "rewrite_documents"
 
 
 @pytest.mark.asyncio
 async def test_ensure_collection_operation_is_accepted_without_document_writes() -> None:
     context, client = _context()
 
-    count = await apply_database_migrations(
+    count = await apply_data_migrations(
         app_id="app_1",
         migrations=[_migration(operations=[{"type": "ensure_collection", "module_id": "projects", "entity_name": "projects"}])],
         persistence=context,
@@ -249,7 +249,7 @@ async def test_ensure_collection_operation_is_accepted_without_document_writes()
 async def test_ensure_index_operation_calls_ensure_indexes() -> None:
     context, client = _context()
 
-    await apply_database_migrations(
+    await apply_data_migrations(
         app_id="app_1",
         migrations=[_migration(operations=[{
             "type": "ensure_index",
@@ -269,7 +269,7 @@ async def test_applied_migration_is_recorded_in_history_collection() -> None:
     context, client = _context()
     migration = _migration()
 
-    await apply_database_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
+    await apply_data_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
 
     history = _history_collection(client)
     record = history.document_by_key[("app_1", "m_001")]
@@ -289,7 +289,7 @@ async def test_applied_migration_is_recorded_in_history_collection() -> None:
 async def test_migration_writes_in_progress_before_operations() -> None:
     context, client = _context()
 
-    await apply_database_migrations(app_id="app_1", migrations=[_migration()], persistence=context, history_client=client)
+    await apply_data_migrations(app_id="app_1", migrations=[_migration()], persistence=context, history_client=client)
 
     history = _history_collection(client)
     claim = history.find_one_and_update_calls[0][1]["$setOnInsert"]
@@ -304,7 +304,7 @@ async def test_migration_writes_in_progress_before_operations() -> None:
 async def test_history_collection_ensures_unique_app_migration_index() -> None:
     context, client = _context()
 
-    await apply_database_migrations(app_id="app_1", migrations=[_migration()], persistence=context, history_client=client)
+    await apply_data_migrations(app_id="app_1", migrations=[_migration()], persistence=context, history_client=client)
 
     history = _history_collection(client)
     assert history.create_index_calls[0] == (
@@ -319,7 +319,7 @@ async def test_failed_migration_updates_history_with_error_details() -> None:
     migration = _migration(operations=[{"type": "rewrite_documents", "module_id": "projects", "entity_name": "projects"}])
 
     with pytest.raises(DatabaseMigrationError, match="operation 0"):
-        await apply_database_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
+        await apply_data_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
 
     record = _history_collection(client).document_by_key[("app_1", "m_001")]
     assert record["status"] == "failed"
@@ -345,7 +345,7 @@ async def test_already_applied_same_hash_skips() -> None:
         "status": "applied",
     }
 
-    count = await apply_database_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
+    count = await apply_data_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
 
     assert count == 0
     assert _app_collection(client).create_index_calls == []
@@ -364,7 +364,7 @@ async def test_already_applied_different_hash_raises() -> None:
     }
 
     with pytest.raises(DatabaseMigrationError, match="different hash"):
-        await apply_database_migrations(app_id="app_1", migrations=[_migration()], persistence=context, history_client=client)
+        await apply_data_migrations(app_id="app_1", migrations=[_migration()], persistence=context, history_client=client)
 
 
 @pytest.mark.asyncio
@@ -379,7 +379,7 @@ async def test_existing_in_progress_migration_raises() -> None:
     }
 
     with pytest.raises(DatabaseMigrationError, match="m_001.*already in progress"):
-        await apply_database_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
+        await apply_data_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
 
 
 @pytest.mark.asyncio
@@ -394,7 +394,7 @@ async def test_existing_failed_migration_raises_until_operator_clears_record() -
     }
 
     with pytest.raises(DatabaseMigrationError, match="m_001.*clear the failed history record"):
-        await apply_database_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
+        await apply_data_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
 
 
 @pytest.mark.asyncio
@@ -412,7 +412,7 @@ async def test_duplicate_claim_race_is_handled_deterministically() -> None:
     history.fail_next_find_one_and_update = True
 
     with pytest.raises(DatabaseMigrationError, match="m_001.*already in progress"):
-        await apply_database_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
+        await apply_data_migrations(app_id="app_1", migrations=[migration], persistence=context, history_client=client)
 
     assert _app_collection(client).create_index_calls == []
 
@@ -423,9 +423,9 @@ async def test_migrations_are_applied_in_loaded_order(tmp_path: Path) -> None:
     _write_migration(tmp_path, "001.json", _migration("m_001", []))
     context, client = _context()
 
-    await apply_database_migrations(
+    await apply_data_migrations(
         app_id="app_1",
-        migrations=load_database_migrations(tmp_path),
+        migrations=load_data_migrations(tmp_path),
         persistence=context,
         history_client=client,
     )
@@ -444,7 +444,7 @@ def test_destructive_operations_are_rejected(tmp_path: Path, operation_type: str
     _write_migration(tmp_path, "001.json", _migration(operations=[{"type": operation_type}]))
 
     with pytest.raises(DatabaseMigrationError, match="destructive"):
-        load_database_migrations(tmp_path)
+        load_data_migrations(tmp_path)
 
 
 @pytest.mark.asyncio
@@ -591,13 +591,13 @@ async def test_migration_health_report_does_not_mutate_history_collection() -> N
 @pytest.mark.asyncio
 async def test_migration_health_report_uses_injected_client_database_name() -> None:
     client = FakeMongoClient()
-    history = client["custom_history"][APP_DATABASE_MIGRATIONS_COLLECTION]
+    history = client["custom_history"][APP_DATA_MIGRATIONS_COLLECTION]
     history.document_by_key[("app_1", "m_001")] = _history_doc(status="applied")
 
     report = await get_migration_health_report(client=client, database_name="custom_history")
 
     assert report["summary"]["total"] == 1
-    assert client["mozaiksai"][APP_DATABASE_MIGRATIONS_COLLECTION].find_calls == []
+    assert client["mozaiksai"][APP_DATA_MIGRATIONS_COLLECTION].find_calls == []
 
 
 @pytest.mark.asyncio
@@ -611,8 +611,8 @@ async def test_platform_startup_calls_migration_application_after_index_applicat
         return AppLoadResult(
             definition=AppDefinition(name="Migration Test", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent={"version": "1", "app_id": "app_1", "surfaces": []},
-            database_entities_by_key={},
+            data_contract={"version": "1", "app_id": "app_1", "surfaces": []},
+            data_entities_by_key={},
         )
 
     async def fake_apply_indexes(_intent, *, app_id=None):
@@ -635,8 +635,8 @@ async def test_platform_startup_calls_migration_application_after_index_applicat
 
     monkeypatch.setattr(platform.AppLoader, "load", fake_load)
     monkeypatch.setattr(platform, "apply_database_indexes", fake_apply_indexes)
-    monkeypatch.setattr(platform, "load_database_migrations", fake_load_migrations)
-    monkeypatch.setattr(platform, "apply_database_migrations", fake_apply_migrations)
+    monkeypatch.setattr(platform, "load_data_migrations", fake_load_migrations)
+    monkeypatch.setattr(platform, "apply_data_migrations", fake_apply_migrations)
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: FakeHooks())
 
     await platform._platform_startup()
@@ -654,8 +654,8 @@ async def test_platform_startup_logs_migration_failure_and_continues(monkeypatch
         return AppLoadResult(
             definition=AppDefinition(name="Migration Test", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent=None,
-            database_entities_by_key={},
+            data_contract=None,
+            data_entities_by_key={},
         )
 
     def fake_load_migrations(_root):
@@ -669,15 +669,15 @@ async def test_platform_startup_logs_migration_failure_and_continues(monkeypatch
             return None
 
     monkeypatch.setattr(platform.AppLoader, "load", fake_load)
-    monkeypatch.setattr(platform, "load_database_migrations", fake_load_migrations)
-    monkeypatch.setattr(platform, "apply_database_migrations", fail_apply_migrations)
+    monkeypatch.setattr(platform, "load_data_migrations", fake_load_migrations)
+    monkeypatch.setattr(platform, "apply_data_migrations", fail_apply_migrations)
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: FakeHooks())
     monkeypatch.setattr(platform.logger, "warning", lambda message, *args: warnings.append(message % args))
     monkeypatch.delenv("MOZAIKS_DATABASE_STARTUP_POLICY", raising=False)
 
     await platform._platform_startup()
 
-    assert any("DATABASE_MIGRATIONS_NOT_APPLIED" in warning for warning in warnings)
+    assert any("data_migrations_NOT_APPLIED" in warning for warning in warnings)
 
 
 @pytest.mark.asyncio
@@ -692,8 +692,8 @@ async def test_platform_startup_best_effort_logs_concurrent_migration_claim_fail
         return AppLoadResult(
             definition=AppDefinition(name="Migration Test", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent=None,
-            database_entities_by_key={},
+            data_contract=None,
+            data_entities_by_key={},
         )
 
     def fake_load_migrations(_root):
@@ -708,14 +708,14 @@ async def test_platform_startup_best_effort_logs_concurrent_migration_claim_fail
 
     monkeypatch.delenv("MOZAIKS_DATABASE_STARTUP_POLICY", raising=False)
     monkeypatch.setattr(platform.AppLoader, "load", fake_load)
-    monkeypatch.setattr(platform, "load_database_migrations", fake_load_migrations)
-    monkeypatch.setattr(platform, "apply_database_migrations", fail_apply_migrations)
+    monkeypatch.setattr(platform, "load_data_migrations", fake_load_migrations)
+    monkeypatch.setattr(platform, "apply_data_migrations", fail_apply_migrations)
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: FakeHooks())
     monkeypatch.setattr(platform.logger, "warning", lambda message, *args: warnings.append(message % args))
 
     await platform._platform_startup()
 
-    assert any("DATABASE_MIGRATIONS_NOT_APPLIED" in warning and "m_001" in warning for warning in warnings)
+    assert any("data_migrations_NOT_APPLIED" in warning and "m_001" in warning for warning in warnings)
 
 
 def test_database_startup_policy_defaults_to_best_effort(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -751,8 +751,8 @@ async def test_platform_startup_required_migration_failure_raises(monkeypatch: p
         return AppLoadResult(
             definition=AppDefinition(name="Migration Test", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent=None,
-            database_entities_by_key={},
+            data_contract=None,
+            data_entities_by_key={},
         )
 
     def fake_load_migrations(_root):
@@ -763,10 +763,10 @@ async def test_platform_startup_required_migration_failure_raises(monkeypatch: p
 
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "required")
     monkeypatch.setattr(platform.AppLoader, "load", fake_load)
-    monkeypatch.setattr(platform, "load_database_migrations", fake_load_migrations)
-    monkeypatch.setattr(platform, "apply_database_migrations", fail_apply_migrations)
+    monkeypatch.setattr(platform, "load_data_migrations", fake_load_migrations)
+    monkeypatch.setattr(platform, "apply_data_migrations", fail_apply_migrations)
 
-    with pytest.raises(platform.DatabaseStartupError, match="Database migrations were not applied"):
+    with pytest.raises(platform.DatabaseStartupError, match="Data migrations were not applied"):
         await platform._platform_startup()
 
 
@@ -780,8 +780,8 @@ async def test_platform_startup_required_concurrent_migration_claim_failure_rais
         return AppLoadResult(
             definition=AppDefinition(name="Migration Test", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent=None,
-            database_entities_by_key={},
+            data_contract=None,
+            data_entities_by_key={},
         )
 
     def fake_load_migrations(_root):
@@ -792,8 +792,8 @@ async def test_platform_startup_required_concurrent_migration_claim_failure_rais
 
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "required")
     monkeypatch.setattr(platform.AppLoader, "load", fake_load)
-    monkeypatch.setattr(platform, "load_database_migrations", fake_load_migrations)
-    monkeypatch.setattr(platform, "apply_database_migrations", fail_apply_migrations)
+    monkeypatch.setattr(platform, "load_data_migrations", fake_load_migrations)
+    monkeypatch.setattr(platform, "apply_data_migrations", fail_apply_migrations)
 
     with pytest.raises(platform.DatabaseStartupError, match="m_001"):
         await platform._platform_startup()
@@ -807,8 +807,8 @@ async def test_platform_startup_without_database_artifacts_is_unaffected(monkeyp
         return AppLoadResult(
             definition=AppDefinition(name="No Persistence", version="1.0", config={"appId": "app_1"}),
             modules=[],
-            database_intent=None,
-            database_entities_by_key={},
+            data_contract=None,
+            data_entities_by_key={},
         )
 
     class FakeHooks:
@@ -817,7 +817,7 @@ async def test_platform_startup_without_database_artifacts_is_unaffected(monkeyp
 
     monkeypatch.setenv("MOZAIKS_DATABASE_STARTUP_POLICY", "required")
     monkeypatch.setattr(platform.AppLoader, "load", fake_load)
-    monkeypatch.setattr(platform, "load_database_migrations", lambda _root: [])
+    monkeypatch.setattr(platform, "load_data_migrations", lambda _root: [])
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: FakeHooks())
 
     await platform._platform_startup()

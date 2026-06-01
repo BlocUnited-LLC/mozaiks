@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from tests.import_utils import import_module_directly
 
 _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow_manager")
@@ -48,7 +50,7 @@ def test_agentgenerator_structured_outputs_load_optional_dict_contracts() -> Non
     assert option.context_variables is None
 
 
-def test_appgenerator_structured_outputs_load_child_workflow_spec_contract() -> None:
+def test_appgenerator_structured_outputs_load_task_batch_build_task_contract() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -61,16 +63,33 @@ def test_appgenerator_structured_outputs_load_child_workflow_spec_contract() -> 
 
     assert registry["AppPlanAgent"].__name__ == "AppBuildPlanOutput"
 
-    child = models["AppChildWorkflowSpec"](
-        name="AppGenerator",
-        description="Backend foundation task",
+    task = models["AppBuildTask"](
+        task_id="task_service_foundation",
+        task_type="service_foundation",
+        capability_pack_id=None,
+        surface_id="app_shell",
+        surface_kind="module",
+        execution_target="AppGenerator",
         initial_agent="ConfigMiddlewareAgent",
+        description="Backend foundation task",
         initial_message="Execute only the backend foundation task.",
-        context_variables={"task_run_mode": True, "current_build_task_id": "task_backend_foundation"},
+        owned_paths=["services/config.py"],
+        depends_on=[],
+        acceptance_criteria=["Environment-driven config only"],
+        context_variables=[
+            {"key": "task_run_mode", "value": "true", "value_type": "boolean"},
+            {
+                "key": "current_build_task_id",
+                "value": "task_service_foundation",
+                "value_type": "string",
+            },
+        ],
+        integration_needs=[],
     )
 
-    assert child.name == "AppGenerator"
-    assert child.context_variables["current_build_task_id"] == "task_backend_foundation"
+    assert "AppChildWorkflowSpec" not in models
+    assert task.initial_agent == "ConfigMiddlewareAgent"
+    assert task.context_variables[1].key == "current_build_task_id"
 
 
 def test_appgenerator_app_schema_output_schema_uses_strict_section_config_union() -> None:
@@ -117,6 +136,71 @@ def test_appgenerator_app_schema_output_supports_provider_strict_response_format
     assert offending_path is None
 
 
+def test_appgenerator_config_middleware_output_supports_provider_strict_response_format() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["ConfigMiddlewareAgent"]
+    )
+
+    assert supported is True
+    assert offending_path is None
+
+
+def test_appgenerator_provider_schema_has_no_ref_sibling_keywords() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
+    provider_model = _structured_mod.get_provider_response_model(registry["AppSchemaAgent"])
+    raw_schema = BaseModel.model_json_schema.__func__(provider_model)
+
+    def _has_ref_sibling_keywords(node) -> bool:
+        if isinstance(node, dict):
+            if "$ref" in node and len(node) > 1:
+                return True
+            return any(_has_ref_sibling_keywords(value) for value in node.values())
+        if isinstance(node, list):
+            return any(_has_ref_sibling_keywords(value) for value in node)
+        return False
+
+    assert _has_ref_sibling_keywords(raw_schema) is False
+    assert "$ref" not in str(provider_model.model_json_schema())
+
+
+def test_appgenerator_app_plan_output_supports_provider_strict_response_format() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["AppPlanAgent"]
+    )
+
+    assert supported is True
+    assert offending_path is None
+
+
 def test_get_llm_for_workflow_keeps_response_format_for_app_schema_agent() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
@@ -127,7 +211,7 @@ def test_get_llm_for_workflow_keeps_response_format_for_app_schema_agent() -> No
     _structured_mod._workflow_structured_agents.clear()
 
     _, registry = _structured_mod.load_workflow_structured_outputs("AppGenerator")
-    expected_model = registry["AppSchemaAgent"]
+    expected_model = _structured_mod.get_provider_response_model(registry["AppSchemaAgent"])
     seen: dict[str, object] = {}
 
     async def _fake_get_llm_config(*, response_format=None, extra_config=None, cache=True):
@@ -160,7 +244,7 @@ def test_get_llm_for_workflow_keeps_response_format_for_strict_safe_models() -> 
     _structured_mod._workflow_structured_agents.clear()
 
     _, registry = _structured_mod.load_workflow_structured_outputs("AgentGenerator")
-    expected_model = registry["PatternAgent"]
+    expected_model = _structured_mod.get_provider_response_model(registry["PatternAgent"])
     seen: dict[str, object] = {}
 
     async def _fake_get_llm_config(*, response_format=None, extra_config=None, cache=True):
@@ -181,3 +265,28 @@ def test_get_llm_for_workflow_keeps_response_format_for_strict_safe_models() -> 
 
     assert seen["response_format"] is expected_model
     assert cfg["response_format"] is expected_model
+
+
+def test_runtime_task_batch_models_mark_declared_fields_as_required() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+
+    models, registry = _structured_mod.load_workflow_structured_outputs("RuntimeTaskBatchSmoke")
+
+    planner_output = _structured_mod.get_provider_response_model(registry["TaskPlannerAgent"])
+    planner_schema = planner_output.model_json_schema()
+    plan_schema = planner_schema["properties"]["RuntimeTaskBatchPlan"]
+    work_unit_schema = plan_schema["properties"]["work_units"]["items"]
+
+    assert planner_output.model_fields["agent_message"].is_required() is True
+    assert planner_output.model_fields["RuntimeTaskBatchPlan"].is_required() is True
+    assert _structured_mod.get_provider_response_model(models["RuntimeTaskBatchPlan"]).model_fields["user_intent"].is_required() is True
+    assert _structured_mod.get_provider_response_model(models["RuntimeTaskBatchWorkUnit"]).model_fields["task_id"].is_required() is True
+    assert _structured_mod.get_provider_response_model(models["RuntimeTaskBatchWorkUnit"]).model_fields["owned_paths"].is_required() is True
+    assert "default" not in plan_schema["properties"]["user_intent"]
+    assert "default" not in work_unit_schema["properties"]["task_id"]

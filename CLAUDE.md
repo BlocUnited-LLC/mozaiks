@@ -40,6 +40,7 @@ Canonical target:
 - shared generation core lives outside app workspaces
 - app workspaces keep app bundle files under `app/` and app-local workflows at
   the workspace root under `workflows/`
+- app-owned service implementations live at `app/services/`
 - hosted product workspaces should consume that same contract from their own repos
 
 Working modes:
@@ -153,13 +154,13 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | Shared/factory AI workflow logic | `factory_app/workflows/{name}/` |
 | App-local AI workflow logic | `workflows/{name}/` beside the active `app/` root |
 | Deterministic module (CRUD/actions) | `app/modules/{name}/` in an app workspace |
-| App-owned external client | `app/backend/integrations/{service}_client.py` in an app workspace |
-| App-owned provider adapter | `app/backend/adapters/{area}/{provider}.py` in an app workspace |
-| App-specific auth provider mechanic | `app/backend/adapters/auth/{provider}.py` in an app workspace |
-| Provider-neutral auth/secret helper | `app/backend/security/` in an app workspace |
-| App-specific secret manager adapter | `app/backend/adapters/secrets/{provider}.py` in an app workspace |
+| App-owned external client | `app/services/integrations/{service}_client.py` in an app workspace |
+| App-owned provider adapter | `app/services/adapters/{area}/{provider}.py` in an app workspace |
+| App-specific auth provider mechanic | `app/services/adapters/auth/{provider}.py` in an app workspace |
+| Provider-neutral auth/secret helper | `app/services/security/` in an app workspace |
+| App-specific secret manager adapter | `app/services/adapters/secrets/{provider}.py` in an app workspace |
 | Secret management contract, names only | `app/config/secrets.yaml` in an app workspace |
-| Shared persistence helper | `app/shared_persistence/` when declared by `app/config/shared_persistence.json` |
+| Data-contract helper | `app/services/data/` when declared by `app/config/data.json` |
 | Multi-module page | `app/ui/pages/{name}.yaml` in an app workspace |
 | Runtime infrastructure | `mozaiksai/core/` |
 | Framework backend adapter | `mozaiksai/core/adapters/` |
@@ -218,12 +219,12 @@ modules/{module_id}/
 
 ## Generated Persistence Contract
 
-Generated app persistence is currently expressed as staged intent artifacts:
+Generated app persistence is expressed as staged data-contract artifacts:
 
-- `database_intent_bundle` is the canonical machine-readable planning object.
-- `AppGenerator` writes it to `config/database_intent.json` when present.
+- `data_contract` is the canonical machine-readable planning object.
+- `AppGenerator` writes it to `config/data.json` when present.
 - additive refinement migrations are staged under
-  `config/database_migrations/{migration_id}.json`.
+  `config/data_migrations/{migration_id}.json`.
 - generated modules use `backend/schemas.py` for typed document/request shapes,
   `backend/repo.py` for persistence operations, and `backend/policy.py` for
   scoping helpers.
@@ -244,8 +245,7 @@ outputs into active runtime paths.
 Workflow resolution is single-root by default. A running host binds to one
 workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
 factory roots. Studio defaults to `factory_app/workflows/`; app/product hosts
-prefer the workspace root's `workflows/` and support prior
-`<active app root>/workflows/` only as a transition path.
+prefer the workspace root's `workflows/`.
 
 Use `MOZAIKS_GENERATED_ARTIFACTS_PATH`, defaulting to:
 
@@ -319,8 +319,8 @@ workflows/{WorkflowName}/
 ├── context_variables.yaml  # Shared workflow state
 ├── ui_config.yaml          # Frontend exposure metadata (visual_agents)
 ├── hooks.yaml              # Lifecycle hooks (optional)
-├── extended_orchestration/ # MFJ triggers and extensions (optional)
-│   └── mfj_extension.json
+├── extended_orchestration/ # Task batch contracts (optional)
+│   └── task_batches.yaml
 ├── tools/                  # Python tool implementations
 └── ui/{WorkflowName}/      # Workflow-specific UI components
 ```
@@ -455,3 +455,5 @@ When adding code, decide placement in this order:
 7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
 
 Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.
+
+

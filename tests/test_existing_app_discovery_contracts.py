@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import yaml
 
 WORKSPACE = Path(__file__).resolve().parents[1]
@@ -63,6 +65,7 @@ def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -
 
 def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> None:
     context_vars = _read_yaml("factory_app/workflows/ExistingAppDiscovery/context_variables.yaml")
+    hooks = _read_yaml("factory_app/workflows/ExistingAppDiscovery/hooks.yaml")
     agents = _read_text("factory_app/workflows/ExistingAppDiscovery/agents.yaml")
 
     definitions = context_vars["definitions"]
@@ -81,8 +84,22 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "capability_specs" in definitions
     assert "agent_augmentation_plan" in definitions
     assert "existing_app_discovery_artifact" in definitions
+    assert "context_graph_pack" in definitions
+    assert "context_graph_catalog" in definitions
+    assert "context_graph_status" in definitions
+    assert "context_graph_reason" in definitions
+    assert "context_graph_warnings" in definitions
+    assert "context_graph_health" in definitions
+    assert "app_context_graph" in definitions
     assert "adoption_level" in definitions
     assert "ecosystem_bindings" in definitions
+    assert any(
+        item.get("hook_type") == "update_agent_state"
+        and item.get("hook_agent") == "all"
+        and item.get("filename") == "../_shared/context_graph/hook_context_graph.py"
+        and item.get("function") == "inject_context_graph_context"
+        for item in hooks.get("hooks") or []
+    )
 
     assert "Embed" in agents
     assert "Bridge" in agents
@@ -346,6 +363,92 @@ def test_existing_app_preload_supports_workspace_app_preset() -> None:
     assert context["theme_capture_status"] == "ready"
     assert "Rajdhani" in context["theme_capture_summary"]
     assert context["theme_capture_evidence"]["appearance"] == "dark"
+
+
+def test_existing_app_preload_builds_context_graph_pack_for_local_repo(tmp_path: Path) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_context_graph_direct",
+    )
+
+    repo = tmp_path / "sample-existing-app"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "service.py").write_text(
+        "class TaskService:\n"
+        "    def list_tasks(self):\n"
+        "        return []\n",
+        encoding="utf-8",
+    )
+    (repo / "package.json").write_text(
+        '{"dependencies": {"react": "^18.0.0"}}',
+        encoding="utf-8",
+    )
+
+    context = _Context(
+        app_id="app_1",
+        repo_path=str(repo),
+        discovery_inputs={"repo_path": str(repo)},
+    )
+
+    result = asyncio.run(module.collect_prechat_discovery_context(context_variables=context))
+
+    assert result["success"] is True
+    assert result["context_graph_status"] == "loaded"
+    assert context["context_graph_status"] == "loaded"
+    assert context["context_graph_pack"]["source"] == "existing_app_discovery_preload"
+    assert context["context_graph_pack"]["pack_kind"] == "context_graph_prompt_pack"
+    assert context["context_graph_catalog"]["indexed_file_count"] >= 1
+    assert context["context_graph_health"]["selected_file_count"] >= 1
+    assert context["context_graph_pack"]["summary"]["scan"]["selected_file_count"] >= 1
+    assert "src/service.py" in context["context_graph_catalog"]["file_tree"]
+    assert "Context graph preload indexed" in context["preload_summary"]
+
+
+def test_existing_app_refresh_preloads_prior_context_graph_when_no_source_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module(
+        "factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py",
+        "tests.preload_discovery_context_graph_refresh",
+    )
+
+    from mozaiksai.control_plane import app_context as app_context_mod
+    from mozaiksai.core.app_context.context_graph import build_context_graph_from_file_map
+
+    graph = build_context_graph_from_file_map(
+        app_id="app_1",
+        artifact_version_id="av_graph_1",
+        artifact_kind="app_context_graph",
+        file_map={
+            "modules/tasks/backend/service.py": "def list_tasks():\n    return []\n",
+        },
+    )
+
+    async def _prior_graph(**kwargs):
+        assert kwargs["app_id"] == "app_1"
+        assert kwargs["context_version_id"] == "ctx_before_refresh"
+        return SimpleNamespace(graph=graph, warnings=[])
+
+    monkeypatch.setattr(app_context_mod, "get_app_context_graph_for_version", _prior_graph)
+    context = _Context(
+        app_id="app_1",
+        current_context_version_id="ctx_before_refresh",
+        context_refresh_request={
+            "app_id": "app_1",
+            "current_context_version_id": "ctx_before_refresh",
+            "reason": "Refresh repository snapshot.",
+        },
+        discovery_inputs={},
+    )
+
+    result = asyncio.run(module.collect_prechat_discovery_context(context_variables=context))
+
+    assert result["context_graph_status"] == "loaded"
+    assert context["context_graph_status"] == "loaded"
+    assert context["context_graph_reason"] == "context_refresh_prior_version"
+    assert context["context_graph_pack"]["source"] == "previous_app_context_graph"
+    assert context["context_graph_pack"]["reason"] == "context_refresh_prior_version"
+    assert context["context_graph_catalog"]["current_context_version_id"] == "ctx_before_refresh"
+    assert context["context_graph_health"]["source"] == "previous_app_context_graph"
+    assert "modules/tasks/backend/service.py" in context["context_graph_catalog"]["file_tree"]
 
 
 def test_existing_app_artifact_saver_persists_canonical_fields() -> None:

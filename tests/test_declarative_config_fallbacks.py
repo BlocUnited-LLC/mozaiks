@@ -5,11 +5,12 @@ from pathlib import Path
 import sys
 import types
 
+from mozaiksai.core.workflow.execution import hooks as _hooks_mod
 from tests.import_utils import import_module_directly
-
-_hooks_mod = import_module_directly("mozaiksai.core.workflow.execution.hooks")
 _tools_mod = import_module_directly("mozaiksai.core.workflow.agents.tools")
-_hook_code_context_mod = import_module_directly("factory_app.workflows.AppGenerator.tools.hook_code_context")
+_context_graph_hook_mod = import_module_directly(
+    "factory_app.workflows._shared.context_graph.hook_context_graph"
+)
 
 
 def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
@@ -49,7 +50,7 @@ def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
             {
                 "hooks": [
                     {
-                        "hook_type": "process_message_before_send",
+                        "hook_type": "update_agent_state",
                         "hook_agent": "Narrator",
                         "filename": "removed_only.py",
                         "function": "before_send",
@@ -168,45 +169,118 @@ def test_agent_tools_loader_rebinds_workflows_package_to_active_root(tmp_path: P
     assert result == {"ok": True, "source": "repo-local-helper"}
 
 
-def test_hooks_loader_resolves_appgenerator_code_context_hook_from_repo() -> None:
+def test_hooks_loader_resolves_shared_context_graph_hook_from_repo() -> None:
     workspace = Path(__file__).resolve().parents[1]
     workflows_root = workspace / "factory_app" / "workflows"
     workflow_path = workflows_root / "AppGenerator"
 
     fn, qualname = _hooks_mod._resolve_import(
         "AppGenerator",
-        "hook_code_context.py",
-        "inject_code_context",
+        "../_shared/context_graph/hook_context_graph.py",
+        "inject_context_graph_context",
         workflow_path,
     )
 
     assert callable(fn)
-    assert qualname.endswith("hook_code_context.py:inject_code_context")
+    assert qualname.endswith("hook_context_graph.py:inject_context_graph_context")
 
 
-def test_appgenerator_code_context_hook_uses_current_tool_contract(monkeypatch) -> None:
+def test_shared_context_graph_hook_injects_preloaded_graph_pack() -> None:
     captured: dict[str, str] = {}
-
-    def _fake_get_code_context_for_agent(*, app_id, workspace_id, agent_name, version_hash=None, max_tokens=None):
-        return {"success": True, "context": f"{agent_name}:{app_id}:{workspace_id}"}
-
-    monkeypatch.setattr(
-        _hook_code_context_mod,
-        "get_code_context_for_agent",
-        _fake_get_code_context_for_agent,
-    )
 
     class _Agent:
         name = "ServiceAgent"
         system_message = "Base prompt"
-        context_variables = {"app_id": "app_1", "workspace_id": "ws_1"}
+        context_variables = {
+            "context_graph_pack": {
+                "graph_id": "graph_1",
+                "stale_status": "current",
+                "candidate_files": [{"path": "modules/tasks/backend/service.py"}],
+                "matched_nodes": [{"node_id": "module:tasks", "node_type": "module", "label": "tasks"}],
+            }
+        }
 
         def update_system_message(self, message):
             captured["message"] = message
             self.system_message = message
 
     agent = _Agent()
-    _hook_code_context_mod.inject_code_context(agent, [])
+    _context_graph_hook_mod.inject_context_graph_context(agent, [])
 
-    assert "[CODE CONTEXT]" in captured["message"]
-    assert "ServiceAgent:app_1:ws_1" in captured["message"]
+    assert "[CONTEXT GRAPH]" in captured["message"]
+    assert "modules/tasks/backend/service.py" in captured["message"]
+
+
+def test_shared_context_graph_hook_injects_unavailable_status_pack() -> None:
+    captured: dict[str, str] = {}
+
+    class _Agent:
+        name = "ServiceAgent"
+        system_message = "Base prompt"
+        context_variables = {
+            "context_graph_pack": {
+                "pack_kind": "context_graph_prompt_pack",
+                "present": False,
+                "status": "unavailable",
+                "reason": "current_app_context_graph_unavailable",
+                "warnings": ["No current app context version is registered."],
+            }
+        }
+
+        def update_system_message(self, message):
+            captured["message"] = message
+            self.system_message = message
+
+    agent = _Agent()
+    _context_graph_hook_mod.inject_context_graph_context(agent, [])
+
+    assert "Status: unavailable" in captured["message"]
+    assert "Reason: current_app_context_graph_unavailable" in captured["message"]
+
+
+def test_shared_context_graph_hook_does_not_treat_catalog_as_prompt_pack() -> None:
+    captured: dict[str, str] = {}
+
+    class _Agent:
+        name = "ServiceAgent"
+        system_message = "Base prompt"
+        context_variables = {
+            "context_graph_catalog": {
+                "graph_id": "graph_1",
+                "candidate_files": [{"path": "modules/tasks/backend/service.py"}],
+            }
+        }
+
+        def update_system_message(self, message):
+            captured["message"] = message
+            self.system_message = message
+
+    agent = _Agent()
+    _context_graph_hook_mod.inject_context_graph_context(agent, [])
+
+    assert captured == {}
+    assert agent.system_message == "Base prompt"
+
+
+def test_shared_context_graph_hook_ignores_control_plane_scope_payload() -> None:
+    captured: dict[str, str] = {}
+
+    class _Agent:
+        name = "ServiceAgent"
+        system_message = "Base prompt"
+        context_variables = {
+            "context_graph_scope": {
+                "graph_id": "graph_1",
+                "selected_file_paths": ["modules/tasks/backend/service.py"],
+            }
+        }
+
+        def update_system_message(self, message):
+            captured["message"] = message
+            self.system_message = message
+
+    agent = _Agent()
+    _context_graph_hook_mod.inject_context_graph_context(agent, [])
+
+    assert captured == {}
+    assert agent.system_message == "Base prompt"

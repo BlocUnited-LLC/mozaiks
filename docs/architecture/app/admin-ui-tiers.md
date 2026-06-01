@@ -211,3 +211,5 @@ When in doubt, use Tier 1. Tier 2 is an explicit escape hatch, not the default.
 - Custom route drift guard: `factory_app/workflows/_shared/generated_ui_contract.py`
 - Canonical app structure: [`docs/architecture/app/canonical-app-structure.md`](canonical-app-structure.md)
 - AppGenerator output assembly: [`docs/architecture/builder/appgenerator-output-assembly-contract.md`](../builder/appgenerator-output-assembly-contract.md)
+
+

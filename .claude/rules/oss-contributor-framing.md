@@ -23,3 +23,4 @@ shell guidance.
 - When documenting local UI/dev setup in this repo, prefer the current repo truth:
   `web_shell/`, `scripts/run-studio.ps1`, `scripts/run-backend.ps1`, and
   `scripts/run-frontend.ps1` when those surfaces are the actual implementation.
+

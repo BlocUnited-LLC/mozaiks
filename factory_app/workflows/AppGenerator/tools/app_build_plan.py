@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Dict, List, Optional
@@ -18,12 +19,12 @@ _FRONTEND_JS_TS_SEGMENTS = (
     "/src/components/",
 )
 _OBSOLETE_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
-_APP_BACKEND_ADMIN_PATHS = {"backend/admin_config.py", "backend/routes/admin.py"}
-_INTEGRATIONS_PREFIX = "backend/integrations/"
-_ADAPTERS_PREFIX = "backend/adapters/"
+_APP_SERVICE_ADMIN_PATHS = {"services/admin_config.py", "services/routes/admin.py"}
+_INTEGRATIONS_PREFIX = "services/integrations/"
+_ADAPTERS_PREFIX = "services/adapters/"
 _CLIENT_SUFFIX = "_client.py"
 _ALLOWED_TASK_TYPES = {
-    "backend_foundation",
+    "service_foundation",
     "module_contract",
     "persistence_contract",
     "data_models",
@@ -35,21 +36,24 @@ _ALLOWED_TASK_TYPES = {
     "pack_overlay",
 }
 _CANONICAL_INITIAL_AGENTS = {
-    "backend_foundation": "ConfigMiddlewareAgent",
+    "service_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
     "persistence_contract": "DatabaseAgent",
+    "data_models": "ModelAgent",
+    "business_services": "ServiceAgent",
     "control_plane_pack": "ControlPlaneAgent",
     "pack_overlay": "ConfigMiddlewareAgent",
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
-    "external_integration": frozenset({"api_surface", "backend_foundation", "agent_backend_integration"}),
+    "external_integration": frozenset({"api_surface", "service_foundation", "agent_backend_integration"}),
     "control_plane": frozenset({"control_plane_pack"}),
     "ui_only": frozenset({"page_bundle"}),
     "framework_pack": frozenset({"pack_overlay"}),
 }
 _WORKFLOW_SURFACE_KIND = "workflow"
+_MODULE_LOCAL_TASK_TYPES = frozenset({"module_contract", "data_models", "business_services"})
 
 
 def _normalize_string_list(value: Any) -> List[str]:
@@ -73,6 +77,64 @@ def _normalize_object_list(value: Any) -> List[Dict[str, Any]]:
     return items
 
 
+def _normalize_context_variables(value: Any) -> Optional[Dict[str, Any]]:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return dict(value)
+    if not isinstance(value, list):
+        return None
+    normalized: Dict[str, Any] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        if not key:
+            continue
+        raw_value = item.get("value")
+        value_type = str(item.get("value_type") or "string").strip()
+        if value_type == "boolean":
+            normalized[key] = str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+        elif value_type == "integer":
+            try:
+                normalized[key] = int(str(raw_value).strip())
+            except ValueError:
+                normalized[key] = 0
+        elif value_type == "number":
+            try:
+                normalized[key] = float(str(raw_value).strip())
+            except ValueError:
+                normalized[key] = 0.0
+        elif value_type == "json":
+            try:
+                normalized[key] = json.loads(str(raw_value or "null"))
+            except json.JSONDecodeError:
+                normalized[key] = raw_value
+        elif value_type == "null":
+            normalized[key] = None
+        else:
+            normalized[key] = "" if raw_value is None else str(raw_value)
+    return normalized
+
+
+def _unwrap_app_build_plan_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if "app_kind" in payload:
+        return payload
+    for key in ("AppBuildPlan", "app_build_plan"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            unwrapped = _unwrap_app_build_plan_payload(value)
+            if "app_kind" in unwrapped:
+                return unwrapped
+    if len(payload) == 1:
+        value = next(iter(payload.values()))
+        if isinstance(value, dict):
+            unwrapped = _unwrap_app_build_plan_payload(value)
+            if "app_kind" in unwrapped:
+                return unwrapped
+    return payload
+
+
 def _task_sort_key(task: Dict[str, Any]) -> tuple[int, str]:
     task_id = str(task.get("task_id") or "")
     return (0 if task_id else 1, task_id)
@@ -80,7 +142,8 @@ def _task_sort_key(task: Dict[str, Any]) -> tuple[int, str]:
 
 def _infer_pack_id_from_integration_path(path: str) -> Optional[str]:
     """
-    Extract the hosted pack id from a backend/integrations/{pack_id}_client.py path.
+    Extract the hosted pack id from an app-bundle-relative
+    services/integrations/{pack_id}_client.py path.
 
     Returns the inferred pack_id string, or None if the path does not match
     the hosted adapter pattern.
@@ -117,6 +180,35 @@ def _normalized_owned_paths(task: Dict[str, Any]) -> List[str]:
     return paths
 
 
+def _infer_module_id_from_owned_paths(task: Dict[str, Any]) -> Optional[str]:
+    module_ids: set[str] = set()
+    for path in _normalized_owned_paths(task):
+        parts = PurePosixPath(path).parts
+        if len(parts) >= 2 and parts[0] == "modules" and parts[1]:
+            module_ids.add(parts[1])
+    if len(module_ids) == 1:
+        return next(iter(module_ids))
+    return None
+
+
+def _normalize_build_task_identity(task: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(task)
+    task_type = str(normalized.get("task_type") or "").strip()
+    if task_type in _MODULE_LOCAL_TASK_TYPES:
+        module_id = _infer_module_id_from_owned_paths(normalized)
+        if module_id:
+            declared_id = str(normalized.get("capability_pack_id") or "").strip()
+            if declared_id != module_id:
+                _logger.info(
+                    "Normalized build task %s capability_pack_id from %r to %r based on owned_paths",
+                    normalized.get("task_id") or "<unknown>",
+                    declared_id or None,
+                    module_id,
+                )
+                normalized["capability_pack_id"] = module_id
+    return normalized
+
+
 def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: frozenset[str] | None = None) -> None:
     hosted_pack_ids = hosted_pack_ids or frozenset()
     for task in build_tasks:
@@ -141,19 +233,22 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                 raise ValueError(
                     "Build task "
                     f"'{task_id}' owns '{hosted_module_prefix}' for hosted pack "
-                    f"'{normalized_capability_pack_id}'. Hosted pack adapters must live under backend/integrations/."
+                    f"'{normalized_capability_pack_id}'. Hosted pack adapters must use the app-bundle-relative "
+                    "services/integrations/ lane, which assembles under app/services/integrations/."
                 )
             if any(path.replace("\\", "/").startswith(_ADAPTERS_PREFIX) for path in owned_paths):
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' owns backend/adapters/ for hosted pack "
-                    f"'{normalized_capability_pack_id}'. Hosted pack adapters must be thin API clients under backend/integrations/."
+                    f"'{task_id}' owns services/adapters/ for hosted pack "
+                    f"'{normalized_capability_pack_id}'. Hosted pack adapters must be thin API clients under "
+                    "app-bundle-relative services/integrations/."
                 )
-            if task_type == "backend_foundation":
+            if task_type == "service_foundation":
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' uses backend_foundation for hosted pack "
-                    f"'{normalized_capability_pack_id}'. Hosted packs must use api_surface adapters under backend/integrations/."
+                    f"'{task_id}' uses service_foundation for hosted pack "
+                    f"'{normalized_capability_pack_id}'. Hosted packs must use api_surface adapters under "
+                    "app-bundle-relative services/integrations/."
                 )
             if task_type == "api_surface" and surface_kind_raw and surface_kind_raw != "external_integration":
                 raise ValueError(
@@ -187,10 +282,75 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                 "declarative page artifacts only."
             )
 
+        if task_type in _MODULE_LOCAL_TASK_TYPES:
+            if not normalized_capability_pack_id:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type '{task_type}' but capability_pack_id is null. "
+                    "Module-local tasks must identify the generated module folder."
+                )
+            module_prefix = f"modules/{normalized_capability_pack_id}/"
+            invalid_module_paths = [
+                path
+                for path in owned_paths
+                if not path.replace("\\", "/").startswith(module_prefix)
+            ]
+            if invalid_module_paths:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' owns paths outside module '{normalized_capability_pack_id}': "
+                    f"{invalid_module_paths}."
+                )
+
+            backend_paths = [
+                path
+                for path in owned_paths
+                if "/backend/" in path.replace("\\", "/")
+            ]
+            if task_type == "module_contract" and backend_paths:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' mixes module contract YAML with backend Python files: "
+                    f"{backend_paths}. `module_contract` tasks must emit module.yaml, contracts/*, "
+                    "and optional runtime_extensions.yaml only. Use `data_models` and "
+                    "`business_services` tasks for backend Python."
+                )
+
+            if task_type == "data_models":
+                expected = f"{module_prefix}backend/schemas.py"
+                invalid = [
+                    path
+                    for path in owned_paths
+                    if path.replace("\\", "/") != expected
+                ]
+                if invalid:
+                    raise ValueError(
+                        "Build task "
+                        f"'{task_id}' uses task_type 'data_models' but owns non-schema paths: "
+                        f"{invalid}. `data_models` tasks may only own {expected}."
+                    )
+
+            if task_type == "business_services":
+                schemas_path = f"{module_prefix}backend/schemas.py"
+                invalid = [
+                    path
+                    for path in owned_paths
+                    if not path.replace("\\", "/").startswith(f"{module_prefix}backend/")
+                    or path.replace("\\", "/") == schemas_path
+                ]
+                if invalid:
+                    raise ValueError(
+                        "Build task "
+                        f"'{task_id}' uses task_type 'business_services' but owns invalid "
+                        f"backend paths: {invalid}. `business_services` tasks own handler.py, "
+                        "service.py, repo.py, policy.py, and declared hooks; schemas.py belongs "
+                        "to the `data_models` task."
+                    )
+
         # Hosted-pack adapter tasks must declare capability_pack_id so that template
         # expansion (resolve_hosted_pack_templates) can locate the correct pack template.
         # This check fires only when the path pattern matches a known hosted pack
-        # (e.g. backend/integrations/mozaikspay_client.py → inferred pack id "mozaikspay").
+        # (e.g. services/integrations/mozaikspay_client.py -> inferred pack id "mozaikspay").
         if (
             task_type == "api_surface"
             and surface_kind_raw == "external_integration"
@@ -222,7 +382,7 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                 "Build task "
                 f"'{task_id}' uses obsolete task_type 'admin_config'. "
                 "Admin bootstrap lives in app/app.json admins; use module_contract for feature panels "
-                "and api_surface for split app-backend admin APIs."
+                "and api_surface for split service admin APIs."
             )
 
         if _OBSOLETE_HOST_ADMIN_CONFIG_PATH in owned_paths:
@@ -232,18 +392,18 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                 "Admin bootstrap lives in app/app.json admins; do not generate app/config/admin.json."
             )
 
-        has_app_backend_admin_path = bool(_APP_BACKEND_ADMIN_PATHS.intersection(owned_paths))
-        if has_app_backend_admin_path:
+        has_app_service_admin_path = bool(_APP_SERVICE_ADMIN_PATHS.intersection(owned_paths))
+        if has_app_service_admin_path:
             if task_type != "api_surface":
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' owns split app-backend admin files but uses task_type '{task_type}'. "
-                    "Use the explicit api_surface task for backend/admin_config.py + backend/routes/admin.py."
+                    f"'{task_id}' owns split service admin files but uses task_type '{task_type}'. "
+                    "Use the explicit api_surface task for services/admin_config.py + services/routes/admin.py."
                 )
             if initial_agent != "ControllerAgent":
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' assigns split app-backend admin files to {initial_agent}. "
+                    f"'{task_id}' assigns split service admin files to {initial_agent}. "
                     "`api_surface` must start at ControllerAgent."
                 )
             if capability_pack_id is not None:
@@ -251,10 +411,10 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                     "Build task "
                     f"'{task_id}' must keep capability_pack_id null for app-level split admin APIs."
                 )
-            if _APP_BACKEND_ADMIN_PATHS.difference(owned_paths):
+            if _APP_SERVICE_ADMIN_PATHS.difference(owned_paths):
                 raise ValueError(
                     "Build task "
-                    f"'{task_id}' must own both backend/admin_config.py and backend/routes/admin.py together."
+                    f"'{task_id}' must own both services/admin_config.py and services/routes/admin.py together."
                 )
 
         if task_type == "pack_overlay" and not normalized_capability_pack_id:
@@ -430,10 +590,6 @@ def app_build_plan(
         Optional[Dict[str, Any]],
         Field(description="Canonical app build plan emitted by AppPlanAgent."),
     ],
-    workflows: Annotated[
-        Optional[List[Dict[str, Any]]],
-        Field(description="Optional child workflow specs emitted alongside the build plan."),
-    ] = None,
     context_variables: Annotated[
         Optional[Any],
         Field(description="AG2-injected workflow context variables."),
@@ -441,6 +597,11 @@ def app_build_plan(
 ) -> str:
     if not AppBuildPlan or not isinstance(AppBuildPlan, dict):
         raise ValueError("AppBuildPlan payload is required and must be a dictionary")
+    AppBuildPlan = _unwrap_app_build_plan_payload(AppBuildPlan)
+    if "app_kind" not in AppBuildPlan and context_variables and hasattr(context_variables, "get"):
+        existing_plan = context_variables.get("app_build_plan")
+        if isinstance(existing_plan, dict):
+            AppBuildPlan = _unwrap_app_build_plan_payload(existing_plan)
 
     agent_message = str(AppBuildPlan.get("agent_message") or "").strip()
     app_kind = str(AppBuildPlan.get("app_kind") or "").strip()
@@ -448,14 +609,20 @@ def app_build_plan(
     entities = _normalize_object_list(AppBuildPlan.get("entities"))
     roles = _normalize_string_list(AppBuildPlan.get("roles"))
     auth_strategy = AppBuildPlan.get("auth_strategy")
-    backend_scope = _normalize_string_list(AppBuildPlan.get("backend_scope"))
+    service_scope = _normalize_string_list(AppBuildPlan.get("service_scope"))
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")
     brand_intent = AppBuildPlan.get("brand_intent")
     capability_packs = _normalize_object_list(AppBuildPlan.get("capability_packs"))
     external_integrations = _normalize_object_list(AppBuildPlan.get("external_integrations"))
-    build_tasks = sorted(_normalize_object_list(AppBuildPlan.get("build_tasks")), key=_task_sort_key)
-    database_intent_bundle = AppBuildPlan.get("database_intent_bundle")
+    build_tasks = sorted(
+        [
+            _normalize_build_task_identity(task)
+            for task in _normalize_object_list(AppBuildPlan.get("build_tasks"))
+        ],
+        key=_task_sort_key,
+    )
+    data_contract = AppBuildPlan.get("data_contract")
     pending_schema_migration = AppBuildPlan.get("pending_schema_migration")
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
     agent_backend_required = bool(AppBuildPlan.get("agent_backend_required", False))
@@ -480,55 +647,24 @@ def app_build_plan(
     if not pages:
         raise ValueError("AppBuildPlan.pages must contain at least one page")
 
-    child_workflows: List[Dict[str, Any]] = []
-    if workflows:
-        appgenerator_workflows = [w for w in workflows if w.get("name") == "AppGenerator"]
-        appgenerator_task_ids = {str(t.get("task_id")) for t in build_tasks}
-        covered_task_ids = {
-            str(w.get("context_variables", {}).get("current_build_task_id"))
-            for w in appgenerator_workflows
+    task_batch_items: List[Dict[str, Any]] = []
+    normalized_build_tasks: List[Dict[str, Any]] = []
+    for task in build_tasks:
+        normalized_task = dict(task)
+        normalized_context = _normalize_context_variables(normalized_task.get("context_variables"))
+        if normalized_context is not None:
+            normalized_task["context_variables"] = normalized_context
+        task_id = str(normalized_task.get("task_id") or "").strip()
+        task_type = str(normalized_task.get("task_type") or "").strip()
+        item = {
+            **normalized_task,
+            "task_run_mode": True,
+            "current_build_task_id": task_id,
+            "current_build_task_type": task_type,
+            "current_build_task": dict(normalized_task),
         }
-
-        uncovered = appgenerator_task_ids - covered_task_ids
-        if uncovered:
-            raise ValueError(
-                f"Child workflows must cover every AppGenerator build task. "
-                f"Missing coverage for: {sorted(uncovered)}. "
-                "Each AppGenerator build task must have a matching child workflow."
-            )
-
-        task_by_id = {str(t.get("task_id")): t for t in build_tasks}
-
-        for workflow in appgenerator_workflows:
-            ctx = dict(workflow.get("context_variables") or {})
-            child_task_id = str(ctx.get("current_build_task_id") or "")
-            child_task_type = str(ctx.get("current_build_task_type") or "")
-            child_initial_agent = str(workflow.get("initial_agent") or "")
-
-            canonical_task = task_by_id.get(child_task_id)
-            if canonical_task:
-                expected_task_type = str(canonical_task.get("task_type") or "")
-                if child_task_type and expected_task_type and child_task_type != expected_task_type:
-                    raise ValueError(
-                        f"Child workflow for task '{child_task_id}' declares "
-                        f"current_build_task_type='{child_task_type}' but the build plan "
-                        f"task has task_type='{expected_task_type}'. These must match."
-                    )
-
-                expected_agent = _CANONICAL_INITIAL_AGENTS.get(expected_task_type or child_task_type)
-                if expected_agent and child_initial_agent != expected_agent:
-                    raise ValueError(
-                        f"Child workflow for task '{child_task_id}' (task_type='{expected_task_type or child_task_type}') "
-                        f"starts at '{expected_agent}', not '{child_initial_agent}'. "
-                        f"task_type='{expected_task_type or child_task_type}' must use '{expected_agent}'."
-                    )
-
-                hydrated_task = dict(canonical_task)
-                ctx["current_build_task"] = hydrated_task
-
-            hydrated_workflow = dict(workflow)
-            hydrated_workflow["context_variables"] = ctx
-            child_workflows.append(hydrated_workflow)
+        task_batch_items.append(item)
+        normalized_build_tasks.append(normalized_task)
 
     normalized_plan = {
         "agent_message": agent_message or "App build plan cached successfully.",
@@ -537,15 +673,15 @@ def app_build_plan(
         "entities": entities,
         "roles": roles,
         "auth_strategy": auth_strategy,
-        "backend_scope": backend_scope,
+        "service_scope": service_scope,
         "frontend_scope": frontend_scope,
         "theme_preferences": theme_preferences,
         "brand_intent": brand_intent if isinstance(brand_intent, dict) else None,
         "capability_packs": capability_packs,
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,
-        "build_tasks": build_tasks,
-        "database_intent_bundle": database_intent_bundle if isinstance(database_intent_bundle, dict) else None,
+        "build_tasks": normalized_build_tasks,
+        "data_contract": data_contract if isinstance(data_contract, dict) else None,
         "pending_schema_migration": pending_schema_migration if isinstance(pending_schema_migration, dict) else None,
         "generation_order": generation_order,
         "carry_forward_decisions": carry_forward_decisions,
@@ -555,17 +691,17 @@ def app_build_plan(
         try:
             context_variables.set("app_build_plan", normalized_plan)
             context_variables.set("app_plan_ready", True)
-            if child_workflows:
-                context_variables.set("app_child_workflows", child_workflows)
+            context_variables.set("app_task_batch_items", task_batch_items)
+            context_variables.set("app_task_batch_status", "planned")
             _logger.info(
-                "Cached AppBuildPlan: kind=%s pages=%d entities=%d packs=%d build_tasks=%d integrations=%d child_workflows=%d",
+                "Cached AppBuildPlan: kind=%s pages=%d entities=%d packs=%d build_tasks=%d integrations=%d batch_items=%d",
                 app_kind,
                 len(pages),
                 len(entities),
                 len(capability_packs),
                 len(build_tasks),
                 len(external_integrations),
-                len(child_workflows),
+                len(task_batch_items),
             )
         except Exception as exc:
             _logger.error("Failed to cache AppBuildPlan: %s", exc)
@@ -573,7 +709,6 @@ def app_build_plan(
     else:
         _logger.warning("context_variables not available or missing 'set' method")
 
-    child_workflows_line = f"\nChild workflows: {len(child_workflows)}" if child_workflows else ""
     return (
         f"{normalized_plan['agent_message']}\n\n"
         f"App kind: {app_kind}\n"
@@ -581,10 +716,10 @@ def app_build_plan(
         f"Entities: {len(entities)}\n"
         f"Capability packs: {len(capability_packs)}\n"
         f"Build tasks: {len(build_tasks)}\n"
+        f"Task batch items: {len(task_batch_items)}\n"
         f"Roles: {len(roles)}\n"
         f"Agent backend required: {agent_backend_required}\n"
         f"Integrations: {len(external_integrations)}"
-        f"{child_workflows_line}"
     )
 
 

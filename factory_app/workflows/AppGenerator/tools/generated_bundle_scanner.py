@@ -4,7 +4,7 @@ Checks that the generated app does not:
 
 - Directly import or call the Stripe SDK.
   Generated apps must use the hosted MozaiksPay adapter
-  (backend/integrations/mozaikspay_client.py), not Stripe directly.
+  (services/integrations/mozaikspay_client.py), not Stripe directly.
 
 - Reference the Stripe Refunds API (/v1/refunds) in any file.
   Refund execution is hosted-platform-only; generated apps must not
@@ -113,7 +113,7 @@ def scan_generated_bundle(files_map: Dict[str, str]) -> List[str]:
                 f"{path}: imports the Stripe SDK directly "
                 "('import stripe' or 'from stripe ...'). Generated apps must "
                 "call payment services via the hosted MozaiksPay adapter "
-                "(backend/integrations/mozaikspay_client.py), not Stripe."
+                "(services/integrations/mozaikspay_client.py), not Stripe."
             )
 
         if _STRIPE_API_KEY_RE.search(content):

@@ -11,7 +11,7 @@ def _read(rel_path: str) -> str:
 
 def test_agentgenerator_context_prompt_does_not_emit_kg_fields() -> None:
     agents = _read("factory_app/workflows/AgentGenerator/agents.yaml")
-    section = agents.split("- name: ContextVariablesAgent", 1)[1].split("- name:", 1)[0]
+    section = agents.split("- name: WorkflowBundleBuilderAgent", 1)[1].split("- name:", 1)[0]
     lowered = section.lower()
 
     assert "falkordb" not in lowered
@@ -66,26 +66,13 @@ def test_falkordb_is_not_a_declared_dependency() -> None:
     assert failures == []
 
 
-def test_falkor_graph_module_is_quarantined_if_present() -> None:
-    graph_file = ROOT / "factory_app/workflows/AppGenerator/tools/code_context/graph.py"
-    assert graph_file.exists()
-
-    text = graph_file.read_text(encoding="utf-8").lower()
-    assert "quarantined prototype" in text
-    assert "future optional read-only falkordb" in text
-    assert "not imported by" in text
-    assert "not a source of truth" in text
+def test_appgenerator_local_code_context_subsystem_was_removed() -> None:
+    assert not (ROOT / "factory_app/workflows/AppGenerator/tools/code_context").exists()
+    assert not (ROOT / "factory_app/workflows/AppGenerator/tools/hook_code_context.py").exists()
 
 
 def test_runtime_paths_do_not_import_falkordb() -> None:
     paths = list((ROOT / "mozaiksai").rglob("*.py"))
-    paths.extend(
-        [
-            ROOT / "factory_app/workflows/AppGenerator/tools/code_context/startup.py",
-            ROOT / "factory_app/workflows/AppGenerator/tools/code_context/tools.py",
-            ROOT / "factory_app/workflows/AppGenerator/tools/hook_code_context.py",
-        ]
-    )
 
     failures: list[str] = []
     for path in paths:
@@ -108,10 +95,10 @@ def test_graph_authority_doc_declares_matrix_and_kg_boundaries() -> None:
     assert "control-plane refinement impact graph" in lowered
     assert "module event/reaction/notification graph" in lowered
     assert "ui route/component graph" in lowered
-    assert "code context graph" in lowered
+    assert "context graph intelligence layer" in lowered
     assert "integration readiness graph" in lowered
-    assert "optional derived mirror" in lowered
-    assert "best future mirror candidate" in lowered
+    assert "primary intelligence layer" in lowered
+    assert "optional backend mirror" in lowered
 
     forbidden_runtime_authorities = [
         "request routing",

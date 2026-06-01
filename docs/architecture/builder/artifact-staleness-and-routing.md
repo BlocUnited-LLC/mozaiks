@@ -26,7 +26,7 @@ ValueEngine → ConceptBlueprint (typed)
 ThemeCapture → CapturedThemeConfig (typed)
     ↓  theme.variant / appearance → experience_spec.brand_direction
     ↓  identity.tagline           → brand posture
-DesignDocs → ExperienceSpec + surface_map + database_intent_bundle (typed)
+DesignDocs → ExperienceSpec + surface_map + data_contract (typed)
     ↓  experience_spec.pages[]   → AppPlanAgent page list (authoritative)
     ↓  surface_map               → AppGenerator module generation
 AgentGenerator → workflow_bundle
@@ -294,3 +294,5 @@ created during an in-flight revision are never included.
 - Tests for BFS propagation: `tests/test_control_plane_invalidation.py`
 - Tests for staleness query: `tests/test_artifact_store.py`
 - Tests for deterministic stale routing: `tests/test_refinement_router.py`
+
+

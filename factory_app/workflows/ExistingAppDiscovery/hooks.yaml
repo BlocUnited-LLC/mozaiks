@@ -1,2 +1,6 @@
 # ExistingAppDiscovery Hooks
-hooks: []
+hooks:
+- hook_type: update_agent_state
+  hook_agent: all
+  filename: ../_shared/context_graph/hook_context_graph.py
+  function: inject_context_graph_context

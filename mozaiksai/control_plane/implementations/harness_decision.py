@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from mozaiksai.control_plane.contracts import HarnessDecision, HarnessDecisionAction, ScopeProposal
+from mozaiksai.control_plane.contracts import ContractSurfacePlan, HarnessDecision, HarnessDecisionAction, ScopeProposal
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 
 from .refinement_router import ChangeClass, RefinementRoutingDecision
@@ -283,6 +283,83 @@ class FirstPartyHarnessDecisionPolicy:
                 )
             ],
             metadata={"scope_origin": "applied"},
+        )
+
+    def for_contract_surface_plan(
+        self,
+        *,
+        routing_decision: RefinementRoutingDecision,
+        plan: ContractSurfacePlan,
+    ) -> HarnessDecision:
+        """Shape the decision for a contract surface planning result.
+
+        If the plan identifies specific surfaces and confidence is sufficient,
+        returns a targeted_regeneration decision with the surface plan in
+        metadata. Otherwise falls back to workflow_reentry.
+        """
+        workflow_id = routing_decision.workflow_id
+        confidence = float(plan.confidence)
+        rationale = str(routing_decision.change_intent.rationale or "").strip()
+
+        if plan.fallback_to_workflow or not plan.surfaces:
+            return HarnessDecision(
+                decision_type="workflow_reentry",
+                message=f"Change scope is too broad for targeted regeneration. Recommended route: {workflow_id}.",
+                rationale=plan.fallback_reason or rationale or "falling back to workflow route",
+                confidence=confidence,
+                recommended_workflow_id=workflow_id,
+                requires_confirmation=False,
+                actions=[
+                    HarnessDecisionAction(
+                        action_id="run_recommended_workflow",
+                        label=f"Continue in {workflow_id}",
+                        action_type="run_workflow",
+                        workflow_id=workflow_id,
+                    )
+                ],
+                metadata={
+                    "change_class": routing_decision.change_intent.change_class.value,
+                    "workflow_sequence": routing_decision.workflow_sequence,
+                    "contract_surface_fallback": True,
+                    "fallback_reason": plan.fallback_reason,
+                },
+            )
+
+        surface_labels = [
+            f"{s.kind} ({s.target_id})" for s in plan.surfaces
+        ]
+        return HarnessDecision(
+            decision_type="targeted_regeneration",
+            message=plan.summary,
+            rationale=rationale or f"Targeted update across {len(plan.surfaces)} contract surface(s).",
+            confidence=confidence,
+            recommended_workflow_id=workflow_id,
+            requires_confirmation=False,
+            actions=[
+                HarnessDecisionAction(
+                    action_id="review_surface_plan",
+                    label="Review surface plan",
+                    action_type="review_surface",
+                    workflow_id=workflow_id,
+                    metadata={
+                        "surface_count": len(plan.surfaces),
+                        "surfaces": surface_labels,
+                    },
+                ),
+                HarnessDecisionAction(
+                    action_id="apply_surface_plan",
+                    label="Apply targeted update",
+                    action_type="run_workflow",
+                    workflow_id=workflow_id,
+                ),
+            ],
+            metadata={
+                "change_class": routing_decision.change_intent.change_class.value,
+                "workflow_sequence": routing_decision.workflow_sequence,
+                "contract_surface_plan": plan.model_dump(mode="python"),
+                "surface_labels": surface_labels,
+                "requires_schema_migration": plan.requires_schema_migration,
+            },
         )
 
     @staticmethod

@@ -1,4 +1,4 @@
-"""AppGenerator integration readiness fan-in tool."""
+"""AppGenerator integration readiness checkpoint tool."""
 
 from __future__ import annotations
 

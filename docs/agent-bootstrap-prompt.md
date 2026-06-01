@@ -12,7 +12,7 @@ Treat these as canonical:
 - Hosts: mozaiksai/hosts/runtime.py, mozaiksai/hosts/platform.py,
   mozaiksai/hosts/studio.py
 - Shared builder workflows: factory_app/workflows/
-- App-owned workflows: app/workflows/ under the active app root
+- App-owned workflows: workflows/ under the active app root
 - First-party Studio app bundle: factory_app/app/
 - Generated artifacts: generated/
 
@@ -46,3 +46,5 @@ This is the right starting point when the task touches:
 ## Related
 
 - [Architecture Overview](architecture/index.md)
+
+

@@ -29,9 +29,9 @@ from pydantic import ValidationError
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from mozaiksai.core.runtime.persistence.intent_loader import (
-    DatabaseIntentLoadError,
-    index_database_intent_by_entity,
-    load_database_intent,
+    DataContractLoadError,
+    index_data_contract_by_entity,
+    load_data_contract,
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from logs.logging_config import get_workflow_logger
@@ -53,8 +53,8 @@ class AppLoadResult:
     """
     definition: AppDefinition
     modules: List[LoadedModule] = field(default_factory=list)
-    database_intent: Dict[str, Any] | None = None
-    database_entities_by_key: Dict[tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
+    data_contract: Dict[str, Any] | None = None
+    data_entities_by_key: Dict[tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
 
 
 class AppLoader:
@@ -115,10 +115,10 @@ class AppLoader:
             raise AppLoadError(f"Invalid app.json/discovered bundle: {exc}") from exc
 
         try:
-            database_intent = load_database_intent(base_path)
-            database_entities_by_key = index_database_intent_by_entity(database_intent)
-        except DatabaseIntentLoadError as exc:
-            raise AppLoadError(f"Invalid config/database_intent.json: {exc}") from exc
+            data_contract = load_data_contract(base_path)
+            data_entities_by_key = index_data_contract_by_entity(data_contract)
+        except DataContractLoadError as exc:
+            raise AppLoadError(f"Invalid config/data.json: {exc}") from exc
 
         logger.info(
             f"APP_LOADED: name={app_def.name!r} version={app_def.version!r} "
@@ -137,8 +137,8 @@ class AppLoader:
         return AppLoadResult(
             definition=app_def,
             modules=loaded_modules,
-            database_intent=database_intent,
-            database_entities_by_key=database_entities_by_key,
+            data_contract=data_contract,
+            data_entities_by_key=data_entities_by_key,
         )
 
     @classmethod

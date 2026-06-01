@@ -1,27 +1,23 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import pytest
 
-from tests.import_utils import import_module_directly
-
-
-_handler_mod = import_module_directly("mozaiksai.core.workflow.stream.handlers.mozaiks_event_handler")
-_events_mod = import_module_directly("mozaiksai.core.events.ag2_events")
-
-
-MozaiksaiEventHandler = _handler_mod.MozaiksaiEventHandler
-StructuredOutputEvent = _events_mod.StructuredOutputEvent
-ArtifactReadyEvent = _events_mod.ArtifactReadyEvent
-DecompositionPlannedEvent = _events_mod.DecompositionPlannedEvent
-HandoffRequestedEvent = _events_mod.HandoffRequestedEvent
-
-
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(chat_id="chat-1", workflow_name="AppGenerator")
+from mozaiksai.core.events.ag2_events import (
+    ArtifactReadyEvent,
+    HandoffRequestedEvent,
+    StructuredOutputEvent,
+)
+from mozaiksai.core.events.runtime_events import (
+    RUNTIME_AGENT_OUTPUT_VALIDATED,
+    build_artifact_lifecycle_event,
+    build_runtime_agent_output_validated_event,
+)
+from mozaiksai.core.transport.simple_transport import SimpleTransport
+from mozaiksai.core.workflow.task_batches import _emit_task_batch_activity
 
 
-def test_build_ui_payload_converts_structured_output_into_activity() -> None:
-    handler = MozaiksaiEventHandler()
+def test_transport_serializes_mozaiks_ag2_events_without_pydantic_internals() -> None:
+    transport = SimpleTransport()
     event = StructuredOutputEvent(
         agent_name="AppPlanAgent",
         chat_id="chat-1",
@@ -30,93 +26,110 @@ def test_build_ui_payload_converts_structured_output_into_activity() -> None:
         validation_passed=True,
     )
 
-    payload = handler._build_ui_payload(event, _ctx())
+    payload = transport._serialize_ag2_events(event)
 
     assert payload == {
-        "kind": "activity",
-        "activity_type": "structured_output",
-        "status": "validated",
-        "agent": "AppPlanAgent",
-        "message": "AppPlanAgent produced validated AppPlan.",
-        "chat_id": "chat-1",
-        "workflow_name": "AppGenerator",
-        "metadata": {
+        "type": "structured_output",
+        "content": {
+            "uuid": payload["content"]["uuid"],
+            "agent_name": "AppPlanAgent",
+            "chat_id": "chat-1",
             "output_type": "AppPlan",
+            "output_data": {"summary": "done"},
             "validation_passed": True,
         },
     }
+    assert isinstance(payload["content"]["uuid"], str)
+    assert "model_fields" not in payload
+    assert "model_fields" not in payload["content"]
 
 
-def test_build_ui_payload_converts_artifact_ready_into_activity() -> None:
-    handler = MozaiksaiEventHandler()
-    event = ArtifactReadyEvent(
+def test_transport_serializes_artifact_and_handoff_events() -> None:
+    transport = SimpleTransport()
+
+    artifact = transport._serialize_ag2_events(
+        ArtifactReadyEvent(
+            artifact_id="artifact-1",
+            artifact_type="app_bundle",
+            chat_id="chat-1",
+            workflow_name="AppGenerator",
+            artifact_version_id="version-1",
+        )
+    )
+    handoff = transport._serialize_ag2_events(
+        HandoffRequestedEvent(
+            from_agent="WorkflowStrategyAgent",
+            to_agent="AppPlanAgent",
+            reason="Need concrete app plan",
+            chat_id="chat-1",
+            context_snapshot={},
+        )
+    )
+
+    assert artifact["type"] == "artifact_ready"
+    assert artifact["content"]["artifact_id"] == "artifact-1"
+    assert artifact["content"]["workflow_name"] == "AppGenerator"
+    assert handoff["type"] == "handoff_requested"
+    assert handoff["content"]["from_agent"] == "WorkflowStrategyAgent"
+    assert handoff["content"]["to_agent"] == "AppPlanAgent"
+
+
+def test_runtime_event_builders_emit_canonical_payloads() -> None:
+    output = build_runtime_agent_output_validated_event(
+        agent="AppPlanAgent",
+        model_name="AppBuildPlanOutput",
+        structured_data={"AppBuildPlan": {"app_name": "Support Operations"}},
+        auto_tool_call=True,
+        context={"chat_id": "chat-1", "workflow_name": "AppGenerator"},
+    )
+    artifact = build_artifact_lifecycle_event(
+        event_type="artifact.ready",
         artifact_id="artifact-1",
-        artifact_type="app_bundle",
+        artifact_kind="app_bundle",
         chat_id="chat-1",
         workflow_name="AppGenerator",
         artifact_version_id="version-1",
     )
 
-    payload = handler._build_ui_payload(event, _ctx())
+    assert output["kind"] == RUNTIME_AGENT_OUTPUT_VALIDATED
+    assert output["agent"] == "AppPlanAgent"
+    assert output["auto_tool_call"] is True
+    assert output["structured_data"]["AppBuildPlan"]["app_name"] == "Support Operations"
+    assert artifact["kind"] == "artifact.ready"
+    assert artifact["artifact_type"] == "app_bundle"
+    assert artifact["artifact_version_id"] == "version-1"
 
-    assert payload == {
-        "kind": "activity",
-        "activity_type": "artifact_ready",
-        "status": "ready",
-        "agent": None,
-        "message": "App Bundle ready.",
-        "chat_id": "chat-1",
-        "workflow_name": "AppGenerator",
-        "metadata": {
-            "artifact_type": "app_bundle",
-            "artifact_id": "artifact-1",
-            "artifact_version_id": "version-1",
+
+@pytest.mark.asyncio
+async def test_task_batch_activity_emits_direct_activity_payload() -> None:
+    class _Transport:
+        def __init__(self) -> None:
+            self.events: list[tuple[dict, str]] = []
+
+        async def send_event_to_ui(self, payload: dict, chat_id: str) -> None:
+            self.events.append((payload, chat_id))
+
+    transport = _Transport()
+
+    await _emit_task_batch_activity(
+        transport,
+        "chat-1",
+        {
+            "phase": "started",
+            "batch_id": "app_build_tasks",
+            "task_count": 4,
         },
-    }
-
-
-def test_build_ui_payload_converts_decomposition_and_handoff_into_activity() -> None:
-    handler = MozaiksaiEventHandler()
-    decomposition = DecompositionPlannedEvent(
-        agent_name="WorkflowStrategyAgent",
-        chat_id="chat-1",
-        workflow_name="AppGenerator",
-        model_name="WorkflowPlan",
-        structured_data={"workflows": [{"name": "One"}, {"name": "Two"}]},
-        context={},
-    )
-    handoff = HandoffRequestedEvent(
-        from_agent="WorkflowStrategyAgent",
-        to_agent="AppPlanAgent",
-        reason="Need concrete app plan",
-        chat_id="chat-1",
-        context_snapshot={},
     )
 
-    decomposition_payload = handler._build_ui_payload(decomposition, _ctx())
-    handoff_payload = handler._build_ui_payload(handoff, _ctx())
-
-    assert decomposition_payload == {
-        "kind": "activity",
-        "activity_type": "decomposition_planned",
-        "status": "planned",
-        "agent": "WorkflowStrategyAgent",
-        "message": "WorkflowStrategyAgent planned 2 child workflows.",
-        "chat_id": "chat-1",
-        "workflow_name": "AppGenerator",
-        "metadata": {"workflow_count": 2},
-    }
-    assert handoff_payload == {
-        "kind": "activity",
-        "activity_type": "handoff_requested",
-        "status": "handoff",
-        "agent": "WorkflowStrategyAgent",
-        "message": "Handoff: WorkflowStrategyAgent to AppPlanAgent.",
-        "chat_id": "chat-1",
-        "workflow_name": "AppGenerator",
-        "metadata": {
-            "from_agent": "WorkflowStrategyAgent",
-            "to_agent": "AppPlanAgent",
-            "reason": "Need concrete app plan",
-        },
-    }
+    assert transport.events == [
+        (
+            {
+                "kind": "activity",
+                "activity_type": "task_batch",
+                "phase": "started",
+                "batch_id": "app_build_tasks",
+                "task_count": 4,
+            },
+            "chat-1",
+        )
+    ]

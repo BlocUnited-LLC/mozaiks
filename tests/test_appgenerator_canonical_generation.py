@@ -734,9 +734,9 @@ class TestAssemblyFixture:
         )
         filenames = {f["filename"] for f in result["code_files"]}
 
-        # Confirm drift patterns are present (so the absence checks above are meaningful)
-        assert "modules/drift_module/events.yaml" in filenames
-        assert "modules/drift_module/reactions.yaml" in filenames
+        # Confirm drift patterns are present (so the absence checks above are meaningful).
+        # Note: flat events.yaml / reactions.yaml are normalized to contracts/ by the
+        # runtime extractor — they are not drift signals. Remaining drift signals:
         assert "modules/drift_module/states.yaml" in filenames
         assert "modules/drift_module/backend/models.py" in filenames
         assert "app/capability_packs/config.yaml" in filenames

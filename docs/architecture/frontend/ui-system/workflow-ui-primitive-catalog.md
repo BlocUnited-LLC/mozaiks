@@ -222,7 +222,7 @@ It intentionally validates:
 Canonical smoke command:
 
 ```bash
-python scripts/run_live_mfj_smoke.py \
+python scripts/run_live_workflow_smoke.py \
   --workflow RuntimeUIPrimitiveSmoke \
   --workflows-root factory_app/workflows \
   --tool-response-file factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json
@@ -248,7 +248,7 @@ Use it when validating:
 Canonical smoke command:
 
 ```bash
-python scripts/run_live_mfj_smoke.py \
+python scripts/run_live_workflow_smoke.py \
   --workflow AgentGenerator \
   --workflows-root factory_app/workflows \
   --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt \
@@ -289,3 +289,5 @@ The current source of truth is split across:
 
 If those contracts change, update the docs, prompts, validators, and tests
 together.
+
+

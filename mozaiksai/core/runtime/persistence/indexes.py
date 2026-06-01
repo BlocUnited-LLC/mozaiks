@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .intent_loader import DatabaseIntent
+from .intent_loader import DataContract
 from .mongo import MongoPersistenceContext
 
 
 class DatabaseIndexApplyError(ValueError):
-    """Raised when database intent index metadata cannot be applied."""
+    """Raised when data contract index metadata cannot be applied."""
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -55,10 +55,10 @@ def _normalize_index_spec(raw_spec: Any, path: str) -> dict[str, Any]:
     return spec
 
 
-def _iter_indexed_collections(intent: DatabaseIntent):
-    surfaces = intent.get("surfaces") or []
+def _iter_indexed_collections(contract: DataContract):
+    surfaces = contract.get("surfaces") or []
     for surface_index, surface in enumerate(surfaces):
-        surface_path = f"database_intent.surfaces[{surface_index}]"
+        surface_path = f"data_contract.surfaces[{surface_index}]"
         if not isinstance(surface, dict):
             raise DatabaseIndexApplyError(f"{surface_path} must be an object")
         surface_id = str(surface.get("surface_id") or "").strip()
@@ -85,27 +85,27 @@ def _iter_indexed_collections(intent: DatabaseIntent):
 
 
 async def apply_database_indexes(
-    intent: DatabaseIntent | None,
+    contract: DataContract | None,
     *,
     app_id: str | None = None,
     persistence: MongoPersistenceContext | None = None,
 ) -> int:
-    """Ensure indexes declared in database intent exist.
+    """Ensure indexes declared in the app data contract exist.
 
     This is index-only. It does not mutate documents, apply migrations, or
     write migration history.
     """
 
-    if intent is None:
+    if contract is None:
         return 0
 
-    resolved_app_id = str(app_id or intent.get("app_id") or "").strip()
+    resolved_app_id = str(app_id or contract.get("app_id") or "").strip()
     if not resolved_app_id:
         raise DatabaseIndexApplyError("app_id is required to apply database indexes")
 
     context = persistence or MongoPersistenceContext(app_id=resolved_app_id)
     applied_specs = 0
-    for module_id, entity_name, indexes, collection_path in _iter_indexed_collections(intent):
+    for module_id, entity_name, indexes, collection_path in _iter_indexed_collections(contract):
         normalized_indexes = [
             _normalize_index_spec(index_spec, f"{collection_path}.indexes[{index}]")
             for index, index_spec in enumerate(indexes)

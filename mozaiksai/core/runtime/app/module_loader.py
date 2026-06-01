@@ -680,6 +680,10 @@ class ModuleLoader:
 
     def __init__(self, base_path: str) -> None:
         self._base = Path(base_path)
+        workspace_root = self._base.parent if self._base.name == "app" else self._base
+        workspace_root_text = str(workspace_root.resolve())
+        if workspace_root_text not in sys.path:
+            sys.path.insert(0, workspace_root_text)
 
     def discover_module_names(self) -> List[str]:
         """Return module names for every modules/*/module.yaml in the bundle."""

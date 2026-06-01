@@ -1,21 +1,20 @@
+"""Workflow pack graph helpers."""
+
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
-from .config import load_workflow_pack_graph
-from .schema import WorkflowPackGraph
+from ..task_batches import workflow_has_task_batches
 
 
-def get_workflow_pack_graph(workflow_name: str) -> Optional[WorkflowPackGraph]:
-    return load_workflow_pack_graph(workflow_name)
+def workflow_declares_task_batches(
+    workflow_name: str,
+    workflows_root: Optional[Path] = None,
+) -> bool:
+    """Return true when a workflow declares AG2 task batch execution."""
+
+    return workflow_has_task_batches(workflow_name, workflows_root)
 
 
-def workflow_has_mid_flight_journeys(workflow_name: str) -> bool:
-    graph = load_workflow_pack_graph(workflow_name)
-    if graph is None:
-        return False
-    return bool(graph.mid_flight_journeys)
-
-
-__all__ = ["get_workflow_pack_graph", "workflow_has_mid_flight_journeys"]
-
+__all__ = ["workflow_declares_task_batches"]

@@ -81,7 +81,7 @@ def test_missing_context_data_model_migration_blocks_for_refresh() -> None:
         app_context_summary=_missing_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/database_migrations/add_phase.json"],
+        affected_bundle_paths=["config/data_migrations/add_phase.json"],
     )
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
@@ -94,7 +94,7 @@ def test_stale_context_data_model_migration_blocks_for_refresh() -> None:
         app_context_summary=_stale_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/database_intent.json"],
+        affected_bundle_paths=["config/data.json"],
     )
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
@@ -106,7 +106,7 @@ def test_stale_context_integration_change_blocks_for_refresh() -> None:
         app_context_summary=_stale_context(),
         change_class="patch",
         refinement_lane="integration",
-        affected_bundle_paths=["backend/integrations/email_gateway_client.py"],
+        affected_bundle_paths=["services/integrations/email_gateway_client.py"],
     )
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
@@ -181,7 +181,7 @@ def test_context_policy_result_attaches_to_execution_plan_without_rerouting() ->
         "workflow_sequence": "app_revision",
         "affected_workflows": ["AppGenerator"],
         "affected_declarative_families": ["app_bundle"],
-        "affected_bundle_paths": ["backend/integrations/email_gateway_client.py"],
+        "affected_bundle_paths": ["services/integrations/email_gateway_client.py"],
         "scope_summary": "Integration update.",
         "app_id": "field_service",
     }

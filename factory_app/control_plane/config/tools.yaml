@@ -29,12 +29,30 @@ tools:
     entrypoint: factory_app.control_plane.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog
     available_to:
       - scope_requested
+  - id: get_context_graph_catalog
+    kind: context_tool
+    description: Load the merged current AppContextGraph and artifact code graph for graph-aware scope selection, including candidate files, matched nodes, and relationship hints.
+    entrypoint: factory_app.control_plane.tools.get_context_graph_catalog:get_context_graph_catalog
+    available_to:
+      - scope_requested
+  - id: get_context_graph_scope
+    kind: context_tool
+    description: Load graph-neighborhood context for explicitly scoped files, including related files, symbols, and edges from the current app/artifact Context Graph.
+    entrypoint: factory_app.control_plane.tools.get_context_graph_scope:get_context_graph_scope
+    available_to:
+      - coding_requested
   - id: get_stale_artifact_families
     kind: context_tool
     description: Return the artifact families (concept, brand, design_docs, workflow_bundle, app_bundle) that have stale versions for this app. Used by the classifier to detect upstream families invalidated by a prior change request so routing can include the minimal necessary refresh.
     entrypoint: factory_app.control_plane.tools.get_stale_artifact_families:get_stale_artifact_families
     available_to:
       - request_submitted
+  - id: get_contract_surface_context
+    kind: context_tool
+    description: Load the artifact workspace file tree and context graph catalog for contract surface resolution. Used by the ContractSurfacePlanner to confirm which canonical paths exist in the workspace before resolving surface file lists.
+    entrypoint: factory_app.control_plane.tools.get_contract_surface_context:get_contract_surface_context
+    available_to:
+      - contract_surface_requested
   - id: get_carry_forward_candidates
     kind: context_tool
     description: >

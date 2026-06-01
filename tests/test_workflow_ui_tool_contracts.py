@@ -82,7 +82,6 @@ def test_repo_owned_interactive_ui_tools_use_canonical_helper_import() -> None:
     files = [
         "factory_app/workflows/AppGenerator/tools/generate_and_download.py",
         "factory_app/workflows/AgentGenerator/tools/generate_and_download.py",
-        "factory_app/workflows/AgentGenerator/tools/request_api_key.py",
         "factory_app/workflows/RuntimeUIPrimitiveSmoke/tools/request_acceptance_approval.py",
     ]
 
@@ -99,7 +98,7 @@ def test_agent_generator_runtime_helpers_are_yaml_first() -> None:
 
     assert "tools.json" not in generate_download
     assert "agents.json" not in generate_download
-    assert "tools.yaml" in generate_download
+    assert "workflow_bundle_results" in generate_download
 
     assert '"/agents.yaml"' in export_helper
     assert '"/tools.yaml"' in export_helper
@@ -128,18 +127,22 @@ def test_repo_workflow_tools_do_not_import_global_shared_workflow_bucket() -> No
     assert offenders == []
 
 
-def test_request_api_key_exposes_current_runtime_contract() -> None:
-    source = _read("factory_app/workflows/AgentGenerator/tools/request_api_key.py")
+def test_generate_and_download_reads_workflow_bundle_results() -> None:
+    source = _read("factory_app/workflows/AgentGenerator/tools/generate_and_download.py")
     module = ast.parse(source)
     function_def = next(
-        node for node in module.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "request_api_key"
+        node for node in module.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "generate_and_download"
     )
     arg_names = [arg.arg for arg in function_def.args.args]
 
-    assert "display_name" in arg_names
-    assert "store_connector" in arg_names
-    assert "return_for_e2b" in arg_names
-    assert "service_display_name" not in arg_names
+    assert "DownloadRequest" in arg_names
+    assert "agent_message" in arg_names
+    assert "context_variables" in arg_names
+    # Must read from task batch output, not dead persistence-gather approach
+    assert "workflow_bundle_results" in source
+    assert "gather_latest_agent_jsons" not in source
+    assert "WorkflowStrategyAgent" not in source
+    assert "OrchestratorAgent" not in source
 
 
 def test_generator_prompts_treat_connector_state_as_platform_owned() -> None:
@@ -150,9 +153,9 @@ def test_generator_prompts_treat_connector_state_as_platform_owned() -> None:
     assert "platform connector flow" in agent_generator
     assert "Do not create workflow collections for API keys" in agent_generator
     assert "workspace integrations/admin surface" in agent_generator
-    assert "some integrations may already be ready from the workspace integrations surface" in agent_generator
+    assert "some integrations may already be ready from the workspace integrations/admin surface" in agent_generator
     assert "missing dependency" in agent_generator
-    assert "must not be modeled as app/business collections inside `database_intent_bundle`" in design_docs
+    assert "must not be modeled as app/business collections inside `data_contract`" in design_docs
     assert "Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state." in app_generator
     assert "app connector inventory as the source of truth" in app_generator
 
@@ -418,7 +421,6 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
     assert "*" in response_fixture["tool_responses"]
     assert response_fixture["tool_responses"]["*"]["approved"] is True
     assert response_fixture["tool_responses"]["DownloadCenter"]["action"] == "download_complete"
-    assert response_fixture["tool_responses"]["AgentAPIKeysBundleInput"]["action"] == "cancel"
     assert "ActionPlan" not in response_fixture["tool_responses"]
     assert any(rule["contains"] == "final tweaks" for rule in assistant_reply_rules)
     assert any("Proceed with implementation." in rule["reply"] for rule in assistant_reply_rules)
@@ -426,10 +428,9 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
     assert "classify urgency" in smoke_prompt
     assert "ask for human approval before closing" in smoke_prompt
     assert "Do not use external APIs or third-party integrations." in smoke_prompt
-    assert {"DownloadCenter", "DiagramViewer", "AgentAPIKeysBundleInput"} <= manifest_components
+    assert {"DownloadCenter", "DiagramViewer"} <= manifest_components
     assert manifest_realizations["DownloadCenter"] == "shipped_component"
     assert manifest_realizations["DiagramViewer"] == "shipped_component"
-    assert manifest_realizations["AgentAPIKeysBundleInput"] == "workflow_wrapper"
     assert (scripted_components - manifest_components) <= exported_names
 
 
@@ -440,13 +441,13 @@ def test_agent_generator_review_handoff_uses_user_text_state_triggers() -> None:
     review_handoffs = {
         (rule["source_agent"], rule["target_agent"]): rule
         for rule in handoffs["handoff_rules"]
-        if rule["source_agent"] == "user" and rule["target_agent"] in {"ContextVariablesAgent", "PatternAgent"}
+        if rule["source_agent"] == "user" and rule["target_agent"] in {"PackBuildCoordinator", "PatternAgent"}
     }
     review_defs = context_vars["definitions"]
 
-    assert review_handoffs[("user", "ContextVariablesAgent")]["condition_type"] == "expression"
-    assert review_handoffs[("user", "ContextVariablesAgent")]["condition_scope"] == "pre"
-    assert review_handoffs[("user", "ContextVariablesAgent")]["condition"] == "${workflow_review_approved} == True"
+    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_type"] == "expression"
+    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_scope"] == "pre"
+    assert review_handoffs[("user", "PackBuildCoordinator")]["condition"] == "${workflow_review_approved} == True"
     assert review_handoffs[("user", "PatternAgent")]["condition_type"] == "expression"
     assert review_handoffs[("user", "PatternAgent")]["condition_scope"] == "pre"
     assert review_handoffs[("user", "PatternAgent")]["condition"] == "${workflow_review_revision_requested} == True"

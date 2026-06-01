@@ -117,10 +117,10 @@ def _file_manifest() -> list[dict[str, Any]]:
         "GeneratedApp/app/modules/work_orders/module.yaml",
         "GeneratedApp/workflows/WorkOrderSummary/orchestrator.yaml",
         "GeneratedApp/workflows/WorkOrderSummary/agents.yaml",
-        "GeneratedApp/app/backend/integrations/email_gateway_client.py",
+        "GeneratedApp/app/services/integrations/email_gateway_client.py",
         "GeneratedApp/app/config/integrations/email_gateway.json",
-        "GeneratedApp/app/config/database_intent.json",
-        "GeneratedApp/app/config/database_migrations/add_work_orders.json",
+        "GeneratedApp/app/config/data.json",
+        "GeneratedApp/app/config/data_migrations/add_work_orders.json",
         "GeneratedApp/app/config/shell.json",
         "GeneratedApp/app/brand/theme_config.json",
     ]

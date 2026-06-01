@@ -101,12 +101,12 @@ class BuilderArtifactStore:
             ],
         )
 
-    async def ensure_database_intent_indexes(self) -> None:
+    async def ensure_data_contract_indexes(self) -> None:
         await self._ensure_indexes(
-            BuilderCollections.DATABASE_INTENTS,
+            BuilderCollections.DATA_CONTRACTS,
             [
-                ((("app_id", 1), ("build_id", 1)), {"unique": True, "name": "dbi_app_build"}),
-                ((("app_id", 1), ("updated_at", -1)), {"name": "dbi_app_updated"}),
+                ((("app_id", 1), ("build_id", 1)), {"unique": True, "name": "dc_app_build"}),
+                ((("app_id", 1), ("updated_at", -1)), {"name": "dc_app_updated"}),
             ],
         )
 
@@ -229,20 +229,20 @@ class BuilderArtifactStore:
                 update["$set"]["error"] = error
             await coll.update_one({"app_id": app_id, "kind": kind}, update, upsert=True)
 
-    async def save_database_intent(
+    async def save_data_contract(
         self,
         *,
         app_id: str,
         build_id: str,
         artifact_version_id: Optional[str],
         change_class: Optional[str],
-        database_intent_bundle: Dict[str, Any],
+        data_contract: Dict[str, Any],
         user_id: Optional[str],
         source_workflow: str,
         source_chat_id: Optional[str],
     ) -> None:
-        await self.ensure_database_intent_indexes()
-        coll = await self._collection(BuilderCollections.DATABASE_INTENTS)
+        await self.ensure_data_contract_indexes()
+        coll = await self._collection(BuilderCollections.DATA_CONTRACTS)
         now = datetime.now(UTC)
         await coll.update_one(
             {"app_id": app_id, "build_id": build_id},
@@ -252,7 +252,7 @@ class BuilderArtifactStore:
                     "build_id": build_id,
                     "artifact_version_id": artifact_version_id,
                     "change_class": change_class,
-                    "database_intent_bundle": database_intent_bundle,
+                    "data_contract": data_contract,
                     "status": "succeeded",
                     "user_id": user_id,
                     "source": {"workflow": source_workflow, "chat_id": source_chat_id},
@@ -263,8 +263,8 @@ class BuilderArtifactStore:
             upsert=True,
         )
 
-    async def get_latest_database_intent(self, *, app_id: str) -> Optional[Dict[str, Any]]:
-        coll = await self._collection(BuilderCollections.DATABASE_INTENTS)
+    async def get_latest_data_contract(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+        coll = await self._collection(BuilderCollections.DATA_CONTRACTS)
         cursor = coll.find({"app_id": str(app_id)}).sort("updated_at", -1).limit(1)
         docs = await cursor.to_list(length=1)
         if not docs or not isinstance(docs[0], dict):
@@ -363,7 +363,7 @@ class BuilderArtifactStore:
         migration_id = str(migration.get("migration_id") or "").strip()
         if not migration_id:
             raise ValueError("migration.migration_id is required")
-        relative_path = bundle_relative_path or f"config/database_migrations/{migration_id}.json"
+        relative_path = bundle_relative_path or f"config/data_migrations/{migration_id}.json"
         doc: Dict[str, Any] = {
             "app_id": app_id,
             "build_id": build_id,
@@ -386,3 +386,4 @@ class BuilderArtifactStore:
 
 
 __all__ = ["BuilderArtifactStore"]
+

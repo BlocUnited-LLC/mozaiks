@@ -7,7 +7,8 @@
 Lifecycle Tools - Declarative Hook System for Workflows
 
 Purpose:
-- Execute tools at orchestration boundaries (before_chat, after_chat, before_agent, after_agent)
+- Execute tools at orchestration boundaries
+  (before_chat, after_chat, before_agent, after_agent, on_start, on_complete, on_fail)
 - Driven by <workflow_root>/<workflow>/tools.yaml "lifecycle_tools" list
 - Integrates with existing event system for observability
 - AG2-native context injection via ContextVariables
@@ -15,7 +16,7 @@ Purpose:
 Schema (tools.yaml lifecycle section):
 
 lifecycle_tools:
-  - trigger: before_chat       # Required: before_chat | after_chat | before_agent | after_agent
+  - trigger: before_chat       # Required: before_chat | after_chat | before_agent | after_agent | on_start | on_complete | on_fail
     agent: null                # Optional: Agent name for before_agent/after_agent, null for chat-level
     file: echo.py              # Required: Tool file path (supports root or tools/ subdir)
     function: echo             # Required: Function name to invoke
@@ -76,10 +77,7 @@ class LifecycleToolManager:
     def __init__(self, workflow_name: str):
         self.workflow_name = workflow_name
         self.tools: Dict[LifecycleTrigger, List[LifecycleTool]] = {
-            LifecycleTrigger.BEFORE_CHAT: [],
-            LifecycleTrigger.AFTER_CHAT: [],
-            LifecycleTrigger.BEFORE_AGENT: [],
-            LifecycleTrigger.AFTER_AGENT: [],
+            trigger: [] for trigger in LifecycleTrigger
         }
         self._loaded = False
 
@@ -295,6 +293,22 @@ class LifecycleToolManager:
             await self.trigger_after_agent(agent_name=agent_name, context_variables=ctx_vars)
             return
 
+        if resolved_trigger in {
+            LifecycleTrigger.ON_START,
+            LifecycleTrigger.ON_COMPLETE,
+            LifecycleTrigger.ON_FAIL,
+        }:
+            await self._execute_tools(
+                resolved_trigger,
+                context_variables=ctx_vars,
+                call_kwargs={
+                    key: value
+                    for key, value in kwargs.items()
+                    if key not in {"context_variables", "trigger"}
+                },
+            )
+            return
+
         logger.debug(f"[LIFECYCLE] Trigger '{resolved_trigger.value}' is not supported")
 
     async def _execute_tools(
@@ -302,6 +316,7 @@ class LifecycleToolManager:
         trigger: LifecycleTrigger,
         agent_name: Optional[str] = None,
         context_variables: Any = None,
+        call_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Execute all tools for a given trigger point."""
         tools = self.tools.get(trigger, [])
@@ -328,13 +343,19 @@ class LifecycleToolManager:
 
         # Deterministic contract: execute in declaration order.
         for tool in tools:
-            await self._execute_single_tool(tool, context_variables, wf_logger)
+            await self._execute_single_tool(
+                tool,
+                context_variables,
+                wf_logger,
+                call_kwargs=call_kwargs,
+            )
 
     async def _execute_single_tool(
         self,
         tool: LifecycleTool,
         context_variables: Any,
         wf_logger: logging.Logger,
+        call_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Execute a single lifecycle tool with error handling."""
         start_time = asyncio.get_event_loop().time()
@@ -343,8 +364,16 @@ class LifecycleToolManager:
         try:
             # Build kwargs
             kwargs = {}
+            sig = inspect.signature(tool.callable)
+            accepts_var_kwargs = any(
+                param.kind is inspect.Parameter.VAR_KEYWORD
+                for param in sig.parameters.values()
+            )
             if tool.accepts_context and context_variables:
                 kwargs['context_variables'] = context_variables
+            for key, value in (call_kwargs or {}).items():
+                if accepts_var_kwargs or key in sig.parameters:
+                    kwargs[key] = value
 
             wf_logger.info(
                 f"[LIFECYCLE] Calling {tool_name} for {tool.trigger.value}"

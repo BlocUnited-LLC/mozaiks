@@ -111,14 +111,14 @@ def test_validation_evidence_tracks_completed_failed_warnings_and_artifacts() ->
         completed=["route_component_validation", "ui_theme_primitive_validation"],
         failed=["migration_plan_validation"],
         warnings=["manual review recommended"],
-        artifacts=["config/database_intent.json"],
+        artifacts=["config/data.json"],
         checked_at="2026-05-21T00:00:00Z",
         source="unit-test",
     )
 
     assert evidence.completed_names() == {"route_component_validation", "ui_theme_primitive_validation"}
     assert evidence.failed_names() == {"migration_plan_validation"}
-    assert evidence.artifact_names() == {"config/database_intent.json"}
+    assert evidence.artifact_names() == {"config/data.json"}
     assert evidence.warnings == ["manual review recommended"]
     assert evidence.checked_at == "2026-05-21T00:00:00Z"
     assert evidence.source == "unit-test"
@@ -235,7 +235,7 @@ def test_data_model_migration_blocks_repo_py_without_database_artifacts(tmp_path
         workflow_sequence="app_revision",
         affected_bundle_paths=["modules/projects/backend/repo.py"],
         candidate_path="modules/projects/backend/repo.py",
-        validation_completed=["database_intent_validation", "migration_plan_validation"],
+        validation_completed=["data_contract_validation", "migration_plan_validation"],
     )
 
     decision = evaluate_refinement_promotion_policy(
@@ -248,10 +248,10 @@ def test_data_model_migration_blocks_repo_py_without_database_artifacts(tmp_path
 
     assert decision.allowed is False
     assert decision.mode == "blocked_requires_upstream_artifact"
-    assert decision.required_artifacts == ["config/database_intent.json", "config/database_migrations/*.json"]
+    assert decision.required_artifacts == ["config/data.json", "config/data_migrations/*.json"]
 
 
-def test_data_model_migration_allows_repo_py_with_database_intent_evidence(tmp_path: Path) -> None:
+def test_data_model_migration_allows_repo_py_with_data_contract_evidence(tmp_path: Path) -> None:
     plan, review, execution_result, changed_file, evidence = _policy_inputs(
         tmp_path,
         request="Add a required project phase field and migrate existing project records.",
@@ -259,8 +259,8 @@ def test_data_model_migration_allows_repo_py_with_database_intent_evidence(tmp_p
         workflow_sequence="app_revision",
         affected_bundle_paths=["modules/projects/backend/repo.py"],
         candidate_path="modules/projects/backend/repo.py",
-        validation_completed=["database_intent_validation", "migration_plan_validation"],
-        validation_artifacts=["config/database_intent.json", "config/database_migrations/001_initial.json"],
+        validation_completed=["data_contract_validation", "migration_plan_validation"],
+        validation_artifacts=["config/data.json", "config/data_migrations/001_initial.json"],
     )
 
     decision = evaluate_refinement_promotion_policy(
@@ -325,8 +325,8 @@ def test_hosted_capability_allows_backend_integrations_client_path(tmp_path: Pat
         request="Change hosted analytics dashboard display.",
         change_class="design",
         workflow_sequence="app_surface_revision",
-        affected_bundle_paths=["backend/integrations/hosted_analytics_client.py"],
-        candidate_path="backend/integrations/hosted_analytics_client.py",
+        affected_bundle_paths=["services/integrations/hosted_analytics_client.py"],
+        candidate_path="services/integrations/hosted_analytics_client.py",
         validation_completed=["hosted_facade_boundary_validation"],
     )
 
@@ -348,8 +348,8 @@ def test_integration_allows_analytics_provider_client_path(tmp_path: Path) -> No
         request="Change the analytics_provider connector sync behavior.",
         change_class="patch",
         workflow_sequence="app_revision",
-        affected_bundle_paths=["backend/integrations/analytics_provider_client.py"],
-        candidate_path="backend/integrations/analytics_provider_client.py",
+        affected_bundle_paths=["services/integrations/analytics_provider_client.py"],
+        candidate_path="services/integrations/analytics_provider_client.py",
         validation_completed=["integration_readiness_validation"],
     )
 

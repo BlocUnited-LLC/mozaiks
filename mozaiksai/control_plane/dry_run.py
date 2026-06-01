@@ -159,12 +159,12 @@ def neutral_manifest() -> list[dict[str, Any]]:
     return [
         {"path": "app.json"},
         {"path": "config/shell.json"},
-        {"path": "config/database_intent.json"},
-        {"path": "config/database_migrations/001_initial.json"},
+        {"path": "config/data.json"},
+        {"path": "config/data_migrations/001_initial.json"},
         {"path": "config/integrations.json"},
         {"path": "docs/integrations.md"},
-        {"path": "backend/integrations/analytics_provider_client.py"},
-        {"path": "backend/integrations/hosted_analytics_client.py"},
+        {"path": "services/integrations/analytics_provider_client.py"},
+        {"path": "services/integrations/hosted_analytics_client.py"},
         {"path": "modules/projects/module.yaml"},
         {"path": "modules/projects/contracts/events.yaml"},
         {"path": "modules/projects/backend/handler.py"},
@@ -247,7 +247,7 @@ def infer_refinement_lane(
     text = " ".join([request_text, scope_summary, path_text]).lower()
     if (
         "destructive changes require explicit review" in text
-        or any(term in path_text for term in ("database_intent", "database_migrations"))
+        or any(term in path_text for term in ("data_contract", "data_migrations"))
         or any(term in request_text for term in ("data model", "database", "migration", "migrate", "required field"))
     ):
         return "data_model_migration"
@@ -353,7 +353,7 @@ def _has_database_review_impact(
     scope_text = str(scope_summary or "").lower()
     return (
         lane == "data_model_migration"
-        or any(term in paths_text for term in ("database_intent", "database_migrations"))
+        or any(term in paths_text for term in ("data_contract", "data_migrations"))
         or "destructive changes require explicit review" in scope_text
         or any(
             term in request_text
@@ -437,9 +437,9 @@ def build_validation_plan(
         items.append(
             RefinementValidationItem(
                 id="database_migration_review",
-                label="Database migration review",
+                label="Data migration review",
                 required=True,
-                reason="Required when database intent, migrations, or destructive data changes are in scope.",
+                reason="Required when data contract, migrations, or destructive data changes are in scope.",
             )
         )
     if hosted_required:
@@ -619,7 +619,7 @@ def build_refinement_execution_plan_from_route(
     if "Destructive changes require explicit review." in scope_summary:
         plan_warnings.append("Destructive changes require explicit review.")
     if any(item.id == "database_migration_review" and item.required for item in validation_plan.items):
-        plan_warnings.append("Database migration review is required before mutation.")
+        plan_warnings.append("Data migration review is required before mutation.")
     if human_review_required:
         plan_warnings.append("Human review is required before mutation.")
     resolved_app_context_summary = (
@@ -862,3 +862,4 @@ __all__ = [
     "resolve_execution_profiles",
     "requires_human_review",
 ]
+

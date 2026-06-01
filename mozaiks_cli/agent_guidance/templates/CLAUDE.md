@@ -14,7 +14,7 @@ app/
   app.json
   config/
   brand/
-  backend/  # optional integrations/adapters/security/routes support code
+  services/  # optional integrations/adapters/security/routes/data support code
   modules/
   ui/
 workflows/
@@ -31,12 +31,12 @@ and web shell behavior.
 | Shell, navigation, footer, mobile chrome | `app/config/shell.json` |
 | Secret management contract, names only | `app/config/secrets.yaml` |
 | Branding/theme assets | `app/brand/` |
-| App-owned external clients | `app/backend/integrations/<service>_client.py` |
-| App-owned provider adapters | `app/backend/adapters/<area>/<provider>.py` |
-| App-specific auth provider mechanics | `app/backend/adapters/auth/<provider>.py` |
-| Provider-neutral auth/secret helpers | `app/backend/security/` |
-| App-level routes, only when needed | `app/backend/routes/` |
-| Shared persistence helpers, only with `config/shared_persistence.json` | `app/shared_persistence/` |
+| App-owned external clients | `app/services/integrations/<service>_client.py` |
+| App-owned provider adapters | `app/services/adapters/<area>/<provider>.py` |
+| App-specific auth provider mechanics | `app/services/adapters/auth/<provider>.py` |
+| Provider-neutral auth/secret helpers | `app/services/security/` |
+| App-level routes, only when needed | `app/services/routes/` |
+| Data contract and migration artifacts, only when `config/data.json` is present | `app/config/data.json`, `app/config/data_migrations/`, `app/services/data/` |
 | Deterministic app capabilities | `app/modules/<module_id>/` |
 | AI workflow behavior | `workflows/<WorkflowName>/` |
 | Declarative pages | `app/ui/pages/` |
@@ -50,7 +50,7 @@ and web shell behavior.
 - Do not hardcode workflow names inside module business logic.
 - Do not bypass module contracts with undeclared routes or side channels.
 - Do not put business logic directly in `backend/handler.py`.
-- Do not turn provider adapters into modules or put module business state in `app/backend/`.
+- Do not turn provider adapters into modules or put module business state in `app/services/`.
 - Do not copy framework runtime auth into the app; generic auth belongs in the installed `mozaiks` package.
 - Do not put raw secret values in `app/config/secrets.yaml`; it is a names-only contract.
 - Do not use custom React when a declarative page schema is sufficient.
@@ -77,3 +77,4 @@ These base files are maintained by the installed `mozaiks` package. Add
 app-specific rules or skills only when generated or hand-authored app behavior
 needs narrower instructions. Studio/factory-generated modules and workflows
 should own those app-specific additions when they become concrete.
+

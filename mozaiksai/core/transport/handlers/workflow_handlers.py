@@ -143,9 +143,9 @@ async def handle_switch_workflow(
     # UI can reliably reconstruct workflow messages after Ask-mode transitions.
     if replay_on_switch:
         try:
-            from mozaiksai.core.transport.resume_groupchat import GroupChatResumer
+            from mozaiksai.core.transport.resume_run import AgentRunResumer
 
-            resumer = GroupChatResumer()
+            resumer = AgentRunResumer()
 
             async def send_event_wrapper(event_dict: Dict[str, Any], _target_chat_id: str | None) -> None:
                 if not isinstance(event_dict, dict):

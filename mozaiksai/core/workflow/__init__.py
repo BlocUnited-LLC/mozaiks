@@ -1,40 +1,37 @@
-"""Workflow Management Package
-================================
-Public entry points for running and registering workflows.
+"""Workflow Management Package.
 
-Exports (stable surface):
- - run_workflow_orchestration: Execute a workflow instance (async orchestration engine)
- - create_ag2_pattern: Factory for AG2 patterns
- - register_workflow / get_workflow_handler: Registry for custom workflow handlers
- - get_workflow_transport / get_workflow_tools / workflow_status_summary: Introspection utilities
- - initialize_workflow_ui_components: Optional UI component bootstrap
- - add_initialization_coroutine / get_initialization_coroutines / run_initializers: Startup hooks
-
-Internal symbols are intentionally not re-exported to keep namespace clean.
+Public entry points stay stable, but imports are resolved lazily so that
+submodules like startup_messages can load without eagerly importing the
+orchestration engine and re-entering persistence during runtime startup.
 """
 
-from .orchestration_patterns import (
-	run_workflow_orchestration,
-	create_ag2_pattern,
-)
+from __future__ import annotations
 
-from .workflow_manager import (
-	register_workflow,
-	get_workflow_handler,
-	get_workflow_transport,
-	workflow_status_summary,
-	get_workflow_tools,
-)
+from importlib import import_module
+from typing import Any
 
-__all__ = [
-	# Orchestration engine / patterns
-	"run_workflow_orchestration",
-	"create_ag2_pattern",
-	# Registry APIs
-	"register_workflow",
-	"get_workflow_handler",
-	"get_workflow_transport",
-	"workflow_status_summary",
-	"get_workflow_tools",
-]
+_EXPORTS = {
+    "run_workflow_orchestration": ".orchestration_patterns",
+    "register_workflow": ".workflow_manager",
+    "get_workflow_handler": ".workflow_manager",
+    "get_workflow_transport": ".workflow_manager",
+    "workflow_status_summary": ".workflow_manager",
+    "get_workflow_tools": ".workflow_manager",
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    module_path = _EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_path, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
 

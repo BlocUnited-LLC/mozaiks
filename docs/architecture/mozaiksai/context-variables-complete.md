@@ -10,7 +10,7 @@ This document defines:
 
 ## Canonical File
 
-`app/workflows/{workflow}/context_variables.yaml`
+`workflows/{workflow}/context_variables.yaml`
 
 ## Canonical Contract Shape
 
@@ -193,3 +193,5 @@ agents:
   GreeterAgent:
     variables: []
 ```
+
+

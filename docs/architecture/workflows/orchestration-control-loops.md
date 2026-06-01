@@ -44,7 +44,7 @@ Examples:
 - `DesignDocs`
 - `AgentGenerator`
 - `AppGenerator`
-- any app-local workflow under `app/workflows/*`
+- any app-local workflow under `workflows/*`
 
 This loop owns:
 
@@ -54,7 +54,7 @@ This loop owns:
 - `max_rounds` or equivalent workflow-local limits
 - workflow-local HITL pauses and resume
 - `chat.tool_call` / `tool_call_response`
-- workflow-local MFJ fan-out and fan-in
+- workflow-local task batch execution
 - workflow-local context variables and structured outputs
 
 This loop does not own:
@@ -66,7 +66,7 @@ This loop does not own:
 - coding-agent file repair policy
 
 `factory_app/workflows/*/orchestrator.yaml`, `agents.yaml`, `handoffs.yaml`, and
-`extended_orchestration/mfj_extension.json` all belong to this loop.
+`extended_orchestration/task_batches.yaml` all belong to this loop.
 
 ### 2. Builder session loop
 
@@ -102,7 +102,7 @@ This loop consumes:
 This loop does not own:
 
 - AG2 speaker selection inside a workflow
-- MFJ fan-out inside a workflow
+- task batch execution inside a workflow
 - direct file editing
 
 #### Current builder-session harness binding
@@ -185,7 +185,7 @@ thing as the control loops above.
 | Artifact | Scope | Owned by |
 |---|---|---|
 | `workflow_sequences[]` in `extension_registry.json` | coarse workflow sequencing and sequence-level artifact impact across workflows | builder session loop |
-| `mid_flight_journeys[]` in `mfj_extension.json` | workflow-local fan-out and fan-in | workflow execution loop |
+| `batches[]` in `task_batches.yaml` | workflow-local parallel task execution | workflow execution loop |
 | `BuildGraph` | bounded authoring work inside one build | builder session loop |
 
 Important rule:
@@ -206,7 +206,7 @@ Resume means:
 Examples:
 
 - user replies to a pending `tool_call`
-- MFJ fan-in resumes the parent at the configured resume agent
+- task batch completion injects the declared result context key
 
 ### Builder session resume
 
@@ -241,7 +241,7 @@ Examples:
 - `max_consecutive_auto_reply`
 - `max_rounds`
 - tool-call throttle
-- MFJ child concurrency
+- task batch concurrency
 - per-workflow timeout
 
 ### Builder session loop limits
@@ -394,3 +394,5 @@ Relevant repo-local builder docs:
 - [Builder Execution Model](../builder/builder-execution-model.md)
 - [App Builder Architecture](../builder/app-builder-architecture.md)
 - [App Planning Contracts](../builder/app-planning-contracts.md)
+
+

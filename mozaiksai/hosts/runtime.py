@@ -689,7 +689,6 @@ async def websocket_endpoint(
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
         from mozaiksai.core.session.router import get_session_router
         from mozaiksai.core.transport.session_registry import session_registry
-        from mozaiksai.core.workflow.pack.graph import workflow_has_mid_flight_journeys
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
         coll = await _chat_coll()
@@ -904,7 +903,7 @@ async def websocket_endpoint(
             "workflow_name": resolved_workflow_name,
             "app_id": app_id,
             "user_id": user_id,
-            "has_children": bool(workflow_has_mid_flight_journeys(resolved_workflow_name)),
+            "has_children": False,
             "cache_seed": cache_seed,
             "chat_exists": True,
             "last_artifact": resolved_doc.get("last_artifact"),

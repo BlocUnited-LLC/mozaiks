@@ -122,7 +122,7 @@ def _bundle():
                 }
             ]
         },
-        "database_intent_bundle": {
+        "data_contract": {
             "version": "1",
             "app_id": None,
             "artifact_version_id": None,
@@ -160,7 +160,7 @@ def _bundle():
     }
 
 
-def test_save_design_docs_bundle_persists_surface_map_and_database_intent(monkeypatch) -> None:
+def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypatch) -> None:
     monkeypatch.setattr(design_docs_module, "AG2PersistenceManager", _FakePersistenceManager)
     summary_artifact = {}
 
@@ -184,11 +184,11 @@ def test_save_design_docs_bundle_persists_surface_map_and_database_intent(monkey
     result = asyncio.run(design_docs_module.save_design_docs_bundle(context_variables=context))
 
     design_docs_collection = _FakePersistenceManager.client["mozaiksai"]["DesignDocuments"]
-    database_intents_collection = _FakePersistenceManager.client["mozaiksai"]["DatabaseIntents"]
+    data_contracts_collection = _FakePersistenceManager.client["mozaiksai"]["DataContracts"]
 
     assert result["ok"] is True
     assert context.data["design_surface_map"]["surfaces"][0]["surface_id"] == "users"
-    assert context.data["database_intent_bundle"]["app_id"] == "app_123"
+    assert context.data["data_contract"]["app_id"] == "app_123"
     # Typed ExperienceSpec must be set on context as a structured object
     assert context.data["experience_spec"]["navigation_model"] == "top-level routes with shell navigation"
     assert context.data["experience_spec"]["pages"][0]["name"] == "Users"
@@ -204,7 +204,7 @@ def test_save_design_docs_bundle_persists_surface_map_and_database_intent(monkey
         update[0].get("kind") == "ui_schema" and "experience_spec" in update[1]["$set"]
         for update in design_docs_collection.updates
     )
-    assert database_intents_collection.updates[0][1]["$set"]["database_intent_bundle"]["artifact_version_id"] == "artifact_123"
+    assert data_contracts_collection.updates[0][1]["$set"]["data_contract"]["artifact_version_id"] == "artifact_123"
     assert summary_artifact["artifact_kind"] == "design_docs"
     assert summary_artifact["input_artifact_kinds"] == ("concept", "build_plan")
     assert summary_artifact["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] == "users"

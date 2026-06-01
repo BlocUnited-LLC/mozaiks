@@ -42,6 +42,7 @@ def test_load_default_factory_control_plane_pack() -> None:
         "get_revision_context",
         "get_artifact_summary",
         "get_artifact_workspace_catalog",
+        "get_context_graph_catalog",
     ]
     assert pack.policies.scope.max_selected_paths == 3
     assert pack.policies.scope.auto_apply_max_paths == 1
@@ -53,6 +54,7 @@ def test_load_default_factory_control_plane_pack() -> None:
         "get_revision_context",
         "get_artifact_summary",
         "get_artifact_workspace_scope",
+        "get_context_graph_scope",
     ]
     assert pack.prompt_by_id("change_classifier_system") is not None
     assert pack.prompt_by_id("coding_refinement_system") is not None
@@ -61,9 +63,17 @@ def test_load_default_factory_control_plane_pack() -> None:
         "get_artifact_summary",
         "get_artifact_workspace_scope",
         "get_artifact_workspace_catalog",
+        "get_context_graph_catalog",
+        "get_context_graph_scope",
         "get_stale_artifact_families",
+        "get_contract_surface_context",
         "get_carry_forward_candidates",
     ]
+    contract_surface_checkpoint = pack.checkpoint_by_event("contract_surface_requested")
+    assert contract_surface_checkpoint is not None
+    assert contract_surface_checkpoint.prompt_id == "contract_surface_selection_system"
+    assert contract_surface_checkpoint.tool_ids == ["get_contract_surface_context"]
+    assert pack.prompt_by_id("contract_surface_selection_system") is not None
 
 
 def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> None:

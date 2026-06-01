@@ -104,6 +104,28 @@ class TestAuditModuleRuntimeQuality:
         )
         assert warnings == []
 
+    def test_pass_statement_warns(self):
+        warnings = self._audit(
+            _code_files(
+                (
+                    "modules/investor_marketplace/backend/repo.py",
+                    "class Repo:\n    async def save(self, ctx):\n        pass\n",
+                )
+            )
+        )
+        assert any("contains pass" in warning for warning in warnings)
+
+    def test_example_or_implement_comment_warns(self):
+        warnings = self._audit(
+            _code_files(
+                (
+                    "modules/investor_marketplace/backend/policy.py",
+                    "class Policy:\n    async def check(self, ctx):\n        # Implement additional authorization checks\n        return True\n",
+                )
+            )
+        )
+        assert any("unfinished runtime logic" in warning for warning in warnings)
+
 
 class TestReviewModuleRuntimeQuality:
     def _review(self, code_files=None, prior_warnings=None, revision_count=None):

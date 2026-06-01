@@ -18,14 +18,15 @@ At minimum, a workflow should include:
 - `ui_config.yaml`
 - `hooks.yaml`
 
-`extended_orchestration/mfj_extension.json` is required when the workflow uses mid-flight journeys (MFJ).
+`extended_orchestration/task_batches.yaml` is optional and required only when
+the workflow uses workflow-local AG2 task batches.
 
 `a2a.yaml` is optional.
 
 ## Canonical Directory
 
 ```text
-app/workflows/{workflow_name}/
+workflows/{workflow_name}/
   orchestrator.yaml
   agents.yaml
   handoffs.yaml
@@ -35,7 +36,7 @@ app/workflows/{workflow_name}/
   ui_config.yaml
   hooks.yaml
   extended_orchestration/
-    mfj_extension.json    # MFJ config (only when needed)
+    task_batches.yaml     # task batch config (only when needed)
   tools/
     *.py
   ui/
@@ -140,6 +141,9 @@ triggers:
 
 Rules:
 - `workflow_name` must match directory name.
+- `orchestration_pattern` should be the selected AG2 Network patternbook label
+  when known, or `ag2_network` for generic runtime workflows. It is metadata;
+  routing still comes from `handoffs.yaml`.
 - `workflow_startup_mode` must be one of:
   - `AgentDriven`
   - `UserDriven`
@@ -174,8 +178,8 @@ handoff_rules:
   - source_agent: user
     target_agent: ExampleHostAgent
     handoff_type: condition
-    condition_type: string_llm
-    condition: "When user starts the conversation."
+    condition_type: expression
+    condition: ${intake_complete} == false
     transition_target: AgentTarget
   - source_agent: ExampleHostAgent
     target_agent: user
@@ -186,6 +190,11 @@ handoff_rules:
 Rules:
 - `handoff_type` is `after_work` or `condition`.
 - `condition` is required when `handoff_type: condition`.
+- `condition_type` is deterministic: `expression`, `context_expression`, or
+  `context`. LLM intent classification belongs in the control plane before a
+  workflow run is started or resumed.
+- AgentGenerator derives pattern-specific handoff rules from
+  `factory_app/workflows/_shared/patternbook/ag2_network_patterns.yaml`.
 
 ### `context_variables.yaml`
 
@@ -299,77 +308,52 @@ Rules:
 - `ui_contract` belongs only on `UI_Tool`.
 - Tool references use `file` and `function`.
 
-### `extended_orchestration/mfj_extension.json`
+### `extended_orchestration/task_batches.yaml`
 
-Only add this file if the workflow uses mid-flight journeys.
+Only add this file if the workflow uses workflow-local task batches. Task
+batches execute a typed list of work items with AG2 agents and merge results
+into one declared context key.
 
-**Minimal single-phase form:**
+**Minimal form:**
 
-```json
-{
-  "version": 3,
-  "mid_flight_journeys": [
-    {
-      "id": "my_journey",
-      "description": "Brief human-readable summary of the fan-out purpose.",
-      "decomposition_agent": "DecompositionAgent",
-      "fan_out": {
-        "spawn_mode": "workflow",
-        "max_children": 5
-      },
-      "fan_in": {
-        "resume_agent": "SummaryAgent",
-        "inject_as": "mfj_my_results"
-      }
-    }
-  ]
-}
-```
-
-**Multi-phase form (stages):**
-
-Use `stages` when one trigger agent powers multiple sequential fan-out → fan-in
-phases with a mid-flight user gate between them:
-
-```json
-{
-  "version": 3,
-  "mid_flight_journeys": [
-    {
-      "id": "my_journey",
-      "description": "Stage 1 plans, user approves, stage 2 implements.",
-      "decomposition_agent": "DecompositionAgent",
-      "fan_out": { "spawn_mode": "workflow", "max_children": 10 },
-      "stages": [
-        {
-          "id": "plan",
-          "child_initial_agent": "PlanningAgent",
-          "resume_agent": "ReviewAgent",
-          "inject_as": "mfj_plan_results"
-        },
-        {
-          "id": "implement",
-          "gate_agent": "ApprovalAgent",
-          "child_initial_agent": "ImplementationAgent",
-          "resume_agent": "PackagingAgent",
-          "inject_as": "mfj_impl_results"
-        }
-      ]
-    }
-  ]
-}
+```yaml
+version: 1
+batches:
+  - id: document_reviews
+    trigger_agent: TriageAgent
+    source:
+      kind: context_variable
+      path: review_plan.tasks
+      task_model: DocumentReviewTask
+    worker:
+      mode: ag2_agent
+      agent_field: initial_agent
+      prompt_field: initial_message
+      context_fields:
+        - task_id
+        - owned_paths
+        - acceptance_criteria
+    execution:
+      concurrency: 4
+      dependency_field: depends_on
+      failure_policy: fail_batch
+      retry_limit: 1
+    result:
+      context_key: document_review_results
+      status_key: document_review_status
+      merge_strategy: collect_task_outputs
+      require_owned_paths: true
 ```
 
 Rules:
-- `inject_as` values must start with `mfj_`.
-- `gate_agent` is required for every stage after the first.
-- `stages` and `fan_in` are mutually exclusive on the same journey.
-- The runtime auto-synthesizes context variable declarations for every `inject_as`
-  key and the five `_mfj_resume_*` handshake fields. Do not manually declare
-  these in `context_variables.yaml`.
-- The `resume_agent` for each stage must reference the `inject_as` key by name
-  in its `[CONTEXT]` prompt section — the runtime injects the value but the agent
-  must be authored to know what to do with it.
+- `version` is `1`.
+- `batches[].id` values must be unique within a workflow.
+- `source.kind` is `context_variable` or `structured_output`.
+- `worker.mode` is `ag2_agent`.
+- `result.context_key` and `result.status_key` must be explicit context
+  variables that downstream agents understand.
+- Cross-workflow sequencing still belongs in `extension_registry.json`, not in
+  `task_batches.yaml`.
 
 ### `ui_config.yaml`
 
@@ -390,11 +374,9 @@ hooks:
 ```
 
 Rules:
-- Valid `hook_type` values:
-  - `process_message_before_send`
-  - `update_agent_state`
-  - `process_last_received_message`
-  - `process_all_messages_before_reply`
+- Valid `hook_type` value: `update_agent_state`.
+- Hooks are prompt-injection hooks. Use lifecycle tools for side effects and
+  structured outputs/runtime validators for output validation.
 
 ## Guardrails
 
@@ -406,3 +388,5 @@ Rules:
   `factory_app/workflows/_shared/`, but generated workflow packs must not emit
   or depend on that path.
 - Keep app-backend CRUD policy outside workflow declaratives.
+
+

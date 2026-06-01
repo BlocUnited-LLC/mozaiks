@@ -649,7 +649,7 @@ class RefinementTriggerRouteResolver:
     def _pack_ids_from_integration_clients(manifest_paths: list[str]) -> list[str]:
         pack_ids: list[str] = []
         for path in manifest_paths:
-            match = re.fullmatch(r"backend/integrations/([A-Za-z0-9_-]+)_client\.py", path)
+            match = re.fullmatch(r"services/integrations/([A-Za-z0-9_-]+)_client\.py", path)
             if match:
                 pack_id = match.group(1)
                 if pack_id not in pack_ids:
@@ -699,7 +699,7 @@ class RefinementTriggerRouteResolver:
 
     @staticmethod
     def _adapter_path_matches_connector(path: str, connector_id: str) -> bool:
-        adapter_scope = path.removeprefix("backend/adapters/").lower().replace("-", "_")
+        adapter_scope = path.removeprefix("services/adapters/").lower().replace("-", "_")
         normalized_id = str(connector_id or "").lower().replace("-", "_")
         candidates = {normalized_id, normalized_id.replace("_", "")}
         candidates.update(
@@ -763,8 +763,8 @@ class RefinementTriggerRouteResolver:
 
         if not manifest_paths:
             paths = [
-                "backend/integrations/*_client.py",
-                "backend/adapters/**/*.py",
+                "services/integrations/*_client.py",
+                "services/adapters/**/*.py",
                 "modules/*/backend/service.py",
                 "modules/*/backend/schemas.py",
                 "modules/*/module.yaml",
@@ -787,19 +787,19 @@ class RefinementTriggerRouteResolver:
             for path in manifest_paths
             if cls._is_safe_integration_path(path)
             and (
-                re.fullmatch(r"backend/integrations/[A-Za-z0-9_-]+_client\.py", path)
-                or path.startswith("backend/adapters/")
+                re.fullmatch(r"services/integrations/[A-Za-z0-9_-]+_client\.py", path)
+                or path.startswith("services/adapters/")
             )
             and (
                 not mentioned_connector_ids
                 or (
-                    path.startswith("backend/adapters/")
+                    path.startswith("services/adapters/")
                     and any(
                         cls._adapter_path_matches_connector(path, connector_id)
                         for connector_id in selected_connector_ids
                     )
                 )
-                or path.removeprefix("backend/integrations/").removesuffix("_client.py") in selected_connector_ids
+                or path.removeprefix("services/integrations/").removesuffix("_client.py") in selected_connector_ids
             )
         ]
 
@@ -852,8 +852,8 @@ class RefinementTriggerRouteResolver:
     @staticmethod
     def _integration_readiness_path_hint_present(paths: list[str]) -> bool:
         return any(
-            path.startswith("backend/integrations/")
-            or path.startswith("backend/adapters/")
+            path.startswith("services/integrations/")
+            or path.startswith("services/adapters/")
             or path.startswith("config/integrations")
             or path.startswith("docs/integrations")
             for path in paths
@@ -911,7 +911,7 @@ class RefinementTriggerRouteResolver:
 
     @staticmethod
     def _is_database_migration_path(path: str) -> bool:
-        return bool(re.fullmatch(r"config/database_migrations/[^/]+\.json", path))
+        return bool(re.fullmatch(r"config/data_migrations/[^/]+\.json", path))
 
     @classmethod
     def _data_model_bundle_paths(
@@ -931,8 +931,8 @@ class RefinementTriggerRouteResolver:
 
         if not manifest_paths:
             paths = [
-                "config/database_intent.json",
-                "config/database_migrations/*.json",
+                "config/data.json",
+                "config/data_migrations/*.json",
                 "modules/*/backend/schemas.py",
                 "modules/*/backend/repo.py",
                 "modules/*/backend/policy.py",
@@ -948,7 +948,7 @@ class RefinementTriggerRouteResolver:
             known_module_ids=known_module_ids,
         )
 
-        paths: list[str] = ["config/database_intent.json"]
+        paths: list[str] = ["config/data.json"]
 
         migration_paths = sorted(
             path
@@ -958,7 +958,7 @@ class RefinementTriggerRouteResolver:
         if migration_paths:
             paths.extend(migration_paths)
         else:
-            paths.append("config/database_migrations/*.json")
+            paths.append("config/data_migrations/*.json")
 
         if mentioned_module_ids:
             module_paths: list[str] = []
@@ -997,8 +997,8 @@ class RefinementTriggerRouteResolver:
         if not paths:
             paths.extend(
                 [
-                    "config/database_intent.json",
-                    "config/database_migrations/*.json",
+                    "config/data.json",
+                    "config/data_migrations/*.json",
                     "modules/*/backend/schemas.py",
                     "modules/*/backend/repo.py",
                     "modules/*/backend/policy.py",
@@ -1011,8 +1011,8 @@ class RefinementTriggerRouteResolver:
     @staticmethod
     def _data_model_path_hint_present(paths: list[str]) -> bool:
         return any(
-            path == "config/database_intent.json"
-            or path.startswith("config/database_migrations/")
+            path == "config/data.json"
+            or path.startswith("config/data_migrations/")
             or path.startswith("modules/*/backend/schemas.py")
             or path.endswith("/backend/schemas.py")
             or path.endswith("/backend/repo.py")
@@ -1148,7 +1148,7 @@ class RefinementTriggerRouteResolver:
 
         if not manifest_paths:
             paths = [
-                "backend/integrations/*_client.py",
+                "services/integrations/*_client.py",
                 "modules/*/module.yaml",
                 "modules/*/contracts/*.yaml",
                 "modules/*/backend/*.py",
@@ -1166,10 +1166,10 @@ class RefinementTriggerRouteResolver:
         paths = [
             path
             for path in manifest_paths
-            if re.fullmatch(r"backend/integrations/[A-Za-z0-9_-]+_client\.py", path)
+            if re.fullmatch(r"services/integrations/[A-Za-z0-9_-]+_client\.py", path)
             and (
                 not mentioned_pack_ids
-                or path.removeprefix("backend/integrations/").removesuffix("_client.py") in selected_pack_ids
+                or path.removeprefix("services/integrations/").removesuffix("_client.py") in selected_pack_ids
             )
         ]
 
@@ -1879,3 +1879,4 @@ def get_refinement_trigger_route_resolver() -> RefinementTriggerRouteResolver:
     if _resolver is None:
         _resolver = RefinementTriggerRouteResolver()
     return _resolver
+

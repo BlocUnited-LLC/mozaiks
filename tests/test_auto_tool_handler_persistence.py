@@ -32,13 +32,13 @@ class _ContextVariables:
         self.data[key] = value
 
 
-async def _consume_resume_state(
+async def _consume_task_batch_state(
     summary: str,
     worker_name: str,
     context_variables: _ContextVariables,
 ) -> dict[str, object]:
-    context_variables.set("_mfj_resume_pending", False)
-    context_variables.set("_mfj_resume_consumed_nonce", "nonce-123")
+    context_variables.set("app_task_batch_status", "consumed")
+    context_variables.set("app_task_batch_consumed_nonce", "nonce-123")
     context_variables.set("smoke_presented_summary", summary)
     context_variables.set("smoke_presented_worker", worker_name)
     return {"status": "ok"}
@@ -50,15 +50,15 @@ async def test_handle_tool_dispatch_persists_updated_context(monkeypatch):
     binding = AutoToolBinding(
         model_name="SmokePresentation",
         agent_name="PresenterAgent",
-        tool_name="consume_resume_state",
-        function=_consume_resume_state,
+        tool_name="consume_task_batch_state",
+        function=_consume_task_batch_state,
         param_names=("summary", "worker_name", "context_variables"),
         accepts_context=True,
         ui_config={},
         model_cls=SmokePresentation,
     )
 
-    monkeypatch.setattr(handler, "_resolve_binding", AsyncMock(return_value=binding))
+    monkeypatch.setattr(handler, "_resolve_bindings", AsyncMock(return_value=[binding]))
     monkeypatch.setattr(handler, "_emit_tool_call", AsyncMock())
     monkeypatch.setattr(handler, "_emit_tool_result", AsyncMock())
     monkeypatch.setattr(handler, "_register_turn", AsyncMock())
@@ -72,8 +72,8 @@ async def test_handle_tool_dispatch_persists_updated_context(monkeypatch):
     monkeypatch.setattr(_auto_tool_mod, "AG2PersistenceManager", _FakePersistenceManager)
 
     pattern_context = _ContextVariables({
-        "_mfj_resume_pending": True,
-        "_mfj_resume_nonce": "nonce-123",
+        "app_task_batch_status": "ready",
+        "app_task_batch_nonce": "nonce-123",
     })
     event = {
         "auto_tool_call": True,
@@ -98,8 +98,8 @@ async def test_handle_tool_dispatch_persists_updated_context(monkeypatch):
     persisted = persist_mock.await_args.kwargs
     assert persisted["chat_id"] == "chat-1"
     assert persisted["app_id"] == "app-1"
-    assert persisted["variables"]["_mfj_resume_pending"] is False
-    assert persisted["variables"]["_mfj_resume_consumed_nonce"] == "nonce-123"
+    assert persisted["variables"]["app_task_batch_status"] == "consumed"
+    assert persisted["variables"]["app_task_batch_consumed_nonce"] == "nonce-123"
     assert persisted["variables"]["smoke_presented_summary"] == "Smoke path summarized."
 
 
@@ -109,20 +109,20 @@ async def test_handle_tool_dispatch_rejects_invalid_structured_data(monkeypatch)
     binding = AutoToolBinding(
         model_name="SmokePresentation",
         agent_name="PresenterAgent",
-        tool_name="consume_resume_state",
-        function=_consume_resume_state,
+        tool_name="consume_task_batch_state",
+        function=_consume_task_batch_state,
         param_names=("summary", "worker_name", "context_variables"),
         accepts_context=True,
         ui_config={},
         model_cls=SmokePresentation,
     )
 
-    resolve_binding = AsyncMock(return_value=binding)
+    resolve_bindings = AsyncMock(return_value=[binding])
     emit_tool_call = AsyncMock()
     emit_tool_result = AsyncMock()
     register_turn = AsyncMock()
 
-    monkeypatch.setattr(handler, "_resolve_binding", resolve_binding)
+    monkeypatch.setattr(handler, "_resolve_bindings", resolve_bindings)
     monkeypatch.setattr(handler, "_emit_tool_call", emit_tool_call)
     monkeypatch.setattr(handler, "_emit_tool_result", emit_tool_result)
     monkeypatch.setattr(handler, "_register_turn", register_turn)
@@ -145,10 +145,79 @@ async def test_handle_tool_dispatch_rejects_invalid_structured_data(monkeypatch)
 
     await handler.handle_tool_dispatch(event)
 
-    resolve_binding.assert_awaited_once()
+    resolve_bindings.assert_awaited_once()
     emit_tool_call.assert_not_awaited()
     emit_tool_result.assert_not_awaited()
     register_turn.assert_awaited_once_with("chat-1:turn-2")
+
+
+@pytest.mark.asyncio
+async def test_handle_tool_dispatch_runs_multiple_bindings_in_order(monkeypatch):
+    handler = AutoToolEventHandler()
+    calls: list[str] = []
+
+    async def _first(summary: str, worker_name: str, context_variables: _ContextVariables):
+        calls.append("first")
+        context_variables.set("first_tool", worker_name)
+        return {"status": "first"}
+
+    async def _second(summary: str, worker_name: str, context_variables: _ContextVariables):
+        calls.append("second")
+        context_variables.set("second_tool", summary)
+        return {"status": "second"}
+
+    bindings = [
+        AutoToolBinding(
+            model_name="SmokePresentation",
+            agent_name="PresenterAgent",
+            tool_name="first",
+            function=_first,
+            param_names=("summary", "worker_name", "context_variables"),
+            accepts_context=True,
+            ui_config={},
+            model_cls=SmokePresentation,
+        ),
+        AutoToolBinding(
+            model_name="SmokePresentation",
+            agent_name="PresenterAgent",
+            tool_name="second",
+            function=_second,
+            param_names=("summary", "worker_name", "context_variables"),
+            accepts_context=True,
+            ui_config={},
+            model_cls=SmokePresentation,
+        ),
+    ]
+
+    monkeypatch.setattr(handler, "_resolve_bindings", AsyncMock(return_value=bindings))
+    monkeypatch.setattr(handler, "_emit_tool_call", AsyncMock())
+    monkeypatch.setattr(handler, "_emit_tool_result", AsyncMock())
+    monkeypatch.setattr(handler, "_persist_context_variables", AsyncMock())
+    monkeypatch.setattr(handler, "_register_turn", AsyncMock())
+
+    pattern_context = _ContextVariables()
+    await handler.handle_tool_dispatch(
+        {
+            "auto_tool_call": True,
+            "agent_name": "PresenterAgent",
+            "model_name": "SmokePresentation",
+            "structured_data": {
+                "summary": "Smoke path summarized.",
+                "worker_name": "SmokeChild",
+            },
+            "context": {
+                "workflow_name": "SmokeParent",
+                "chat_id": "chat-1",
+                "app_id": "app-1",
+            },
+            "turn_idempotency_key": "turn-3",
+            "_pattern_context_ref": pattern_context,
+        }
+    )
+
+    assert calls == ["first", "second"]
+    assert pattern_context.data["first_tool"] == "SmokeChild"
+    assert pattern_context.data["second_tool"] == "Smoke path summarized."
 
 
 @pytest.mark.asyncio
@@ -164,7 +233,7 @@ async def test_persist_context_variables_filters_canonical_fields():
         variables={
             "chat_id": "override-me",
             "workflow_name": "override-me",
-            "_mfj_resume_pending": False,
+            "app_task_batch_status": "consumed",
             "smoke_presented_summary": "Smoke path summarized.",
         },
     )
@@ -175,6 +244,6 @@ async def test_persist_context_variables_filters_canonical_fields():
     assert filter_doc["app_id"] == "app-1"
     assert "chat_id" not in update_doc["$set"]
     assert "workflow_name" not in update_doc["$set"]
-    assert update_doc["$set"]["_mfj_resume_pending"] is False
+    assert update_doc["$set"]["app_task_batch_status"] == "consumed"
     assert update_doc["$set"]["smoke_presented_summary"] == "Smoke path summarized."
     assert isinstance(update_doc["$set"]["last_updated_at"], datetime)

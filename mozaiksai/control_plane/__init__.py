@@ -117,6 +117,7 @@ from .staged_coding_worker import (
     select_staged_coding_worker_reason,
 )
 from .tools import get_revision_context
+from .workspace_snapshot import WorkspaceSnapshotRegistrationResult, register_workspace_snapshot
 
 __all__ = [
     "ArtifactKind",
@@ -188,6 +189,7 @@ __all__ = [
     "create_app_context_policy_override",
     "StagedCodingWorkerChange",
     "StagedCodingWorkerResult",
+    "WorkspaceSnapshotRegistrationResult",
     "build_scoped_changes_from_worker_result",
     "run_deterministic_staged_coding_worker",
     "run_live_staged_coding_worker",
@@ -213,4 +215,5 @@ __all__ = [
     "resolve_control_plane_pack_path",
     "resolve_control_plane_tool_entrypoint",
     "resolve_factory_control_plane_root",
+    "register_workspace_snapshot",
 ]

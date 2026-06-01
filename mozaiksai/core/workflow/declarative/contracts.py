@@ -73,7 +73,7 @@ class OrchestratorConfig(DeclarativeModel):
     max_turns: int = 50
     human_in_the_loop: bool = False
     workflow_startup_mode: Literal["AgentDriven", "UserDriven", "BackendOnly"]
-    orchestration_pattern: str = "AutoPattern"
+    orchestration_pattern: str = "ag2_network"
     initial_message_to_user: Optional[str] = None
     initial_message: Optional[str] = None
     initial_agent: Optional[str] = None
@@ -169,7 +169,7 @@ class HandoffRuleSpec(DeclarativeModel):
     target_agent: str
     handoff_type: Literal["after_work", "condition"]
     condition: Optional[str] = None
-    condition_type: Optional[Literal["expression", "context_expression", "context", "llm", "string_llm"]] = None
+    condition_type: Optional[Literal["expression", "context_expression", "context"]] = None
     condition_scope: Optional[str] = None
     transition_target: Optional[str] = None
 
@@ -431,6 +431,7 @@ class ToolSpec(DeclarativeModel):
     description: Optional[str] = None
     tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"]
     auto_tool_call: bool = False
+    bind_to_agent: bool = True
     ui: Optional[ToolUIConfig] = None
     ui_contract: Optional[UIToolContractSpec] = None
 
@@ -583,12 +584,7 @@ class ToolsConfig(DeclarativeModel):
 
 
 class HookSpec(DeclarativeModel):
-    hook_type: Literal[
-        "process_message_before_send",
-        "update_agent_state",
-        "process_last_received_message",
-        "process_all_messages_before_reply",
-    ]
+    hook_type: Literal["update_agent_state"]
     hook_agent: str
     filename: str
     function: str

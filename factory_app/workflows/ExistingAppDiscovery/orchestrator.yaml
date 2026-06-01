@@ -11,9 +11,10 @@ workflow_name: ExistingAppDiscovery
 max_turns: 40
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
-orchestration_pattern: DefaultPattern
+orchestration_pattern: ag2_network
 initial_message_to_user: null
 initial_message:
   You are part of the Mozaiks existing-app discovery process. DiscoveryHostAgent,
   welcome the user and begin gathering information about their existing application.
 initial_agent: DiscoveryHostAgent
+

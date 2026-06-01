@@ -78,7 +78,7 @@ class TestRefinementClassifierFixtureReplay:
         assert by_id["hosted_capability_facade"]["classifier"]["change_class"] in {"design", "feature"}
         assert "modules/projects/module.yaml" in by_id["module_backend"]["impact"]["affected_bundle_paths"]
         assert (
-            "backend/integrations/analytics_provider_client.py"
+            "services/integrations/analytics_provider_client.py"
             in by_id["external_integration"]["impact"]["affected_bundle_paths"]
         )
         assert (
@@ -86,6 +86,6 @@ class TestRefinementClassifierFixtureReplay:
             in by_id["data_model_migration"]["impact"]["scope_summary"]
         )
         assert (
-            "backend/integrations/hosted_analytics_client.py"
+            "services/integrations/hosted_analytics_client.py"
             in by_id["hosted_capability_facade"]["impact"]["affected_bundle_paths"]
         )

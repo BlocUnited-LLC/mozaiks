@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import Any, Optional
+from typing import Any
 
+from mozaiksai.core.app_context.scan_policy import (
+    default_context_graph_scan_policy,
+    is_excluded_source_directory_path,
+    is_sensitive_source_path,
+    safe_scan_relpath,
+)
 from mozaiksai.core.artifacts.content_store import ArtifactContentStore, ContentNotFoundError
 from mozaiksai.core.artifacts.store import ArtifactStore
 
@@ -25,16 +32,8 @@ _IMPORT_EXTENSIONS = (
 )
 
 
-def safe_relpath(raw: Any) -> Optional[str]:
-    if not isinstance(raw, str):
-        return None
-    normalized = raw.replace("\\", "/").strip().strip("/")
-    if not normalized:
-        return None
-    path = PurePosixPath(normalized)
-    if path.is_absolute() or any(part == ".." for part in path.parts):
-        return None
-    return str(path)
+def safe_relpath(raw: Any) -> str | None:
+    return safe_scan_relpath(raw)
 
 
 async def load_artifact_workspace(
@@ -42,7 +41,7 @@ async def load_artifact_workspace(
     artifact_store: ArtifactStore,
     app_id: str,
     artifact_version_id: str,
-    content_store: Optional[ArtifactContentStore] = None,
+    content_store: ArtifactContentStore | None = None,
 ) -> dict[str, Any]:
     artifact = await artifact_store.get_artifact_version(
         app_id=app_id,
@@ -51,7 +50,7 @@ async def load_artifact_workspace(
     if artifact is None:
         return {"present": False, "reason": "artifact_not_found", "artifact_version_id": artifact_version_id}
 
-    metadata = dict((artifact.commit_metadata.metadata or {})) if artifact.commit_metadata else {}
+    metadata = dict(artifact.commit_metadata.metadata or {}) if artifact.commit_metadata else {}
     workspace_dir = metadata.get("workspace_dir")
     artifact_path = metadata.get("artifact_path")
     content_ref = metadata.get("content_ref")
@@ -116,28 +115,38 @@ async def load_artifact_workspace(
 
 def read_workspace_dir(root: Path) -> dict[str, str]:
     file_map: dict[str, str] = {}
-    for file_path in root.rglob("*"):
-        if not file_path.is_file():
-            continue
-        rel = safe_relpath(file_path.relative_to(root).as_posix())
-        if rel is None:
-            continue
-        if file_path.stat().st_size > _MAX_FILE_BYTES:
-            continue
-        try:
-            file_map[rel] = file_path.read_text(encoding="utf-8")
-        except Exception:
-            continue
+    policy = default_context_graph_scan_policy()
+    for current, dir_names, file_names in os.walk(root):
+        dir_names[:] = sorted(
+            name for name in dir_names if name.lower() not in policy.excluded_dir_names
+        )
+        for file_name in sorted(file_names):
+            file_path = Path(current) / file_name
+            rel = safe_relpath(file_path.relative_to(root).as_posix())
+            if rel is None:
+                continue
+            if _skip_artifact_workspace_path(rel):
+                continue
+            if not file_path.is_file():
+                continue
+            if file_path.stat().st_size > _MAX_FILE_BYTES:
+                continue
+            try:
+                file_map[rel] = file_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
     return file_map
 
 
 def _read_from_archive(archive: zipfile.ZipFile) -> dict[str, str]:
     raw_entries: list[tuple[str, str]] = []
-    for info in archive.infolist():
+    for info in sorted(archive.infolist(), key=lambda item: item.filename):
         if info.is_dir() or info.file_size > _MAX_FILE_BYTES:
             continue
         safe_name = safe_relpath(info.filename)
         if safe_name is None:
+            continue
+        if _skip_artifact_workspace_path(safe_name):
             continue
         try:
             decoded = archive.read(info.filename).decode("utf-8")
@@ -154,6 +163,20 @@ def _read_from_archive(archive: zipfile.ZipFile) -> dict[str, str]:
         if all(parts[0] == first for parts in split_paths):
             return {"/".join(path.split("/")[1:]): content for path, content in raw_entries}
     return dict(raw_entries)
+
+
+def _skip_artifact_workspace_path(path: str) -> bool:
+    safe = safe_relpath(path)
+    if safe is None:
+        return True
+    policy = default_context_graph_scan_policy()
+    name = PurePosixPath(safe).name.lower()
+    return (
+        is_excluded_source_directory_path(safe, policy=policy)
+        or is_sensitive_source_path(safe)
+        or name in policy.excluded_file_names
+        or ".min." in name
+    )
 
 
 def read_artifact_zip(zip_path: Path) -> dict[str, str]:

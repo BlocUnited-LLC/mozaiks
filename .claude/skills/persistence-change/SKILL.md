@@ -1,6 +1,6 @@
 ---
 name: persistence-change
-description: Review or implement a change to database_intent, database_migrations, repo.py generation rules, ModuleContext.persistence, or persistence guidance.
+description: Review or implement a change to data_contract, data_migrations, repo.py generation rules, ModuleContext.persistence, or persistence guidance.
 argument-hint: "[change summary or file path]"
 ---
 
@@ -11,16 +11,16 @@ Inspect first:
 
 - `AGENTS.md`
 - `CLAUDE.md`
-- `docs/architecture/builder/database-intent-and-revision-contract.md`
+- `docs/architecture/builder/data-contract-and-revision-contract.md`
 - `docs/architecture/foundations/events-and-data/persistence-and-artifact-storage.md`
 - `factory_app/workflows/AppGenerator/tools/file_contracts.yaml` when generator
   file families or backend defaults are involved
 
 Current persistence truth:
 
-- `database_intent_bundle` is the canonical planning object
-- `config/database_intent.json` is the exported app artifact
-- `config/database_migrations/{migration_id}.json` is the additive migration artifact
+- `data_contract` is the canonical planning object
+- `config/data.json` is the exported app artifact
+- `config/data_migrations/{migration_id}.json` is the additive migration artifact
 - generated module repo code uses `ModuleContext.persistence` as `ctx.persistence`
 - `ctx.db` is absent and non-canonical
 - `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py` are the
@@ -29,7 +29,7 @@ Current persistence truth:
 Companion routing:
 
 - Add `runtime-change` when `ModuleContext.persistence`, runtime persistence injection, or runtime persistence behavior changes.
-- Add `appgenerator-change` when generated `database_intent.json`, `config/database_migrations/{migration_id}.json`, or generated module persistence output changes.
+- Add `appgenerator-change` when generated `config/data.json`, `config/data_migrations/{migration_id}.json`, or generated module persistence output changes.
 
 Do not reintroduce:
 

@@ -58,10 +58,10 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     assert (target_dir / "scripts" / "run-frontend.ps1").exists()
     assert (target_dir / "app" / "modules" / "README.md").exists()
     assert (target_dir / "workflows" / "README.md").exists()
-    assert (target_dir / "app" / "backend" / "config.py").exists()
-    assert (target_dir / "app" / "backend" / "security" / "__init__.py").exists()
-    assert (target_dir / "app" / "backend" / "adapters" / "secrets" / "__init__.py").exists()
-    assert (target_dir / "app" / "backend" / "routes" / "__init__.py").exists()
+    assert (target_dir / "app" / "services" / "config.py").exists()
+    assert (target_dir / "app" / "services" / "security" / "__init__.py").exists()
+    assert (target_dir / "app" / "services" / "adapters" / "secrets" / "__init__.py").exists()
+    assert (target_dir / "app" / "services" / "routes" / "__init__.py").exists()
     modules_readme = (target_dir / "app" / "modules" / "README.md").read_text(encoding="utf-8")
     assert "backend/handler.py" in modules_readme
     assert "events.yaml" in modules_readme
@@ -124,8 +124,8 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert ".venv/" in gitignore
     assert ".env" in gitignore
     assert "generated/" in gitignore
-    assert "!app/backend/**" in gitignore
-    assert "app/backend/**/*.py[cod]" in gitignore
+    assert "!app/services/**" in gitignore
+    assert "app/services/**/*.py[cod]" in gitignore
 
     readme = (target_dir / "README.md").read_text(encoding="utf-8")
     assert "Standalone Workspace Setup" in readme
@@ -140,24 +140,24 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "Standalone Workspace Setup" in agents_md
     assert "Do not assume a sibling checkout" in agents_md
     assert "app/modules/" in agents_md
-    assert "app/backend/" in agents_md
-    assert "app/backend/adapters/" in agents_md
-    assert "app/backend/security/" in agents_md
+    assert "app/services/" in agents_md
+    assert "app/services/adapters/" in agents_md
+    assert "app/services/security/" in agents_md
     assert "app/config/secrets.yaml" in agents_md
     assert "Never store raw API keys" in agents_md
-    assert "app/config/shared_persistence.json" in agents_md
+    assert "app/config/data.json" in agents_md
     assert "workflows/" in agents_md
 
     claude_md = (target_dir / "CLAUDE.md").read_text(encoding="utf-8")
     assert "not the Mozaiks framework source repository" in claude_md
     assert ".claude/rules/" in claude_md
-    assert "app/backend/integrations/<service>_client.py" in claude_md
-    assert "app/backend/adapters/<area>/<provider>.py" in claude_md
-    assert "app/backend/adapters/auth/<provider>.py" in claude_md
-    assert "app/backend/security/" in claude_md
+    assert "app/services/integrations/<service>_client.py" in claude_md
+    assert "app/services/adapters/<area>/<provider>.py" in claude_md
+    assert "app/services/adapters/auth/<provider>.py" in claude_md
+    assert "app/services/security/" in claude_md
     assert "Secret management contract, names only" in claude_md
     assert "app/config/secrets.yaml" in claude_md
-    assert "app/shared_persistence/" in claude_md
+    assert "app/services/data/" in claude_md
     assert "workflows/<WorkflowName>/" in claude_md
 
     expected_rules = {
