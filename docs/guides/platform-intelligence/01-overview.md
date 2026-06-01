@@ -1,97 +1,88 @@
 # Code Context
 
-Code Context is the user-facing view of how Mozaiks figures out what a request
-means and what part of the app it should touch.
+When you ask Mozaiks to change something in your app, you are not prompting a
+generic coding assistant. You are asking a platform that already knows what your
+app is made of.
 
-When someone says something like "fix this dashboard" or "add export controls",
-Mozaiks does not start by guessing. It first builds enough context to answer two
-practical questions:
+Mozaiks keeps a live map of your app — every module, page, workflow, contract,
+and data schema — and uses it to figure out exactly what a request means before
+anything runs. That is what makes the difference between a tool that makes
+its best guess and a platform that makes targeted, accurate changes.
 
-- what kind of change is this?
-- what part of the app does it affect?
+## What You Actually Get
 
-That is what makes refinement feel intentional instead of improvised.
+Most coding tools work at the file level. They read code, infer structure, and
+hope they got the right files. Mozaiks works at the contract level.
 
-## What Mozaiks Figures Out First
+Because every app Mozaiks generates is built from explicit contracts —
+`module.yaml`, `data_contract`, page bindings, workflow tools — the platform
+already understands the semantic structure of your app. When you ask for a
+change, it reads contracts, not HTML.
 
-Before a workflow runs or a coding worker edits anything, Mozaiks works out:
+In practice, this means:
 
-- whether the request is a small patch, a design change, a feature request, or
-  a concept-level shift
-- whether it should route back into a workflow, run a scoped coding path, ask
-  for clarification, or restart from a higher planning step
-- which files, contracts, modules, pages, or workflows are actually relevant to
-  the request
+- changes stay scoped to the right part of the app instead of drifting
+- the platform can show you why a file was included in a change
+- your existing build state is preserved unless a full rebuild is actually
+  necessary
 
-Under the hood, two systems do that work together:
+## How It Works In Practice
 
-- the **control-plane harness** decides the route
-- the **context graph** scopes the relevant code and contracts when coding is
-  needed
+Every request goes through two quick steps before any code changes.
 
-The harness itself is more general than this guide. Here, the focus is on how
-Mozaiks uses it in build and refinement flows.
+**Step 1: classify the request.**
+Mozaiks decides whether this is a patch, a design change, a feature request, or
+a concept-level change. That determines the path — a scoped code fix, a workflow
+re-entry, or something larger.
 
-## How The Flow Works
+**Step 2: scope the context.**
+For patches and targeted fixes, Mozaiks builds a compact view of the files and
+contracts most likely to be affected. The coding worker gets that scoped view —
+not the whole workspace.
 
-At a high level, the flow looks like this:
-
-```text
-User request
-  → classify the request
-  → choose the next path
-  → gather the smallest useful code context
-  → run the selected workflow or coding step
-```
-
-For larger changes, the route is mostly about workflow re-entry.
-
-Example:
+**Adding a feature:**
 
 ```text
-User: "add export controls to the dashboard"
+You: "Add export controls to the projects table"
 
-classify: feature
-  → route to app_revision sequence
-  → workflow runs with the right routing context
+→ classified as: feature
+→ route to app_revision sequence
+→ workflow runs with routing context already set
 ```
 
-For patch-level changes, Mozaiks also needs scoped code context.
+Mozaiks re-enters the right workflow with context already loaded. You do not
+have to re-describe the app.
 
-Example:
+**Fixing a bug:**
 
 ```text
-User: "fix the broken column header in the projects table"
+You: "Fix the broken column header in the projects table"
 
-classify: patch
-  → route to app_revision sequence
-  → load context graph catalog
-  → rank likely files and contracts
-  → load graph-neighborhood context
-  → run scoped coding worker
+→ classified as: patch
+→ rank relevant files and contracts by proximity
+→ coding worker runs against that scoped slice
+→ auto-patches or asks to clarify if confidence is low
 ```
 
-The important product behavior is that the coding worker never needs the whole
-workspace. It gets the smallest relevant slice of the app instead.
+Mozaiks knows `projects` is a module, `column header` maps to the page YAML
+binding, and the relevant files are the module handler, the page schema, and
+their neighbors. A generic coding tool would have to guess all of that.
 
-## Why This Matters
+## Why This Matters For Building
 
-This gives Mozaiks a cleaner refinement loop:
+This changes what iteration actually feels like.
 
-- change requests are classified before anything runs
-- code edits stay scoped instead of expanding across the whole workspace
-- the platform can explain why a certain file or contract was selected
-- refinement stays fast without giving up deterministic control
+Instead of re-describing your app every time you want to change something, you
+just describe the change. Mozaiks already has the map. It uses that map to make
+the smallest accurate change, validate it against the contracts, and keep
+everything else intact.
 
-The context graph is built from the code and contracts already in the app.
-`AppContextGraph` is the canonical model. Optional graph databases may help with
-retrieval later, but they are not the source of truth.
+See [Refinement Control Plane](./04-refinement-control-plane.md) for how
+Mozaiks decides what level of change a request actually requires.
 
-## Read More
+---
 
-- [Refinement Control Plane](./04-refinement-control-plane.md)
-
-For the deeper canonical architecture behind these systems, see:
+**Architecture references**
 
 - [Control-Plane Harness Architecture](../../architecture/workflows/control-plane-harness-architecture.md)
 - [Context Graph and Code Intelligence](../../architecture/foundations/context-graph-and-code-intelligence.md)

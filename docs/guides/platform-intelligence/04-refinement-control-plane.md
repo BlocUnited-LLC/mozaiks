@@ -1,78 +1,72 @@
 # Refinement Control Plane
 
-The refinement control plane is the part of Mozaiks that turns a post-generation
-change request into the smallest safe next step.
+Generating your app is the starting point. The refinement control plane is what
+makes every change after that accurate and fast.
 
-It is the operating layer that keeps refinement fast without making it vague.
+When you ask Mozaiks to change something — rename a field, restructure a page,
+add a feature, rethink the product direction — you should not have to re-run
+everything from scratch. Mozaiks figures out how large the change really is and
+does only what the change actually requires.
 
-## What Refinement Means
+## The Four Types of Change
 
-Mozaiks treats **initial generation** and **refinement** as separate modes.
+Every request you make falls into one of four classes. Mozaiks classifies it
+automatically — you do not need to tell it which one applies.
 
-Initial generation builds the first canonical shape of the app. Refinement is
-the edit path that classifies a requested change, chooses the smallest valid
-re-entry point, and updates the artifact safely.
+| Class | What it means | What Mozaiks does |
+|---|---|---|
+| **Patch** | A small, localized fix | Scoped code edit against the affected files only |
+| **Design** | A visual or layout change without a new capability | Page schema and UI binding regeneration, module untouched |
+| **Feature** | A new capability within the same product | Targeted workflow re-entry with updated planning context |
+| **Core** | A fundamental change to the product direction | Restart from the concept and value planning stage |
 
-That is what allows Mozaiks to improve an existing app without pretending every
-change is a brand-new build.
+## What This Looks Like For You
 
-## The Core Idea
+**Renaming a label on a form:**
+Mozaiks classifies it as `patch`, identifies the page binding and the module
+schema that own that label, patches only those, and closes the loop. You do not
+wait for a full rebuild.
 
-The control plane decides whether a request is:
+**Changing the app from a card layout to a table view:**
+Mozaiks classifies it as `design`, regenerates the page schema and layout
+bindings, and leaves the module actions and data contract completely untouched.
+The backend is not touched because it does not need to be.
 
-- `patch`
-- `design`
-- `feature`
-- `core`
+**Adding an approval workflow to an existing feature:**
+Mozaiks classifies it as `feature`, re-enters the planning workflow with the
+existing app context already loaded, and generates only the new contract surfaces
+that the capability requires.
 
-That classification determines whether Mozaiks should:
+**Pivoting from B2C to enterprise:**
+Mozaiks classifies it as `core` and takes you back to the value and concept
+stage — because a change at that level affects everything downstream, and a
+partial patch would be wrong.
 
-- run a scoped coding path
-- selectively re-enter a workflow sequence
-- rebuild part of the plan
-- restart from concept-level intent
+## Why This Approach Matters
 
-The key idea is not just classification for its own sake. The point is to avoid
-doing more work than the change actually requires.
+Most AI tools treat every request as an edit against a pile of files. Mozaiks
+treats every request as a change against a structured app with known contracts.
 
-## Why This Is Better Than Re-Running Everything
+That means:
 
-Without the refinement control plane, every change request risks becoming a full
-rebuild. With it, Mozaiks can preserve the canonical app state, route only the
-necessary work, and validate a new artifact version against the right scope.
+- changes are as small as the request allows
+- the existing app state is preserved at every level above the change
+- you are always working forward from your current build, not repeating it
 
-This is what makes post-generation changes feel fast without giving up
-determinism.
+## How To Use It
 
-## How To Think About The Four Classes
+You do not configure the refinement control plane directly. It is always on for
+apps running through Studio.
 
-- `patch`: a small, localized fix
-- `design`: a visual or information-architecture change without changing the core product
-- `feature`: a new capability within the same product direction
-- `core`: a concept-level shift that changes what the app fundamentally is
+Just describe what you want to change in plain language. Mozaiks classifies it,
+shows you the proposed scope, and either auto-applies it (for clear patches) or
+asks for confirmation before proceeding.
 
-## Current Runtime Truth
+If a change is classified in a way that surprises you, you can adjust the scope
+before it runs.
 
-In the current implementation, refinement is driven by:
+---
 
-- `app/config/ai.json`
-- the selected `control_plane.yaml` pack
-- checkpoint routing and control-plane re-entry
-
-It is not a separate dedicated `RefinementWorkflow`.
-
-So the clean flow is:
-
-1. load the current artifact state
-2. classify the requested change
-3. route to the smallest valid re-entry point
-4. validate and persist the updated result
-
-That is the core promise of the refinement control plane: Mozaiks changes the
-app at the right level instead of defaulting to a full rebuild.
-
-## Go Deeper
-
-For the full canonical architecture contract, read:
+**Architecture reference**
 
 - [Refinement Control Plane](../../architecture/workflows/refinement-control-plane.md)
