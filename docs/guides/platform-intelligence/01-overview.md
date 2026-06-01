@@ -3,28 +3,18 @@
 Mozaiks does not just generate apps. It knows how to change them intelligently
 after generation.
 
-That is the product promise behind the control plane.
-
 When you ask for a change, Mozaiks does not treat every request like a blind
 code edit. It understands whether you are asking for a tiny patch, a
 design adjustment, a new capability, or a concept-level pivot. It routes to the
 smallest accurate next step, preserves everything above the change, and only
 regenerates what actually needs to move.
 
-That is what the Mozaiks control plane does. It is the layer that turns the app
-into a self-improving system instead of a one-time generation output.
+That is the product promise.
 
-## Why This Matters
-
-This is the part of Mozaiks that aligns most directly with the YC "AI Operating
-System for Companies" thesis.
-
-The app is already legible to AI because it was generated from contracts. The
-control plane is what uses that legibility to compare the current build state to
-your requested outcome and choose the right path forward.
-
-Without this layer, Mozaiks would just be a generator. With it, Mozaiks can
-keep evolving the app after the first build.
+The control plane is the system that makes that promise real. The harness is a
+single runtime shell inside that system. The control plane decides what should
+happen next; the harness is the implementation that executes the checkpoint and
+routing flow.
 
 ## What The Control Plane Actually Does
 
@@ -36,73 +26,38 @@ When a change request comes in, the control plane:
 - scopes the change to the relevant contracts and files
 - decides whether to auto-apply, ask for confirmation, or clarify first
 
-That is the user-facing behavior. Under the hood, the current implementation is
-split across three layers.
-
-### 1. Runtime Layer
-
-`mozaiksai/control_plane/` is the canonical runtime package. It owns the
-control-plane runtime, checkpoint dispatch, contracts, loaders, and the
-first-party implementations that execute the current flow.
-
-Key components include:
-
-- `LLMChangeClassifier`
-- `RefinementTriggerRouteResolver`
-- `ArtifactScopeProposer`
-- `ContractSurfacePlanner`
-- `SurfaceRegenerationWorker`
-- `ScopedRefinementCodingWorker`
-- `FirstPartyHarnessDecisionPolicy`
-
-### 2. Declarative Pack
-
-The runtime is driven by a first-party declarative pack:
-
-- `factory_app/app/config/ai.json` enables the control plane and selects model
-  profiles
-- `factory_app/control_plane/config/control_plane.yaml` declares checkpoints,
-  prompts, routes, tools, and the harness implementation
-- `factory_app/workflows/extended_orchestration/extension_registry.json`
-  defines the workflow sequences the router can re-enter
-
-So the current system is not one monolithic router hardcoded in Python. It is a
-runtime executing a declarative control-plane pack.
-
-### 3. Context Inputs
-
 The control plane depends on persisted revision context, artifact summaries, and
 the Context Graph.
 
 The Context Graph tells Mozaiks what exists and how it is connected. The control
 plane uses that map to decide what happens next.
 
-## How This Differs From AG2's Harness
+## Declarative Pack
 
-AG2's harness and the Mozaiks control plane solve different problems.
+The runtime is driven by a first-party declarative pack. Its job is to describe
+what the control plane is allowed to do, what runtime implementation should do
+it, and which workflow sequences can be re-entered.
 
-AG2 describes its harness as the set of opt-in primitives you compose onto a
-single agent loop: context assembly policies, persistent knowledge, sub-task
-spawning, and the middleware those features inject. In other words, AG2's
-harness is agent-local. It makes one agent richer.
+| File | Shape | What it controls | Derived from |
+|---|---|---|---|
+| `factory_app/app/config/ai.json` | app config JSON | Enables the control plane and selects model profiles | The app's chosen control-plane policy and model budget |
+| `factory_app/control_plane/config/control_plane.yaml` | control-plane manifest YAML | Declares checkpoints, prompts, routes, tools, and the harness implementation | The first-party control-plane pack for this app workspace |
+| `factory_app/workflows/extended_orchestration/extension_registry.json` | workflow registry JSON | Defines the workflow sequences the router can re-enter | The cross-workflow build and revision graph |
 
-Mozaiks uses the word differently.
+So the current system is not one monolithic router hardcoded in Python. It is a
+runtime executing a declarative control-plane pack.
 
-In Mozaiks, the harness is a runtime shell inside the broader control plane.
-It coordinates checkpoints and decisions, but it is not the whole intelligence
-layer. The broader control plane sits above workflow execution and answers a
-different question: given this user request and this app state, what does the
-system do next?
+## Harness
 
-The clean comparison is:
+The harness is the runtime shell inside the broader control plane. It is the
+implementation named in `control_plane.yaml`, and it coordinates checkpoints,
+tool calls, and routing decisions.
 
-- AG2 harness: enrich one agent's turn lifecycle
-- Mozaiks harness: runtime shell for checkpoint orchestration inside the control plane
-- Mozaiks control plane: app-level routing and refinement system above workflows
+If you want the short version:
 
-So if someone already knows AG2, the easiest way to explain the difference is:
-AG2's harness is about composing capabilities onto an agent. Mozaiks' control
-plane is about governing how a generated app changes over time.
+- control plane = the full intelligence layer
+- harness = the runtime shell that runs the checkpoint flow
+- declarative pack = the files that configure that flow
 
 ## How A Request Moves Through The System
 
