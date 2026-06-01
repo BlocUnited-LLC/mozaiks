@@ -5,11 +5,11 @@ after generation.
 
 That is the product promise behind the control plane.
 
-When you ask for a change, Mozaiks should not treat every request like a blind
-code edit. It should understand whether you are asking for a tiny patch, a
-design adjustment, a new capability, or a concept-level pivot. It should route
-to the smallest accurate next step, preserve everything above the change, and
-only regenerate what actually needs to move.
+When you ask for a change, Mozaiks does not treat every request like a blind
+code edit. It understands whether you are asking for a tiny patch, a
+design adjustment, a new capability, or a concept-level pivot. It routes to the
+smallest accurate next step, preserves everything above the change, and only
+regenerates what actually needs to move.
 
 That is what the Mozaiks control plane does. It is the layer that turns the app
 into a self-improving system instead of a one-time generation output.
@@ -75,7 +75,7 @@ The control plane depends on persisted revision context, artifact summaries, and
 the Context Graph.
 
 The Context Graph tells Mozaiks what exists and how it is connected. The control
-plane uses that map to decide what should happen next.
+plane uses that map to decide what happens next.
 
 ## How This Differs From AG2's Harness
 
@@ -91,7 +91,7 @@ Mozaiks uses the word differently.
 In Mozaiks, the harness is a runtime shell inside the broader control plane.
 It coordinates checkpoints and decisions, but it is not the whole intelligence
 layer. The broader control plane sits above workflow execution and answers a
-different question: given this user request and this app state, what should the
+different question: given this user request and this app state, what does the
 system do next?
 
 The clean comparison is:
