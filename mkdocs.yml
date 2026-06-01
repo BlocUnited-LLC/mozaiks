@@ -92,11 +92,12 @@ nav:
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
+      - Add Control Plane: guides/adding-control-plane/01-overview.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Platform Intelligence:
-          - Control Plane Overview: guides/platform-intelligence/01-overview.md
-          - Control Plane Schemas: guides/platform-intelligence/02-schema-shapes.md
-          - Refinement Control Plane: guides/platform-intelligence/04-refinement-control-plane.md
+          - Context Graph: guides/platform-intelligence/01-context-graph.md
+          - Harness: guides/platform-intelligence/02-harness.md
+          - Refinement: guides/platform-intelligence/03-refinement.md
   - Architecture:
       - Overview: architecture/index.md
       - Foundations:
