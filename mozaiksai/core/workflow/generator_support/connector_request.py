@@ -615,6 +615,75 @@ async def request_connector_bundle(
     }
 
 
+def _request_result_ready_services(request_result: dict[str, Any] | None) -> set[str]:
+    ready_services: set[str] = set()
+    for entry in (request_result or {}).get("services") or []:
+        if not isinstance(entry, dict):
+            continue
+        service = normalize_service(entry.get("service"))
+        if not service or entry.get("status") != "success":
+            continue
+        stored_secret = bool(entry.get("connector_stored"))
+        stored_metadata_only = bool(entry.get("metadata_saved")) and not bool(entry.get("has_key"))
+        if stored_secret or stored_metadata_only:
+            ready_services.add(service)
+    return ready_services
+
+
+def _merge_inventory_ready_services(
+    inventory: dict[str, Any],
+    ready_services: set[str],
+) -> dict[str, Any]:
+    if not ready_services:
+        return inventory
+
+    merged = dict(inventory or {})
+    required = [
+        normalize_service(service)
+        for service in (merged.get("required_services") or [])
+        if normalize_service(service)
+    ]
+    required_set = set(required)
+    ready = {
+        normalize_service(service)
+        for service in (merged.get("ready_services") or [])
+        if normalize_service(service)
+    }
+    ready.update(ready_services)
+
+    known = {
+        normalize_service(service)
+        for service in (merged.get("known_services") or [])
+        if normalize_service(service)
+    }
+    known.update(ready)
+
+    unresolved = required_set - ready
+    merged["ready_services"] = sorted(ready)
+    merged["known_services"] = sorted(known)
+    merged["missing_required_services"] = sorted(unresolved)
+    merged["known_but_unready_required_services"] = sorted(unresolved & known)
+    merged["entirely_missing_required_services"] = sorted(unresolved - known)
+
+    status_buckets = dict(merged.get("status_buckets") or {})
+    active = {
+        normalize_service(service)
+        for service in (status_buckets.get("active") or [])
+        if normalize_service(service)
+    }
+    active.update(ready)
+    status_buckets["active"] = sorted(active)
+
+    metadata_only = {
+        normalize_service(service)
+        for service in (status_buckets.get("metadata_only") or [])
+        if normalize_service(service)
+    }
+    status_buckets["metadata_only"] = sorted(metadata_only - ready)
+    merged["status_buckets"] = status_buckets
+    return merged
+
+
 async def collect_missing_connector_needs(
     *,
     context_variables: Any = None,
@@ -658,6 +727,7 @@ async def collect_missing_connector_needs(
             if app_id
             else inventory
         )
+        inventory = _merge_inventory_ready_services(inventory, _request_result_ready_services(request_result))
 
     unresolved = list(inventory.get("missing_required_services") or [])
     if not unresolved:
