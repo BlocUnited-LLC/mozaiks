@@ -15,9 +15,10 @@ workflow_name: ThemeCapture
 max_turns: 30
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
-orchestration_pattern: DefaultPattern
+orchestration_pattern: ag2_network
 initial_message_to_user: null
 initial_message:
   You are part of the Mozaiks ThemeCapture process. ThemeInterviewAgent,
   greet the user and begin gathering their app's visual identity.
 initial_agent: ThemeInterviewAgent
+

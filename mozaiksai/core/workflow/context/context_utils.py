@@ -22,8 +22,6 @@ import string
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Callable
 
-from autogen import ConversableAgent, UpdateSystemMessage
-
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -34,7 +32,6 @@ __all__ = [
     'merge_message_parts',
     'apply_context_exposures',
     'render_default_context_fragment',
-    'build_exposure_update_hook',
 ]
 
 
@@ -241,48 +238,3 @@ def apply_context_exposures(
     return message or base_message or ""
 
 
-# ==============================================================================
-# AG2 HOOK CONSTRUCTION
-# ==============================================================================
-
-def build_exposure_update_hook(
-    agent_name: str,
-    base_message: str,
-    exposures: List[Dict[str, Any]],
-    fallback_variables: List[str],
-):
-    """Build AG2 UpdateSystemMessage hook for context exposure.
-    
-    Creates a hook that updates agent system message with current context
-    variable values before each reply.
-    
-    Args:
-        agent_name: Name of agent this hook is for
-        base_message: Base system message template
-        exposures: List of exposure configurations
-        fallback_variables: Default variables to expose
-        
-    Returns:
-        UpdateSystemMessage hook or None if no valid exposures
-    """
-    valid_exposures = [exp for exp in exposures if isinstance(exp, dict)]
-    if not valid_exposures and not fallback_variables:
-        return None
-
-    def _update(agent: ConversableAgent, messages: List[Dict[str, Any]]) -> str:
-        container = getattr(agent, "context_variables", None)
-        context_dict = context_to_dict(container) if container is not None else {}
-        logger.debug(f"[UpdateSystemMessage][{agent_name}] context snapshot: {context_dict}")
-        base_template = getattr(agent, "_mozaiks_base_system_message", base_message)
-        updated = apply_context_exposures(base_template, valid_exposures, context_dict, fallback_variables)
-        if hasattr(agent, "update_system_message") and callable(agent.update_system_message):
-            agent.update_system_message(updated or base_template or "")
-        return updated or base_template or ""
-
-    _update.__annotations__ = {
-        "agent": ConversableAgent,
-        "messages": List[Dict[str, Any]],
-        "return": str,
-    }
-    _update.__name__ = f"{agent_name.lower()}_context_update"
-    return UpdateSystemMessage(_update)

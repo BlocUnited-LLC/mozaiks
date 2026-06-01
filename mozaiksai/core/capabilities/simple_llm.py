@@ -53,7 +53,7 @@ class SimpleLLMCapabilityService:
         self,
         *,
         messages: List[Dict[str, str]],
-        temperature: float = 0.3,
+        temperature: Optional[float] = 0.3,
         llm_config: Optional[Dict[str, Any]] = None,
         app_id: Optional[str],
         user_id: Optional[str],
@@ -85,9 +85,10 @@ class SimpleLLMCapabilityService:
 
         payload: Dict[str, Any] = {
             "model": model,
-            "temperature": float(temperature),
             "messages": messages,
         }
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
         if extra_payload:
             payload.update(extra_payload)
 
@@ -167,7 +168,14 @@ class SimpleLLMCapabilityService:
         extra_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute a chat completion expected to return a JSON object."""
-        resolved_temperature = float(temperature) if temperature is not None else 0.0
+        resolved_temperature: Optional[float] = None
+        if temperature is not None:
+            resolved_temperature = float(temperature)
+        elif isinstance(llm_config, dict) and llm_config.get("temperature") is not None:
+            try:
+                resolved_temperature = float(llm_config["temperature"])
+            except Exception:
+                resolved_temperature = None
         response = await self.generate_chat_completion(
             messages=[
                 {"role": "system", "content": str(system_prompt or "")},

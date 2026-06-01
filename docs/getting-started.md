@@ -59,9 +59,8 @@ In-progress builds stay in **Apps** so you can always pick up where you left off
 
 !!! tip "Coming back to an existing workspace"
     ```powershell
-    cd .\my-workspace
     docker start mozaiks-mongo   # bring MongoDB back up if your PC restarted
-    python -m mozaiks studio --dir . --open
+    python -m mozaiks studio --dir .\my-workspace --open
     ```
 
 ## Troubleshooting

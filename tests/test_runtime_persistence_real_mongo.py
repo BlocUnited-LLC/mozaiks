@@ -10,9 +10,9 @@ from mozaiksai.core.core_config import close_mongo_client, get_mongo_client
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import (
-    APP_DATABASE_MIGRATIONS_COLLECTION,
+    APP_DATA_MIGRATIONS_COLLECTION,
     apply_database_indexes,
-    apply_database_migrations,
+    apply_data_migrations,
     collection_name_for,
     migration_hash,
 )
@@ -56,7 +56,7 @@ def _test_database_name() -> tuple[str, bool]:
     return f"mozaiks_persistence_test_{uuid4().hex[:10]}", True
 
 
-def _database_intent(app_id: str) -> dict:
+def _data_contract(app_id: str) -> dict:
     return {
         "version": "1",
         "app_id": app_id,
@@ -107,7 +107,7 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
 
     Normal CI uses fake/in-memory tests. This test requires an explicit env gate
     and a real Mongo connection, then exercises ModuleExecutor,
-    MongoPersistenceContext, database intent indexes, additive migrations, and
+    MongoPersistenceContext, data contract indexes, additive migrations, and
     migration history with a dedicated test database.
     """
 
@@ -125,7 +125,7 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
     client = get_mongo_client()
     raw_collection = client[database_name][collection_name]
     other_collection = client[database_name][other_collection_name]
-    history = client["mozaiksai"][APP_DATABASE_MIGRATIONS_COLLECTION]
+    history = client["mozaiksai"][APP_DATA_MIGRATIONS_COLLECTION]
     migration = _migration()
 
     try:
@@ -171,13 +171,13 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
         assert list_result.data["items"][0]["user_id"] == "integration_user"
         assert other_list_result.data["items"][0]["app_id"] == other_app_id
 
-        index_count = await apply_database_indexes(_database_intent(app_id), app_id=app_id)
+        index_count = await apply_database_indexes(_data_contract(app_id), app_id=app_id)
         assert index_count == 1
         index_names = {index["name"] for index in await raw_collection.list_indexes().to_list(length=None)}
         assert "project_owner_idx" in index_names
 
-        applied_count = await apply_database_migrations(app_id=app_id, migrations=[migration])
-        skipped_count = await apply_database_migrations(app_id=app_id, migrations=[migration])
+        applied_count = await apply_data_migrations(app_id=app_id, migrations=[migration])
+        skipped_count = await apply_data_migrations(app_id=app_id, migrations=[migration])
         assert applied_count == 1
         assert skipped_count == 0
 

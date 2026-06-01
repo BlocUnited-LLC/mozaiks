@@ -22,6 +22,7 @@ the peer architecture sections for details:
 | [Platform Information Architecture](platform-information-architecture.md) | Studio and app-level IA contracts |
 | [Core, Product, and App Bundle Boundary](core-product-app-bundle-boundary.md) | Ownership boundaries between runtime, product, and app bundle |
 | [Graph Authority Boundaries](graph-authority-boundaries.md) | Source-of-truth boundaries for config, runtime, DB, and derived graph indexes |
+| [Context Graph and Code Intelligence](context-graph-and-code-intelligence.md) | Context Graph contract, deterministic code extraction, contract mapping, and advisory semantic annotations |
 | [App Context and Brownfield Adoption](app-context-and-brownfield-adoption.md) | Unified app context, brownfield onboarding, and control-plane ownership boundaries |
 
 ## Events and Data
@@ -42,8 +43,9 @@ from builder state.
 
 - Mozaiks framework code lives in `mozaiksai/`, `chat-ui/`, the repo-local web
   shell host, CLI, and shared generation core.
-- App workspaces are self-contained and keep `app/config`, `app/ui/pages`,
-  `app/workflows`, `app/modules`, `app/ui`, and `app/brand` together.
+- App workspaces are self-contained and keep `app/config`, `app/modules`,
+  `app/ui`, `app/brand`, workspace-root `services`, and workspace-root
+  `workflows` together.
 - Domains are planning context. Capability packs are build-time generation
   recipes. Modules are deterministic runtime units.
 - Workflows are declarative AI runs owned either by an app workspace or by the

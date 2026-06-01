@@ -45,3 +45,4 @@ When adding README images or demos:
 - avoid relative image paths such as `./docs/assets/demo.png`; they render on GitHub but break on PyPI
 - prefer small PNG/JPG assets for logos over large SVGs
 - use absolute GitHub `blob/main/...` links for docs links that should work from PyPI
+

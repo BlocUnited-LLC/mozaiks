@@ -13,6 +13,7 @@ handoffs, workflow routing, or session/refinement behavior.
 | [Workflow Routing Transitions](workflow-routing-transitions.md) | Global workflow routing and transition UI |
 | [Orchestration Control Loops](orchestration-control-loops.md) | Workflow-local, builder-session, and refinement loops |
 | [Declarative AG2 Mapping](declarative-ag2-mapping.md) | YAML-to-AG2 mapping rules |
+| [AG2 Network Patternbook](ag2-network-patternbook.md) | Canonical AgentGenerator pattern catalog for AG2 beta Network workflow shapes |
 | [Structured Output Extraction](structured-output-extraction-contract.md) | Strict structured-output extraction contract |
 | [Refinement Control Plane](refinement-control-plane.md) | Refinement routing, classification, and scoped repair |
 | [Session Router](session-router.md) | Session routing and resume contract |

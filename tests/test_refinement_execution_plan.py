@@ -73,7 +73,7 @@ def test_data_model_refinement_execution_plan_requires_migration_review_and_huma
 
     assert "database_migration_review" in _required_validation_ids(plan)
     assert plan.human_review_required is True
-    assert "Database migration review is required before mutation." in plan.warnings
+    assert "Data migration review is required before mutation." in plan.warnings
     assert "Human review is required before mutation." in plan.warnings
 
 
@@ -82,7 +82,7 @@ def test_hosted_capability_refinement_execution_plan_requires_facade_validation(
 
     assert plan.workflow_sequence == "app_surface_revision"
     assert "hosted_facade_validation" in _required_validation_ids(plan)
-    assert "backend/integrations/hosted_analytics_client.py" in plan.affected_bundle_paths
+    assert "services/integrations/hosted_analytics_client.py" in plan.affected_bundle_paths
 
 
 def test_execution_plan_defaults_to_dry_run_without_mutation() -> None:

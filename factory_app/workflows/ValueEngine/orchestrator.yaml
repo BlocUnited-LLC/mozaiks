@@ -2,8 +2,9 @@ workflow_name: ValueEngine
 max_turns: 25
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
-orchestration_pattern: DefaultPattern
+orchestration_pattern: ag2_network
 initial_message_to_user: null
 initial_message: 'ValueInterviewAgent: guide the user to a concrete app direction. If the idea is vague, propose a
   short list of grounded options and ask which is closest. Ask only the smallest missing question.'
 initial_agent: ValueInterviewAgent
+

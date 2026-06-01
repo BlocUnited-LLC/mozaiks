@@ -61,11 +61,11 @@ def test_runtime_artifact_writers_use_shared_helpers() -> None:
     assert "get_agent_outputs_dir" in orchestration
     assert 'Path("logs/agent_outputs")' not in orchestration
 
-    assert "get_agent_outputs_dir" in workflow_download
+    assert "MOZAIKS_GENERATED_ARTIFACTS_PATH" in workflow_download
     assert 'Path("logs/agent_outputs")' not in workflow_download
 
-    assert "get_workflow_converter_logs_dir" in workflow_converter
     assert 'Path("logs/workflow_converter")' not in workflow_converter
+    assert "MOZAIKS_GENERATED_ARTIFACTS_PATH" in workflow_converter
 
 
 def test_runtime_cleanup_scripts_are_available() -> None:

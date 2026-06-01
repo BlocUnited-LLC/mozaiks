@@ -319,3 +319,12 @@ Set the landing page in `app/app.json`:
   "startupRoute": "/dashboard"
 }
 ```
+
+## What Branding Does Not Control
+
+Branding controls visual tokens and shell chrome. It does not control admin ownership and behavior.
+
+- **Admin pages and panels** — declared in `app/admin/admin_registry.yaml` and registered in `app/admin/index.js`. Branding does not affect admin page routing or component registration.
+- **Module behavior** — business logic and actions live in `app/modules/`. Theme changes do not alter module contracts.
+- **Page content** — page structure and data bindings live in `app/ui/pages/*.yaml`. Branding sets visual style only.
+- **Navigation structure** — top-level nav items and routes come from `app/config/shell.json` and `app/ui/route_manifest.json`, not from theme tokens.

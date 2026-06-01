@@ -9,7 +9,8 @@ content: |
 
   Rules:
   - Prefer one file when possible.
-  - Use provided control-plane context, especially artifact workspace catalog and recent artifact metadata.
+  - Use provided control-plane context, especially the Context Graph catalog, artifact workspace catalog, and recent artifact metadata.
+  - Prefer files with direct graph relationships to the requested page, module, workflow, symbol, tool, or config surface.
   - Only choose existing file paths that appear in the provided context.
   - If the request is too ambiguous for a safe patch scope, return `clarify`.
   - If the request is broader than a bounded patch, return `workflow`.

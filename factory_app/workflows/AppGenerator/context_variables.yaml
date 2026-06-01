@@ -178,6 +178,59 @@ definitions:
     source:
       type: state
       default: null
+  context_graph_pack:
+    type: object
+    description: >
+      Compact Context Graph prompt pack loaded by the before_chat lifecycle
+      tool. Contains the prompt-safe graph status, relevant paths, matched
+      nodes, relationship hints, warnings, and semantic annotation targets.
+      This is advisory code-context intelligence, not routing or execution
+      authority.
+    source:
+      type: state
+      default: null
+  context_graph_catalog:
+    type: object
+    description: >
+      Rich machine-readable Context Graph catalog for diagnostics and tooling.
+      This is intentionally distinct from context_graph_pack. Populated by
+      load_context_graph_context when a current app context graph or artifact
+      workspace graph is available.
+    source:
+      type: state
+      default: null
+  context_graph_status:
+    type: string
+    description: >
+      Startup load status for Context Graph prompt packs: loaded, unavailable,
+      or null when the loader has not run.
+    source:
+      type: state
+      default: null
+  context_graph_reason:
+    type: string
+    description: >
+      Specific Context Graph load reason such as missing_app_id,
+      current_app_context_graph_unavailable, or context_refresh_prior_version.
+      Null when graph prompt context loaded without a special condition.
+    source:
+      type: state
+      default: null
+  context_graph_warnings:
+    type: array
+    description: Warnings emitted while loading Context Graph context.
+    source:
+      type: state
+      default: []
+  context_graph_health:
+    type: object
+    description: >
+      Deterministic Context Graph load health and coverage metadata, including
+      scan limits, selected file counts, parser availability, and skipped-file
+      counts when a local source scan was performed.
+    source:
+      type: state
+      default: null
   app_type:
     type: string
     description: >
@@ -345,20 +398,20 @@ definitions:
       fields:
       - surface_map
       default: null
-  database_intent_bundle:
+  data_contract:
     type: object
     description: >
       Canonical typed database ownership and migration contract persisted by DesignDocs.
-      AppGenerator uses this as the source of truth for staged `config/database_intent.json`
+      AppGenerator uses this as the source of truth for staged `config/data.json`
       and for deterministic backend collection ownership.
     source:
       type: data_reference
       database_name: mozaiksai
-      collection: DatabaseIntents
+      collection: DataContracts
       query_template:
         app_id: '{{runtime.app_id}}'
       fields:
-      - database_intent_bundle
+      - data_contract
       default: null
   captured_theme_config:
     type: object
@@ -577,12 +630,32 @@ definitions:
     source:
       type: computed
       default: false
-  app_child_workflows:
+  app_task_batch_items:
     type: array
-    description: Hydrated child workflow specs for each AppGenerator build task, written by app_build_plan.
+    description: Hydrated task batch items for each AppGenerator build task, written by app_build_plan.
     source:
       type: computed
       default: []
+  app_task_batch_status:
+    type: string
+    description: >
+      Status of AppGenerator task batch execution: planned | running |
+      completed | failed.
+    source:
+      type: computed
+      default: null
+  app_task_batch_results:
+    type: object
+    description: Normalized results from AppGenerator task batch execution.
+    source:
+      type: computed
+      default: null
+  app_task_batch_results_summary:
+    type: object
+    description: Compact task batch status and task-key summary written after AssemblyAgent merges task outputs.
+    source:
+      type: computed
+      default: null
   runtime_capabilities:
     type: array
     description: Hosted platform capabilities available at runtime (e.g. hosted_wallet). Null in OSS mode.
@@ -647,7 +720,7 @@ definitions:
     type: array
     description: >
       App-scoped third-party connector needs discovered by AppPlanAgent build
-      tasks, MFJ child task outputs, or task agents via record_integration_need.
+      tasks, task batch outputs, or task agents via record_integration_need.
       IntegrationReadinessAgent aggregates this list and prompts inline only for
       unresolved required credentials.
     source:
@@ -663,7 +736,7 @@ definitions:
       default: null
   integration_readiness_result:
     type: object
-    description: Raw result payload from the AppGenerator integration readiness fan-in checkpoint.
+    description: Raw result payload from the AppGenerator integration readiness checkpoint.
     source:
       type: computed
       default: null
@@ -693,25 +766,25 @@ definitions:
       default: []
   task_run_mode:
     type: boolean
-    description: True when this AppGenerator chat is a child task run spawned by MFJ.
+    description: True when an AppGenerator agent is executing one scoped task batch item.
     source:
       type: state
       default: false
   current_build_task:
     type: object
-    description: Current build task spec for MFJ child task runs.
+    description: Current build task spec for task batch item execution.
     source:
       type: state
       default: null
   current_build_task_id:
     type: string
-    description: Current build task identifier for MFJ child task runs.
+    description: Current build task identifier for task batch item execution.
     source:
       type: state
       default: null
   current_build_task_type:
     type: string
-    description: Current build task type for MFJ child task runs.
+    description: Current build task type for task batch item execution.
     source:
       type: state
       default: null
@@ -732,7 +805,7 @@ definitions:
     description: >
       Migration document produced by DatabaseAgent during a refinement run.
       Null for greenfield generation runs. generate_and_download injects this
-      into the bundle as config/database_migrations/{migration_id}.json when present.
+      into the bundle as config/data_migrations/{migration_id}.json when present.
     source:
       type: computed
       default: null
@@ -767,6 +840,60 @@ definitions:
   app_validation_result:
     type: object
     description: Raw app validation result payload (may be null).
+    source:
+      type: computed
+      default: null
+  wiring_validation_passed:
+    type: boolean
+    description: Set by the deterministic module/page wiring check.
+    source:
+      type: computed
+      default: false
+  wiring_validation_result:
+    type: object
+    description: Raw module/page wiring validation payload.
+    source:
+      type: computed
+      default: null
+  module_implementation_validation_passed:
+    type: boolean
+    description: Set by the deterministic module.yaml-to-backend implementation check.
+    source:
+      type: computed
+      default: false
+  module_implementation_validation_result:
+    type: object
+    description: Raw module implementation validation payload.
+    source:
+      type: computed
+      default: null
+  generated_app_dir:
+    type: string
+    description: Absolute path to the generated app bundle directory after schema save or download packaging.
+    source:
+      type: computed
+      default: null
+  generated_app_zip:
+    type: string
+    description: Absolute path to the generated ZIP bundle after DownloadAgent packaging.
+    source:
+      type: computed
+      default: null
+  download_status:
+    type: string
+    description: Download packaging status, such as ready or cancelled.
+    source:
+      type: computed
+      default: null
+  app_download_ready:
+    type: boolean
+    description: True after DownloadAgent has packaged the app bundle and the artifact UI has completed.
+    source:
+      type: computed
+      default: false
+  download_result:
+    type: object
+    description: Compact download packaging result with bundle paths and file count.
     source:
       type: computed
       default: null
@@ -856,7 +983,7 @@ agents:
     - concept_api_endpoints
     - concept_blueprint
     - design_surface_map
-    - database_intent_bundle
+    - data_contract
     - frontend_design_document
     - backend_design_document
     - database_design_document
@@ -919,7 +1046,7 @@ agents:
     - concept_overview
     - concept_blueprint
     - design_surface_map
-    - database_intent_bundle
+    - data_contract
     - captured_theme_config
     - app_build_plan
     - app_plan_ready
@@ -936,7 +1063,9 @@ agents:
   AssemblyAgent:
     variables:
     - app_build_plan
-    - app_child_workflows
+    - app_task_batch_items
+    - app_task_batch_status
+    - app_task_batch_results
     - integration_needs
     - connector_inventory
     - required_connector_services
@@ -949,13 +1078,12 @@ agents:
     - app_asset_manifest
     - app_custom_route_bundle
     - app_schema_ready
-    - mfj_app_task_results
   IntegrationReadinessAgent:
     variables:
     - app_build_plan
-    - app_child_workflows
+    - app_task_batch_items
     - app_schema_ready
-    - mfj_app_task_results
+    - app_task_batch_results_summary
     - integration_needs
     - integration_readiness_status
     - integration_readiness_result
@@ -983,7 +1111,7 @@ agents:
     - concept_api_endpoints
     - concept_blueprint
     - design_surface_map
-    - database_intent_bundle
+    - data_contract
     - backend_design_document
     - database_design_document
     - app_build_plan
@@ -1004,7 +1132,7 @@ agents:
     - platform_user_email
     - concept_overview
     - design_surface_map
-    - database_intent_bundle
+    - data_contract
     - backend_design_document
     - app_build_plan
     - task_run_mode
@@ -1036,7 +1164,7 @@ agents:
     variables:
     - concept_overview
     - design_surface_map
-    - database_intent_bundle
+    - data_contract
     - backend_design_document
     - database_design_document
     - app_build_plan
@@ -1049,7 +1177,7 @@ agents:
     - app_backend_url
     - concept_overview
     - design_surface_map
-    - database_intent_bundle
+    - data_contract
     - backend_design_document
     - database_design_document
     - app_build_plan
@@ -1067,7 +1195,7 @@ agents:
     - concept_overview
     - concept_api_endpoints
     - design_surface_map
-    - database_intent_bundle
+    - data_contract
     - backend_design_document
     - app_build_plan
     - task_run_mode
@@ -1077,6 +1205,10 @@ agents:
     - integration_needs
   AppValidationAgent:
     variables:
+    - generated_files
+    - assembled_source
+    - app_task_batch_status
+    - app_task_batch_results_summary
     - integration_readiness_status
     - integration_readiness_result
     - app_validation_strategy
@@ -1084,6 +1216,10 @@ agents:
     - app_validation_strategy_used
     - app_validation_preview_url
     - app_validation_result
+    - wiring_validation_passed
+    - wiring_validation_result
+    - module_implementation_validation_passed
+    - module_implementation_validation_result
   IntegrationTestAgent:
     variables:
     - concept_overview
@@ -1098,6 +1234,10 @@ agents:
     - available_tools
     - integration_tests_passed
     - integration_test_result
+    - wiring_validation_passed
+    - wiring_validation_result
+    - module_implementation_validation_passed
+    - module_implementation_validation_result
   DownloadAgent:
     variables:
     - build_registry_id
@@ -1106,6 +1246,12 @@ agents:
     - app_validation_status
     - app_validation_strategy_used
     - app_validation_preview_url
+    - integration_tests_passed
+    - integration_test_result
+    - wiring_validation_passed
+    - module_implementation_validation_passed
+    - generated_files
+    - assembled_source
     - agent_api_url
     - agent_websocket_url
     - available_agents

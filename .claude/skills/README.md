@@ -18,7 +18,7 @@ Use this index to choose the closest skill before nontrivial work.
 | Page or frontend change | `add-page` | Use for AppPageSchema, route-manifest, or custom route work. |
 | Admin UI change | `add-page` | Pair with the frontend rule. Distinguish AdminPortal schema panels from custom operator/admin React pages; add `runtime-change` when platform/admin shell behavior changes. |
 | Add or author a workflow | `create-workflow` | `add-workflow` is a planned alias. |
-| Persistence / database intent / repo contract | `persistence-change` | Covers `database_intent.json`, migrations, `repo.py`, and `ModuleContext.persistence`. Add `runtime-change` when runtime persistence behavior changes. Add `appgenerator-change` when generated persistence output changes. |
+| Persistence / data contract / repo contract | `persistence-change` | Covers `data.json`, migrations, `repo.py`, and `ModuleContext.persistence`. Add `runtime-change` when runtime persistence behavior changes. Add `appgenerator-change` when generated persistence output changes. |
 | Docs-only change | `docs-maintenance` | If the docs change a specific layer contract, also read that layer's rule. |
 | Test-only change | owning surface skill | Use the owning surface skill when obvious. If unclear, start with `oss-contribution-review`. |
 | CLI change | `oss-contribution-review` | No CLI-specific skill exists yet. If CLI scaffolding changes module/page/workflow contracts, also inspect the owning layer rule or skill. |
@@ -48,3 +48,4 @@ Use this index to choose the closest skill before nontrivial work.
 - Task label note: "Build sequence / extension registry / journey composition" work routes through `factory-build-workflow-change`.
 - When a planned skill is missing, start with `oss-contribution-review` and
   then inspect the owning files directly.
+

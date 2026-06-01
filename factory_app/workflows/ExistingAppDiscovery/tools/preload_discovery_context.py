@@ -234,7 +234,6 @@ _THEME_SNAPSHOT_RELATIVE_CANDIDATES = [
     "src/styles.css",
 ]
 
-
 def _ctx_store(context_variables: Any) -> Any:
     if context_variables is None:
         return {}
@@ -830,6 +829,328 @@ async def _scan_repo_source(local_repo_path: str | None, github_repo: str | None
     if github_repo:
         return await _scan_github_repo(str(github_repo), str(github_ref) if github_ref else None)
     return {}
+
+
+def _context_graph_roots(
+    *,
+    repo_path: Any,
+    frontend_repo_path: Any,
+    backend_repo_path: Any,
+) -> list[tuple[str, Path]]:
+    roots: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+
+    explicit_roots = [
+        ("frontend", frontend_repo_path),
+        ("backend", backend_repo_path),
+    ]
+    for label, raw_path in explicit_roots:
+        if not raw_path:
+            continue
+        root = Path(str(raw_path)).expanduser().resolve()
+        if root.exists() and root.is_dir() and root not in seen:
+            roots.append((label, root))
+            seen.add(root)
+
+    if not roots and repo_path:
+        root = Path(str(repo_path)).expanduser().resolve()
+        if root.exists() and root.is_dir():
+            roots.append(("", root))
+
+    return roots
+
+
+def _collect_context_graph_file_map(
+    roots: list[tuple[str, Path]],
+    *,
+    scan_policy_inputs: dict[str, Any] | None = None,
+) -> Any:
+    from mozaiksai.core.app_context.scan_policy import (
+        collect_source_scan_file_map,
+        default_context_graph_scan_policy,
+    )
+
+    return collect_source_scan_file_map(
+        roots,
+        policy=default_context_graph_scan_policy(scan_policy_inputs),
+    )
+
+
+def _context_graph_scan_policy_inputs(context_variables: Any, discovery_inputs: dict[str, Any]) -> dict[str, Any]:
+    raw = _first_nonempty(
+        _ctx_get(context_variables, "context_graph_scan_policy"),
+        discovery_inputs.get("context_graph_scan_policy"),
+    )
+    return _coerce_mapping(raw)
+
+
+def _context_graph_request_text(context_variables: Any, discovery_inputs: dict[str, Any]) -> str:
+    context_refresh_request = _coerce_mapping(_ctx_get(context_variables, "context_refresh_request", {}))
+    candidates = [
+        discovery_inputs.get("raw_user_request"),
+        discovery_inputs.get("description"),
+        context_refresh_request.get("raw_user_request"),
+        context_refresh_request.get("reason"),
+        _ctx_get(context_variables, "refresh_reason"),
+        _ctx_get(context_variables, "app_description"),
+        _ctx_get(context_variables, "app_name"),
+    ]
+    parts = [str(value).strip() for value in candidates if value and str(value).strip()]
+    return "\n".join(parts[:4])
+
+
+async def _preload_context_graph_pack(
+    *,
+    context_variables: Any,
+    roots: list[tuple[str, Path]],
+    discovery_inputs: dict[str, Any],
+) -> dict[str, Any]:
+    if not roots:
+        return await _preload_prior_context_graph_pack(
+            context_variables=context_variables,
+            discovery_inputs=discovery_inputs,
+            unavailable_reason="no_local_source_roots",
+        )
+
+    try:
+        from factory_app.workflows._shared.context_graph.prompt_pack import (
+            build_context_graph_prompt_pack,
+            build_context_graph_unavailable_pack,
+        )
+        from mozaiksai.control_plane.context_graph import build_context_graph_catalog
+        from mozaiksai.core.app_context.context_graph import (
+            build_context_graph_from_file_map,
+            context_graph_parser_status,
+        )
+    except Exception as exc:
+        warning = f"context_graph_import_failed:{exc}"
+        _ctx_set(
+            context_variables,
+            "context_graph_pack",
+            {
+                "pack_kind": "context_graph_prompt_pack",
+                "present": False,
+                "status": "unavailable",
+                "reason": "context_graph_import_failed",
+                "warnings": [warning],
+            },
+        )
+        _ctx_set(context_variables, "context_graph_catalog", None)
+        _ctx_set(context_variables, "context_graph_status", "unavailable")
+        _ctx_set(context_variables, "context_graph_reason", "context_graph_import_failed")
+        _ctx_set(context_variables, "context_graph_warnings", [warning])
+        _ctx_set(
+            context_variables,
+            "context_graph_health",
+            {"source": "existing_app_discovery_preload", "status": "unavailable", "reason": "context_graph_import_failed"},
+        )
+        return {"present": False, "reason": "context_graph_import_failed", "warnings": [warning]}
+
+    scan_result = _collect_context_graph_file_map(
+        roots,
+        scan_policy_inputs=_context_graph_scan_policy_inputs(context_variables, discovery_inputs),
+    )
+    file_map = scan_result.file_map
+    warnings = list(scan_result.warnings)
+    scan_health = dict(scan_result.health)
+    parser_status = context_graph_parser_status()
+    scan_health["parser_status"] = parser_status
+    if not file_map:
+        _ctx_set(
+            context_variables,
+            "context_graph_pack",
+            build_context_graph_unavailable_pack(reason="no_supported_source_files", warnings=warnings),
+        )
+        _ctx_set(context_variables, "context_graph_catalog", None)
+        _ctx_set(context_variables, "context_graph_status", "unavailable")
+        _ctx_set(context_variables, "context_graph_reason", "no_supported_source_files")
+        _ctx_set(context_variables, "context_graph_warnings", warnings)
+        _ctx_set(context_variables, "context_graph_health", scan_health)
+        return {"present": False, "reason": "no_supported_source_files", "warnings": warnings}
+
+    app_id = str(
+        _first_nonempty(
+            _ctx_get(context_variables, "app_id"),
+            _ctx_get(context_variables, "app_name"),
+            "existing_app_discovery",
+        )
+    )
+    artifact_version_id = str(
+        _first_nonempty(
+            _ctx_get(context_variables, "current_context_version_id"),
+            "existing_app_discovery_preload",
+        )
+    )
+    request_text = _context_graph_request_text(context_variables, discovery_inputs)
+
+    graph = build_context_graph_from_file_map(
+        app_id=app_id,
+        artifact_version_id=artifact_version_id,
+        artifact_kind="existing_app_source",
+        file_map=file_map,
+    )
+    catalog = build_context_graph_catalog(
+        graph=graph,
+        raw_user_request=request_text,
+        file_map=file_map,
+    )
+    catalog.update(
+        {
+            "source": "existing_app_discovery_preload",
+            "warnings": warnings,
+            "indexed_file_count": len(file_map),
+            "scan_health": scan_health,
+            "parser_status": parser_status,
+        }
+    )
+    pack = build_context_graph_prompt_pack(
+        catalog=catalog,
+        source="existing_app_discovery_preload",
+        warnings=warnings,
+    )
+    _ctx_set(context_variables, "context_graph_pack", pack)
+    _ctx_set(context_variables, "context_graph_catalog", catalog)
+    _ctx_set(context_variables, "context_graph_status", "loaded")
+    _ctx_set(context_variables, "context_graph_reason", None)
+    _ctx_set(context_variables, "context_graph_warnings", warnings)
+    _ctx_set(context_variables, "context_graph_health", scan_health)
+    return {
+        "present": True,
+        "source": "existing_app_discovery_preload",
+        "graph_id": catalog.get("graph_id"),
+        "indexed_file_count": len(file_map),
+        "warnings": warnings,
+        "scan_health": scan_health,
+    }
+
+
+async def _preload_prior_context_graph_pack(
+    *,
+    context_variables: Any,
+    discovery_inputs: dict[str, Any],
+    unavailable_reason: str,
+) -> dict[str, Any]:
+    context_refresh_request = _coerce_mapping(_ctx_get(context_variables, "context_refresh_request", {}))
+    app_id = str(
+        _first_nonempty(
+            _ctx_get(context_variables, "app_id"),
+            context_refresh_request.get("app_id"),
+            discovery_inputs.get("app_id"),
+            "",
+        )
+        or ""
+    ).strip()
+    context_version_id = str(
+        _first_nonempty(
+            _ctx_get(context_variables, "current_context_version_id"),
+            context_refresh_request.get("current_context_version_id"),
+            "",
+        )
+        or ""
+    ).strip()
+    if not app_id or not context_version_id:
+        return _set_context_graph_unavailable(
+            context_variables,
+            reason=unavailable_reason,
+            warnings=[],
+            source="existing_app_discovery_preload",
+        )
+
+    try:
+        from factory_app.workflows._shared.context_graph.prompt_pack import build_context_graph_prompt_pack
+        from mozaiksai.control_plane.app_context import get_app_context_graph_for_version
+        from mozaiksai.control_plane.context_graph import build_context_graph_catalog
+    except Exception as exc:
+        warning = f"context_graph_import_failed:{exc}"
+        return _set_context_graph_unavailable(
+            context_variables,
+            reason="context_graph_import_failed",
+            warnings=[warning],
+            source="previous_app_context_graph",
+        )
+
+    lookup = await get_app_context_graph_for_version(
+        app_id=app_id,
+        context_version_id=context_version_id,
+    )
+    if lookup.graph is None:
+        warnings = list(lookup.warnings)
+        return _set_context_graph_unavailable(
+            context_variables,
+            reason="previous_app_context_graph_unavailable",
+            warnings=warnings,
+            source="previous_app_context_graph",
+        )
+
+    catalog = build_context_graph_catalog(
+        graph=lookup.graph,
+        raw_user_request=_context_graph_request_text(context_variables, discovery_inputs),
+        file_map={},
+    )
+    health = {
+        "source": "previous_app_context_graph",
+        "selected_file_count": catalog.get("file_count"),
+        "node_count": catalog.get("node_count"),
+        "edge_count": catalog.get("edge_count"),
+        "warnings": list(lookup.warnings),
+    }
+    catalog.update(
+        {
+            "source": "previous_app_context_graph",
+            "current_context_version_id": context_version_id,
+            "warnings": list(lookup.warnings),
+            "scan_health": health,
+        }
+    )
+    pack = build_context_graph_prompt_pack(
+        catalog=catalog,
+        source="previous_app_context_graph",
+        reason="context_refresh_prior_version",
+        warnings=list(lookup.warnings),
+    )
+    _ctx_set(context_variables, "context_graph_pack", pack)
+    _ctx_set(context_variables, "context_graph_catalog", catalog)
+    _ctx_set(context_variables, "context_graph_status", "loaded")
+    _ctx_set(context_variables, "context_graph_reason", "context_refresh_prior_version")
+    _ctx_set(context_variables, "context_graph_warnings", list(lookup.warnings))
+    _ctx_set(context_variables, "context_graph_health", health)
+    return {
+        "present": True,
+        "source": "previous_app_context_graph",
+        "graph_id": catalog.get("graph_id"),
+        "warnings": list(lookup.warnings),
+        "scan_health": health,
+    }
+
+
+def _set_context_graph_unavailable(
+    context_variables: Any,
+    *,
+    reason: str,
+    warnings: list[str],
+    source: str | None,
+) -> dict[str, Any]:
+    try:
+        from factory_app.workflows._shared.context_graph.prompt_pack import build_context_graph_unavailable_pack
+
+        pack = build_context_graph_unavailable_pack(reason=reason, warnings=warnings, source=source)
+    except Exception:
+        pack = {
+            "pack_kind": "context_graph_prompt_pack",
+            "present": False,
+            "status": "unavailable",
+            "reason": reason,
+            "source": source,
+            "warnings": warnings,
+        }
+    _ctx_set(context_variables, "context_graph_pack", pack)
+    _ctx_set(context_variables, "context_graph_catalog", None)
+    _ctx_set(context_variables, "context_graph_status", "unavailable")
+    _ctx_set(context_variables, "context_graph_reason", reason)
+    _ctx_set(context_variables, "context_graph_warnings", warnings)
+    health = {"source": source, "status": "unavailable", "reason": reason, "warnings": warnings}
+    _ctx_set(context_variables, "context_graph_health", health)
+    return {"present": False, "reason": reason, "warnings": warnings, "scan_health": health}
 
 
 def _combine_repo_summaries(*summaries: dict[str, Any]) -> dict[str, Any]:
@@ -1506,6 +1827,16 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
                 active_repo_root = candidate
                 break
 
+    context_graph_preload = await _preload_context_graph_pack(
+        context_variables=ctx,
+        roots=_context_graph_roots(
+            repo_path=repo_path,
+            frontend_repo_path=frontend_repo_path,
+            backend_repo_path=backend_repo_path,
+        ),
+        discovery_inputs=discovery_inputs,
+    )
+
     if active_repo_root:
         try:
             package_names = _collect_package_names_from_root(active_repo_root)
@@ -1566,6 +1897,13 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         )
     if theme_capture_status != "none" and theme_capture_summary:
         summary_lines.append(f"Theme evidence: {theme_capture_summary}")
+    if context_graph_preload.get("present"):
+        if context_graph_preload.get("source") == "previous_app_context_graph":
+            summary_lines.append("Context graph preload loaded the previous app context graph for refresh.")
+        else:
+            summary_lines.append(
+                f"Context graph preload indexed {context_graph_preload.get('indexed_file_count', 0)} source files."
+            )
     if unresolved_questions:
         summary_lines.append(
             f"Open questions remaining: {len(unresolved_questions)}"
@@ -1615,4 +1953,5 @@ async def collect_prechat_discovery_context(context_variables: Any | None = None
         "preload_status": preload_status,
         "successful_sources": len(successful_sources),
         "total_sources": len(evidence_sources),
+        "context_graph_status": _ctx_get(ctx, "context_graph_status"),
     }

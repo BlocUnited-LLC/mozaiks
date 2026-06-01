@@ -70,7 +70,7 @@ agent/tool discovers need
 Generated app code references connector ids/capabilities and reads integration
 state through server-side adapters. It never receives raw secrets.
 
-The readiness checkpoint is the fan-in boundary before validation/download. It
+The readiness checkpoint is the task-result merge boundary before validation/download. It
 does not require manual preflight setup; it waits until the build has a concrete
 missing integration need, asks inline, then rechecks the connector inventory.
 Resume is handled by the same correlated `chat.tool_call` response path used by

@@ -60,14 +60,14 @@ Use the app-level backend support lane when the support code is not module
 business behavior:
 
 ```text
-backend/integrations/{service}_client.py      # external or hosted API client
-backend/adapters/{area}/{provider}.py         # provider implementation boundary
+app/services/integrations/{service}_client.py  # external or hosted API client
+app/services/adapters/{area}/{provider}.py     # provider implementation boundary
 modules/{module}/backend/service.py           # business action calls the client/adapter
 ```
 
 Typical adapter areas include auth, source_control, deployment, dns, registrar,
 cloud, storage, search, email, and payments. Keep generic runtime auth in the
-framework; use `backend/adapters/auth/` only for app-specific provider
+framework; use `app/services/adapters/auth/` only for app-specific provider
 mechanics.
 
 Do not put provider implementation boundaries under `modules/` unless they are
@@ -84,7 +84,7 @@ The generic shape is:
 
 ```text
 hosted_pack
-  -> backend/integrations/{pack_id}_client.py
+  -> app/services/integrations/{pack_id}_client.py
   -> app-owned facade module
   -> ui/pages bind to the facade module
 ```
@@ -93,7 +93,7 @@ Provider-neutral example:
 
 ```text
 hosted_analytics
-  -> backend/integrations/hosted_analytics_client.py
+  -> app/services/integrations/hosted_analytics_client.py
   -> modules/analytics_dashboard/
   -> ui/pages/analytics.yaml
   -> /api/modules/analytics_dashboard/get_metrics
@@ -149,3 +149,4 @@ Prohibited uses:
 - [Module System](module-system.md)
 - [Capability Pack Model](capability-pack-model.md)
 - [Platform Authoring](../app/platform-authoring.md)
+

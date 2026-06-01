@@ -104,7 +104,7 @@ This is where actual file writing happens.
 
 ## AG2 Implementation Note
 
-The builder may be implemented as a set of AG2 workflows or groupchats.
+The builder may be implemented as a set of AG2 beta workflow runs.
 
 That is compatible with this model only if:
 
@@ -193,8 +193,8 @@ Parallel build work should be based on bounded ownership:
 
 - one task owns specific declaratives or paths
 - shared foundations are configured first
-- fan-out happens only after dependencies are explicit
-- fan-in happens before integration and validation
+- parallel dispatch happens only after dependencies are explicit
+- task result merging happens before integration and validation
 
 The builder should never let multiple AG2 authoring workers improvise over the
 same paths.
@@ -230,7 +230,7 @@ The builder should reason toward:
   - `app/config/*`
   - `app/ui/pages/*`
   - `app/modules/*`
-  - `app/workflows/*`
+  - `workflows/*`
   - `app/brand/*`
 
 At runtime, the same contract is consumed from the active app root, such as
@@ -257,3 +257,5 @@ change.
 - [app-planning-contracts.md](app-planning-contracts.md)
 - [app-builder-architecture.md](app-builder-architecture.md)
 - [orchestration-control-loops.md](../workflows/orchestration-control-loops.md)
+
+

@@ -42,7 +42,7 @@ _TOOLS_DIR = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _PACKS_ROOT_ENV = os.getenv("MOZAIKS_HOSTED_PACKS_ROOT", "").strip()
 _REAL_PACKS_ROOT = Path(_PACKS_ROOT_ENV).expanduser().resolve() if _PACKS_ROOT_ENV else None
 _REAL_WALLET_TEMPLATE = (
-    _REAL_PACKS_ROOT / "wallet" / "backend_templates" / "wallet_client.py"
+    _REAL_PACKS_ROOT / "wallet" / "service_templates" / "wallet_client.py"
     if _REAL_PACKS_ROOT
     else None
 )
@@ -171,7 +171,7 @@ class TestHostedWalletContextInjection:
 
     def test_agents_yaml_adapter_path_is_backend_integrations(self) -> None:
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
-        assert "backend/integrations/{pack_id}_client.py" in source
+        assert "services/integrations/{pack_id}_client.py" in source
 
     def test_agents_yaml_no_hosted_business_logic_rule(self) -> None:
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
@@ -188,7 +188,7 @@ class TestHostedWalletContextInjection:
     def test_file_contracts_api_surface_lists_backend_integrations(self) -> None:
         fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
         outputs = fc["task_contracts"]["api_surface"]["optional_outputs"]
-        assert any("backend/integrations" in o for o in outputs)
+        assert any("services/integrations" in o for o in outputs)
 
     def test_file_contracts_api_surface_hosted_adapter_constraint(self) -> None:
         fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
@@ -227,19 +227,19 @@ _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK: Dict[str, Any] = {
     "initial_agent": "ControllerAgent",
     "description": (
         "Generate a thin app-side client for the hosted wallet capability. "
-        "Copy the hosted wallet adapter template to backend/integrations/wallet_client.py. "
+        "Copy the hosted wallet adapter template to services/integrations/wallet_client.py. "
         "Do not implement wallet business logic or reference Stripe directly."
     ),
     "initial_message": (
-        "Generate a thin adapter in backend/integrations/wallet_client.py that wraps the "
+        "Generate a thin adapter in services/integrations/wallet_client.py that wraps the "
         "hosted wallet module at POST {MOZAIKS_APP_URL}/api/modules/wallet/{action_id}. "
         "Do not import stripe. Do not reference STRIPE_SECRET_KEY. "
         "Do not implement balance calculation or settlement logic."
     ),
-    "owned_paths": ["backend/integrations/wallet_client.py"],
+    "owned_paths": ["services/integrations/wallet_client.py"],
     "depends_on": [],
     "acceptance_criteria": [
-        "backend/integrations/wallet_client.py exists",
+        "services/integrations/wallet_client.py exists",
         "No Stripe imports in adapter file",
         "No hosted wallet internals copied",
     ],
@@ -255,24 +255,62 @@ _CREATOR_DASHBOARD_FACADE_TASK: Dict[str, Any] = {
     "initial_agent": "ConfigMiddlewareAgent",
     "description": (
         "Generate app-owned façade module 'wallet_dashboard' that wraps the hosted wallet adapter. "
-        "Service layer calls backend/integrations/wallet_client.py. "
         "Declares actions: get_wallet_summary, request_payout."
     ),
     "initial_message": (
         "Generate module contract for 'wallet_dashboard' (generated_module). "
         "Declare actions: get_wallet_summary, request_payout. "
-        "Service must import HostedWalletClient from backend.integrations.wallet_client "
-        "and delegate to it — do not re-implement wallet logic."
+        "Emit only module.yaml and contracts/events.yaml — no backend Python in this task."
     ),
     "owned_paths": [
         "modules/wallet_dashboard/module.yaml",
-        "modules/wallet_dashboard/backend/handler.py",
-        "modules/wallet_dashboard/backend/service.py",
-        "modules/wallet_dashboard/backend/schemas.py",
     ],
     "depends_on": ["creator_dashboard.wallet_adapter"],
     "acceptance_criteria": [
         "modules/wallet_dashboard/module.yaml exists",
+        "module.yaml declares get_wallet_summary and request_payout actions",
+    ],
+}
+
+_CREATOR_DASHBOARD_MODELS_TASK: Dict[str, Any] = {
+    "task_id": "creator_dashboard.wallet_dashboard_models",
+    "task_type": "data_models",
+    "capability_pack_id": "wallet_dashboard",
+    "surface_id": "wallet_dashboard_surface",
+    "surface_kind": "module",
+    "execution_target": "AppGenerator",
+    "initial_agent": "ModelAgent",
+    "description": "Generate wallet_dashboard typed schemas.",
+    "initial_message": "Generate modules/wallet_dashboard/backend/schemas.py with typed request/response shapes.",
+    "owned_paths": [
+        "modules/wallet_dashboard/backend/schemas.py",
+    ],
+    "depends_on": ["creator_dashboard.wallet_dashboard_module"],
+    "acceptance_criteria": [
+        "schemas.py has typed shapes for get_wallet_summary and request_payout",
+    ],
+}
+
+_CREATOR_DASHBOARD_SERVICES_TASK: Dict[str, Any] = {
+    "task_id": "creator_dashboard.wallet_dashboard_services",
+    "task_type": "business_services",
+    "capability_pack_id": "wallet_dashboard",
+    "surface_id": "wallet_dashboard_surface",
+    "surface_kind": "module",
+    "execution_target": "AppGenerator",
+    "initial_agent": "ServiceAgent",
+    "description": "Generate wallet_dashboard module backend: handler and service.",
+    "initial_message": (
+        "Generate modules/wallet_dashboard/backend/handler.py and service.py. "
+        "Service must import HostedWalletClient from backend.integrations.wallet_client "
+        "and delegate to it — do not re-implement wallet logic."
+    ),
+    "owned_paths": [
+        "modules/wallet_dashboard/backend/handler.py",
+        "modules/wallet_dashboard/backend/service.py",
+    ],
+    "depends_on": ["creator_dashboard.wallet_dashboard_models"],
+    "acceptance_criteria": [
         "service.py imports HostedWalletClient from backend.integrations.wallet_client",
         "No Stripe imports or STRIPE_SECRET_KEY references",
     ],
@@ -296,7 +334,7 @@ _CREATOR_DASHBOARD_PAGE_TASK: Dict[str, Any] = {
         "ui/pages/dashboard.yaml",
         "ui/pages/wallet.yaml",
     ],
-    "depends_on": ["creator_dashboard.wallet_dashboard_module"],
+    "depends_on": ["creator_dashboard.wallet_dashboard_services"],
     "acceptance_criteria": [
         "ui/pages/wallet.yaml binds to /api/modules/wallet_dashboard/ (not /api/modules/wallet/)",
     ],
@@ -305,6 +343,8 @@ _CREATOR_DASHBOARD_PAGE_TASK: Dict[str, Any] = {
 _CREATOR_DASHBOARD_BUILD_TASKS = [
     _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK,
     _CREATOR_DASHBOARD_FACADE_TASK,
+    _CREATOR_DASHBOARD_MODELS_TASK,
+    _CREATOR_DASHBOARD_SERVICES_TASK,
     _CREATOR_DASHBOARD_PAGE_TASK,
 ]
 
@@ -318,7 +358,7 @@ _MINIMAL_PLAN_BASE: Dict[str, Any] = {
     "entities": [],
     "roles": [],
     "auth_strategy": "basic-login",
-    "backend_scope": [],
+    "service_scope": [],
     "frontend_scope": [],
     "theme_preferences": None,
     "brand_intent": None,
@@ -367,7 +407,7 @@ class TestCreatorDashboardBuildPlan:
 
     def test_wallet_adapter_owned_path_is_backend_integrations(self) -> None:
         adapter = _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK
-        assert adapter["owned_paths"] == ["backend/integrations/wallet_client.py"]
+        assert adapter["owned_paths"] == ["services/integrations/wallet_client.py"]
 
     def test_wallet_adapter_initial_agent_is_controller(self) -> None:
         assert _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK["initial_agent"] == "ControllerAgent"
@@ -411,7 +451,7 @@ class TestCreatorDashboardBuildPlan:
         assert ctx.data.get("app_plan_ready") is True
         cached = ctx.data["app_build_plan"]
         assert cached["capability_packs"][0]["capability_source"] == "hosted_pack"
-        assert "Build tasks: 3" in result
+        assert "Build tasks: 5" in result
 
     def test_build_plan_rejects_if_wallet_module_contract_added(self) -> None:
         mod = _load_module(
@@ -469,7 +509,7 @@ class TestCreatorDashboardBuildPlan:
 def wallet_pack_root(tmp_path: Path) -> Path:
     """Minimal pack source with active wallet manifest and template."""
     wallet_dir = tmp_path / "wallet"
-    tpl_dir = wallet_dir / "backend_templates"
+    tpl_dir = wallet_dir / "service_templates"
     tpl_dir.mkdir(parents=True)
 
     manifest = {
@@ -481,7 +521,7 @@ def wallet_pack_root(tmp_path: Path) -> Path:
             "status": "active",
             "capability_source": "hosted_pack",
         },
-        "backend_templates": ["backend_templates/wallet_client.py"],
+        "service_templates": ["service_templates/wallet_client.py"],
     }
     (wallet_dir / "manifest.yaml").write_text(yaml.dump(manifest), encoding="utf-8")
     (tpl_dir / "wallet_client.py").write_text(
@@ -533,7 +573,7 @@ class TestCreatorDashboardAssembly:
             pack_sources, [_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK]
         )
         assert len(template_files) == 1
-        assert template_files[0]["filename"] == "backend/integrations/wallet_client.py"
+        assert template_files[0]["filename"] == "services/integrations/wallet_client.py"
 
     def test_assembly_includes_wallet_adapter_and_pages(
         self, pack_sources: List[Dict[str, Any]]
@@ -553,7 +593,7 @@ class TestCreatorDashboardAssembly:
             file_map[tpl["filename"]] = tpl["content"]
         final_filenames = set(file_map.keys())
 
-        assert "backend/integrations/wallet_client.py" in final_filenames
+        assert "services/integrations/wallet_client.py" in final_filenames
         assert "ui/pages/wallet.yaml" in final_filenames
         assert "app.json" in final_filenames
 
@@ -659,7 +699,7 @@ class TestCreatorDashboardAssembly:
         # Simulate LLM generating a (wrong) adapter file
         llm_output = [{
             "code_files": [
-                {"filename": "backend/integrations/wallet_client.py",
+                {"filename": "services/integrations/wallet_client.py",
                  "content": "# llm generated stub — should be replaced\n"},
             ]
         }]
@@ -669,7 +709,7 @@ class TestCreatorDashboardAssembly:
         for tpl in template_files:
             file_map[tpl["filename"]] = tpl["content"]
 
-        adapter_content = file_map["backend/integrations/wallet_client.py"]
+        adapter_content = file_map["services/integrations/wallet_client.py"]
         assert "llm generated stub" not in adapter_content
         assert "HostedWalletClient" in adapter_content
 
@@ -745,11 +785,11 @@ class TestRealWalletTemplateDriftGuards:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "wallet",
-            "owned_paths": ["backend/integrations/wallet_client.py"],
+            "owned_paths": ["services/integrations/wallet_client.py"],
         }
         result = resolver.resolve_hosted_pack_templates(pack_sources, [task])
         assert len(result) == 1
-        assert result[0]["filename"] == "backend/integrations/wallet_client.py"
+        assert result[0]["filename"] == "services/integrations/wallet_client.py"
         assert result[0]["content"] == self.content
 
 

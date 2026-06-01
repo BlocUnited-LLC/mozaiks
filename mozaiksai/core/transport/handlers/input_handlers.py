@@ -70,7 +70,7 @@ async def handle_user_input_submit(
         await transport._send_ws_error(
             websocket,
             "Response-required interactions must be answered with tool_call_response",
-            "INPUT_REQUEST_SUBMIT_DEPRECATED",
+            "INPUT_REQUEST_SUBMIT_REMOVED",
         )
         return
 

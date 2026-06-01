@@ -38,8 +38,19 @@ _LAZY_EXPORTS: dict[str, str] = {
     "get_event_dispatcher": ".events",
 }
 
+# Maps exported package names → relative submodule package.
+_LAZY_MODULE_EXPORTS: dict[str, str] = {
+    "events": ".events",
+}
+
 
 def __getattr__(name: str) -> Any:  # noqa: ANN001
+    module_rel = _LAZY_MODULE_EXPORTS.get(name)
+    if module_rel is not None:
+        mod = importlib.import_module(module_rel, package=__name__)
+        globals()[name] = mod
+        return mod
+
     module_rel = _LAZY_EXPORTS.get(name)
     if module_rel is not None:
         mod = importlib.import_module(module_rel, package=__name__)
@@ -50,4 +61,4 @@ def __getattr__(name: str) -> Any:  # noqa: ANN001
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = list(_LAZY_EXPORTS)
+__all__ = [*_LAZY_EXPORTS, *_LAZY_MODULE_EXPORTS]

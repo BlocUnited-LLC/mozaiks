@@ -1,7 +1,21 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
+
+import yaml
+
+
+_MODULE_CONTRACT_FILENAMES = {
+    "admin.yaml",
+    "events.yaml",
+    "notifications.yaml",
+    "profile.yaml",
+    "reactions.yaml",
+    "settings.yaml",
+}
 
 
 def safe_relpath(raw: str) -> Optional[str]:
@@ -16,6 +30,150 @@ def safe_relpath(raw: str) -> Optional[str]:
     if any(part == ".." for part in pure_path.parts):
         return None
     return str(pure_path)
+
+
+def _unwrap_output_envelope(payload: Any) -> Any:
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return payload
+    key, value = next(iter(payload.items()))
+    if isinstance(key, str) and key.endswith("Output") and isinstance(value, dict):
+        return value
+    return payload
+
+
+def _canonical_generated_path(path: str) -> str:
+    pure_path = PurePosixPath(path)
+    parts = pure_path.parts
+    if (
+        len(parts) == 3
+        and parts[0] == "modules"
+        and parts[2] in _MODULE_CONTRACT_FILENAMES
+    ):
+        return str(PurePosixPath(parts[0], parts[1], "contracts", parts[2]))
+    return str(pure_path)
+
+
+def _page_file_stem(page: Dict[str, Any]) -> str:
+    route = str(page.get("route") or "").strip()
+    if route and route != "/":
+        candidate = route.strip("/").split("/")[-1]
+    else:
+        candidate = str(page.get("name") or page.get("id") or "page").strip()
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", candidate).strip("_").lower()
+    return normalized or "page"
+
+
+def _materialize_app_schema_file_map(payload: Dict[str, Any]) -> Dict[str, str]:
+    manifest = payload.get("manifest")
+    pages = payload.get("pages")
+    if not isinstance(manifest, dict) or not isinstance(pages, list):
+        return {}
+
+    file_map: Dict[str, str] = {}
+    default_route = manifest.get("default_route") or "/"
+    auth_strategy = manifest.get("auth_strategy")
+    app_json = {
+        "appName": manifest.get("app_name") or manifest.get("name") or "Generated App",
+        "startup": {"landing_spot": default_route},
+        "targets": {"web": True, "mobile": False},
+        "authRequired": bool(auth_strategy and auth_strategy != "public"),
+        "admins": [],
+    }
+    file_map["app.json"] = json.dumps(app_json, indent=2, ensure_ascii=False)
+
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        file_map[f"ui/pages/{_page_file_stem(page)}.yaml"] = yaml.dump(
+            page,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+
+    optional_json_outputs = {
+        "theme_config_patch": "brand/theme_config.json",
+        "shell_config": "config/shell.json",
+        "asset_manifest": "config/asset_manifest.json",
+        "data_contract": "config/data.json",
+    }
+    for key, path in optional_json_outputs.items():
+        value = payload.get(key)
+        if isinstance(value, dict):
+            file_map[path] = json.dumps(value, indent=2, ensure_ascii=False)
+
+    custom_route_bundle = payload.get("custom_route_bundle")
+    if isinstance(custom_route_bundle, dict):
+        route_manifest = custom_route_bundle.get("route_manifest")
+        if route_manifest is not None:
+            file_map["ui/route_manifest.json"] = json.dumps(
+                route_manifest,
+                indent=2,
+                ensure_ascii=False,
+            )
+        page_files = custom_route_bundle.get("page_files")
+        if isinstance(page_files, list):
+            for item in page_files:
+                if not isinstance(item, dict):
+                    continue
+                safe = safe_relpath(str(item.get("path") or ""))
+                content = item.get("content")
+                if safe and content is not None:
+                    file_map[safe] = str(content)
+        ui_index = custom_route_bundle.get("ui_index")
+        if ui_index is not None:
+            file_map["ui/index.js"] = str(ui_index)
+
+    return file_map
+
+
+def _materialize_module_contract_file_map(payload: Dict[str, Any]) -> Dict[str, str]:
+    bundle = payload.get("module_contract")
+    if not isinstance(bundle, dict):
+        return {}
+    module_id = str(bundle.get("module_id") or "").strip()
+    if not module_id:
+        return {}
+
+    prefix = PurePosixPath("modules", module_id)
+    file_map: Dict[str, str] = {}
+    yaml_outputs = {
+        "module_yaml": prefix / "module.yaml",
+        "events_yaml": prefix / "contracts" / "events.yaml",
+        "reactions_yaml": prefix / "contracts" / "reactions.yaml",
+        "notifications_yaml": prefix / "contracts" / "notifications.yaml",
+        "settings_yaml": prefix / "contracts" / "settings.yaml",
+        "admin_yaml": prefix / "contracts" / "admin.yaml",
+        "runtime_extensions_yaml": prefix / "runtime_extensions.yaml",
+    }
+    for key, path in yaml_outputs.items():
+        value = bundle.get(key)
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)):
+            file_map[str(path)] = yaml.safe_dump(
+                value,
+                allow_unicode=True,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        else:
+            file_map[str(path)] = str(value)
+
+    profile_yaml = bundle.get("profile_yaml")
+    if profile_yaml is not None:
+        path = prefix / "contracts" / "profile.yaml"
+        if isinstance(profile_yaml, (dict, list)):
+            file_map[str(path)] = yaml.safe_dump(
+                profile_yaml,
+                allow_unicode=True,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        else:
+            file_map[str(path)] = str(profile_yaml)
+
+    return file_map
 
 
 def _normalize_code_file_entries(raw_entries: Any) -> Dict[str, str]:
@@ -33,7 +191,7 @@ def _normalize_code_file_entries(raw_entries: Any) -> Dict[str, str]:
         safe = safe_relpath(str(filename))
         if not safe:
             continue
-        file_map[safe] = str(content)
+        file_map[_canonical_generated_path(safe)] = str(content)
     return file_map
 
 
@@ -45,10 +203,13 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
     live in factory_app/workflows/AppGenerator/tools/code_file_utils.py.
     """
 
+    payload = _unwrap_output_envelope(payload)
     if not isinstance(payload, dict):
         return {}
 
     file_map = _normalize_code_file_entries(payload.get("code_files"))
+    file_map.update(_materialize_app_schema_file_map(payload))
+    file_map.update(_materialize_module_contract_file_map(payload))
 
     raw_python_files = payload.get("python_files")
     if isinstance(raw_python_files, list):
@@ -59,7 +220,7 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
             content = item.get("content")
             if not safe or content is None:
                 continue
-            file_map[safe] = str(content)
+            file_map[_canonical_generated_path(safe)] = str(content)
 
     raw_database_files = payload.get("database_files")
     if isinstance(raw_database_files, list):
@@ -70,7 +231,7 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
             content = item.get("content")
             if not safe or content is None:
                 continue
-            file_map[safe] = str(content)
+            file_map[_canonical_generated_path(safe)] = str(content)
 
     raw_model_files = payload.get("model_files")
     if isinstance(raw_model_files, list):
@@ -81,20 +242,20 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
             content = item.get("content")
             if not safe or content is None:
                 continue
-            file_map[safe] = str(content)
+            file_map[_canonical_generated_path(safe)] = str(content)
 
-    raw_backend_foundation_bundle = payload.get("backend_foundation_bundle")
-    if isinstance(raw_backend_foundation_bundle, dict):
-        raw_backend_foundation_files = raw_backend_foundation_bundle.get("files")
-        if isinstance(raw_backend_foundation_files, list):
-            for item in raw_backend_foundation_files:
+    raw_service_foundation_bundle = payload.get("service_foundation_bundle")
+    if isinstance(raw_service_foundation_bundle, dict):
+        raw_service_foundation_files = raw_service_foundation_bundle.get("files")
+        if isinstance(raw_service_foundation_files, list):
+            for item in raw_service_foundation_files:
                 if not isinstance(item, dict):
                     continue
                 safe = safe_relpath(str(item.get("path") or ""))
                 content = item.get("content")
                 if not safe or content is None:
                     continue
-                file_map[safe] = str(content)
+                file_map[_canonical_generated_path(safe)] = str(content)
 
     raw_js_files = payload.get("js_files")
     if isinstance(raw_js_files, list):
@@ -105,13 +266,13 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
             content = item.get("content")
             if not safe or content is None:
                 continue
-            file_map[safe] = str(content)
+            file_map[_canonical_generated_path(safe)] = str(content)
 
     registration_barrel = payload.get("registration_barrel")
     if registration_barrel is not None:
         safe = safe_relpath("ui/index.js")
         if safe:
-            file_map[safe] = str(registration_barrel)
+            file_map[_canonical_generated_path(safe)] = str(registration_barrel)
 
     return file_map
 

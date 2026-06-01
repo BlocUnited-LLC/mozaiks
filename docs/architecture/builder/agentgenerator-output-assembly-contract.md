@@ -1,346 +1,225 @@
 # AgentGenerator Output Assembly Contract
 
 **Status:** CANONICAL — describes what actually exists
-**Last verified:** 2026-04-08
+**Last verified:** 2026-05-31
 **Source files:**
-- `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
 - `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
+- `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
 - `factory_app/workflows/AgentGenerator/structured_outputs.yaml`
 - `factory_app/workflows/AgentGenerator/agents.yaml`
+- `factory_app/workflows/AgentGenerator/extended_orchestration/task_batches.yaml`
 
 > **Related:** [`structured-output-extraction-contract.md`](../workflows/structured-output-extraction-contract.md) —
 > the general runtime contract for structured outputs and auto-tool-call.
-> This document covers the **AgentGenerator-specific** pattern where agent outputs
-> are accumulated via persistence and assembled into workflow YAML files.
+> This document covers the **AgentGenerator-specific** pattern where a task batch
+> worker agent produces all workflow bundle files in a single structured output.
 
 ---
 
-## How This Differs From Normal Workflows
+## How This Works
 
-Normal mozaiks workflows use the **auto-tool-call pattern**:
-agent emits → runtime validates → tool auto-called inline → tool persists/emits UI.
+AgentGenerator uses the **task batch pattern**:
 
-AgentGenerator uses a **deferred assembly pattern**:
-agents emit → outputs persist to MongoDB → **DownloadAgent triggers assembly** →
-`gather_latest_agent_jsons()` scrapes all prior outputs → `create_workflow_files()` assembles → files written under `MOZAIKS_GENERATED_ARTIFACTS_PATH` → zip presented to user.
+1. `PackBuildCoordinator` collects the user's workflow pack specification into `pack_spec` (context variable)
+2. The `workflow_bundle_tasks` task batch fires — one `WorkflowBundleBuilderAgent` instance per workflow in the pack, running in parallel
+3. Each worker emits a `WorkflowBundleBuilderOutput` with a `files` list of `CodeFile` entries
+4. The runtime collects all results into `context_variables["workflow_bundle_results"]`, keyed by task_id
+5. `generate_and_download` reads `workflow_bundle_results`, writes each bundle to disk, zips them, and presents the download UI
 
-There are no auto-tool-call tools per planning agent. Every planning agent's output is
-collected in a single final pass by the `DownloadAgent`.
+There are no sequential planning agents scraping MongoDB. Each `WorkflowBundleBuilderAgent` instance owns its full bundle output end-to-end.
 
 Generated workflow bundles are staged at:
 
 ```text
-$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{build_id}/{workflow_name}/
+$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/{workflow_name}/
 ```
 
 They do not become active runtime-loaded workflows until an explicit promotion
 step copies them into an active app root's `workflows/` directory.
 
-Canonical live regression target for this workflow:
+---
 
-```bash
-python scripts/run_live_mfj_smoke.py \
-  --workflow AgentGenerator \
-  --workflows-root factory_app/workflows \
-  --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt \
-  --tool-response-file factory_app/workflows/AgentGenerator/smoke_responses.json \
-  --timeout-seconds 300
-```
+## Agent Roster
 
-The checked-in smoke pair:
-
-- `factory_app/workflows/AgentGenerator/smoke_prompt.txt`
-- `factory_app/workflows/AgentGenerator/smoke_responses.json`
-
-is the stable regression contract for:
-
-- multi-turn AG2 interview replies
-- composer fallback via `default_input_reply`
-- `ProjectOverviewAgent` diagram review through the composer reply lane
-- shipped/shared workflow primitives such as `DownloadCenter`
-- final bundle handoff through `generate_and_download`
+| Agent | Role |
+|-------|------|
+| `PatternAgent` | Selects orchestration pattern; output available to `WorkflowBundleBuilderAgent` via context |
+| `PackBuildCoordinator` | Interviews the user, populates `pack_spec`, seeds the task batch |
+| `WorkflowBundleBuilderAgent` | Task batch worker — generates all YAML and code files for one workflow bundle |
+| `DownloadCenterAgent` | Triggers `generate_and_download` after the task batch completes |
 
 ---
 
-## Agent Pipeline
+## Task Batch: `workflow_bundle_tasks`
 
-16 agents run in sequence. Each is mapped to a structured output model.
+Declared in `extended_orchestration/task_batches.yaml`.
 
-| # | Agent | Output Model | Notes |
-|---|-------|-------------|-------|
-| 1 | `InterviewAgent` | none (`null`) | Conversational only |
-| 2 | `PatternAgent` | `PatternSelectionOutput` | Selects orchestration pattern; feeds `PatternSelection` to all downstream |
-| 3 | `WorkflowStrategyAgent` | `WorkflowStrategyOutput` | Defines modules, startup_mode, MFJ decomposition config |
-| 4 | `DatabaseIntentAgent` | `DatabaseIntentOutput` | Collections, fields, access patterns → `db_intent.json` |
-| 5 | `AgentRosterAgent` | `AgentRosterOutput` | Agent names, module_index, human_interaction; reads `ToolPlanning.ui_requirements` |
-| 6 | `ToolPlanningAgent` | `ToolPlanningOutput` | **Absorbs UX decisions**: `ui_requirements` (inline/artifact per module) + backend tools + lifecycle tools + hooks |
-| 7 | `ProjectOverviewAgent` | `MermaidSequenceDiagramOutput` | Renders Mermaid sequence diagram as UI artifact; user reviews the agent pipeline before continuing |
-| 8 | `ContextVariablesAgent` | `ContextVariablesPlanOutput` | **Absorbs state architecture**: derives context var types, lifecycle_requirements, assets from WorkflowStrategy directly |
-| 9 | `ToolsManagerAgent` | `ToolsManifestOutput` | Normalizes tools manifest → `tools.yaml` |
-| 10 | `UIFileGenerator` | `UIToolsFilesOutput` | Generates canonical `CodeFile` entries for Python UI tool wrappers and only the workflow-local React files actually required |
-| 11 | `AgentToolsFileGenerator` | `AgentToolsFilesOutput` | Generates canonical `CodeFile` entries for backend tool stubs |
-| 12 | `StructuredOutputsAgent` | `StructuredModelsOutput` | Generates `structured_outputs.yaml` models + registry |
-| 13 | `AgentsAgent` | `RuntimeAgentsOutput` | Generates full `agents.yaml` with prompt_sections |
-| 14 | `HookAgent` | `HookFilesOutput` | Generates `hooks.yaml` + hook implementations |
-| 15 | `HandoffsAgent` | `HandoffRulesOutput` | Generates `handoffs.yaml` |
-| 16 | `OrchestratorAgent` | `OrchestrationConfigOutput` | Generates `orchestrator.yaml` |
-| 17 | `PackMetadataAgent` | `PackMetadataOutput` | Generates global `extended_orchestration/extension_registry.json` (cross-workflow pack registry) |
-| 18 | `DownloadAgent` | `DownloadRequestOutput` | Triggers final assembly |
+```yaml
+source:
+  kind: context_variable
+  path: pack_spec.workflows
+  task_model: WorkflowInPack
+worker:
+  mode: ag2_agent
+  agent_field: initial_agent   # WorkflowBundleBuilderAgent
+  prompt_field: initial_message
+result:
+  context_key: workflow_bundle_results
+  status_key: workflow_bundle_status
+```
 
-**Removed agents (collapsed):**
-- `StateArchitectAgent` → merged into `ContextVariablesAgent` (context var taxonomy, lifecycle requirements, and assets are derived directly from WorkflowStrategy)
-- `UXArchitectAgent` → merged into `ToolPlanningAgent` (UI surface decisions — inline vs artifact — are one field decision per module, part of tool planning)
+Each task receives one `WorkflowInPack` entry from `pack_spec.workflows`.
+The runtime injects it as `context_variables["structured_output"]` for the worker.
 
 ---
 
-## Output Collection: `gather_latest_agent_jsons()`
+## WorkflowBundleBuilderOutput
 
-When `DownloadAgent` triggers the `generate_and_download` tool, it calls:
+The worker emits a single `WorkflowBundleBuilderOutput` structured output:
 
-```python
-collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)
+```yaml
+workflow_name: str
+files:
+  - filename: orchestrator.yaml
+    content: "..."
+  - filename: agents.yaml
+    content: "..."
+  - filename: handoffs.yaml
+    content: "..."
+  - filename: context_variables.yaml
+    content: "..."
+  - filename: structured_outputs.yaml
+    content: "..."
+  - filename: tools.yaml
+    content: "..."
+  - filename: hooks.yaml
+    content: "..."
+  - filename: ui_config.yaml
+    content: "..."
+  - filename: tools/some_tool.py
+    content: "..."
+  - filename: ui/index.js
+    content: "..."
 ```
 
-This method scans MongoDB for assistant messages in the chat, parses their content
-as JSON, and returns a dict keyed by `agent_name`:
+Each `CodeFile` has:
+- `filename` — workflow-local relative path (e.g., `tools/save_result.py`, `ui/index.js`)
+- `content` — full file content as a string
+
+---
+
+## workflow_bundle_results Structure
+
+After the task batch completes, `context_variables["workflow_bundle_results"]` is a dict:
 
 ```python
 {
-    "WorkflowStrategyAgent": { "WorkflowStrategy": { ... } },
-    "AgentsAgent": { "agents": [ ... ] },
-    "ContextVariablesAgent": { "context_variables": [ ... ] },
-    # ...
+    "task_id_1": {
+        "workflow_name": "StoryCreator",
+        "files": [
+            {"filename": "orchestrator.yaml", "content": "..."},
+            {"filename": "agents.yaml", "content": "..."},
+            ...
+        ]
+    },
+    "task_id_2": {
+        "workflow_name": "ReviewWorkflow",
+        "files": [ ... ]
+    }
 }
 ```
 
-**Collection constraints:**
-- Only messages with `role="assistant"` and a valid `agent_name` field
-- Only messages whose content parses as valid JSON (after markdown fence stripping)
-- Takes the **latest** message per agent name (last turn wins)
-- If an agent never emitted valid JSON, its key is absent from `collected`
-
-**Brittleness at scale:** If an agent produces malformed JSON, wraps output in markdown,
-or emits multiple turns, only the last valid JSON is kept. Agents that re-ran during
-iteration will silently overwrite earlier outputs.
+Keys starting with `_` are internal meta entries and are skipped during assembly.
 
 ---
 
-## Assembly: `create_workflow_files()`
+## Assembly: `generate_and_download`
 
-The collected dict is passed to `create_workflow_files(data, context_variables)`,
-which builds a unified `config` dict, then calls `_save_modular_workflow()`.
+Reads `workflow_bundle_results` directly from context. For each bundle entry:
 
-### Input Key → Config Section Mapping
+1. `_write_bundle_to_disk(wf_name, files, base_dir)` — writes all `CodeFile` entries under `base_dir/{wf_name}/`
+2. `_build_pack_zip(bundle_dirs, output_path)` — zips all workflow directories into a single archive
+3. `use_ui_tool("DownloadCenter", ...)` — presents the download UI to the user
 
-| Collected Key | Config Section | Target File |
-|---------------|---------------|-------------|
-| `orchestrator_output` | merged into config root | `orchestrator.yaml` |
-| `agents_output.agents` (list→dict transform) | `config["agents"]` | `agents.yaml` |
-| `handoffs_output.handoff_rules` | `config["handoffs"]` | `handoffs.yaml` |
-| `hooks_output.hooks` (metadata only) | `config["hooks"]` | `hooks.yaml` |
-| `context_variables_output` | `config["context_variables"]` | `context_variables.yaml` |
-| `tools_manager_output` (tools + lifecycle_tools) | `config["tools"]` | `tools.yaml` |
-| `ui_config` | merged into config root | `ui_config.yaml` |
-| `structured_outputs` (static) + `structured_outputs_agent_output` (dynamic) | merged → `config["structured_outputs"]` | `structured_outputs.yaml` |
+No MongoDB scraping. No `create_workflow_files()` assembly step.
 
-### Files Written by `_save_modular_workflow()`
+### Files Written
 
 ```
-{WorkflowName}/
-├── orchestrator.yaml          ← OrchestratorAgent output (merged root keys)
-├── agents.yaml                ← AgentsAgent output (list-to-dict transform)
-├── handoffs.yaml              ← HandoffsAgent output
-├── hooks.yaml                 ← HookAgent metadata (filecontent → extra_files)
-├── context_variables.yaml     ← ContextVariablesAgent output
-├── tools.yaml                 ← ToolsManagerAgent output
-├── ui_config.yaml             ← visual_agents config
-├── structured_outputs.yaml    ← merged static + StructuredOutputsAgent
-├── capability_spec.json       ← generated from config metadata
-├── websocket_config.yaml      ← generated from config metadata
-├── db_intent.json             ← DatabaseIntentAgent output (if present)
-├── extended_orchestration/
-│   └── mfj_extension.json     ← built from WorkflowStrategy.decomposition (if MFJ)
-└── tools/
-    ├── *.py                   ← `CodeFile.filename` entries from UIFileGenerator / AgentToolsFileGenerator
-    └── ...
+$MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/
+├── {WorkflowName}/
+│   ├── orchestrator.yaml
+│   ├── agents.yaml
+│   ├── handoffs.yaml
+│   ├── context_variables.yaml
+│   ├── structured_outputs.yaml
+│   ├── tools.yaml
+│   ├── hooks.yaml
+│   ├── ui_config.yaml
+│   ├── extended_orchestration/
+│   │   └── task_batches.yaml   ← if workflow uses task batches
+│   ├── tools/
+│   │   └── *.py               ← tool implementations
+│   └── ui/
+│       ├── index.js            ← component barrel
+│       └── *.jsx               ← workflow-local React components
+└── {PackName}.zip             ← all workflows bundled together
 ```
 
-Generated workflow tools are workflow-local. AgentGenerator must not create or
-reference `workflows/_shared`, `app.workflows._shared`, sibling workflow tool
-folders, or root-level shared tool paths. Reusable framework-owned support code
-belongs under `mozaiksai.core.*`; workflow-specific helpers stay beside the
-workflow tools that call them.
-
-Factory-owned builder infrastructure is separate from generated bundle output.
-Builder-only shared helpers may live under `factory_app/workflows/_shared/`,
-but generated workflow bundles must still emit workflow-local files only.
-
-Frontend React components (if any UI tools):
-```
-{WorkflowName}/ui/
-├── index.js                  ← synthesized deterministically from workflow-local component files
-├── <workflow-local paths>    ← `CodeFile.filename` entries emitted by UIFileGenerator
-└── ...
-```
-
-Rules:
-
-- `UIFileGenerator` emits canonical `CodeFile` objects with `filename` + `content`; `workflow_converter.py` no longer consumes ad hoc `tool_name` / `py_content` / `js_content` structures on the live path.
-- Workflow-local React files stay under the workflow's own `ui/` tree and preserve the emitted relative path when safe.
-- `ui.realization` is the canonical realization contract for workflow UI assembly.
-- If `ui.realization=shipped_component`, no workflow-local React file is required. The converter skips any accidental duplicate React file and still keeps the Python wrapper/tool file.
-- If `ui.realization=workflow_wrapper`, the converter keeps that wrapper and synthesizes `ui/index.js` from the declared workflow-local component files.
-- If `ui.realization=generated_component`, the converter preserves the full workflow-local React surface.
+Generated workflow tools are workflow-local. Generated bundles must not reference
+`workflows/_shared`, sibling workflow tool folders, or root-level shared paths.
+Reusable framework-owned support code belongs under `mozaiksai.core.*`.
 
 ---
 
-## Special Cases
+## Workflow Name and Pack Name
 
-### extended_orchestration/mfj_extension.json (per-workflow MFJ)
-
-**Not** produced by a dedicated agent. Built programmatically in
-`_build_workflow_local_pack_graph()` from `WorkflowStrategyAgent`'s output.
-
-Required `WorkflowStrategy.decomposition` fields to trigger graph generation:
-```json
-{
-  "required": true,
-  "mode": "single_stage_mfj",
-  "decomposition_agent": "DecomposerAgent",
-  "child_initial_agent": "WorkerAgent",
-  "resume_agent": "ResumeRouterAgent",
-  "resume_entry_agent": "ResumeRouterAgent",
-  "inject_as": "mfj_results",
-  "max_children": 3,
-  "contracts": {
-    "input_required": ["field1"],
-    "input_optional": [],
-    "output_required": ["result_field"],
-    "output_optional": []
-  }
-}
-```
-
-If `decomposition.required` is false or `mode` is not `single_stage_mfj`,
-no `extended_orchestration/mfj_extension.json` is written.
-
-### Structured Outputs Merge
-
-Two sources are merged:
-
-1. **Static base** (`structured_outputs` key in `data`): Model library from the
-   AgentGenerator's own `structured_outputs.yaml` — these are the meta-models used
-   by the planning agents (e.g., `WorkflowAgent`, `AgentTool`, `ToolSpec`, etc.)
-
-2. **Dynamic** (`structured_outputs_agent_output`): What `StructuredOutputsAgent`
-   produced for the **generated** workflow's own models.
-
-The merge strategy: dynamic models and registry entries overwrite static ones.
-All agents listed in `agent_names` (from `AgentsAgent` output) are ensured to have
-a registry entry (defaulting to `null` if not mapped by `StructuredOutputsAgent`).
-
-### Agents List-to-Dict Transform
-
-`AgentsAgent` emits a list: `[{"name": "MyAgent", "prompt_sections": [...], ...}]`
-
-`create_workflow_files()` transforms this to a dict keyed by agent name:
-```python
-{"MyAgent": {"prompt_sections": [...], ...}}  # "name" field removed
-```
-
-The `name` and `display_name` fields are excluded from the stored config.
-
-### Hook Files
-
-`HookAgent` output includes both:
-- Metadata entries (stored in `hooks.yaml`): `hook_type`, `hook_agent`, `filename`, `function`
-- Implementation content (`filecontent`): written to `tools/{filename}` as extra files
-
-Function names are normalized (module prefix and dot notation stripped).
-Hook implementation files follow the same workflow-local path rule and may not
-target shared workflow folders.
+- `bundle_name` is derived from `context_variables["pack_name"]` if set, otherwise from the first workflow's `workflow_name`
+- All names are converted to PascalCase for the output folder and zip file name
 
 ---
 
-## Workflow Name Resolution
+## Normalization Utilities in `workflow_converter.py`
 
-The generated workflow name is resolved in priority order:
+`workflow_converter.py` is a contract normalization helper — it does NOT do assembly.
+Functions exported:
 
-1. `context_variables.action_plan.workflow.name` (auto-tool context injection)
-2. `collected["WorkflowStrategyAgent"]["WorkflowStrategy"]["workflow_name"]`
-3. `collected["OrchestratorAgent"]["workflow_name"]`
-4. Fallback: `"Generated_Workflow"`
+| Function | Purpose |
+|----------|---------|
+| `promote_generated_workflow(source_dir, target_root)` | Copy a generated workflow into the active workflows root |
+| `_normalize_handoff_rules(raw_rules)` | Normalize handoff rule list; rejects LLM-evaluated conditions |
+| `_normalize_tools_manifest(output, wf_logger)` | Normalize tools + lifecycle_tools with UI realization stamps |
+| `_normalize_visual_agents(value, startup_mode)` | Normalize visual_agents list per startup_mode |
+| `_collect_ui_code_files(output, tools_config, wf_logger)` | Collect UIFileGenerator output, skip shipped primitives, synthesize barrel |
+| `_normalize_runtime_extensions(extensions, workflow_name, wf_logger)` | Keep extensions workflow-local |
+| `_normalize_orchestrator_triggers(triggers, wf_logger)` | Validate trigger types against declared schema |
 
-All names are converted to PascalCase for the output folder and zip file name.
-
----
-
-## Agent Output Key Reference
-
-When `WorkflowStrategyAgent` emits:
-```json
-{
-  "WorkflowStrategy": {
-    "workflow_name": "StoryCreator",
-    "startup_mode": "UserDriven",
-    "orchestration_pattern": "PipelinePattern",
-    "decomposition": { "required": false }
-  }
-}
-```
-
-`create_workflow_files()` unwraps this via:
-```python
-payload = raw.get("WorkflowStrategy") or raw.get("workflow_strategy") or raw
-```
-
-Other agents follow similar wrapping patterns. The converter handles both wrapped
-(`{"WorkflowStrategy": {...}}`) and unwrapped (`{...}`) forms.
-
----
-
-## At-Scale File Generation Considerations
-
-The current approach has known brittleness points:
-
-| Risk | Description | Mitigation |
-|------|-------------|------------|
-| **JSON parse failure** | Agent wraps output in markdown or adds extra text | `clean_agent_content()` strips fences; still fails on partial JSON |
-| **Agent re-runs** | Iterating agents overwrite earlier outputs | Only latest message per agent is kept — early outputs are lost |
-| **Missing agent output** | Agent skipped or failed | Corresponding config section is absent; file may be incomplete |
-| **Model mismatch** | StructuredOutputsAgent emits wrong wrapper key | `_normalize_dynamic_structured()` tries common fallback keys |
-| **Agents list order** | AgentsAgent list order sets agent sequence | No runtime validation that list order matches handoffs |
-
-**Consistent file generation at scale** requires that each planning agent:
-1. Emits exactly one valid JSON turn (no conversational turns before the JSON turn)
-2. Uses the canonical wrapper key matching the model name (e.g., `"WorkflowStrategy": {...}`)
-3. Does not re-run after its designated turn
-
-To verify output quality, inspect `logs/agent_outputs/agent_outputs_{chat_id}_{ts}.json`
-and `logs/workflow_converter/converter_input_{WorkflowName}_{ts}.json` written during
-each generation run.
+These are used by tests and by `WorkflowBundleBuilderAgent` implementations as reference
+for what a well-formed bundle looks like.
 
 ---
 
 ## What Does NOT Exist
 
-| Concept from Aspirational Spec | Reality |
-|-------------------------------|---------|
-| `extraction_contracts.yaml` | Does not exist — mapping is hardcoded in `workflow_converter.py` |
-| `BaseExtractor` class / extractor classes | Does not exist — monolithic `create_workflow_files()` function |
-| Separate "extraction" phase | Does not exist — assembly happens in `generate_and_download` tool |
-| `workflow_strategy.yaml` / `agent_roster.yaml` output files | Intermediate planning only — NOT written as workflow files |
-| `StateArchitectAgent` | Removed — its work (context var types, lifecycle requirements, assets) is now done inline by `ContextVariablesAgent` |
-| `UXArchitectAgent` | Removed — UI surface decisions (inline/artifact) are now part of `ToolPlanningAgent` output |
-| `StateArchitectAgent` | Removed — merged into `ContextVariablesAgent` |
-| `UXArchitectAgent` | Removed — merged into `ToolPlanningAgent` |
+| Concept | Reality |
+|---------|---------|
+| `gather_latest_agent_jsons()` | Removed — was MongoDB scraping; replaced by task batch result collection |
+| `create_workflow_files()` | Removed — was the old per-agent-output assembly function |
+| `ContextVariablesAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
+| `HandoffsAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
+| `AgentsAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
+| `ToolsManagerAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
+| `OrchestratorAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
+| `DownloadAgent` | Replaced by `DownloadCenterAgent` |
+| Sequential 18-agent chain | Replaced by 4-agent workflow with parallel task batch workers |
 
 ---
 
 ## Cross References
 
 - [structured-output-extraction-contract.md](../workflows/structured-output-extraction-contract.md) — general auto-tool-call pattern
-- [workflow-authoring-contracts.md](../workflows/workflow-authoring-contracts.md) — `extended_orchestration/mfj_extension.json` format
-- `factory_app/workflows/AgentGenerator/tools/workflow_converter.py` — assembly implementation
-- `factory_app/workflows/AgentGenerator/tools/generate_and_download.py` — collection + trigger
-- `factory_app/workflows/AgentGenerator/` — current working MFJ-enabled workflow example
+- [workflow-authoring-contracts.md](../workflows/workflow-authoring-contracts.md) — `extended_orchestration/task_batches.yaml` format
+- `factory_app/workflows/AgentGenerator/tools/generate_and_download.py` — assembly and download
+- `factory_app/workflows/AgentGenerator/tools/workflow_converter.py` — normalization utilities
+- `factory_app/workflows/AgentGenerator/extended_orchestration/task_batches.yaml` — task batch config
+- `factory_app/workflows/AgentGenerator/structured_outputs.yaml` — `WorkflowBundleBuilderOutput` model

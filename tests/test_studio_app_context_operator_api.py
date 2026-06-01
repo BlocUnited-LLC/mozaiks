@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from mozaiksai.control_plane.app_context import (
     APP_CONTEXT_MISSING_WARNING,
+    AppContextGraphLookupResult,
     AppContextRefSummary,
     AppContextSummary,
 )
@@ -18,6 +19,7 @@ from mozaiksai.control_plane.app_context_refresh_execution import (
     ContextRefreshLaunchStatus,
 )
 from mozaiksai.control_plane.dry_run import build_refinement_execution_plan_from_route
+from mozaiksai.core.app_context.models import AppContextGraph, AppContextStaleStatus
 from mozaiksai.core.app_context.refresh import (
     BROWNFIELD_DISCOVERY_REFRESH_SEQUENCE,
     ContextRefreshPlan,
@@ -84,13 +86,26 @@ def _refresh_plan() -> ContextRefreshPlan:
     )
 
 
+def _graph() -> AppContextGraph:
+    return AppContextGraph(
+        graph_id="graph_app_1",
+        app_id="app_1",
+        stale_status=AppContextStaleStatus.CURRENT,
+        graph_hash="sha256:test",
+    )
+
+
 def test_get_app_context_status_returns_current_summary(monkeypatch) -> None:
     studio_app, client = _client(monkeypatch)
 
     async def fake_summary(**kwargs):
         return _current_summary()
 
+    async def fake_graph(**kwargs):
+        return AppContextGraphLookupResult(graph=_graph())
+
     monkeypatch.setattr(studio_app, "get_current_app_context_summary", fake_summary)
+    monkeypatch.setattr(studio_app, "get_current_app_context_graph", fake_graph)
 
     response = client.get("/api/studio/apps/app_1/context")
 
@@ -100,6 +115,8 @@ def test_get_app_context_status_returns_current_summary(monkeypatch) -> None:
     assert body["app_context_summary"]["context_version_id"] == "ctx_1"
     assert body["stale_status"] == "current"
     assert body["artifact_refs"][0]["kind"] == "app_context_graph"
+    assert body["context_graph_status"]["available"] is True
+    assert body["context_graph_status"]["graph_id"] == "graph_app_1"
 
 
 def test_get_app_context_status_handles_missing_context(monkeypatch) -> None:
@@ -112,14 +129,56 @@ def test_get_app_context_status_handles_missing_context(monkeypatch) -> None:
             warnings=[APP_CONTEXT_MISSING_WARNING],
         )
 
+    async def fake_graph(**kwargs):
+        return AppContextGraphLookupResult(graph=None)
+
     monkeypatch.setattr(studio_app, "get_current_app_context_summary", fake_summary)
+    monkeypatch.setattr(studio_app, "get_current_app_context_graph", fake_graph)
 
     response = client.get("/api/studio/apps/app_1/context")
 
     assert response.status_code == 200
     body = response.json()
     assert body["app_context_summary"]["available"] is False
+    assert body["context_graph_status"]["available"] is False
     assert APP_CONTEXT_MISSING_WARNING in body["warnings"]
+
+
+def test_workspace_snapshot_endpoint_registers_context(monkeypatch) -> None:
+    studio_app, client = _client(monkeypatch)
+
+    async def fake_register(**kwargs):
+        assert kwargs["app_id"] == "app_1"
+        assert kwargs["workspace_root"] == "C:/workspace/app"
+        return type(
+            "Result",
+            (),
+            {
+                "app_bundle_artifact_version_id": "av_bundle",
+                "app_context_version_id": "ctx_app_1",
+                "app_context_artifact_version_id": "av_context",
+                "graph_artifact_version_id": "av_graph",
+                "artifact_path": "generated/workspace_snapshots/app_1/artifact.zip",
+                "indexed_file_count": 42,
+                "scan_health": {"selected_file_count": 42},
+                "health_report": {"status": "healthy", "warnings": [], "blockers": [], "coverage": {}},
+                "warnings": [],
+            },
+        )()
+
+    monkeypatch.setattr(studio_app, "register_workspace_snapshot", fake_register)
+
+    response = client.post(
+        "/api/studio/apps/app_1/context/workspace-snapshot",
+        json={"workspace_root": "C:/workspace/app"},
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()["workspace_snapshot"]
+    assert snapshot["app_bundle_artifact_version_id"] == "av_bundle"
+    assert snapshot["graph_artifact_version_id"] == "av_graph"
+    assert snapshot["scan_health"]["selected_file_count"] == 42
+    assert snapshot["health_report"]["status"] == "healthy"
 
 
 def test_refresh_plan_is_non_mutating_and_does_not_launch(monkeypatch) -> None:
@@ -271,7 +330,7 @@ def test_override_allow_with_warning_is_non_mutating_and_preserves_plan_scope(mo
         workflow_sequence="app_revision",
         affected_workflows=["AppGenerator"],
         affected_declarative_families=["app_bundle"],
-        affected_bundle_paths=["config/database_intent.json"],
+        affected_bundle_paths=["config/data.json"],
         scope_summary="Brownfield data model migration.",
         app_id="app_1",
         request_id="req_1",
@@ -295,7 +354,7 @@ def test_override_allow_with_warning_is_non_mutating_and_preserves_plan_scope(mo
             "override_decision": "allow_with_warning",
             "reason": "Operator reviewed source ownership and will keep validation gates.",
             "reviewer": "operator@example.invalid",
-            "applies_to_paths": ["config/database_intent.json"],
+            "applies_to_paths": ["config/data.json"],
             "change_class": "feature",
             "refinement_lane": plan.refinement_lane,
             "apply_to_plan": True,

@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 from pathlib import Path
 
-from tests.import_utils import import_module_directly
-
-
-_schema = import_module_directly("mozaiksai.core.workflow.pack.schema")
-parse_workflow_pack_graph = _schema.parse_workflow_pack_graph
-
+import pytest
 
 class _Logger:
     def info(self, *args, **kwargs):
@@ -45,74 +39,12 @@ def _load_workflow_converter_module():
 workflow_converter = _load_workflow_converter_module()
 
 
-def test_build_workflow_local_pack_graph_for_decomposition() -> None:
-    graph = workflow_converter._build_workflow_local_pack_graph(
-        workflow_name="ReviewWorkflow",
-        workflow_strategy_output={
-            "WorkflowStrategy": {
-                "workflow_name": "Review Workflow",
-                "decomposition": {
-                    "required": True,
-                    "mode": "single_stage_mfj",
-                    "work_unit": "document",
-                    "decomposition_agent": "DecompositionAgent",
-                    "child_initial_agent": "ReviewWorkerAgent",
-                    "resume_entry_agent": "ResumeRouterAgent",
-                    "resume_agent": "SynthesisAgent",
-                    "inject_as": "document_results",
-                    "max_children": 6,
-                    "contracts": {
-                        "input_required": ["concept_overview", "document_batch"],
-                        "input_optional": ["style_guide"],
-                        "output_required": ["review_summary"],
-                        "output_optional": ["citations"],
-                    },
-                },
-            }
-        },
-        wf_logger=_Logger(),
-    )
-
-    assert graph is not None
-    assert graph["version"] == 3
-    journey = graph["mid_flight_journeys"][0]
-    assert journey["id"] == "document_cycle"
-    assert journey["decomposition_agent"] == "DecompositionAgent"
-    assert journey["fan_out"]["spawn_mode"] == "workflow"
-    assert journey["fan_out"]["child_initial_agent"] == "ReviewWorkerAgent"
-    assert journey["fan_out"]["max_children"] == 6
-    assert journey["fan_in"]["resume_agent"] == "SynthesisAgent"
-    assert journey["fan_in"]["inject_as"] == "mfj_document_results"
-
-    parsed = parse_workflow_pack_graph(graph)
-    assert parsed.mid_flight_journeys[0].fan_in.inject_as == "mfj_document_results"
-
-
-def test_build_workflow_local_pack_graph_returns_none_without_decomposition() -> None:
-    graph = workflow_converter._build_workflow_local_pack_graph(
-        workflow_name="LinearWorkflow",
-        workflow_strategy_output={
-            "WorkflowStrategy": {
-                "workflow_name": "Linear Workflow",
-                "decomposition": {
-                    "required": False,
-                    "mode": "none",
-                    "contracts": None,
-                },
-            }
-        },
-        wf_logger=_Logger(),
-    )
-
-    assert graph is None
-
-
 def test_generated_extra_file_paths_stay_workflow_local() -> None:
     normalize = workflow_converter._normalize_workflow_extra_path
 
     assert normalize("tools/analyze.py") == "tools/analyze.py"
     assert normalize("ui/components/ReviewPanel.jsx") == "ui/components/ReviewPanel.jsx"
-    assert normalize("extended_orchestration/mfj_extension.json") == "extended_orchestration/mfj_extension.json"
+    assert normalize("extended_orchestration/task_batches.yaml") == "extended_orchestration/task_batches.yaml"
 
     assert normalize("../outside.py") is None
     assert normalize("tools/../outside.py") is None
@@ -203,21 +135,6 @@ def test_orchestrator_triggers_are_normalized_to_runtime_schema() -> None:
     ]
 
 
-def test_split_config_preserves_orchestrator_triggers() -> None:
-    sections = workflow_converter._split_config_into_sections(
-        {
-            "workflow_name": "ReviewWorkflow",
-            "startup_mode": "BackendOnly",
-            "triggers": [{"type": "event", "event": "domain.documents.document_uploaded"}],
-            "agents": {"ReviewAgent": {}},
-        }
-    )
-
-    assert sections["orchestrator"]["triggers"] == [
-        {"type": "event", "event": "domain.documents.document_uploaded"}
-    ]
-
-
 def test_normalize_visual_agents_backend_only_blank_to_null() -> None:
     assert workflow_converter._normalize_visual_agents(None, startup_mode="BackendOnly") is None
     assert workflow_converter._normalize_visual_agents("  ", startup_mode="BackendOnly") is None
@@ -242,6 +159,21 @@ def test_normalize_handoff_rules_blank_condition_defaults_to_after_work() -> Non
     assert normalized[0]["condition_scope"] is None
     assert normalized[0]["condition_type"] is None
     assert normalized[0]["handoff_type"] == "after_work"
+
+
+def test_normalize_handoff_rules_rejects_llm_conditions() -> None:
+    with pytest.raises(ValueError, match="no longer supports LLM-evaluated"):
+        workflow_converter._normalize_handoff_rules(
+            [
+                {
+                    "source_agent": "user",
+                    "target_agent": "PlannerAgent",
+                    "handoff_type": "condition",
+                    "condition_type": "string_llm",
+                    "condition": "When the user wants changes.",
+                }
+            ]
+        )
 
 
 def test_normalize_tools_manifest_stamps_default_ui_contract_for_ui_tools() -> None:
@@ -494,303 +426,3 @@ def test_collect_code_files_uses_canonical_codefile_contract() -> None:
             "content": "async def analyze():\n    return None\n",
         }
     ]
-
-
-def test_create_workflow_files_assembles_canonical_codefiles(monkeypatch, tmp_path: Path) -> None:
-    generated_root = tmp_path / "generated"
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
-    context = _Context({"app_id": "demo-app", "chat_id": "build-123"})
-
-    result = asyncio.run(
-        workflow_converter.create_workflow_files(
-            {
-                "workflow_name": "ReviewWorkflow",
-                "orchestrator_output": {
-                    "workflow_name": "ReviewWorkflow",
-                    "startup_mode": "BackendOnly",
-                },
-                "agents_output": {
-                    "agents": [
-                        {
-                            "name": "ReviewAgent",
-                            "prompt_sections": [],
-                        }
-                    ]
-                },
-                "tools_manager_output": {
-                    "tools": [
-                        {
-                            "agent": "ReviewAgent",
-                            "file": "tools/request_approval.py",
-                            "function": "request_approval",
-                            "description": "Request approval using the shipped primitive.",
-                            "tool_type": "UI_Tool",
-                            "ui": {
-                                "component": "ApprovalCard",
-                                "mode": "inline",
-                                "workflow_primitive": "approval_card",
-                                "realization": "shipped_component",
-                            },
-                        },
-                        {
-                            "agent": "ReviewAgent",
-                            "file": "tools/request_branded_approval.py",
-                            "function": "request_branded_approval",
-                            "description": "Request approval with a workflow-local wrapper.",
-                            "tool_type": "UI_Tool",
-                            "ui": {
-                                "component": "BrandedApprovalCard",
-                                "mode": "inline",
-                                "workflow_primitive": "approval_card",
-                                "realization": "workflow_wrapper",
-                            },
-                        },
-                        {
-                            "agent": "ReviewAgent",
-                            "file": "tools/summarize_findings.py",
-                            "function": "summarize_findings",
-                            "description": "Summarize findings.",
-                            "tool_type": "Agent_Tool",
-                        },
-                    ],
-                    "lifecycle_tools": [],
-                },
-                "ui_file_generator_output": {
-                    "tools": [
-                        {
-                            "filename": "tools/request_approval.py",
-                            "content": "async def request_approval():\n    return None\n",
-                        },
-                        {
-                            "filename": "ui/review/ApprovalCard.jsx",
-                            "content": "export default function ApprovalCard() { return null; }\n",
-                        },
-                        {
-                            "filename": "tools/request_branded_approval.py",
-                            "content": "async def request_branded_approval():\n    return None\n",
-                        },
-                        {
-                            "filename": "ui/review/BrandedApprovalCard.jsx",
-                            "content": "export default function BrandedApprovalCard() { return null; }\n",
-                        },
-                    ]
-                },
-                "agent_tools_file_generator_output": {
-                    "tools": [
-                        {
-                            "filename": "tools/summarize_findings.py",
-                            "content": "async def summarize_findings():\n    return None\n",
-                        }
-                    ]
-                },
-            },
-            context_variables=context,
-        )
-    )
-
-    assert result["status"] == "success"
-
-    workflow_dir = generated_root / "workflows" / "demo-app" / "build-123" / "ReviewWorkflow"
-    assert (workflow_dir / "tools" / "request_approval.py").exists()
-    assert (workflow_dir / "tools" / "request_branded_approval.py").exists()
-    assert (workflow_dir / "tools" / "summarize_findings.py").exists()
-    assert not (workflow_dir / "ui" / "review" / "ApprovalCard.jsx").exists()
-    assert (workflow_dir / "ui" / "review" / "BrandedApprovalCard.jsx").exists()
-    assert (workflow_dir / "ui" / "index.js").exists()
-    assert (
-        "export { default as BrandedApprovalCard } from './review/BrandedApprovalCard.jsx';"
-        in (workflow_dir / "ui" / "index.js").read_text(encoding="utf-8")
-    )
-
-
-def test_create_workflow_files_ignores_malformed_orchestrator_output(monkeypatch, tmp_path: Path) -> None:
-    generated_root = tmp_path / "generated"
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
-    context = _Context({"app_id": "demo-app", "chat_id": "build-456"})
-
-    result = asyncio.run(
-        workflow_converter.create_workflow_files(
-            {
-                "workflow_name": "FallbackWorkflow",
-                "orchestrator_output": "{not valid json}",
-                "agents_output": {
-                    "agents": [
-                        {
-                            "name": "FallbackAgent",
-                            "prompt_sections": [],
-                        }
-                    ]
-                },
-            },
-            context_variables=context,
-        )
-    )
-
-    assert result["status"] == "success"
-    config = result["workflow_config"]
-    assert config["max_turns"] == 25
-    assert config["orchestration_pattern"] == "DefaultPattern"
-    assert config["startup_mode"] == "BackendOnly"
-    assert config["initial_message"] == "Initialize workflow sequence."
-    assert config["initial_message_to_user"] is None
-    assert config["initial_agent"] == "FallbackAgent"
-
-
-def test_create_workflow_files_skips_invalid_decomposition_graph_payload(monkeypatch, tmp_path: Path) -> None:
-    generated_root = tmp_path / "generated"
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
-    context = _Context({"app_id": "demo-app", "chat_id": "build-789"})
-
-    result = asyncio.run(
-        workflow_converter.create_workflow_files(
-            {
-                "workflow_name": "InvalidDecompositionWorkflow",
-                "orchestrator_output": {
-                    "workflow_name": "InvalidDecompositionWorkflow",
-                    "startup_mode": "BackendOnly",
-                },
-                "agents_output": {
-                    "agents": [
-                        {
-                            "name": "ReviewAgent",
-                            "prompt_sections": [],
-                        }
-                    ]
-                },
-                "workflow_strategy_output": {
-                    "WorkflowStrategy": {
-                        "workflow_name": "Invalid Decomposition Workflow",
-                        "decomposition": {
-                            "required": True,
-                            "mode": "single_stage_mfj",
-                            "work_unit": "document",
-                            "decomposition_agent": "DecompositionAgent",
-                        },
-                    }
-                },
-            },
-            context_variables=context,
-        )
-    )
-
-    assert result["status"] == "success"
-    assert "extended_orchestration/mfj_extension.json" not in result["files"]
-    assert not (
-        Path(result["workflow_dir"]) / "extended_orchestration" / "mfj_extension.json"
-    ).exists()
-    extra_files = result["workflow_config"].get("extra_files") or []
-    assert all(
-        (item.get("filename") or item.get("path")) != "extended_orchestration/mfj_extension.json"
-        for item in extra_files
-        if isinstance(item, dict)
-    )
-
-
-def test_create_workflow_files_ignores_malformed_mapping_sections(monkeypatch, tmp_path: Path) -> None:
-    generated_root = tmp_path / "generated"
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
-    context = _Context({"app_id": "demo-app", "chat_id": "build-999"})
-
-    result = asyncio.run(
-        workflow_converter.create_workflow_files(
-            {
-                "workflow_name": "MalformedSectionsWorkflow",
-                "orchestrator_output": {
-                    "workflow_name": "MalformedSectionsWorkflow",
-                    "startup_mode": "BackendOnly",
-                    "initial_agent": "StarterAgent",
-                },
-                "agents_output": "agents",
-                "handoffs_output": "handoff_rules",
-                "hooks_output": "hooks",
-                "context_variables_output": "context_variables",
-                "structured_outputs": "{not valid json}",
-                "structured_outputs_agent_output": "{not valid json}",
-                "tools_manager_output": "tools",
-                "ui_config": "ui_config",
-            },
-            context_variables=context,
-        )
-    )
-
-    assert result["status"] == "success"
-    config = result["workflow_config"]
-    assert config["initial_agent"] == "StarterAgent"
-    assert "agents" not in config
-    assert "handoffs" not in config
-    assert "hooks" not in config
-    assert "context_variables" not in config
-    assert "tools" not in config
-    assert config["structured_outputs"] == {"models": {}, "registry": {}}
-
-
-def test_create_workflow_files_preserves_canonical_context_variables_plan(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    generated_root = tmp_path / "generated"
-    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(generated_root))
-    context = _Context({"app_id": "demo-app", "chat_id": "build-ctx"})
-
-    result = asyncio.run(
-        workflow_converter.create_workflow_files(
-            {
-                "workflow_name": "ContextVariablesWorkflow",
-                "orchestrator_output": {
-                    "workflow_name": "ContextVariablesWorkflow",
-                    "startup_mode": "BackendOnly",
-                },
-                "agents_output": {
-                    "agents": [
-                        {
-                            "name": "ContextAgent",
-                            "prompt_sections": [],
-                        }
-                    ]
-                },
-                "context_variables_output": {
-                    "ContextVariablesPlan": {
-                        "definitions": [
-                            {
-                                "name": "project_id",
-                                "type": "string",
-                                "description": "Current project identifier",
-                                "source": {
-                                    "type": "state",
-                                    "default": None,
-                                },
-                            }
-                        ],
-                        "agents": [
-                            {"agent": "ContextAgent", "variables": ["project_id"]}
-                        ],
-                    }
-                },
-            },
-            context_variables=context,
-        )
-    )
-
-    assert result["status"] == "success"
-    assert result["workflow_config"]["context_variables"] == {
-        "definitions": {
-            "project_id": {
-                "type": "string",
-                "description": "Current project identifier",
-                "source": {
-                    "type": "state",
-                    "default": None,
-                },
-            }
-        },
-        "agents": {
-            "ContextAgent": {
-                "variables": ["project_id"],
-            }
-        },
-    }
-    workflow_dir = Path(result["workflow_dir"])
-    context_variables_text = (workflow_dir / "context_variables.yaml").read_text(encoding="utf-8")
-    assert "project_id:" in context_variables_text
-    assert "ContextAgent:" in context_variables_text
-    assert (workflow_dir / "context_variables.yaml").exists()

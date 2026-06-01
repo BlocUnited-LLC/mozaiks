@@ -219,12 +219,12 @@ def _create_bundle_scaffold(
 ) -> None:
     app_root = target_dir / "app"
     config_dir = app_root / "config"
-    backend_dir = app_root / "backend"
-    backend_integrations_dir = backend_dir / "integrations"
-    backend_adapters_dir = backend_dir / "adapters"
-    backend_security_dir = backend_dir / "security"
-    backend_routes_dir = backend_dir / "routes"
-    shared_persistence_dir = app_root / "shared_persistence"
+    services_dir = app_root / "services"
+    service_integrations_dir = services_dir / "integrations"
+    service_adapters_dir = services_dir / "adapters"
+    service_security_dir = services_dir / "security"
+    service_routes_dir = services_dir / "routes"
+    service_data_dir = services_dir / "data"
     modules_dir = app_root / "modules"
     workflows_dir = target_dir / "workflows"
     brand_dir = app_root / "brand"
@@ -238,12 +238,13 @@ def _create_bundle_scaffold(
     for directory in (
         app_root,
         config_dir,
-        backend_dir,
-        backend_integrations_dir,
-        backend_adapters_dir,
-        backend_security_dir,
-        backend_routes_dir,
-        *(backend_adapters_dir / area for area in (
+        services_dir,
+        service_integrations_dir,
+        service_adapters_dir,
+        service_security_dir,
+        service_routes_dir,
+        service_data_dir,
+        *(service_adapters_dir / area for area in (
             "auth",
             "source_control",
             "deployment",
@@ -254,7 +255,6 @@ def _create_bundle_scaffold(
             "secrets",
             "payments",
         )),
-        shared_persistence_dir,
         modules_dir,
         workflows_dir,
         brand_dir,
@@ -267,7 +267,7 @@ def _create_bundle_scaffold(
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
-    print("Created scaffold directories: app/config, app/backend, app/modules, workflows, app/ui, app/brand")
+    print("Created scaffold directories: app/config, app/services, app/modules, workflows, app/ui, app/brand")
 
     features = TIER_PRESETS[preset]
     resolved_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else None
@@ -297,14 +297,14 @@ def _create_bundle_scaffold(
     _write_text(config_dir / "secrets.yaml", _secrets_yaml_placeholder())
     print("Created app/config/secrets.yaml")
 
-    _write_json(config_dir / "shared_persistence.json", _shared_persistence_placeholder())
-    print("Created app/config/shared_persistence.json")
+    _write_json(config_dir / "data.json", _data_contract_placeholder())
+    print("Created app/config/data.json")
 
-    _write_backend_support_stubs(backend_dir)
-    print("Created app/backend support stubs")
+    _write_service_support_stubs(services_dir)
+    print("Created app/services support stubs")
 
-    _write_text(shared_persistence_dir / "__init__.py", '"""Shared persistence helpers — declared in app/config/shared_persistence.json."""\n')
-    print("Created app/shared_persistence/")
+    _write_text(service_data_dir / "__init__.py", '"""Data contract helpers declared by app/config/data.json."""\n')
+    print("Created app/services/data/")
 
     _copy_default_brand_bundle(brand_dir, app_name)
     print("Created app/brand from factory_app default brand")
@@ -401,10 +401,10 @@ __pycache__/
 node_modules/
 dist/
 build/
-!app/backend/
-!app/backend/**
-app/backend/**/__pycache__/
-app/backend/**/*.py[cod]
+!app/services/
+!app/services/**
+app/services/**/__pycache__/
+app/services/**/*.py[cod]
 logs/
 generated/
 .pytest_cache/
@@ -998,26 +998,28 @@ secrets: []
 """
 
 
-def _shared_persistence_placeholder() -> dict:
+def _data_contract_placeholder() -> dict:
     return {
         "enabled": False,
         "description": (
-            "Shared persistence helpers for stable shared or existing database collections. "
-            "Set enabled to true and declare collections when this app has a shared "
-            "database layer outside of module-owned collections."
+            "Data contract for durable module collections, cross-module aggregate ownership, "
+            "or explicit existing database mappings."
         ),
-        "collections": [],
+        "version": "1",
+        "surfaces": [],
+        "shared_collections": [],
     }
 
 
-def _write_backend_support_stubs(backend_dir: Path) -> None:
-    _write_text(backend_dir / "__init__.py", '"""App-owned backend support code."""')
-    _write_text(backend_dir / "config.py", '"""App-owned backend support configuration."""')
+def _write_service_support_stubs(services_dir: Path) -> None:
+    _write_text(services_dir / "__init__.py", '"""App-owned service support code."""')
+    _write_text(services_dir / "config.py", '"""App-owned service support configuration."""')
     for package in (
-        backend_dir / "integrations",
-        backend_dir / "adapters",
-        backend_dir / "security",
-        backend_dir / "routes",
+        services_dir / "integrations",
+        services_dir / "adapters",
+        services_dir / "security",
+        services_dir / "routes",
+        services_dir / "data",
     ):
         _write_text(package / "__init__.py", "")
     for area in (
@@ -1031,7 +1033,7 @@ def _write_backend_support_stubs(backend_dir: Path) -> None:
         "secrets",
         "payments",
     ):
-        _write_text(backend_dir / "adapters" / area / "__init__.py", "")
+        _write_text(services_dir / "adapters" / area / "__init__.py", "")
 
 
 def _create_starter_workflow(workflows_dir: Path) -> None:
@@ -1045,7 +1047,7 @@ def _create_starter_workflow(workflows_dir: Path) -> None:
 max_turns: 10
 human_in_the_loop: true
 workflow_startup_mode: UserDriven
-orchestration_pattern: AutoPattern
+orchestration_pattern: ag2_network
 initial_message_to_user: "Hello. I am a starter workflow. Replace me when you know the real product behavior."
 initial_message: null
 initial_agent: GreeterAgent

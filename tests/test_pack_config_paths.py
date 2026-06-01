@@ -12,9 +12,7 @@ _config = import_module_directly("mozaiksai.core.workflow.pack.config")
 _paths = import_module_directly("mozaiksai.core.workflow.paths")
 _resources = import_module_directly("mozaiksai.resources")
 get_global_pack_graph_path = _config.get_global_pack_graph_path
-get_workflow_pack_graph_path = _config.get_workflow_pack_graph_path
 load_global_pack_graph = _config.load_global_pack_graph
-load_workflow_pack_graph = _config.load_workflow_pack_graph
 list_workflow_sequences = _config.list_workflow_sequences
 
 
@@ -24,7 +22,6 @@ def _use_repo_factory_workflows(monkeypatch) -> None:
     monkeypatch.setenv("PLATFORM_PATH", str(repo_root / "__no_active_app__"))
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
     _config._GLOBAL_CACHE = None
-    _config._WORKFLOW_CACHE = {}
 
 
 def test_global_pack_graph_path_points_to_repo_workflows_pack(monkeypatch) -> None:
@@ -33,18 +30,6 @@ def test_global_pack_graph_path_points_to_repo_workflows_pack(monkeypatch) -> No
     assert path.name == "extension_registry.json"
     assert path.parent.name == "extended_orchestration"
     assert path.parent.parent.name == "workflows"
-
-
-def test_workflow_pack_graph_path_points_to_workflow_pack(monkeypatch) -> None:
-    _use_repo_factory_workflows(monkeypatch)
-    path = get_workflow_pack_graph_path("AgentGenerator")
-    expected_suffix = (
-        Path("workflows")
-        / "AgentGenerator"
-        / "extended_orchestration"
-        / "mfj_extension.json"
-    )
-    assert str(path).endswith(str(expected_suffix))
 
 
 def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
@@ -112,15 +97,6 @@ def test_single_root_registry_path_uses_explicit_override_without_factory_merge(
     assert graph.journeys == []
 
 
-def test_load_workflow_pack_graph_uses_canonical_file(monkeypatch) -> None:
-    _use_repo_factory_workflows(monkeypatch)
-    graph = load_workflow_pack_graph("AgentGenerator")
-    assert graph is not None
-    assert graph.version == 3
-    assert len(graph.mid_flight_journeys) >= 1
-    assert graph.mid_flight_journeys[0].id.startswith("workflow_generation")
-
-
 def test_declared_global_workflows_match_physical_workflow_folders(monkeypatch) -> None:
     _use_repo_factory_workflows(monkeypatch)
     graph = load_global_pack_graph()
@@ -183,24 +159,6 @@ def test_single_root_registry_rejects_invalid_artifact_dependency_graph(
 
     with pytest.raises(ValueError, match="artifact_dependency_graph"):
         load_global_pack_graph()
-
-
-def test_workflows_path_selects_one_root(monkeypatch, tmp_path: Path) -> None:
-    local_root = tmp_path / "local"
-    local_graph_dir = local_root / "LocalOnly" / "extended_orchestration"
-    local_graph_dir.mkdir(parents=True)
-
-    local_graph = local_graph_dir / "mfj_extension.json"
-    local_graph.write_text(json.dumps({"version": 3, "mid_flight_journeys": []}), encoding="utf-8")
-    (local_root / "LocalOnly" / "orchestrator.yaml").write_text("workflow_name: LocalOnly\n", encoding="utf-8")
-
-    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(local_root))
-    monkeypatch.delenv("PLATFORM_PATH", raising=False)
-    _config._GLOBAL_CACHE = None
-    _config._WORKFLOW_CACHE = {}
-
-    assert _paths.resolve_workflows_root() == local_root.resolve()
-    assert get_workflow_pack_graph_path("LocalOnly") == local_graph.resolve()
 
 
 def test_single_root_override_does_not_inject_factory_fallback(monkeypatch, tmp_path: Path) -> None:

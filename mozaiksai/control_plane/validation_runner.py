@@ -43,8 +43,8 @@ _PLAN_VALIDATION_TARGETS: dict[str, list[str]] = {
     "module_contract_validation": ["module_contract_validation"],
     "integration_readiness": ["integration_readiness_validation"],
     "integration_readiness_validation": ["integration_readiness_validation"],
-    "database_migration_review": ["database_intent_validation", "migration_plan_validation"],
-    "database_intent_validation": ["database_intent_validation"],
+    "database_migration_review": ["data_contract_validation", "migration_plan_validation"],
+    "data_contract_validation": ["data_contract_validation"],
     "migration_plan_validation": ["migration_plan_validation"],
     "hosted_facade_validation": ["hosted_facade_boundary_validation"],
     "hosted_facade_boundary_validation": ["hosted_facade_boundary_validation"],
@@ -59,7 +59,7 @@ _VALIDATION_ORDER = [
     "module_contract_validation",
     "experience_spec_validation",
     "app_bundle_validation",
-    "database_intent_validation",
+    "data_contract_validation",
     "migration_plan_validation",
     "hosted_facade_boundary_validation",
     "integration_readiness_validation",
@@ -220,8 +220,8 @@ def _integration_surface_entries(files: dict[str, str]) -> list[dict[str, str]]:
         if _matches_any(
             filename,
             (
-                "backend/integrations/*_client.py",
-                "backend/adapters/**/*.py",
+                "services/integrations/*_client.py",
+                "services/adapters/**/*.py",
                 "config/integrations*.json",
                 "docs/integrations*.md",
             ),
@@ -234,7 +234,7 @@ def _integration_surface_entries(files: dict[str, str]) -> list[dict[str, str]]:
 
 def _database_surface_entries(files: dict[str, str]) -> list[dict[str, str]]:
     def _is_database_surface(filename: str) -> bool:
-        return filename == "config/database_intent.json" or _matches_any(filename, ("config/database_migrations/*.json",))
+        return filename == "config/data.json" or _matches_any(filename, ("config/data_migrations/*.json",))
 
     return _code_file_list(files, predicate=_is_database_surface)
 
@@ -486,40 +486,40 @@ def _experience_spec_validation(
     )
 
 
-def _database_intent_validation(
+def _data_contract_validation(
     files: dict[str, str],
     *,
     required: bool,
 ) -> RefinementValidationItemResult:
-    filename = "config/database_intent.json"
+    filename = "config/data.json"
     content = files.get(filename)
     if content is None:
         return _result(
-            name="database_intent_validation",
+            name="data_contract_validation",
             status="skipped" if not required else "warning",
-            reason="config/database_intent.json was not present in the staged workspace.",
+            reason="config/data.json was not present in the staged workspace.",
         )
 
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
         return _result(
-            name="database_intent_validation",
+            name="data_contract_validation",
             status="failed",
             reason=f"{filename} is not valid JSON: {exc.msg}.",
             artifacts=[filename],
         )
     if not isinstance(parsed, dict):
         return _result(
-            name="database_intent_validation",
+            name="data_contract_validation",
             status="failed",
             reason=f"{filename} must parse to a JSON object.",
             artifacts=[filename],
         )
     return _result(
-        name="database_intent_validation",
+        name="data_contract_validation",
         status="passed",
-        reason="config/database_intent.json is valid JSON.",
+        reason="config/data.json is valid JSON.",
         artifacts=[filename],
     )
 
@@ -530,12 +530,12 @@ def _migration_plan_validation(
     required: bool,
 ) -> RefinementValidationItemResult:
     entries = _database_surface_entries(files)
-    migration_entries = [entry for entry in entries if entry["filename"] != "config/database_intent.json"]
+    migration_entries = [entry for entry in entries if entry["filename"] != "config/data.json"]
     if not migration_entries:
         return _result(
             name="migration_plan_validation",
             status="skipped" if not required else "warning",
-            reason="No config/database_migrations/*.json files were present in the staged workspace.",
+            reason="No config/data_migrations/*.json files were present in the staged workspace.",
         )
 
     warnings: list[str] = []
@@ -571,7 +571,7 @@ def _hosted_facade_boundary_validation(
     integration_paths = [
         path
         for path in paths
-        if _matches_any(path, ("backend/integrations/*_client.py", "backend/adapters/**/*.py"))
+        if _matches_any(path, ("services/integrations/*_client.py", "services/adapters/**/*.py"))
         or path.startswith("modules/")
     ]
     if not hosted_internal_paths and not integration_paths:
@@ -716,11 +716,11 @@ def run_refinement_validations(
             items.append(_experience_spec_validation(files, plan=plan))
         elif name == "app_bundle_validation":
             items.append(_app_bundle_validation(files, plan=plan))
-        elif name == "database_intent_validation":
+        elif name == "data_contract_validation":
             items.append(
-                _database_intent_validation(
+                _data_contract_validation(
                     files,
-                    required="database_intent_validation" in targets,
+                    required="data_contract_validation" in targets,
                 )
             )
         elif name == "migration_plan_validation":
@@ -762,3 +762,4 @@ __all__ = [
     "ValidationStatus",
     "run_refinement_validations",
 ]
+

@@ -231,7 +231,7 @@ Generated frontend work must stay in the correct UI surface lane.
 # HOOK FUNCTION - Single entry point for all injections
 # =============================================================================
 
-def inject_universal_prompts(agent, messages: List[Dict[str, Any]], groupchat: Any = None) -> str:
+def inject_universal_prompts(agent, messages: List[Dict[str, Any]], run_context: Any = None) -> str:
     """
     Injects universal and conditional prompt sections into agent system message.
     

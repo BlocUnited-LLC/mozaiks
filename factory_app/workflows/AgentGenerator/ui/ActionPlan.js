@@ -42,7 +42,7 @@ const PATTERN_META = {
   feedbackloop: { label: 'Feedback Loop', desc: 'Iterative refinement until acceptance', color: 'blue' },
   escalation: { label: 'Escalation', desc: 'Progressively engages higher-tier experts', color: 'violet' },
   contextawarerouting: { label: 'Context-Aware Routing', desc: 'Dynamically routes tasks based on context variables', color: 'cyan' },
-  organic: { label: 'Organic', desc: 'Free-form collaboration among agents', color: 'emerald' },
+  coordinator: { label: 'Coordinator', desc: 'Coordinator-managed specialist consultation', color: 'emerald' },
   triagewithtasks: { label: 'Triage with Tasks', desc: 'Intake triage followed by targeted execution tasks', color: 'amber' },
 };
 
@@ -1503,7 +1503,7 @@ const ActionPlan = ({ payload = {}, onResponse, toolName, toolCallId, workflowNa
   const [pending, setPending] = useState(false);
   const [openModules, setOpenModules] = useState({ 0: true });
   const [activeTab, setActiveTab] = useState('workflow'); // Tab state: 'workflow' | 'data' | 'interactions' | 'diagram'
-  const [activeWorkflowIndex, setActiveWorkflowIndex] = useState(0); // Pack mode: active child workflow tab
+  const [activeWorkflowIndex, setActiveWorkflowIndex] = useState(0); // Pack mode: active workflow tab
 
   const packWorkflows = Array.isArray(payload?.workflows)
     ? payload.workflows.filter((entry) => entry && typeof entry === 'object')
@@ -1821,7 +1821,7 @@ const ActionPlan = ({ payload = {}, onResponse, toolName, toolCallId, workflowNa
           </div>
         </header>
 
-      {/* Pack Workflow Tabs (1 tab per child workflow) */}
+      {/* Pack Workflow Tabs (1 tab per workflow) */}
       {hasChildWorkflows && (
         <div className="flex items-center gap-2 rounded-xl border-2 border-border bg-background p-2 overflow-x-auto">
           {packWorkflows.map((entry, idx) => {

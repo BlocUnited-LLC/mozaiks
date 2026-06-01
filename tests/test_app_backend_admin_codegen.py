@@ -61,28 +61,31 @@ def test_build_app_backend_admin_code_files_produces_importable_surface(tmp_path
     code_files = build_app_backend_admin_code_files(_valid_admin_config())
     file_map = {entry["filename"]: entry["content"] for entry in code_files}
 
-    assert set(file_map) == {"backend/admin_config.py", "backend/routes/admin.py"}
+    assert set(file_map) == {"services/admin_config.py", "services/routes/admin.py"}
 
-    _write_package_file(tmp_path, "backend/__init__.py", "")
-    _write_package_file(tmp_path, "backend/routes/__init__.py", "")
+    app_root = tmp_path / "app"
+    _write_package_file(app_root, "__init__.py", "")
+    _write_package_file(app_root, "services/__init__.py", "")
+    _write_package_file(app_root, "services/routes/__init__.py", "")
     for filename, content in file_map.items():
-        _write_package_file(tmp_path, filename, content)
+        _write_package_file(app_root, filename, content)
 
     monkeypatch.syspath_prepend(str(tmp_path))
     for module_name in [
-        "backend",
-        "backend.admin_config",
-        "backend.routes",
-        "backend.routes.admin",
+        "app",
+        "app.services",
+        "app.services.admin_config",
+        "app.services.routes",
+        "app.services.routes.admin",
     ]:
         sys.modules.pop(module_name, None)
 
-    admin_config_module = importlib.import_module("backend.admin_config")
+    admin_config_module = importlib.import_module("app.services.admin_config")
     admin_config = admin_config_module.get_admin_config()
     assert admin_config["schema_version"] == "mozaiks.admin.app_backend.v1"
     assert admin_config["panels"][0]["builtin_panel"] == "users"
 
-    route_module = importlib.import_module("backend.routes.admin")
+    route_module = importlib.import_module("app.services.routes.admin")
     app = FastAPI()
     app.include_router(route_module.router)
 
@@ -99,7 +102,7 @@ def test_extract_code_file_map_prefers_typed_app_backend_admin_config() -> None:
         "app_backend_admin_config": _valid_admin_config(),
         "code_files": [
             {
-                "filename": "backend/admin_config.py",
+                "filename": "services/admin_config.py",
                 "content": "BROKEN",
             }
         ],
@@ -107,11 +110,11 @@ def test_extract_code_file_map_prefers_typed_app_backend_admin_config() -> None:
 
     file_map = extract_code_file_map_from_payload(payload)
 
-    assert "BROKEN" not in file_map["backend/admin_config.py"]
-    assert "mozaiks.admin.app_backend.v1" in file_map["backend/admin_config.py"]
-    assert "get_admin_config" in file_map["backend/admin_config.py"]
-    assert "APIRouter" in file_map["backend/routes/admin.py"]
-    assert "/api/admin" in file_map["backend/routes/admin.py"]
+    assert "BROKEN" not in file_map["services/admin_config.py"]
+    assert "mozaiks.admin.app_backend.v1" in file_map["services/admin_config.py"]
+    assert "get_admin_config" in file_map["services/admin_config.py"]
+    assert "APIRouter" in file_map["services/routes/admin.py"]
+    assert "/api/admin" in file_map["services/routes/admin.py"]
 
 
 def test_assembly_phase_materializes_split_admin_surface_from_typed_payload() -> None:
@@ -127,7 +130,7 @@ def test_assembly_phase_materializes_split_admin_surface_from_typed_payload() ->
 
     file_map = {entry["filename"]: entry["content"] for entry in merged}
 
-    assert set(file_map) == {"backend/admin_config.py", "backend/routes/admin.py"}
-    assert "mozaiks.admin.app_backend.v1" in file_map["backend/admin_config.py"]
-    assert "get_admin_config" in file_map["backend/admin_config.py"]
-    assert "APIRouter" in file_map["backend/routes/admin.py"]
+    assert set(file_map) == {"services/admin_config.py", "services/routes/admin.py"}
+    assert "mozaiks.admin.app_backend.v1" in file_map["services/admin_config.py"]
+    assert "get_admin_config" in file_map["services/admin_config.py"]
+    assert "APIRouter" in file_map["services/routes/admin.py"]

@@ -5,14 +5,14 @@ created: 2026-04-13
 depends_on:
   - refinement-control-plane.md
   - workflow-routing-transitions.md
-  - ../../architecture/mozaiksai/mid-flight-journeys.md
+  - ../../architecture/mozaiksai/task-batches.md
   - ../../architecture/mozaiksai/universal-orchestrator.md
 ---
 
 # SessionRouter
 
 This document defines the SessionRouter — the unified session-level coordinator that
-sits above `JourneyOrchestrator`, host-supplied trigger routing policy, and MFJ.
+sits above `JourneyOrchestrator`, host-supplied trigger routing policy, and workflow-local task batches.
 
 The concrete refinement re-entry policy is framework-owned. The generic
 control-plane contracts and runtime now live under `mozaiksai/control_plane/`,
@@ -31,7 +31,7 @@ The platform already has the right subsystems:
 |---|---|
 | `GlobalPackGraph` | Static macro topology — workflows, dependencies, journeys, transitions |
 | `JourneyOrchestrator` | Reactive auto-advance — listens to `run_complete`, spawns next step |
-| MFJ | Workflow-local parallel execution — internal to a single workflow |
+| Task batches | Workflow-local parallel task execution — internal to a single workflow |
 | Refinement re-entry policy | Change-class + artifact ownership → re-entry workflow |
 
 What is missing is a **first-class, persisted session record** and a **routing decision point** that sees all trigger types uniformly.
@@ -52,7 +52,7 @@ coordinates them.
 
 ## Non-Goals
 
-- Does not replace MFJ. MFJ is workflow-local orchestration and stays that way.
+- Does not replace task batches. Task batches are workflow-local execution and stay that way.
 - Does not replace `JourneyOrchestrator`. Journey auto-advance remains event-driven.
 - Does not classify natural-language change requests. SessionRouter consumes a prior
   classification result for refinement re-entry.
@@ -77,7 +77,7 @@ coordinates them.
                         |                   |
                     GlobalPackGraph         |
                         |                   |
-                   MFJ / AG2 runtime        |
+              task batches / AG2 runtime    |
 ```
 
 `JourneyOrchestrator` becomes a sub-handler for the `run_complete` case.
@@ -132,12 +132,12 @@ workflow phases or before routing.
 Some transitions are fully silent. In those cases SessionRouter simply reroutes
 or resumes without mounting any UI.
 
-### 4. MFJ
+### 4. Task Batches
 
-MFJ remains workflow-local orchestration.
+Task batches remain workflow-local execution.
 
-- It answers: "inside this workflow, do we need fan-out/fan-in?"
-- SessionRouter does not inspect child chat details.
+- They answer: "inside this workflow, do we need bounded parallel task work?"
+- SessionRouter does not inspect task item details.
 - SessionRouter only sees the outer workflow run lifecycle.
 
 ---
@@ -268,7 +268,7 @@ class Session:
     # Active execution
     current_run_id: str | None       # chat_id of the currently executing workflow run
     current_workflow_name: str | None
-    active_mfj_run_ids: list[str]    # parallel run ids when in a parallel step group
+    active_parallel_run_ids: list[str]    # parallel run ids when in a parallel step group
 
     # Blocked state
     pending_transition_id: str | None
@@ -417,14 +417,14 @@ prerequisite system.
 6. updates Session.current_workflow_name, Session.current_run_id
 ```
 
-### Parallel Step Groups (MFJ-adjacent)
+### Parallel Step Groups
 
 When `journey.steps` contains a parallel group such as
 `["ThemeCapture", "ExistingAppDiscovery"]`:
 
 ```
 1. SessionRouter spawns both runs (via JourneyOrchestrator as today)
-2. records both run ids in Session.active_mfj_run_ids
+2. records both run ids in Session.active_parallel_run_ids
 3. remains in ACTIVE until all sibling runs complete
 4. JourneyOrchestrator's existing sibling-check logic handles the "advance only when
    all siblings done" barrier — SessionRouter only adds the state write-back
@@ -434,8 +434,8 @@ Parallel groups must not contain required dependency edges between siblings. If
 `AppGenerator` depends on `AgentGenerator`, they must be authored as separate
 serial steps.
 
-MFJ (within a single workflow) is invisible to SessionRouter. SessionRouter only sees
-the outer workflow's run_complete event.
+Task batches within a single workflow are invisible to SessionRouter. SessionRouter
+only sees the outer workflow's run_complete event.
 
 ---
 

@@ -417,6 +417,54 @@ async def set_current_app_context_version(
     )
 
 
+async def get_app_context_version(
+    *,
+    app_id: str,
+    context_version_id: str | None = None,
+    artifact_version_id: str | None = None,
+    artifact_store: ArtifactStore | None = None,
+) -> AppContextVersion | None:
+    """Load an AppContextVersion by canonical context id or artifact version id."""
+    resolved_app_id = str(app_id or "").strip()
+    if not resolved_app_id:
+        raise ValueError("app_id is required")
+    resolved_context_version_id = str(context_version_id or "").strip()
+    resolved_artifact_version_id = str(artifact_version_id or "").strip()
+    if not resolved_context_version_id and not resolved_artifact_version_id:
+        raise ValueError("context_version_id or artifact_version_id is required")
+
+    store = artifact_store or get_artifact_store()
+    if resolved_artifact_version_id:
+        artifact = await store.get_artifact_version(
+            app_id=resolved_app_id,
+            artifact_version_id=resolved_artifact_version_id,
+        )
+        if artifact is None:
+            return None
+        if artifact.artifact_kind != APP_CONTEXT_VERSION_ARTIFACT_KIND:
+            raise ValueError("artifact_version_id does not reference an app_context_version artifact")
+        context_version = _app_context_version_from_artifact(artifact)
+        if (
+            context_version is not None
+            and resolved_context_version_id
+            and context_version.context_version_id != resolved_context_version_id
+        ):
+            return None
+        return context_version
+
+    versions = await store.list_artifact_versions(
+        app_id=resolved_app_id,
+        artifact_kind=APP_CONTEXT_VERSION_ARTIFACT_KIND,
+        artifact_key=APP_CONTEXT_VERSION_ARTIFACT_KEY,
+        limit=100,
+    )
+    for artifact in versions:
+        context_version = _app_context_version_from_artifact(artifact)
+        if context_version is not None and context_version.context_version_id == resolved_context_version_id:
+            return context_version
+    return None
+
+
 async def get_current_app_context_version(
     *,
     app_id: str,
@@ -435,6 +483,13 @@ async def get_current_app_context_version(
         return None
 
     payload = _summary_payload(versions[0])
+    if payload is None:
+        return None
+    return AppContextVersion.model_validate(payload)
+
+
+def _app_context_version_from_artifact(artifact: ArtifactVersionDoc | Any) -> AppContextVersion | None:
+    payload = _summary_payload(artifact)
     if payload is None:
         return None
     return AppContextVersion.model_validate(payload)
@@ -554,11 +609,10 @@ def _normalize_app_bundle_path(path: Any) -> str | None:
         "ui/",
         "modules/",
         "workflows/",
-        "backend/",
+        "services/",
         "config/",
         "brand/",
         "admin/",
-        "shared_persistence/",
     )
     for prefix in known_prefixes:
         marker = f"/{prefix}"
@@ -726,7 +780,7 @@ def _greenfield_api_endpoints(paths: list[str], source_ref_id: str) -> list[Surf
             source_ref_id=source_ref_id,
         )
         for path in paths
-        if path.startswith(("backend/api/", "api/")) and path.endswith((".py", ".yaml", ".yml", ".json"))
+        if path.startswith(("services/routes/", "api/")) and path.endswith((".py", ".yaml", ".yml", ".json"))
     ]
 
 
@@ -736,7 +790,7 @@ def _greenfield_data_entities(
     manifest_by_path: dict[str, dict[str, Any]],
 ) -> list[SurfaceRef]:
     entities: list[SurfaceRef] = []
-    explicit_entities = _database_intent_entities(manifest_by_path)
+    explicit_entities = _data_contract_entities(manifest_by_path)
     for entity in explicit_entities:
         entity_id = str(entity.get("entity_id") or "").strip()
         if not entity_id:
@@ -746,27 +800,27 @@ def _greenfield_data_entities(
                 surface_id=_surface_id("data", entity_id),
                 kind="data_entity",
                 label=entity_id,
-                location="config/database_intent.json",
+                location="config/data.json",
                 source_ref_id=source_ref_id,
                 metadata={
-                    "path": "config/database_intent.json",
+                    "path": "config/data.json",
                     "module_ids": sorted(entity.get("module_ids") or []),
                     "operations_by_module": entity.get("operations_by_module") or {},
                 },
             )
         )
-    if "config/database_intent.json" in paths:
+    if "config/data.json" in paths:
         entities.append(
             SurfaceRef(
-                surface_id="database_intent",
-                kind="database_intent",
-                label="Database intent",
-                location="config/database_intent.json",
+                surface_id="data_contract",
+                kind="data_contract",
+                label="Data contract",
+                location="config/data.json",
                 source_ref_id=source_ref_id,
             )
         )
     for path in paths:
-        if path.startswith("config/database_migrations/") and path.endswith(".json"):
+        if path.startswith("config/data_migrations/") and path.endswith(".json"):
             entities.append(
                 SurfaceRef(
                     surface_id=_surface_id("database_migration", path),
@@ -783,7 +837,7 @@ def _greenfield_integrations(paths: list[str]) -> list[IntegrationInventory]:
     integration_ids: set[str] = set()
     config_ids: set[str] = set()
     for path in paths:
-        if path.startswith("backend/integrations/") and path.endswith("_client.py"):
+        if path.startswith("services/integrations/") and path.endswith("_client.py"):
             integration_ids.add(path.rsplit("/", 1)[-1].removesuffix("_client.py"))
         elif path == "config/integrations.json":
             config_ids.add("integrations")
@@ -990,8 +1044,8 @@ def _workflow_metadata(
     return metadata
 
 
-def _database_intent_entities(manifest_by_path: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    data = _load_json_manifest("config/database_intent.json", manifest_by_path)
+def _data_contract_entities(manifest_by_path: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    data = _load_json_manifest("config/data.json", manifest_by_path)
     if not isinstance(data, dict):
         return []
 
@@ -1251,14 +1305,14 @@ def _greenfield_risk_report(paths: list[str], integrations: list[IntegrationInve
                 mitigation="Confirm integration config before promoting integration-dependent changes.",
             )
         )
-    has_migrations = any(path.startswith("config/database_migrations/") for path in paths)
-    if has_migrations and "config/database_intent.json" not in paths:
+    has_migrations = any(path.startswith("config/data_migrations/") for path in paths)
+    if has_migrations and "config/data.json" not in paths:
         risks.append(
             RiskItem(
-                risk_id="risk_database_migration_without_intent",
-                description="Database migration files exist without database_intent evidence.",
+                risk_id="risk_data_migration_without_contract",
+                description="Data migration files exist without data contract evidence.",
                 severity="medium",
-                mitigation="Review database intent before applying migration plans.",
+                mitigation="Review the data contract before applying migration plans.",
             )
         )
     has_custom_pages = any(path.startswith("ui/pages/custom/") for path in paths)
@@ -1404,7 +1458,7 @@ def _greenfield_app_context_graph(
     for route in inventory.routes:
         add_surface(route, GraphNodeType.ROUTE, "route")
     for page in inventory.pages:
-        add_surface(page, GraphNodeType.COMPONENT, "page")
+        add_surface(page, GraphNodeType.PAGE, "page")
     for component in inventory.components:
         add_surface(component, GraphNodeType.COMPONENT, "component")
     for module in inventory.modules:
@@ -1709,7 +1763,7 @@ def _manifest_checksum(entry: dict[str, Any] | None) -> str | None:
 
 
 def _integration_client_path(integration_id: str, paths: list[str]) -> str | None:
-    target = f"backend/integrations/{integration_id}_client.py"
+    target = f"services/integrations/{integration_id}_client.py"
     if target in paths:
         return target
     return None
@@ -1762,6 +1816,7 @@ __all__ = [
     "RegisteredAppContextVersion",
     "build_brownfield_app_context_version",
     "build_greenfield_app_context_from_app_bundle",
+    "get_app_context_version",
     "get_current_app_context_version",
     "register_greenfield_app_context_version",
     "register_app_context_version",

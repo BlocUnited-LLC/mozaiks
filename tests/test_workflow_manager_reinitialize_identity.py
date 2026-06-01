@@ -24,7 +24,7 @@ def _write_minimal_workflow(root: Path, workflow_name: str) -> None:
                 "max_turns: 4",
                 "human_in_the_loop: false",
                 "workflow_startup_mode: AgentDriven",
-                "orchestration_pattern: DefaultPattern",
+                "orchestration_pattern: ag2_network",
                 f"initial_message: {workflow_name} initial message",
                 "initial_agent: DemoAgent",
             ]

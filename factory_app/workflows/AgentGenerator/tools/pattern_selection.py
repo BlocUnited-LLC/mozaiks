@@ -1,5 +1,5 @@
 """
-pattern_selection tool - stores AG2 pattern selection from PatternAgent.
+pattern_selection tool - stores AG2 Network patternbook selection from PatternAgent.
 
 Caches the selected pattern so update_agent_state hooks can inject pattern-specific
 guidance into downstream agent prompts.
@@ -56,6 +56,11 @@ def pattern_selection(
 
     _cache_context_value(context_variables, "is_multi_workflow", is_multi)
     _cache_context_value(context_variables, "pack_name", pack_name)
+    _cache_context_value(
+        context_variables,
+        "pack_partition_reason",
+        PatternSelection.get("pack_partition_reason"),
+    )
     _cache_context_value(context_variables, "workflows_spec", workflows)
 
     _logger.info(

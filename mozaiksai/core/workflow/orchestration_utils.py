@@ -58,7 +58,7 @@ def _load_workflow_config(workflow_name: str) -> Dict[str, Any]:
     return {
         "config": config,
         "max_turns": config.get("max_turns", 50),
-        "orchestration_pattern": config.get("orchestration_pattern", "AutoPattern"),
+        "orchestration_pattern": config.get("orchestration_pattern", "ag2_network"),
         "workflow_startup_mode": config.get("workflow_startup_mode", "AgentDriven"),
         "human_in_loop": _normalize_human_in_the_loop(config.get("human_in_the_loop", False)),
         "initial_agent_name": config.get("initial_agent", None),

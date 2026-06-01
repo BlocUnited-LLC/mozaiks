@@ -15,7 +15,7 @@ from .indexes import DatabaseIndexApplyError, _normalize_index_spec
 from .mongo import MongoPersistenceContext
 
 SYSTEM_DATABASE = "mozaiksai"
-APP_DATABASE_MIGRATIONS_COLLECTION = "AppDatabaseMigrations"
+APP_DATA_MIGRATIONS_COLLECTION = "AppDataMigrations"
 MIGRATION_HEALTH_MAX_LIMIT = 500
 SUPPORTED_MIGRATION_OPERATIONS = {"ensure_collection", "ensure_index"}
 DESTRUCTIVE_MIGRATION_OPERATIONS = {
@@ -32,7 +32,7 @@ DatabaseMigration = dict[str, Any]
 
 
 class DatabaseMigrationError(ValueError):
-    """Raised when an app database migration cannot be loaded or applied."""
+    """Raised when an app data migration cannot be loaded or applied."""
 
 
 class DatabaseMigrationOperationError(DatabaseMigrationError):
@@ -66,14 +66,14 @@ def _require_operations(value: Any, path: str) -> list[Any]:
     return value
 
 
-def load_database_migrations(app_root: Path) -> list[DatabaseMigration]:
-    """Load app/config/database_migrations/*.json in filename order."""
+def load_data_migrations(app_root: Path) -> list[DatabaseMigration]:
+    """Load app/config/data_migrations/*.json in filename order."""
 
-    migrations_dir = Path(app_root) / "config" / "database_migrations"
+    migrations_dir = Path(app_root) / "config" / "data_migrations"
     if not migrations_dir.exists():
         return []
     if not migrations_dir.is_dir():
-        raise DatabaseMigrationError("config/database_migrations must be a directory")
+        raise DatabaseMigrationError("config/data_migrations must be a directory")
 
     migrations: list[DatabaseMigration] = []
     for path in sorted(migrations_dir.glob("*.json"), key=lambda item: item.name.lower()):
@@ -92,18 +92,18 @@ def migration_hash(migration: DatabaseMigration) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def apply_database_migrations(
+async def apply_data_migrations(
     *,
     app_id: str,
     migrations: list[DatabaseMigration],
     persistence: MongoPersistenceContext | None = None,
     history_client: Any | None = None,
 ) -> int:
-    """Apply additive app database migrations and record migration history."""
+    """Apply additive app data migrations and record migration history."""
 
     resolved_app_id = str(app_id or "").strip()
     if not resolved_app_id:
-        raise DatabaseMigrationError("app_id is required to apply database migrations")
+        raise DatabaseMigrationError("app_id is required to apply data migrations")
     if not migrations:
         return 0
 
@@ -264,7 +264,7 @@ def _migration_health_item(record: dict[str, Any]) -> dict[str, Any]:
 
 def _history_collection(client: Any | None = None, *, database_name: str | None = None):
     resolved_client = client or get_mongo_client()
-    return resolved_client[(database_name or SYSTEM_DATABASE)][APP_DATABASE_MIGRATIONS_COLLECTION]
+    return resolved_client[(database_name or SYSTEM_DATABASE)][APP_DATA_MIGRATIONS_COLLECTION]
 
 
 async def _ensure_history_indexes(history: Any) -> None:
@@ -458,11 +458,11 @@ def _operations_summary(operations: list[Any]) -> list[dict[str, str]]:
 
 
 __all__ = [
-    "APP_DATABASE_MIGRATIONS_COLLECTION",
+    "APP_DATA_MIGRATIONS_COLLECTION",
     "DatabaseMigrationError",
     "DatabaseMigrationOperationError",
-    "apply_database_migrations",
+    "apply_data_migrations",
     "get_migration_health_report",
-    "load_database_migrations",
+    "load_data_migrations",
     "migration_hash",
 ]

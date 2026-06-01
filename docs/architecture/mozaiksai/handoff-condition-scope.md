@@ -8,9 +8,10 @@ reviews an artifact and replies in chat.
 
 ## Canonical Approach
 
-Use `handoffs.yaml` with `handoff_type: condition` and set
-`condition_type: string_llm` when the user is replying through the composer after
-reviewing a one-way artifact such as a diagram.
+Use `handoffs.yaml` with deterministic context conditions. Composer replies that
+need natural-language interpretation are classified by the control plane first;
+the resulting route or approval state is then written into context and consumed
+by the workflow transition graph.
 
 ## Example (`handoffs.yaml`)
 
@@ -19,18 +20,15 @@ handoff_rules:
   - source_agent: user
     target_agent: ContextVariablesAgent
     handoff_type: condition
-    condition_type: string_llm
-    condition: When the user approves the proposed workflow, confirms they want
-      to proceed, says the sequence diagram looks correct, or indicates there are
-      no further changes needed.
+    condition_type: expression
+    condition: ${workflow_review_approved} == true
     transition_target: AgentTarget
 
   - source_agent: user
     target_agent: PatternAgent
     handoff_type: condition
-    condition_type: string_llm
-    condition: When the user requests changes, gives critique, or asks for revisions
-      to the proposed workflow.
+    condition_type: expression
+    condition: ${workflow_review_revision_requested} == true
     transition_target: AgentTarget
 ```
 
@@ -38,5 +36,7 @@ handoff_rules:
 
 - Keep this in YAML declaratives (`handoffs.yaml`, `context_variables.yaml`,
   `tools.yaml`).
-- Use composer replies for plain-text approval/feedback after one-way artifact review.
-- Reserve context-expression gates for state that is actually produced by the live UI contract.
+- Use composer replies for plain-text approval/feedback only when the control
+  plane or a response-required tool writes the resulting context variable.
+- Workflow-local handoffs compile to AG2 beta Network `TransitionGraph`; they do
+  not run LLM classification during transition evaluation.

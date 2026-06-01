@@ -16,11 +16,6 @@ Returned object supports:
 from __future__ import annotations
 from typing import Any, Iterable
 
-try:  # pragma: no cover - vendor optional
-    from autogen.agentchat.group import ContextVariables as VendorContextVariables  # type: ignore
-except Exception:  # pragma: no cover
-    VendorContextVariables = None  # type: ignore
-
 
 class _RuntimeContextVariables:
     def __init__(self, initial: dict[str, Any] | None = None, chat_id: str | None = None, app_id: str | None = None) -> None:
@@ -70,19 +65,7 @@ class _RuntimeContextVariables:
         return self._data
 
 
-def _vendor_is_usable(obj: Any) -> bool:
-    required = ("get", "set", "remove", "keys", "contains")
-    return all(hasattr(obj, n) for n in required)
-
-
 def create_context_container(initial: dict[str, Any] | None = None, chat_id: str | None = None, app_id: str | None = None):
-    if VendorContextVariables:
-        try:
-            inst = VendorContextVariables(data=initial or {})  # type: ignore[call-arg]
-            if _vendor_is_usable(inst):
-                return inst
-        except Exception:
-            pass
     return _RuntimeContextVariables(initial=initial, chat_id=chat_id, app_id=app_id)
 
 __all__ = ["create_context_container"]

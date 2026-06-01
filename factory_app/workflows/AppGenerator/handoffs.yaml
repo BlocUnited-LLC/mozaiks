@@ -1,10 +1,10 @@
 handoff_rules:
-- source_agent: user
-  target_agent: InterviewAgent
+- source_agent: InterviewAgent
+  target_agent: AppPlanAgent
   handoff_type: condition
   condition_type: expression
   condition_scope: null
-  condition: ${interview_complete} == False
+  condition: ${interview_complete} == True
   transition_target: AgentTarget
 - source_agent: InterviewAgent
   target_agent: user
@@ -13,19 +13,19 @@ handoff_rules:
   condition_scope: null
   condition: null
   transition_target: RevertToUserTarget
-- source_agent: InterviewAgent
-  target_agent: AppPlanAgent
+- source_agent: AppPlanAgent
+  target_agent: AssemblyAgent
   handoff_type: condition
   condition_type: expression
   condition_scope: null
-  condition: ${interview_complete} == True
+  condition: ${app_task_batch_status} == "completed"
   transition_target: AgentTarget
 - source_agent: AppPlanAgent
   target_agent: AppSchemaAgent
-  handoff_type: after_work
-  condition_type: null
+  handoff_type: condition
+  condition_type: expression
   condition_scope: null
-  condition: null
+  condition: ${app_task_batch_status} != "completed"
   transition_target: AgentTarget
 - source_agent: AppSchemaAgent
   target_agent: AppUIQualityAgent
@@ -69,21 +69,12 @@ handoff_rules:
   condition_scope: null
   condition: null
   transition_target: AgentTarget
-# Schema-driven path: schemas are written to disk by save_app_schema; check integration readiness before download
-- source_agent: IntegrationReadinessAgent
-  target_agent: DownloadAgent
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${app_schema_ready} == True and ${integration_readiness_status} != "blocked"
-  transition_target: AgentTarget
-# Code-generation path: check integration readiness before validation
 - source_agent: IntegrationReadinessAgent
   target_agent: AppValidationAgent
   handoff_type: condition
   condition_type: expression
   condition_scope: null
-  condition: ${app_schema_ready} != True and ${integration_readiness_status} != "blocked"
+  condition: ${integration_readiness_status} != "blocked"
   transition_target: AgentTarget
 - source_agent: IntegrationReadinessAgent
   target_agent: user
@@ -219,53 +210,24 @@ handoff_rules:
   condition: null
   transition_target: AgentTarget
 - source_agent: AppValidationAgent
-  target_agent: IntegrationTestAgent
-  handoff_type: condition
-  condition_type: expression
-  condition_scope: null
-  condition: ${app_validation_status} != "failed"
-  transition_target: AgentTarget
-- source_agent: AppValidationAgent
-  target_agent: DatabaseAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: IntegrationTestAgent
   target_agent: DownloadAgent
   handoff_type: condition
   condition_type: expression
   condition_scope: null
-  condition: ${integration_tests_passed} == True
+  condition: ${app_validation_status} != "failed" and ${integration_tests_passed} == True
   transition_target: AgentTarget
-- source_agent: IntegrationTestAgent
-  target_agent: DatabaseAgent
-  handoff_type: after_work
-  condition_type: null
-  condition_scope: null
-  condition: null
-  transition_target: AgentTarget
-- source_agent: DownloadAgent
+- source_agent: AppValidationAgent
   target_agent: user
+  handoff_type: condition
+  condition_type: expression
+  condition_scope: null
+  condition: ${app_validation_status} == "failed" or ${integration_tests_passed} != True
+  transition_target: RevertToUserTarget
+- source_agent: DownloadAgent
+  target_agent: terminate
   handoff_type: after_work
   condition_type: null
   condition_scope: null
   condition: null
-  transition_target: RevertToUserTarget
-- source_agent: user
-  target_agent: InterviewAgent
-  handoff_type: condition
-  condition_type: string_llm
-  condition_scope: null
-  condition: When the user requests changes to scope, pages, CRUD behavior, authentication,
-    integrations, or other application requirements before finalizing the bundle.
-  transition_target: AgentTarget
-- source_agent: user
-  target_agent: terminate
-  handoff_type: condition
-  condition_type: string_llm
-  condition_scope: null
-  condition: When the user confirms the app bundle download is complete and no further
-    changes are needed.
   transition_target: TerminateTarget
+

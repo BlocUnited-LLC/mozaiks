@@ -226,8 +226,8 @@ Those panels must declare:
 
 Recommended generated file ownership for split backends:
 
-- `backend/admin_config.py` returns the canonical payload
-- `backend/routes/admin.py` exposes it through
+- `app/services/admin_config.py` returns the canonical payload
+- `app/services/routes/admin.py` exposes it through
   `mozaiksai.core.admin.build_app_backend_admin_router(...)`
 - AppGenerator should treat `ControllerOutput.app_backend_admin_config` as the
   typed source of truth and may regenerate those two files from it during
@@ -267,3 +267,4 @@ The unified UI does not collapse authority:
 - runtime/operator panels use same-host admin APIs
 - feature panels use module contracts
 - app-business panels may use a connected app backend
+

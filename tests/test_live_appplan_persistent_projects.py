@@ -94,23 +94,23 @@ def test_app_build_plan_accepts_persistence_contract_task() -> None:
         "pages": [{"name": "Projects", "route": "/projects", "purpose": "List projects"}],
         "entities": [{"name": "Project"}, {"name": "Task"}],
         "roles": ["user"],
-        "backend_scope": ["projects", "tasks"],
+        "service_scope": ["projects", "tasks"],
         "frontend_scope": ["projects_page"],
         "capability_packs": [],
         "external_integrations": [],
         "agent_backend_required": False,
         "build_tasks": [
             {
-                "task_id": "database_intent",
+                "task_id": "data_contract",
                 "task_type": "persistence_contract",
                 "capability_pack_id": None,
                 "surface_id": "database",
                 "surface_kind": None,
                 "execution_target": "app",
                 "initial_agent": "DatabaseAgent",
-                "description": "Create config/database_intent.json.",
-                "initial_message": "Plan projects/tasks database intent.",
-                "owned_paths": ["config/database_intent.json"],
+                "description": "Create config/data.json.",
+                "initial_message": "Plan projects/tasks data contract.",
+                "owned_paths": ["config/data.json"],
                 "depends_on": [],
                 "acceptance_criteria": [],
             }
@@ -140,7 +140,7 @@ def test_appplan_prompt_injects_persistence_contract_for_planning() -> None:
 
     assert "[FILE CONTRACTS CONTEXT]" in agent.system_message
     assert "persistence_contract" in agent.system_message
-    assert "config/database_intent.json" in agent.system_message
+    assert "config/data.json" in agent.system_message
 
 
 @pytest.mark.skipif(
@@ -182,9 +182,9 @@ class TestAppPlanPersistentProjectsFixtureReplay:
         assert "projects" in text
         assert "tasks" in text
 
-    def test_database_intent_and_canonical_backend_paths_exist(self) -> None:
-        assert isinstance(self.plan.get("database_intent_bundle"), dict)
-        assert "config/database_intent.json" in self.paths
+    def test_data_contract_and_canonical_backend_paths_exist(self) -> None:
+        assert isinstance(self.plan.get("data_contract"), dict)
+        assert "config/data.json" in self.paths
         for module_id in ("projects", "tasks"):
             assert f"modules/{module_id}/backend/repo.py" in self.paths
             assert f"modules/{module_id}/backend/schemas.py" in self.paths
@@ -200,8 +200,8 @@ class TestAppPlanPersistentProjectsFixtureReplay:
         assert "get_mongo_client" not in all_text
 
     def test_database_migration_paths_are_canonical_when_present(self) -> None:
-        migration_paths = [path for path in self.paths if "database_migrations" in path]
-        assert all(path.startswith("config/database_migrations/") for path in migration_paths)
+        migration_paths = [path for path in self.paths if "data_migrations" in path]
+        assert all(path.startswith("config/data_migrations/") for path in migration_paths)
 
     def test_persistence_stays_in_repo_layer(self) -> None:
         assert "backend/repo.py" in self.text

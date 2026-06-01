@@ -24,7 +24,7 @@ layers:
       - User account and identity (/api/me contract)
     rule: >
       If the product spec mentions any of these, note them as available platform
-      capabilities in backend_scope. Do not add them to capability_packs or
+      capabilities in service_scope. Do not add them to capability_packs or
       build_tasks. Domain-specific profile records (investor profiles, creator
       profiles, vendor profiles) are module-owned entities — they extend the
       platform identity contract; they do not replace it.
@@ -126,3 +126,4 @@ layers:
       - Custom ML inference engine → module.yaml actions + api_router webhook stub
       - Custom real-time data feed → startup_service stub + module action for reads
       - Proprietary business engine → module.yaml action declarations only
+

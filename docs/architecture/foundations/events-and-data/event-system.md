@@ -14,7 +14,7 @@ Event ownership follows the layer that owns the fact.
 | --- | --- | --- | --- |
 | `domain.*` | app module / app backend | durable business facts after deterministic mutations | no |
 | `workflow.*` | workflow runtime | workflow lifecycle facts and workflow-level checkpoints | yes, as execution metadata |
-| `runtime.*` | runtime substrate | internal orchestration, validation, fan-out, resume, and control state | yes |
+| `runtime.*` | runtime substrate | internal orchestration, validation, task batching, resume, and control state | yes |
 | `chat.*` | runtime transport | live chat transcript and tool execution stream | yes |
 | `artifact.*` | runtime or generator workflow | artifact lifecycle facts | yes for transport, no for business meaning |
 | `ui.*` | app UI contract | primitive updates and client-side UI reactions | no |

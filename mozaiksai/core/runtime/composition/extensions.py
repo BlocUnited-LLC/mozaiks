@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import inspect
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -384,28 +385,77 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
             )
             continue
 
-        # Convert tools/platform/build_lifecycle.py → workflows.WorkflowName.tools.platform.build_lifecycle
-        # The file path in tools.yaml is workflow-local (relative to the workflow directory).
-        module_path = _workflow_local_file_to_module(wf_file, workflow_name)
-        entrypoint = f"{module_path}:{function}"
-
         try:
-            callable_fn = _load_entrypoint(entrypoint)
+            callable_fn = _load_workflow_local_entrypoint(
+                workflow_name=workflow_name,
+                file_path=wf_file,
+                function=function,
+            )
             result[trigger] = callable_fn
-            logger.info(f"LIFECYCLE_HOOKS_LOADED: {entrypoint} trigger={trigger} (workflow={workflow_name})")
+            logger.info(
+                "LIFECYCLE_HOOKS_LOADED: %s:%s trigger=%s (workflow=%s)",
+                wf_file,
+                function,
+                trigger,
+                workflow_name,
+            )
         except Exception as exc:
-            logger.warning(f"LIFECYCLE_HOOKS_FAILED: {entrypoint} trigger={trigger} error={exc}")
+            logger.warning(
+                "LIFECYCLE_HOOKS_FAILED: %s:%s trigger=%s error=%s",
+                wf_file,
+                function,
+                trigger,
+                exc,
+            )
 
     return result
 
 
-def _workflow_local_file_to_module(file_path: str, workflow_name: str) -> str:
-    """Convert a workflow-local file path to a Python import path.
+def _load_workflow_local_entrypoint(
+    *,
+    workflow_name: str,
+    file_path: str,
+    function: str,
+) -> Any:
+    """Load a lifecycle hook from a workflow-local Python file.
 
-    tools/platform/build_lifecycle.py → workflows.WorkflowName.tools.platform.build_lifecycle
+    Workflow folders are runtime data under the selected workflows root, not a
+    Python package named ``workflows``. Loading by resolved file path keeps the
+    lifecycle contract aligned with ``tools.yaml`` and with generated workflow
+    bundles.
     """
-    # Strip leading ./ and trailing .py
-    clean = file_path.lstrip("./").removesuffix(".py")
-    # Replace path separators with dots
-    dotted = clean.replace("/", ".").replace("\\", ".")
-    return f"workflows.{workflow_name}.{dotted}"
+    from mozaiksai.core.workflow.paths import resolve_workflow_path
+
+    workflow_path = resolve_workflow_path(workflow_name)
+    if workflow_path is None:
+        raise FileNotFoundError(f"workflow path not found for {workflow_name!r}")
+
+    clean_file = str(file_path or "").strip()
+    if not clean_file:
+        raise ValueError("file_path is required")
+    clean_function = str(function or "").strip()
+    if not clean_function:
+        raise ValueError("function is required")
+
+    candidates = [
+        (workflow_path / clean_file).resolve(),
+        (workflow_path / "tools" / clean_file).resolve(),
+    ]
+    resolved_file = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if resolved_file is None:
+        raise FileNotFoundError(f"lifecycle hook file not found: {clean_file}")
+
+    module_name = (
+        "mozaiks_lifecycle_run_"
+        f"{workflow_name}_{resolved_file.stem}_{abs(hash(str(resolved_file)))}"
+    )
+    spec = importlib.util.spec_from_file_location(module_name, resolved_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load lifecycle hook module from {resolved_file}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    callable_fn = getattr(module, clean_function, None)
+    if not callable(callable_fn):
+        raise AttributeError(f"{clean_function!r} is not callable in {resolved_file}")
+    return callable_fn

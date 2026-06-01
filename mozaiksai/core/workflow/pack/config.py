@@ -13,10 +13,8 @@ from .schema import (
     WorkflowDependency,
     WorkflowEntry,
     WorkflowEntrypoint,
-    WorkflowPackGraph,
     normalize_step_groups,
     parse_global_pack_graph,
-    parse_workflow_pack_graph,
 )
 from ..paths import primary_workflows_root, resolve_workflow_path
 
@@ -28,7 +26,6 @@ class _CacheEntry:
 
 
 _GLOBAL_CACHE: Optional[_CacheEntry] = None
-_WORKFLOW_CACHE: Dict[str, _CacheEntry] = {}
 
 def _workflows_root() -> Path:
     """Resolve canonical workflows root.
@@ -44,20 +41,6 @@ def _workflows_root() -> Path:
 def get_global_pack_graph_path() -> Path:
     """Resolve the active global extension registry path."""
     return (_workflows_root() / "extended_orchestration" / "extension_registry.json").resolve()
-
-
-def get_workflow_pack_graph_path(workflow_name: str) -> Path:
-    """Resolve per-workflow MFJ extension path.
-
-    Canonical path: <workflows_root>/<workflow_name>/extended_orchestration/mfj_extension.json
-    """
-    wf = str(workflow_name or "").strip()
-    if not wf:
-        raise ValueError("workflow_name is required")
-    workflow_dir = resolve_workflow_path(wf)
-    if workflow_dir is not None:
-        return (workflow_dir / "extended_orchestration" / "mfj_extension.json").resolve()
-    return (_workflows_root() / wf / "extended_orchestration" / "mfj_extension.json").resolve()
 
 
 def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
@@ -94,32 +77,6 @@ def load_global_pack_graph() -> Optional[GlobalPackGraph]:
 
     graph = parse_global_pack_graph(raw)
     _GLOBAL_CACHE = _CacheEntry(source=signature, payload=graph)
-    return graph
-
-
-def load_workflow_pack_graph(workflow_name: str) -> Optional[WorkflowPackGraph]:
-    """Load and validate canonical per-workflow pack graph."""
-    wf = str(workflow_name or "").strip()
-    if not wf:
-        return None
-
-    path = get_workflow_pack_graph_path(wf)
-    if not path.exists():
-        return None
-
-    mtime = path.stat().st_mtime
-    cached = _WORKFLOW_CACHE.get(wf)
-    signature = ((str(path), mtime),)
-    if cached and cached.source == signature:
-        payload = cached.payload
-        if isinstance(payload, WorkflowPackGraph):
-            return payload
-
-    raw = _load_json_file(path)
-    if raw is None:
-        return None
-    graph = parse_workflow_pack_graph(raw)
-    _WORKFLOW_CACHE[wf] = _CacheEntry(source=signature, payload=graph)
     return graph
 
 
@@ -265,9 +222,7 @@ def journey_next_step(journey: GlobalJourney, current_workflow: str) -> Optional
 
 __all__ = [
     "get_global_pack_graph_path",
-    "get_workflow_pack_graph_path",
     "load_global_pack_graph",
-    "load_workflow_pack_graph",
     "list_workflow_ids",
     "get_workflow_entry",
     "list_workflow_sequences",

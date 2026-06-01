@@ -3,59 +3,23 @@ hooks:
   hook_agent: all
   filename: hook_universal_prompts.py
   function: inject_universal_prompts
+
 - hook_type: update_agent_state
-  hook_agent: ToolPlanningAgent
-  filename: hook_primitive_catalog.py
-  function: inject_primitive_catalog
-- hook_type: update_agent_state
-  hook_agent: UIFileGenerator
-  filename: hook_primitive_catalog.py
-  function: inject_primitive_catalog
+  hook_agent: all
+  filename: ../_shared/context_graph/hook_context_graph.py
+  function: inject_context_graph_context
+
 - hook_type: update_agent_state
   hook_agent: PackMetadataAgent
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog
+
 - hook_type: update_agent_state
-  hook_agent: ToolsManagerAgent
-  filename: hook_primitive_catalog.py
-  function: inject_primitive_catalog
-- hook_type: process_message_before_send
-  hook_agent: DownloadAgent
-  filename: hook_tokengate.py
-  function: add_usage_footer
-- hook_type: update_agent_state
-  hook_agent: WorkflowStrategyAgent
+  hook_agent: PatternAgent
   filename: update_agent_state_pattern.py
-  function: inject_workflow_strategy_guidance
+  function: inject_pattern_selection_guidance
+
 - hook_type: update_agent_state
-  hook_agent: AgentsAgent
+  hook_agent: WorkflowBundleBuilderAgent
   filename: update_agent_state_pattern.py
-  function: inject_agents_agent_guidance
-- hook_type: update_agent_state
-  hook_agent: ToolPlanningAgent
-  filename: update_agent_state_pattern.py
-  function: inject_workflow_architect_guidance
-- hook_type: update_agent_state
-  hook_agent: ProjectOverviewAgent
-  filename: update_agent_state_pattern.py
-  function: inject_project_overview_guidance
-- hook_type: update_agent_state
-  hook_agent: HandoffsAgent
-  filename: update_agent_state_pattern.py
-  function: inject_handoffs_guidance
-- hook_type: update_agent_state
-  hook_agent: AgentToolsFileGenerator
-  filename: update_agent_state_pattern.py
-  function: inject_agent_tools_file_generator_guidance
-- hook_type: update_agent_state
-  hook_agent: UIFileGenerator
-  filename: update_agent_state_pattern.py
-  function: inject_ui_file_generator_guidance
-- hook_type: update_agent_state
-  hook_agent: AgentToolsFileGenerator
-  filename: hook_file_generation.py
-  function: inject_file_generation_instructions
-- hook_type: update_agent_state
-  hook_agent: UIFileGenerator
-  filename: hook_file_generation.py
-  function: inject_file_generation_instructions
+  function: inject_workflow_bundle_builder_guidance

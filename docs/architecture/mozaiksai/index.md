@@ -6,15 +6,13 @@ token controls, and UI interaction mechanics.
 
 Use this section after you understand the high-level architecture and workflow
 model. If you are evaluating Mozaiks runtime differentiators first, start with
-[Mid-Flight Journeys](mid-flight-journeys.md).
+[Workflow Task Batches](task-batches.md).
 
 ## Workflow and Orchestration
 
-- [Mid-Flight Journeys](mid-flight-journeys.md)
-- [MFJ Strict Resume Contract](mfj-strict-resume-contract.md)
+- [Workflow Task Batches](task-batches.md)
 - [Universal Orchestrator](universal-orchestrator.md)
 - [Pack Graph Semantics](pack-graph-semantics.md)
-- [Parallel Fan-Out Fan-In](parallel-fan-out-fan-in.md)
 - [Handoff Condition Scope](handoff-condition-scope.md)
 
 ## UI and Interaction

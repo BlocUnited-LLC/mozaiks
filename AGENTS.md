@@ -120,6 +120,7 @@ Canonical target:
 - shared generation core lives outside any individual app workspace
 - app workspaces keep app bundle files under `app/` and app-local workflows at
   the workspace root under `workflows/`
+- app-owned service implementations live at `app/services/`
 - hosted product workspaces should consume that same contract from their own repos
 
 ## Contributor Guidance Operating System
@@ -188,20 +189,20 @@ App-owned runtime secret output is names-first, not value-first:
   app-owned secret provider/vault policy, env handles, and secret names.
 - It must never contain raw API keys, tokens, passwords, connection strings,
   private keys, webhook secrets, or other credential values.
-- Provider-neutral secret resolution belongs in `backend/security/`; provider
-  secret manager mechanics belong in `backend/adapters/secrets/`.
+- Provider-neutral secret resolution belongs in `app/services/security/`; provider
+  secret manager mechanics belong in `app/services/adapters/secrets/`.
 - Connector/API-key collection during workflows must store raw credential values
   only through the configured secret backend. App artifacts should carry safe
   metadata and secret references, not raw values.
 
 ## Generated Persistence Contract
 
-AppGenerator persistence output is intent-first, not runtime-DB-first:
+AppGenerator persistence output is data-contract-first, not runtime-DB-first:
 
-- `database_intent_bundle` is the canonical generated database planning object.
-- Generated app bundles write it to `config/database_intent.json`.
+- `data_contract` is the canonical generated data planning object.
+- Generated app bundles write it to `config/data.json`.
 - Additive refinement plans belong under
-  `config/database_migrations/{migration_id}.json`.
+  `config/data_migrations/{migration_id}.json`.
 - Persistent modules use `backend/repo.py`, `backend/policy.py`, and
   `backend/schemas.py`; do not generate `backend/models.py` or
   `backend/models/*.py`.
@@ -212,13 +213,11 @@ AppGenerator persistence output is intent-first, not runtime-DB-first:
 - Runtime injects `ctx.persistence` into `ModuleContext` when `app_id` exists.
   Generated `backend/repo.py` must use
   `ctx.persistence.collection(module_id, entity_name)`.
-- `config/shared_persistence.json` is the explicit opt-in escape hatch for apps
-  that need stable shared collections, cross-module aggregate ownership, or
-  external existing database integration. Normal generated apps should omit it.
-- Optional shared persistence helper code belongs under `shared_persistence/`
-  with generic names. Do not generate app-specific hosted names such as
-  `platform_persistence`, `host_system`, `hosted_database_metadata.json`, or
-  `HostSystemPersistence` for customer apps.
+- `config/data.json` also covers cross-module aggregate ownership and explicit
+  existing database integration when needed.
+- Optional data-contract helper code belongs under `app/services/data/` with generic
+  names. Do not generate app-specific hosted or host-internal helper names for
+  customer apps.
 - `ctx.db` remains absent and non-canonical; generated code must not require or
   emit it.
 
@@ -281,9 +280,8 @@ not land directly in active runtime paths.
 Workflow resolution is single-root by contract. A running host binds to one
 workflow root via `MOZAIKS_WORKFLOWS_PATH` rather than auto-merging app and
 factory roots. Studio defaults to `factory_app/workflows/`; product/app hosts
-prefer the workspace root's `workflows/` and support prior
-`<active app root>/workflows/` only as a transition path. The first-party
-`factory_app/app` bundle should not check in `factory_app/app/workflows/`.
+prefer the workspace root's `workflows/`. The first-party
+`factory_app/app` bundle should not check in a nested workflows directory.
 External hosted product workspaces define app-local workflows under
 `workflows/`, beside `app/`.
 
@@ -318,7 +316,7 @@ When working in or generating workflows:
   ├── ui_config.yaml              ← required: `visual_agents` contract for websocket-visible agents
   ├── hooks.yaml                  ← optional: lifecycle hooks
   ├── extended_orchestration/
-  │   └── mfj_extension.json      ← optional: Mid-Flight Journey fan-out/fan-in config
+  │   └── task_batches.yaml       ← optional: workflow-local AG2 task batch config
   ├── tools/
   │   ├── __init__.py
   │   └── *.py
@@ -326,7 +324,7 @@ When working in or generating workflows:
       └── components/
   ```
 - `ui_config.yaml` must declare `visual_agents`. Only agents listed there have messages and UI-bearing outputs streamed through the websocket to the user-facing UI.
-- `hooks.yaml` and `extended_orchestration/mfj_extension.json` are canonical workflow surfaces even when optional. Do not omit them from workflow documentation patterns.
+- `hooks.yaml` and `extended_orchestration/task_batches.yaml` are canonical workflow surfaces when lifecycle hooks or workflow-local task batches are needed.
 - Treat workflow YAMLs as structured-output-first contracts. They should map cleanly to strict models that generators can emit and runtime code can validate deterministically.
 - Tools stay dumb. Reasoning belongs in prompts and structured outputs, not in Python tool code.
 
@@ -362,3 +360,5 @@ When adding code, decide placement in this order:
 7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
 
 Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.
+
+

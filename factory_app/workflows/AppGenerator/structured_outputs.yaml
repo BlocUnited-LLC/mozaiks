@@ -213,11 +213,64 @@ models:
         description: Whether the app can proceed without this integration.
       required_fields:
         type: optional_list
-        items: dict
+        items: AppIntegrationRequiredField
         description: >
           Optional connector setup fields. Each item should include name, label,
           type (secret, text, url, select), required, and frontend_safe. Secret
           fields are write-only and must never be returned to generated code.
+  AppIntegrationRequiredField:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Stable field id.
+      label:
+        type: str
+        description: Human-facing field label.
+      type:
+        type: literal
+        values:
+        - secret
+        - text
+        - url
+        - select
+        - number
+        - json
+        description: Field input type.
+      required:
+        type: bool
+        description: Whether this field is required.
+      frontend_safe:
+        type: bool
+        description: Whether the value can be exposed to frontend code.
+      options:
+        type: optional_list
+        items: str
+        description: Optional select values.
+  AppIntegrationRequiredBy:
+    type: model
+    fields:
+      kind:
+        type: literal
+        values:
+        - task
+        - agent
+        - path
+        - capability_pack
+        - unknown
+        description: Reference kind requiring this integration.
+      id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Task, agent, or capability id when applicable.
+      path:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Bundle path when kind=path.
   AppIntegrationNeed:
     type: model
     fields:
@@ -256,12 +309,12 @@ models:
       required_by:
         type: union
         variants:
-        - dict
+        - AppIntegrationRequiredBy
         - 'null'
         description: Task, agent, paths, or capability pack requiring this integration.
       required_fields:
         type: optional_list
-        items: dict
+        items: AppIntegrationRequiredField
         description: >
           Optional connector setup fields. Each item should include name, label,
           type (secret, text, url, select), required, and frontend_safe. Secret
@@ -286,6 +339,25 @@ models:
         type: optional_list
         items: str
         description: Capability ids invoked from this event, never raw workflow names.
+  AppContextVariable:
+    type: model
+    fields:
+      key:
+        type: str
+        description: Context variable key.
+      value:
+        type: str
+        description: Stringified scalar or JSON value.
+      value_type:
+        type: literal
+        values:
+        - string
+        - integer
+        - number
+        - boolean
+        - json
+        - 'null'
+        description: How the string value should be decoded by runtime helpers.
   AppWorkflowTouchpoint:
     type: model
     fields:
@@ -316,10 +388,8 @@ models:
         - empty_state
         description: Preferred placement of the workflow launch affordance in the page schema.
       context_variables:
-        type: union
-        variants:
-        - dict
-        - 'null'
+        type: optional_list
+        items: AppContextVariable
         description: Optional deterministic context_variables payload for the workflow launch. Keys must belong to the target workflow context contract.
       purpose:
         type: str
@@ -474,7 +544,7 @@ models:
       task_type:
         type: literal
         values:
-        - backend_foundation
+        - service_foundation
         - module_contract
         - persistence_contract
         - data_models
@@ -488,18 +558,26 @@ models:
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
           declarative page/schema bundle and must be paired with AppSchemaAgent.
-          `backend_foundation` emits app-level backend support code such as
-          backend/integrations/ clients, backend/adapters/ provider boundaries,
-          backend/security/ helpers, and backend/routes/ route files.
+          `module_contract` emits only module.yaml, contracts/*.yaml, and optional
+          runtime_extensions.yaml; it must not own backend/*.py.
+          `data_models` emits modules/{module_id}/backend/schemas.py and must start
+          at ModelAgent.
+          `business_services` emits module backend implementation files such as
+          handler.py, service.py, repo.py, policy.py, and declared hooks; it must
+          start at ServiceAgent and must not own schemas.py in task-batch execution.
+          `service_foundation` emits app-level support code at app-bundle-relative
+          services/integrations/ clients, services/adapters/ provider boundaries,
+          services/security/ helpers, and services/routes/ route files. These
+          assemble under physical app/services/ in generated workspaces.
           These files are not runtime modules and must not own business actions,
           events, lifecycle state, or persistence authority.
           `control_plane_pack` is required for surface_kind=control_plane tasks and
           emits an optional app-local control_plane/ harness pack. It must start
-          at ControlPlaneAgent — do NOT use backend_foundation, api_surface, or
+          at ControlPlaneAgent — do NOT use service_foundation, api_surface, or
           module_contract for control_plane surfaces.
           surface_kind=external_integration may use `api_surface` for thin
-          clients, `backend_foundation` for provider adapters under
-          backend/adapters/, backend/security/, or backend/routes/, or
+          clients, `service_foundation` for provider adapters under
+          services/adapters/, services/security/, or services/routes/, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
           `pack_overlay` generates ONLY the app-specific wiring for a selected framework_pack
@@ -533,13 +611,13 @@ models:
         description: Runtime or generator system responsible for executing the task.
       initial_agent:
         type: str
-        description: Agent that should start the child run.
+        description: Agent that should execute this task batch item.
       description:
         type: str
         description: Human-readable summary of the task.
       initial_message:
         type: str
-        description: Seed message instructing the child run on exactly what to generate.
+        description: Seed message instructing the task worker on exactly what to generate.
       owned_paths:
         type: optional_list
         items: str
@@ -553,11 +631,9 @@ models:
         items: str
         description: Concrete completion checks for the task output.
       context_variables:
-        type: union
-        variants:
-        - dict
-        - 'null'
-        description: Context variables seeded into the child run before execution.
+        type: optional_list
+        items: AppContextVariable
+        description: Context variables seeded into task batch execution.
       integration_needs:
         type: optional_list
         items: AppIntegrationNeed
@@ -630,7 +706,7 @@ models:
         - str
         - 'null'
         description: Auth approach such as public, basic-login, role-based, or third-party auth.
-      backend_scope:
+      service_scope:
         type: optional_list
         items: str
         description: Backend capabilities that must be generated.
@@ -700,33 +776,24 @@ models:
         type: list
         items: AppBuildTask
         description: Explicit execution-oriented build tasks derived from the plan.
-      database_intent_bundle:
+      data_contract:
         type: union
         variants:
-        - dict
-        - 'null'
-        description: Canonical generated database planning object for persistent app modules. It is written to config/database_intent.json by DatabaseAgent.
-      shared_persistence_contract:
-        type: union
-        variants:
-        - SharedPersistenceContract
+        - DataContract
         - 'null'
         default: null
         description: >
-          Optional opt-in app infrastructure contract for stable shared collections,
-          cross-module aggregate ownership, or external existing database integration.
-          Ordinary generated apps should set this to null and use generated-scoped
-          ctx.persistence plus database_intent_bundle. When present it is written to
-          config/shared_persistence.json and must use generic shared_persistence
-          naming, not ad hoc app/shared helpers or host-internal
-          names such as platform_persistence, host_system,
-          hosted_database_metadata.json, or HostSystemPersistence.
+          Canonical generated data planning object for persistent app modules,
+          cross-module aggregate ownership, or explicit existing database
+          integration. It is written to config/data.json by DatabaseAgent.
+          Ordinary generated apps may set this to null when generated-scoped
+          ctx.persistence is sufficient.
       pending_schema_migration:
         type: union
         variants:
-        - dict
+        - DataMigrationDocument
         - 'null'
-        description: Optional additive database migration intent for config/database_migrations/{migration_id}.json, or null when no migration is planned.
+        description: Optional additive data migration intent for config/data_migrations/{migration_id}.json, or null when no migration is planned.
       deployment_targets:
         type: optional_list
         items: DeployTargetSpec
@@ -749,30 +816,6 @@ models:
         type: optional_list
         items: str
         description: Recommended ordered phases for downstream generation.
-  AppChildWorkflowSpec:
-    type: model
-    fields:
-      name:
-        type: str
-        description: Workflow name to run for the child task.
-      description:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional child-task summary for MFJ tracing.
-      initial_agent:
-        type: str
-        description: Agent that must start the child workflow run.
-      initial_message:
-        type: str
-        description: Exact task-scoped instruction the child run should execute.
-      context_variables:
-        type: union
-        variants:
-        - dict
-        - 'null'
-        description: Optional child run context seed merged into the spawned workflow session.
   AppBuildPlanOutput:
     type: model
     fields:
@@ -838,6 +881,31 @@ models:
       health:
         type: bool
         description: Whether health checks are required.
+  DeployTargetProviderMetadataEntry:
+    type: model
+    fields:
+      key:
+        type: str
+        description: Stable provider-profile metadata key.
+      value:
+        type: str
+        description: Provider-profile metadata value encoded as a string.
+  DeployTargetProviderProfile:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Provider-neutral profile name, such as generic.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional provider profile description.
+      metadata:
+        type: optional_list
+        items: DeployTargetProviderMetadataEntry
+        description: Optional bounded metadata entries. Use an empty list when no metadata is needed.
   CiSecretRequirement:
     type: model
     fields:
@@ -918,7 +986,7 @@ models:
       provider_profile:
         type: union
         variants:
-        - dict
+        - DeployTargetProviderProfile
         - 'null'
         description: Optional provider profile metadata. Keep generic by default.
       deployment_profile:
@@ -942,6 +1010,15 @@ models:
       port:
         type: int
         description: Port associated with the health endpoint.
+  DeploymentSafeDetail:
+    type: model
+    fields:
+      key:
+        type: str
+        description: Non-secret build output detail key.
+      value:
+        type: str
+        description: Non-secret build output detail value encoded as a string.
   DeploymentBuildOutput:
     type: model
     fields:
@@ -990,10 +1067,8 @@ models:
         - 'null'
         description: Optional generic build/export logs URL.
       safe_details:
-        type: union
-        variants:
-        - dict
-        - 'null'
+        type: optional_list
+        items: DeploymentSafeDetail
         description: Optional non-secret metadata for hosts/adapters.
       error_code:
         type: union
@@ -1072,10 +1147,6 @@ models:
         - DeploymentBuildOutput
         - 'null'
         description: Optional provider-neutral build output handoff contract reference.
-      workflows:
-        type: list
-        items: AppChildWorkflowSpec
-        description: Child run specs used by MFJ fan-out for task execution.
   CodeFileEntry:
     type: model
     fields:
@@ -1103,13 +1174,12 @@ models:
     fields:
       path:
         type: str
-        description: Concrete database artifact path such as config/database_intent.json or config/database_migrations/{migration_id}.json.
+        description: Concrete database artifact path such as config/data.json or config/data_migrations/{migration_id}.json.
       kind:
         type: literal
         values:
-        - database_intent_json
-        - database_migration_json
-        - shared_persistence_json
+        - data_contract_json
+        - data_migration_json
         description: Deterministic database artifact kind.
       purpose:
         type: str
@@ -1121,13 +1191,107 @@ models:
       content:
         type: str
         description: Complete JSON text for this artifact.
+  DataMigrationIndexKey:
+    type: model
+    fields:
+      field:
+        type: str
+        description: Indexed field name.
+      order:
+        type: int
+        description: Sort order, normally 1 or -1.
+  DataMigrationIndex:
+    type: model
+    fields:
+      name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional index name.
+      keys:
+        type: list
+        items: DataMigrationIndexKey
+        description: Ordered index keys.
+      unique:
+        type: bool
+        description: Whether this index is unique.
+  DataMigrationOperation:
+    type: model
+    fields:
+      type:
+        type: literal
+        values:
+        - ensure_collection
+        - ensure_index
+        - add_field
+        - add_collection
+        description: Additive migration operation type.
+      module_id:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Module that owns the target collection when applicable.
+      entity_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Entity or collection name affected by the operation.
+      field_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Field added by add_field operations.
+      field_type:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Type for an added field when applicable.
+      required:
+        type: bool
+        description: Whether an added field is required.
+      index:
+        type: union
+        variants:
+        - DataMigrationIndex
+        - 'null'
+        description: Index declaration for ensure_index operations.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional operation note.
+  DataMigrationDocument:
+    type: model
+    fields:
+      migration_id:
+        type: str
+        description: Stable migration id used in config/data_migrations/{migration_id}.json.
+      version:
+        type: str
+        description: Migration document version.
+      summary:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional migration summary.
+      operations:
+        type: list
+        items: DataMigrationOperation
+        description: Additive runtime migration operations.
   DatabaseOutput:
     type: model
     fields:
       database_files:
         type: list
         items: DatabaseArtifactFile
-        description: Typed database intent or migration artifacts emitted by DatabaseAgent.
+        description: Typed data contract or migration artifacts emitted by DatabaseAgent.
       code_files:
         type: list
         items: CodeFileEntry
@@ -1135,9 +1299,9 @@ models:
       pending_schema_migration:
         type: union
         variants:
-        - dict
+        - DataMigrationDocument
         - 'null'
-        description: Additive migration document staged under config/database_migrations/{migration_id}.json, or null when no migration is staged.
+        description: Additive migration document staged under config/data_migrations/{migration_id}.json, or null when no migration is staged.
       agent_message:
         type: union
         variants:
@@ -1207,7 +1371,7 @@ models:
         description: >
           Maximum automated revision loops before blocking. Reserved for future
           loop-back support; currently unused because ConfigMiddlewareAgent runs
-          as a task_run_mode child and cannot be revisited from the main workflow.
+          as a scoped task batch worker and cannot be revisited from the main workflow.
         default: 1
       agent_message:
         type: str
@@ -1288,12 +1452,44 @@ models:
       AppValidation:
         type: AppValidation
         description: App validation results.
+  AppValidationRequest:
+    type: model
+    fields:
+      validation_strategy:
+        type: literal
+        values:
+        - e2b
+        - local
+        - skip
+        description: Requested validation strategy. Use context app_validation_strategy when provided; otherwise choose skip for smoke or local/e2b when explicitly configured.
+      start_dev_server:
+        type: bool
+        description: Whether validation may start a preview/dev server when the strategy supports it.
+      timeout_seconds:
+        type: int
+        description: Maximum validation runtime in seconds.
+      commands:
+        type: optional_list
+        items: str
+        description: Optional build commands. Omit to use the canonical default validation commands.
+  AppValidationRequestCall:
+    type: model
+    fields:
+      AppValidationRequest:
+        type: AppValidationRequest
+        description: Deterministic validation request consumed by the auto validation gate.
+      agent_message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Short validation status message.
   BackendFoundationFile:
     type: model
     fields:
       path:
         type: str
-        description: Concrete backend foundation file path such as backend/config.py, config/secrets.yaml, backend/integrations/provider_client.py, backend/security/secrets.py, backend/routes/webhooks.py, or backend/adapters/secrets/vault_provider.py.
+        description: Concrete app-bundle-relative service foundation file path such as services/config.py, config/secrets.yaml, services/integrations/provider_client.py, services/security/secrets.py, services/routes/webhooks.py, or services/adapters/secrets/vault_provider.py. Physical generated workspaces place services/* under app/services/*.
       kind:
         type: literal
         values:
@@ -1304,24 +1500,24 @@ models:
         - integration_helper
         - provider_adapter
         - tooling
-        description: Backend foundation file family.
+        description: Service foundation file family.
       purpose:
         type: str
-        description: Why this backend foundation file exists.
+        description: Why this service foundation file exists.
       contract_refs:
         type: optional_list
         items: str
         description: Build-plan paths or contract surfaces this file satisfies.
       content:
         type: str
-        description: Complete source for this backend foundation file.
+        description: Complete source for this service foundation file.
   BackendFoundationBundle:
     type: model
     fields:
       files:
         type: list
         items: BackendFoundationFile
-        description: Typed backend foundation files emitted in ConfigMiddleware backend_foundation mode.
+        description: Typed service foundation files emitted in ConfigMiddleware service_foundation mode.
   ModelFile:
     type: model
     fields:
@@ -1413,6 +1609,78 @@ models:
         type: str
         description: Human-readable permission purpose.
 
+  JsonSchemaProperty:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Property name.
+      type:
+        type: literal
+        values:
+        - string
+        - integer
+        - number
+        - boolean
+        - object
+        - array
+        - 'null'
+        description: JSON-compatible property type.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional field description.
+      required:
+        type: bool
+        description: Whether this property is required.
+      enum_values:
+        type: optional_list
+        items: str
+        description: Optional finite string values.
+      items_type:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Array item type when type=array.
+
+  JsonSchemaContract:
+    type: model
+    fields:
+      type:
+        type: literal
+        values:
+        - object
+        - array
+        - string
+        - integer
+        - number
+        - boolean
+        - 'null'
+        description: Top-level JSON-compatible type.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional contract description.
+      required:
+        type: optional_list
+        items: str
+        description: Required property names for object contracts.
+      properties:
+        type: optional_list
+        items: JsonSchemaProperty
+        description: Object properties as a finite typed list.
+      items_type:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Array item type when type=array.
+
   ModuleAction:
     type: model
     fields:
@@ -1426,11 +1694,11 @@ models:
         type: str
         description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
       input_schema:
-        type: dict
-        description: JSON-schema-like input contract.
+        type: JsonSchemaContract
+        description: Typed JSON-schema-like input contract.
       output_schema:
-        type: dict
-        description: JSON-schema-like output contract.
+        type: JsonSchemaContract
+        description: Typed JSON-schema-like output contract.
       permissions:
         type: optional_list
         items: str
@@ -1468,7 +1736,7 @@ models:
       input_schema:
         type: union
         variants:
-        - dict
+        - JsonSchemaContract
         - 'null'
         description: Optional input schema for workflow/hosted/page capability invocation.
 
@@ -1597,8 +1865,8 @@ models:
         type: str
         description: Module id expected to publish this event.
       payload_schema:
-        type: dict
-        description: JSON-schema-like payload contract.
+        type: JsonSchemaContract
+        description: Typed JSON-schema-like payload contract.
 
   ModuleEventsManifest:
     type: model
@@ -1653,11 +1921,9 @@ models:
         type: ModuleReactionTarget
         description: Handler, capability, or notification target.
       filters:
-        type: union
-        variants:
-        - dict
-        - 'null'
-        description: Optional declarative filters based on event envelope/payload.
+        type: optional_list
+        items: str
+        description: Optional declarative filter expressions based on event envelope/payload.
       idempotency_key:
         type: str
         description: Template used to prevent duplicate reaction execution.
@@ -1776,9 +2042,8 @@ models:
         - str
         - int
         - bool
-        - dict
         - 'null'
-        description: Default value, or null for no default.
+        description: Scalar default value, JSON string for object defaults, or null for no default.
       allowed_values:
         type: optional_list
         items: str
@@ -2131,6 +2396,34 @@ models:
         items: ControlPlaneToolDefinition
         description: Tool bindings available to checkpoints.
 
+  ControlPlaneScopePolicies:
+    type: model
+    fields:
+      max_selected_paths:
+        type: int
+        description: Maximum number of paths inferred by scope selection before clarification is required.
+      auto_apply_max_paths:
+        type: int
+        description: Maximum number of scoped paths that can be patched without an explicit scope confirmation.
+      overflow_behavior:
+        type: literal
+        values:
+        - clarify
+        - fail
+        description: Behavior when inferred scope exceeds max_selected_paths.
+
+  ControlPlanePoliciesManifestOutput:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+        - mozaiks.control_plane.policies
+        description: Control-plane policies manifest schema version.
+      scope:
+        type: ControlPlaneScopePolicies
+        description: Deterministic scope and auto-apply bounds for the harness.
+
   ControlPlanePromptFile:
     type: model
     fields:
@@ -2156,7 +2449,7 @@ models:
       policies_yaml:
         type: union
         variants:
-        - dict
+        - ControlPlanePoliciesManifestOutput
         - 'null'
         description: Optional policies manifest serialized to control_plane/config/policies.yaml.
       prompt_files:
@@ -2188,24 +2481,24 @@ models:
         type: literal
         values:
         - module_contract_bundle
-        - backend_foundation
+        - service_foundation
         description: Output mode selected from current_build_task_type.
       module_contract:
         type: union
         variants:
         - ModuleContractBundle
         - 'null'
-        description: Required in module_contract_bundle mode; null for backend_foundation mode.
-      backend_foundation_bundle:
+        description: Required in module_contract_bundle mode; null for service_foundation mode.
+      service_foundation_bundle:
         type: union
         variants:
         - BackendFoundationBundle
         - 'null'
-        description: Required in backend_foundation mode; null for module_contract_bundle mode.
+        description: Required in service_foundation mode; null for module_contract_bundle mode.
       code_files:
         type: list
         items: CodeFileEntry
-        description: Serialized files. In typed modes, these mirror module_contract or backend_foundation_bundle.
+        description: Serialized files. In typed modes, these mirror module_contract or service_foundation_bundle.
       agent_message:
         type: union
         variants:
@@ -4653,33 +4946,31 @@ models:
           Optional asset inventory persisted as config/asset_manifest.json. Use this
           for non-token media metadata (logos/icons/hero imagery) and asset
           provenance; do not use theme_config_patch or shell_config as a media dump.
-      shared_persistence_contract:
+      data_contract:
         type: union
         variants:
-        - SharedPersistenceContract
+        - DataContract
         - 'null'
         default: null
         description: >
-          Optional opt-in shared persistence contract persisted as
-          config/shared_persistence.json. Leave null for default generated-scoped
-          persistence. Use only when the build plan explicitly requires stable shared
-          collections, cross-module aggregate ownership, or an external existing
-          database contract, and keep any helper naming generic under
-          shared_persistence/. Do not emit app/shared or hosted-product helper
-          names.
+          Optional data contract persisted as config/data.json. Leave null only
+          for apps with no durable app-owned persistence. Use it for module
+          collections, cross-module aggregate ownership, or an explicit existing
+          database contract, and keep helper naming generic under services/data/.
+          Do not emit ad hoc shared folders or non-canonical app/backend helper names.
 
-  SharedPersistenceAlias:
+  DataContractAlias:
     type: model
     fields:
       alias:
         type: str
-        description: Namespaced alias for the shared collection or lifecycle path.
+        description: Namespaced alias for the collection or lifecycle path.
       collection:
         type: str
         description: Canonical collection name referenced by the alias.
       owner_module:
         type: str
-        description: Module that owns the shared collection or lifecycle contract.
+        description: Module that owns the collection or lifecycle contract.
       access:
         type: union
         variants:
@@ -4693,7 +4984,7 @@ models:
         - 'null'
         description: Optional human-readable rationale for the alias.
 
-  SharedPersistenceContract:
+  DataContract:
     type: model
     fields:
       version:
@@ -4702,17 +4993,17 @@ models:
       mode:
         type: literal
         values:
-        - app_shared_contracts
+        - app_data_contract
         - external_existing_db
-        description: Shared persistence mode selected for the app.
+        description: Data contract mode selected for the app.
       aliases:
         type: list
-        items: SharedPersistenceAlias
-        description: Declared shared collection aliases and ownership boundaries.
+        items: DataContractAlias
+        description: Declared collection aliases and ownership boundaries.
       shared_collections:
         type: list
         items: str
-        description: Explicit shared collection names that the app may own or reference.
+        description: Explicit collection names that the app may own or reference across surfaces.
 
   ControllerOutput:
     type: model
@@ -4915,5 +5206,7 @@ registry:
   FrontendStubAgent: FrontendStubOutput
   ControllerAgent: ControllerOutput
   AssemblyAgent: CodeFilesOutput
-  AppValidationAgent: AppValidationOutput
+  AppValidationAgent: AppValidationRequestCall
   DownloadAgent: DownloadRequestCall
+
+

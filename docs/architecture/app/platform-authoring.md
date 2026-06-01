@@ -160,7 +160,7 @@ Optional but common:
 - `tools/*.py`
 - `ui/index.js`
 - `ui/*.{js,jsx}`
-- `extended_orchestration/mfj_extension.json`
+- `extended_orchestration/task_batches.yaml`
 
 Event routing and workflow triggers are configured via:
 - `workflows/{workflow}/orchestrator.yaml` - `triggers` declare which app events start or resume a workflow
@@ -249,7 +249,7 @@ class {Name}Repo:
 
 Rules: no business logic, no event emission, no validation — pure data access.
 Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
-with values aligned to `config/database_intent.json`. It must not use `ctx.db`,
+with values aligned to `config/data.json`. It must not use `ctx.db`,
 call `get_mongo_client()`, or hardcode database names.
 
 **`policy.py`** — multi-tenancy query scoping.
@@ -302,13 +302,13 @@ Modules are backing capability bundles. The generator should not create module U
 
 Modules do not own page routing by default. Routeable surfaces should be pages.
 
-### `app/config/database_intent.json`
+### `app/config/data.json`
 
 Optional for non-persistent apps. Required when generated modules own business
 collections such as `projects`, `tasks`, `audit_logs`, or `notifications`.
 
-The generator emits `database_intent_bundle` and stages it as
-`app/config/database_intent.json`. The platform runtime loads it with the app,
+The generator emits `data_contract` and stages it as
+`app/config/data.json`. The platform runtime loads it with the app,
 indexes entities by `(module_id, entity_name)`, and applies declared indexes
 idempotently. Invalid JSON or invalid shape fails app load.
 
@@ -339,10 +339,10 @@ Example collection intent:
 }
 ```
 
-### `app/config/database_migrations/{migration_id}.json`
+### `app/config/data_migrations/{migration_id}.json`
 
 Optional additive migration files. The runtime loads files under
-`app/config/database_migrations/*.json`, applies them in deterministic filename
+`app/config/data_migrations/*.json`, applies them in deterministic filename
 order, and records migration state in `mozaiksai.AppDatabaseMigrations`.
 
 Supported operations:
@@ -451,3 +451,4 @@ That means:
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [Frontend Architecture](../mozaiksai/index.md)
 - [surface-model.md](surface-model.md)
+

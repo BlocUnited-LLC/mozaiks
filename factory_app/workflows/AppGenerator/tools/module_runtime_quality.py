@@ -33,6 +33,8 @@ _BANNED_TEXT_PATTERNS: Tuple[Tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\blorem\b", re.I), "lorem placeholder text"),
     (re.compile(r"\bTODO\b", re.I), "TODO runtime logic"),
     (re.compile(r"\bNotImplemented(?:Error)?\b", re.I), "unimplemented runtime logic"),
+    (re.compile(r"\bexample\b", re.I), "example runtime logic"),
+    (re.compile(r"\bimplement(?:\s+(?:additional|the|own))?\s+(?:logic|checks|authorization|persistence)", re.I), "unfinished runtime logic"),
     (re.compile(r"\bin production\b", re.I), "production-only placeholder branch"),
     (re.compile(r"\brandom\.", re.I), "randomized runtime facts"),
     (re.compile(r"\bfaker\b", re.I), "faker-generated runtime facts"),
@@ -204,6 +206,11 @@ def _audit_ast(filename: str, content: str) -> List[str]:
         return warnings
 
     for node in ast.walk(tree):
+        if isinstance(node, ast.Pass):
+            warnings.append(
+                f"{filename}:{node.lineno}: runtime function contains pass; generated module runtime code must execute real logic or return an honest value."
+            )
+
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if _SUSPICIOUS_NAME.search(node.name):
                 warnings.append(

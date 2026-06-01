@@ -64,7 +64,7 @@ DesignDocs, or any workflow sequence.
 ## Manifest Input
 
 When no manifest is provided, the harness uses a neutral built-in app bundle
-manifest with app config, database intent, integration adapters, modules, and UI
+manifest with app config, data contract, integration adapters, modules, and UI
 pages.
 
 To use a custom manifest:
@@ -109,3 +109,4 @@ Dry run stops after deterministic planning. It does not:
 
 Use it before building a real staged execution harness or before introducing a
 human approval gate for mutations.
+

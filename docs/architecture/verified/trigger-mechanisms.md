@@ -74,7 +74,7 @@ runtime host's trigger endpoint. This is an HTTP call — there is no
 Python helper function; the trigger goes over the wire to the running server.
 
 ```python
-# your_backend/routes/orders.py
+# your_services/routes/orders.py
 import httpx
 
 MOZAIKS_BASE_URL = "http://localhost:8000"
@@ -175,3 +175,4 @@ GET  /api/workflows/{name}/runs?user_id=xxx
 | Route/Embed | `<WorkflowChat workflow="CustomerSupport" />` |
 | Backend | `POST /api/workflows/CustomerSupport/trigger` |
 | External | `POST /api/workflows/CustomerSupport/trigger` |
+

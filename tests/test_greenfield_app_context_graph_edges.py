@@ -61,9 +61,9 @@ integrations:
 """,
         },
         {"path": "SampleApp/app/modules/projects/backend/handler.py", "content": "class Handler: pass"},
-        {"path": "SampleApp/app/backend/integrations/analytics_provider_client.py", "content": "class Client: pass"},
+        {"path": "SampleApp/app/services/integrations/analytics_provider_client.py", "content": "class Client: pass"},
         {
-            "path": "SampleApp/app/config/database_intent.json",
+            "path": "SampleApp/app/config/data.json",
             "content": """
 {
   "entities": [
@@ -171,7 +171,7 @@ def test_integration_client_produces_integration_node_and_module_integration_edg
     assert "uses_integration" in _edge_types_between("module:", "integration:")
 
 
-def test_database_intent_produces_data_entity_and_explicit_read_write_edges() -> None:
+def test_data_contract_produces_data_entity_and_explicit_read_write_edges() -> None:
     graph = _drafts().app_context_graph
 
     assert any(node.node_type is GraphNodeType.DATA_ENTITY and node.label == "project_phase" for node in graph.nodes)

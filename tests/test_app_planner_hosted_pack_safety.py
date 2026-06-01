@@ -70,7 +70,7 @@ _MINIMAL_PLAN_BASE: dict = {
     "entities": [],
     "roles": [],
     "auth_strategy": "basic-login",
-    "backend_scope": [],
+    "service_scope": [],
     "frontend_scope": [],
     "theme_preferences": None,
     "brand_intent": None,
@@ -474,8 +474,8 @@ _HOSTED_ADAPTER_TASK: dict = {
     "execution_target": "AppGenerator",
     "initial_agent": "ControllerAgent",
     "description": "Generate app-side adapter for hosted wallet capability.",
-    "initial_message": "Generate a thin client in backend/integrations/wallet_client.py.",
-    "owned_paths": ["backend/integrations/wallet_client.py"],
+    "initial_message": "Generate a thin client in services/integrations/wallet_client.py.",
+    "owned_paths": ["services/integrations/wallet_client.py"],
     "depends_on": [],
     "acceptance_criteria": [
         "Does not implement wallet internals",
@@ -493,7 +493,7 @@ class TestHostedPackAdapterTaskValidation:
         )
 
     def test_hosted_pack_api_surface_adapter_task_accepted(self):
-        """hosted_pack with api_surface task at backend/integrations/ must be accepted."""
+        """hosted_pack with api_surface task at services/integrations/ must be accepted."""
         ctx = _Context()
         result = self.mod.app_build_plan(
             AppBuildPlan={
@@ -583,7 +583,7 @@ class TestHostedPackAdapterTaskValidation:
         im_adapter = {**_HOSTED_ADAPTER_TASK,
                       "task_id": "task_im_adapter",
                       "capability_pack_id": "investor_marketplace",
-                      "owned_paths": ["backend/integrations/investor_marketplace_client.py"]}
+                      "owned_paths": ["services/integrations/investor_marketplace_client.py"]}
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
@@ -606,7 +606,7 @@ class TestAgentsYamlHostedAdapterGuidance:
         self._text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
 
     def test_appplanagent_hosted_adapter_task_rule_present(self):
-        assert "backend/integrations/{pack_id}_client.py" in self._text
+        assert "services/integrations/{pack_id}_client.py" in self._text
 
     def test_appplanagent_hosted_adapter_no_hosted_business_logic(self):
         assert "no hosted business logic" in self._text
@@ -626,7 +626,7 @@ class TestAgentsYamlHostedAdapterGuidance:
     def test_file_contracts_backend_integrations_listed(self):
         fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
         api_surface_outputs = fc["task_contracts"]["api_surface"]["optional_outputs"]
-        assert any("backend/integrations" in o for o in api_surface_outputs)
+        assert any("services/integrations" in o for o in api_surface_outputs)
 
     def test_file_contracts_hosted_adapter_constraint(self):
         fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
@@ -643,9 +643,9 @@ class TestAgentsYamlHostedAdapterGuidance:
         assert "task_wallet_adapter" in self._text
 
     def test_output_format_contains_integrations_path_example(self):
-        assert "backend/integrations/wallet_client.py" in self._text
+        assert "services/integrations/wallet_client.py" in self._text
 
-    def test_output_format_contains_adapter_child_workflow_spec(self):
+    def test_output_format_contains_adapter_task_batch_spec(self):
         assert "current_build_task_type" in self._text
         assert "api_surface" in self._text
 
@@ -663,7 +663,7 @@ class TestHostedAdapterSurfaceKindValidation:
         )
 
     def test_adapter_task_with_wrong_surface_kind_rejected(self):
-        """api_surface + hosted_pack + backend/integrations/ + surface_kind=module → rejected."""
+        """api_surface + hosted_pack + services/integrations/ + surface_kind=module → rejected."""
         bad_task = {
             **_HOSTED_ADAPTER_TASK,
             "surface_kind": "module",
@@ -729,7 +729,7 @@ class TestHostedAdapterSurfaceKindValidation:
             "initial_agent": "ControllerAgent",
             "description": "CRM API surface.",
             "initial_message": "Generate CRM API.",
-            "owned_paths": ["backend/integrations/crm_client.py"],
+            "owned_paths": ["services/integrations/crm_client.py"],
             "depends_on": [],
             "acceptance_criteria": [],
         }
@@ -751,23 +751,23 @@ class TestHostedAdapterSurfaceKindValidation:
 
 
 # ---------------------------------------------------------------------------
-# 9. Child workflow spec shape for hosted adapter task
+# 9. Task batch item shape for hosted adapter task
 # ---------------------------------------------------------------------------
 
-class TestChildWorkflowSpecShape:
-    def test_output_format_child_workflow_has_task_type_api_surface(self):
+class TestTaskBatchSpecShape:
+    def test_output_format_task_batch_has_task_type_api_surface(self):
         text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
         assert '"current_build_task_type": "api_surface"' in text
 
-    def test_output_format_child_workflow_has_wallet_adapter_owned_path(self):
+    def test_output_format_task_batch_has_wallet_adapter_owned_path(self):
         text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-        assert '"backend/integrations/wallet_client.py"' in text
+        assert '"services/integrations/wallet_client.py"' in text
 
-    def test_output_format_child_workflow_has_surface_kind_external_integration(self):
+    def test_output_format_task_batch_has_surface_kind_external_integration(self):
         text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-        # The child workflow spec for adapter should carry surface_kind
+        # The task batch item for adapter work should carry surface_kind.
         assert '"surface_kind": "external_integration"' in text
 
-    def test_output_format_child_workflow_initial_agent_is_controller(self):
+    def test_output_format_task_batch_initial_agent_is_controller(self):
         text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
         assert '"initial_agent": "ControllerAgent"' in text

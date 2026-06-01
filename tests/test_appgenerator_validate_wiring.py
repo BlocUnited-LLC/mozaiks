@@ -77,3 +77,59 @@ def test_validate_wiring_rejects_api_endpoint_query_string() -> None:
     assert result["passed"] is False
     assert result["invalid_endpoints"][0]["endpoint"] == "/api/modules/tickets/list_tickets?limit=12"
     assert "query strings" in result["failed_tests"][0]["error"]
+
+
+def test_validate_wiring_reads_generated_files_from_context() -> None:
+    result = asyncio.run(
+        validate_wiring_module.validate_wiring(
+            {
+                "generated_files": {
+                    "ui/pages/tickets.yaml": """
+name: Tickets
+sections:
+- id: ticket-table
+  config:
+    api_endpoint: /api/modules/tickets/list_tickets
+""",
+                    "modules/tickets/module.yaml": """
+module:
+  id: tickets
+actions:
+- id: list_tickets
+  handler_method: list_tickets
+""",
+                }
+            }
+        )
+    )
+
+    assert result["passed"] is True
+    assert result["wired"][0]["endpoint"] == "/api/modules/tickets/list_tickets"
+
+
+def test_validate_wiring_rejects_generated_file_endpoint_without_module_action() -> None:
+    result = asyncio.run(
+        validate_wiring_module.validate_wiring(
+            {
+                "generated_files": {
+                    "ui/pages/tickets.yaml": """
+name: Tickets
+sections:
+- id: ticket-table
+  config:
+    api_endpoint: /api/tickets
+""",
+                    "modules/tickets/module.yaml": """
+module:
+  id: tickets
+actions:
+- id: list_tickets
+  handler_method: list_tickets
+""",
+                }
+            }
+        )
+    )
+
+    assert result["passed"] is False
+    assert result["orphaned_pages"][0]["endpoint"] == "/api/tickets"

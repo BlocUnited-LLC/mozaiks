@@ -759,7 +759,7 @@ async def test_module_impact_handles_multiple_module_ids_deterministically() -> 
 
 
 @pytest.mark.asyncio
-async def test_data_model_impact_includes_database_intent_migrations_and_known_module_paths() -> None:
+async def test_data_model_impact_includes_data_contract_migrations_and_known_module_paths() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="feature",
@@ -773,8 +773,8 @@ async def test_data_model_impact_includes_database_intent_migrations_and_known_m
                 "raw_user_request": "Add an optional field to the projects data model.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/database_intent.json"},
-                        {"path": "config/database_migrations/001_projects_status.json"},
+                        {"path": "config/data.json"},
+                        {"path": "config/data_migrations/001_projects_status.json"},
                         {"path": "modules/projects/module.yaml"},
                         {"path": "modules/projects/contracts/events.yaml"},
                         {"path": "modules/projects/contracts/admin.yaml"},
@@ -797,8 +797,8 @@ async def test_data_model_impact_includes_database_intent_migrations_and_known_m
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "config/database_intent.json",
-        "config/database_migrations/001_projects_status.json",
+        "config/data.json",
+        "config/data_migrations/001_projects_status.json",
         "modules/projects/module.yaml",
         "modules/projects/contracts/events.yaml",
         "modules/projects/contracts/admin.yaml",
@@ -835,8 +835,8 @@ async def test_data_model_impact_unknown_module_uses_conservative_hints() -> Non
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "config/database_intent.json",
-        "config/database_migrations/*.json",
+        "config/data.json",
+        "config/data_migrations/*.json",
         "modules/*/backend/schemas.py",
         "modules/*/backend/repo.py",
         "modules/*/backend/policy.py",
@@ -859,7 +859,7 @@ async def test_data_model_impact_ui_request_includes_page_paths() -> None:
                 "raw_user_request": "Add a customers field and show it on the edit form.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/database_intent.json"},
+                        {"path": "config/data.json"},
                         {"path": "modules/customers/module.yaml"},
                         {"path": "modules/customers/backend/schemas.py"},
                         {"path": "modules/customers/backend/repo.py"},
@@ -877,8 +877,8 @@ async def test_data_model_impact_ui_request_includes_page_paths() -> None:
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "config/database_intent.json",
-        "config/database_migrations/*.json",
+        "config/data.json",
+        "config/data_migrations/*.json",
         "modules/customers/module.yaml",
         "modules/customers/backend/repo.py",
         "modules/customers/backend/policy.py",
@@ -902,7 +902,7 @@ async def test_data_model_destructive_change_adds_review_warning() -> None:
                 "raw_user_request": "Remove field from reports and backfill existing records.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/database_intent.json"},
+                        {"path": "config/data.json"},
                         {"path": "modules/reports/module.yaml"},
                         {"path": "modules/reports/backend/schemas.py"},
                         {"path": "modules/reports/backend/repo.py"},
@@ -937,8 +937,8 @@ async def test_non_data_model_backend_request_does_not_include_database_paths() 
                 "raw_user_request": "Add a tasks backend endpoint for closing tasks.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/database_intent.json"},
-                        {"path": "config/database_migrations/001_tasks_status.json"},
+                        {"path": "config/data.json"},
+                        {"path": "config/data_migrations/001_tasks_status.json"},
                         {"path": "modules/tasks/module.yaml"},
                         {"path": "modules/tasks/backend/handler.py"},
                         {"path": "modules/tasks/backend/service.py"},
@@ -964,8 +964,8 @@ async def test_non_data_model_backend_request_does_not_include_database_paths() 
         "modules/tasks/backend/policy.py",
         "modules/tasks/backend/schemas.py",
     ]
-    assert "config/database_intent.json" not in decision.impact_set.affected_bundle_paths
-    assert "config/database_migrations/001_tasks_status.json" not in decision.impact_set.affected_bundle_paths
+    assert "config/data.json" not in decision.impact_set.affected_bundle_paths
+    assert "config/data_migrations/001_tasks_status.json" not in decision.impact_set.affected_bundle_paths
 
 
 @pytest.mark.asyncio
@@ -983,8 +983,8 @@ async def test_hosted_capability_impact_includes_adapter_facade_and_dependent_pa
                 "raw_user_request": "Change how hosted analytics metrics display on the dashboard.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/integrations/hosted_analytics_client.py"},
-                        {"path": "backend/integrations/reporting_provider_client.py"},
+                        {"path": "services/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/reporting_provider_client.py"},
                         {"path": "modules/analytics_dashboard/backend/service.py"},
                         {"path": "modules/analytics_dashboard/module.yaml"},
                         {"path": "modules/analytics_dashboard/backend/handler.py"},
@@ -995,7 +995,7 @@ async def test_hosted_capability_impact_includes_adapter_facade_and_dependent_pa
                             "content": "api_endpoint: /api/modules/analytics_dashboard/get_metrics",
                         },
                         {"path": "ui/pages/reports.yaml"},
-                        {"path": "backend/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/hosted_analytics_client.py"},
                     ]
                 },
             }
@@ -1008,14 +1008,14 @@ async def test_hosted_capability_impact_includes_adapter_facade_and_dependent_pa
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/hosted_analytics_client.py",
+        "services/integrations/hosted_analytics_client.py",
         "modules/analytics_dashboard/module.yaml",
         "modules/analytics_dashboard/contracts/events.yaml",
         "modules/analytics_dashboard/backend/handler.py",
         "modules/analytics_dashboard/backend/service.py",
         "ui/pages/analytics.yaml",
     ]
-    assert "backend/integrations/reporting_provider_client.py" not in decision.impact_set.affected_bundle_paths
+    assert "services/integrations/reporting_provider_client.py" not in decision.impact_set.affected_bundle_paths
     assert "modules/hosted_analytics/module.yaml" not in decision.impact_set.affected_bundle_paths
 
 
@@ -1034,9 +1034,9 @@ async def test_integration_impact_includes_app_backend_provider_adapters() -> No
                 "raw_user_request": "Update the search provider adapter retry behavior.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/adapters/search/vector_provider.py"},
-                        {"path": "backend/integrations/search_provider_client.py"},
-                        {"path": "backend/adapters/billing/payment_provider.py"},
+                        {"path": "services/adapters/search/vector_provider.py"},
+                        {"path": "services/integrations/search_provider_client.py"},
+                        {"path": "services/adapters/billing/payment_provider.py"},
                         {"path": "modules/search/backend/service.py"},
                         {"path": "modules/search/module.yaml"},
                     ]
@@ -1050,9 +1050,9 @@ async def test_integration_impact_includes_app_backend_provider_adapters() -> No
     assert request is not None
     decision = await resolver.route(request)
 
-    assert "backend/adapters/search/vector_provider.py" in decision.impact_set.affected_bundle_paths
-    assert "backend/integrations/search_provider_client.py" in decision.impact_set.affected_bundle_paths
-    assert "backend/adapters/billing/payment_provider.py" not in decision.impact_set.affected_bundle_paths
+    assert "services/adapters/search/vector_provider.py" in decision.impact_set.affected_bundle_paths
+    assert "services/integrations/search_provider_client.py" in decision.impact_set.affected_bundle_paths
+    assert "services/adapters/billing/payment_provider.py" not in decision.impact_set.affected_bundle_paths
 
 
 @pytest.mark.asyncio
@@ -1070,7 +1070,7 @@ async def test_hosted_capability_non_ui_request_does_not_force_page_paths() -> N
                 "raw_user_request": "Update hosted analytics provider-backed refresh policy.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/hosted_analytics_client.py"},
                         {"path": "modules/analytics_dashboard/module.yaml"},
                         {"path": "modules/analytics_dashboard/backend/service.py"},
                         {"path": "ui/pages/analytics.yaml"},
@@ -1086,7 +1086,7 @@ async def test_hosted_capability_non_ui_request_does_not_force_page_paths() -> N
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/hosted_analytics_client.py",
+        "services/integrations/hosted_analytics_client.py",
         "modules/analytics_dashboard/module.yaml",
         "modules/analytics_dashboard/backend/service.py",
     ]
@@ -1107,7 +1107,7 @@ async def test_hosted_capability_ui_request_uses_page_glob_when_page_binding_is_
                 "raw_user_request": "Change hosted analytics dashboard display.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/hosted_analytics_client.py"},
                         {"path": "modules/analytics_dashboard/module.yaml"},
                         {"path": "modules/analytics_dashboard/backend/service.py"},
                         {"path": "ui/pages/analytics.yaml"},
@@ -1123,7 +1123,7 @@ async def test_hosted_capability_ui_request_uses_page_glob_when_page_binding_is_
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/hosted_analytics_client.py",
+        "services/integrations/hosted_analytics_client.py",
         "modules/analytics_dashboard/module.yaml",
         "modules/analytics_dashboard/backend/service.py",
         "ui/pages/*.yaml",
@@ -1153,7 +1153,7 @@ async def test_hosted_capability_without_manifest_uses_conservative_hints() -> N
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/*_client.py",
+        "services/integrations/*_client.py",
         "modules/*/module.yaml",
         "modules/*/contracts/*.yaml",
         "modules/*/backend/*.py",
@@ -1183,7 +1183,7 @@ async def test_hosted_capability_without_manifest_adds_page_hint_only_for_ui_req
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/*_client.py",
+        "services/integrations/*_client.py",
         "modules/*/module.yaml",
         "modules/*/contracts/*.yaml",
         "modules/*/backend/*.py",
@@ -1206,8 +1206,8 @@ async def test_integration_impact_includes_exact_connector_adapter_and_module_pa
                 "raw_user_request": "Update analytics provider connector sync behavior for reports.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/integrations/reporting_provider_client.py"},
-                        {"path": "backend/integrations/analytics_provider_client.py"},
+                        {"path": "services/integrations/reporting_provider_client.py"},
+                        {"path": "services/integrations/analytics_provider_client.py"},
                         {"path": "modules/reports/backend/service.py", "content": "from backend.integrations.analytics_provider_client import AnalyticsProviderClient"},
                         {"path": "modules/reports/backend/schemas.py", "content": "connector_id = 'analytics_provider'"},
                         {"path": "modules/reports/backend/policy.py"},
@@ -1228,7 +1228,7 @@ async def test_integration_impact_includes_exact_connector_adapter_and_module_pa
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/analytics_provider_client.py",
+        "services/integrations/analytics_provider_client.py",
         "modules/reports/module.yaml",
         "modules/reports/backend/service.py",
         "modules/reports/backend/policy.py",
@@ -1236,7 +1236,7 @@ async def test_integration_impact_includes_exact_connector_adapter_and_module_pa
         "config/integrations.json",
         "docs/integrations.md",
     ]
-    assert "backend/integrations/reporting_provider_client.py" not in decision.impact_set.affected_bundle_paths
+    assert "services/integrations/reporting_provider_client.py" not in decision.impact_set.affected_bundle_paths
     assert ".env" not in decision.impact_set.affected_bundle_paths
     assert "config/integrations.credentials.json" not in decision.impact_set.affected_bundle_paths
     assert "Integration readiness may need to be rechecked." in decision.impact_set.scope_summary
@@ -1265,8 +1265,8 @@ async def test_integration_impact_without_manifest_uses_conservative_hints() -> 
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/*_client.py",
-        "backend/adapters/**/*.py",
+        "services/integrations/*_client.py",
+        "services/adapters/**/*.py",
         "modules/*/backend/service.py",
         "modules/*/backend/schemas.py",
         "modules/*/module.yaml",
@@ -1291,7 +1291,7 @@ async def test_integration_impact_ui_request_includes_setup_page_when_present() 
                 "raw_user_request": "Update search provider integration setup page.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/integrations/search_provider_client.py"},
+                        {"path": "services/integrations/search_provider_client.py"},
                         {"path": "modules/reports/module.yaml"},
                         {"path": "modules/reports/backend/service.py", "content": "connector_id = 'search_provider'"},
                         {"path": "modules/reports/backend/schemas.py"},
@@ -1308,7 +1308,7 @@ async def test_integration_impact_ui_request_includes_setup_page_when_present() 
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/search_provider_client.py",
+        "services/integrations/search_provider_client.py",
         "modules/reports/module.yaml",
         "modules/reports/backend/service.py",
         "modules/reports/backend/schemas.py",
@@ -1331,7 +1331,7 @@ async def test_integration_impact_non_ui_request_does_not_force_pages() -> None:
                 "raw_user_request": "Update reporting provider webhook sync.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/integrations/reporting_provider_client.py"},
+                        {"path": "services/integrations/reporting_provider_client.py"},
                         {"path": "modules/reports/module.yaml"},
                         {"path": "modules/reports/backend/service.py", "content": "connector_id = 'reporting_provider'"},
                         {"path": "ui/pages/reports.yaml"},
@@ -1347,7 +1347,7 @@ async def test_integration_impact_non_ui_request_does_not_force_pages() -> None:
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/reporting_provider_client.py",
+        "services/integrations/reporting_provider_client.py",
         "modules/reports/module.yaml",
         "modules/reports/backend/service.py",
     ]
@@ -1369,8 +1369,8 @@ async def test_integration_impact_never_emits_secret_path_hints() -> None:
                 "raw_user_request": "Update storage provider API key handling.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "backend/integrations/storage_provider_client.py"},
-                        {"path": "backend/integrations/storage_provider_secret.py"},
+                        {"path": "services/integrations/storage_provider_client.py"},
+                        {"path": "services/integrations/storage_provider_secret.py"},
                         {"path": "config/integrations.json"},
                         {"path": "config/integrations.keys.json"},
                         {"path": "secrets/storage_provider.json"},
@@ -1386,7 +1386,7 @@ async def test_integration_impact_never_emits_secret_path_hints() -> None:
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "backend/integrations/storage_provider_client.py",
+        "services/integrations/storage_provider_client.py",
         "config/integrations.json",
     ]
     assert all("secret" not in path for path in decision.impact_set.affected_bundle_paths)

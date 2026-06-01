@@ -64,10 +64,10 @@ async def fetch_current_schema(
     artifact_version_id: Annotated[Optional[str], Field(description="Artifact version ID of the bundle being refined. If null, returns null.")] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch the prior database intent that was recorded for an existing app bundle
+    Fetch the prior data contract that was recorded for an existing app bundle
     artifact. Returns {"schema": <dict>} when prior intent exists, or
     {"schema": null} when no prior intent is available. DatabaseAgent prompts should prefer
-    database_intent_bundle context and staged migration artifacts.
+    data_contract context and staged migration artifacts.
     """
     if not artifact_version_id:
         logger.debug("fetch_current_schema: no artifact_version_id — returning null schema (greenfield)")
@@ -106,3 +106,4 @@ async def apply_schema_migration(
     except Exception as e:
         logger.error(f"Failed to apply migration {migration_id}: {e}")
         return {"error": str(e), "migration_id": migration_id}
+

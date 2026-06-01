@@ -135,7 +135,7 @@ boundary explicit:
 
 ```text
 hosted_pack
-  -> backend/integrations/{pack_id}_client.py
+  -> app/services/integrations/{pack_id}_client.py
   -> app-owned facade module
   -> ui/pages bind to the facade module
 ```
@@ -144,7 +144,7 @@ Provider-neutral example:
 
 ```text
 hosted_analytics
-  -> backend/integrations/hosted_analytics_client.py
+  -> app/services/integrations/hosted_analytics_client.py
   -> modules/analytics_dashboard/
   -> ui/pages/analytics.yaml
   -> /api/modules/analytics_dashboard/get_metrics
@@ -237,7 +237,8 @@ Required schema-driven outputs:
 - `config/shell.json` when `app_shell_config` exists
 - `config/asset_manifest.json` when `app_asset_manifest` exists
 
-When `app_schema_ready == false`, `AssemblyAgent` should use MFJ fan-in via `assemble_app_tasks` and must still preserve the page contract.
+When `app_schema_ready == false`, `AssemblyAgent` should use task batch outputs
+via `assemble_app_tasks` and must still preserve the page contract.
 
 ### 4b. Raw Frontend Path Removed
 
@@ -253,7 +254,7 @@ Rules:
 ### 5. IntegrationReadinessAgent
 
 `IntegrationReadinessAgent` runs after `AssemblyAgent` and before validation or
-download. It is not a manual preflight step. It is the agentic fan-in point for
+download. It is not a manual preflight step. It is the agentic aggregation point for
 third-party connector needs discovered while planning or executing decomposed
 build tasks.
 
@@ -262,7 +263,7 @@ Inputs:
 - `app_build_plan.external_integrations`
 - `capability_packs[].required_integrations`
 - `build_tasks[].integration_needs`
-- `mfj_app_task_results` from child task fan-in
+- `app_task_batch_results` from task batch execution
 - `integration_needs` recorded by task agents with `record_integration_need`
 
 Rules:
@@ -321,7 +322,7 @@ Materialization rule:
 
 - typed agent outputs such as `app_backend_admin_config`, `python_files`, and
   `js_files` are the source of truth for their owned lanes
-- the same applies to `database_files`, `model_files`, and `backend_foundation_bundle.files`
+- the same applies to `database_files`, `model_files`, and `service_foundation_bundle.files`
 - extraction may regenerate canonical file content from those typed fields before
   packaging
 - raw `code_files` are the serialized mirror, not the authority, when a typed
@@ -353,3 +354,5 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
+
+

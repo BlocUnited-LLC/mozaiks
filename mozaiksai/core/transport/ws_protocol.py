@@ -236,9 +236,8 @@ class WebSocketProtocolMixin:
                     except Exception as cfg_err:
                         logger.warning(f"[AUTO_RESUME] Failed to get workflow config: {cfg_err}")
 
-            # Use GroupChatResumer for proper message replay with filtering
-            from mozaiksai.core.transport.resume_groupchat import GroupChatResumer
-            resumer = GroupChatResumer()
+            from mozaiksai.core.transport.resume_run import AgentRunResumer
+            resumer = AgentRunResumer()
 
             async def send_event_wrapper(event_dict: Dict[str, Any], target_chat_id: Optional[str]) -> None:
                 """Wrapper to convert resume events to transport format."""

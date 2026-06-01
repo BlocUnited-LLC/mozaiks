@@ -2,7 +2,7 @@
 
 Verifies that generate_migration() produces a document that satisfies the
 runtime _validate_migration() contract so files written to
-config/database_migrations/*.json can be loaded and validated by the
+config/data_migrations/*.json can be loaded and validated by the
 runtime migration loader without raising DatabaseMigrationError.
 """
 
@@ -22,7 +22,7 @@ from factory_app.workflows.AppGenerator.tools.schema_migration import (
 from mozaiksai.core.runtime.persistence.migrations import (
     DatabaseMigrationError,
     _validate_migration,
-    load_database_migrations,
+    load_data_migrations,
 )
 
 
@@ -133,7 +133,7 @@ def test_generate_migration_empty_diff_has_empty_operations():
 
 def test_generated_migration_survives_roundtrip_through_runtime_loader(tmp_path: Path):
     """A generated migration written via inject_migration_into_bundle must be
-    loadable by the runtime load_database_migrations without raising."""
+    loadable by the runtime load_data_migrations without raising."""
     schema = _schema([_col("invoices", module_id="billing", entity_name="invoices")])
     diff = diff_schemas(None, schema)
     migration = generate_migration(diff, app_id="app_1", change_class="feature", new_schema=schema)
@@ -148,7 +148,7 @@ def test_generated_migration_survives_roundtrip_through_runtime_loader(tmp_path:
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(content, encoding="utf-8")
 
-    loaded = load_database_migrations(app_root)
+    loaded = load_data_migrations(app_root)
 
     assert len(loaded) == 1
     assert loaded[0]["migration_id"] == migration["migration_id"]

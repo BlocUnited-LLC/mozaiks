@@ -48,11 +48,9 @@ def resolve_active_app_root() -> Path:
 
 def candidate_app_workflows_roots(app_root: Path) -> tuple[Path, ...]:
     """Return canonical workflow-root candidates for an active app root."""
-    roots: list[Path] = []
     if app_root.name == "app":
-        roots.append((app_root.parent / "workflows").resolve())
-    roots.append((app_root / "workflows").resolve())
-    return tuple(dict.fromkeys(roots))
+        return ((app_root.parent / "workflows").resolve(),)
+    return ((app_root / "workflows").resolve(),)
 
 
 def _normalize_root(value: str | os.PathLike[str]) -> Path:

@@ -25,6 +25,7 @@ Use this section as the web navigation layer for that architecture.
 - [Platform Information Architecture](foundations/platform-information-architecture.md)
 - [Core, Product, and App Bundle Boundary](foundations/core-product-app-bundle-boundary.md)
 - [Graph Authority Boundaries](foundations/graph-authority-boundaries.md)
+- [Context Graph and Code Intelligence](foundations/context-graph-and-code-intelligence.md)
 - [App Context and Brownfield Adoption](foundations/app-context-and-brownfield-adoption.md)
 - [Event System](foundations/events-and-data/event-system.md)
 - [Event Contracts](foundations/events-and-data/event-contracts.md)

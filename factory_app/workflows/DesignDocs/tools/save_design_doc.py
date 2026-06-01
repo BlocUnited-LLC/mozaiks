@@ -138,7 +138,7 @@ def _canonical_surface_map(raw: Any) -> Dict[str, Any]:
     return {"surfaces": surfaces}
 
 
-def _canonical_database_intent_bundle(
+def _canonical_data_contract(
     raw: Any,
     *,
     app_id: str,
@@ -146,11 +146,11 @@ def _canonical_database_intent_bundle(
     surface_map: Dict[str, Any],
 ) -> Dict[str, Any]:
     if not isinstance(raw, dict):
-        raise ValueError("database_intent_bundle must be an object")
+        raise ValueError("data_contract must be an object")
 
     raw_surfaces = raw.get("surfaces")
     if not isinstance(raw_surfaces, list) or not raw_surfaces:
-        raise ValueError("database_intent_bundle.surfaces must be a non-empty list")
+        raise ValueError("data_contract.surfaces must be a non-empty list")
 
     known_surface_ids = {
         str(surface.get("surface_id")): str(surface.get("surface_kind"))
@@ -161,20 +161,20 @@ def _canonical_database_intent_bundle(
     normalized_surfaces = []
     for index, surface in enumerate(raw_surfaces):
         if not isinstance(surface, dict):
-            raise ValueError(f"database_intent_bundle.surfaces[{index}] must be an object")
+            raise ValueError(f"data_contract.surfaces[{index}] must be an object")
         surface_id = str(surface.get("surface_id") or "").strip()
         surface_kind = str(surface.get("surface_kind") or "").strip()
         if not surface_id or not surface_kind:
-            raise ValueError(f"database_intent_bundle.surfaces[{index}] requires surface_id and surface_kind")
+            raise ValueError(f"data_contract.surfaces[{index}] requires surface_id and surface_kind")
         expected_kind = known_surface_ids.get(surface_id)
         if expected_kind and expected_kind != surface_kind:
             raise ValueError(
-                f"database_intent_bundle.surfaces[{index}] surface_kind must match surface_map "
+                f"data_contract.surfaces[{index}] surface_kind must match surface_map "
                 f"for '{surface_id}'"
             )
         collections = surface.get("collections")
         if not isinstance(collections, list):
-            raise ValueError(f"database_intent_bundle.surfaces[{index}].collections must be a list")
+            raise ValueError(f"data_contract.surfaces[{index}].collections must be a list")
         normalized_surfaces.append(
             {
                 "surface_id": surface_id,
@@ -187,7 +187,7 @@ def _canonical_database_intent_bundle(
     if shared_collections is None:
         shared_collections = []
     if not isinstance(shared_collections, list):
-        raise ValueError("database_intent_bundle.shared_collections must be a list")
+        raise ValueError("data_contract.shared_collections must be a list")
 
     policies = raw.get("policies")
     if policies is None:
@@ -196,11 +196,11 @@ def _canonical_database_intent_bundle(
             "allow_destructive_migrations": False,
         }
     if not isinstance(policies, dict):
-        raise ValueError("database_intent_bundle.policies must be an object")
+        raise ValueError("data_contract.policies must be an object")
 
     default_scope_field = str(policies.get("default_scope_field") or "app_id").strip()
     if not default_scope_field:
-        raise ValueError("database_intent_bundle.policies.default_scope_field must be non-empty")
+        raise ValueError("data_contract.policies.default_scope_field must be non-empty")
 
     return {
         "version": str(raw.get("version") or "1"),
@@ -398,8 +398,8 @@ async def save_design_docs_bundle(
             bundle.get("experience_spec"),
             surface_map=surface_map,
         )
-        database_intent_bundle = _canonical_database_intent_bundle(
-            bundle.get("database_intent_bundle"),
+        data_contract = _canonical_data_contract(
+            bundle.get("data_contract"),
             app_id=app_id,
             artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
             surface_map=surface_map,
@@ -449,12 +449,12 @@ async def save_design_docs_bundle(
             extra_fields=extra_fields,
         )
 
-    await store.save_database_intent(
+    await store.save_data_contract(
         app_id=app_id,
         build_id=str(build_id or chat_id or "design-docs"),
         artifact_version_id=str(artifact_version_id) if artifact_version_id else None,
         change_class=str(revision_scope) if revision_scope else None,
-        database_intent_bundle=database_intent_bundle,
+        data_contract=data_contract,
         user_id=str(user_id) if user_id else None,
         source_workflow="DesignDocs",
         source_chat_id=str(chat_id) if chat_id else None,
@@ -471,7 +471,7 @@ async def save_design_docs_bundle(
                 "database_markdown": database_markdown,
                 "experience_spec": experience_spec,
                 "surface_map": surface_map,
-                "database_intent_bundle": database_intent_bundle,
+                "data_contract": data_contract,
             },
             source_workflow="DesignDocs",
             source_chat_id=str(chat_id) if chat_id else None,
@@ -502,7 +502,7 @@ async def save_design_docs_bundle(
     # Typed object for AppPlanAgent — authoritative structured page specification
     _cv_set(context_variables, "experience_spec", experience_spec)
     _cv_set(context_variables, "design_surface_map", surface_map)
-    _cv_set(context_variables, "database_intent_bundle", database_intent_bundle)
+    _cv_set(context_variables, "data_contract", data_contract)
 
     return {
         "ok": True,
@@ -511,5 +511,6 @@ async def save_design_docs_bundle(
         "kinds": list(_DOC_KINDS),
         "surface_count": len(surface_map.get("surfaces", [])),
         "page_count": len(experience_spec.get("pages", [])),
-        "database_surface_count": len(database_intent_bundle.get("surfaces", [])),
+        "data_surface_count": len(data_contract.get("surfaces", [])),
     }
+

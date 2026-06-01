@@ -12,7 +12,7 @@ import inspect
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from pydantic import ValidationError
 import yaml
@@ -58,7 +58,7 @@ class AutoToolEventHandler:
     _CACHE_LIMIT = 512
 
     def __init__(self) -> None:
-        self._workflow_bindings: Dict[str, Dict[str, AutoToolBinding]] = {}
+        self._workflow_bindings: Dict[str, Dict[str, List[AutoToolBinding]]] = {}
         self._processed_keys: set[str] = set()
         self._processed_order: asyncio.Queue[str] = asyncio.Queue()
 
@@ -106,10 +106,8 @@ class AutoToolEventHandler:
             logger.debug("[AUTO_TOOL] Duplicate turn detected -> skipping (key=%s)", cache_key)
             return
 
-        binding = await self._resolve_binding(workflow_name, model_name, agent_name)
-        if binding:
-            logger.info("[AUTO_TOOL] Binding resolved for agent=%s tool=%s model=%s", agent_name, binding.tool_name, binding.model_name)
-        if not binding:
+        bindings = await self._resolve_bindings(workflow_name, model_name, agent_name)
+        if not bindings:
             logger.warning(
                 "[AUTO_TOOL] No tool binding for workflow=%s model=%s agent=%s",
                 workflow_name,
@@ -120,7 +118,7 @@ class AutoToolEventHandler:
             return
 
         try:
-            validated = binding.model_cls.model_validate(structured_data)
+            validated = bindings[0].model_cls.model_validate(structured_data)
             normalized = validated.model_dump(mode='json')  # type: ignore[attr-defined] - Force JSON serialization for enums
         except ValidationError as err:
             logger.error(
@@ -140,62 +138,58 @@ class AutoToolEventHandler:
             await self._register_turn(cache_key)
             return
 
-        kwargs = self._build_tool_kwargs(binding, normalized, {
-            **context,
-            "turn_idempotency_key": turn_key,
-            "agent_name": agent_name,
-        }, pattern_context_ref)
-        logger.info("[AUTO_TOOL] Prepared kwargs for %s: %s", binding.tool_name, {k: v for k, v in kwargs.items() if k != 'context_variables'})
-        await self._emit_tool_call(binding, agent_name, chat_id, kwargs, turn_key)
-        result_payload, status = await self._invoke_tool(binding, kwargs)
-        
-        # Write back context changes to pattern context if available
-        container = kwargs.get("context_variables")
-        if pattern_context_ref and container and hasattr(container, "data"):
-            try:
-                # Copy changes from tool's container back to the shared pattern context
-                for key, value in getattr(container, "data").items():
-                    try:
-                        pattern_context_ref.set(key, value)
-                    except Exception:
-                        pass
-                logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(getattr(container, "data")), binding.tool_name)
-            except Exception as wb_err:
-                logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
+        for binding in bindings:
+            logger.info("[AUTO_TOOL] Binding resolved for agent=%s tool=%s model=%s", agent_name, binding.tool_name, binding.model_name)
+            kwargs = self._build_tool_kwargs(binding, normalized, {
+                **context,
+                "turn_idempotency_key": turn_key,
+                "agent_name": agent_name,
+            }, pattern_context_ref)
+            logger.info("[AUTO_TOOL] Prepared kwargs for %s: %s", binding.tool_name, {k: v for k, v in kwargs.items() if k != 'context_variables'})
+            await self._emit_tool_call(binding, agent_name, chat_id, kwargs, turn_key)
+            result_payload, status = await self._invoke_tool(binding, kwargs)
 
-        await self._persist_context_variables(
-            chat_id=chat_id,
-            app_id=context.get("app_id"),
-            context_variables=container,
-        )
-        
-        await self._emit_tool_result(binding, agent_name, chat_id, result_payload, status, turn_key)
+            # Write back context changes to pattern context if available
+            container = kwargs.get("context_variables")
+            if pattern_context_ref and container and hasattr(container, "data"):
+                try:
+                    # Copy changes from tool's container back to the shared pattern context
+                    for key, value in getattr(container, "data").items():
+                        try:
+                            pattern_context_ref.set(key, value)
+                        except Exception:
+                            pass
+                    logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(getattr(container, "data")), binding.tool_name)
+                except Exception as wb_err:
+                    logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
+
+            await self._persist_context_variables(
+                chat_id=chat_id,
+                app_id=context.get("app_id"),
+                context_variables=container,
+            )
+
+            await self._emit_tool_result(binding, agent_name, chat_id, result_payload, status, turn_key)
         await self._register_turn(cache_key)
 
-    async def _resolve_binding(
+    async def _resolve_bindings(
         self, workflow_name: str, model_name: str, agent_name: str
-    ) -> Optional[AutoToolBinding]:
+    ) -> List[AutoToolBinding]:
         bindings = await self._load_bindings_for_workflow(workflow_name)
-        binding = bindings.get(model_name)
-        if not binding:
+        candidates = bindings.get(model_name) or []
+        if not candidates:
             logger.debug("[AUTO_TOOL] No cached binding for workflow=%s model=%s agent=%s", workflow_name, model_name, agent_name)
-            return None
-        if binding.agent_name != agent_name:
-            logger.debug(
-                "[AUTO_TOOL] Binding agent mismatch (expected=%s, actual=%s) for model=%s",
-                binding.agent_name,
-                agent_name,
-                model_name,
-            )
-        return binding
+            return []
+        matched = [binding for binding in candidates if binding.agent_name == agent_name]
+        return matched
 
-    async def _load_bindings_for_workflow(self, workflow_name: str) -> Dict[str, AutoToolBinding]:
+    async def _load_bindings_for_workflow(self, workflow_name: str) -> Dict[str, List[AutoToolBinding]]:
         cached = self._workflow_bindings.get(workflow_name)
         if cached is not None:
             logger.debug("[AUTO_TOOL] Returning cached bindings for workflow=%s (count=%d)", workflow_name, len(cached))
             return cached
 
-        mapping: Dict[str, AutoToolBinding] = {}
+        mapping: Dict[str, List[AutoToolBinding]] = {}
         try:
             registry = get_structured_outputs_for_workflow(workflow_name)
             logger.debug("[AUTO_TOOL] Loaded structured outputs registry for workflow=%s: %s", workflow_name, list(registry.keys()))
@@ -212,7 +206,7 @@ class AutoToolEventHandler:
             self._workflow_bindings[workflow_name] = mapping
             return mapping
 
-        tool_functions = load_agent_tool_functions(workflow_name)
+        tool_functions = load_agent_tool_functions(workflow_name, include_auto_only=True)
         logger.debug("[AUTO_TOOL] Loaded tool functions for workflow=%s: agents=%s", workflow_name, list(tool_functions.keys()))
         agent_function_index: Dict[str, Dict[str, Callable[..., Any]]] = {}
         for agent, funcs in tool_functions.items():
@@ -311,7 +305,7 @@ class AutoToolEventHandler:
                     ui_config=ui_cfg,
                     model_cls=model_cls,
                 )
-                mapping[model_name] = binding
+                mapping.setdefault(model_name, []).append(binding)
                 logger.info("[AUTO_TOOL] ✅ Created binding: model=%s agent=%s tool=%s", model_name, agent_name, binding.tool_name)
 
         logger.info("[AUTO_TOOL] Loaded %d total bindings for workflow=%s: %s", len(mapping), workflow_name, list(mapping.keys()))

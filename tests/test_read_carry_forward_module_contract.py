@@ -383,7 +383,7 @@ class TestRejectsPathTraversal:
         ):
             result = await read_carry_forward_module_contract(
                 "auth",
-                files=["app.json", "config/database_intent.json", "ui/index.js"],
+                files=["app.json", "config/data.json", "ui/index.js"],
                 context_variables=_ctx(),
             )
 

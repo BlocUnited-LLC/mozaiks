@@ -23,7 +23,7 @@ Primary covered surfaces today:
 - AgentGenerator workflow-local changes: `agentgenerator-change`
 - Module authoring and scaffolding: `add-module`
 - Frontend pages and admin UI surfaces: `add-page` plus the frontend rule
-- Persistence and database intent guidance: `persistence-change`
+- Persistence and data contract guidance: `persistence-change`
 - Hosted-pack boundaries: `oss-contribution-review` plus the hosted-packs rule
 - Docs, release, and testing guidance: `docs-maintenance`, `release-notes`, and `.claude/rules/testing.md`
 
@@ -44,7 +44,7 @@ docs, release notes, architecture placement, and final-report expectations.
 | Control-plane/refinement | `control-plane-refinement-change` | add `factory-build-workflow-change` when `workflow_sequence` composition or `extension_registry.json` routing also changes |
 | Module contract | `add-module` | use `runtime-change` for loader or runtime behavior changes; use `appgenerator-change` for generated module output changes |
 | Frontend/admin UI | `add-page` | use the frontend rule; add `runtime-change` if platform or admin shell behavior changes |
-| Persistence/database intent | `persistence-change` | add `runtime-change` for runtime persistence behavior; add `appgenerator-change` for generated persistence output |
+| Persistence/data contract | `persistence-change` | add `runtime-change` for runtime persistence behavior; add `appgenerator-change` for generated persistence output |
 | Docs-only | `docs-maintenance` | also read the owning layer rule when contract docs change |
 | Release/changelog | `release-notes` | release-notes rule |
 | Test-only | owning surface skill | use `oss-contribution-review` if the owning surface is unclear |

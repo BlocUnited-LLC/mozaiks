@@ -28,8 +28,9 @@ from mozaiksai.control_plane import (
     AcceptedStagedAppBundleArtifactVersionError,
     accept_staged_refinement_artifact_version,
     get_orchestration_control_harness,
+    register_workspace_snapshot,
 )
-from mozaiksai.control_plane.app_context import get_current_app_context_summary
+from mozaiksai.control_plane.app_context import get_current_app_context_graph, get_current_app_context_summary
 from mozaiksai.control_plane.app_context_override import (
     AppContextPolicyOverrideDecision,
     apply_app_context_policy_override,
@@ -674,6 +675,13 @@ class AppContextRefreshCompleteRequest(BaseModel):
     workflow_context_variables: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AppContextWorkspaceSnapshotRequest(BaseModel):
+    workspace_root: str = Field(..., min_length=1)
+    artifact_key: str = "workspace_snapshot"
+    make_current: bool = True
+    scan_policy: Optional[Dict[str, Any]] = None
+
+
 class AppContextPolicyOverrideRequest(BaseModel):
     request_id: str = Field(..., min_length=1)
     context_version_id: Optional[str] = None
@@ -749,14 +757,70 @@ async def get_studio_app_context_status(
         app_id=resolved_app_id,
         artifact_store=get_artifact_store(),
     )
+    graph_lookup = await get_current_app_context_graph(
+        app_id=resolved_app_id,
+        app_context_summary=summary,
+        artifact_store=get_artifact_store(),
+    )
+    graph = graph_lookup.graph
+    graph_status = {
+        "available": graph is not None,
+        "graph_id": graph.graph_id if graph is not None else None,
+        "stale_status": graph.stale_status.value if graph is not None else None,
+        "graph_hash": graph.graph_hash if graph is not None else None,
+        "indexed_at": graph.indexed_at.isoformat() if graph is not None else None,
+        "node_count": len(graph.nodes) if graph is not None else 0,
+        "edge_count": len(graph.edges) if graph is not None else 0,
+        "source_ref_count": len(graph.source_refs) if graph is not None else 0,
+        "warnings": list(graph_lookup.warnings),
+    }
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
             "app_context_summary": summary.model_dump(mode="json"),
+            "context_graph_status": graph_status,
             "stale_status": summary.stale_status,
-            "warnings": list(summary.warnings),
+            "warnings": [*list(summary.warnings), *list(graph_lookup.warnings)],
             "artifact_refs": [ref.model_dump(mode="json") for ref in summary.artifact_refs],
             "ownership": summary.ownership.model_dump(mode="json"),
+        }
+    )
+
+
+@app.post("/api/studio/apps/{app_id}/context/workspace-snapshot")
+async def create_studio_workspace_snapshot_context(
+    app_id: str,
+    body: AppContextWorkspaceSnapshotRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
+    try:
+        result = await register_workspace_snapshot(
+            app_id=resolved_app_id,
+            workspace_root=body.workspace_root,
+            artifact_store=get_artifact_store(),
+            artifact_key=body.artifact_key,
+            source_workflow="studio_workspace_snapshot",
+            source_chat_id=user_id,
+            scan_policy=body.scan_policy,
+            make_current=body.make_current,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _redact_secret_fields(
+        {
+            "app_id": resolved_app_id,
+            "workspace_snapshot": {
+                "app_bundle_artifact_version_id": result.app_bundle_artifact_version_id,
+                "app_context_version_id": result.app_context_version_id,
+                "app_context_artifact_version_id": result.app_context_artifact_version_id,
+                "graph_artifact_version_id": result.graph_artifact_version_id,
+                "artifact_path": result.artifact_path,
+                "indexed_file_count": result.indexed_file_count,
+                "scan_health": result.scan_health,
+                "health_report": result.health_report,
+                "warnings": result.warnings,
+            },
         }
     )
 

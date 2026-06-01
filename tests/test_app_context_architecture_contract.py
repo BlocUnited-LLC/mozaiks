@@ -60,7 +60,7 @@ def test_app_context_doc_defines_source_of_truth_and_staging_boundaries() -> Non
     assert "the brownfield existing repo remains the source of truth until explicit transfer" in normalized
     assert "Discovery snapshots are evidence, not authority" in normalized
     assert "Staged patches are proposals" in normalized
-    assert "KG/FalkorDB is optional mirror only" in normalized
+    assert "Graph backend mirrors are never source of truth" in normalized
 
 
 def test_app_context_doc_identifies_placeholder_brownfield_concepts_as_not_canonical() -> None:
@@ -78,7 +78,7 @@ def test_app_context_doc_identifies_placeholder_brownfield_concepts_as_not_canon
     assert "module_decomposition_plan" in doc
     assert "workspace_app" in doc
     assert "private sibling discovery shortcut" in normalized
-    assert "hook_workflow_artifacts.py" in doc
+    assert "AppGenerator-local `code_context` package" in doc
 
 
 def test_graph_authority_doc_mentions_app_context_graph_without_runtime_authority() -> None:
@@ -86,9 +86,9 @@ def test_graph_authority_doc_mentions_app_context_graph_without_runtime_authorit
     normalized = _normalized(doc)
 
     assert "AppContextGraph" in doc
-    assert "FalkorDB remains optional mirror only and non-authoritative" in normalized
-    assert "It is derived from authoritative source refs" in normalized
-    assert "must not be used for:" in doc
+    assert "primary intelligence layer" in normalized
+    assert "The in-repo canonical graph snapshot is `AppContextGraph`" in normalized
+    assert "It is not the authority for:" in doc
     assert "request routing" in doc
     assert "workflow execution" in doc
 

@@ -1,0 +1,139 @@
+registry:
+  TaskPlannerAgent: RuntimeTaskBatchPlanOutput
+  TaskWorkerAgent: RuntimeTaskBatchWorkerOutput
+  SynthesisAgent: RuntimeTaskBatchSmokeResult
+
+models:
+  RuntimeTaskBatchWorkUnit:
+    type: model
+    fields:
+      task_id:
+        type: str
+        description: Stable identifier for one independent task batch work unit.
+      kind:
+        type: str
+        description: Canonical work-unit kind.
+      name:
+        type: str
+        description: Human-readable name for the work unit.
+      objective:
+        type: str
+        description: One-sentence objective for the worker.
+      initial_agent:
+        type: str
+        description: Worker agent that should execute this task. Use TaskWorkerAgent.
+      initial_message:
+        type: str
+        description: Scoped instruction passed to the worker agent.
+      owned_paths:
+        type: optional_list
+        items: str
+        description: Canonical app or workflow paths this unit primarily owns.
+      depends_on:
+        type: optional_list
+        items: str
+        description: Optional upstream task ids that must complete first.
+  RuntimeTaskBatchPlan:
+    type: model
+    fields:
+      user_intent:
+        type: str
+        description: Normalized product request being planned.
+      task_batch_reason:
+        type: str
+        description: Why a workflow-local task batch is warranted.
+      requires_task_batch:
+        type: bool
+        description: Whether the request genuinely needs multiple independent work units.
+      max_parallelism:
+        type: int
+        description: Recommended maximum number of concurrent worker asks.
+      work_units:
+        type: list
+        items: RuntimeTaskBatchWorkUnit
+        description: Independent work units to execute through task_batches.yaml.
+  RuntimeTaskBatchPlanOutput:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short confirmation message.
+      RuntimeTaskBatchPlan:
+        type: RuntimeTaskBatchPlan
+  RuntimeTaskBatchWorkerOutput:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short worker completion message.
+      task_id:
+        type: str
+        description: Task id this worker completed.
+      kind:
+        type: str
+        description: Work-unit kind this worker handled.
+      summary:
+        type: str
+        description: One-sentence summary of the worker output.
+      deliverables:
+        type: list
+        items: str
+        description: Concrete deliverables produced for this task.
+      owned_paths:
+        type: optional_list
+        items: str
+        description: Canonical paths covered by this task.
+      code_files:
+        type: optional_list
+        items: CodeFile
+        description: Optional code files emitted by the worker.
+  CodeFile:
+    type: model
+    fields:
+      filename:
+        type: str
+        description: App- or workflow-relative file path.
+      content:
+        type: str
+        description: File content.
+  RuntimeTaskBatchSmokeResult:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: User-facing completion message.
+      result:
+        type: str
+        description: One-sentence summary of whether task batch execution succeeded.
+      user_intent:
+        type: str
+        description: Normalized user intent from the planner.
+      work_unit_count:
+        type: int
+        description: Number of work units executed.
+      task_batch_execution_used:
+        type: bool
+        description: Whether the workflow used the task batch executor.
+      max_parallelism:
+        type: int
+        description: Maximum concurrency declared by task_batches.yaml.
+      executed_task_ids:
+        type: list
+        items: str
+        description: Ordered task ids executed by the task batch executor.
+      executed_kinds:
+        type: list
+        items: str
+        description: Unique work-unit kinds covered by execution.
+      result_context_key:
+        type: str
+        description: Context key containing persisted worker results.
+      all_units_succeeded:
+        type: bool
+        description: Whether every worker completed successfully.
+      failure_count:
+        type: int
+        description: Number of worker failures captured by the executor.
+      sample_summary:
+        type: str
+        description: One worker summary captured from the execution.

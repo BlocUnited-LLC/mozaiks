@@ -10,6 +10,7 @@ import traceback
 import os
 from typing import Dict, Any, Optional, Union, Tuple, List
 from fastapi import WebSocket
+from pydantic import BaseModel
 from pymongo import ReturnDocument
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 from datetime import datetime, timezone
@@ -162,7 +163,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         # Used to apply declarative ui_response triggers without bespoke agents.
         self._derived_context_managers: Dict[str, Any] = {}
 
-        # Background workflow execution (for parallel child chats)
+        # Background workflow execution for workflow sequence runs.
         self._background_tasks: Dict[str, asyncio.Task] = {}
         try:
             max_parallel = int(os.environ.get("MOZAIKS_MAX_PARALLEL_WORKFLOWS", "4"))
@@ -170,7 +171,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             max_parallel = 4
         self._workflow_spawn_semaphore = asyncio.Semaphore(max(1, max_parallel))
 
-        # Usage emission fan-out (measurement only; no billing enforcement).
+        # Usage emission broadcast (measurement only; no billing enforcement).
         try:
             from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 
@@ -1017,6 +1018,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if isinstance(obj, datetime):
                 return obj.isoformat()
 
+            if isinstance(obj, uuid.UUID):
+                return str(obj)
+
             # Guard against deep recursive/cyclic objects from external runtimes.
             if _depth > 12:
                 return self._stringify_unknown(obj)
@@ -1045,6 +1049,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 _seen.add(obj_id)
                 try:
                     return [self._serialize_ag2_events(v, _seen, _depth + 1) for v in list(obj)]
+                finally:
+                    _seen.discard(obj_id)
+
+            if isinstance(obj, BaseModel) and hasattr(obj, "model_dump"):
+                _seen.add(obj_id)
+                try:
+                    return self._serialize_ag2_events(obj.model_dump(), _seen, _depth + 1)
                 finally:
                     _seen.discard(obj_id)
 
@@ -1262,7 +1273,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         })
 
     async def _handle_resume_request(self, chat_id: str, last_client_index: int, websocket) -> None:
-        """Resume protocol aligned with AG2 GroupChat resume semantics.
+        """Resume protocol for persisted AG2 beta workflow runs.
 
         We DO NOT compute sequence diffs via a bespoke diff endpoint anymore.
         Instead we:
@@ -1276,9 +1287,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
              sufficient for replay correctness.
           4. Emit chat.resume_boundary summarizing counts and boundaries.
 
-        This mirrors AG2's requirement that the *messages array* is the source
-        of truth for preparing agents via GroupChatManager.resume, while giving
-        the WebSocket consumer a minimal, deterministic replay mechanism.
+        The persisted messages array is the runtime source of truth for
+        rebuilding agent context, while the WebSocket consumer gets a minimal,
+        deterministic replay mechanism.
         """
         try:
             conn_meta = self.connections.get(chat_id) or {}
@@ -1299,9 +1310,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
             # Use the AG2-aligned resumer so visibility filtering and UI tool replay
             # semantics stay consistent with live events (no leaking hidden agents).
-            from mozaiksai.core.transport.resume_groupchat import GroupChatResumer
+            from mozaiksai.core.transport.resume_run import AgentRunResumer
 
-            resumer = GroupChatResumer()
+            resumer = AgentRunResumer()
             summary = await resumer.handle_resume_request(
                 chat_id=str(chat_id),
                 app_id=str(app_id),

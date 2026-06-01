@@ -53,15 +53,15 @@ _DENYLIST_BASENAMES: frozenset[str] = frozenset({
 _DENYLIST_FULL_PATHS: frozenset[str] = frozenset({
     "ui/route_manifest.json",
     "ui/index.js",
-    "config/database_intent.json",
+    "config/data.json",
 })
 
 # Path prefixes that are always rejected
 _DENYLIST_PREFIXES: tuple[str, ...] = (
-    "config/database_migrations/",
+    "config/data_migrations/",
     "ui/pages/custom/",
-    "backend/integrations/",
-    "backend/routes/",
+    "services/integrations/",
+    "services/routes/",
 )
 
 # Case-insensitive substrings in the path that trigger rejection
@@ -188,7 +188,7 @@ async def resolve_carry_forward_preservation(
 
     - ``context_variables["generated_files"]`` — merged dict (for schema path).
     - ``context_variables["carry_forward_additions"]`` — only the new preserved
-      files (for the MFJ path, merged by generate_and_download).
+      files (merged by generate_and_download with generated task outputs).
     - ``context_variables["carry_forward_report"]`` — full report dict.
 
     Returns ``{"carry_forward_report": {...}}``.  Never raises.
@@ -355,7 +355,7 @@ async def resolve_carry_forward_preservation(
         _cv_set(context_variables, "generated_files", updated_generated)
 
     # Write preservation_additions separately so generate_and_download can merge
-    # them into files collected from agent outputs on the MFJ path.
+    # them into files collected from agent outputs.
     _cv_set(context_variables, "carry_forward_additions", dict(preservation_additions))
     _cv_set(context_variables, "carry_forward_report", report)
     return {"carry_forward_report": report}
@@ -367,3 +367,4 @@ __all__ = [
     "_is_denylist_path",
     "_is_safe_module_id",
 ]
+

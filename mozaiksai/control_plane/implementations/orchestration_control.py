@@ -17,7 +17,7 @@ from mozaiksai.core.artifacts import ArtifactStore
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
-from mozaiksai.control_plane.contracts import CodingWorkerRequest, CodingWorkerResult, HarnessDecision
+from mozaiksai.control_plane.contracts import CodingWorkerRequest, CodingWorkerResult, ContractSurfacePlan, HarnessDecision, SurfacePlanExecutionResult
 from mozaiksai.control_plane.runtime import ControlPlaneCheckpointRuntime
 from mozaiksai.control_plane.invalidation import (
     ArtifactInvalidationService,
@@ -25,6 +25,8 @@ from mozaiksai.control_plane.invalidation import (
 )
 
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
+from .contract_surface_planner import ContractSurfacePlanner, get_contract_surface_planner
+from .surface_regeneration_worker import SurfaceRegenerationWorker, get_surface_regeneration_worker
 from .refinement_router import (
     RefinementRequest,
     RefinementRoutingDecision,
@@ -50,6 +52,8 @@ class OrchestrationControlHarness:
         coding_worker: Optional[ScopedRefinementCodingWorker] = None,
         decision_policy: Optional[FirstPartyHarnessDecisionPolicy] = None,
         scope_proposer: Optional[ArtifactScopeProposer] = None,
+        contract_surface_planner: Optional[ContractSurfacePlanner] = None,
+        surface_regeneration_worker: Optional[SurfaceRegenerationWorker] = None,
         artifact_invalidation: Optional[ArtifactInvalidationService] = None,
         config_loader: Any = load_control_plane_config,
     ) -> None:
@@ -64,6 +68,12 @@ class OrchestrationControlHarness:
             decision_policy or self._get_checkpoint_handler("decision_requested") or get_harness_decision_policy()
         )
         self._scope_proposer = scope_proposer or self._get_checkpoint_handler("scope_requested") or get_scope_proposer()
+        self._contract_surface_planner = (
+            contract_surface_planner
+            or self._get_checkpoint_handler("contract_surface_requested")
+            or get_contract_surface_planner()
+        )
+        self._surface_regeneration_worker = surface_regeneration_worker or get_surface_regeneration_worker()
         self._artifact_invalidation = artifact_invalidation or get_artifact_invalidation_service()
         self._config_loader = config_loader
 
@@ -86,6 +96,10 @@ class OrchestrationControlHarness:
 
     def coding_enabled(self) -> bool:
         return bool(self.current_config().coding_enabled())
+
+    def contract_surface_enabled(self) -> bool:
+        config = self.current_config()
+        return bool(config.enabled and config.contract_surface.enabled)
 
     async def resolve(self, trigger: TriggerInput) -> Optional[TriggerRoutingContribution]:
         """Resolve builder-session routing contributions for a trigger.
@@ -129,6 +143,70 @@ class OrchestrationControlHarness:
         if not self.enabled():
             raise RuntimeError("Control-plane harness is disabled in app/config/ai.json")
         return await self._refinement_resolver.route(request)
+
+    async def prepare_contract_surface_request(
+        self,
+        *,
+        refinement_request: RefinementRequest,
+        routing_decision: RefinementRoutingDecision,
+        context_graph_catalog: Optional[dict[str, Any]] = None,
+    ) -> tuple[Optional["ContractSurfacePlan"], "HarnessDecision"]:
+        """Run contract surface planning for feature/design changes on app_bundle artifacts.
+
+        This is the contract-aware refinement path:
+        - Eligible: feature or design change class on app_bundle or workflow_bundle
+        - The planner identifies which contract surfaces are affected and in what order
+        - The decision policy shapes this into a targeted_regeneration decision
+        - Falls back to workflow_reentry when confidence is low or scope is too broad
+
+        Returns (plan, decision). plan is None when the fallback path is taken.
+        """
+        from mozaiksai.control_plane.contracts import ContractSurfacePlan, HarnessDecision
+
+        if not self.contract_surface_enabled():
+            raise RuntimeError("Contract surface planning is disabled in app/config/ai.json")
+
+        plan: ContractSurfacePlan = await self._contract_surface_planner.propose(
+            refinement_request=refinement_request,
+            routing_decision=routing_decision,
+            context_graph_catalog=context_graph_catalog,
+        )
+
+        decision: HarnessDecision = self._decision_policy.for_contract_surface_plan(
+            routing_decision=routing_decision,
+            plan=plan,
+        )
+        return (None if plan.fallback_to_workflow else plan), decision
+
+    async def execute_surface_plan(
+        self,
+        *,
+        plan: ContractSurfacePlan,
+        refinement_request: RefinementRequest,
+        routing_decision: RefinementRoutingDecision,
+        workspace_files: Optional[dict[str, Any]] = None,
+    ) -> SurfacePlanExecutionResult:
+        """Execute a ContractSurfacePlan surface by surface.
+
+        Each surface in the plan is executed in dependency order (data_schema
+        before module_action, module_action before page_binding, etc.).
+        File outputs accumulate across surfaces so later surfaces see the
+        updated content from earlier ones.
+
+        workspace_files supplies the current content of workspace files keyed
+        by relative path. Absent paths are treated as new files (empty string).
+
+        Raises RuntimeError when contract_surface is disabled.
+        """
+        if not self.contract_surface_enabled():
+            raise RuntimeError("Contract surface planning is disabled in app/config/ai.json")
+
+        return await self._surface_regeneration_worker.execute_plan(
+            plan=plan,
+            refinement_request=refinement_request,
+            routing_decision=routing_decision,
+            workspace_files={str(k): str(v) for k, v in (workspace_files or {}).items()},
+        )
 
     def build_harness_decision(self, routing_decision: RefinementRoutingDecision) -> HarnessDecision:
         return self._decision_policy.for_workflow_route(routing_decision)

@@ -18,8 +18,8 @@ surfaces.
 
 Recommended generated file ownership for split backends:
 
-- `backend/admin_config.py` — returns the canonical `mozaiks.admin.app_backend.v1` payload as a plain dict (validated at codegen time by AppGenerator)
-- `backend/routes/admin.py` — exposes `GET /api/admin/config` as a self-contained FastAPI `APIRouter`
+- `app/services/admin_config.py` — returns the canonical `mozaiks.admin.app_backend.v1` payload as a plain dict (validated at codegen time by AppGenerator)
+- `app/services/routes/admin.py` — exposes `GET /api/admin/config` as a self-contained FastAPI `APIRouter`
 
 For AppGenerator, the typed source of truth is `ControllerOutput.app_backend_admin_config`.
 The codegen step validates the config at generation time and materialises these two files
@@ -28,7 +28,7 @@ from the typed object — no runtime Mozaiks import is required in the generated
 Generated example:
 
 ```python
-# backend/admin_config.py
+# app/services/admin_config.py
 _ADMIN_CONFIG = {
     "schema_version": "mozaiks.admin.app_backend.v1",
     "panels": [
@@ -49,11 +49,11 @@ def get_admin_config():
 ```
 
 ```python
-# backend/routes/admin.py
+# app/services/routes/admin.py
 from fastapi import APIRouter, HTTPException
 from inspect import isawaitable
 
-from backend.admin_config import get_admin_config
+from app.services.admin_config import get_admin_config
 
 router = APIRouter(prefix="/api/admin", tags=["app-backend-admin"])
 
@@ -203,3 +203,4 @@ This contract does not:
 - replace `app/app.json` `admins`
 - replace `modules/{module}/contracts/admin.yaml`
 - allow app backends to generate standalone admin routes or React shells
+

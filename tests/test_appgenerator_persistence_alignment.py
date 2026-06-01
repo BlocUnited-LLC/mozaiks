@@ -26,9 +26,9 @@ def _agent_block(agent_name: str) -> str:
 def test_database_agent_uses_intent_artifacts_not_live_database_tools() -> None:
     block = _agent_block("DatabaseAgent")
 
-    assert "database_intent_bundle" in block
-    assert "config/database_intent.json" in block
-    assert "config/database_migrations/{migration_id}.json" in block
+    assert "data_contract" in block
+    assert "config/data.json" in block
+    assert "config/data_migrations/{migration_id}.json" in block
     assert "pending_schema_migration" in block
 
     for tool_name in (
@@ -71,8 +71,8 @@ def test_structured_outputs_align_with_persistence_contract() -> None:
 
     assert "persistence_contract" in task_type_values
     assert "pending_schema_migration" in database_output
-    assert "database_intent_json" in database_file["kind"]["values"]
-    assert "database_migration_json" in database_file["kind"]["values"]
+    assert "data_contract_json" in database_file["kind"]["values"]
+    assert "data_migration_json" in database_file["kind"]["values"]
     assert "backend/schemas.py" in model_file["path"]["description"]
 
     assert "backend/models/" not in text
@@ -91,8 +91,8 @@ def test_file_contracts_define_canonical_persistence_and_ban_removed_paths() -> 
     persistence = data["task_contracts"]["persistence_contract"]
     constraints = "\n".join(persistence["hard_constraints"])
 
-    assert persistence["required_outputs"] == ["config/database_intent.json"]
-    assert "config/database_migrations/{migration_id}.json" in persistence["optional_outputs"]
+    assert persistence["required_outputs"] == ["config/data.json"]
+    assert "config/data_migrations/{migration_id}.json" in persistence["optional_outputs"]
     assert "modules/{module_id}/backend/repo.py" in persistence["downstream_python_defaults"]
     assert "modules/{module_id}/backend/schemas.py" in persistence["downstream_python_defaults"]
     assert "modules/{module_id}/backend/policy.py" in persistence["downstream_python_defaults"]
@@ -143,14 +143,14 @@ def test_service_agent_repo_example_uses_ctx_persistence() -> None:
 
     assert 'getattr(context, \\"persistence\\", None)' in block
     assert 'persistence.collection(\\"task_manager\\", \\"tasks\\")' in block
-    assert "database_intent_bundle.surfaces[*].collections[*]" in block
+    assert "data_contract.surfaces[*].collections[*]" in block
     assert 'getattr(context, \\"db\\", None)' not in block
     assert "get_mongo_client" in block
 
 
 def _generated_persistent_module_fixture() -> tuple[dict, dict[str, str]]:
     intent = {
-        "schema_version": "mozaiks.database_intent.v1",
+        "schema_version": "mozaiks.data_contract.v1",
         "surfaces": [
             {
                 "surface_id": "projects",
@@ -233,7 +233,7 @@ def test_generated_repo_fixture_uses_ctx_persistence_only() -> None:
     assert "get_mongo_client" not in repo
 
 
-def test_generated_repo_fixture_matches_database_intent_collection() -> None:
+def test_generated_repo_fixture_matches_data_contract_collection() -> None:
     intent, files = _generated_persistent_module_fixture()
     repo = files["modules/projects/backend/repo.py"]
 
@@ -296,16 +296,16 @@ def test_schema_save_and_download_paths_are_canonical() -> None:
     save_schema = _read(APPGEN / "tools" / "save_app_schema.py")
     generate_download = _read(APPGEN / "tools" / "generate_and_download.py")
 
-    assert '"config" / "database_intent.json"' in save_schema
-    assert "config/database_intent.json" in save_schema
-    assert "config/database_migrations" in generate_download
+    assert '"config" / "data.json"' in save_schema
+    assert "config/data.json" in save_schema
+    assert "config/data_migrations" in generate_download
 
 
 def test_docs_state_ctx_persistence_is_runtime_supported() -> None:
     docs = "\n".join(
         _read(path)
         for path in (
-            ROOT / "docs" / "architecture" / "builder" / "database-intent-and-revision-contract.md",
+            ROOT / "docs" / "architecture" / "builder" / "data-contract-and-revision-contract.md",
             ROOT / "docs" / "architecture" / "modules-systems" / "module-system.md",
             ROOT / "docs" / "architecture" / "app" / "platform-authoring.md",
             ROOT / "docs" / "architecture" / "foundations" / "events-and-data" / "persistence-and-artifact-storage.md",
@@ -319,8 +319,8 @@ def test_docs_state_ctx_persistence_is_runtime_supported() -> None:
     assert "`ctx.db` remains absent and non-canonical" in docs
     assert "must not require `ctx.db`" in docs
     assert "backend/schemas.py" in docs
-    assert "config/database_intent.json" in docs
-    assert "config/database_migrations/{migration_id}.json" in docs
+    assert "config/data.json" in docs
+    assert "config/data_migrations/{migration_id}.json" in docs
 
 
 def test_add_module_skill_repo_example_uses_ctx_persistence() -> None:
@@ -331,9 +331,10 @@ def test_add_module_skill_repo_example_uses_ctx_persistence() -> None:
 
     assert 'getattr(ctx, "persistence", None)' in repo_section
     assert 'persistence.collection("{name}", "{name}")' in repo_section
-    assert "app/config/database_intent.json" in repo_section
+    assert "app/config/data.json" in repo_section
     assert "ctx.db" in repo_section
     assert "Do not use" in repo_section
     assert "get_mongo_client" in repo_section
     assert "from mozaiksai.core.core_config import get_mongo_client" not in repo_section
     assert 'getattr(ctx, "db", None)' not in repo_section
+

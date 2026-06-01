@@ -14,8 +14,8 @@ from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import (
     apply_database_indexes,
-    apply_database_migrations,
-    load_database_migrations,
+    apply_data_migrations,
+    load_data_migrations,
 )
 
 
@@ -272,7 +272,7 @@ def _write_generated_persistence_app(root: Path) -> None:
         },
     )
     _write_json(
-        root / "config" / "database_intent.json",
+        root / "config" / "data.json",
         {
             "version": "1",
             "app_id": "smoke_app",
@@ -318,7 +318,7 @@ def _write_generated_persistence_app(root: Path) -> None:
         },
     )
     _write_json(
-        root / "config" / "database_migrations" / "001_projects_tasks_indexes.json",
+        root / "config" / "data_migrations" / "001_projects_tasks_indexes.json",
         {
             "migration_id": "001_projects_tasks_indexes",
             "version": "1",
@@ -527,8 +527,8 @@ def test_fixture_app_structure_is_canonical(tmp_path: Path) -> None:
     _write_generated_persistence_app(tmp_path)
 
     assert (tmp_path / "app.json").exists()
-    assert (tmp_path / "config" / "database_intent.json").exists()
-    assert (tmp_path / "config" / "database_migrations" / "001_projects_tasks_indexes.json").exists()
+    assert (tmp_path / "config" / "data.json").exists()
+    assert (tmp_path / "config" / "data_migrations" / "001_projects_tasks_indexes.json").exists()
     for module_id in ("projects", "tasks"):
         module_root = tmp_path / "modules" / module_id
         assert (module_root / "module.yaml").exists()
@@ -541,14 +541,14 @@ def test_fixture_app_structure_is_canonical(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_app_loader_loads_database_intent_and_modules(tmp_path: Path) -> None:
+async def test_app_loader_loads_data_contract_and_modules(tmp_path: Path) -> None:
     _write_generated_persistence_app(tmp_path)
 
     result = await AppLoader.load(str(tmp_path))
 
-    assert result.database_intent is not None
-    assert ("projects", "projects") in result.database_entities_by_key
-    assert ("tasks", "tasks") in result.database_entities_by_key
+    assert result.data_contract is not None
+    assert ("projects", "projects") in result.data_entities_by_key
+    assert ("tasks", "tasks") in result.data_entities_by_key
     assert {module.name for module in result.modules} == {"projects", "tasks"}
 
 
@@ -571,10 +571,10 @@ def test_generated_fixture_code_uses_only_canonical_persistence(tmp_path: Path) 
         assert f'persistence.collection("{module_id}", "{module_id}")' in repo_text
 
 
-def test_database_intent_matches_repo_collection_calls_and_is_additive(tmp_path: Path) -> None:
+def test_data_contract_matches_repo_collection_calls_and_is_additive(tmp_path: Path) -> None:
     _write_generated_persistence_app(tmp_path)
-    intent = json.loads((tmp_path / "config" / "database_intent.json").read_text(encoding="utf-8"))
-    migrations = load_database_migrations(tmp_path)
+    intent = json.loads((tmp_path / "config" / "data.json").read_text(encoding="utf-8"))
+    migrations = load_data_migrations(tmp_path)
 
     intent_keys = {
         (collection["module_id"], collection.get("entity_name") or collection["name"])
@@ -599,12 +599,12 @@ async def test_indexes_and_migrations_apply_with_fake_persistence(tmp_path: Path
     persistence = FakePersistenceContext(app_id="smoke_app")
 
     applied_indexes = await apply_database_indexes(
-        load_result.database_intent,
+        load_result.data_contract,
         app_id="smoke_app",
         persistence=persistence,
     )
-    migrations = load_database_migrations(tmp_path)
-    applied_migrations = await apply_database_migrations(
+    migrations = load_data_migrations(tmp_path)
+    applied_migrations = await apply_data_migrations(
         app_id="smoke_app",
         migrations=migrations,
         persistence=persistence,

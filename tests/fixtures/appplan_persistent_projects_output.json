@@ -205,7 +205,7 @@
       "admin"
     ],
     "auth_strategy": "role-based",
-    "backend_scope": [
+    "service_scope": [
       "projects",
       "tasks"
     ],
@@ -232,7 +232,7 @@
     "external_integrations": [],
     "event_flows": [],
     "agent_backend_required": false,
-    "database_intent_bundle": {
+    "data_contract": {
       "version": "1",
       "surfaces": [
         {
@@ -350,15 +350,15 @@
         "surface_kind": null,
         "execution_target": "AppGenerator",
         "initial_agent": "DatabaseAgent",
-        "description": "Stage database intent and additive index migrations for projects and tasks.",
-        "initial_message": "Create database_intent_bundle entries for projects/projects and tasks/tasks. Stage config/database_intent.json and optional config/database_migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
+        "description": "Stage data contract and additive index migrations for projects and tasks.",
+        "initial_message": "Create data_contract entries for projects/projects and tasks/tasks. Stage config/data.json and optional config/data_migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
         "owned_paths": [
-          "config/database_intent.json",
-          "config/database_migrations/001_projects_tasks_indexes.json"
+          "config/data.json",
+          "config/data_migrations/001_projects_tasks_indexes.json"
         ],
         "depends_on": [],
         "acceptance_criteria": [
-          "database_intent declares projects/projects and tasks/tasks"
+          "data_contract declares projects/projects and tasks/tasks"
         ]
       },
       {
@@ -369,23 +369,63 @@
         "surface_kind": "module",
         "execution_target": "AppGenerator",
         "initial_agent": "ConfigMiddlewareAgent",
-        "description": "Generate the projects module contract and declared backend layers.",
-        "initial_message": "Generate projects module.yaml and backend stubs. repo.py must use ctx.persistence.collection(\"projects\", \"projects\") and align with database_intent_bundle. service.py calls repo.py. handler.py does not touch persistence.",
+        "description": "Generate the projects module contract YAML.",
+        "initial_message": "Generate projects module.yaml and contracts/events.yaml. Backend Python files are owned by separate tasks.",
         "owned_paths": [
           "modules/projects/module.yaml",
-          "modules/projects/contracts/events.yaml",
-          "modules/projects/backend/handler.py",
-          "modules/projects/backend/service.py",
-          "modules/projects/backend/repo.py",
-          "modules/projects/backend/policy.py",
-          "modules/projects/backend/schemas.py"
+          "modules/projects/contracts/events.yaml"
         ],
         "depends_on": [
           "task_projects_persistence"
         ],
         "acceptance_criteria": [
-          "repo.py uses ctx.persistence",
+          "module.yaml declares projects module identity",
+          "contracts/events.yaml is present"
+        ]
+      },
+      {
+        "task_id": "task_projects_models",
+        "task_type": "data_models",
+        "capability_pack_id": "projects",
+        "surface_id": "projects",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ModelAgent",
+        "description": "Generate typed data shapes for the projects module.",
+        "initial_message": "Generate modules/projects/backend/schemas.py with typed request/response and document shapes. No persistence logic — only pure shape definitions.",
+        "owned_paths": [
+          "modules/projects/backend/schemas.py"
+        ],
+        "depends_on": [
+          "task_projects_module"
+        ],
+        "acceptance_criteria": [
           "schemas.py is canonical",
+          "no models.py or models/ directory"
+        ]
+      },
+      {
+        "task_id": "task_projects_services",
+        "task_type": "business_services",
+        "capability_pack_id": "projects",
+        "surface_id": "projects",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ServiceAgent",
+        "description": "Generate the projects module backend service layer.",
+        "initial_message": "Generate handler.py, service.py, repo.py, and policy.py for the projects module. repo.py must use ctx.persistence.collection(\"projects\", \"projects\"). service.py calls repo.py. handler.py stays thin dispatch only.",
+        "owned_paths": [
+          "modules/projects/backend/handler.py",
+          "modules/projects/backend/service.py",
+          "modules/projects/backend/repo.py",
+          "modules/projects/backend/policy.py"
+        ],
+        "depends_on": [
+          "task_projects_models"
+        ],
+        "acceptance_criteria": [
+          "repo.py uses ctx.persistence",
+          "handler.py does not touch persistence",
           "removed model artifacts are absent"
         ]
       },
@@ -397,23 +437,63 @@
         "surface_kind": "module",
         "execution_target": "AppGenerator",
         "initial_agent": "ConfigMiddlewareAgent",
-        "description": "Generate the tasks module contract and declared backend layers.",
-        "initial_message": "Generate tasks module.yaml and backend stubs. repo.py must use ctx.persistence.collection(\"tasks\", \"tasks\") and align with database_intent_bundle. service.py calls repo.py. handler.py does not touch persistence.",
+        "description": "Generate the tasks module contract YAML.",
+        "initial_message": "Generate tasks module.yaml and contracts/events.yaml. Backend Python files are owned by separate tasks.",
         "owned_paths": [
           "modules/tasks/module.yaml",
-          "modules/tasks/contracts/events.yaml",
-          "modules/tasks/backend/handler.py",
-          "modules/tasks/backend/service.py",
-          "modules/tasks/backend/repo.py",
-          "modules/tasks/backend/policy.py",
-          "modules/tasks/backend/schemas.py"
+          "modules/tasks/contracts/events.yaml"
         ],
         "depends_on": [
           "task_projects_persistence"
         ],
         "acceptance_criteria": [
-          "repo.py uses ctx.persistence",
+          "module.yaml declares tasks module identity",
+          "contracts/events.yaml is present"
+        ]
+      },
+      {
+        "task_id": "task_tasks_models",
+        "task_type": "data_models",
+        "capability_pack_id": "tasks",
+        "surface_id": "tasks",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ModelAgent",
+        "description": "Generate typed data shapes for the tasks module.",
+        "initial_message": "Generate modules/tasks/backend/schemas.py with typed request/response and document shapes. No persistence logic — only pure shape definitions.",
+        "owned_paths": [
+          "modules/tasks/backend/schemas.py"
+        ],
+        "depends_on": [
+          "task_tasks_module"
+        ],
+        "acceptance_criteria": [
           "schemas.py is canonical",
+          "no models.py or models/ directory"
+        ]
+      },
+      {
+        "task_id": "task_tasks_services",
+        "task_type": "business_services",
+        "capability_pack_id": "tasks",
+        "surface_id": "tasks",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ServiceAgent",
+        "description": "Generate the tasks module backend service layer.",
+        "initial_message": "Generate handler.py, service.py, repo.py, and policy.py for the tasks module. repo.py must use ctx.persistence.collection(\"tasks\", \"tasks\"). service.py calls repo.py. handler.py stays thin dispatch only.",
+        "owned_paths": [
+          "modules/tasks/backend/handler.py",
+          "modules/tasks/backend/service.py",
+          "modules/tasks/backend/repo.py",
+          "modules/tasks/backend/policy.py"
+        ],
+        "depends_on": [
+          "task_tasks_models"
+        ],
+        "acceptance_criteria": [
+          "repo.py uses ctx.persistence",
+          "handler.py does not touch persistence",
           "removed model artifacts are absent"
         ]
       },
@@ -432,7 +512,7 @@
           "ui/pages/projects.yaml"
         ],
         "depends_on": [
-          "task_projects_module"
+          "task_projects_services"
         ],
         "acceptance_criteria": [
           "page endpoints bind to app-owned modules",
@@ -454,7 +534,7 @@
           "ui/pages/tasks.yaml"
         ],
         "depends_on": [
-          "task_tasks_module"
+          "task_tasks_services"
         ],
         "acceptance_criteria": [
           "page endpoints bind to app-owned modules",
@@ -465,7 +545,11 @@
     "generation_order": [
       "task_projects_persistence",
       "task_projects_module",
+      "task_projects_models",
+      "task_projects_services",
       "task_tasks_module",
+      "task_tasks_models",
+      "task_tasks_services",
       "task_project_pages",
       "task_task_pages"
     ]

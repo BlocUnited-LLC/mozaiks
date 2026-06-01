@@ -5,10 +5,10 @@
 # When AG2 ships bidirectional streaming or a new engine is added,
 # ONLY this file (and orchestration_patterns.py) change.
 #
-# Consumers (transport, pack coordinator, journey orchestrator) interact
+# Consumers (transport, runtime routes, workflow callers) interact
 # exclusively through the OrchestrationPort protocol and never import AG2.
 # ==============================================================================
-"""AG2OrchestrationAdapter — wraps AG2 group-chat execution behind OrchestrationPort.
+"""AG2OrchestrationAdapter — wraps the autogen.beta Agent loop behind OrchestrationPort.
 
 Responsibilities:
     - run()    → delegates to orchestration_patterns.run_workflow_orchestration()
@@ -16,10 +16,10 @@ Responsibilities:
     - cancel() → delegates to SimpleTransport.pause_background_workflow()
     - capabilities() → reports engine version and supported features
 
-This adapter does NOT own fan-out/fan-in logic.  That belongs to
-WorkflowPackCoordinator, which reacts to events emitted by the adapter
-(runtime.agent_output_validated, runtime.process_completed) through the
-UnifiedEventDispatcher.
+This adapter does not own workflow-specific task planning. AG2 beta provides the
+agent and network execution substrate; workflow-local task batches are declared
+beside workflow YAML and executed by runtime code that calls agents as async
+functions.
 
 Architecture (Layer 1.5):
 
@@ -39,8 +39,8 @@ Architecture (Layer 1.5):
                                          │ emits events
                           ┌──────────────▼──────────────┐
                           │ UnifiedEventDispatcher       │
-                          │  ├─ PackCoordinator (fan-out)│
-                          │  ├─ JourneyOrchestrator      │
+                          │  ├─ Task batch observers     │
+                          │  ├─ Workflow sequence hooks  │
                           │  └─ AutoToolHandler          │
                           └─────────────────────────────┘
 """
@@ -93,10 +93,10 @@ class AG2OrchestrationAdapter:
         """Start a workflow orchestration.
 
         Delegates to ``orchestration_patterns.run_workflow_orchestration()``
-        which builds the AG2 pattern, runs the GroupChat, and emits events
-        through the dispatcher.
+        which creates beta Agents, runs the compiled AG2 Network transition
+        graph, and streams events through the transport.
 
-        The function is long-running (blocks until AG2 finishes or hands off).
+        The function is long-running (blocks until the loop finishes or pauses).
         Callers should wrap in ``asyncio.create_task()`` when fire-and-forget
         semantics are desired (e.g. ``_run_workflow_background``).
         """
@@ -159,7 +159,7 @@ class AG2OrchestrationAdapter:
         be available in the next agent's ``context_variables`` (via persistence).
         """
         try:
-            # If injected_context is provided (e.g. merged fan-in results),
+            # If injected_context is provided (e.g. task batch results),
             # persist it BEFORE resuming so the next agent sees it.
             if request.injected_context:
                 await self._inject_context_before_resume(request)
@@ -244,10 +244,11 @@ class AG2OrchestrationAdapter:
             "version": self._version,
             "supports_pause": True,
             "supports_resume": True,
-            "supports_fan_out": True,
+            "supports_task_batches": True,
             "supports_cancel": True,
             "supports_bidirectional_stream": False,  # ← flips when AG2 ships it
             "supports_structured_outputs": True,
+            "supports_network_transition_graph": True,
         }
 
     # ------------------------------------------------------------------
@@ -284,10 +285,10 @@ class AG2OrchestrationAdapter:
         )
 
     async def _inject_context_before_resume(self, request: ResumeRequest) -> None:
-        """Persist injected context (e.g. merged fan-in results) into the chat session.
+        """Persist injected context into the chat session before resume.
 
         This ensures the next agent's ``update_agent_state`` hook can read the
-        merged child outputs from ``context_variables``.
+        injected outputs from ``context_variables``.
         """
         if not request.injected_context:
             return

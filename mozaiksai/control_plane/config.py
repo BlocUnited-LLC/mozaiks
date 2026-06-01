@@ -54,6 +54,7 @@ class ControlPlaneConfig(BaseModel):
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
+    contract_surface: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
 
     @field_validator("llm_profiles", mode="before")
     @classmethod

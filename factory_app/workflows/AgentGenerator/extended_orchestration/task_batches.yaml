@@ -1,0 +1,30 @@
+version: 1
+batches:
+  - id: workflow_generation_tasks
+    trigger_agent: PackBuildCoordinator
+    source:
+      kind: context_variable
+      path: workflows_spec
+      task_model: WorkflowInPack
+    worker:
+      mode: ag2_agent
+      agent_field: initial_agent
+      prompt_field: initial_message
+      context_fields:
+        - concept_overview
+        - design_surface_map
+        - backend_design_document
+        - experience_spec_document
+        - pack_name
+        - is_multi_workflow
+    execution:
+      concurrency: 4
+      dependency_field: depends_on
+      failure_policy: fail_batch
+      retry_limit: 1
+      timeout_seconds: 300
+    result:
+      context_key: workflow_bundle_results
+      status_key: workflow_bundle_status
+      merge_strategy: collect_task_outputs
+      require_owned_paths: false

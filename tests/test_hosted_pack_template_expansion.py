@@ -35,7 +35,7 @@ _TOOLS_DIR = WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _PACKS_ROOT_ENV = os.getenv("MOZAIKS_HOSTED_PACKS_ROOT", "").strip()
 _WALLET_PACKS_ROOT = Path(_PACKS_ROOT_ENV).expanduser().resolve() if _PACKS_ROOT_ENV else None
 _WALLET_TEMPLATE_PATH = (
-    _WALLET_PACKS_ROOT / "wallet" / "backend_templates" / "wallet_client.py"
+    _WALLET_PACKS_ROOT / "wallet" / "service_templates" / "wallet_client.py"
     if _WALLET_PACKS_ROOT
     else None
 )
@@ -84,12 +84,12 @@ def pack_root(tmp_path: Path) -> Path:
 
         {tmp_path}/
           wallet/
-            manifest.yaml   ← backend_templates: [backend_templates/wallet_client.py]
-            backend_templates/
+            manifest.yaml   ← service_templates: [service_templates/wallet_client.py]
+            service_templates/
               wallet_client.py  ← inactive template content
     """
     wallet_dir = tmp_path / "wallet"
-    tpl_dir = wallet_dir / "backend_templates"
+    tpl_dir = wallet_dir / "service_templates"
     tpl_dir.mkdir(parents=True)
 
     manifest = {
@@ -101,8 +101,8 @@ def pack_root(tmp_path: Path) -> Path:
             "status": "active",
             "capability_source": "hosted_pack",
         },
-        "backend_templates": [
-            "backend_templates/wallet_client.py"
+        "service_templates": [
+            "service_templates/wallet_client.py"
         ],
     }
     (wallet_dir / "manifest.yaml").write_text(
@@ -135,7 +135,7 @@ def wallet_adapter_task() -> dict[str, Any]:
         "capability_pack_id": "wallet",
         "surface_kind": "external_integration",
         "initial_agent": "ControllerAgent",
-        "owned_paths": ["backend/integrations/wallet_client.py"],
+        "owned_paths": ["services/integrations/wallet_client.py"],
     }
 
 
@@ -183,7 +183,7 @@ class TestTemplateResolution:
             pack_sources_from, [wallet_adapter_task]
         )
         assert len(result) == 1
-        assert result[0]["filename"] == "backend/integrations/wallet_client.py"
+        assert result[0]["filename"] == "services/integrations/wallet_client.py"
         assert result[0]["content"].strip()
 
     def test_resolved_filename_is_exact_owned_path(
@@ -192,7 +192,7 @@ class TestTemplateResolution:
         result = resolver.resolve_hosted_pack_templates(
             pack_sources_from, [wallet_adapter_task]
         )
-        assert result[0]["filename"] == "backend/integrations/wallet_client.py"
+        assert result[0]["filename"] == "services/integrations/wallet_client.py"
 
     def test_template_content_is_nonempty(
         self, resolver, pack_sources_from, wallet_adapter_task
@@ -226,7 +226,7 @@ class TestRealWalletTemplateContent:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "wallet",
-            "owned_paths": ["backend/integrations/wallet_client.py"],
+            "owned_paths": ["services/integrations/wallet_client.py"],
         }
         result = resolver.resolve_hosted_pack_templates(pack_sources, [task])
         assert len(result) == 1
@@ -270,16 +270,16 @@ class TestMissingTemplate:
         wallet_dir.mkdir()
         manifest = {
             "pack": {"id": "wallet", "status": "active"},
-            "backend_templates": ["backend_templates/wallet_client.py"],
+            "service_templates": ["service_templates/wallet_client.py"],
         }
         (wallet_dir / "manifest.yaml").write_text(yaml.dump(manifest))
-        # No backend_templates/ directory — file is missing
+        # No service_templates/ directory — file is missing
 
         pack_sources = [{"id": "x", "kind": "filesystem", "path": str(tmp_path)}]
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "wallet",
-            "owned_paths": ["backend/integrations/wallet_client.py"],
+            "owned_paths": ["services/integrations/wallet_client.py"],
         }
         with pytest.raises(resolver.HostedPackTemplateError):
             resolver.resolve_hosted_pack_templates(pack_sources, [task])
@@ -290,7 +290,7 @@ class TestMissingTemplate:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "wallet",
-            "owned_paths": ["backend/integrations/wallet_client.py"],
+            "owned_paths": ["services/integrations/wallet_client.py"],
         }
         with pytest.raises(resolver.HostedPackTemplateError, match="manifest"):
             resolver.resolve_hosted_pack_templates(pack_sources, [task])
@@ -302,7 +302,7 @@ class TestMissingTemplate:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "wallet",
-            "owned_paths": ["backend/integrations/nonexistent_client.py"],
+            "owned_paths": ["services/integrations/nonexistent_client.py"],
         }
         with pytest.raises(resolver.HostedPackTemplateError):
             resolver.resolve_hosted_pack_templates(pack_sources_from, [task])
@@ -315,11 +315,11 @@ class TestMissingTemplate:
 class TestInactivePack:
     def test_inactive_pack_not_expanded(self, resolver, tmp_path):
         wallet_dir = tmp_path / "mozaikspay"
-        tpl_dir = wallet_dir / "backend_templates"
+        tpl_dir = wallet_dir / "service_templates"
         tpl_dir.mkdir(parents=True)
         manifest = {
             "pack": {"id": "mozaikspay", "status": "inactive"},
-            "backend_templates": ["backend_templates/mozaikspay_client.py"],
+            "service_templates": ["service_templates/mozaikspay_client.py"],
         }
         (wallet_dir / "manifest.yaml").write_text(yaml.dump(manifest))
         (tpl_dir / "mozaikspay_client.py").write_text("# inactive")
@@ -328,7 +328,7 @@ class TestInactivePack:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "mozaikspay",
-            "owned_paths": ["backend/integrations/mozaikspay_client.py"],
+            "owned_paths": ["services/integrations/mozaikspay_client.py"],
         }
         result = resolver.resolve_hosted_pack_templates(pack_sources, [task])
         assert result == [], "Inactive pack must not produce template files"
@@ -343,7 +343,7 @@ class TestPathTraversalPrevention:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "../evil",
-            "owned_paths": ["backend/integrations/evil_client.py"],
+            "owned_paths": ["services/integrations/evil_client.py"],
         }
         with pytest.raises(resolver.HostedPackTemplateError, match="Unsafe pack_id"):
             resolver.resolve_hosted_pack_templates(pack_sources_from, [task])
@@ -352,7 +352,7 @@ class TestPathTraversalPrevention:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "..\\evil",
-            "owned_paths": ["backend/integrations/evil_client.py"],
+            "owned_paths": ["services/integrations/evil_client.py"],
         }
         with pytest.raises(resolver.HostedPackTemplateError, match="Unsafe pack_id"):
             resolver.resolve_hosted_pack_templates(pack_sources_from, [task])
@@ -363,7 +363,7 @@ class TestPathTraversalPrevention:
         manifest = {
             "pack": {"id": "wallet", "status": "active"},
             # Attempt to escape pack directory via template path
-            "backend_templates": ["../../secret.py"],
+            "service_templates": ["../../secret.py"],
         }
         (wallet_dir / "manifest.yaml").write_text(yaml.dump(manifest))
 
@@ -371,7 +371,7 @@ class TestPathTraversalPrevention:
         task = {
             "task_type": "api_surface",
             "capability_pack_id": "wallet",
-            "owned_paths": ["backend/integrations/secret.py"],
+            "owned_paths": ["services/integrations/secret.py"],
         }
         with pytest.raises(resolver.HostedPackTemplateError, match="traversal|manifest|matching"):
             resolver.resolve_hosted_pack_templates(pack_sources, [task])
@@ -476,7 +476,7 @@ class TestAdapterTaskValidationStillPasses:
                 "task_type": "api_surface",
                 "capability_pack_id": "wallet",
                 "initial_agent": "ControllerAgent",
-                "owned_paths": ["backend/integrations/wallet_client.py"],
+                "owned_paths": ["services/integrations/wallet_client.py"],
             }
         ]
         hosted_pack_ids: frozenset = frozenset({"wallet"})

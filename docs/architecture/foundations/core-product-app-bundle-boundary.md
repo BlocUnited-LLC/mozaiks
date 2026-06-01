@@ -56,7 +56,7 @@ Owns agent-native semantics.
 AG2 should continue to own native concepts such as:
 
 - handoffs
-- groupchat progression
+- AG2 beta workflow progression
 - reply hooks
 - tool calling
 
@@ -113,7 +113,7 @@ internals.
 
 The app backend may emit domain events.
 
-The app backend must not emit workflow names or directly encode AG2 or groupchat
+The app backend must not emit workflow names or directly encode AG2 workflow-run
 meaning.
 
 `mozaiksai` owns:

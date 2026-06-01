@@ -22,7 +22,6 @@ __all__ = [
     'normalize_text_content',
     'serialize_event_content',
     'extract_agent_name',
-    'safe_context_snapshot',
     'extract_images_from_conversation',
 ]
 
@@ -174,39 +173,6 @@ def extract_agent_name(obj: Any) -> Optional[str]:
         return None
 
 
-def safe_context_snapshot(ctx) -> Dict[str, Any]:
-    """Safe snapshot for verbose context logging (avoids secrets).
-    
-    Redacts sensitive keys and truncates long strings to prevent log bloat.
-    """
-    out: Dict[str, Any] = {}
-    try:
-        data = None
-        if ctx is None:
-            return {}
-        if hasattr(ctx, 'data') and isinstance(getattr(ctx, 'data'), dict):
-            data = getattr(ctx, 'data')
-        elif hasattr(ctx, 'to_dict') and callable(getattr(ctx, 'to_dict')):
-            data = ctx.to_dict()
-        elif isinstance(ctx, dict):
-            data = ctx
-        if not isinstance(data, dict):
-            return {"_repr": str(ctx)[:200]}
-        for k, v in data.items():
-            lk = k.lower()
-            if any(s in lk for s in ("secret", "api", "key", "token", "password")):
-                out[k] = "***REDACTED***"
-                continue
-            try:
-                sv = str(v)
-            except Exception:
-                sv = "<non-serializable>"
-            if isinstance(sv, str) and len(sv) > 300:
-                sv = sv[:300] + "..."
-            out[k] = sv
-    except Exception as _snap_err:
-        out["_error"] = f"snapshot_failed:{_snap_err}"  # pragma: no cover
-    return out
 
 
 def extract_images_from_conversation(sender, recipient):

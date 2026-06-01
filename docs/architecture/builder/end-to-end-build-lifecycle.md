@@ -100,7 +100,7 @@ Responsibilities:
 - create `app/brand/theme_config.json`
 - create `app/ui/index.js`
 - create `app/ui/route_manifest.json`
-- create empty `app/modules/` and `app/workflows/`
+- create empty `app/modules/` and `workflows/`
 
 Important rule:
 
@@ -221,8 +221,8 @@ This phase may write:
 - `ui/index.js`
 - `brand/theme_config.json`
 - `config/shell.json`
-- `config/database_intent.json`
-- optional `config/database_migrations/*.json`
+- `config/data.json`
+- optional `config/data_migrations/*.json`
 - generated module files
 - provider-neutral deployment artifacts (optional): `Dockerfile`,
   `docker-compose.yml`, `.github/workflows/deploy.yml`, `env.example`, and
@@ -306,12 +306,12 @@ Use it when validating changes to:
 Recommended smoke command:
 
 ```bash
-python scripts/run_live_mfj_smoke.py \
+python scripts/run_live_workflow_smoke.py \
   --workflow RuntimeUIPrimitiveSmoke \
   --workflows-root factory_app/workflows \
   --tool-response-file factory_app/workflows/RuntimeUIPrimitiveSmoke/smoke_responses.json
 
-python scripts/run_live_mfj_smoke.py \
+python scripts/run_live_workflow_smoke.py \
   --workflow AgentGenerator \
   --workflows-root factory_app/workflows \
   --prompt-file factory_app/workflows/AgentGenerator/smoke_prompt.txt \
@@ -505,9 +505,12 @@ These are the remaining lifecycle gaps.
 
 - `docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md`
   - defines persistent frontend surface contracts and realization boundaries
-- `database-intent-and-revision-contract.md`
-  - defines canonical database intent, staged database artifacts, and revision-time migration rules
+- `data-contract-and-revision-contract.md`
+  - defines canonical data contract, staged database artifacts, and revision-time migration rules
 - external hosted product workspace docs (outside this repo)
   - may define hosted-only boundaries built around this lifecycle
 
 This document defines the lifecycle that those documents assume.
+
+
+

@@ -38,11 +38,11 @@ def _app_build_plan_fixture() -> dict[str, Any]:
         ),
         "build_tasks": [
             {
-                "task_id": "database_intent",
+                "task_id": "data_contract",
                 "task_type": "persistence_contract",
                 "owned_paths": [
-                    "config/database_intent.json",
-                    "config/database_migrations/001_projects_tasks_indexes.json",
+                    "config/data.json",
+                    "config/data_migrations/001_projects_tasks_indexes.json",
                     "modules/projects/backend/repo.py",
                     "modules/projects/backend/policy.py",
                     "modules/projects/backend/schemas.py",
@@ -80,12 +80,12 @@ def _app_build_plan_fixture() -> dict[str, Any]:
                 ],
             },
         ],
-        "database_intent_bundle": _database_intent(),
+        "data_contract": _data_contract(),
         "pending_schema_migration": _schema_migration(),
     }
 
 
-def _database_intent() -> dict[str, Any]:
+def _data_contract() -> dict[str, Any]:
     return {
         "version": "1",
         "app_id": "project_management",
@@ -210,14 +210,14 @@ def _database_output() -> dict[str, Any]:
     return {
         "database_files": [
             {
-                "path": "config/database_intent.json",
-                "kind": "database_intent_json",
-                "purpose": "Canonical generated database intent.",
+                "path": "config/data.json",
+                "kind": "data_contract_json",
+                "purpose": "Canonical generated data contract.",
                 "entity_refs": ["projects", "tasks"],
-                "content": json.dumps(_database_intent(), indent=2) + "\n",
+                "content": json.dumps(_data_contract(), indent=2) + "\n",
             },
             {
-                "path": "config/database_migrations/001_projects_tasks_indexes.json",
+                "path": "config/data_migrations/001_projects_tasks_indexes.json",
                 "kind": "database_migration_json",
                 "purpose": "Additive project/task index migration.",
                 "entity_refs": ["projects", "tasks"],
@@ -226,9 +226,9 @@ def _database_output() -> dict[str, Any]:
         ],
         "pending_schema_migration": _schema_migration(),
         "code_files": [
-            {"filename": "config/database_intent.json", "content": "BROKEN\n"},
+            {"filename": "config/data.json", "content": "BROKEN\n"},
             {
-                "filename": "config/database_migrations/001_projects_tasks_indexes.json",
+                "filename": "config/data_migrations/001_projects_tasks_indexes.json",
                 "content": "BROKEN\n",
             },
         ],
@@ -286,7 +286,7 @@ def _backend_output(module_id: str) -> dict[str, Any]:
                 "path": f"modules/{module_id}/backend/repo.py",
                 "kind": "repo",
                 "purpose": "Persistence access through ctx.persistence.",
-                "contract_refs": ["database_intent_bundle.surfaces[*].collections[*]"],
+                "contract_refs": ["data_contract.surfaces[*].collections[*]"],
                 "content": (
                     f"class {class_name}Repo:\n"
                     "    async def _collection(self, ctx):\n"
@@ -321,7 +321,7 @@ def _backend_output(module_id: str) -> dict[str, Any]:
                 "path": f"modules/{module_id}/backend/schemas.py",
                 "kind": "schemas",
                 "purpose": "Typed document shapes and pure helpers.",
-                "contract_refs": ["database_intent_bundle"],
+                "contract_refs": ["data_contract"],
                 "content": (
                     "from typing import TypedDict\n\n\n"
                     "class Record(TypedDict):\n"
@@ -359,10 +359,10 @@ def test_app_build_plan_fixture_uses_canonical_persistence_paths() -> None:
         for path in task["owned_paths"]
     }
 
-    assert plan["database_intent_bundle"]["surfaces"]
+    assert plan["data_contract"]["surfaces"]
     assert plan["pending_schema_migration"]["migration_id"] == "001_projects_tasks_indexes"
-    assert "config/database_intent.json" in owned_paths
-    assert "config/database_migrations/001_projects_tasks_indexes.json" in owned_paths
+    assert "config/data.json" in owned_paths
+    assert "config/data_migrations/001_projects_tasks_indexes.json" in owned_paths
     for module_id in ("projects", "tasks"):
         assert f"modules/{module_id}/backend/repo.py" in owned_paths
         assert f"modules/{module_id}/backend/schemas.py" in owned_paths
@@ -392,7 +392,7 @@ def test_config_middleware_style_module_contracts_declare_repo_and_schemas() -> 
 
     intent_keys = {
         (collection["module_id"], collection.get("entity_name") or collection["name"])
-        for surface in _database_intent()["surfaces"]
+        for surface in _data_contract()["surfaces"]
         for collection in surface["collections"]
     }
     assert intent_keys == {("projects", "projects"), ("tasks", "tasks")}
@@ -423,8 +423,8 @@ def test_service_agent_style_backend_uses_ctx_persistence_boundary() -> None:
 def test_assembly_materializes_canonical_persistent_artifact_tree() -> None:
     file_map = _assembled_file_map()
 
-    assert "config/database_intent.json" in file_map
-    assert "config/database_migrations/001_projects_tasks_indexes.json" in file_map
+    assert "config/data.json" in file_map
+    assert "config/data_migrations/001_projects_tasks_indexes.json" in file_map
     for module_id in ("projects", "tasks"):
         for filename in ("handler.py", "service.py", "repo.py", "policy.py", "schemas.py"):
             assert f"modules/{module_id}/backend/{filename}" in file_map
@@ -442,10 +442,10 @@ def test_assembly_materializes_canonical_persistent_artifact_tree() -> None:
     assert "motor" not in all_generated
 
 
-def test_assembled_database_intent_migration_and_repos_align() -> None:
+def test_assembled_data_contract_migration_and_repos_align() -> None:
     file_map = _assembled_file_map()
-    intent = json.loads(file_map["config/database_intent.json"])
-    migration = json.loads(file_map["config/database_migrations/001_projects_tasks_indexes.json"])
+    intent = json.loads(file_map["config/data.json"])
+    migration = json.loads(file_map["config/data_migrations/001_projects_tasks_indexes.json"])
     intent_keys = {
         (collection["module_id"], collection.get("entity_name") or collection["name"])
         for surface in intent["surfaces"]
@@ -480,12 +480,12 @@ def test_appgenerator_guidance_still_targets_persistent_module_contract() -> Non
     database_output_fields = structured_outputs["models"]["DatabaseOutput"]["fields"]
 
     assert "context.persistence.collection(module_id, entity_name)" in service_agent
-    assert "config/database_intent.json" in persistence_contract["required_outputs"]
-    assert "config/database_migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
+    assert "config/data.json" in persistence_contract["required_outputs"]
+    assert "config/data_migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
     assert "must not use ctx.db" in hard_constraints
     assert "must not import or call get_mongo_client()" in hard_constraints
     assert "pending_schema_migration" in database_output_fields
-    assert "config/database_migrations" in generate_and_download
+    assert "config/data_migrations" in generate_and_download
     assert "backend/models.py" not in module_archetypes
     assert "backend/models/" not in module_archetypes
     assert "backend/models.py" not in domain_catalog

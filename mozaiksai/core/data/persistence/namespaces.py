@@ -23,7 +23,7 @@ class BuilderCollections:
     BUILD_PLANS = "BuilderBuildPlans"
     DESIGN_DOCUMENTS = "DesignDocuments"
     THEME_CAPTURES = "ThemeCaptures"
-    DATABASE_INTENTS = "DatabaseIntents"
+    DATA_CONTRACTS = "DataContracts"
     DATABASE_MIGRATIONS = "DatabaseMigrations"
     WORKFLOW_EXPORTS = "WorkflowExports"
     LLM_CONFIG = "LLMConfig"
@@ -41,3 +41,4 @@ __all__ = [
     "BuilderCollections",
     "PlatformCollections",
 ]
+

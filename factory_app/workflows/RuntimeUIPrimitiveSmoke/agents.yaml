@@ -8,7 +8,7 @@ agents:
     heading: '[INSTRUCTIONS]'
     content: |
       On your first turn, ask exactly one short discovery question about the product or workflow idea.
-      After the user answers, emit NEXT and nothing else.
+      After the user answers, output the single word NEXT on a line by itself and nothing else.
       Do not use JSON. Do not call tools.
   max_consecutive_auto_reply: 2
   structured_outputs_required: false

@@ -10,6 +10,7 @@ tools:
     Called automatically after AppSchemaAgent speaks.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
 - agent: AppUIQualityAgent
   file: ui_quality.py
   function: review_ui_quality
@@ -19,6 +20,7 @@ tools:
     AppGenerator handoff gate.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
 - agent: ModuleContractQualityAgent
   file: review_module_contract_quality.py
   function: review_module_contract_quality
@@ -29,6 +31,7 @@ tools:
     ModuleContractQualityAgent speaks.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
 - agent: ModuleRuntimeQualityAgent
   file: module_runtime_quality.py
   function: review_module_runtime_quality
@@ -40,6 +43,7 @@ tools:
     ModuleRuntimeQualityAgent speaks.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
 - agent: AppPlanAgent
   file: app_build_plan.py
   function: app_build_plan
@@ -48,6 +52,7 @@ tools:
     theme preferences, and generation order.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
 - agent: AppPlanAgent
   file: read_carry_forward_module_contract.py
   function: read_carry_forward_module_contract
@@ -71,12 +76,14 @@ tools:
     into the accumulated bundle. Called automatically after AdminRegistryAgent speaks.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
 - agent: AssemblyAgent
   file: assemble_app_tasks.py
   function: assemble_app_tasks
-  description: Merge MFJ child task outputs into one assembled code_files bundle.
+  description: Merge AppGenerator task batch outputs into one assembled code_files bundle.
   tool_type: Agent_Tool
-  auto_tool_call: false
+  auto_tool_call: true
+  bind_to_agent: false
 - agent: AssemblyAgent
   file: resolve_carry_forward_preservation.py
   function: resolve_carry_forward_preservation
@@ -92,15 +99,17 @@ tools:
     Emits carry_forward_report and carry_forward_additions to context_variables.
   tool_type: Agent_Tool
   auto_tool_call: true
+  bind_to_agent: false
 - agent: IntegrationReadinessAgent
   file: integration_readiness.py
   function: check_integration_readiness
   description: >
-    Aggregate integration needs from AppGenerator planning, MFJ child task
-    fan-in, and discovered task context. Reuse app connectors when ready and
+    Aggregate integration needs from AppGenerator planning, task batch outputs,
+    and discovered task context. Reuse app connectors when ready and
     prompt inline for unresolved required credentials before validation/download.
   tool_type: UI_Tool
-  auto_tool_call: false
+  auto_tool_call: true
+  bind_to_agent: false
   ui:
     component: AgentAPIKeysBundleInput
     mode: inline
@@ -141,18 +150,6 @@ tools:
   description: Record an integration need discovered while generating an API adapter or controller surface.
   tool_type: Agent_Tool
   auto_tool_call: false
-- agent: ConfigMiddlewareAgent
-  file: integration_readiness.py
-  function: record_integration_need
-  description: Record an integration need discovered while generating module contracts or runtime extension wiring.
-  tool_type: Agent_Tool
-  auto_tool_call: false
-- agent: ServiceAgent
-  file: integration_readiness.py
-  function: record_integration_need
-  description: Record an integration need discovered while implementing module service logic.
-  tool_type: Agent_Tool
-  auto_tool_call: false
 - agent: DownloadAgent
   file: generate_and_download.py
   function: generate_and_download
@@ -160,6 +157,7 @@ tools:
     artifact UI (code + preview + export).
   tool_type: UI_Tool
   auto_tool_call: true
+  bind_to_agent: false
   ui:
     component: AppWorkbench
     mode: artifact
@@ -208,17 +206,15 @@ tools:
         additionalProperties: true
 - agent: AppValidationAgent
   file: app_validation.py
-  function: validate_app_build
-  description: Validate generated application code by building and optionally running
-    it using the explicit app validation strategy (e2b | local | skip).
+  function: validate_app_bundle_from_request
+  description: >
+    Deterministically validate the generated app bundle from AppValidationAgent's
+    structured request. Runs app build validation, agent-backend checks when
+    agent backend context exists, and module/page wiring checks. Called
+    automatically after AppValidationAgent speaks.
   tool_type: Agent_Tool
-  auto_tool_call: false
-- agent: AppValidationAgent
-  file: app_validation.py
-  function: parse_build_errors
-  description: Parse build output into structured error entries (file/line/column/message).
-  tool_type: Agent_Tool
-  auto_tool_call: false
+  auto_tool_call: true
+  bind_to_agent: false
 - agent: IntegrationTestAgent
   file: integration_tests.py
   function: run_integration_tests
@@ -237,29 +233,34 @@ tools:
     run_integration_tests before finalizing the build.
   tool_type: Agent_Tool
   auto_tool_call: false
-- agent: ConfigMiddlewareAgent
-  file: backend_tools.py
-  function: generate_scaffold
-  description: Generate app scaffold files (boilerplate, config, dockerfiles) via
-    the backend.
-  tool_type: Agent_Tool
-  auto_tool_call: false
 lifecycle_tools:
-- trigger: on_start
-  agent: null
-  file: tools/platform/build_lifecycle.py
-  function: emit_build_started
-  description: Notify platform build tracking when workflow run starts.
-  tool_type: Agent_Tool
-- trigger: on_complete
-  agent: null
-  file: tools/platform/build_lifecycle.py
-  function: emit_build_completed
-  description: Notify platform build tracking when workflow run completes.
-  tool_type: Agent_Tool
-- trigger: on_fail
-  agent: null
-  file: tools/platform/build_lifecycle.py
-  function: emit_build_failed
-  description: Notify platform build tracking when workflow run fails.
-  tool_type: Agent_Tool
+  - trigger: before_chat
+    agent: null
+    file: ../_shared/context_graph/load_context_graph_context.py
+    function: load_context_graph_context
+    description: Load the current compact Context Graph pack into context_variables before agent prompt hooks run.
+    tool_type: Agent_Tool
+  - trigger: before_chat
+    agent: null
+    file: hydrate_app_build_plan_context.py
+    function: hydrate_app_build_plan_context
+    description: Hydrate task-batch context from a preloaded AppBuildPlan before AppGenerator agents run.
+    tool_type: Agent_Tool
+  - trigger: on_start
+    agent: null
+    file: tools/platform/build_lifecycle.py
+    function: emit_build_started
+    description: Notify platform build tracking when workflow run starts.
+    tool_type: Agent_Tool
+  - trigger: on_complete
+    agent: null
+    file: tools/platform/build_lifecycle.py
+    function: emit_build_completed
+    description: Notify platform build tracking when workflow run completes.
+    tool_type: Agent_Tool
+  - trigger: on_fail
+    agent: null
+    file: tools/platform/build_lifecycle.py
+    function: emit_build_failed
+    description: Notify platform build tracking when workflow run fails.
+    tool_type: Agent_Tool

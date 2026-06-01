@@ -90,7 +90,7 @@ Use a workflow when the value comes from:
 Question a workflow answers: **what run is happening**
 
 Canonically, app-owned workflow definitions live under `workflows/*`.
-The shared generation core lives under `factory_workflows/*`.
+The shared generation core lives under `factory_app/workflows/*`.
 
 ## 3. Module
 
@@ -208,3 +208,4 @@ But those are secondary details. They are not the first classification question.
 - [Frontend Architecture](../mozaiksai/index.md)
 - [canonical-app-structure.md](canonical-app-structure.md)
 - [../workflows/workflow-architecture.md](../workflows/workflow-architecture.md)
+

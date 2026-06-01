@@ -1,0 +1,51 @@
+definitions:
+  task_batch_results:
+    type: object
+    description: Aggregated worker outputs from workflow-local task batch execution.
+    source:
+      type: computed
+      default: {}
+  task_batch_status:
+    type: string
+    description: Aggregate status emitted by the task batch executor.
+    source:
+      type: computed
+      default: pending
+  task_run_mode:
+    type: boolean
+    description: True when a worker is executing one scoped task batch item.
+    source:
+      type: computed
+      default: false
+  current_task_batch_id:
+    type: string
+    description: Current task batch id for worker calls.
+    source:
+      type: computed
+      default: null
+  current_task_id:
+    type: string
+    description: Current task id for worker calls.
+    source:
+      type: computed
+      default: null
+  current_task:
+    type: object
+    description: Current task object for worker calls.
+    source:
+      type: computed
+      default: null
+
+agents:
+  TaskPlannerAgent:
+    variables: []
+  TaskWorkerAgent:
+    variables:
+    - task_run_mode
+    - current_task_batch_id
+    - current_task_id
+    - current_task
+  SynthesisAgent:
+    variables:
+    - task_batch_results
+    - task_batch_status

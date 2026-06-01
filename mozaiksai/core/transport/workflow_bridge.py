@@ -191,8 +191,8 @@ class WorkflowBridgeMixin:
         """
         Handle user input from the POST API endpoint with smart routing.
 
-        Checks if there's an active AG2 GroupChat session waiting for input.
-        If yes, passes message to existing session. If no, starts new workflow.
+        Checks if there's an active workflow run waiting for input. If yes,
+        passes message to the existing run. If no, starts a new workflow run.
         """
         try:
             starting_new_workflow = False

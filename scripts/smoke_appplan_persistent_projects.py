@@ -236,25 +236,25 @@ def check_plan_shape(plan: dict[str, Any]) -> list[str]:
             if expected not in owned_paths:
                 violations.append(f"missing owned_path {expected}")
 
-    if "config/database_intent.json" not in owned_paths:
-        violations.append("missing owned_path config/database_intent.json")
+    if "config/data.json" not in owned_paths:
+        violations.append("missing owned_path config/data.json")
 
     persistence_tasks = [task for task in build_tasks if task.get("task_type") == "persistence_contract"]
     database_tasks = [task for task in build_tasks if task.get("initial_agent") == "DatabaseAgent"]
     if not persistence_tasks and not database_tasks:
         violations.append("missing persistence_contract/DatabaseAgent build task")
 
-    intent = plan.get("database_intent_bundle")
-    if isinstance(intent, dict):
-        intent_text = json.dumps(intent)
-        if "projects" not in intent_text or "tasks" not in intent_text:
-            violations.append("database_intent_bundle does not mention projects and tasks")
+    data_contract = plan.get("data_contract")
+    if isinstance(data_contract, dict):
+        contract_text = json.dumps(data_contract)
+        if "projects" not in contract_text or "tasks" not in contract_text:
+            violations.append("data_contract does not mention projects and tasks")
     else:
-        violations.append("missing top-level database_intent_bundle")
+        violations.append("missing top-level data_contract")
 
-    migration_paths = [path for path in owned_paths if "database_migrations" in path]
-    if migration_paths and not all(path.startswith("config/database_migrations/") for path in migration_paths):
-        violations.append(f"non-canonical database migration path(s): {migration_paths}")
+    migration_paths = [path for path in owned_paths if "data_migrations" in path]
+    if migration_paths and not all(path.startswith("config/data_migrations/") for path in migration_paths):
+        violations.append(f"non-canonical data migration path(s): {migration_paths}")
 
     forbidden_paths = (
         "backend/models.py",

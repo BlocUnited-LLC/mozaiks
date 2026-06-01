@@ -158,6 +158,331 @@ def test_validate_app_build_skip_strategy_persists_context() -> None:
     assert context.get("app_validation_preview_url") is None
 
 
+def test_module_implementation_contract_rejects_missing_handler_methods() -> None:
+    module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
+
+    result = module.validate_module_implementation_contract(
+        {
+            "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: list_tickets
+  handler_method: list_tickets
+- id: update_status
+  handler_method: update_status
+""",
+            "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def update_status(self, ctx, **params):
+        return {"ok": True}
+""",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(
+        item["test"] == "module_action_handler_method_missing"
+        and "list_tickets" in item["error"]
+        for item in result["failed_tests"]
+    )
+
+
+def test_module_implementation_contract_rejects_unresolved_class_base() -> None:
+    module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
+
+    result = module.validate_module_implementation_contract(
+        {
+            "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: list_tickets
+  handler_method: list_tickets
+""",
+            "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def list_tickets(self, ctx, **params):
+        return {"tickets": []}
+""",
+            "modules/tickets/backend/schemas.py": """
+from typing import TypedDict
+
+class TicketStatus(str, Enum):
+    OPEN = "open"
+""",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(
+        item["test"] == "backend_python_unresolved_class_base"
+        and "Enum" in item["error"]
+        for item in result["failed_tests"]
+    )
+
+
+def test_module_implementation_contract_rejects_handler_context_last_signature() -> None:
+    module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
+
+    result = module.validate_module_implementation_contract(
+        {
+            "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: update_status
+  handler_method: update_status
+  input_schema:
+    required: [ticket_id, status]
+""",
+            "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def update_status(self, ticket_id: str, status: str, context):
+        return {"ok": True}
+""",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(
+        item["test"] == "module_handler_context_parameter"
+        and "ticket_id" in item["error"]
+        for item in result["failed_tests"]
+    )
+
+
+def test_module_implementation_contract_accepts_ctx_kwargs_signature() -> None:
+    module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
+
+    result = module.validate_module_implementation_contract(
+        {
+            "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: update_status
+  handler_method: update_status
+  input_schema:
+    required: [ticket_id, status]
+""",
+            "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def update_status(self, ctx, **params):
+        return {"ok": True}
+""",
+        }
+    )
+
+    assert result["passed"] is True
+
+
+def test_module_implementation_contract_rejects_synthetic_payload_for_field_inputs() -> None:
+    module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
+
+    result = module.validate_module_implementation_contract(
+        {
+            "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: update_status
+  handler_method: update_status
+  input_schema:
+    required: [ticket_id, new_status]
+""",
+            "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def update_status(self, ctx, **params):
+        return {"ok": True}
+""",
+            "modules/tickets/backend/service.py": """
+class TicketsService:
+    async def update_status(self, ctx, **params):
+        payload = params.get("payload")
+        return payload
+""",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(
+        item["test"] == "module_service_synthetic_payload_wrapper"
+        for item in result["failed_tests"]
+    )
+
+
+def test_module_implementation_contract_rejects_undeclared_service_params_key() -> None:
+    module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
+
+    result = module.validate_module_implementation_contract(
+        {
+            "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: save_settings
+  handler_method: save_settings
+  input_schema:
+    required: [default_queue, sla_hours]
+    properties:
+    - name: default_queue
+    - name: sla_hours
+""",
+            "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def save_settings(self, ctx, **params):
+        return {"ok": True}
+""",
+            "modules/tickets/backend/service.py": """
+class TicketsService:
+    async def save_settings(self, ctx, **params):
+        settings = params["settings"]
+        return settings
+""",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(
+        item["test"] == "module_service_undeclared_params_key"
+        and "settings" in item["error"]
+        for item in result["failed_tests"]
+    )
+
+
+def test_module_implementation_contract_rejects_pass_backed_runtime_logic() -> None:
+    module = _import_workflow_module("workflows.AppGenerator.tools.app_validation")
+
+    result = module.validate_module_implementation_contract(
+        {
+            "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: save_settings
+  handler_method: save_settings
+""",
+            "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def save_settings(self, ctx, **params):
+        return {"ok": True}
+""",
+            "modules/tickets/backend/repo.py": """
+class TicketsRepo:
+    async def save_settings(self, ctx, settings):
+        pass
+""",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(
+        item["test"] == "backend_python_pass_statement"
+        for item in result["failed_tests"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_app_bundle_from_request_blocks_module_implementation_failure(monkeypatch) -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+
+    async def fake_validate_app_build(**kwargs):
+        return {"validation_status": "skipped", "validation_strategy": "skip"}
+
+    monkeypatch.setattr(module, "validate_app_build", fake_validate_app_build)
+    context = _Context(
+        {
+            "generated_files": {
+                "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: list_tickets
+  handler_method: list_tickets
+""",
+                "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    pass
+""",
+            }
+        }
+    )
+
+    result = await module.validate_app_bundle_from_request(
+        {"validation_strategy": "skip", "start_dev_server": False},
+        context_variables=context,
+    )
+
+    assert result["status"] == "failed"
+    assert result["integration_tests_passed"] is False
+    assert context.get("integration_tests_passed") is False
+    assert context.get("module_implementation_validation_passed") is False
+    assert context.get("integration_test_result")["module_implementation"]["failed_tests"]
+
+
+@pytest.mark.asyncio
+async def test_validate_app_bundle_from_request_blocks_runtime_quality_warnings(monkeypatch) -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+
+    async def fake_validate_app_build(**kwargs):
+        return {"validation_status": "skipped", "validation_strategy": "skip"}
+
+    monkeypatch.setattr(module, "validate_app_build", fake_validate_app_build)
+    context = _Context(
+        {
+            "generated_files": {
+                "modules/tickets/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: tickets
+  handler: backend.handler:TicketsModule
+actions:
+- id: save_settings
+  handler_method: save_settings
+""",
+                "modules/tickets/backend/handler.py": """
+class TicketsModule:
+    async def save_settings(self, ctx, **params):
+        return {"ok": True}
+""",
+                "modules/tickets/backend/policy.py": """
+class TicketsPolicy:
+    async def require_save_settings(self, ctx):
+        # Placeholder for auth logic
+        return True
+""",
+            }
+        }
+    )
+
+    result = await module.validate_app_bundle_from_request(
+        {"validation_strategy": "skip", "start_dev_server": False},
+        context_variables=context,
+    )
+
+    assert result["status"] == "failed"
+    assert context.get("integration_tests_passed") is False
+    assert context.get("module_runtime_quality_status") == "blocked"
+    assert context.get("integration_test_result")["module_runtime_quality"]["warnings"]
+
+
 def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:
     from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 

@@ -22,7 +22,7 @@ Before writing files, define:
 Use `factory_app/workflows/{WorkflowName}/` for shared builder workflows such as
 app generation, workflow generation, and refinement journeys.
 
-Use `app/workflows/{WorkflowName}/` for workflows that belong to one generated
+Use `workflows/{WorkflowName}/` for workflows that belong to one generated
 app workspace.
 
 ## File Set
@@ -38,7 +38,7 @@ workflows/{WorkflowName}/
 ├── ui_config.yaml
 ├── hooks.yaml
 ├── extended_orchestration/
-│   └── mfj_extension.json
+│   └── task_batches.yaml
 ├── tools/
 │   ├── __init__.py
 │   └── artifact_tools.py
@@ -71,7 +71,7 @@ them as contract references, not as full workflow examples.
     max_turns: 20
     human_in_the_loop: true
     workflow_startup_mode: AgentDriven
-    orchestration_pattern: Pipeline
+    orchestration_pattern: ag2_network
     initial_agent: IntakeAgent
     initial_message: "Start with IntakeAgent."
     initial_message_to_user: null
@@ -165,15 +165,15 @@ them as contract references, not as full workflow examples.
       - source_agent: user
         target_agent: IntakeAgent
         handoff_type: condition
-        condition_type: string_llm
-        condition: When the user starts or answers an intake question.
+        condition_type: expression
+        condition: ${intake_complete} == false
         transition_target: AgentTarget
 
       - source_agent: IntakeAgent
         target_agent: GeneratorAgent
         handoff_type: condition
-        condition_type: string_llm
-        condition: When intake_complete is true.
+        condition_type: expression
+        condition: ${intake_complete} == true
         transition_target: AgentTarget
 
       - source_agent: GeneratorAgent
@@ -307,4 +307,6 @@ workflow UI folder.
 
 - [Workflow Architecture](../../architecture/workflows/workflow-architecture.md)
 - [Workflow Authoring Contracts](../../architecture/workflows/workflow-authoring-contracts.md)
-- [Mid-Flight Journeys](../../architecture/mozaiksai/mid-flight-journeys.md)
+- [Workflow Task Batches](../../architecture/mozaiksai/task-batches.md)
+
+

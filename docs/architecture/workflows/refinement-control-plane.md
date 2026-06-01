@@ -2,7 +2,7 @@
 title: Refinement Control Plane
 status: Authoritative - Pre-Production, Canonical Contract
 created: 2026-04-13
-depends_on: workflow-routing-transitions.md, event-system.md, ../../architecture/mozaiksai/universal-orchestrator.md, ../builder/database-intent-and-revision-contract.md
+depends_on: workflow-routing-transitions.md, event-system.md, ../../architecture/mozaiksai/universal-orchestrator.md, ../builder/data-contract-and-revision-contract.md
 ---
 
 # Refinement Control Plane
@@ -73,9 +73,9 @@ The existing platform already has the right raw ingredients:
 That means refinement does **not** need a brand-new reasoning model. It needs a control plane and durable state model around the artifacts the generators already produce.
 
 Database refinements should follow the companion contract in
-[database-intent-and-revision-contract.md](../builder/database-intent-and-revision-contract.md):
+[data-contract-and-revision-contract.md](../builder/data-contract-and-revision-contract.md):
 
-- compare previous and target `database_intent` artifacts
+- compare previous and target `data_contract` artifacts
 - generate a typed migration plan
 - auto-apply additive-safe changes only
 - block destructive changes unless explicitly escalated
@@ -148,7 +148,7 @@ Recommended lanes:
 | `conceptual_reframe` | `core` | Product purpose, audience, or value proposition change |
 | `architecture_replan` | `core` or high-impact `feature` | Module, workflow, data ownership, or tenancy model replan |
 | `hosted_capability_change` | `feature` | Provider-neutral hosted capability pack or façade boundary change |
-| `data_model_migration` | `feature` or `core` | Persistence shape change requiring database intent and migration planning |
+| `data_model_migration` | `feature` or `core` | Persistence shape change requiring data contract and migration planning |
 
 Examples:
 
@@ -215,7 +215,7 @@ app-owned boundary:
 
 ```text
 hosted_pack
-  -> backend/integrations/{pack_id}_client.py
+  -> app/services/integrations/{pack_id}_client.py
   -> modules/{facade_module_id}/
   -> ui/pages/*.yaml bound to /api/modules/{facade_module_id}/...
 ```
@@ -225,7 +225,7 @@ integration client, façade module, provider-backed surface, managed capability,
 external service, or neutral provider category such as analytics, reporting,
 audit, or notification, the router can add hosted capability path hints:
 
-- adapter clients under `backend/integrations/*_client.py`
+- adapter clients under `app/services/integrations/*_client.py`
 - app-owned façade module files under `modules/{facade_module_id}/`
 - dependent page YAML files when current manifest metadata shows a page binding
   to `/api/modules/{facade_module_id}/`
@@ -251,7 +251,7 @@ service, API key, credential, provider, webhook, sync, import/export, or a
 neutral provider category such as analytics, reporting, search, email, storage,
 or CRM, the router can add integration path hints:
 
-- adapter clients under `backend/integrations/*_client.py`
+- adapter clients under `app/services/integrations/*_client.py`
 - module files that declare or use the integration:
   `modules/{module_id}/module.yaml`, `backend/service.py`,
   `backend/schemas.py`, and `backend/policy.py`
@@ -260,7 +260,7 @@ or CRM, the router can add integration path hints:
 - `ui/pages/*.yaml` or concrete page YAML files only for UI-facing setup or
   display requests
 
-If a connector id is known from `backend/integrations/{connector_id}_client.py`
+If a connector id is known from `app/services/integrations/{connector_id}_client.py`
 and the request mentions that id, the router prefers the exact adapter path.
 Without a manifest, it emits conservative hints for adapter, module, config, and
 docs surfaces.
@@ -276,9 +276,9 @@ The fifth supported mapping is data model migration impact for `app_bundle`
 refinements. Generated app persistence changes stay intent-first:
 
 ```text
-database_intent_bundle
-  -> config/database_intent.json
-  -> optional config/database_migrations/{migration_id}.json
+data_contract
+  -> config/data.json
+  -> optional config/data_migrations/{migration_id}.json
   -> modules/{module_id}/backend/{schemas.py,repo.py,policy.py}
 ```
 
@@ -288,9 +288,9 @@ fields, relations, references, foreign keys, tenant/workspace/owner scoping,
 record archival, soft deletion, renames, type changes, added or removed columns,
 or backfills, the router can add data-model path hints:
 
-- `config/database_intent.json`
-- exact `config/database_migrations/{migration_id}.json` files when present,
-  otherwise the conservative `config/database_migrations/*.json` hint
+- `config/data.json`
+- exact `config/data_migrations/{migration_id}.json` files when present,
+  otherwise the conservative `config/data_migrations/*.json` hint
 - module persistence contract files:
   `modules/{module_id}/module.yaml`, `backend/schemas.py`, `backend/repo.py`,
   and `backend/policy.py`
@@ -316,7 +316,7 @@ destructive changes require explicit review. This is a review signal only. This
 slice does not implement migration generation, migration execution, a migration
 review workflow, runtime persistence changes, or `ctx.persistence` changes.
 
-Data model refinements should trigger database intent validation, migration
+Data model refinements should trigger data contract validation, migration
 plan validation, app validation, and explicit review for destructive migrations
 before promotion. This generated-app persistence contract is separate from
 hosted platform persistence. Refinement scope must never include secret paths
@@ -702,15 +702,29 @@ Target workflow revision context contract:
   prior concept, design, and bundle history available through the revision
   context.
 
-This is intentionally different from the older `code_context` subsystem under
-`AppGenerator/tools/code_context/`:
+This now uses the shared Context Graph substrate rather than a workflow-local
+code-context subsystem:
 
-- `code_context` is a workflow-local, persisted semantic index for generator
-  agents
-- `get_artifact_workspace_catalog` is a control-plane tool for harness-time
-  file-scope proposal against persisted artifact workspaces
-- `get_artifact_workspace_scope` is a control-plane tool for harness-time
-  artifact inspection around an explicit scoped refinement request
+- `AppContextGraph` is the canonical graph contract for app, artifact, file,
+  symbol, module, page, workflow, agent, tool, risk, and provenance context
+- `get_artifact_workspace_catalog` remains the deterministic workspace/file
+  listing tool for persisted artifact workspaces
+- `get_context_graph_catalog` adds graph-aware candidate files, matched nodes,
+  relationship hints, and semantic annotation candidates for scope proposal
+- `get_artifact_workspace_scope` remains the explicit scoped-file loader
+- `get_context_graph_scope` adds graph-neighborhood context around selected
+  files for the coding worker, including symbols, call edges, contract roles,
+  and bounded semantic annotation requests
+
+These control-plane tool payloads stay inside the control-plane checkpoint
+request. They are not automatically copied into downstream workflow
+`context_variables`. When a workflow needs graph-aware prompt context, its own
+`before_chat` lifecycle loader rebuilds a compact `context_graph_pack` from the
+seeded `artifact_version_id` and current `AppContextGraph`. The workflow
+`context_graph_catalog` remains the richer diagnostic/tooling catalog; it is
+not a prompt-injection fallback. Unavailable graph context is represented as a
+prompt pack with `status: unavailable` and a reason such as `missing_app_id` or
+`current_app_context_graph_unavailable`.
 
 ---
 
@@ -957,7 +971,7 @@ Current lane rules are:
   only.
 - `experience_design` requires ExperienceSpec evidence before page, route, or
   shell changes can be promoted directly.
-- `data_model_migration` requires database intent or migration artifact
+- `data_model_migration` requires data contract or migration artifact
   evidence before `repo.py`, `schemas.py`, or `policy.py` can be promoted.
 - `conceptual_reframe` and `architecture_replan` block direct file promotion
   and require a replan.
@@ -981,7 +995,7 @@ selected lane. Current validation item ids are:
 | `app_bundle_validation` | Experience and bundle-level promotion requires bundle validation evidence |
 | `module_contract_validation` | Module manifests, contracts, or backend handlers are in scope |
 | `integration_readiness_validation` | Connector, adapter, or integration files are in scope |
-| `database_intent_validation` | Database intent artifacts are in scope |
+| `data_contract_validation` | Data contract artifacts are in scope |
 | `migration_plan_validation` | Migration plan artifacts or destructive database changes are in scope |
 | `hosted_facade_boundary_validation` | Hosted capability adapter, facade module, or page paths are in scope |
 
@@ -1347,7 +1361,7 @@ Example:
 
 - `core` change -> start a fresh `ValueEngine` revision, then downstream phases become stale
 - `design` change -> resume at `DesignDocs` or a design refinement workflow, then rebuild affected app artifacts
-- `feature` change -> resume at a scoped planner step, then run partial MFJ
+- `feature` change -> resume at a scoped planner step, then run affected task batches
 - an in-progress build and a completed build both use the same routing matrix;
   the difference is whether the session's `sequence_status` is already
   `completed` or still `in_progress`
@@ -2111,9 +2125,9 @@ resolver may copy exactly these relative paths (under `modules/{module_id}/`):
 - `runtime_extensions.yaml` — runtime wiring is always regenerated
 - `.env.example`, `requirements.txt`
 - `ui/route_manifest.json`, `ui/index.js` — custom React routing
-- `config/database_intent.json` and `config/database_migrations/*` — persistence intent
+- `config/data.json` and `config/data_migrations/*` — persistence intent
 - `ui/pages/custom/*` — custom React pages
-- `backend/integrations/*`, `backend/routes/*` — integration clients and API routes
+- `app/services/integrations/*`, `app/services/routes/*` — integration clients and API routes
 - Any path containing `secret`, `credential`, or `password`
 - All `backend/*.py` — backend Python source is never preserved
 
@@ -2164,7 +2178,7 @@ that have no `conceptual_replan` carry-forward context are unaffected.
 | `factory_app/control_plane/tools/resolve_carry_forward_preservation.py` | Core resolver |
 | `factory_app/workflows/AppGenerator/tools/resolve_carry_forward_preservation.py` | Thin AG2 wrapper with `Annotated[..., Field(...)]` DI |
 | `factory_app/workflows/AppGenerator/tools.yaml` | `AssemblyAgent` entry, `auto_tool_call: true` |
-| `factory_app/workflows/AppGenerator/tools/assemble_app_tasks.py` | Writes `generated_files` to context on both schema and MFJ paths |
+| `factory_app/workflows/AppGenerator/tools/assemble_app_tasks.py` | Writes `generated_files` to context on both schema and task batch paths |
 | `factory_app/workflows/AppGenerator/tools/generate_and_download.py` | Merges `carry_forward_additions`; saves `carry_forward_report` to artifact metadata |
 | `factory_app/app/admin/pages/CarryForwardReportPanel.jsx` | Studio app overview — full audit panel from `commit_metadata.metadata.carry_forward_report` |
 | `factory_app/app/admin/pages/AppOverviewPage.jsx` | Mounts `CarryForwardReportPanel` when the latest artifact contains a `carry_forward_report` |

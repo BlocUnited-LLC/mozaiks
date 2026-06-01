@@ -67,11 +67,8 @@ models:
       trigger:
         type: literal
         values:
-        - process_message_before_send
         - update_agent_state
-        - process_last_received_message
-        - process_all_messages_before_reply
-        description: The AG2 hook trigger point.
+        description: AG2 beta prompt-injection hook trigger. Runtime lifecycle work belongs in lifecycle_tools, not hooks.
       purpose:
         type: str
         description: Brief explanation of why this hook is needed (<=140 chars).
@@ -651,13 +648,8 @@ models:
       hook_type:
         type: literal
         values:
-        - before_chat
-        - after_chat
         - update_agent_state
-        - process_message_before_send
-        - process_last_received_message
-        - process_all_messages_before_reply
-        description: Lifecycle or system hook type
+        description: AG2 beta prompt-injection hook type. Use lifecycle_tools for before/after workflow or agent execution.
       py_content:
         type: str
         description: Complete Python code for hook function
@@ -712,23 +704,23 @@ models:
         values:
         - condition
         - after_work
-        description: 'Type of handoff: ''condition'' for immediate evaluation (context
-          or LLM-based), ''after_work'' for post-agent-completion evaluation'
+        description: 'Type of handoff: ''condition'' for immediate deterministic
+          context evaluation, ''after_work'' for post-agent-completion evaluation'
       condition:
         type: union
         variants:
         - str
         - 'null'
-        description: 'Condition text: null for unconditional after_work, expression
-          string with ${var} for context conditions, natural language for LLM conditions'
+        description: 'Condition text: null for unconditional after_work, or an expression
+          string with ${var} for deterministic context conditions'
       condition_type:
         type: union
         variants:
         - str
         - 'null'
-        description: 'Condition evaluation method: ''expression'' for context variable
-          expressions (${...}), ''string_llm'' for LLM natural language evaluation,
-          null to auto-detect (${} triggers expression, else LLM)'
+        description: 'Condition evaluation method: ''expression'', ''context_expression'',
+          or ''context'' for context variable expressions (${...}); null only for
+          unconditional after_work handoffs'
       condition_scope:
         type: union
         variants:
@@ -793,109 +785,137 @@ models:
         description: Strategic description of what happens in this workflow stage and why
       pattern_id:
         type: int
-        description: AG2 pattern ID (1-9) aligned to this workflow stage.
+        description: AG2 Network patternbook ID (1-9) aligned to this workflow stage.
       pattern_name:
         type: str
-        description: Human-readable AG2 pattern name aligned to this workflow stage.
+        description: Human-readable AG2 Network patternbook label aligned to this workflow stage.
       agents_needed:
         type: list
         items: str
         description: Agent names this workflow stage requires (guidance list; full specs
           defined in StageAgents).
-  WorkflowDecompositionContracts:
+  WorkflowTaskBatchSource:
     type: model
     fields:
-      input_required:
+      kind:
+        type: literal
+        values:
+        - context_variable
+        - structured_output
+        description: Where the batch executor reads task items from.
+      path:
+        type: str
+        description: Dot path to the task list, such as PlannerOutput.tasks.
+      task_model:
+        type: str
+        description: Structured output model name for each task item.
+  WorkflowTaskBatchWorker:
+    type: model
+    fields:
+      mode:
+        type: literal
+        values:
+        - ag2_agent
+        description: Worker execution mode for lightweight parallel AG2 agent calls.
+      agent_field:
+        type: str
+        description: Task item field containing the worker agent name.
+      prompt_field:
+        type: str
+        description: Task item field containing the task-specific prompt.
+      context_fields:
         type: list
         items: str
-        description: Context fields that MUST already exist before the workflow
-          can fan out child runs.
-      input_optional:
-        type: list
-        items: str
-        description: Helpful but non-blocking context fields the decomposition
-          planner may read.
-      output_required:
-        type: list
-        items: str
-        description: Keys that every child result MUST expose so fan-in can resume
-          deterministically.
-      output_optional:
-        type: list
-        items: str
-        description: Additional child-result keys that may be present but are not
-          required by fan-in.
-  WorkflowDecomposition:
+        description: Task item fields copied into the worker context.
+  WorkflowTaskBatchExecution:
+    type: model
+    fields:
+      concurrency:
+        type: int
+        description: Maximum concurrent worker calls for this batch.
+      dependency_field:
+        type: str
+        description: Task item field containing prerequisite task ids.
+      failure_policy:
+        type: literal
+        values:
+        - fail_batch
+        - continue_with_available
+        - collect_errors
+        description: How the executor handles failed task items.
+      retry_limit:
+        type: int
+        description: Maximum per-task retries.
+      timeout_seconds:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional per-task timeout.
+  WorkflowTaskBatchResult:
+    type: model
+    fields:
+      context_key:
+        type: str
+        description: Context variable that receives normalized task results. Must
+          be explicit and workflow-owned.
+      status_key:
+        type: str
+        description: Context variable that receives batch status. Must not use
+          hidden runtime prefixes.
+      merge_strategy:
+        type: literal
+        values:
+        - collect_task_outputs
+        - collect_outputs
+        description: Deterministic merge strategy for worker outputs.
+      require_owned_paths:
+        type: bool
+        description: Whether every task result must stay within declared owned_paths.
+  WorkflowTaskBatchSpec:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable batch id.
+      trigger_agent:
+        type: str
+        description: Agent whose completed output makes the task source available.
+      source:
+        type: WorkflowTaskBatchSource
+        description: Task-list source for this batch.
+      worker:
+        type: WorkflowTaskBatchWorker
+        description: Worker-call mapping for each task item.
+      execution:
+        type: WorkflowTaskBatchExecution
+        description: Dependency, concurrency, and failure policy.
+      result:
+        type: WorkflowTaskBatchResult
+        description: Result keys and merge policy.
+  WorkflowTaskBatchesPlan:
     type: model
     fields:
       required:
         type: bool
-        description: Whether this workflow needs workflow-local parallel decomposition.
+        description: Whether this workflow declares workflow-local AG2 task batches.
       mode:
         type: literal
         values:
         - none
-        - single_stage_mfj
-        description: Decomposition topology. Use `single_stage_mfj` only when one
-          planner turn can fan out bounded parallel work units that later merge
-          back into the same workflow.
+        - ag2_task_batch
+        description: Use ag2_task_batch only when one planner output can produce
+          bounded, independent task items for AG2 worker calls.
       reason:
         type: union
         variants:
         - str
         - 'null'
-        description: Why decomposition is or is not needed for this workflow.
-      work_unit:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Short label for the parallel execution unit, such as task,
-          lane, document, segment, or entity batch.
-      decomposition_agent:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Decomposition planner agent whose structured output should trigger the MFJ.
-      child_initial_agent:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Agent that should start each child run.
-      resume_entry_agent:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Router agent that receives control first when the parent resumes.
-      resume_agent:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Host or presenter agent that consumes merged child output after
-          the resume router hands off.
-      inject_as:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Parent context key where merged child results should be injected.
-          Must use the `mfj_` prefix when decomposition is enabled.
-      max_children:
-        type: union
-        variants:
-        - int
-        - 'null'
-        description: Safe upper bound for parallel children in one fan-out cycle.
-      contracts:
-        type: union
-        variants:
-        - WorkflowDecompositionContracts
-        - 'null'
-        description: Runtime-facing input/output contract for the child workflow cycle.
+        description: Why task batching is or is not needed.
+      batches:
+        type: list
+        items: WorkflowTaskBatchSpec
+        description: Workflow-local task batch declarations. Empty when required=false.
   WorkflowInputEvent:
     type: model
     fields:
@@ -991,7 +1011,7 @@ models:
       pattern:
         type: list
         items: str
-        description: List of AG2 orchestration patterns
+        description: List of AG2 Network patternbook labels
       startup_mode:
         type: literal
         values:
@@ -1008,9 +1028,9 @@ models:
           by the user request (minimum 3 for complex workflows). Each stage must
           have unique numbered prefix (Stage 1:, Stage 2:, etc.) in sequential
           order.
-      decomposition:
-        type: WorkflowDecomposition
-        description: Workflow-local decomposition decision and runtime contract.
+      task_batches:
+        type: WorkflowTaskBatchesPlan
+        description: Optional workflow-local AG2 task batch authoring contract.
       event_boundary:
         type: WorkflowEventBoundary
         description: Explicit boundary between workflow orchestration, module-owned domain facts, UI events, and runtime events.
@@ -1181,23 +1201,6 @@ models:
       name:
         type: str
         description: Workflow name in PascalCase (e.g., 'ITSupportBot', 'KnowledgeBase')
-      initial_agent:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: 'Optional runtime hint: if this workflow is spawned as a child
-          GroupChat, start at this agent (maps to AG2 pattern ''initial_agent'').
-          Null to use the workflow''s default initial_agent.'
-        default: null
-      initial_message:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: 'Optional runtime hint: seed message for a child workflow run.
-          Null to rely on the child''s normal startup message flow.'
-        default: null
       role:
         type: literal
         values:
@@ -1210,10 +1213,19 @@ models:
         description: Brief description of what this workflow does (<=100 chars)
       pattern_id:
         type: int
-        description: AG2 pattern ID (1-9) for this specific workflow
+        description: AG2 Network patternbook ID (1-9) for this specific workflow
       pattern_name:
         type: str
-        description: Human-readable pattern name for this workflow
+        description: Human-readable AG2 Network patternbook label for this workflow
+      initial_agent:
+        type: str
+        description: Always WorkflowBundleBuilderAgent. Required by the task batch executor.
+      initial_message:
+        type: str
+        description: >
+          Scoped generation instruction for this workflow's WorkflowBundleBuilderAgent instance.
+          Include workflow_name, pattern_name, role, description, and any key design-surface
+          constraints derived from the intent. This is what the worker reads as its task prompt.
   PatternSelection:
     type: model
     fields:
@@ -1221,22 +1233,13 @@ models:
         type: bool
         description: Whether this request requires multiple workflows (pack) or
           a single workflow
-      resume_agent:
+      pack_partition_reason:
         type: union
         variants:
         - str
         - 'null'
-        description: 'Optional runtime hint for nested execution: when child workflows
-          complete, resume the parent workflow at this agent. Null to use the parent
-          workflow''s declared resume_agent.'
-        default: null
-      decomposition_reason:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: If is_multi_workflow is true, explains why decomposition is
-          needed. Null for single workflows.
+        description: If is_multi_workflow is true, explains why distinct workflows
+          are needed. Null for single workflows.
       pack_name:
         type: str
         description: Name for the workflow pack (Title Case, 2-4 words). Used as
@@ -1251,7 +1254,7 @@ models:
     fields:
       PatternSelection:
         type: PatternSelection
-        description: Pack-aware pattern selection with decomposition decision and
+        description: Pack-aware pattern selection with workflow partition decision and
           per-workflow patterns
   WorkflowStrategyOutput:
     type: model
@@ -1351,7 +1354,8 @@ models:
         - BackendOnly
       orchestration_pattern:
         type: str
-        default: DefaultPattern
+        default: ag2_network
+        description: Selected AG2 Network patternbook label for this workflow, or ag2_network when not specialized.
       initial_message_to_user:
         type: union
         variants:
@@ -1367,7 +1371,7 @@ models:
       initial_agent:
         type: str
         description: Name of the first agent that receives control when the workflow
-          starts (matches AG2 pattern 'initial_agent' parameter).
+          starts (maps to the AG2 beta Network initial speaker).
       visual_agents:
         type: optional_list
         items: str
@@ -1586,7 +1590,7 @@ models:
         type: optional_list
         items: str
         description: Fields to index (non-unique).
-  DatabaseIntentDefinition:
+  DataContractDefinition:
     type: model
     fields:
       collections:
@@ -1597,13 +1601,13 @@ models:
         type: optional_list
         items: str
         description: Query/access patterns the app expects (read/write emphasis).
-  DatabaseIntentOutput:
+  DataContractOutput:
     type: model
-    description: Output for DatabaseIntentAgent (db_intent.json).
+    description: Output for DataContractAgent (data_contract_bundle.json).
     fields:
-      DatabaseIntent:
-        type: DatabaseIntentDefinition
-        description: Database intent (no schema/seed enforcement).
+      DataContract:
+        type: DataContractDefinition
+        description: Data contract (no schema/seed enforcement).
   AgentRosterOutput:
     type: model
     fields:
@@ -1809,6 +1813,7 @@ models:
         description: Route ordering for shell navigation composition.
       meta:
         type: optional_dict
+        default: null
         description: Route metadata such as title.
   PackGraphTransitionOption:
     type: model
@@ -1830,6 +1835,7 @@ models:
         description: Optional workflow sequence override to bind when this option is selected.
       context_variables:
         type: optional_dict
+        default: null
         description: Deterministic context variables seeded when this option is selected. Keys must be declared by the target workflow context_variables.yaml.
   PackGraphShellMode:
     type: literal
@@ -1863,6 +1869,7 @@ models:
           normal app chrome.
       props:
         type: optional_dict
+        default: null
         description: Optional transition presentation props consumed by the selected shell component.
   PackGraphTransition:
     type: model
@@ -2027,23 +2034,50 @@ models:
         type: str
         description: Concise quality-gate message before review_workflow_ui_quality runs.
 
+  WorkflowBundleBuilderOutput:
+    type: model
+    description: >
+      Complete workflow bundle produced by one WorkflowBundleBuilderAgent task batch worker.
+      Contains all files needed to run the workflow: YAML declarations, Python tool stubs,
+      and optional UI components. Each file's filename is relative to the workflow root.
+    fields:
+      workflow_name:
+        type: str
+        description: PascalCase workflow name matching the bundle folder name.
+      agent_message:
+        type: str
+        description: One-sentence confirmation that the bundle was generated (<=140 chars).
+      pattern_id:
+        type: int
+        description: AG2 Network patternbook ID used for this workflow.
+      pattern_name:
+        type: str
+        description: Human-readable patternbook label for this workflow.
+      files:
+        type: list
+        items: CodeFile
+        description: >
+          Ordered list of workflow bundle files. Must include at minimum:
+          orchestrator.yaml, agents.yaml, handoffs.yaml, tools.yaml,
+          context_variables.yaml, structured_outputs.yaml, hooks.yaml, ui_config.yaml.
+          Python tool stubs go under tools/<name>.py.
+          UI components go under ui/<WorkflowName>/<Component>.jsx.
+  PackBuildCoordinatorOutput:
+    type: model
+    description: Thin acknowledgment emitted by PackBuildCoordinator before the task batch fires.
+    fields:
+      agent_message:
+        type: str
+        description: One-sentence status message confirming parallel generation is starting (<=140 chars).
+      workflow_count:
+        type: int
+        description: Number of workflow bundles that will be generated in parallel.
+
 registry:
   InterviewAgent: null
   PatternAgent: PatternSelectionOutput
-  WorkflowStrategyAgent: WorkflowStrategyOutput
-  DatabaseIntentAgent: DatabaseIntentOutput
-  AgentRosterAgent: AgentRosterOutput
-  ToolPlanningAgent: ToolPlanningOutput
   ProjectOverviewAgent: MermaidSequenceDiagramOutput
-  ContextVariablesAgent: ContextVariablesPlanOutput
-  ToolsManagerAgent: ToolsManifestOutput
-  UIFileGenerator: UIToolsFilesOutput
-  WorkflowUIQualityAgent: WorkflowUIQualityReviewRequest
-  AgentToolsFileGenerator: AgentToolsFilesOutput
-  HookAgent: HookFilesOutput
-  AgentsAgent: RuntimeAgentsOutput
-  OrchestratorAgent: OrchestrationConfigOutput
-  HandoffsAgent: HandoffRulesOutput
-  StructuredOutputsAgent: StructuredModelsOutput
+  PackBuildCoordinator: PackBuildCoordinatorOutput
+  WorkflowBundleBuilderAgent: WorkflowBundleBuilderOutput
   PackMetadataAgent: PackMetadataOutput
   DownloadAgent: DownloadRequestOutput

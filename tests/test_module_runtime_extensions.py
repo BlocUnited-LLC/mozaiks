@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from types import SimpleNamespace
 from typing import Any, List, Optional
@@ -60,6 +61,54 @@ class TestModulePackageRoot:
 
     def test_dotted_name(self):
         assert self._fn("a.b") == "mozaiks_runtime_module_a_b"
+
+
+def test_get_workflow_lifecycle_hooks_loads_workflow_local_files(monkeypatch, tmp_path):
+    from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
+    from mozaiksai.core.workflow import workflow_manager as workflow_manager_mod
+
+    wf_dir = tmp_path / "FlowLifecycle"
+    hook_dir = wf_dir / "tools" / "platform"
+    hook_dir.mkdir(parents=True)
+    (wf_dir / "orchestrator.yaml").write_text("workflow_name: FlowLifecycle\n", encoding="utf-8")
+    (hook_dir / "build_lifecycle.py").write_text(
+        "\n".join(
+            [
+                "async def started(*, app_id, workflow_name, chat_id=None, **kwargs):",
+                "    return f'{app_id}:{workflow_name}:{chat_id}'",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class _FakeManager:
+        def get_config(self, workflow_name):
+            assert workflow_name == "FlowLifecycle"
+            return {
+                "lifecycle_tools": [
+                    {
+                        "trigger": "on_start",
+                        "file": "tools/platform/build_lifecycle.py",
+                        "function": "started",
+                    }
+                ]
+            }
+
+    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
+    monkeypatch.setattr(workflow_manager_mod, "get_workflow_manager", lambda: _FakeManager())
+
+    hooks = get_workflow_lifecycle_hooks("FlowLifecycle")
+
+    assert hooks["on_complete"] is None
+    assert hooks["on_fail"] is None
+    assert asyncio.run(
+        hooks["on_start"](
+            app_id="app_1",
+            workflow_name="FlowLifecycle",
+            chat_id="chat_1",
+        )
+    ) == "app_1:FlowLifecycle:chat_1"
 
 
 # ---------------------------------------------------------------------------

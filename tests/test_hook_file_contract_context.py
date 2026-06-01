@@ -145,7 +145,7 @@ class TestInjectCookieCutterContractsContext:
         assert "control_plane_pack:" in msg
         assert "control_plane/config/control_plane.yaml" in msg
         assert "module_contract:" not in msg
-        assert "backend_foundation:" not in msg
+        assert "service_foundation:" not in msg
         assert "[MODULE ARCHETYPES CONTEXT]" not in msg
 
     def test_service_agent_uses_selected_module_archetype(self):

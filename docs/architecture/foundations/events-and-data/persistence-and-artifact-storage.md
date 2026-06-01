@@ -36,7 +36,7 @@ Framework-owned pipeline artifacts produced and consumed by `factory_app`:
 - `BuilderBuildPlans`
 - `DesignDocuments`
 - `ThemeCaptures`
-- `DatabaseIntents`
+- `DataContracts`
 - `DatabaseMigrations`
 - `WorkflowExports`
 - `LLMConfig`
@@ -129,24 +129,24 @@ That staged bundle is separate from Mongo persistence:
 
 Promotion into a runnable workspace is an explicit later step.
 
-## Database Intent and Revisions
+## Data Contracts and Revisions
 
 Database evolution is a first-class generated artifact, not an implicit side
 effect of handler code.
 
-- `DesignDocs` owns the typed `database_intent_bundle`
-- `AppGenerator` stages `config/database_intent.json`
-- refinement runs may stage `config/database_migrations/{migration_id}.json`
+- `DesignDocs` owns the typed `data_contract`
+- `AppGenerator` stages `config/data.json`
+- refinement runs may stage `config/data_migrations/{migration_id}.json`
 - generated module repos use `backend/schemas.py` for typed document shapes and
   `backend/repo.py` for persistence operations
 - the runtime injects `ctx.persistence` into module actions when `app_id` exists;
   generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
   and must not require `ctx.db`
-- the runtime loads `config/database_intent.json` during app load; missing
+- the runtime loads `config/data.json` during app load; missing
   intent is allowed for non-persistent apps, while invalid JSON or invalid shape
   fails app loading
 - the runtime applies declared indexes idempotently and applies only additive
-  migration files from `config/database_migrations/*.json`
+  migration files from `config/data_migrations/*.json`
 - migration states are recorded in `mozaiksai.AppDatabaseMigrations`
 
 The target contract is:
@@ -280,4 +280,7 @@ hardcode database names. Do not generate `backend/models.py`,
 - [App Bundle Declaratives](../../app/app-bundle-declaratives.md)
 - [Event System](event-system.md)
 - [Event Contracts](event-contracts.md)
-- [Database Intent and Revision Contract](../../builder/database-intent-and-revision-contract.md)
+- [Data Contract and Revision Contract](../../builder/data-contract-and-revision-contract.md)
+
+
+

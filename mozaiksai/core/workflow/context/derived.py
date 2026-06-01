@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Callable, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 from autogen.events.agent_events import TextEvent
 
@@ -259,7 +259,6 @@ class DerivedContextManager:
         self.base_context = base_context
         self.providers: List[Any] = []
         self._listeners: List[Any] = []
-        self._agent_hook_registry: set[int] = set()
 
         if base_context is not None:
             self.providers.append(base_context)
@@ -279,7 +278,6 @@ class DerivedContextManager:
             logger.info(
                 f"[DERIVED_CONTEXT] Loaded {len(self.variables)} agent_text state variables: {[v.name for v in self.variables]}"
             )
-            self._register_agent_hooks(agents)
         if self.ui_response_bindings:
             logger.info(
                 f"[DERIVED_CONTEXT] Loaded ui_response bindings: {len(self.ui_response_bindings)}"
@@ -459,6 +457,51 @@ class DerivedContextManager:
 
         return updated_vars
 
+    def apply_agent_text(self, agent_name: str, text: str) -> Dict[str, Any]:
+        """Apply declarative agent_text triggers based on what an agent just said.
+
+        Called by the orchestration loop after agent.ask() returns so that
+        context variables that depend on agent output (e.g. `intake_complete`)
+        are updated before the next routing decision is made.
+        """
+
+        candidate = str(text or "").strip()
+        if not candidate or not self.variables:
+            return {}
+
+        # Build a per-agent lookup once and check only variables that care about
+        # this specific agent to keep the hot path O(matching triggers).
+        updated_vars: Dict[str, Any] = {}
+        for var in self.variables:
+            for trigger in var.triggers:
+                if trigger.agent != agent_name:
+                    continue
+                if not self._matches_trigger(trigger, candidate):
+                    continue
+                value_to_set = trigger.value
+                if value_to_set == "$1" and trigger._compiled:
+                    m = trigger._compiled.search(candidate)
+                    if m and m.groups():
+                        value_to_set = m.group(1)
+                for provider in self.providers:
+                    if hasattr(provider, "set"):
+                        try:
+                            provider.set(var.name, value_to_set)  # type: ignore[attr-defined]
+                            updated_vars[var.name] = value_to_set
+                        except Exception as err:  # pragma: no cover
+                            logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
+                if var.name in updated_vars:
+                    logger.info(
+                        "[DERIVED_CONTEXT] %s: %s -> %r (agent_text, agent=%s)",
+                        self.workflow_name, var.name, updated_vars[var.name], agent_name,
+                    )
+                    for cb in list(self._listeners):
+                        try:
+                            cb({"variable": var.name, "value": updated_vars[var.name], "source": "agent_text"})
+                        except Exception:  # pragma: no cover
+                            pass
+        return updated_vars
+
     def apply_user_text(self, text: str) -> Dict[str, Any]:
         """Apply declarative user_text triggers based on a free-form composer reply."""
 
@@ -490,88 +533,6 @@ class DerivedContextManager:
                         pass
 
         return updated_vars
-
-    def _register_agent_hooks(self, agents: Dict[str, Any]) -> None:
-        trigger_map: Dict[str, List[Tuple[DerivedVariableSpec, AgentTextTrigger]]] = {}
-        for var in self.variables:
-            for trigger in var.triggers:
-                trigger_map.setdefault(trigger.agent, []).append((var, trigger))
-
-        for agent_name, trigger_pairs in trigger_map.items():
-            agent_obj = agents.get(agent_name)
-            if not agent_obj or not hasattr(agent_obj, "register_hook"):
-                continue
-            agent_id = id(agent_obj)
-            if agent_id in self._agent_hook_registry:
-                continue
-            try:
-                agent_obj.register_hook(
-                    "process_message_before_send",
-                    self._make_pre_send_hook(agent_name, trigger_pairs),
-                )
-                self._agent_hook_registry.add(agent_id)
-                logger.debug(f"[DERIVED_CONTEXT] Registered pre-send hook for {agent_name}")
-            except Exception as err:  # pragma: no cover
-                logger.debug(f"[DERIVED_CONTEXT] Failed to register pre-send hook for {agent_name}: {err}")
-
-    def _make_pre_send_hook(
-        self,
-        agent_name: str,
-        trigger_pairs: List[Tuple[DerivedVariableSpec, AgentTextTrigger]],
-    ) -> Callable[[Any, Any, Any, bool], Any]:
-        def _hook(sender=None, message=None, recipient=None, silent: bool = False):
-            # Hooks must accept the AG2 signature, but we only care about the message payload.
-            # Explicitly delete unused parameters so static analyzers know this is intentional.
-            del sender, recipient, silent
-            raw_message = message.get("content") if isinstance(message, dict) else message
-            if not isinstance(raw_message, str):
-                return message
-            candidate = raw_message.strip()
-            if not candidate:
-                return message
-
-            should_hide = False
-            for var, trigger in trigger_pairs:
-                if self._matches_trigger(trigger, candidate):
-                    # Determine value to set (handle dynamic extraction)
-                    value_to_set = trigger.value
-                    if value_to_set == "$1" and trigger._compiled:
-                        m = trigger._compiled.search(candidate)
-                        if m and m.groups():
-                            value_to_set = m.group(1)
-
-                    updated = False
-                    for provider in self.providers:
-                        if hasattr(provider, "set"):
-                            if trigger.from_state is not None:
-                                current = None
-                                if hasattr(provider, "get"):
-                                    try:
-                                        current = provider.get(var.name)
-                                    except Exception:  # pragma: no cover
-                                        current = None
-                                if current != trigger.from_state:
-                                    continue
-                            try:
-                                provider.set(var.name, value_to_set)  # type: ignore[attr-defined]
-                                updated = True
-                            except Exception as err:  # pragma: no cover
-                                logger.debug(f"[DERIVED_CONTEXT] pre-send update failed: {err}")
-                    if updated:
-                        logger.info(
-                            f"[DERIVED_CONTEXT] {self.workflow_name}: {var.name} -> {value_to_set!r} (pre-send, agent={agent_name})"
-                        )
-                    if trigger.ui_hidden:
-                        should_hide = True
-            if should_hide:
-                if isinstance(message, dict):
-                    updated_message = dict(message)
-                    updated_message["_mozaiks_hide"] = True
-                    return updated_message
-                return {"content": raw_message, "_mozaiks_hide": True}
-            return message
-
-        return _hook
 
     @staticmethod
     def _matches_trigger(trigger: AgentTextTrigger, text: str) -> bool:

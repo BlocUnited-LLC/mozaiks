@@ -73,13 +73,14 @@ from .ag2_events import (
     # Runtime events
     AgentThinkingEvent,
     StructuredOutputEvent,
+    TaskBatchPlannedEvent,
     ArtifactUpdatedEvent,
     ArtifactReadyEvent,
     ToolCallRequestedEvent,
     ContextUpdatedEvent,
-    # Journey events
-    JourneyStartedEvent,
-    JourneyCompletedEvent,
+    # Task batch events
+    TaskBatchStartedEvent,
+    TaskBatchCompletedEvent,
     # Helpers
     emit_ag2_event,
     emit_handoff_requested,
@@ -90,7 +91,7 @@ from .ag2_events import (
     # Event registries
     MOZAIKSAI_CONTROL_EVENTS,
     MOZAIKSAI_RUNTIME_EVENTS,
-    MOZAIKSAI_JOURNEY_EVENTS,
+    MOZAIKSAI_TASK_BATCH_EVENTS,
     ALL_MOZAIKSAI_EVENTS,
 )
 
@@ -123,12 +124,13 @@ __all__ = [
     "PrerequisitesRequiredEvent",
     "AgentThinkingEvent",
     "StructuredOutputEvent",
+    "TaskBatchPlannedEvent",
     "ArtifactUpdatedEvent",
     "ArtifactReadyEvent",
     "ToolCallRequestedEvent",
     "ContextUpdatedEvent",
-    "JourneyStartedEvent",
-    "JourneyCompletedEvent",
+    "TaskBatchStartedEvent",
+    "TaskBatchCompletedEvent",
 
     # AG2 event helpers
     "emit_ag2_event",
@@ -141,7 +143,7 @@ __all__ = [
     # Event registries (for yield_on)
     "MOZAIKSAI_CONTROL_EVENTS",
     "MOZAIKSAI_RUNTIME_EVENTS",
-    "MOZAIKSAI_JOURNEY_EVENTS",
+    "MOZAIKSAI_TASK_BATCH_EVENTS",
     "ALL_MOZAIKSAI_EVENTS",
 ]
 

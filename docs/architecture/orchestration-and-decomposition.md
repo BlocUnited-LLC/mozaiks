@@ -1,357 +1,197 @@
 # Orchestration and Decomposition
 
 **Status**: Active  
-**Date**: March 11, 2026  
-**Purpose**: Define the deterministic control-plane model for Mozaiks runtime orchestration and the authoring contract for decomposition.
-
-This document is about graph/config artifacts used by orchestration.
-For the execution ownership model across workflow runs, builder sessions, and
-scoped refinement workers, see
-[Orchestration Control Loops](workflows/orchestration-control-loops.md).
+**Date**: May 31, 2026  
+**Purpose**: Define how Mozaiks decomposes large app/workflow builds while keeping execution deterministic and AG2-aligned.
 
 ## Non-Negotiable Rules
 
-- The runtime control plane is deterministic.
-- `mfj_extension.json` is a compiled execution artifact, not a place for prose reasoning.
+- Workflow sequencing, workflow-local agent routing, workflow-local task batching,
+  and control-plane routing are separate contracts.
 - Natural-language reasoning does not belong in runtime graphs.
-- LLMs may produce plans, classifications, and structured outputs inside workflows.
-- The runtime may execute those outputs, but it must not interpret vague prose to decide control flow.
+- LLMs may produce plans, task lists, classifications, and structured outputs.
+  Runtime code validates and executes those contracts deterministically.
+- AG2 owns agent execution mechanics: `agent.ask`, tools, handoffs, streams, and
+  workflow-local Network routing.
+- Mozaiks owns continuity: artifact state, app/build scope, workflow sequence
+  selection, persistence, validation, and user-facing lifecycle events.
 - There is no single global orchestration prompt over every user request.
-  Builder-context free-text analysis belongs in the builder-session harness
-  (`OrchestrationControlHarness`), not in pack graphs.
-- The builder-session harness is configured through `app/config/ai.json ->
-  control_plane`, not through `extension_registry.json`, `mfj_extension.json`,
-  or workflow-local handoff prompts.
+  Builder-context free-text analysis belongs in the control-plane harness.
 
-## The Three Graph Scopes
+## Execution Scopes
 
-These are graph or config scopes, not the same thing as Mozaiks' three control
-loops.
+### 1. Global Workflow Sequence
 
-### 1. Global workflow sequence graph
+The global pack graph in
+`factory_app/workflows/extended_orchestration/extension_registry.json` sequences
+whole workflows through `workflow_sequences[]`.
 
-The global pack graph in `factory_app/workflows/extended_orchestration/extension_registry.json` is for sequencing across workflows.
+Use it for coarse build phases:
 
-Sequence key: `workflow_sequences[]`.
+- `ValueEngine -> ThemeCapture -> DesignDocs -> AgentGenerator -> AppGenerator -> AppReview`
+- `ExistingAppDiscovery -> brownfield path selection`
+- downstream design/revision paths that must restart at a workflow boundary
 
-It answers:
+It does not decide how a workflow decomposes its internal task work.
 
-- which workflows exist
-- which workflows belong to the same journey
-- which workflows run sequentially vs in parallel groups
+### 2. Workflow-Local AG2 Routing
 
-It does not answer:
-
-- how a workflow decomposes a task internally
-- how a child fan-out is generated
-- how an LLM should reason about branching
-
-Use the global layer for coarse journey phases such as:
-
-- `ValueEngine -> BuildApp`
-- `GreenRoom -> WritersRoom -> MainStage`
-- `Review -> Publish`
-
-### 2. Workflow-level MFJ graph
-
-The per-workflow pack graph in `app/workflows/<workflow>/extended_orchestration/mfj_extension.json` is for mid-flight journeys inside one workflow. Builder workflows use the same contract under `factory_app/workflows/<workflow>/extended_orchestration/mfj_extension.json`.
+Workflow-local agent movement belongs in `handoffs.yaml`, compiled to an AG2
+Network `TransitionGraph`.
 
 It answers:
 
-- which `decomposition_agent` triggers the MFJ
-- what the child spawn mode is
-- which context fields must be present
-- how fan-in resumes the parent
-- where merged child results are injected
+- which agent can speak next
+- which deterministic context expression controls a route
+- when a workflow terminates
+- when an agent should ask for human input
 
-It does not contain business prose. It only contains executable runtime config.
+It does not batch-generate modules, pages, services, workflow files, or app
+bundles.
 
-### 3. Builder task graph / DAG
+### 3. Workflow-Local Task Batches
 
-This is optional and separate from MFJ.
+Short parallel agent work belongs in `extended_orchestration/task_batches.yaml`.
+This is the default decomposition primitive for factory artifact generation.
 
-A DAG only exists when a planner emits explicit dependency edges such as `depends_on`.
+Use this for:
 
-That means:
+- module generation
+- page schema generation
+- service/repo/policy file generation
+- workflow artifact generation
+- review lanes where each lane is a bounded LLM task
 
-- a `decomposition_agent` output is not automatically a DAG
-- an MFJ is not automatically a DAG
-- a DAG is a structured task plan plus dependency edges plus a scheduler
+The production shape is:
 
-For most Mozaiks workflows, a layered execution model is enough:
+```text
+planner agent emits typed task specs
+  -> task_batches.yaml selects source, worker mapping, limits, and result key
+  -> runtime validates dependencies, ownership, and concurrency bounds
+  -> AG2 worker calls run with bounded parallelism
+  -> runtime writes one merged payload to workflow context
+  -> normal AG2 handoff routing continues
+```
 
-1. foundation
-2. parallel child work
-3. integration
-4. summary / preview
+The LLM may plan the tasks, but Python owns validation, concurrency bounds, and
+merge shape. Shared artifact state still belongs to Mozaiks.
 
-## Runtime Contract
+### 4. Control-Plane Routing
 
-### Global Pack Graph
+The builder-session harness chooses the route before any workflow or coding
+worker starts.
 
-Global pack graphs should stay minimal:
+Use this taxonomy:
 
-```json
-{
-  "version": 3,
-  "workflows": [
-    { "id": "GreenRoom" },
-    { "id": "WritersRoom" },
-    { "id": "MainStage" }
-  ],
-  "workflow_sequences": [
-    {
-      "id": "backstage_showcase",
-      "steps": [
-        { "workflows": ["GreenRoom"] },
-        { "workflows": ["WritersRoom"] },
-        { "workflows": ["MainStage"] }
-      ]
-    }
-  ]
-}
+| Decision | Use when |
+| --- | --- |
+| `build_sequence` | User is creating a new app or broad product build. |
+| `discovery_sequence` | User points Mozaiks at an existing app/repo. |
+| `refinement_sequence` | Request changes generated artifacts or invalidates upstream specs. |
+| `scoped_coding_task` | Existing files have a bounded patch scope and validation can prove the edit. |
+| `workflow_local_batch` | A selected workflow needs short bounded parallel agent work. |
+| `ask_for_scope` | Scope is ambiguous or risk is too high to choose safely. |
+
+## Canonical Task Batch Contract
+
+```yaml
+version: 1
+batches:
+  - id: app_build_tasks
+    trigger_agent: AppPlanAgent
+    source:
+      kind: context_variable
+      path: app_task_batch_items
+      task_model: AppBuildTask
+    worker:
+      mode: ag2_agent
+      agent_field: initial_agent
+      prompt_field: initial_message
+      context_fields:
+        - task_id
+        - task_type
+        - owned_paths
+        - acceptance_criteria
+    execution:
+      concurrency: 8
+      dependency_field: depends_on
+      failure_policy: fail_batch
+      retry_limit: 2
+      timeout_seconds: 300
+    result:
+      context_key: app_task_batch_results
+      status_key: app_task_batch_status
+      merge_strategy: collect_task_outputs
+      require_owned_paths: true
 ```
 
 Meaning:
 
-- `GreenRoom` runs first
-- then `WritersRoom` starts
-- then `MainStage` finishes the journey
-- the runtime does not guess intent from prose
+- `source.path` points to a deterministic list of typed task specs.
+- `worker.agent_field` and `worker.prompt_field` map each task to an AG2 worker
+  call.
+- `execution` is enforced by runtime code, not prompt prose.
+- `result.context_key` is the only merge surface downstream agents read.
 
-### Workflow MFJ Graph
+## Factory Workflow Alignment
 
-Workflow MFJ graphs should stay as small as possible.
+AppGenerator:
 
-**Single-phase form:**
+- `AppPlanAgent` emits `AppBuildPlan.build_tasks[]`.
+- `app_build_plan.py` normalizes `app_task_batch_items`.
+- `task_batches.yaml` declares the `app_build_tasks` batch.
+- `assemble_app_tasks.py` consumes `app_task_batch_results`.
+- `IntegrationReadinessAgent` aggregates connector needs from planning,
+  task outputs, and recorded runtime needs.
 
-```json
-{
-  "version": 3,
-  "mid_flight_journeys": [
-    {
-      "id": "writers_room_cycle",
-      "description": "Fan out to 3 writer children, fan in to host.",
-      "decomposition_agent": "DecompositionAgent",
-      "fan_out": { "spawn_mode": "workflow", "max_children": 3 },
-      "fan_in": {
-        "resume_agent": "WritersHostAgent",
-        "inject_as": "mfj_writers_room_results"
-      }
-    }
-  ]
-}
-```
+AgentGenerator:
 
-Meaning:
-
-- `decomposition_agent` must emit the child specs in its structured output
-- runtime fans out deterministically
-- runtime fans in deterministically
-- parent resumes at the configured `resume_agent`
-- `aggregation_strategy` defaults to `collect_all` — no need to author it
-- `resume_entry_agent` defaults to `resume_agent` when omitted
-
-**Multi-stage form:**
-
-Use `stages` when one decomposition agent powers multiple sequential fan-out → fan-in
-phases. Each stage after the first requires a `gate_agent` that serves as the
-fan-in resume point of the prior stage and the decomposition trigger for the next fan-out.
-
-```json
-{
-  "version": 3,
-  "mid_flight_journeys": [
-    {
-      "id": "generation_journey",
-      "description": "Stage 1 plans all workflows in parallel, user approves, stage 2 implements.",
-      "decomposition_agent": "DecompositionAgent",
-      "fan_out": { "spawn_mode": "workflow", "max_children": 10 },
-      "stages": [
-        {
-          "id": "plan",
-          "child_initial_agent": "PlanningAgent",
-          "resume_agent": "ReviewAgent",
-          "inject_as": "mfj_plan_results"
-        },
-        {
-          "id": "implement",
-          "gate_agent": "ApprovalAgent",
-          "child_initial_agent": "ImplementationAgent",
-          "resume_agent": "PackagingAgent",
-          "inject_as": "mfj_impl_results"
-        }
-      ]
-    }
-  ]
-}
-```
-
-The schema expands stages to flat journeys at load time. The coordinator never
-sees the staged format — it sees one journey per stage, with the gate agent as
-the decomposition trigger of the next stage.
-
-Advanced fields like `trigger_on`, `input_contract`, `output_contract`,
-`child_context_seed`, and timeout settings are optional override knobs. They
-exist for stricter validation or special cases, but they should not be the
-default authored experience. Keep those advanced knobs in roadmap profiles
-until the baseline authoring flow needs them:
-internal MFJ authoring roadmap notes.
-
-## Decomposition Contract
-
-If a workflow needs productive fan-out, a dedicated decomposition step should prepare it.
-
-That means:
-
-- do not put reasoning in `mfj_extension.json`
-- do put reasoning in a `decomposition_agent`
-- require structured outputs from that agent
-
-### MFJ context variable auto-synthesis
-
-The runtime reads `extended_orchestration/mfj_extension.json` at plan-load time and
-auto-registers context variables for:
-
-- every `inject_as` key — type `object`, default `null`, scoped to the
-  corresponding `resume_agent`
-- the runtime `_mfj_resume_*` handshake keys — scoped to every `resume_agent`
-
-Workflow authors do not declare these in `context_variables.yaml`. The only
-authoring obligation is in the `resume_agent`'s `[CONTEXT]` prompt section:
-name the `inject_as` key and describe the shape of the injected value so the
-agent knows what it is reading.
-
-The decomposition agent is responsible for producing:
-
-- bounded child work units
-- child workflow specs
-- any lane/task metadata needed for fan-in
-
-For build-style workflows, the output should include ownership and dependency information such as:
-
-- `task_id`
-- `goal`
-- `owned_paths`
-- `depends_on`
-- `acceptance_criteria`
-- `integration_needs` when a child task expects third-party credentials or
-  connector configuration
+- `PackBuildCoordinator` collects the pack spec; the `workflow_bundle_tasks`
+  task batch fires a `WorkflowBundleBuilderAgent` instance per workflow.
+- Each worker writes a complete workflow bundle — including
+  `extended_orchestration/task_batches.yaml` when the generated workflow
+  requires it — as `WorkflowBundleBuilderOutput.files`.
+- Generated workflows author task batches through the builder's structured
+  output, not by writing custom orchestration Python.
 
 ## Cross-Workflow Data Transfer
 
-Global journeys do not magically share workflow-local context.
+Global workflows do not magically share workflow-local context.
 
 Cross-workflow carry must be explicit:
 
-1. workflow A persists canonical fields to its `ChatSessions` document
-2. workflow B loads them in a `before_chat` lifecycle tool
-3. workflow B seeds its own context variables from those persisted fields
+1. workflow A persists canonical fields to artifacts or the chat session
+2. workflow B loads them in a lifecycle tool or startup context preload
+3. workflow B seeds its own declared context variables
 
-This is the current Mozaiks contract.
-
-Use it for:
-
-- `ValueEngine` canonical app spec
-- `GreenRoom` set brief
-- any other workflow-to-workflow carry
-
-## Runtime Event Flow
-
-The runtime emits `chat.agent_output_validated` for any agent with a registered structured-output model. Two downstream handlers react:
-
-- **`handle_tool_dispatch`** — invoked only when the agent has an `auto_tool_call: true` tool in tools.yaml. Runs the mapped tool function deterministically.
-- **`handle_journey_triggered`** — invoked only when the agent matches a `decomposition_agent` in the workflow's MFJ pack graph. Starts fan-out.
-
-That means:
-
-- MFJ decomposition agents do not need fake auto-tool bindings
-- UI tool or side-effect automation should use `auto_tool_call: true` on the tool in tools.yaml
-
-## Showcase Pattern
-
-The canonical demo in this repo is:
-
-1. `GreenRoom`
-2. `WritersRoom`
-3. `MainStage`
-
-### GreenRoom
-
-Purpose:
-
-- capture a comedy premise and performer boundaries
-- convert it into a canonical set brief
-- persist that brief for the next workflow
-
-### WritersRoom
-
-Purpose:
-
-- load the persisted set brief
-- decompose it into three parallel evaluation lanes
-- fan out to three child runs inside the same workflow
-- fan in to the host
-- render both inline and artifact UI surfaces
-
-### MainStage
-
-Purpose:
-
-- load the writers-room summary
-- package the strongest material into a final stage-ready set
-- render the final artifact for presentation
-
-This demonstrates:
-
-- global universal orchestration
-- workflow-level MFJ
-- lifecycle-tool carry between workflows
-- inline UI tools
-- artifact UI tools
+Use it for app specs, brand tokens, design docs, app context graphs, and build
+plans.
 
 ## BuildApp Guidance
-
-For real application generation, the pattern should be:
-
-1. `ValueEngine` produces `ProductSpec`, or `ExistingAppDiscovery` produces `ExistingProductSpec`
-2. downstream planning resolves `CapabilitySpec[]`
-3. `ExperienceSpec` and `AgentAugmentationPlan` are derived from that product model
-4. compilers turn those artifacts into a typed `BuildGraph` and concrete bundles
-5. major changes emit a typed `ChangeIntent`
-6. the universal orchestrator routes deterministically from typed refinement state rather than raw prose
-
-Do not route from raw prose.
-
-Use:
-
-- typed `AppSpec`
-- typed `ProductSpec`
-- typed `CapabilitySpec`
-- typed `ExperienceSpec`
-- typed `AgentAugmentationPlan`
-- typed `ChangeIntent`
-- typed `BuildGraph`
-- typed `BuildTaskSpec`
 
 Decompose into product artifacts first, not workflows first.
 
 - modules and persistent pages come from deterministic product planning
 - workflows are attached only when a capability requires agentic behavior
-- refinements route by artifact boundary (`ProductSpec`, `CapabilitySpec[]`, `ExperienceSpec`, `AgentAugmentationPlan`, `BuildGraph`)
-- third-party credentials are requested agentically at the point of need. Child
-  tasks may declare or record `integration_needs`; the parent fan-in checkpoint
-  aggregates them, reuses ready app connectors, prompts inline for missing
-  required credentials, and persists results to the app-scoped
-  `/apps/{appId}/integrations` surface.
+- refinements route by artifact boundary and workflow sequence impact
+- third-party credentials are requested agentically at the point of need
+- task agents may declare or record `integration_needs`; the parent readiness
+  checkpoint aggregates them before validation/download
+
+Typed builder contracts anchor the artifact pipeline:
+
+- `ProductSpec` captures the approved product capability and UX intent
+- `ExperienceSpec` owns persistent app UI definitions — pages, shell,
+  navigation, and schema-first surface contracts
+- `AgentAugmentationPlan` declares which capabilities require AI workflows
+  and which workflow bundles need to be generated by AgentGenerator
 
 ## Summary
 
 - Global pack graphs sequence workflows.
-- Workflow pack graphs handle MFJ inside a workflow.
-- Workflow execution, builder-session routing, and scoped refinement workers are
-  separate control loops above those graph artifacts.
-- Decomposition belongs to agents, not runtime graph prose.
-- DAG scheduling is optional and separate from MFJ.
+- `handoffs.yaml` controls workflow-local AG2 routing.
+- `task_batches.yaml` handles short parallel LLM work inside a workflow.
+- The control-plane harness chooses build/refinement/coding routes.
+- Decomposition belongs to typed agent outputs, not runtime graph prose.
 - Cross-workflow carry is explicit persistence plus lifecycle loading.
 - The runtime executes compiled contracts, not natural-language logic.

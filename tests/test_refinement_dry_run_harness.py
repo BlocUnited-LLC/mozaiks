@@ -73,7 +73,7 @@ def test_integration_request_includes_adapter_and_readiness_paths() -> None:
 
     assert plan.workflow_sequence == "app_revision"
     assert plan.next_step == "scoped_patch_candidate"
-    assert "backend/integrations/analytics_provider_client.py" in plan.affected_bundle_paths
+    assert "services/integrations/analytics_provider_client.py" in plan.affected_bundle_paths
     assert "modules/reports/backend/service.py" in plan.affected_bundle_paths
     assert "modules/reports/backend/schemas.py" in plan.affected_bundle_paths
     assert "Integration readiness may need to be rechecked." in plan.scope_summary
@@ -85,8 +85,8 @@ def test_data_model_request_includes_database_paths_and_review_warning() -> None
         "feature",
     )
 
-    assert "config/database_intent.json" in plan.affected_bundle_paths
-    assert "config/database_migrations/001_initial.json" in plan.affected_bundle_paths
+    assert "config/data.json" in plan.affected_bundle_paths
+    assert "config/data_migrations/001_initial.json" in plan.affected_bundle_paths
     assert "modules/projects/backend/repo.py" in plan.affected_bundle_paths
     assert "modules/projects/backend/policy.py" in plan.affected_bundle_paths
     assert "Destructive changes require explicit review." in plan.scope_summary
@@ -97,7 +97,7 @@ def test_hosted_capability_request_includes_adapter_facade_and_page_paths() -> N
     plan = _run_plan("Change hosted analytics dashboard display.", "design")
 
     assert plan.workflow_sequence == "app_surface_revision"
-    assert "backend/integrations/hosted_analytics_client.py" in plan.affected_bundle_paths
+    assert "services/integrations/hosted_analytics_client.py" in plan.affected_bundle_paths
     assert "modules/analytics_dashboard/module.yaml" in plan.affected_bundle_paths
     assert "modules/analytics_dashboard/backend/service.py" in plan.affected_bundle_paths
     assert "ui/pages/analytics.yaml" in plan.affected_bundle_paths

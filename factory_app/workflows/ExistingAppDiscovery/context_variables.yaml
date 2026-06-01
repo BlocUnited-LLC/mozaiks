@@ -178,6 +178,62 @@ definitions:
       type: state
       default: null
 
+  context_graph_pack:
+    type: object
+    description: >
+      Advisory compact Context Graph prompt pack built during before_chat when
+      local source files or a prior refresh context graph are available.
+      ExistingAppDiscovery uses this for mid-discovery code intelligence only;
+      the final canonical graph is produced with the discovery artifact.
+    source:
+      type: state
+      default: null
+
+  context_graph_catalog:
+    type: object
+    description: >
+      Rich machine-readable Context Graph catalog for diagnostics and tooling.
+      This is intentionally distinct from context_graph_pack.
+    source:
+      type: state
+      default: null
+
+  context_graph_status:
+    type: string
+    description: >
+      Mid-discovery Context Graph preload status: loaded, unavailable, or null
+      when the preload has not run.
+    source:
+      type: state
+      default: null
+
+  context_graph_reason:
+    type: string
+    description: >
+      Specific Context Graph preload reason such as no_local_source_roots,
+      previous_app_context_graph_unavailable, or context_refresh_prior_version.
+      Null when source graph context loaded without a special condition.
+    source:
+      type: state
+      default: null
+
+  context_graph_warnings:
+    type: array
+    description: Warnings emitted while building mid-discovery Context Graph prompt context.
+    source:
+      type: state
+      default: []
+
+  context_graph_health:
+    type: object
+    description: >
+      Deterministic Context Graph preload health and coverage metadata,
+      including scan limits, selected file counts, parser availability, and
+      skipped-file counts.
+    source:
+      type: state
+      default: null
+
   theme_capture_ready:
     type: boolean
     description: True when deterministic theme evidence was captured for the host frontend.
@@ -393,7 +449,7 @@ definitions:
 
   api_surface:
     type: string
-    description: Type and rough scope of the backend/API surface.
+    description: Type and rough scope of the app's service/API surface.
     source:
       type: state
       default: null
@@ -428,7 +484,7 @@ definitions:
 
   service_surfaces:
     type: object
-    description: Existing backend-facing surfaces such as APIs, hubs, or workers.
+    description: Existing service-facing surfaces such as APIs, hubs, or workers.
     source:
       type: state
       default: []
@@ -616,6 +672,16 @@ definitions:
   existing_app_discovery_artifact:
     type: object
     description: Full structured discovery artifact produced by DiscoveryArtifactAssemblerAgent.
+    source:
+      type: state
+      default: null
+
+  app_context_graph:
+    type: object
+    description: >
+      Final canonical AppContext graph payload produced when
+      DiscoveryArtifactAssemblerAgent saves the discovery artifact. This lands
+      after discovery assembly, not during mid-discovery preload.
     source:
       type: state
       default: null

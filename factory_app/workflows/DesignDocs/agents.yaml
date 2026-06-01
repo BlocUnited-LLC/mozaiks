@@ -6,7 +6,7 @@ agents:
     content: 'You are DesignDocsAgent. You generate one typed design bundle containing
       four design documents: frontend, backend, database, and ui_schema. The ui_schema
       document is the current serialized ExperienceSpec for persistent app UI, and
-      the bundle also carries the canonical typed `surface_map` and `database_intent_bundle`
+      the bundle also carries the canonical typed `surface_map` and `data_contract`
       contracts.'
   - id: hard_constraints
     heading: '[HARD CONSTRAINTS]'
@@ -21,7 +21,7 @@ agents:
       - If database_setup_mode is skip, still design a MongoDB-ready schema and note that connection setup is intentionally deferred.
       - Do not call save tools manually. The runtime auto-invokes the save tool after your structured output validates.
       - Include monetization/paywall/billing integration points ONLY if MONETIZATION_ENABLED is true; never implement payment logic in the runtime.
-      - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `database_intent_bundle`.
+      - Treat third-party credentials, connector secrets, and workspace integration records as platform-owned integration state. They must not be modeled as app/business collections inside `data_contract`.
   - id: theme_identity
     heading: '[THEME IDENTITY]'
     content: |-
@@ -105,9 +105,9 @@ agents:
 
       6) Emit one typed `surface_map` object that exactly captures the realization boundaries used by both the Backend doc and the UI Schema doc.
 
-      7) Emit one typed `database_intent_bundle` object that captures the canonical collection, field, index, ownership, and migration intent for the app.
+      7) Emit one typed `data_contract` object that captures the canonical collection, field, index, ownership, and migration intent for the app.
 
-      8) Output ONE valid `DesignDocsBundle` JSON object only. The runtime auto-persists the docs, the typed `surface_map`, and the typed `database_intent_bundle`.
+      8) Output ONE valid `DesignDocsBundle` JSON object only. The runtime auto-persists the docs, the typed `surface_map`, and the typed `data_contract`.
   - id: event_architecture
     heading: '[EVENT ARCHITECTURE]'
     content: |-
@@ -172,8 +172,8 @@ agents:
       - For durable module surfaces, be explicit about owned entities, mutations, permissions, event facts, and ownership checks so downstream layered backend generation does not have to infer them from vague prose.
       - Do not rely on prose-only conventions for event namespaces, primitive types, layout modes, capability ids, or admin sections.
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
-      - The database design must be transcribed into `database_intent_bundle`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
-      - Do not place API-key metadata, vault state, or workspace integration records into `database_intent_bundle`; those are platform-managed connector contracts, not app-owned schema.
+      - The data design must be transcribed into `data_contract`; do not leave durable collection ownership, indexes, or migration policy trapped only in prose.
+      - Do not place API-key metadata, vault state, or workspace integration records into `data_contract`; those are platform-managed connector contracts, not app-owned schema.
       - If a surface truly needs file-backed customization, describe the need in a bounded way; do not invent ad hoc YAML keys or raw implementation blobs.
       - Persistent app UI remains declarative. Do not embed raw JSX, Tailwind, or untyped callback logic in the ui_schema.
       - Treat custom full-page React as a rare bounded escape hatch, not a normal generation target. If a page truly cannot be expressed with shipped primitives, describe that as a bounded need for the downstream `custom_route_bundle` contract (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) rather than inventing a second page contract.
@@ -315,7 +315,7 @@ agents:
             }
           ]
         },
-        "database_intent_bundle": {
+        "data_contract": {
           "version": "1",
           "app_id": null,
           "artifact_version_id": null,
@@ -360,7 +360,8 @@ agents:
       - `frontend_markdown`, `backend_markdown`, and `database_markdown` must be complete Markdown documents.
       - `experience_spec` must be a typed JSON object matching ExperienceSpec — not a YAML string.
       - `surface_map` is the parser-enforced source of truth for surface ownership. The saved Backend doc and experience_spec must align with it.
-      - `database_intent_bundle` is the parser-enforced source of truth for durable collections, field contracts, indexes, and migration posture.
+      - `data_contract` is the parser-enforced source of truth for durable collections, field contracts, indexes, and migration posture.
       - Output ONLY the raw JSON object. No markdown fences, no commentary.
   max_consecutive_auto_reply: 12
   structured_outputs_required: true
+

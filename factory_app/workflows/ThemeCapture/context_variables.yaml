@@ -32,9 +32,9 @@ definitions:
       type: state
       default: null
 
-  is_child_workflow:
+  automated_workflow_run:
     type: boolean
-    description: True when ThemeCapture is launched from another workflow with seeded context.
+    description: True when ThemeCapture is launched automatically with seeded upstream context.
     source:
       type: state
       default: false
@@ -142,7 +142,7 @@ agents:
       - css_snapshot
       - screenshot_description
       - parent_theme_config
-      - is_child_workflow
+      - automated_workflow_run
       - app_name
       - app_description
       - tech_stack

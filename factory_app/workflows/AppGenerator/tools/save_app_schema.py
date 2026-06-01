@@ -25,8 +25,7 @@ from mozaiksai.core.workflow.ui_primitives import (
 
 _logger = logging.getLogger("tools.save_app_schema")
 
-PROMOTABLE_APP_ENTRIES = ("app.json", "ui", "brand", "config", "shared_persistence")
-VALID_SHARED_PERSISTENCE_MODES = {"app_shared_contracts", "external_existing_db"}
+PROMOTABLE_APP_ENTRIES = ("app.json", "ui", "brand", "config", "services")
 
 
 def _repo_root() -> Path:
@@ -523,20 +522,20 @@ def _validate_asset_manifest(asset_manifest: Any) -> None:
             raise ValueError(f"{path} must include at least one of path or url")
 
 
-def _validate_database_intent_bundle(database_intent_bundle: Any) -> None:
-    if database_intent_bundle is None:
+def _validate_data_contract(data_contract: Any) -> None:
+    if data_contract is None:
         return
-    if not isinstance(database_intent_bundle, dict):
-        raise ValueError("database_intent_bundle must be an object")
-    if not _is_non_empty_string(database_intent_bundle.get("version")):
-        raise ValueError("database_intent_bundle.version is required")
+    if not isinstance(data_contract, dict):
+        raise ValueError("data_contract must be an object")
+    if not _is_non_empty_string(data_contract.get("version")):
+        raise ValueError("data_contract.version is required")
 
-    surfaces = database_intent_bundle.get("surfaces")
+    surfaces = data_contract.get("surfaces")
     if not isinstance(surfaces, list):
-        raise ValueError("database_intent_bundle.surfaces must be a list")
+        raise ValueError("data_contract.surfaces must be a list")
 
     for index, surface in enumerate(surfaces):
-        path = f"database_intent_bundle.surfaces[{index}]"
+        path = f"data_contract.surfaces[{index}]"
         if not isinstance(surface, dict):
             raise ValueError(f"{path} must be an object")
         if not _is_non_empty_string(surface.get("surface_id")):
@@ -546,31 +545,12 @@ def _validate_database_intent_bundle(database_intent_bundle: Any) -> None:
         if not isinstance(surface.get("collections"), list):
             raise ValueError(f"{path}.collections must be a list")
 
-
-def _validate_shared_persistence_contract(shared_persistence_contract: Any) -> None:
-    if shared_persistence_contract is None:
-        return
-    if not isinstance(shared_persistence_contract, dict):
-        raise ValueError("shared_persistence_contract must be an object")
-    if not _is_non_empty_string(shared_persistence_contract.get("version")):
-        raise ValueError("shared_persistence_contract.version is required")
-
-    mode = shared_persistence_contract.get("mode")
-    if mode not in VALID_SHARED_PERSISTENCE_MODES:
-        raise ValueError(
-            "shared_persistence_contract.mode must be one of "
-            f"{sorted(VALID_SHARED_PERSISTENCE_MODES)}"
-        )
-
-    aliases = shared_persistence_contract.get("aliases")
-    if aliases is None:
-        aliases = []
+    aliases = data_contract.get("aliases") or []
     if not isinstance(aliases, list):
-        raise ValueError("shared_persistence_contract.aliases must be a list when provided")
-
+        raise ValueError("data_contract.aliases must be a list when provided")
     seen_aliases: set[str] = set()
     for index, alias in enumerate(aliases):
-        path = f"shared_persistence_contract.aliases[{index}]"
+        path = f"data_contract.aliases[{index}]"
         if not isinstance(alias, dict):
             raise ValueError(f"{path} must be an object")
         alias_id = alias.get("alias")
@@ -584,14 +564,12 @@ def _validate_shared_persistence_contract(shared_persistence_contract: Any) -> N
         if not _is_non_empty_string(alias.get("owner_module")):
             raise ValueError(f"{path}.owner_module is required")
 
-    shared_collections = shared_persistence_contract.get("shared_collections")
-    if shared_collections is None:
-        shared_collections = []
+    shared_collections = data_contract.get("shared_collections") or []
     if not isinstance(shared_collections, list):
-        raise ValueError("shared_persistence_contract.shared_collections must be a list when provided")
+        raise ValueError("data_contract.shared_collections must be a list when provided")
     for index, collection in enumerate(shared_collections):
         if not _is_non_empty_string(collection):
-            raise ValueError(f"shared_persistence_contract.shared_collections[{index}] is required")
+            raise ValueError(f"data_contract.shared_collections[{index}] is required")
 
 
 def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
@@ -1393,8 +1371,7 @@ def _persist_to_filesystem(
     theme_config_patch: Optional[Dict[str, Any]],
     shell_config: Optional[Dict[str, Any]],
     asset_manifest: Optional[Dict[str, Any]],
-    database_intent_bundle: Optional[Dict[str, Any]],
-    shared_persistence_contract: Optional[Dict[str, Any]],
+    data_contract: Optional[Dict[str, Any]],
     custom_route_bundle: Optional[Dict[str, Any]],
 ) -> List[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
@@ -1489,23 +1466,14 @@ def _persist_to_filesystem(
         manifest_path.write_text(json.dumps(existing_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         written.append("config/asset_manifest.json")
 
-    if database_intent_bundle and isinstance(database_intent_bundle, dict):
-        database_intent_path = output_dir / "config" / "database_intent.json"
-        database_intent_path.parent.mkdir(parents=True, exist_ok=True)
-        database_intent_path.write_text(
-            json.dumps(database_intent_bundle, indent=2, ensure_ascii=False),
+    if data_contract and isinstance(data_contract, dict):
+        data_contract_path = output_dir / "config" / "data.json"
+        data_contract_path.parent.mkdir(parents=True, exist_ok=True)
+        data_contract_path.write_text(
+            json.dumps(data_contract, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        written.append("config/database_intent.json")
-
-    if shared_persistence_contract and isinstance(shared_persistence_contract, dict):
-        shared_persistence_path = output_dir / "config" / "shared_persistence.json"
-        shared_persistence_path.parent.mkdir(parents=True, exist_ok=True)
-        shared_persistence_path.write_text(
-            json.dumps(shared_persistence_contract, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        written.append("config/shared_persistence.json")
+        written.append("config/data.json")
 
     return written
 
@@ -1574,13 +1542,9 @@ def save_app_schema(
         Optional[Dict[str, Any]],
         Field(description="Optional asset manifest to merge into config/asset_manifest.json. None to skip."),
     ] = None,
-    database_intent_bundle: Annotated[
+    data_contract: Annotated[
         Optional[Dict[str, Any]],
-        Field(description="Optional canonical database intent bundle persisted to config/database_intent.json. None to skip."),
-    ] = None,
-    shared_persistence_contract: Annotated[
-        Optional[Dict[str, Any]],
-        Field(description="Optional opt-in shared/existing persistence contract persisted to config/shared_persistence.json. None for default generated-scoped persistence."),
+        Field(description="Optional canonical data contract persisted to config/data.json. None to skip."),
     ] = None,
     custom_route_bundle: Annotated[
         Optional[Dict[str, Any]],
@@ -1603,13 +1567,12 @@ def save_app_schema(
       - brand/theme_config.json (merge)  → theme_config_patch when set
       - config/shell.json (merge)        → shell_config when set
       - config/asset_manifest.json       → asset_manifest when set
-      - config/database_intent.json      → database_intent_bundle when set or available in context
-      - config/shared_persistence.json   → shared_persistence_contract when explicitly set or available in context
+      - config/data.json                 → data_contract when set or available in context
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
-        app_asset_manifest, app_database_intent_bundle, app_shared_persistence_contract,
-        app_custom_route_bundle, app_schema_ready
+        app_asset_manifest, app_data_contract, app_custom_route_bundle,
+        app_schema_ready
 
     Tools are dumb — no reasoning, no transformation. AppSchemaAgent already
     produced correct typed output; this tool just persists it.
@@ -1629,8 +1592,7 @@ def save_app_schema(
     theme_config_patch = _strip_none(_to_plain(theme_config_patch))
     shell_config = _normalize_shell_config(shell_config)
     asset_manifest = _strip_none(_to_plain(asset_manifest))
-    database_intent_bundle = _strip_none(_to_plain(database_intent_bundle))
-    shared_persistence_contract = _strip_none(_to_plain(shared_persistence_contract))
+    data_contract = _strip_none(_to_plain(data_contract))
     custom_route_bundle = _normalize_custom_route_bundle(custom_route_bundle)
 
     for page in page_list:
@@ -1675,14 +1637,10 @@ def save_app_schema(
     _validate_shell_navigation(shell_config)
     _validate_shell_chrome(shell_config)
     _validate_asset_manifest(asset_manifest)
-    resolved_database_intent_bundle = database_intent_bundle
-    if resolved_database_intent_bundle is None:
-        resolved_database_intent_bundle = _context_get(context_variables, "database_intent_bundle")
-    _validate_database_intent_bundle(resolved_database_intent_bundle)
-    resolved_shared_persistence_contract = shared_persistence_contract
-    if resolved_shared_persistence_contract is None:
-        resolved_shared_persistence_contract = _context_get(context_variables, "shared_persistence_contract")
-    _validate_shared_persistence_contract(resolved_shared_persistence_contract)
+    resolved_data_contract = data_contract
+    if resolved_data_contract is None:
+        resolved_data_contract = _context_get(context_variables, "data_contract")
+    _validate_data_contract(resolved_data_contract)
     app_ui_quality_warnings = dedupe(
         audit_page_schemas(page_list)
         + audit_custom_route_bundle_integrity(
@@ -1709,8 +1667,7 @@ def save_app_schema(
             context_variables.set("app_theme_config_patch", theme_config_patch)
             context_variables.set("app_shell_config", shell_config)
             context_variables.set("app_asset_manifest", asset_manifest)
-            context_variables.set("app_database_intent_bundle", resolved_database_intent_bundle)
-            context_variables.set("app_shared_persistence_contract", resolved_shared_persistence_contract)
+            context_variables.set("app_data_contract", resolved_data_contract)
             context_variables.set("app_custom_route_bundle", custom_route_bundle)
             context_variables.set("app_schema_ready", True)
             context_variables.set("available_page_primitives", list(get_page_ui_primitive_names()))
@@ -1735,8 +1692,7 @@ def save_app_schema(
             theme_config_patch,
             shell_config,
             asset_manifest,
-            resolved_database_intent_bundle,
-            resolved_shared_persistence_contract,
+            resolved_data_contract,
             custom_route_bundle,
         )
         _logger.info(
@@ -1760,8 +1716,7 @@ def save_app_schema(
         f"Theme config patch: {'yes' if theme_config_patch else 'no'}\n"
         f"Shell config: {'yes' if shell_config else 'no'}\n"
         f"Asset manifest: {'yes' if asset_manifest else 'no'}\n"
-        f"Database intent: {'yes' if resolved_database_intent_bundle else 'no'}"
-        f"\nShared persistence: {'yes' if resolved_shared_persistence_contract else 'no'}"
+        f"Data contract: {'yes' if resolved_data_contract else 'no'}"
         f"{files_written}"
     )
 

@@ -318,8 +318,8 @@ async def get_llm_config(
     """Build (or retrieve from cache) an LLM runtime config.
 
     Returns a tuple (wrapper_placeholder, llm_config). The first element is
-    reserved and currently always None; the second is the dict passed to
-    ConversableAgent.
+    reserved and currently always None; the second is the dict converted into
+    an AG2 beta OpenAIConfig.
     """
     cache_key = _build_llm_cache_key(
         response_format=response_format, extra_config=extra_config

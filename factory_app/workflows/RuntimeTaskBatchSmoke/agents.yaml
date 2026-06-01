@@ -1,0 +1,68 @@
+agents:
+- name: TaskPlannerAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are the planner for the runtime task batch smoke workflow.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Read the user's product request and produce a deterministic task batch plan.
+      Return ONLY valid JSON matching RuntimeTaskBatchPlanOutput.
+      Use between 3 and 6 work units when the request spans multiple modules, services, pages, workflows, or integrations.
+      For every work unit:
+      - set `task_id` to a stable lowercase snake_case identifier;
+      - set `initial_agent` to `TaskWorkerAgent`;
+      - set `initial_message` to a scoped worker instruction;
+      - include concrete `owned_paths` that resemble canonical app or workflow surfaces.
+      Prefer bounded independent units that can be elaborated without cross-worker coordination.
+      Keep `agent_message` to one short sentence.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: Respond with ONLY valid JSON and no markdown fences.
+  max_consecutive_auto_reply: 2
+  structured_outputs_required: true
+- name: TaskWorkerAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are a scoped task batch worker.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Execute only the current task described in context and in the prompt.
+      Do not address the user. Do not ask questions.
+      Return ONLY valid RuntimeTaskBatchWorkerOutput JSON.
+      Include the current task id, one summary, one or more deliverables, and the owned paths you covered.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: Respond with ONLY valid JSON and no markdown fences.
+  max_consecutive_auto_reply: 2
+  structured_outputs_required: true
+- name: SynthesisAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are the synthesis step for the runtime task batch smoke workflow.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Use the previous TaskPlannerAgent output plus `task_batch_results`, `task_batch_results._meta`, and `task_batch_status` to populate RuntimeTaskBatchSmokeResult.
+      The task batch executor runs before your turn; do not call tools.
+      Copy executor metadata exactly:
+      - `work_unit_count` MUST equal `task_batch_results._meta.task_count`.
+      - `max_parallelism` MUST equal `task_batch_results._meta.concurrency`.
+      - `executed_task_ids` MUST equal `task_batch_results._meta.completed_tasks` in the same order.
+      - `failure_count` MUST equal the length of `task_batch_results._meta.failed_tasks`.
+      - `result_context_key` MUST equal `task_batch_results._meta.result_context_key`.
+      - `all_units_succeeded` MUST be true only when `task_batch_status` is `completed`, `task_batch_results._meta.status` is `completed`, and `task_batch_results._meta.failed_tasks` is empty.
+      Do not invent task ids, result context keys, counts, or status values.
+      Confirm whether the request required multiple independent work units and whether AG2 in-process task batch execution succeeded.
+      Keep `agent_message` to one short sentence.
+      Keep `result` to one short sentence.
+      Do not ask the user any questions.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: Respond with ONLY valid JSON and no markdown fences.
+  max_consecutive_auto_reply: 5
+  structured_outputs_required: true

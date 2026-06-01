@@ -44,7 +44,7 @@ UI (receives tool_call/tool_response events)
 | `agents.yaml` | Agent config with `structured_outputs_required: true` |
 | `tools.yaml` | Tool bindings with `auto_tool_call: true` |
 | `tools/*.py` | Python tool implementations |
-| `extended_orchestration/mfj_extension.json` | MFJ (fan-out/fan-in) config |
+| `extended_orchestration/task_batches.yaml` | Optional workflow-local task batch config |
 
 ## Contract Details
 
@@ -60,19 +60,18 @@ registry:
 
 # Model definitions
 models:
-  ExampleChildSpec:
+  ExampleTask:
     type: model
     fields:
-      name:
-        type: literal
-        values: [ExampleWorker]
-        description: Fixed child workflow name
-      description:
+      task_id:
         type: str
-        description: The angle label in 3-5 words
+        description: Stable task id
+      initial_agent:
+        type: str
+        description: Worker agent to execute the task
       initial_message:
         type: str
-        description: Full prompt for the child workflow
+        description: Prompt for the worker agent
 
   ExampleDecomposition:
     type: model
@@ -239,37 +238,35 @@ Tool function invoked with validated kwargs
 Emits chat.tool_call + chat.tool_response to UI
 ```
 
-## MFJ (Mid-Flight Journeys)
+## Task Batches
 
-For workflows that fan-out to child workflows, use `extended_orchestration/mfj_extension.json`.
+For workflows that execute a typed list of work items in parallel, use
+`extended_orchestration/task_batches.yaml`.
 
-```json
-{
-  "version": 3,
-  "mid_flight_journeys": [
-    {
-      "id": "parallel-example-generation",
-      "description": "Spawn 3 parallel ExampleWorker children",
-      "decomposition_agent": "ExampleDecomposerAgent",
-      "fan_out": {
-        "spawn_mode": "workflow",
-        "max_children": 3
-      },
-      "fan_in": {
-        "resume_agent": "ExamplePresenterAgent",
-        "resume_entry_agent": "ResumeRouterAgent",
-        "inject_as": "mfj_example_results"
-      }
-    }
-  ]
-}
+```yaml
+version: 1
+batches:
+  - id: example_generation
+    trigger_agent: ExampleDecomposerAgent
+    source:
+      kind: context_variable
+      path: example_plan.tasks
+      task_model: ExampleTask
+    worker:
+      mode: ag2_agent
+      agent_field: initial_agent
+      prompt_field: initial_message
+    result:
+      context_key: example_task_results
+      status_key: example_task_status
 ```
 
-**MFJ structured output contract:**
-- `decomposition_agent` must have `structured_outputs_required: true`
-- Model must include `workflows` field (list of child specs)
-- Each child spec must include `name` (workflow name) and `initial_message`
-- Fan-in results injected into context as `inject_as` key
+**Task batch structured output contract:**
+- `trigger_agent` must have `structured_outputs_required: true` when the source
+  is structured output.
+- The task model must include the worker fields referenced by
+  `worker.agent_field` and `worker.prompt_field`.
+- Results are injected into context as `result.context_key`.
 
 ## What Does NOT Exist
 
@@ -284,7 +281,7 @@ The following do NOT exist in the mozaiks runtime:
 
 Below is a schematic workflow bundle showing the complete contract shape.
 Use live production workflows under `factory_app/workflows/*` or an active
-app root's `app/workflows/*` for implementation references:
+app root's `workflows/*` for implementation references:
 
 ```
 ExampleWorkflow/
@@ -297,7 +294,7 @@ ExampleWorkflow/
 ├── hooks.yaml                 # Optional hooks
 ├── ui_config.yaml             # visual_agents
 ├── extended_orchestration/
-│   └── mfj_extension.json     # MFJ fan-out/fan-in config (optional)
+│   └── task_batches.yaml      # task batch config (optional)
 └── tools/
     ├── save_jokes.py
     ├── rate_joke.py
@@ -320,3 +317,5 @@ Key validation models:
 - [workflow-authoring-contracts.md](workflow-authoring-contracts.md)
 - `mozaiksai/core/events/auto_tool_handler.py`
 - `mozaiksai/core/workflow/outputs/structured.py`
+
+

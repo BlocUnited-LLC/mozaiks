@@ -54,6 +54,35 @@ def _context_get(context_variables: Optional[Dict[str, Any]], key: str) -> Optio
     return None
 
 
+def _generated_files_from_context(context_variables: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    raw = _context_get(context_variables, "generated_files")
+    if not isinstance(raw, dict):
+        return {}
+    files: Dict[str, str] = {}
+    for path, content in raw.items():
+        if not isinstance(path, str):
+            continue
+        normalized = path.replace("\\", "/").strip()
+        if normalized and not normalized.startswith("/") and ".." not in normalized.split("/"):
+            files[normalized] = str(content)
+    return files
+
+
+def _pages_from_generated_files(files: Dict[str, str]) -> List[Dict[str, Any]]:
+    pages: List[Dict[str, Any]] = []
+    for path, content in sorted(files.items()):
+        if not path.startswith("ui/pages/") or not path.endswith((".yaml", ".yml")):
+            continue
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except Exception as exc:
+            _logger.warning("validate_wiring: failed to parse generated page %s: %s", path, exc)
+            continue
+        if isinstance(parsed, dict):
+            pages.append(parsed)
+    return pages
+
+
 # ---------------------------------------------------------------------------
 # Helpers — filesystem
 # ---------------------------------------------------------------------------
@@ -90,6 +119,16 @@ def _collect_endpoints_from_config(
     ep = config.get("api_endpoint")
     if isinstance(ep, str) and ep.strip():
         out.append((page_name, section_id, ep.strip()))
+    href = config.get("href")
+    if isinstance(href, str) and href.strip().startswith("/api/"):
+        out.append((page_name, section_id, href.strip()))
+    submit_action = config.get("submit_action")
+    if isinstance(submit_action, dict):
+        _collect_endpoints_from_config(page_name, f"{section_id}/submit", submit_action, out)
+    for action in config.get("actions") or []:
+        if isinstance(action, dict):
+            action_id = str(action.get("id") or "action").strip()
+            _collect_endpoints_from_config(page_name, f"{section_id}/{action_id}", action, out)
     for child in config.get("children") or []:
         if isinstance(child, dict):
             child_id = str(child.get("id") or f"{section_id}/child")
@@ -212,6 +251,38 @@ def _actions_from_module_yamls(app_dir: Path) -> Set[str]:
     return valid
 
 
+def _actions_from_generated_module_files(files: Dict[str, str]) -> Set[str]:
+    valid: Set[str] = set()
+    for path, content in sorted(files.items()):
+        if not path.startswith("modules/") or not path.endswith("/module.yaml"):
+            continue
+        try:
+            data = yaml.safe_load(content) or {}
+        except Exception as exc:
+            _logger.warning("validate_wiring: failed to parse generated module %s: %s", path, exc)
+            continue
+        if not isinstance(data, dict):
+            continue
+        module_block = data.get("module") if isinstance(data.get("module"), dict) else data
+        module_id = str(module_block.get("id") if isinstance(module_block, dict) else "").strip()
+        if not module_id:
+            parts = path.split("/")
+            module_id = parts[1] if len(parts) > 1 else ""
+        if not module_id:
+            continue
+        for action in data.get("actions") or []:
+            if isinstance(action, dict):
+                action_id = str(action.get("id") or "").strip()
+            elif isinstance(action, str):
+                action_id = action.strip()
+            else:
+                continue
+            if action_id:
+                valid.add(f"{module_id}/{action_id}")
+                valid.add(action_id)
+    return valid
+
+
 # ---------------------------------------------------------------------------
 # Main tool function
 # ---------------------------------------------------------------------------
@@ -235,7 +306,10 @@ async def validate_wiring(
     }
     """
     # ── Read context ──────────────────────────────────────────────────────
+    generated_files = _generated_files_from_context(context_variables)
     app_pages: List[Any] = _context_get(context_variables, "app_pages") or []
+    if not app_pages:
+        app_pages = _pages_from_generated_files(generated_files)
     app_build_plan: Dict[str, Any] = _context_get(context_variables, "app_build_plan") or {}
     generated_app_dir_str: Optional[str] = _context_get(context_variables, "generated_app_dir")
 
@@ -289,6 +363,8 @@ async def validate_wiring(
 
     if app_dir and app_dir.is_dir():
         known_actions.update(_actions_from_module_yamls(app_dir))
+    if generated_files:
+        known_actions.update(_actions_from_generated_module_files(generated_files))
 
     # ── 3. Cross-reference ────────────────────────────────────────────────
     wired: List[Dict[str, str]] = []

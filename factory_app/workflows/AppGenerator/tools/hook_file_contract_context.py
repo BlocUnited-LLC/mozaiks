@@ -21,7 +21,7 @@ _PLANNING_CONTRACT_ORDER = (
     "page_bundle",
     "module_contract",
     "persistence_contract",
-    "backend_foundation",
+    "service_foundation",
     "control_plane_pack",
     "api_surface",
     "agent_backend_integration",
@@ -160,10 +160,10 @@ def _build_file_contracts_body(agent: Any, file_contracts: Dict[str, Any]) -> st
     task_type = _current_task_type(agent)
 
     if agent_name == "ConfigMiddlewareAgent":
-        if task_type in {"module_contract", "backend_foundation"}:
+        if task_type in {"module_contract", "service_foundation"}:
             target_contract_names = [task_type]
         else:
-            target_contract_names = ["module_contract", "backend_foundation"]
+            target_contract_names = ["module_contract", "service_foundation"]
     elif agent_name == "ControlPlaneAgent":
         target_contract_names = ["control_plane_pack"]
     elif agent_name == "ControllerAgent" and task_type == "module_contract":

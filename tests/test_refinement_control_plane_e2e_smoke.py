@@ -42,9 +42,9 @@ def _base_manifest() -> list[dict[str, str]]:
     return [
         {"path": "app.json"},
         {"path": "config/shell.json"},
-        {"path": "config/database_intent.json"},
-        {"path": "config/database_migrations/001_initial.json"},
-        {"path": "backend/integrations/analytics_provider_client.py"},
+        {"path": "config/data.json"},
+        {"path": "config/data_migrations/001_initial.json"},
+        {"path": "services/integrations/analytics_provider_client.py"},
         {"path": "modules/projects/module.yaml"},
         {"path": "modules/projects/contracts/events.yaml"},
         {"path": "modules/projects/contracts/admin.yaml"},
@@ -72,7 +72,7 @@ def _base_manifest() -> list[dict[str, str]]:
 
 def _hosted_manifest() -> list[dict[str, str]]:
     return [
-        {"path": "backend/integrations/hosted_analytics_client.py"},
+        {"path": "services/integrations/hosted_analytics_client.py"},
         {"path": "modules/analytics_dashboard/module.yaml"},
         {"path": "modules/analytics_dashboard/backend/service.py"},
         {"path": "modules/analytics_dashboard/backend/handler.py"},
@@ -154,7 +154,7 @@ async def test_refinement_control_plane_smoke_scopes_module_backend_refinement_t
     ]:
         assert path in decision.impact_set.affected_bundle_paths
     assert not any(path.startswith("modules/reports/") for path in decision.impact_set.affected_bundle_paths)
-    assert "config/database_intent.json" not in decision.impact_set.affected_bundle_paths
+    assert "config/data.json" not in decision.impact_set.affected_bundle_paths
 
 
 @pytest.mark.asyncio
@@ -176,7 +176,7 @@ async def test_refinement_control_plane_smoke_marks_external_integration_readine
     assert request is not None
     decision = await resolver.route(request)
 
-    assert "backend/integrations/analytics_provider_client.py" in decision.impact_set.affected_bundle_paths
+    assert "services/integrations/analytics_provider_client.py" in decision.impact_set.affected_bundle_paths
     assert "modules/reports/backend/service.py" in decision.impact_set.affected_bundle_paths
     assert "modules/reports/backend/schemas.py" in decision.impact_set.affected_bundle_paths
     assert "Integration readiness may need to be rechecked." in decision.impact_set.scope_summary
@@ -204,8 +204,8 @@ async def test_refinement_control_plane_smoke_marks_data_model_migration_review_
     decision = await resolver.route(request)
 
     for path in [
-        "config/database_intent.json",
-        "config/database_migrations/001_initial.json",
+        "config/data.json",
+        "config/data_migrations/001_initial.json",
         "modules/projects/module.yaml",
         "modules/projects/backend/schemas.py",
         "modules/projects/backend/repo.py",
@@ -235,7 +235,7 @@ async def test_refinement_control_plane_smoke_scopes_hosted_capability_to_app_ow
     assert request is not None
     decision = await resolver.route(request)
 
-    assert "backend/integrations/hosted_analytics_client.py" in decision.impact_set.affected_bundle_paths
+    assert "services/integrations/hosted_analytics_client.py" in decision.impact_set.affected_bundle_paths
     assert "modules/analytics_dashboard/module.yaml" in decision.impact_set.affected_bundle_paths
     assert "modules/analytics_dashboard/backend/service.py" in decision.impact_set.affected_bundle_paths
     assert "ui/pages/analytics.yaml" in decision.impact_set.affected_bundle_paths

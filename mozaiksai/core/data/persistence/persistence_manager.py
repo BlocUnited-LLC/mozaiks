@@ -456,8 +456,8 @@ class AG2PersistenceManager:
     ) -> None:
         """Persist runtime context variables as chat-session extra fields.
 
-        Only non-canonical session fields are written so runtime metadata such as
-        MFJ resume flags and workflow-specific summaries survive across turns.
+        Only non-canonical session fields are written so workflow-specific
+        runtime metadata and summaries survive across turns.
         """
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
@@ -664,10 +664,10 @@ class AG2PersistenceManager:
         """Persist initial seed / user messages that AG2 does NOT emit as TextEvents.
 
         Rationale:
-            a_run_group_chat() consumes the provided initial message list as starting
-            context but does not re-emit those messages as TextEvent instances. Our
-            persistence layer previously only stored AG2 TextEvents, leaving brand-new
-            ChatSessions with an empty messages[] array until the first agent reply.
+            AG2 beta workflow runs consume the provided initial message list as
+            starting context but do not re-emit those messages as TextEvent
+            instances. Our persistence layer stores them explicitly so
+            brand-new ChatSessions do not start with an empty messages[] array.
 
         Behavior:
             - Each provided message gets an auto-assigned sequence (incrementing last_sequence).

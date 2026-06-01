@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:docs.ag2.ai)",
-      "Bash(md \"c:\\\\Users\\\\mbari\\\\OneDrive\\\\Desktop\\\\BlocUnited\\\\BlocUnited Code\\\\mozaiks\\\\docs\\\\guides\\\\adding-workflows\")",
+      "Bash(md \"c:\\\\Repos\\\\BlocUnitedRepo\\\\mozaiks\\\\docs\\\\guides\\\\adding-workflows\")",
       "Bash(npm run dev:*)",
       "Bash(timeout:*)",
       "Bash(npm install:*)",
@@ -21,8 +21,8 @@
       "Bash(python run_server.py:*)",
       "Bash(cd:*)",
       "Bash(del mozaikscorecorecross_substrate_bridge.py)",
-      "Bash(Remove-Item -Recurse -Force \"c:\\\\Users\\\\mbari\\\\OneDrive\\\\Desktop\\\\BlocUnited\\\\BlocUnited Code\\\\mozaiks\\\\docs\\\\guides\\\\adding-workflows\")",
-      "Bash(Remove-Item -Recurse -Force \"c:\\\\Users\\\\mbari\\\\OneDrive\\\\Desktop\\\\BlocUnited\\\\BlocUnited Code\\\\mozaiks\\\\docs\\\\guides\\\\custom-brand-integration\")",
+      "Bash(Remove-Item -Recurse -Force \"c:\\\\Repos\\\\BlocUnitedRepo\\\\mozaiks\\\\docs\\\\guides\\\\adding-workflows\")",
+      "Bash(Remove-Item -Recurse -Force \"c:\\\\Repos\\\\BlocUnitedRepo\\\\mozaiks\\\\docs\\\\guides\\\\custom-brand-integration\")",
       "Bash(git checkout:*)",
       "Bash(python run_test.py:*)",
       "Bash(git ls-tree:*)",

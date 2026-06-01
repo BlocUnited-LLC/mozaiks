@@ -104,7 +104,7 @@
       "id": "external_integration",
       "impact": {
         "affected_bundle_paths": [
-          "backend/integrations/analytics_provider_client.py",
+          "services/integrations/analytics_provider_client.py",
           "modules/reports/module.yaml",
           "modules/reports/backend/service.py",
           "modules/reports/backend/schemas.py",
@@ -147,8 +147,8 @@
       "id": "data_model_migration",
       "impact": {
         "affected_bundle_paths": [
-          "config/database_intent.json",
-          "config/database_migrations/001_initial.json",
+          "config/data.json",
+          "config/data_migrations/001_initial.json",
           "modules/projects/module.yaml",
           "modules/projects/contracts/events.yaml",
           "modules/projects/contracts/admin.yaml",
@@ -194,7 +194,7 @@
         "affected_bundle_paths": [
           "ui/pages/analytics.yaml",
           "ui/route_manifest.json",
-          "backend/integrations/hosted_analytics_client.py",
+          "services/integrations/hosted_analytics_client.py",
           "modules/analytics_dashboard/module.yaml",
           "modules/analytics_dashboard/contracts/events.yaml",
           "modules/analytics_dashboard/backend/handler.py",

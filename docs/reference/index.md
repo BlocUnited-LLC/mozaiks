@@ -11,7 +11,7 @@ Runtime implementation architecture now lives under
 ### Runtime Architecture
 
 Use [MozaiksAI Runtime](../architecture/mozaiksai/index.md) when you need
-advanced details on MFJ, handoffs, transport, hooks, context variables, UI
+advanced details on task batches, handoffs, transport, hooks, context variables, UI
 tools, or token controls.
 
 ### AI Coding Agents

@@ -1,8 +1,8 @@
 hooks:
 - hook_type: update_agent_state
   hook_agent: all
-  filename: hook_code_context.py
-  function: inject_code_context
+  filename: ../_shared/context_graph/hook_context_graph.py
+  function: inject_context_graph_context
 - hook_type: update_agent_state
   hook_agent: AppSchemaAgent
   filename: hook_primitive_catalog.py

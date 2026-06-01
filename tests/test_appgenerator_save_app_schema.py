@@ -191,7 +191,7 @@ def _custom_route_bundle():
     }
 
 
-def _database_intent_bundle():
+def _data_contract():
     return {
         "version": "1",
         "app_id": "app_123",
@@ -939,9 +939,9 @@ def test_save_app_schema_writes_and_merges_asset_manifest(monkeypatch, tmp_path:
     assert "config/asset_manifest.json" in result
 
 
-def test_save_app_schema_writes_database_intent_from_context(monkeypatch, tmp_path: Path) -> None:
+def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
-    context = _Context({"database_intent_bundle": _database_intent_bundle()})
+    context = _Context({"data_contract": _data_contract()})
 
     result = save_app_schema_module.save_app_schema(
         manifest=_base_manifest(),
@@ -949,10 +949,10 @@ def test_save_app_schema_writes_database_intent_from_context(monkeypatch, tmp_pa
         context_variables=context,
     )
 
-    database_intent = json.loads((tmp_path / "config" / "database_intent.json").read_text(encoding="utf-8"))
-    assert database_intent["surfaces"][0]["surface_id"] == "users"
-    assert context.data["app_database_intent_bundle"]["policies"]["default_scope_field"] == "app_id"
-    assert "config/database_intent.json" in result
+    data_contract = json.loads((tmp_path / "config" / "data.json").read_text(encoding="utf-8"))
+    assert data_contract["surfaces"][0]["surface_id"] == "users"
+    assert context.data["app_data_contract"]["policies"]["default_scope_field"] == "app_id"
+    assert "config/data.json" in result
 
 
 def test_save_app_schema_rejects_invalid_asset_manifest(monkeypatch, tmp_path: Path) -> None:
@@ -998,14 +998,20 @@ def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> N
     (source / "ui" / "pages").mkdir(parents=True)
     (source / "brand").mkdir()
     (source / "config").mkdir()
+    (source / "services" / "integrations").mkdir(parents=True)
     (source / "app.json").write_text('{"appName": "Demo"}', encoding="utf-8")
     (source / "ui" / "pages" / "Dashboard.yaml").write_text("name: Dashboard\n", encoding="utf-8")
     (source / "brand" / "theme_config.json").write_text("{}", encoding="utf-8")
     (source / "config" / "shell.json").write_text("{}", encoding="utf-8")
+    (source / "services" / "integrations" / "email_client.py").write_text(
+        "class EmailClient: pass\n",
+        encoding="utf-8",
+    )
 
     result = save_app_schema_module.promote_generated_app(source, target)
 
     assert result["status"] == "success"
-    assert sorted(result["copied"]) == ["app.json", "brand", "config", "ui"]
+    assert sorted(result["copied"]) == ["app.json", "brand", "config", "services", "ui"]
     assert (target / "app.json").exists()
     assert (target / "ui" / "pages" / "Dashboard.yaml").exists()
+    assert (target / "services" / "integrations" / "email_client.py").exists()

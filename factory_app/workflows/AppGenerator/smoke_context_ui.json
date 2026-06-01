@@ -41,7 +41,7 @@
       }
     ]
   },
-  "database_intent_bundle": {
+  "data_contract": {
     "version": "1",
     "app_id": "support-operations-smoke",
     "artifact_version_id": null,
@@ -101,21 +101,42 @@
     }
   },
   "app_build_plan": {
-    "app_name": "Support Operations",
-    "app_slug": "support-operations",
+    "agent_message": "Use the seeded Support Operations scope and generate deterministic app artifacts through explicit task batches.",
+    "app_kind": "support-operations",
     "auth_strategy": "role-based",
     "roles": ["admin", "operator"],
+    "service_scope": [
+      "ticket persistence",
+      "ticket status updates",
+      "queue settings"
+    ],
+    "frontend_scope": [
+      "tickets resource table",
+      "queue settings form"
+    ],
+    "theme_preferences": "Dark, sparse, scan-first support operations UI using the captured typography.",
+    "brand_intent": null,
     "capability_packs": [
       {
-        "pack_id": "support_operations",
-        "ownership_class": "generated_module",
-        "reason": "App-specific deterministic ticket management."
+        "capability_pack_id": "support_operations",
+        "surface_id": "tickets",
+        "surface_kind": "module",
+        "pack_type": "app_module",
+        "label": "Support Operations",
+        "summary": "App-specific deterministic ticket management.",
+        "implementation_mode": "generated"
       }
     ],
-    "modules": [
+    "external_integrations": [],
+    "agent_backend_required": false,
+    "entities": [
       {
-        "module_id": "tickets",
-        "purpose": "Own ticket persistence, updates, and queue status."
+        "name": "tickets",
+        "purpose": "Track support tickets and status changes."
+      },
+      {
+        "name": "queue_settings",
+        "purpose": "Store support queue defaults."
       }
     ],
     "pages": [
@@ -143,7 +164,7 @@
             "section_id_hint": "tickets-table",
             "title_hint": "Ticket queue",
             "config_hint": {
-              "api_endpoint": "/api/modules/tickets/list",
+                "api_endpoint": "/api/modules/tickets/list_tickets",
               "data_key": "tickets",
               "search": true,
               "search_placeholder": "Search tickets...",
@@ -214,16 +235,199 @@
         ]
       }
     ],
-    "workflow_touchpoints": [],
     "build_tasks": [
       {
-        "task_id": "page_bundle",
+        "task_id": "task_tickets_contract",
+        "task_type": "module_contract",
+        "capability_pack_id": "tickets",
+        "surface_id": "tickets",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Generate the tickets module YAML contract.",
+        "initial_message": "Generate only YAML code_files for the tickets module contract. Do not call generate_scaffold and do not emit backend Python. Actions: list_tickets, get_ticket, update_status, save_settings. For generated modules, every action handler_method must exactly equal the action id, so update_status must use handler_method: update_status. Events: domain.tickets.status_updated. Settings: default_queue and sla_hours. Admin panel: support page ResourceTable bound to list_tickets with update_status as a row action. Declare python_stubs for backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/schemas.py.",
+        "owned_paths": [
+          "modules/tickets/module.yaml",
+          "modules/tickets/contracts/events.yaml",
+          "modules/tickets/contracts/settings.yaml",
+          "modules/tickets/contracts/admin.yaml"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [
+          "module.yaml declares ticket list, get, update_status, and save_settings actions",
+          "python_stubs declares handler.py, service.py, repo.py, policy.py, and schemas.py",
+          "no backend Python is emitted"
+        ],
+        "context_variables": {
+          "task_run_mode": true
+        },
+        "integration_needs": []
+      },
+      {
+        "task_id": "task_data_contract",
+        "task_type": "persistence_contract",
+        "capability_pack_id": null,
+        "surface_id": "tickets",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "DatabaseAgent",
+        "description": "Generate the data contract for tickets and queue settings.",
+        "initial_message": "Generate only config/data.json for tickets and queue settings persistence.",
+        "owned_paths": [
+          "config/data.json"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [
+          "config/data.json declares tickets collection with app_id scoping",
+          "no backend/database/schema.json or seed.json is emitted"
+        ],
+        "context_variables": {
+          "task_run_mode": true
+        },
+        "integration_needs": []
+      },
+      {
+        "task_id": "task_tickets_models",
+        "task_type": "data_models",
+        "capability_pack_id": "tickets",
+        "surface_id": "tickets",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ModelAgent",
+        "description": "Generate the tickets module typed schema helpers.",
+        "initial_message": "Generate only modules/tickets/backend/schemas.py. Read dependency_task_outputs for task_tickets_contract and task_data_contract before emitting code. Include TypedDicts/enums/helpers for ticket rows, status updates, and queue settings without I/O.",
+        "owned_paths": [
+          "modules/tickets/backend/schemas.py"
+        ],
+        "depends_on": [
+          "task_tickets_contract",
+          "task_data_contract"
+        ],
+        "acceptance_criteria": [
+          "schemas.py defines ticket and queue setting shapes",
+          "schemas.py contains pure serialization or normalization helpers",
+          "no persistence or runtime I/O is emitted"
+        ],
+        "context_variables": {
+          "task_run_mode": true
+        },
+        "integration_needs": []
+      },
+      {
+        "task_id": "task_tickets_services",
+        "task_type": "business_services",
+        "capability_pack_id": "tickets",
+        "surface_id": "tickets",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ServiceAgent",
+        "description": "Generate the tickets module handler, service, repo, and policy layers.",
+        "initial_message": "Generate only modules/tickets/backend/handler.py, service.py, repo.py, and policy.py. Read dependency_task_outputs for task_tickets_contract, task_tickets_models, and task_data_contract before emitting code. module.handler is backend.handler:TicketsModule; handler.py must define class TicketsModule exactly and implement every module.yaml handler_method exactly: list_tickets, get_ticket, update_status, save_settings. Runtime calls handler methods as method(ctx, **params), so context must be the first parameter after self. service.py must implement the same four service methods and must consume request fields directly from **params using module.yaml input fields; do not use params.get(\"payload\") unless payload is a declared input field. save_settings must read default_queue and sla_hours directly from params; do not invent params[\"settings\"]. repo.py must provide the required persistence operations using context.persistence.collection(\"tickets\", \"tickets\"), and service.py must publish domain.tickets.status_updated when update_status commits. Do not emit pass statements, TODOs, or placeholder implementation comments; return concrete repo-backed results or explicit empty/acknowledgement values.",
+        "owned_paths": [
+          "modules/tickets/backend/handler.py",
+          "modules/tickets/backend/service.py",
+          "modules/tickets/backend/repo.py",
+          "modules/tickets/backend/policy.py"
+        ],
+        "depends_on": [
+          "task_tickets_contract",
+          "task_tickets_models",
+          "task_data_contract"
+        ],
+        "acceptance_criteria": [
+          "handler.py defines TicketsModule and implements list_tickets, get_ticket, update_status, and save_settings",
+          "handler methods accept ctx as the first parameter after self and delegate to service.py",
+          "repo.py uses context.persistence.collection",
+          "service.py publishes declared domain events after mutation"
+        ],
+        "context_variables": {
+          "task_run_mode": true
+        },
+        "integration_needs": []
+      },
+      {
+        "task_id": "task_pages",
         "task_type": "page_bundle",
-        "owner_agent": "AppSchemaAgent",
-        "description": "Generate declarative persistent pages for tickets and queue settings.",
-        "depends_on": []
+        "capability_pack_id": null,
+        "surface_id": "support_pages",
+        "surface_kind": "ui_only",
+        "execution_target": "AppGenerator",
+        "initial_agent": "AppSchemaAgent",
+        "description": "Generate declarative page, shell, route, and theme artifacts for tickets and queue settings.",
+        "initial_message": "Generate only declarative app schema artifacts for /tickets and /settings from the seeded UI hints.",
+        "owned_paths": [
+          "app.json",
+          "ui/pages/tickets.yaml",
+          "ui/pages/settings.yaml",
+          "ui/route_manifest.json",
+          "brand/theme_config.json"
+        ],
+        "depends_on": [
+          "task_tickets_services",
+          "task_data_contract"
+        ],
+        "acceptance_criteria": [
+          "/tickets uses PageHeader and ResourceTable",
+          "/settings uses PageHeader and Form",
+          "no custom React route is emitted"
+        ],
+        "context_variables": {
+          "task_run_mode": true
+        },
+        "integration_needs": []
       }
-    ]
+    ],
+    "data_contract": {
+      "version": "1",
+      "app_id": "support-operations-smoke",
+      "artifact_version_id": null,
+      "surfaces": [
+        {
+          "surface_id": "tickets",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "name": "tickets",
+              "scope": "app",
+              "ownership": {
+                "surface_id": "tickets",
+                "surface_kind": "module"
+              },
+              "fields": [
+                {"name": "app_id", "type": "string", "required": true},
+                {"name": "ticket_id", "type": "string", "required": true},
+                {"name": "subject", "type": "string", "required": true},
+                {"name": "priority", "type": "string", "required": true},
+                {"name": "status", "type": "string", "required": true},
+                {"name": "updated_at", "type": "datetime", "required": true}
+              ],
+              "indexes": [
+                {"keys": [["app_id", 1], ["ticket_id", 1]], "unique": true}
+              ],
+              "search_by": "ticket_id",
+              "lifecycle": {
+                "write_mode": "module_action",
+                "migration_policy": "additive_only"
+              }
+            }
+          ]
+        }
+      ],
+      "shared_collections": [],
+      "policies": {
+        "default_scope_field": "app_id",
+        "allow_destructive_migrations": false
+      }
+    },
+    "pending_schema_migration": null,
+    "generation_order": [
+      "task_tickets_contract",
+      "task_data_contract",
+      "task_tickets_models",
+      "task_tickets_services",
+      "task_pages"
+    ],
+    "carry_forward_decisions": []
   },
   "app_plan_ready": true,
   "app_validation_strategy": "skip",
@@ -232,3 +436,4 @@
   "runtime_capabilities": [],
   "pack_sources": []
 }
+

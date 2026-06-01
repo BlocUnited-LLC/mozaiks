@@ -168,7 +168,7 @@ def _refresh_block_policy(summary: AppContextSummary) -> AppContextPolicyResult:
         app_context_summary=summary,
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/database_migrations/add_status.json"],
+        affected_bundle_paths=["config/data_migrations/add_status.json"],
     )
 
 

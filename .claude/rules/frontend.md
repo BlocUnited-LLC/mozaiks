@@ -257,3 +257,4 @@ import React, { useState } from 'react'
 ### Intentional exception
 
 `detectTheme()` in Mermaid diagram components reads `--color-*` via `getComputedStyle` to bridge the platform theme into Mermaid's renderer. This is correct and intentional — do not replace those reads.
+

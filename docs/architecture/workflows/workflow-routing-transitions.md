@@ -13,7 +13,7 @@ The global workflow routing layer lives in
 App/workspace roots may overlay it with their own
 `workflows/extended_orchestration/extension_registry.json`.
 
-It is not agent routing, not app navigation, and not workflow-local MFJ.
+It is not agent routing, not app navigation, and not workflow-local task batching.
 
 ## Contract
 
@@ -26,17 +26,17 @@ It is not agent routing, not app navigation, and not workflow-local MFJ.
 | Transition routing | `transitions[]` | platform shell author | User choices, context seeds, silent redirects, confirmations |
 
 Workflow sequencing uses `workflow_sequences[]`.
-Treat this data as workflow sequence metadata, not shell navigation or workflow-local MFJ.
+Treat this data as workflow sequence metadata, not shell navigation or workflow-local task batching.
 If a sequence includes an entry transition as its first step, `entrypoints[]`
 points to that transition for actual route entry.
 
-Workflow-local MFJ lives in:
+Workflow-local task batching lives in:
 
 ```text
-<workflow>/extended_orchestration/mfj_extension.json
+<workflow>/extended_orchestration/task_batches.yaml
 ```
 
-Do not put MFJ graphs in the global registry.
+Do not put task batch graphs in the global registry.
 
 ## Hard Rules
 
@@ -306,3 +306,5 @@ to workflow-local `ui/` plus Python tools. If AgentGenerator emits a transition,
 it must keep routing/context deterministic and bind `ui.component` to a
 registered transition component key. Product-specific copy/images/layout belong
 in the React stub.
+
+

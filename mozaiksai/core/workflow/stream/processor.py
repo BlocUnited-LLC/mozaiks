@@ -39,9 +39,6 @@ from .handlers import (
     ToolResponseHandler,
     CompletionHandler,
     UsageSummaryHandler,
-    TransitionHandler,
-    GroupChatRunHandler,
-    GroupChatResumeHandler,
     ErrorHandler,
     StreamingEventHandler,
     MozaiksaiEventHandler,
@@ -85,7 +82,6 @@ class EventStreamProcessor:
         registry = EventHandlerRegistry()
 
         registry.register(StreamingEventHandler())
-        registry.register(TransitionHandler())
         registry.register(ErrorHandler())
         registry.register(MozaiksaiEventHandler())
         registry.register(CompletionHandler())
@@ -94,8 +90,6 @@ class EventStreamProcessor:
         registry.register(SelectSpeakerHandler())
         registry.register(ToolCallHandler())
         registry.register(ToolResponseHandler())
-        registry.register(GroupChatRunHandler())
-        registry.register(GroupChatResumeHandler())
         registry.register(TextEventHandler())
 
         return registry

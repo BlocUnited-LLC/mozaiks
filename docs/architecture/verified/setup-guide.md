@@ -48,7 +48,7 @@ If you are integrating `mozaiksai` into an external backend, mount the
 runtime-only convenience factory explicitly:
 
 ```python
-# your-app/backend/main.py
+# your-services/main.py
 import os
 from fastapi import FastAPI
 from mozaiksai import create_mozaiks_app
@@ -145,7 +145,7 @@ factory_app/
     │   └── extension_registry.json
     └── {workflow_name}/
         ├── extended_orchestration/
-        │   └── mfj_extension.json
+        │   └── task_batches.yaml
         ├── orchestrator.yaml
         ├── agents.yaml
         ├── handoffs.yaml
@@ -189,7 +189,7 @@ A general-purpose agent that lets users ask questions about your app or product.
 ### Workflow Mode
 
 Purpose-built multi-agent workflows for specific tasks. These are the workflows
-you create in the active app root, such as `app/workflows/` in the canonical
+you create in the active app root, such as `workflows/` in the canonical
 workspace model. Product/app overlays may keep local journey and launcher
 config under the active app root's `workflows/extended_orchestration/`, while
 shared build workflow implementations resolve from `factory_app/workflows/`.
@@ -333,3 +333,5 @@ Add a `.dark` class to your root element or use `prefers-color-scheme`:
 Your app now has mozaiksai workflows with the default ChatWidget trigger.
 
 For more advanced trigger options (buttons, routes, backend events, webhooks), see **[Trigger Mechanisms](trigger-mechanisms.md)**.
+
+

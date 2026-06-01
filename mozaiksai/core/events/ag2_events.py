@@ -7,18 +7,12 @@
 AG2-Native Custom Events for mozaiksai
 
 This module defines mozaiksai domain events using AG2's native event system.
-These events flow through AG2's IOStream and can be yielded via a_run_group_chat_iter().
+These events flow through AG2 beta streams and the runtime event dispatcher.
 
 Architecture:
     1. Events defined here use @wrap_event (AG2's event decorator)
     2. Events are emitted via IOStream.get_default().send()
-    3. Events are consumed via yield_on=[...] in a_run_group_chat_iter()
-    4. EventStreamProcessor routes them to UnifiedEventDispatcher
-
-Forward Compatibility (AG2 Beta):
-    - AG2 beta uses similar patterns: BaseEvent + send() + subscribe()
-    - When migrating to beta, these events become Stream subscribers
-    - The event namespace model stays the same; only the transport changes
+    3. EventStreamProcessor routes them to UnifiedEventDispatcher
 
 Event Namespaces (aligned with docs/architecture/foundations/event-system.md):
     - App domain events: business facts from app backend
@@ -119,8 +113,8 @@ class StructuredOutputEvent(BaseEvent):
 
 
 @wrap_event
-class DecompositionPlannedEvent(BaseEvent):
-    """Emitted when a workflow-local decomposition plan is ready for MFJ fan-out."""
+class TaskBatchPlannedEvent(BaseEvent):
+    """Emitted when a workflow-local task batch plan is ready to execute."""
     agent_name: str
     chat_id: str
     workflow_name: str
@@ -129,9 +123,11 @@ class DecompositionPlannedEvent(BaseEvent):
     context: Dict[str, Any]
 
     def print(self, f=None):
-        workflow_count = len(self.structured_data.get("workflows", []) or [])
+        task_count = len(self.structured_data.get("tasks", []) or [])
+        if not task_count:
+            task_count = len(self.structured_data.get("build_tasks", []) or [])
         print(
-            f"[DECOMPOSITION] {self.agent_name} planned {workflow_count} workflow(s) for {self.workflow_name}",
+            f"[TASK_BATCH_PLANNED] {self.agent_name} planned {task_count} task(s) for {self.workflow_name}",
             file=f,
         )
 
@@ -191,32 +187,32 @@ class ContextUpdatedEvent(BaseEvent):
 
 
 # =============================================================================
-# MID-FLIGHT JOURNEY EVENTS
-# These track child workflow orchestration
+# TASK BATCH EVENTS
+# These track workflow-local task batch execution.
 # =============================================================================
 
 @wrap_event
-class JourneyStartedEvent(BaseEvent):
-    """Emitted when a mid-flight journey (child workflow) begins."""
+class TaskBatchStartedEvent(BaseEvent):
+    """Emitted when a workflow-local task batch item begins."""
     parent_chat_id: str
-    child_chat_id: str
-    child_workflow_name: str
-    decomposition_agent: str
+    task_id: str
+    worker_agent: str
+    planner_agent: str
 
     def print(self, f=None):
-        print(f"[MFJ_START] {self.child_workflow_name} spawned from {self.parent_chat_id}", file=f)
+        print(f"[TASK_BATCH_START] {self.task_id} started from {self.parent_chat_id}", file=f)
 
 
 @wrap_event
-class JourneyCompletedEvent(BaseEvent):
-    """Emitted when a mid-flight journey completes and returns to parent."""
+class TaskBatchCompletedEvent(BaseEvent):
+    """Emitted when a workflow-local task batch item completes."""
     parent_chat_id: str
-    child_chat_id: str
-    child_workflow_name: str
+    task_id: str
+    worker_agent: str
     result_summary: Optional[str] = None
 
     def print(self, f=None):
-        print(f"[MFJ_COMPLETE] {self.child_workflow_name} returned to parent", file=f)
+        print(f"[TASK_BATCH_COMPLETE] {self.task_id} completed", file=f)
 
 
 # =============================================================================
@@ -227,9 +223,8 @@ def emit_ag2_event(event: BaseEvent) -> bool:
     """
     Emit an AG2-native event via IOStream.
 
-    Events emitted here flow through AG2's event system and can be:
-    1. Yielded via yield_on=[EventType] in a_run_group_chat_iter()
-    2. Observed by any IOStream subscriber
+    Events emitted here flow through AG2's event system and can be observed by
+    runtime stream subscribers.
 
     Returns True if event was sent, False if no default IOStream exists.
     """
@@ -272,25 +267,6 @@ def emit_structured_output(
         output_type=output_type,
         output_data=output_data,
         validation_passed=validation_passed,
-    ))
-
-
-def emit_decomposition_planned(
-    agent_name: str,
-    chat_id: str,
-    workflow_name: str,
-    model_name: str,
-    structured_data: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """Convenience function to emit an explicit decomposition checkpoint."""
-    return emit_ag2_event(DecompositionPlannedEvent(
-        agent_name=agent_name,
-        chat_id=chat_id,
-        workflow_name=workflow_name,
-        model_name=model_name,
-        structured_data=structured_data,
-        context=context or {},
     ))
 
 
@@ -351,7 +327,7 @@ def emit_artifact_ready(
 
 # =============================================================================
 # EVENT TYPE REGISTRY
-# Used by a_run_group_chat_iter(yield_on=[...])
+# Used by runtime stream subscribers.
 # =============================================================================
 
 MOZAIKSAI_CONTROL_EVENTS = [
@@ -364,21 +340,21 @@ MOZAIKSAI_CONTROL_EVENTS = [
 MOZAIKSAI_RUNTIME_EVENTS = [
     AgentThinkingEvent,
     StructuredOutputEvent,
-    DecompositionPlannedEvent,
+    TaskBatchPlannedEvent,
     ArtifactUpdatedEvent,
     ArtifactReadyEvent,
     ToolCallRequestedEvent,
     ContextUpdatedEvent,
 ]
 
-MOZAIKSAI_JOURNEY_EVENTS = [
-    JourneyStartedEvent,
-    JourneyCompletedEvent,
+MOZAIKSAI_TASK_BATCH_EVENTS = [
+    TaskBatchStartedEvent,
+    TaskBatchCompletedEvent,
 ]
 
 # All custom events for yield_on parameter
 ALL_MOZAIKSAI_EVENTS = (
     MOZAIKSAI_CONTROL_EVENTS +
     MOZAIKSAI_RUNTIME_EVENTS +
-    MOZAIKSAI_JOURNEY_EVENTS
+    MOZAIKSAI_TASK_BATCH_EVENTS
 )

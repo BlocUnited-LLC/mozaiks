@@ -1,29 +1,97 @@
 # ==============================================================================
 # FILE: mozaiksai/core/workflow/agents/factory.py
-# DESCRIPTION: ConversableAgent factory - orchestrates agent creation with tools, context, and hooks
+# DESCRIPTION: autogen.beta.Agent factory for workflow orchestration.
 # ==============================================================================
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Callable, Sequence
+import inspect
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from autogen import ConversableAgent, UpdateSystemMessage
+from autogen.beta import Agent
+from autogen.beta.assembly import AssemblyPolicy
+from autogen.beta.config import OpenAIConfig
+from autogen.beta.context import ConversationContext
+from autogen.beta.events import BaseEvent
 
-from ..outputs.structured import get_structured_outputs_for_workflow
+from ..outputs.structured import (
+    get_provider_response_model,
+    get_structured_outputs_for_workflow,
+    supports_provider_response_format,
+)
 from ..workflow_manager import workflow_manager
 from .a2a import create_a2a_remote_agent, load_a2a_agent_specs
 
-# Import context utilities (extracted for modularity)
 from ..context.context_utils import (
     context_to_dict as _context_to_dict,
     apply_context_exposures as _apply_context_exposures,
-    build_exposure_update_hook as _build_exposure_update_hook,
 )
-
-# Import message utilities (extracted for modularity)
 from ..messages.utils import extract_images_from_conversation
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------
+# CONTEXT BRIDGE
+# ------------------------------------------------------------------
+
+class ContextVariablesBridge:
+    """Bridges a plain dict to the AG2 ContextVariables-compatible interface.
+
+    Tools written for the old system call .get() / .set() / .data — this
+    bridge satisfies those calls against a shared mutable dict so writes
+    from tools propagate through the orchestration loop.
+    """
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        self._data = data
+
+    # AG2-compatible read/write API
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def to_dict(self) -> Dict[str, Any]:
+        return dict(self._data)
+
+    @property
+    def data(self) -> Dict[str, Any]:
+        return self._data
+
+
+# ------------------------------------------------------------------
+# LLM CONFIG BRIDGE
+# ------------------------------------------------------------------
+
+def llm_config_to_openai_config(llm_config: Dict[str, Any]) -> OpenAIConfig:
+    """Convert an AG2 llm_config dict to an autogen.beta OpenAIConfig."""
+    config_list = llm_config.get("config_list") or []
+    if not config_list:
+        raise ValueError("llm_config has no config_list entries")
+    entry = config_list[0]
+    return OpenAIConfig(
+        model=entry.get("model", "gpt-4o-mini"),
+        api_key=entry.get("api_key") or None,
+        base_url=entry.get("base_url") or None,
+        temperature=llm_config.get("temperature"),
+        seed=llm_config.get("cache_seed") or None,
+        streaming=True,
+    )
 
 
 # ------------------------------------------------------------------
@@ -31,24 +99,13 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 
 def _compose_prompt_sections(sections: Sequence[Dict[str, Any]] | Dict[str, Any]) -> str:
-    """Reconstruct the system message string from structured prompt sections.
-    
-    Supports multiple formats for maximum adaptability:
-    1. Fixed structure (PromptSections): Dict with named fields (role, objective, context, etc.)
-    2. Custom array (list[PromptSectionContent]): List of {heading, content} dicts
-    
-    This allows the runtime to compose ANY section structure while enforcing
-    standardization for new agents via schema validation.
-    """
+    """Reconstruct the system message string from structured prompt sections."""
     parts: List[str] = []
-    
-    # Handle fixed structure (PromptSections object from schema)
+
     if isinstance(sections, dict) and not any(k in sections for k in ("heading", "content")):
-        # This is a PromptSections object with named fields (role, objective, etc.)
-        # Convert to array format for unified processing
         section_order = [
             "role", "objective", "context", "runtime_integrations",
-            "guidelines", "instructions", "examples", "json_output_compliance", "output_format"
+            "guidelines", "instructions", "examples", "json_output_compliance", "output_format",
         ]
         array_sections = []
         for key in section_order:
@@ -56,8 +113,7 @@ def _compose_prompt_sections(sections: Sequence[Dict[str, Any]] | Dict[str, Any]
             if section_data and isinstance(section_data, dict):
                 array_sections.append(section_data)
         sections = array_sections
-    
-    # Handle array format (custom sections or converted from fixed structure)
+
     for section in sections:
         if not isinstance(section, dict):
             continue
@@ -67,23 +123,131 @@ def _compose_prompt_sections(sections: Sequence[Dict[str, Any]] | Dict[str, Any]
             content = str(content)
         content = content.strip()
         if heading:
-            if content:
-                parts.append(f"{heading}\n{content}")
-            else:
-                parts.append(f"{heading}")
+            parts.append(f"{heading}\n{content}" if content else heading)
         elif content:
             parts.append(content)
+
     return "\n\n".join(part.strip() for part in parts if part).strip()
 
 
+# ------------------------------------------------------------------
+# TOOL CONTEXT INJECTION
+# ------------------------------------------------------------------
+
+def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge) -> Callable:
+    """Wrap a tool function so it receives a ContextVariablesBridge for its
+    ``context_variables`` parameter.  Functions that don't accept that
+    parameter are returned unchanged.
+    """
+    try:
+        sig = inspect.signature(fn)
+    except (ValueError, TypeError):
+        return fn
+
+    if "context_variables" not in sig.parameters:
+        return fn
+
+    # Hide context_variables from the schema exposed to the LLM.
+    new_params = [p for name, p in sig.parameters.items() if name != "context_variables"]
+    new_sig = sig.replace(parameters=new_params)
+
+    if inspect.iscoroutinefunction(fn):
+        @wraps(fn)
+        async def async_wrapper(*args, **kwargs):
+            kwargs.setdefault("context_variables", context_bridge)
+            return await fn(*args, **kwargs)
+
+        async_wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+        return async_wrapper
+    else:
+        @wraps(fn)
+        def sync_wrapper(*args, **kwargs):
+            kwargs.setdefault("context_variables", context_bridge)
+            return fn(*args, **kwargs)
+
+        sync_wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+        return sync_wrapper
+
+
+# ------------------------------------------------------------------
+# ASSEMBLY POLICY — hook-driven prompt injection via AG2 AssemblyPolicy
+# ------------------------------------------------------------------
+
+class MozaiksHookPolicy:
+    """Wraps ``update_agent_state`` hooks as an AG2 ``AssemblyPolicy``.
+
+    Runs before each LLM call.  If a hook calls ``agent.update_system_message()``
+    the returned string replaces the current prompt list; otherwise prompts are
+    unchanged.  This replaces the old ``_SystemMessageCapture`` + per-turn
+    ``_compute_hook_prompt`` pattern.
+    """
+
+    name: str = "mozaiks_update_agent_state"
+
+    def __init__(
+        self,
+        hooks: List[Callable],
+        agent_name: str,
+        base_system_message: str,
+        context_bridge: Any,
+    ) -> None:
+        self._hooks = hooks
+        self._agent_name = agent_name
+        self._base = base_system_message
+        self._context_bridge = context_bridge
+
+    async def apply(
+        self,
+        prompts: List[str],
+        events: List[BaseEvent],
+        context: ConversationContext,
+    ) -> tuple[List[str], List[BaseEvent]]:
+        if not self._hooks:
+            return prompts, events
+
+        class _Capture:
+            def __init__(self, name: str, ctx: Any, base_message: str) -> None:
+                self.name = name
+                self.context_variables = ctx
+                self.system_message = base_message
+                self._system_message = base_message
+                self._captured: Optional[str] = None
+
+            def update_system_message(self, msg: str) -> None:
+                self.system_message = msg
+                self._system_message = msg
+                self._captured = msg
+
+        history = context.variables.get("_mozaiks_history", [])
+        capture = _Capture(self._agent_name, self._context_bridge, self._base)
+
+        for hook in self._hooks:
+            try:
+                if asyncio.iscoroutinefunction(hook):
+                    await hook(capture, history)
+                else:
+                    hook(capture, history)
+            except Exception as exc:
+                logger.debug("[HOOKS] update_agent_state hook failed: %s", exc)
+
+        if capture._captured and capture._captured != self._base:
+            return [capture._captured], events
+
+        return prompts, events
+
+
+# ------------------------------------------------------------------
+# AGENT CREATION
+# ------------------------------------------------------------------
+
 async def create_agents(
     workflow_name: str,
-    context_variables=None,
+    context_variables: Optional[Any] = None,
     cache_seed: Optional[int] = None,
-) -> Dict[str, ConversableAgent]:
-    """Create ConversableAgent instances for a workflow."""
+) -> Dict[str, Agent]:
+    """Create autogen.beta.Agent instances for a workflow."""
 
-    logger.info(f"[AGENTS] Creating agents for workflow: {workflow_name}")
+    logger.info("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
     from time import perf_counter
 
     start_time = perf_counter()
@@ -92,332 +256,209 @@ async def create_agents(
     if "agents" in agent_configs:
         agent_configs = agent_configs["agents"]
 
-    # Support the canonical JSON form used by most workflows:
-    #   {"agents": [{"name": "AgentA", ...}, {"name": "AgentB", ...}]}
-    # Internally we normalize to a mapping of agent_name -> agent_config.
     if isinstance(agent_configs, list):
         normalized: Dict[str, Any] = {}
         for item in agent_configs:
             if not isinstance(item, dict):
                 continue
             name = item.get("name")
-            if not isinstance(name, str) or not name.strip():
-                continue
-            normalized[name.strip()] = item
+            if isinstance(name, str) and name.strip():
+                normalized[name.strip()] = item
         agent_configs = normalized
 
     if not isinstance(agent_configs, dict):
-        logger.warning(f"[AGENTS] Invalid agents config shape for '{workflow_name}': {type(agent_configs)}")
+        logger.warning("[AGENTS] Invalid agents config for '%s'", workflow_name)
         agent_configs = {}
 
+    # Normalise context to a mutable dict for the bridge
+    if context_variables is None:
+        ctx_dict: Dict[str, Any] = {}
+    elif isinstance(context_variables, dict):
+        ctx_dict = context_variables
+    elif hasattr(context_variables, "to_dict"):
+        ctx_dict = context_variables.to_dict()
+    elif hasattr(context_variables, "data") and isinstance(getattr(context_variables, "data", None), dict):
+        ctx_dict = context_variables.data
+    else:
+        ctx_dict = {}
+
+    context_bridge = ContextVariablesBridge(ctx_dict)
+
     a2a_specs = load_a2a_agent_specs(workflow_config)
-    local_agent_names = [name for name in agent_configs.keys() if name not in a2a_specs]
+    local_agent_names = [n for n in agent_configs if n not in a2a_specs]
 
     base_llm_config: Dict[str, Any] = {}
     if local_agent_names:
         try:
-            from ..llm_config import get_llm_config as _get_base_lllm_config
+            from ..llm_config import get_llm_config as _get_base_llm_config
 
             extra = {"cache_seed": cache_seed} if cache_seed is not None else None
-            _, base_llm_config = await _get_base_lllm_config(extra_config=extra)
+            _, base_llm_config = await _get_base_llm_config(extra_config=extra)
         except Exception as err:
-            logger.error(f"[AGENTS] Failed to load base LLM config: {err}")
+            logger.error("[AGENTS] Failed to load base LLM config: %s", err)
             return {}
-    else:
-        logger.info(
-            "[AGENTS] Workflow '%s' uses only A2A remote agents; skipping local LLM config bootstrap",
-            workflow_name,
-        )
 
     try:
         from .tools import load_agent_tool_functions
 
         agent_tool_functions = load_agent_tool_functions(workflow_name)
     except Exception as tool_err:
-        logger.warning(f"[AGENTS] Failed loading agent tool functions: {tool_err}")
+        logger.warning("[AGENTS] Failed loading tool functions: %s", tool_err)
         agent_tool_functions = {}
 
-    # Derive auto-tool agents from tools.yaml (agents with auto_tool_call: true)
     auto_tool_agent_names = workflow_manager.get_auto_tool_agents(workflow_name)
 
     try:
         structured_registry = get_structured_outputs_for_workflow(workflow_name)
-    except Exception as so_err:
+    except Exception:
         structured_registry = {}
-        logger.debug(f"[AGENTS] Structured outputs unavailable for '{workflow_name}': {so_err}")
 
+    context_dict: Dict[str, Any] = {}
     if context_variables is not None:
         try:
-            context_dict: Dict[str, Any] = _context_to_dict(context_variables)
-            logger.debug(f"[AGENTS] context_variables snapshot: {context_dict}")
-        except Exception as ctx_err:
-            logger.debug(f"[AGENTS] context_variables snapshot unavailable: {ctx_err}")
-            context_dict = {}
-    else:
-        context_dict = {}
-    exposures_map = (
-        getattr(context_variables, "_mozaiks_context_exposures", {}) if context_variables is not None else {}
-    )
-    agent_plan_map = (
-        getattr(context_variables, "_mozaiks_context_agents", {}) if context_variables is not None else {}
-    )
+            context_dict = _context_to_dict(context_variables)
+        except Exception:
+            pass
 
-    agents: Dict[str, ConversableAgent] = {}
+    exposures_map = getattr(context_variables, "_mozaiks_context_exposures", {}) or {}
+    agent_plan_map = getattr(context_variables, "_mozaiks_context_agents", {}) or {}
+
+    agents: Dict[str, Agent] = {}
 
     for agent_name, agent_config in agent_configs.items():
+        # A2A remote agents
         a2a_spec = a2a_specs.get(agent_name)
         if a2a_spec is not None:
             try:
-                remote_agent = create_a2a_remote_agent(a2a_spec, context_variables=context_variables)
-                setattr(remote_agent, "_mozaiks_agent_kind", "a2a_remote")
-                agents[agent_name] = remote_agent
-                logger.info(
-                    "[AGENTS] Created A2A remote agent '%s' for workflow '%s' (url=%s)",
-                    agent_name,
-                    workflow_name,
-                    a2a_spec.url,
-                )
+                remote = create_a2a_remote_agent(a2a_spec, context_variables=context_variables)
+                setattr(remote, "_mozaiks_agent_kind", "a2a_remote")
+                agents[agent_name] = remote
                 continue
             except Exception as a2a_err:
-                logger.error(
-                    "[AGENTS] Failed to create A2A remote agent '%s' for workflow '%s': %s",
-                    agent_name,
-                    workflow_name,
-                    a2a_err,
-                )
+                logger.error("[AGENTS] A2A agent '%s' failed: %s", agent_name, a2a_err)
                 raise
 
+        # Per-agent LLM config → OpenAIConfig
         try:
             from ..outputs.structured import get_llm_for_workflow as _get_structured_llm
 
             extra = {"cache_seed": cache_seed} if cache_seed is not None else None
-            _, llm_config = await _get_structured_llm(
-                workflow_name,
-                "base",
-                agent_name=agent_name,
-                extra_config=extra,
+            _, llm_config_dict = await _get_structured_llm(
+                workflow_name, "base", agent_name=agent_name, extra_config=extra,
             )
         except Exception:
-            llm_config = base_llm_config
+            llm_config_dict = base_llm_config
 
-        # Derive auto-tool execution from tools.yaml (has auto_tool_call: true tool).
-        auto_tool_call_enabled = agent_name in auto_tool_agent_names
-        structured_model_cls = structured_registry.get(agent_name) if structured_registry else None
-        if auto_tool_call_enabled and structured_model_cls is None:
-            raise ValueError(
-                f"[AGENTS] Agent '{agent_name}' has auto_tool_call tool but no structured output model is registered"
-            )
+        try:
+            model_config = llm_config_to_openai_config(llm_config_dict)
+        except Exception as cfg_err:
+            logger.error("[AGENTS] Cannot build OpenAIConfig for '%s': %s", agent_name, cfg_err)
+            raise
 
-        agent_functions = [] if auto_tool_call_enabled else agent_tool_functions.get(agent_name, [])
-        for idx, fn in enumerate(agent_functions):
-            if not callable(fn):
-                logger.error(
-                    f"[AGENTS] Tool function at index {idx} for agent '{agent_name}' is not callable: {fn}"
-                )
-
-        if isinstance(llm_config, dict):
-            if "tools" not in llm_config:
-                llm_config["tools"] = []
-            elif auto_tool_call_enabled:
-                llm_config["tools"] = []
-
-        # Try prompt_sections first (fixed structure - enforces standardization)
-        prompt_sections = agent_config.get("prompt_sections")
-        # Fallback to prompt_sections_custom (flexible array - adapts to any structure)
-        if not prompt_sections:
-            prompt_sections = agent_config.get("prompt_sections_custom")
-        
-        system_message: str
+        # System prompt
+        prompt_sections = agent_config.get("prompt_sections") or agent_config.get("prompt_sections_custom")
         if prompt_sections:
-            # Handles both dict (PromptSections) and list (PromptSectionContent[])
-            # Runtime adapts to whatever structure is provided
             system_message = _compose_prompt_sections(prompt_sections)
         else:
-            # Final fallback for agents still using system_message string directly
             system_message = agent_config.get("system_message", "You are a helpful AI assistant.")
-        agent_exposures = []
-        if isinstance(exposures_map, dict):
-            agent_exposures = exposures_map.get(agent_name, []) or []
 
-        agent_plan = None
-        if isinstance(agent_plan_map, dict):
-            agent_plan = agent_plan_map.get(agent_name)
+        # Apply context exposures to the base prompt
+        agent_exposures = (exposures_map or {}).get(agent_name, []) or []
+        agent_plan = (agent_plan_map or {}).get(agent_name)
         agent_variables = list(getattr(agent_plan, "variables", []) or [])
 
-        base_system_message = system_message
-        update_hooks: List[Callable[..., Any] | UpdateSystemMessage] = []
         if agent_exposures or agent_variables:
             system_message = _apply_context_exposures(
-                base_system_message,
-                agent_exposures,
-                context_dict,
-                agent_variables,
+                system_message, agent_exposures, context_dict, agent_variables,
             )
-            exposure_hook = _build_exposure_update_hook(
-                agent_name,
-                base_system_message,
-                agent_exposures,
-                agent_variables,
-            )
-            if exposure_hook:
-                update_hooks.append(exposure_hook)
-        else:
-            system_message = base_system_message
 
-        # Load update_agent_state hooks from hooks.yaml
-        # CRITICAL: These must be added BEFORE agent construction to work with AG2's update_agent_state_before_reply
+        # Tool binding (skip for auto_tool_call agents — they don't call tools directly)
+        auto_tool_call_enabled = agent_name in auto_tool_agent_names
+        structured_model_cls = structured_registry.get(agent_name) if structured_registry else None
+
+        if auto_tool_call_enabled and structured_model_cls is None:
+            raise ValueError(
+                f"[AGENTS] Agent '{agent_name}' has auto_tool_call but no structured output model"
+            )
+
+        raw_tool_fns: List[Callable] = [] if auto_tool_call_enabled else agent_tool_functions.get(agent_name, [])
+
+        # Wrap tools to inject context_variables
+        wrapped_tools: List[Callable] = [
+            _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns
+        ]
+
+        # Load update_agent_state hooks for pre-turn prompt injection
+        update_hooks: List[Callable] = []
         try:
             from ..execution.hooks import _resolve_import, load_hook_entries
             workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
-            if workflow_path is None:
-                raise ValueError(f"Workflow path not found: {workflow_name}")
-            hooks_entries = load_hook_entries(
-                workflow_name,
-                base_path=str(workflow_path.parent),
-            )
-
-            for entry in hooks_entries:
-                if (
-                    isinstance(entry, dict)
-                    and entry.get("hook_type") == "update_agent_state"
-                    and entry.get("hook_agent") == agent_name
-                ):
-                    file_value = entry.get("filename")
-                    fn_value = entry.get("function")
-
-                    if file_value and fn_value:
-                        fn, qual = _resolve_import(workflow_name, file_value, fn_value, workflow_path)
+            if workflow_path is not None:
+                for entry in load_hook_entries(workflow_name, base_path=str(workflow_path.parent)):
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("hook_type") == "update_agent_state"
+                        and entry.get("hook_agent") in (agent_name, "all")
+                    ):
+                        fn, qual = _resolve_import(workflow_name, entry["filename"], entry["function"], workflow_path)
                         if fn:
                             update_hooks.append(fn)
-                            logger.debug(f"[AGENTS] Pre-loaded update_agent_state hook {qual} for {agent_name}")
-        except Exception as hook_load_err:
-            logger.debug(f"[AGENTS] Failed to pre-load update_agent_state hooks for {agent_name}: {hook_load_err}")
+                            logger.debug("[AGENTS] Loaded update_agent_state hook %s for %s", qual, agent_name)
+        except Exception as hook_err:
+            logger.debug("[AGENTS] Hook pre-load failed for '%s': %s", agent_name, hook_err)
 
-        try:
-            raw_human_mode = agent_config.get("human_input_mode")
-            if raw_human_mode and str(raw_human_mode).upper() not in ("", "NEVER", "NONE"):
-                logger.debug(
-                    f"[AGENTS] Ignoring configured human_input_mode {raw_human_mode} for {agent_name}; enforcing NEVER"
-                )
-            human_input_mode = "NEVER"
+        # Collect any "all" scoped update_agent_state hooks that we might have missed
+        # above if per-agent hooks were already added (dedup by function identity)
+        # The orchestrator is the canonical caller of these hooks — we only store them.
 
-            agent = ConversableAgent(
-                name=agent_name,
-                system_message=system_message,
-                llm_config=llm_config,
-                human_input_mode=human_input_mode,
-                max_consecutive_auto_reply=agent_config.get("max_consecutive_auto_reply", 2),
-                functions=agent_functions,
-                context_variables=context_variables,
-                update_agent_state_before_reply=update_hooks or None,
-            )
-            if isinstance(prompt_sections, Sequence) and prompt_sections:
-                setattr(agent, "_mozaiks_prompt_sections", prompt_sections)
-
-        except Exception as err:
-            logger.error(f"[AGENTS] CRITICAL ERROR creating ConversableAgent {agent_name}: {err}")
-            raise
-
-        # ==============================================================================
-        # IMAGE GENERATION CAPABILITY (AG2 addon)
-        # ==============================================================================
-        if agent_config.get("image_generation_enabled", False):
-            logger.info(f"[AGENTS][CAPABILITY] Image generation enabled for {agent_name} - attaching AG2 capability")
-            
+        # Determine response schema for structured outputs
+        beta_response_schema = None
+        if structured_model_cls is not None:
+            # Beta response_schema is provider-enforced. Only pass models that
+            # are compatible with OpenAI strict structured outputs; models with
+            # open-ended dict fields are parsed and validated after the response.
             try:
-                # Import AG2 image generation components
-                from autogen.agentchat.contrib.capabilities import generate_images
-                
-                logger.debug(f"[AGENTS][CAPABILITY] Imported AG2 generate_images module for {agent_name}")
-                
-                # Load DALL-E specific config
-                from ..llm_config import get_dalle_llm_config
-                dalle_config = await get_dalle_llm_config(cache_seed=cache_seed)
-                
-                logger.info(
-                    f"[AGENTS][CAPABILITY] Built DALL-E config for {agent_name}: "
-                    f"model={dalle_config['config_list'][0].get('model')}"
-                )
-                
-                # Create DALL-E image generator
-                dalle_gen = generate_images.DalleImageGenerator(
-                    llm_config=dalle_config,
-                    resolution="1024x1024",  # Default, can be made configurable
-                    quality="standard",       # Default, can be made configurable
-                    num_images=1
-                )
-                
-                logger.debug(f"[AGENTS][CAPABILITY] Created DalleImageGenerator for {agent_name}")
-                
-                # Create image generation capability
-                image_capability = generate_images.ImageGeneration(
-                    image_generator=dalle_gen,
-                    text_analyzer_llm_config=llm_config,  # Use main config for text analysis
-                    verbosity=1  # Set to 2 for full debug logs
-                )
-                
-                logger.debug(f"[AGENTS][CAPABILITY] Created ImageGeneration capability for {agent_name}")
-                
-                # Attach capability to agent
-                image_capability.add_to_agent(agent)
-                
-                logger.info(
-                    f"[AGENTS][CAPABILITY] ✓ Successfully attached image generation capability to {agent_name} "
-                    f"(DALL-E model={dalle_config['config_list'][0].get('model')}, resolution=1024x1024)"
-                )
-                
-                # Mark agent with capability flag for runtime introspection
-                setattr(agent, "_mozaiks_has_image_generation", True)
-                
-            except ImportError as imp_err:
-                logger.error(
-                    f"[AGENTS][CAPABILITY] Failed to import AG2 image generation for {agent_name}: {imp_err}. "
-                    f"Install with: pip install ag2[lmm,openai]"
-                )
-                raise
-            except Exception as cap_err:
-                logger.error(
-                    f"[AGENTS][CAPABILITY] Failed to attach image generation capability to {agent_name}: {cap_err}",
-                    exc_info=True
-                )
-                raise
+                supports_strict, _ = supports_provider_response_format(structured_model_cls)
+                if supports_strict:
+                    beta_response_schema = get_provider_response_model(structured_model_cls)
+            except Exception:
+                beta_response_schema = None
+
+        # Build AssemblyPolicy from hooks (replaces _SystemMessageCapture + _compute_hook_prompt)
+        assembly = []
+        if update_hooks:
+            assembly.append(
+                MozaiksHookPolicy(update_hooks, agent_name, system_message, context_bridge)
+            )
+
+        # Create beta Agent
+        agent = Agent(
+            agent_name,
+            prompt=system_message,
+            config=model_config,
+            tools=tuple(wrapped_tools),
+            response_schema=beta_response_schema,
+            assembly=assembly,
+        )
+
+        # Store Mozaiks metadata
+        if prompt_sections and isinstance(prompt_sections, Sequence):
+            setattr(agent, "_mozaiks_prompt_sections", prompt_sections)
+        setattr(agent, "_mozaiks_base_system_message", system_message)
+        setattr(agent, "_mozaiks_update_hooks", update_hooks)  # kept for introspection only
+        setattr(agent, "_mozaiks_agent_kind", "local")
+        setattr(agent, "_mozaiks_context_bridge", context_bridge)
 
         if structured_model_cls is not None:
-            try:
-                model_name = getattr(structured_model_cls, "__name__", None)
-            except Exception:
-                model_name = None
+            model_name = getattr(structured_model_cls, "__name__", None)
             if model_name:
                 setattr(agent, "_mozaiks_structured_model_name", model_name)
             setattr(agent, "_mozaiks_structured_model_cls", structured_model_cls)
-        setattr(agent, "_mozaiks_base_system_message", base_system_message)
-        setattr(agent, "_mozaiks_agent_kind", "local")
+
         agents[agent_name] = agent
 
     duration = perf_counter() - start_time
-    logger.info(f"[AGENTS] Created {len(agents)} agents for '{workflow_name}' in {duration:.2f}s")
-
-    try:
-        from logs.logging_config import get_workflow_session_logger
-
-        workflow_logger = get_workflow_session_logger(workflow_name)
-        total_tools = sum(len(tools) for tools in agent_tool_functions.values())
-        workflow_logger.log_tool_binding_summary("ALL_AGENTS", total_tools, list(agent_tool_functions.keys()))
-    except Exception:
-        logger.debug("[AGENTS] Tool binding summary skipped")
-
-    try:
-        from ..workflow_manager import get_workflow_manager
-
-        wm = get_workflow_manager()
-        already_loaded = workflow_name in getattr(wm, "_hooks_loaded_workflows", set())
-        registered = wm.register_hooks(workflow_name, agents, force=False)
-        if registered:
-            logger.info(
-                f"[HOOKS] Registered {len(registered)} hooks for '{workflow_name}' (already_loaded={already_loaded})"
-            )
-    except Exception as hook_err:  # pragma: no cover
-        logger.warning(f"[HOOKS] Failed to register hooks for '{workflow_name}': {hook_err}")
+    logger.info("[AGENTS] Created %d beta agents for '%s' in %.2fs", len(agents), workflow_name, duration)
 
     return agents
 
@@ -427,39 +468,24 @@ async def create_agents(
 # ------------------------------------------------------------------
 
 def list_agent_hooks(agent: Any) -> Dict[str, List[str]]:
-    """Return a mapping of hook_type -> list of function names for a given agent."""
-
+    """Return hook names stored on a beta Agent."""
     out: Dict[str, List[str]] = {}
-    try:
-        for attr in ("_hooks", "hooks"):
-            if hasattr(agent, attr):
-                raw = getattr(agent, attr)
-                if isinstance(raw, dict):
-                    for htype, fns in raw.items():
-                        names: List[str] = []
-                        try:
-                            for fn in fns or []:  # type: ignore
-                                names.append(getattr(fn, "__name__", repr(fn)))
-                        except Exception:
-                            names.append("<error>")
-                        out[htype] = names
-                break
-    except Exception:
-        pass
+    hooks = getattr(agent, "_mozaiks_update_hooks", [])
+    if hooks:
+        out["update_agent_state"] = [getattr(fn, "__name__", repr(fn)) for fn in hooks]
     return out
 
 
 def list_hooks_for_workflow(agents: Dict[str, Any]) -> Dict[str, Dict[str, List[str]]]:
-    """Return hooks per agent for an agents dict."""
-
     return {name: list_agent_hooks(agent) for name, agent in agents.items()}
 
 
 __all__ = [
     "create_agents",
+    "ContextVariablesBridge",
+    "MozaiksHookPolicy",
+    "llm_config_to_openai_config",
     "extract_images_from_conversation",
     "list_agent_hooks",
     "list_hooks_for_workflow",
 ]
-
-

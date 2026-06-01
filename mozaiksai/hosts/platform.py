@@ -51,10 +51,10 @@ from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRo
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.runtime.persistence import (
     apply_database_indexes,
-    apply_database_migrations,
+    apply_data_migrations,
     DatabaseStartupPolicyError,
     get_database_startup_policy,
-    load_database_migrations,
+    load_data_migrations,
 )
 from mozaiksai.core.session.launcher import create_routed_chat_session, launch_transition, validate_context_for_workflow
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots, resolve_active_app_root
@@ -173,15 +173,15 @@ async def _platform_startup() -> None:
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)
     try:
         load_result = await AppLoader.load(str(app_root))
-        if load_result.database_intent:
+        if load_result.data_contract:
             index_app_id = (
-                load_result.database_intent.get("app_id")
+                load_result.data_contract.get("app_id")
                 or load_result.definition.config.get("appId")
                 or load_result.definition.config.get("app_id")
                 or _resolve_default_app_id()
             )
             try:
-                index_count = await apply_database_indexes(load_result.database_intent, app_id=str(index_app_id))
+                index_count = await apply_database_indexes(load_result.data_contract, app_id=str(index_app_id))
                 if index_count:
                     logger.info("DATABASE_INDEXES_READY: app_id=%s count=%s", index_app_id, index_count)
             except Exception as exc:
@@ -198,21 +198,21 @@ async def _platform_startup() -> None:
                         f"at app_root={str(app_root)!r}: {exc}"
                     ) from exc
         try:
-            migrations = load_database_migrations(app_root)
+            migrations = load_data_migrations(app_root)
             if migrations:
                 migration_app_id = (
-                    (load_result.database_intent or {}).get("app_id")
+                    (load_result.data_contract or {}).get("app_id")
                     or load_result.definition.config.get("appId")
                     or load_result.definition.config.get("app_id")
                     or _resolve_default_app_id()
                 )
-                migration_count = await apply_database_migrations(
+                migration_count = await apply_data_migrations(
                     app_id=str(migration_app_id),
                     migrations=migrations,
                 )
                 if migration_count:
                     logger.info(
-                        "DATABASE_MIGRATIONS_APPLIED: app_id=%s count=%s migrations=%s",
+                        "data_migrations_APPLIED: app_id=%s count=%s migrations=%s",
                         migration_app_id,
                         migration_count,
                         [str(migration.get("migration_id") or "") for migration in migrations],
@@ -224,7 +224,7 @@ async def _platform_startup() -> None:
                 if isinstance(migration, dict)
             ]
             logger.warning(
-                "DATABASE_MIGRATIONS_NOT_APPLIED: policy=%s app_id=%s app_root=%s migrations=%s error=%s",
+                "data_migrations_NOT_APPLIED: policy=%s app_id=%s app_root=%s migrations=%s error=%s",
                 database_startup_policy,
                 locals().get("migration_app_id", _resolve_default_app_id()),
                 app_root,
@@ -233,7 +233,7 @@ async def _platform_startup() -> None:
             )
             if database_startup_policy == "required":
                 raise DatabaseStartupError(
-                    f"Database migrations were not applied for app_root={str(app_root)!r} "
+                    f"Data migrations were not applied for app_root={str(app_root)!r} "
                     f"migrations={failed_migration_ids!r}: {exc}"
                 ) from exc
         if load_result.modules:
@@ -2703,12 +2703,6 @@ async def websocket_endpoint(
 
     try:
         has_children = False
-        try:
-            from mozaiksai.core.workflow.pack.graph import workflow_has_mid_flight_journeys
-
-            has_children = workflow_has_mid_flight_journeys(workflow_name)
-        except Exception:
-            has_children = False
 
         chat_exists_flag = False
         coll = None
@@ -3458,12 +3452,6 @@ async def chat_meta(
 ):
     try:
         has_children = False
-        try:
-            from mozaiksai.core.workflow.pack.graph import workflow_has_mid_flight_journeys
-
-            has_children = workflow_has_mid_flight_journeys(workflow_name)
-        except Exception:
-            has_children = False
 
         coll = await runtime_app._chat_coll()
         projection = {"cache_seed": 1, "last_artifact": 1, "status": 1, "last_sequence": 1, "_id": 1, "workflow_name": 1}

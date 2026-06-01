@@ -9,7 +9,6 @@ from .utils import (
     normalize_text_content,
     serialize_event_content,
     extract_agent_name,
-    safe_context_snapshot,
 )
 
 __all__ = [
@@ -17,6 +16,5 @@ __all__ = [
     'normalize_text_content',
     'serialize_event_content',
     'extract_agent_name',
-    'safe_context_snapshot',
 ]
 

@@ -961,7 +961,7 @@ def _app_context_graph(
         page_nodes.append((page, node_id))
         add_node(
             node_id,
-            GraphNodeType.COMPONENT,
+            GraphNodeType.PAGE,
             page.label or page.location,
             page.source_ref_id,
             _surface_metadata(page, "ApplicationInventory.pages"),
@@ -1343,7 +1343,7 @@ def _ownership_node_type(boundary: OwnershipBoundary) -> GraphNodeType:
     if value.startswith("module:"):
         return GraphNodeType.MODULE
     if value.startswith("page:"):
-        return GraphNodeType.COMPONENT
+        return GraphNodeType.PAGE
     if value.startswith("workflow:"):
         return GraphNodeType.WORKFLOW
     if value.startswith("adapter:"):
@@ -1450,7 +1450,7 @@ def _add_decomposition_evidence_nodes(
         node_id = f"candidate_page:{_stable_id(page_id)}"
         add_node(
             node_id,
-            GraphNodeType.COMPONENT,
+            GraphNodeType.PAGE,
             page_id,
             default_source_ref,
             {

@@ -36,7 +36,7 @@ def _minimal_app_build_plan(build_task: dict) -> dict:
         "entities": [],
         "roles": ["admin"],
         "auth_strategy": "role-based",
-        "backend_scope": ["app harness"],
+        "service_scope": ["app harness"],
         "frontend_scope": ["home ui"],
         "theme_preferences": None,
         "brand_intent": None,
@@ -204,7 +204,7 @@ def test_app_build_plan_tool_preserves_capability_packs_theme_preferences_and_br
             "entities": [{"name": "Message", "operations": ["create", "read"]}],
             "roles": ["user"],
             "auth_strategy": "role-based",
-            "backend_scope": ["messaging api"],
+            "service_scope": ["messaging api"],
             "frontend_scope": ["inbox ui"],
             "theme_preferences": "clean neon dark",
             "brand_intent": {
@@ -266,7 +266,7 @@ def test_app_build_plan_tool_rejects_non_schema_page_bundles() -> None:
                 "entities": [{"name": "Message", "operations": ["create", "read"]}],
                 "roles": ["user"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["messaging api"],
+                "service_scope": ["messaging api"],
                 "frontend_scope": ["inbox ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -316,7 +316,7 @@ def test_app_build_plan_tool_rejects_raw_frontend_source_outputs() -> None:
                 "entities": [{"name": "Message", "operations": ["create", "read"]}],
                 "roles": ["user"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["messaging api"],
+                "service_scope": ["messaging api"],
                 "frontend_scope": ["inbox ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -366,7 +366,7 @@ def test_app_build_plan_tool_rejects_obsolete_admin_config_task_type() -> None:
                 "entities": [],
                 "roles": ["admin"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["host admin"],
+                "service_scope": ["host admin"],
                 "frontend_scope": ["home ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -408,7 +408,7 @@ def test_app_build_plan_tool_rejects_obsolete_host_admin_config_path() -> None:
                 "entities": [],
                 "roles": ["admin"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["host admin"],
+                "service_scope": ["host admin"],
                 "frontend_scope": ["home ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -417,8 +417,8 @@ def test_app_build_plan_tool_rejects_obsolete_host_admin_config_path() -> None:
                 "agent_backend_required": False,
                 "build_tasks": [
                     {
-                        "task_id": "task_backend_foundation",
-                        "task_type": "backend_foundation",
+                        "task_id": "task_service_foundation",
+                        "task_type": "service_foundation",
                         "capability_pack_id": None,
                         "execution_target": "AppGenerator",
                         "initial_agent": "ConfigMiddlewareAgent",
@@ -450,7 +450,7 @@ def test_app_build_plan_tool_rejects_split_admin_api_with_wrong_task_type() -> N
                 "entities": [],
                 "roles": ["admin"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["split app backend"],
+                "service_scope": ["split app backend"],
                 "frontend_scope": ["home ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -460,13 +460,13 @@ def test_app_build_plan_tool_rejects_split_admin_api_with_wrong_task_type() -> N
                 "build_tasks": [
                     {
                         "task_id": "task_split_admin",
-                        "task_type": "backend_foundation",
+                        "task_type": "service_foundation",
                         "capability_pack_id": None,
                         "execution_target": "AppGenerator",
                         "initial_agent": "ControllerAgent",
                         "description": "Generate split admin API.",
                         "initial_message": "Generate split admin API.",
-                        "owned_paths": ["backend/admin_config.py", "backend/routes/admin.py"],
+                        "owned_paths": ["backend/admin_config.py", "services/routes/admin.py"],
                         "depends_on": [],
                         "acceptance_criteria": ["Admin config route exists"],
                     }
@@ -492,7 +492,7 @@ def test_app_build_plan_tool_rejects_unknown_task_type() -> None:
                 "entities": [],
                 "roles": ["admin"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["backend glue"],
+                "service_scope": ["backend glue"],
                 "frontend_scope": ["home ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -534,7 +534,7 @@ def test_app_build_plan_tool_rejects_module_contract_with_wrong_initial_agent() 
                 "entities": [],
                 "roles": ["admin"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["module contracts"],
+                "service_scope": ["module contracts"],
                 "frontend_scope": ["home ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -569,13 +569,13 @@ def test_app_build_plan_tool_rejects_module_contract_with_wrong_initial_agent() 
         )
 
 
-def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent() -> None:
+def test_app_build_plan_tool_rejects_service_foundation_with_wrong_initial_agent() -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
-        "tests.app_build_plan_tool_backend_foundation_owner_guard",
+        "tests.app_build_plan_tool_service_foundation_owner_guard",
     )
 
-    with pytest.raises(ValueError, match="`backend_foundation` must start at ConfigMiddlewareAgent"):
+    with pytest.raises(ValueError, match="`service_foundation` must start at ConfigMiddlewareAgent"):
         module.app_build_plan(
             AppBuildPlan={
                 "agent_message": "Planned the product.",
@@ -584,7 +584,7 @@ def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent
                 "entities": [],
                 "roles": ["admin"],
                 "auth_strategy": "role-based",
-                "backend_scope": ["backend glue"],
+                "service_scope": ["backend glue"],
                 "frontend_scope": ["home ui"],
                 "theme_preferences": None,
                 "brand_intent": None,
@@ -593,8 +593,8 @@ def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent
                 "agent_backend_required": False,
                 "build_tasks": [
                     {
-                        "task_id": "task_backend_foundation",
-                        "task_type": "backend_foundation",
+                        "task_id": "task_service_foundation",
+                        "task_type": "service_foundation",
                         "capability_pack_id": None,
                         "execution_target": "AppGenerator",
                         "initial_agent": "ControllerAgent",
@@ -611,7 +611,7 @@ def test_app_build_plan_tool_rejects_backend_foundation_with_wrong_initial_agent
         )
 
 
-def test_app_build_plan_tool_accepts_backend_foundation_provider_adapter_lane() -> None:
+def test_app_build_plan_tool_accepts_service_foundation_provider_adapter_lane() -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_backend_adapter_accept",
@@ -622,14 +622,14 @@ def test_app_build_plan_tool_accepts_backend_foundation_provider_adapter_lane() 
         AppBuildPlan=_minimal_app_build_plan(
             {
                 "task_id": "task_search_provider_adapter",
-                "task_type": "backend_foundation",
+                "task_type": "service_foundation",
                 "capability_pack_id": "search_provider",
                 "surface_kind": "external_integration",
                 "execution_target": "AppGenerator",
                 "initial_agent": "ConfigMiddlewareAgent",
                 "description": "Generate app-owned search provider adapter.",
-                "initial_message": "Generate only backend/adapters/search/vector_provider.py.",
-                "owned_paths": ["backend/adapters/search/vector_provider.py"],
+                "initial_message": "Generate only services/adapters/search/vector_provider.py.",
+                "owned_paths": ["services/adapters/search/vector_provider.py"],
                 "depends_on": [],
                 "acceptance_criteria": ["Provider adapter stays business-logic-free"],
             }
@@ -638,7 +638,7 @@ def test_app_build_plan_tool_accepts_backend_foundation_provider_adapter_lane() 
     )
 
     task = context.data["app_build_plan"]["build_tasks"][0]
-    assert task["owned_paths"] == ["backend/adapters/search/vector_provider.py"]
+    assert task["owned_paths"] == ["services/adapters/search/vector_provider.py"]
 
 
 def test_app_build_plan_tool_rejects_hosted_pack_backend_adapter_lane() -> None:
@@ -650,14 +650,14 @@ def test_app_build_plan_tool_rejects_hosted_pack_backend_adapter_lane() -> None:
     plan = _minimal_app_build_plan(
         {
             "task_id": "task_wallet_provider_adapter",
-            "task_type": "backend_foundation",
+            "task_type": "service_foundation",
             "capability_pack_id": "wallet",
             "surface_kind": "external_integration",
             "execution_target": "AppGenerator",
             "initial_agent": "ConfigMiddlewareAgent",
             "description": "Invalid hosted provider adapter.",
             "initial_message": "Do not do this.",
-            "owned_paths": ["backend/adapters/wallet/provider.py"],
+            "owned_paths": ["services/adapters/wallet/provider.py"],
             "depends_on": [],
             "acceptance_criteria": ["Rejected"],
         }
@@ -960,7 +960,7 @@ def test_valueengine_save_build_plan_preserves_capability_packs_and_concept_blue
                     "task_id": "task_marketplace_pages",
                     "task_type": "app_module",
                     "capability_pack_id": "marketplace_core",
-                    "child_workflow": "AppGenerator",
+                    "target_workflow": "AppGenerator",
                     "description": "Build marketplace pages",
                     "initial_message": "Generate marketplace pages",
                 }

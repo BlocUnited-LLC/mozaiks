@@ -6,7 +6,6 @@ import pytest
 
 from mozaiksai.core.workflow.context.context_utils import (
     apply_context_exposures,
-    build_exposure_update_hook,
 )
 
 
@@ -27,27 +26,6 @@ def test_apply_context_exposures_uses_agent_variable_fallback() -> None:
     assert "APP_BUILD_PLAN" in system_message
     assert "SUPPORT OPERATIONS" in system_message.upper()
     assert "/tickets" in system_message
-
-
-def test_build_exposure_update_hook_uses_agent_variable_fallback() -> None:
-    hook = build_exposure_update_hook(
-        "AppSchemaAgent",
-        "Generate the app UI.",
-        [],
-        ["app_build_plan"],
-    )
-    captured = {}
-    agent = SimpleNamespace(
-        context_variables=SimpleNamespace(data={"app_build_plan": {"app_name": "Support Operations"}}),
-        update_system_message=lambda message: captured.setdefault("message", message),
-    )
-
-    assert hook is not None
-    updated = hook.content_updater(agent, [])
-
-    assert "APP_BUILD_PLAN" in updated
-    assert "SUPPORT OPERATIONS" in updated.upper()
-    assert captured["message"] == updated
 
 
 @pytest.mark.asyncio
@@ -93,7 +71,7 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
             return self.data.get(key, default)
 
     async def _fake_llm_config(*args, **kwargs):
-        return None, False
+        return None, {"config_list": [{"model": "gpt-4o-mini", "api_key": "test-key"}]}
 
     monkeypatch.setattr(factory, "workflow_manager", _FakeManager())
     monkeypatch.setattr(factory, "load_a2a_agent_specs", lambda _config: {})
@@ -105,8 +83,9 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
     agents = await factory.create_agents("AppGenerator", context_variables=_Context())
 
     assert "AppSchemaAgent" in agents
-    assert "APP_BUILD_PLAN" in agents["AppSchemaAgent"].system_message
-    assert "SUPPORT OPERATIONS" in agents["AppSchemaAgent"].system_message.upper()
+    system_message = getattr(agents["AppSchemaAgent"], "_mozaiks_base_system_message")
+    assert "APP_BUILD_PLAN" in system_message
+    assert "SUPPORT OPERATIONS" in system_message.upper()
 
 
 def test_persisted_session_context_overrides_declared_defaults() -> None:
@@ -144,7 +123,7 @@ def test_persisted_session_context_overrides_declared_defaults() -> None:
     assert context.get("app_plan_ready") is True
     assert context.get("available_hosted_packs") == [{"pack_id": "wallet"}]
     assert context.get("app_build_plan") == {"app_name": "Support Operations"}
-    assert context.get("is_child_workflow") is True
+    assert context.get("automated_workflow_run") is True
 
 
 @pytest.mark.asyncio

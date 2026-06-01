@@ -106,7 +106,7 @@ def test_skill_index_still_maps_common_tasks_for_quickstart_follow_through() -> 
     assert "Control-plane / refinement / harness routing" in skills
     assert "Module contract change" in skills
     assert "Admin UI change" in skills
-    assert "Persistence / database intent / repo contract" in skills
+    assert "Persistence / data contract / repo contract" in skills
     assert "Docs-only change" in skills
     assert "Test-only change" in skills
     assert "CLI change" in skills

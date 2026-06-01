@@ -94,7 +94,11 @@ SOURCE_HYGIENE_FORBIDDEN = [
     _source_hygiene_pattern("placeholder ", "pack", flags=re.IGNORECASE),
     _source_hygiene_pattern("placeholder ", "key", flags=re.IGNORECASE),
 ]
-SOURCE_HYGIENE_ALLOWED_SNIPPETS: dict[str, tuple[str, ...]] = {}
+SOURCE_HYGIENE_ALLOWED_SNIPPETS: dict[str, tuple[str, ...]] = {
+    "docs/yc-alignment.md": (
+        "The next generation will replace legacy SaaS with AI-native software.",
+    ),
+}
 
 
 @dataclass(frozen=True)

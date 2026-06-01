@@ -317,7 +317,7 @@ models:
         description: Technical or business constraints.
 
   # =========================================================================
-  # MFJ BUILD TASK MODELS (for parallel decomposition)
+  # BUILD TASK MODELS
   # =========================================================================
 
   BuildTaskSpec:
@@ -325,7 +325,7 @@ models:
     fields:
       task_id:
         type: str
-        description: Stable task identifier for the child run.
+        description: Stable task identifier for the generator task.
       task_type:
         type: literal
         values:
@@ -340,7 +340,7 @@ models:
         - str
         - 'null'
         description: Capability pack this task belongs to. Null only for truly cross-cutting setup work.
-      child_workflow:
+      target_workflow:
         type: literal
         values:
           - AgentGenerator
@@ -348,10 +348,10 @@ models:
         description: Which generator workflow handles this task.
       description:
         type: str
-        description: Short description of the child engineering task.
+        description: Short description of the scoped generator task.
       initial_message:
         type: str
-        description: Seed message passed to the child workflow.
+        description: Seed message passed to the target workflow or task worker.
       depends_on:
         type: optional_list
         items: str
@@ -373,11 +373,11 @@ models:
       capability_packs:
         type: optional_list
         items: CapabilityPackSpec
-        description: Canonical capability packs selected for the product before task fan-out begins.
+        description: Canonical capability packs selected for the product before build tasks begin.
       tasks:
         type: list
         items: BuildTaskSpec
-        description: Child workflow tasks to run (parallel where possible).
+        description: Generator tasks to run according to the build sequence and task-batch contracts.
       required_inputs:
         type: optional_list
         items: str
@@ -388,7 +388,7 @@ models:
     fields:
       agent_message:
         type: str
-        description: Final user-facing status message after fan-in.
+        description: Final user-facing status message after build-task synthesis.
       completed_tasks:
         type: optional_list
         items: str

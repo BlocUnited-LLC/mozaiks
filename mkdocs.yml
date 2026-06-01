@@ -85,14 +85,19 @@ validation:
 
 nav:
   - Home: index.md
-  - Get Started:
-      - Getting Started: getting-started.md
+  - Getting Started: getting-started.md
   - Guides:
       - Overview: guides/index.md
+      - Use Studio: guides/studio/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
+      - Platform Intelligence:
+          - How It Works: guides/platform-intelligence/01-overview.md
+          - Harness Architecture: architecture/workflows/control-plane-harness-architecture.md
+          - Context Graph: architecture/foundations/context-graph-and-code-intelligence.md
+          - Refinement Control Plane: architecture/workflows/refinement-control-plane.md
   - Architecture:
       - Overview: architecture/index.md
       - Foundations:
@@ -102,6 +107,7 @@ nav:
           - Platform Information Architecture: architecture/foundations/platform-information-architecture.md
           - Core vs Product vs App Bundle: architecture/foundations/core-product-app-bundle-boundary.md
           - Graph Authority Boundaries: architecture/foundations/graph-authority-boundaries.md
+          - Context Graph and Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
           - App Context and Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
       - App Architecture:
           - Overview: architecture/app/index.md
@@ -127,6 +133,7 @@ nav:
           - Workflow Routing Transitions: architecture/workflows/workflow-routing-transitions.md
           - Orchestration Control Loops: architecture/workflows/orchestration-control-loops.md
           - Declarative AG2 Mapping: architecture/workflows/declarative-ag2-mapping.md
+          - AG2 Network Patternbook: architecture/workflows/ag2-network-patternbook.md
           - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
           - Refinement Control Plane: architecture/workflows/refinement-control-plane.md
           - Session Router: architecture/workflows/session-router.md
@@ -134,11 +141,9 @@ nav:
       - MozaiksAI Runtime:
           - Overview: architecture/mozaiksai/index.md
           - Workflow and Orchestration:
-              - Mid-Flight Journeys: architecture/mozaiksai/mid-flight-journeys.md
-              - MFJ Strict Resume Contract: architecture/mozaiksai/mfj-strict-resume-contract.md
+              - Workflow Task Batches: architecture/mozaiksai/task-batches.md
               - Universal Orchestrator: architecture/mozaiksai/universal-orchestrator.md
               - Pack Graph Semantics: architecture/mozaiksai/pack-graph-semantics.md
-              - Parallel Fan-Out Fan-In: architecture/mozaiksai/parallel-fan-out-fan-in.md
               - Handoff Condition Scope: architecture/mozaiksai/handoff-condition-scope.md
           - UI and Interaction:
               - UI Interaction Patterns: architecture/mozaiksai/ui-interaction-patterns.md

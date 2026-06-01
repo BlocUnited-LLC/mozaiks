@@ -6,18 +6,16 @@
 """
 AG2 Event Handlers
 
-Each handler processes a specific set of AG2 event types:
-    - TextEventHandler: TextEvent, PrintEvent
+Each handler processes a specific set of AG2 beta event types emitted by the
+agent.ask() / MemoryStream loop:
+    - TextEventHandler: TextEvent
     - InputRequestHandler: InputRequestEvent
     - SelectSpeakerHandler: SelectSpeakerEvent
-    - ToolCallHandler: ToolCallEvent, FunctionCallEvent
-    - ToolResponseHandler: ToolResponseEvent, FunctionResponseEvent
+    - ToolCallHandler: ToolCallsEvent, ToolCallEvent
+    - ToolResponseHandler: ToolResultsEvent
     - CompletionHandler: RunCompletionEvent
     - UsageSummaryHandler: UsageSummaryEvent
-    - TransitionHandler: AfterWorksTransitionEvent
     - MozaiksaiEventHandler: custom mozaiksai AG2 events
-    - GroupChatRunHandler: GroupChatRunChatEvent
-    - GroupChatResumeHandler: GroupChatResumeEvent
     - ErrorHandler: ErrorEvent
     - StreamingEventHandler: StreamEvent (token streaming)
 """
@@ -28,9 +26,7 @@ from .input_handler import InputRequestHandler
 from .speaker_handler import SelectSpeakerHandler
 from .tool_handler import ToolCallHandler, ToolResponseHandler
 from .completion_handler import CompletionHandler, UsageSummaryHandler
-from .transition_handler import TransitionHandler
 from .mozaiks_event_handler import MozaiksaiEventHandler
-from .group_chat_handler import GroupChatRunHandler, GroupChatResumeHandler
 from .error_handler import ErrorHandler
 from .streaming_handler import StreamingEventHandler
 
@@ -52,12 +48,8 @@ __all__ = [
     # Completion handlers
     "CompletionHandler",
     "UsageSummaryHandler",
-    # Transition handlers
-    "TransitionHandler",
+    # Mozaiks event handler
     "MozaiksaiEventHandler",
-    # Group chat handlers
-    "GroupChatRunHandler",
-    "GroupChatResumeHandler",
     # Error handlers
     "ErrorHandler",
 ]
