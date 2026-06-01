@@ -50,9 +50,14 @@ tool calls, and routing decisions.
 
 If you want the short version:
 
-- control plane = the full intelligence layer
-- harness = the runtime shell that runs the checkpoint flow
-- declarative pack = the files that configure that flow
+The control plane is the full intelligence layer. The harness is the part of
+that layer that wires in the opt-in primitives that let Mozaiks classify a
+request, route it to the right path, and scope the work to the right part of
+the app. The declarative pack is the set of files that configures how that
+flow behaves.
+
+Routing means deciding what path the request should take next. Scoping means
+deciding which files, contracts, or surfaces that path should touch.
 
 ## How A Request Moves Through The System
 
