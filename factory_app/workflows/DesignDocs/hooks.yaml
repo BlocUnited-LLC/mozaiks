@@ -1,1 +1,5 @@
-hooks: []
+hooks:
+- hook_type: update_agent_state
+  hook_agent: DesignDocsAgent
+  filename: tools/hook_ai_pack_surface_context.py
+  function: inject_ai_pack_surface_context

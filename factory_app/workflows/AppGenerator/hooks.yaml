@@ -60,6 +60,10 @@ hooks:
   filename: hook_hosted_capabilities_context.py
   function: inject_hosted_capabilities_context
 - hook_type: update_agent_state
+  hook_agent: AppPlanAgent
+  filename: hook_ai_pack_workflow_context.py
+  function: inject_ai_pack_workflow_context
+- hook_type: update_agent_state
   hook_agent: AppSchemaAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context

@@ -336,6 +336,25 @@ def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_p
     assert context.data["app_pages"][0]["sections"][0]["primitive"] == "Grid"
 
 
+def test_save_app_schema_writes_default_ai_config(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+
+    result = save_app_schema_module.save_app_schema(
+        manifest=_base_manifest(),
+        pages=[_base_page()],
+        context_variables=_Context(),
+    )
+
+    workspace = Path(__file__).resolve().parents[1]
+    expected = json.loads(
+        (workspace / "factory_app" / "app" / "config" / "ai.json").read_text(encoding="utf-8")
+    )
+    actual = json.loads((tmp_path / "config" / "ai.json").read_text(encoding="utf-8"))
+
+    assert actual == expected
+    assert "config/ai.json" in result
+
+
 def test_save_app_schema_writes_custom_route_bundle(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
     context = _Context()

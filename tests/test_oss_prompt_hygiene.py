@@ -196,7 +196,8 @@ class TestHostedCapabilitiesHook:
         mod.inject_hosted_capabilities_context(agent, [])
         assert agent.system_message == "base prompt", (
             "inject_hosted_capabilities_context must be a no-op in OSS mode "
-            "(no runtime_capabilities, no available_hosted_packs, no pack_sources)."
+            "(no runtime_capabilities, no available_hosted_packs, "
+            "no hosted_capability_selection, no pack_sources)."
         )
 
     def test_hook_injects_when_hosted_packs_present(self) -> None:

@@ -106,6 +106,77 @@ layers:
       They share no implementation. Use contracts/reactions.yaml for event wiring in any module.
       Use the entitlements pack when the product needs SaaS plan/tier logic.
 
+  ai_native_packs:
+    description: >
+      AI-native capability packs that pair a deterministic module surface with an
+      autonomous BackendOnly AI workflow. AppGenerator generates the MODULE SIDE ONLY.
+      The AI workflow bundle is generated in a SEPARATE AgentGenerator run triggered
+      by the design_surface_map workflow_triggers declarations.
+    rule: >
+      For ai_review_pack, ai_analysis_pack, and ai_extraction_pack:
+        1. Generate the module-side build tasks ONLY — no workflow build tasks.
+        2. Do NOT emit a build task with surface_kind='workflow'. Workflow surfaces
+           are AgentGenerator-owned and the AppBuildPlan validator rejects them.
+        3. Wire reactions.yaml to route the domain event to the AI workflow
+           using the canonical capability_id naming convention below.
+        4. Declare workflow_triggers on the surface_map entry so the design layer
+           records the capability_id the AgentGenerator run must generate.
+    capability_id_convention:
+      ai_review_pack:   "{module_id}-review-workflow"
+      ai_analysis_pack: "{module_id}-analysis-workflow"
+      ai_extraction_pack: "{module_id}-extraction-workflow"
+    packs:
+      - id: ai_review_pack
+        covers: >
+          Human-in-the-loop review workflow for submitted records. The module emits
+          a submission event; the AI workflow evaluates the record and calls
+          record_review_result back into the module.
+        module_actions_required:
+          - "submit_for_review — emits domain.{module_id}.submitted, sets status=under_review"
+          - "record_review_result — accepts decision (approved|rejected|revision_requested) and feedback string"
+        events_required:
+          - "domain.{module_id}.submitted"
+        reactions_required:
+          event_type: "domain.{module_id}.submitted"
+          target_kind: capability
+          target_capability_id: "{module_id}-review-workflow"
+        schema_fields_required:
+          - review_status
+          - review_feedback
+
+      - id: ai_analysis_pack
+        covers: >
+          Automatic background enrichment triggered when records are created or updated.
+          The module emits a creation event; the AI workflow analyzes the record and
+          calls store_analysis_result back into the module. No user-initiated launch.
+        module_actions_required:
+          - "store_analysis_result — accepts analysis_result object, writes to record"
+        events_required:
+          - "domain.{module_id}.created"
+        reactions_required:
+          event_type: "domain.{module_id}.created"
+          target_kind: capability
+          target_capability_id: "{module_id}-analysis-workflow"
+        schema_fields_required:
+          - "analysis_result (subdocument)"
+
+      - id: ai_extraction_pack
+        covers: >
+          Parallel batch processing of document sets or collections. The module emits
+          a batch_submitted event; the AI workflow fans out parallel extraction workers
+          and calls store_extraction_results back into the module.
+        module_actions_required:
+          - "process_batch — accepts batch_id, emits domain.{module_id}.batch_submitted"
+          - "store_extraction_results — accepts batch_id and results array"
+        events_required:
+          - "domain.{module_id}.batch_submitted"
+        reactions_required:
+          event_type: "domain.{module_id}.batch_submitted"
+          target_kind: capability
+          target_capability_id: "{module_id}-extraction-workflow"
+        schema_fields_required:
+          - "extraction_results (array field on item schema)"
+
   custom_owned:
     description: >
       Advanced, custom, or bring-your-own capabilities the user owns entirely.

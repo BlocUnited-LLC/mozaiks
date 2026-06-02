@@ -426,6 +426,7 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
 
         if task_type == "control_plane_pack":
             allowed_config_paths = {
+                "control_plane/config/runtime.yaml",
                 "control_plane/config/control_plane.yaml",
                 "control_plane/config/tools.yaml",
                 "control_plane/config/policies.yaml",
@@ -459,6 +460,7 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                     "control_plane/prompts/*.yaml."
                 )
             required = {
+                "control_plane/config/runtime.yaml",
                 "control_plane/config/control_plane.yaml",
                 "control_plane/config/tools.yaml",
             }

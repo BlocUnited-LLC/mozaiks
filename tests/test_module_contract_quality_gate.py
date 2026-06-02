@@ -205,6 +205,79 @@ actions:
         )
         assert self._audit(files) == []
 
+    def test_emits_undeclared_event_type_warns(self):
+        """action emits a type not declared in events.yaml — runtime would reject this."""
+        module_content = """\
+schema_version: mozaiks.module.v1
+id: task_manager
+handler: backend.handler:TaskManagerModule
+type: standard
+actions:
+  - id: create_task
+    handler_method: create_task
+    permissions: []
+    emits:
+      - domain.task_manager.task_created
+      - domain.task_manager.undeclared_event
+"""
+        files = _code_files(
+            ("modules/task_manager/module.yaml", module_content),
+            ("modules/task_manager/contracts/events.yaml", _make_valid_events_yaml()),
+        )
+        warnings = self._audit(files)
+        assert any("undeclared_event" in w and "not declared" in w for w in warnings)
+
+    def test_emits_with_matching_declared_events_no_warning(self):
+        """All emitted types declared in events.yaml — no warning."""
+        module_content = """\
+schema_version: mozaiks.module.v1
+id: task_manager
+handler: backend.handler:TaskManagerModule
+type: standard
+actions:
+  - id: create_task
+    handler_method: create_task
+    permissions: []
+    emits:
+      - domain.task_manager.task_created
+"""
+        files = _code_files(
+            ("modules/task_manager/module.yaml", module_content),
+            ("modules/task_manager/contracts/events.yaml", _make_valid_events_yaml()),
+        )
+        assert self._audit(files) == []
+
+    def test_events_yaml_producer_mismatch_warns(self):
+        """events.yaml declares a producer that doesn't match the module id."""
+        events_content = """\
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.task_manager.task_created
+    version: 1
+    producer: other_module
+    payload_schema:
+      task_id:
+        type: string
+"""
+        module_content = """\
+schema_version: mozaiks.module.v1
+id: task_manager
+handler: backend.handler:TaskManagerModule
+type: standard
+actions:
+  - id: create_task
+    handler_method: create_task
+    permissions: []
+    emits:
+      - domain.task_manager.task_created
+"""
+        files = _code_files(
+            ("modules/task_manager/module.yaml", module_content),
+            ("modules/task_manager/contracts/events.yaml", events_content),
+        )
+        warnings = self._audit(files)
+        assert any("producer" in w and "other_module" in w for w in warnings)
+
     def test_non_module_yaml_files_ignored(self):
         files = _code_files(
             ("backend/config.py", "some python"),

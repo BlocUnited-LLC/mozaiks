@@ -3,10 +3,10 @@ Hook: Inject Hosted Capabilities Context
 
 Fires as an update_agent_state hook on AppPlanAgent.
 
-When runtime_capabilities, available_hosted_packs, or pack_sources are
-present in context_variables (populated by the hosted mozaiks-app overlay),
-this hook injects a compact [HOSTED CAPABILITIES CONTEXT] block into the
-AppPlanAgent system message.
+When runtime_capabilities, available_hosted_packs, pack_sources, or
+hosted_capability_selection are present in context_variables (populated by a
+hosted deployment overlay), this hook injects a compact
+[HOSTED CAPABILITIES CONTEXT] block into the AppPlanAgent system message.
 
 Capability source taxonomy injected into the block:
   host_universal  — built-in platform features; never generate them
@@ -15,7 +15,7 @@ Capability source taxonomy injected into the block:
   generated_module — AppGenerator should generate module contracts and backend
   external_adapter — generate adapter/client wiring only; backend is third-party
 
-In OSS mode (all three variables are null/empty) this hook is a complete no-op.
+In OSS mode (all hosted variables are null/empty) this hook is a complete no-op.
 The block is never injected and AppGenerator behaviour is unchanged.
 """
 
@@ -258,15 +258,81 @@ def _format_pack_sources(sources: List[Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_hosted_capability_selection(selection: Any) -> str | None:
+    """
+    Render optional host-selected capability intent for this build session.
+
+    Hosts can use this to pass a builder UI choice such as selected capability
+    surfaces or a preferred hosted pack. The hook stays generic: host-specific
+    names and rules must come from the host-provided context, not OSS defaults.
+    """
+    if _is_empty(selection):
+        return None
+
+    lines = ["Host-selected capability intent for this build session:"]
+
+    if isinstance(selection, dict):
+        intent = selection.get("intent_id") or selection.get("intent") or selection.get("id")
+        pack_id = selection.get("pack_id") or selection.get("capability_pack_id")
+        source = selection.get("source")
+        surfaces = (
+            selection.get("surface_ids")
+            or selection.get("surfaces")
+            or selection.get("selected_surfaces")
+            or []
+        )
+        requirements = (
+            selection.get("requirements")
+            or selection.get("notes")
+            or selection.get("reason")
+        )
+
+        if intent:
+            lines.append(f"  - intent: {intent}")
+        if pack_id:
+            lines.append(f"  - preferred hosted pack: {pack_id}")
+        if source:
+            lines.append(f"  - source: {source}")
+        if surfaces:
+            if isinstance(surfaces, (list, tuple, set)):
+                lines.append(f"  - selected surfaces: {', '.join(str(s) for s in surfaces)}")
+            else:
+                lines.append(f"  - selected surfaces: {surfaces}")
+        if requirements:
+            if isinstance(requirements, (list, tuple, set)):
+                for requirement in requirements:
+                    lines.append(f"  - requirement: {requirement}")
+            else:
+                lines.append(f"  - requirement: {requirements}")
+
+        if len(lines) == 1:
+            lines.append(f"  - {selection}")
+    elif isinstance(selection, list):
+        for item in selection:
+            lines.append(f"  - {item}")
+    else:
+        lines.append(f"  - {selection}")
+
+    lines.append(
+        "  Treat this as selection context only; use hosted packs and surfaces declared in the host context."
+    )
+    return "\n".join(lines)
+
+
 def _build_hosted_context_body(
     runtime_capabilities: List[Any] | None,
     available_hosted_packs: List[Any] | None,
     pack_sources: List[Any] | None,
+    hosted_capability_selection: Any | None = None,
 ) -> str:
     parts: list[str] = [_CAPABILITY_SOURCE_GUIDANCE]
 
     if not _is_empty(runtime_capabilities):
         parts.append(_format_runtime_capabilities(runtime_capabilities))
+
+    selection_block = _format_hosted_capability_selection(hosted_capability_selection)
+    if selection_block is not None:
+        parts.append(selection_block)
 
     if not _is_empty(available_hosted_packs):
         parts.append(_format_hosted_packs(available_hosted_packs))
@@ -332,8 +398,9 @@ def inject_hosted_capabilities_context(
     """
     update_agent_state hook for AppPlanAgent.
 
-    Reads runtime_capabilities, available_hosted_packs, and pack_sources from
-    context_variables. No-ops when all three are null/empty (OSS mode).
+    Reads runtime_capabilities, available_hosted_packs, pack_sources, and
+    hosted_capability_selection from context_variables. No-ops when all hosted
+    context values are null/empty (OSS mode).
     Injects [HOSTED CAPABILITIES CONTEXT] when any value is present.
     """
     agent_name = getattr(agent, "name", "")
@@ -346,12 +413,14 @@ def inject_hosted_capabilities_context(
         runtime_capabilities = context_variables.get("runtime_capabilities")
         available_hosted_packs = context_variables.get("available_hosted_packs")
         pack_sources = context_variables.get("pack_sources")
+        hosted_capability_selection = context_variables.get("hosted_capability_selection")
 
-        # No-op in OSS mode — all three are null or empty.
+        # No-op in OSS mode — all hosted context values are null or empty.
         if (
             _is_empty(runtime_capabilities)
             and _is_empty(available_hosted_packs)
             and _is_empty(pack_sources)
+            and _is_empty(hosted_capability_selection)
         ):
             return
 
@@ -359,6 +428,7 @@ def inject_hosted_capabilities_context(
             runtime_capabilities=runtime_capabilities,
             available_hosted_packs=available_hosted_packs,
             pack_sources=pack_sources,
+            hosted_capability_selection=hosted_capability_selection,
         )
         update_agent_section(agent, _HOSTED_CAP_HEADER, body)
 

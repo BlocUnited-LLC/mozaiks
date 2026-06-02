@@ -18,6 +18,9 @@ from factory_app.workflows._shared.generated_ui_contract import (
     custom_route_bundle_page_files,
     dedupe,
 )
+from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
+    load_default_ai_config,
+)
 from mozaiksai.core.workflow.ui_primitives import (
     get_page_ui_primitive_names,
     validate_page_ui_primitives,
@@ -1395,6 +1398,15 @@ def _persist_to_filesystem(
     app_json_path.parent.mkdir(parents=True, exist_ok=True)
     app_json_path.write_text(json.dumps(app_json, indent=2, ensure_ascii=False), encoding="utf-8")
     written.append("app.json")
+
+    # config/ai.json — runtime startup contract seeded from the current factory default.
+    ai_config_path = output_dir / "config" / "ai.json"
+    ai_config_path.parent.mkdir(parents=True, exist_ok=True)
+    ai_config_path.write_text(
+        json.dumps(load_default_ai_config(), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    written.append("config/ai.json")
 
     # ui/pages/{name}.yaml — one file per page
     pages_dir = output_dir / "ui" / "pages"

@@ -56,6 +56,7 @@ class TestOSSNoOp:
         agent = _FakeAgent("AppPlanAgent", context_variables={
             "runtime_capabilities": None,
             "available_hosted_packs": None,
+            "hosted_capability_selection": None,
             "pack_sources": None,
         })
         hook.inject_hosted_capabilities_context(agent, [])
@@ -65,6 +66,7 @@ class TestOSSNoOp:
         agent = _FakeAgent("AppPlanAgent", context_variables={
             "runtime_capabilities": [],
             "available_hosted_packs": [],
+            "hosted_capability_selection": {},
             "pack_sources": [],
         })
         hook.inject_hosted_capabilities_context(agent, [])
@@ -85,7 +87,12 @@ class TestOSSNoOp:
     def test_oss_default_context_vars_are_null(self):
         data = yaml.safe_load(_CONTEXT_VARS_PATH.read_text(encoding="utf-8"))
         defs = data["definitions"]
-        for key in ["runtime_capabilities", "available_hosted_packs", "pack_sources"]:
+        for key in [
+            "runtime_capabilities",
+            "available_hosted_packs",
+            "hosted_capability_selection",
+            "pack_sources",
+        ]:
             assert key in defs, f"Missing definition: {key}"
             default = defs[key].get("source", {}).get("default")
             assert default is None, f"{key} default should be null, got {default!r}"
@@ -175,6 +182,26 @@ class TestHostedInjection:
         assert "hosted_pack" in msg
         assert "planning context only" in msg.lower()
 
+    def test_injects_host_selected_capability_intent(self, hook):
+        agent = _FakeAgent("AppPlanAgent", context_variables={
+            "runtime_capabilities": None,
+            "available_hosted_packs": None,
+            "hosted_capability_selection": {
+                "intent_id": "subscription_revenue",
+                "pack_id": "hosted_checkout",
+                "surfaces": ["checkout", "billing"],
+                "source": "builder",
+            },
+            "pack_sources": None,
+        })
+        hook.inject_hosted_capabilities_context(agent, [])
+        msg = agent.system_message
+        assert "[HOSTED CAPABILITIES CONTEXT]" in msg
+        assert "Host-selected capability intent" in msg
+        assert "subscription_revenue" in msg
+        assert "hosted_checkout" in msg
+        assert "checkout, billing" in msg
+
     def test_taxonomy_guidance_always_present_when_injected(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
             "runtime_capabilities": ["module_execution"],
@@ -257,5 +284,10 @@ class TestStructuredOutputContract:
         data = yaml.safe_load(_CONTEXT_VARS_PATH.read_text(encoding="utf-8"))
         agents = data.get("agents", {})
         plan_vars = agents.get("AppPlanAgent", {}).get("variables", [])
-        for key in ["runtime_capabilities", "available_hosted_packs", "pack_sources"]:
+        for key in [
+            "runtime_capabilities",
+            "available_hosted_packs",
+            "hosted_capability_selection",
+            "pack_sources",
+        ]:
             assert key in plan_vars, f"AppPlanAgent missing variable: {key}"

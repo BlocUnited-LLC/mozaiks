@@ -15,6 +15,135 @@ description: >
 
 archetypes:
 
+  ai_review:
+    summary: >
+      BackendOnly autonomous review workflow. Triggered by a domain event when a
+      record is submitted for review. Evaluates the record using LLM reasoning,
+      produces a structured decision (approved/rejected/revision_requested), and
+      calls record_review_result on the owning module to persist the outcome.
+    select_when:
+      - "The app has an ai_review_pack capability — autonomous evaluation without a human reviewer per item."
+      - "Records are submitted for review and need a structured decision written back to the module."
+      - "The workflow runs BackendOnly — no user-facing chat session."
+    startup_mode: BackendOnly
+    orchestration_pattern: Feedback Loop
+    capability_id_suffix: "-review-workflow"
+    orchestrator_defaults:
+      human_in_the_loop: false
+      workflow_startup_mode: BackendOnly
+      max_turns: 20
+    canonical_agent_sequence:
+      - IntakeAgent:
+          role: >
+            Receives the submission event payload. Reads the submitted record via
+            module action. Validates completeness. Emits NEXT when ready for review.
+          max_consecutive_auto_reply: 4
+          structured_outputs_required: false
+      - ReviewerAgent:
+          role: >
+            Evaluates the submitted record against declared review criteria.
+            Produces a structured decision: approved, rejected, or revision_requested.
+            Includes evidence, rationale, and feedback. May loop back if the record
+            needs clarification or additional context.
+          max_consecutive_auto_reply: 8
+          structured_outputs_required: true
+      - ResultAgent:
+          role: >
+            Calls record_review_result on the owning module with the ReviewerAgent
+            decision and feedback. Confirms the write succeeded. Emits NEXT to close.
+          max_consecutive_auto_reply: 4
+          structured_outputs_required: false
+    hard_constraints:
+      - "startup_mode: BackendOnly — no user chat session."
+      - "ResultAgent MUST call record_review_result — the module owns the persistence."
+      - "Never write review state directly to the database — always via module action."
+      - "Decision must be one of: approved, rejected, revision_requested."
+
+  ai_analysis:
+    summary: >
+      BackendOnly autonomous analysis workflow. Triggered when a record is created.
+      Enriches the record with AI-derived analysis (sentiment, classification, scoring,
+      extraction) and writes the result back to the owning module via store_analysis_result.
+    select_when:
+      - "The app has an ai_analysis_pack capability — background enrichment on record creation."
+      - "Records need AI-derived fields populated automatically after creation."
+      - "The workflow runs BackendOnly — no user interaction required."
+    startup_mode: BackendOnly
+    orchestration_pattern: Pipeline
+    capability_id_suffix: "-analysis-workflow"
+    orchestrator_defaults:
+      human_in_the_loop: false
+      workflow_startup_mode: BackendOnly
+      max_turns: 15
+    canonical_agent_sequence:
+      - ContextReaderAgent:
+          role: >
+            Reads the newly created record and any relevant context (related records,
+            user history, domain rules). Prepares the analysis inputs. Emits NEXT.
+          max_consecutive_auto_reply: 4
+          structured_outputs_required: false
+      - AnalysisAgent:
+          role: >
+            Applies LLM reasoning to produce structured analysis output: classification,
+            scoring, sentiment, entity extraction, or domain-specific enrichment fields.
+            Output is a typed structured object matching the module's analysis_result schema.
+          max_consecutive_auto_reply: 6
+          structured_outputs_required: true
+      - ResultWriterAgent:
+          role: >
+            Calls store_analysis_result on the owning module with the AnalysisAgent output.
+            Confirms the write succeeded.
+          max_consecutive_auto_reply: 3
+          structured_outputs_required: false
+    hard_constraints:
+      - "startup_mode: BackendOnly — triggered by domain.{module_id}.created event."
+      - "ResultWriterAgent MUST call store_analysis_result — the module owns the persistence."
+      - "Never write analysis fields directly — always via the module action contract."
+
+  ai_extraction:
+    summary: >
+      BackendOnly batch extraction workflow. Triggered when a batch of documents or
+      records is submitted for processing. Fans out parallel extraction workers across
+      the batch items and writes results back to the owning module.
+    select_when:
+      - "The app has an ai_extraction_pack capability — parallel processing of document batches."
+      - "Multiple records or files need to be processed in parallel with results persisted."
+      - "The workflow runs BackendOnly with task_batches for parallel workers."
+    startup_mode: BackendOnly
+    orchestration_pattern: Triage with Tasks
+    capability_id_suffix: "-extraction-workflow"
+    task_batches_required: true
+    orchestrator_defaults:
+      human_in_the_loop: false
+      workflow_startup_mode: BackendOnly
+      max_turns: 30
+    canonical_agent_sequence:
+      - TriageAgent:
+          role: >
+            Receives the batch_submitted event payload. Reads the batch record list.
+            Partitions items into parallel worker tasks via task_batches.yaml.
+            Emits NEXT when the fan-out dispatch is complete.
+          max_consecutive_auto_reply: 6
+          structured_outputs_required: true
+      - ExtractionWorkerAgent:
+          role: >
+            Parallel worker. Receives one batch item. Applies LLM extraction (structured
+            fields, entities, classifications, or domain-specific schema). Returns typed
+            extraction result. One worker per item via task_batches.yaml.
+          max_consecutive_auto_reply: 8
+          structured_outputs_required: true
+      - SynthesisAgent:
+          role: >
+            Collects all worker results. Calls store_extraction_results on the owning
+            module with the batch_id and complete results array.
+          max_consecutive_auto_reply: 4
+          structured_outputs_required: false
+    hard_constraints:
+      - "startup_mode: BackendOnly — triggered by domain.{module_id}.batch_submitted event."
+      - "task_batches.yaml is required for parallel ExtractionWorkerAgent dispatch."
+      - "SynthesisAgent MUST call store_extraction_results — the module owns the persistence."
+      - "Never write extraction results directly — always via the module action contract."
+
   proposal_only:
     summary: >
       A human-in-the-loop workflow that produces a structured proposal, plan,

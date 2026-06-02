@@ -668,6 +668,12 @@ definitions:
     source:
       type: computed
       default: null
+  hosted_capability_selection:
+    type: object
+    description: Optional host-provided selected hosted capability intent and surfaces for this build session. Null in OSS mode.
+    source:
+      type: computed
+      default: null
   pack_sources:
     type: object
     description: Pack source metadata for hosted capability packs. Null in OSS mode.
@@ -1040,6 +1046,7 @@ agents:
     - missing_connector_services
     - runtime_capabilities
     - available_hosted_packs
+    - hosted_capability_selection
     - pack_sources
   AppSchemaAgent:
     variables:

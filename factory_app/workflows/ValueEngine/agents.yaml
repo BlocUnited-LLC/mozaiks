@@ -99,18 +99,29 @@ agents:
       - Technical constraints
       - Planned API endpoints
       - UI capability requirements (one statement per major page need)
-      - `capability_pack_hints`: canonical product capability families implied by the concept, such as `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, or `crud_pack`
-      - `surface_candidate_hints`: coarse realization suggestions such as `module`, `workflow`, `control_plane`, `external_integration`, or `ui_only`; these are hints for downstream design/planning, not final contracts
+      - `capability_pack_hints`: canonical product capability families implied by the concept, such as `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `crud_pack`, `ai_review_pack`, `ai_analysis_pack`, or `ai_extraction_pack`. Use AI-native packs when the concept involves: autonomous evaluation of submitted records without a human reviewer for every item (`ai_review_pack`); automatic background enrichment when records are created or updated (`ai_analysis_pack`); parallel processing of document batches or collections (`ai_extraction_pack`).
+      - `surface_candidate_hints`: coarse realization hints for each likely surface. Each hint includes `surface_id`, `label`, `likely_surface_kind` (module/workflow/control_plane/external_integration/ui_only), `source_capability_packs`, `owner_hint` (app/hosted/platform/null), `confidence`, and `rationale`. These are planning signals for DesignDocs, not final contracts.
+        - Set `owner_hint: "app"` for surfaces the generated app owns entirely (custom modules, app-specific workflows).
+        - Set `owner_hint: "hosted"` for surfaces backed by framework packs provided outside the app (messaging_pack, files_pack, notifications_pack, entitlements_pack). DesignDocs will use a facade pattern for these.
+        - Set `owner_hint: "platform"` for surfaces the runtime provides unconditionally (auth, sessions, admin shell, event bus). No generation needed.
+        - Use `owner_hint: null` only when ownership genuinely cannot be inferred from the concept.
       - `agentic_capabilities`: only the capabilities that likely require agentic augmentation rather than pure CRUD/module behavior
 
       Reason in this order:
       1. identify the product's deterministic capability surfaces first
       2. identify which of those surfaces map cleanly to canonical capability packs
-      3. identify coarse realization hints for the major surfaces
+      3. identify coarse realization hints for the major surfaces, including owner_hint
       4. only then identify where agentic behavior adds value
 
       Do not treat every feature as a workflow. Normal product surfaces such as messaging, marketplace listings, billing, dashboards, CRUD admin, or campaign management should usually be expressed as deterministic capability packs first.
       Use `control_plane` only when the product clearly needs semantic request intake, checkpointed lifecycle/refinement/session routing, or policy-aware continuation that cannot be expressed as ordinary workflow launches, module actions, or `extension_registry.json` workflow sequences. Most apps should not receive a `control_plane` surface hint.
+      Emit a `control_plane` hint only when at least two of these signals are present, or one governance-critical signal is dominant:
+      - semantic request intake must choose among multiple valid execution paths before work begins
+      - checkpointed revision continuity or session re-entry is required to preserve prior work
+      - policy, approval, escalation, or risk gating must happen above workflows or modules
+      - scoped coding or contract-surface planning is needed after route selection
+      - artifact-family routing depends on request meaning, not just fixed `workflow_sequence` wiring
+      If the app is mostly CRUD/modules, one known workflow, or fixed transition/sequence routing, do not emit `control_plane`; prefer `module` or `workflow`.
       Use `external_integration` when the surface is mainly a third-party system boundary such as Stripe Connect, hosting providers, ads APIs, or CRM APIs. Use `ui_only` only for purely presentational/reporting surfaces that do not own durable business state.
 
       Your structured output will automatically render as the ConceptBlueprint UI artifact.
@@ -177,6 +188,7 @@ agents:
             "label": "Task registry",
             "source_capability_packs": ["crud_pack"],
             "likely_surface_kind": "module",
+            "owner_hint": "app",
             "confidence": "high",
             "rationale": "Task CRUD and durable task state belong in a deterministic backend surface."
           },
@@ -185,6 +197,7 @@ agents:
             "label": "Daily focus dashboard",
             "source_capability_packs": ["analytics_pack"],
             "likely_surface_kind": "ui_only",
+            "owner_hint": "app",
             "confidence": "medium",
             "rationale": "The dashboard is primarily a presentation surface over task and prioritization data."
           }

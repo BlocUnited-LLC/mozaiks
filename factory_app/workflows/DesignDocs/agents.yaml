@@ -61,10 +61,21 @@ agents:
 
       surface_candidate_hints[]: The upstream surface signal from ValueEngine. Each hint
       carries surface_id, label, likely_surface_kind (module/workflow/control_plane/
-      external_integration/ui_only), source_capability_packs, confidence (low/medium/high),
-      and rationale. High-confidence hints should become surface_map entries. Low-confidence
-      hints are design inputs, not mandates. Do not invent surfaces that contradict the
+      external_integration/ui_only), source_capability_packs, owner_hint (app/hosted/platform/null),
+      confidence (low/medium/high), and rationale. High-confidence hints should become surface_map entries.
+      Low-confidence hints are design inputs, not mandates. Do not invent surfaces that contradict the
       hints without rationale. Do not omit high-confidence hints without rationale.
+
+      owner_hint is a strong directive from concept time — honor it when set:
+        - owner_hint: "app" → surface_map entry owner must be "app"; plan module_contract
+          generation downstream.
+        - owner_hint: "hosted" → surface_map entry owner must be "hosted"; DesignDocs must
+          NOT declare app-owned backend entities or actions for this surface. Use the facade
+          pattern: one app-owned module action per hosted capability boundary.
+        - owner_hint: "platform" → surface_map entry owner must be "platform"; no module
+          generation needed at all, already provided by the runtime.
+        - owner_hint: null → infer owner from likely_surface_kind and source_capability_packs
+          using the ownership rules in [SURFACE REALIZATION].
 
       capability_pack_hints[]: Upstream capability pack signals. Use these to populate
       source_capability_packs in surface_map entries where hints align.
@@ -155,6 +166,10 @@ agents:
       - For every `module` surface, describe the deterministic action boundary clearly enough for downstream generation of `backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py`.
       - Use `workflow` for agentic orchestration lanes.
       - Use `control_plane` for Studio/build/session/refinement coordination.
+      - Treat `control_plane` as an app-owned semantic coordination surface above workflows and modules, not as a synonym for any agentic workflow.
+      - Promote a hint to `surface_kind: control_plane` only when the app needs at least two of: semantic intake across multiple execution paths, checkpointed revision/session continuity, policy/approval/escalation gates, scoped coding or contract-surface planning, or request-meaning-based artifact routing.
+      - If the need is a single known workflow, fixed `workflow_sequence`, or ordinary module action routing, resolve it as `workflow` or `module`, not `control_plane`.
+      - Keep workflow execution lanes as `workflow` surfaces even when a separate control plane may route into them.
       - Use `external_integration` when the main boundary is Stripe Connect, ads APIs, hosting providers, CRM APIs, etc.
       - If a surface depends on third-party credentials, describe that dependency in `integrations`, but keep the credential lifecycle in the platform connector/admin surface rather than in module-owned persistence.
       - Use `ui_only` only for purely presentational/reporting surfaces that own no durable business state.

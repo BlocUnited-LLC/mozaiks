@@ -18,8 +18,22 @@ hooks:
   hook_agent: PatternAgent
   filename: update_agent_state_pattern.py
   function: inject_pattern_selection_guidance
+- hook_type: update_agent_state
+  hook_agent: PatternAgent
+  filename: tools/hook_ai_pack_archetype_context.py
+  function: inject_ai_pack_archetype_context
 
 - hook_type: update_agent_state
   hook_agent: WorkflowBundleBuilderAgent
   filename: update_agent_state_pattern.py
   function: inject_workflow_bundle_builder_guidance
+
+- hook_type: update_agent_state
+  hook_agent: WorkflowBundleBuilderAgent
+  filename: tools/hook_ai_pack_archetype_context.py
+  function: inject_ai_pack_archetype_context
+
+- hook_type: update_agent_state
+  hook_agent: WorkflowBundleBuilderAgent
+  filename: tools/hook_workflow_archetypes_context.py
+  function: inject_workflow_archetypes_context

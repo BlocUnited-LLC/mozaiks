@@ -188,6 +188,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "shell_preset_hint" in source
     assert "[SHELL PRESET CONTEXT]" in source
     assert "initial_agent` must be `ControlPlaneAgent`" in source
+    assert "control_plane/config/runtime.yaml" in source
     assert "Output MUST be a valid JSON object matching `ControlPlaneOutput`" in source
     assert "`current_build_task_type` must equal `control_plane_pack`" in source
     assert "ControlPlanePackBundle" in source
@@ -274,7 +275,13 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "shell_extension" not in _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
 
     module_contract = file_contracts["task_contracts"]["module_contract"]
+    control_plane_pack = file_contracts["task_contracts"]["control_plane_pack"]
     assert module_contract["required_outputs"] == ["modules/{pack_name}/module.yaml"]
+    assert control_plane_pack["required_outputs"] == [
+        "control_plane/config/runtime.yaml",
+        "control_plane/config/control_plane.yaml",
+        "control_plane/config/tools.yaml",
+    ]
     assert "modules/{pack_name}/contracts/reactions.yaml" in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/subscriptions.yaml" not in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/admin.yaml" in module_contract["optional_outputs"]
@@ -292,6 +299,44 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControlPlaneOutput` and `ControlPlanePackBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
+
+
+def test_control_plane_pack_codegen_seeds_runtime_yaml() -> None:
+    from factory_app.workflows.AppGenerator.tools.control_plane_pack_codegen import (
+        build_control_plane_pack_code_files,
+    )
+
+    files = build_control_plane_pack_code_files(
+        {
+            "control_plane_yaml": {
+                "schema_version": "mozaiks.control_plane",
+                "profile": {
+                    "id": "app_refinement_harness",
+                    "display_name": "App Refinement Harness",
+                    "description": "App-local refinement harness.",
+                },
+                "harness": {
+                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
+                },
+                "routing": {
+                    "default_artifact_kind": "app_bundle",
+                    "artifacts": [],
+                },
+                "checkpoints": [],
+            },
+            "tools_yaml": {
+                "schema_version": "mozaiks.control_plane.tools",
+                "tools": [],
+            },
+        }
+    )
+
+    file_map = {item["filename"]: item["content"] for item in files}
+
+    assert "control_plane/config/runtime.yaml" in file_map
+    runtime_yaml = yaml.safe_load(file_map["control_plane/config/runtime.yaml"])
+    assert runtime_yaml["schema_version"] == "mozaiks.control_plane.runtime"
+    assert runtime_yaml["classifier"]["llm_profile"] == "classifier"
 
 
 def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> None:

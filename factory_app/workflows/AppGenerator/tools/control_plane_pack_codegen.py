@@ -6,8 +6,13 @@ from typing import Any, Dict, List
 
 import yaml
 
+from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
+    load_default_control_plane_runtime_config,
+)
+
 
 _CONTROL_PLANE_CONFIG = "control_plane/config/control_plane.yaml"
+_CONTROL_PLANE_RUNTIME = "control_plane/config/runtime.yaml"
 _CONTROL_PLANE_TOOLS = "control_plane/config/tools.yaml"
 _CONTROL_PLANE_POLICIES = "control_plane/config/policies.yaml"
 
@@ -56,6 +61,7 @@ def build_control_plane_pack_code_files(raw: Any) -> List[Dict[str, str]]:
 
     files: Dict[str, str] = {
         _CONTROL_PLANE_CONFIG: _dump_yaml(control_plane_yaml),
+        _CONTROL_PLANE_RUNTIME: _dump_yaml(load_default_control_plane_runtime_config()),
         _CONTROL_PLANE_TOOLS: _dump_yaml(tools_yaml),
     }
 

@@ -94,6 +94,17 @@ models:
         - external_integration
         - ui_only
         description: Coarse realization hint only. Not a final contract.
+      owner_hint:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Strongly suggested runtime owner for this surface. Allowed values:
+          "app" (generate module/backend), "hosted" (facade pattern, no module
+          generation), "platform" (already provided, no generation). Null when
+          ownership cannot be reliably inferred at concept time. DesignDocs
+          must honor this when set.
       confidence:
         type: literal
         values:
@@ -229,6 +240,9 @@ models:
           - notifications_pack
           - analytics_pack
           - agent_backend_integration
+          - ai_review_pack
+          - ai_analysis_pack
+          - ai_extraction_pack
           - custom_domain
         description: Canonical pack family selected for the product.
       label:

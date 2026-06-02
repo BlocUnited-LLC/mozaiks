@@ -7,31 +7,39 @@
         {
           "surface_id": "projects",
           "surface_kind": "module",
-          "source_pack_id": "projects",
+          "owner": "app",
+          "source_capability_packs": ["crud_pack"],
           "label": "Projects Module",
           "summary": "Handles project creation, listing, and management.",
           "primary_entities": [
             "Project"
           ],
-          "primary_pages": [
+          "owned_pages": [
             "Project List",
             "Project Detail"
           ],
+          "owned_mutations": ["create_project", "update_project", "delete_project"],
+          "events_emitted": ["domain.projects.created", "domain.projects.updated"],
+          "workflow_triggers": [],
           "dependencies": []
         },
         {
           "surface_id": "tasks",
           "surface_kind": "module",
-          "source_pack_id": "tasks",
+          "owner": "app",
+          "source_capability_packs": ["crud_pack"],
           "label": "Tasks Module",
           "summary": "Handles task creation, assignment, and completion.",
           "primary_entities": [
             "Task"
           ],
-          "primary_pages": [
+          "owned_pages": [
             "Task List",
             "Task Detail"
           ],
+          "owned_mutations": ["create_task", "assign_task", "complete_task"],
+          "events_emitted": ["domain.tasks.created", "domain.tasks.completed"],
+          "workflow_triggers": [],
           "dependencies": []
         }
       ]

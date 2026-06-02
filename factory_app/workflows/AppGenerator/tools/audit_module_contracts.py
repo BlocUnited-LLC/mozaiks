@@ -173,8 +173,10 @@ def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
     if not code_files:
         return warnings
 
-    module_yamls: Dict[str, Dict[str, Any]] = {}   # filename → parsed data
-    events_by_module: Dict[str, str] = {}           # module_dir → filename
+    module_yamls: Dict[str, Dict[str, Any]] = {}        # filename → parsed data
+    events_by_module: Dict[str, str] = {}               # module_dir → filename
+    events_type_sets: Dict[str, set] = {}               # module_dir → declared event type strings
+    events_producers: Dict[str, Dict[str, str]] = {}    # module_dir → {event_type → producer}
 
     for file_entry in code_files:
         if not isinstance(file_entry, dict):
@@ -201,31 +203,65 @@ def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
         elif basename == "events.yaml":
             events_by_module[mod_dir] = filename
             warnings.extend(_audit_contract_yaml(filename, data))
+            declared: set = set()
+            producers: Dict[str, str] = {}
+            for ev in (data.get("events") or []):
+                if isinstance(ev, dict):
+                    ev_type = str(ev.get("type") or "").strip()
+                    if ev_type:
+                        declared.add(ev_type)
+                        producers[ev_type] = str(ev.get("producer") or "").strip()
+            events_type_sets[mod_dir] = declared
+            events_producers[mod_dir] = producers
         else:
             warnings.extend(_audit_contract_yaml(filename, data))
 
-    # Cross-file check: actions that declare emits[] must have a companion events.yaml
+    # Cross-file checks for modules that declare emits[]
     for mod_path, mod_data in module_yamls.items():
         mod_dir = _module_dir_of(mod_path)
+        module_id = str(mod_data.get("id") or mod_data.get("module_id") or "").strip()
         emitting_actions = [
             a for a in (mod_data.get("actions") or [])
             if isinstance(a, dict) and a.get("emits")
         ]
         if not emitting_actions:
             continue
-        if mod_dir in events_by_module:
+
+        if mod_dir not in events_by_module:
+            emitted = [
+                str(e)
+                for a in emitting_actions
+                for e in (a.get("emits") or [])
+                if e
+            ]
+            if emitted:
+                warnings.append(
+                    f"{mod_path}: actions declare emits {emitted} "
+                    f"but no events.yaml found under {mod_dir}/"
+                )
             continue
-        emitted = [
-            str(e)
-            for a in emitting_actions
-            for e in (a.get("emits") or [])
-            if e
-        ]
-        if emitted:
-            warnings.append(
-                f"{mod_path}: actions declare emits {emitted} "
-                f"but no events.yaml found under {mod_dir}/"
-            )
+
+        # events.yaml exists — check each emitted type is declared and producer matches
+        declared_types = events_type_sets.get(mod_dir, set())
+        producer_map = events_producers.get(mod_dir, {})
+        for action in emitting_actions:
+            action_id = str(action.get("id") or "").strip()
+            for ev_type in (action.get("emits") or []):
+                ev_type_str = str(ev_type).strip()
+                if not ev_type_str:
+                    continue
+                if ev_type_str not in declared_types:
+                    warnings.append(
+                        f"{mod_path}: action {action_id!r} emits {ev_type_str!r} "
+                        f"but that type is not declared in "
+                        f"{events_by_module[mod_dir]}"
+                    )
+                elif module_id and producer_map.get(ev_type_str, module_id) != module_id:
+                    warnings.append(
+                        f"{events_by_module[mod_dir]}: event {ev_type_str!r} "
+                        f"producer {producer_map[ev_type_str]!r} does not match "
+                        f"module id {module_id!r}"
+                    )
 
     return warnings
 
