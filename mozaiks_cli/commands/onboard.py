@@ -7,8 +7,11 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+import yaml
+
 from mozaiks_cli.commands.init import (
     build_default_ai_config,
+    build_default_control_plane_config,
     build_default_shell_config,
     create_scaffold,
 )
@@ -57,6 +60,7 @@ def run(args) -> None:
     app_json_path = app_root / "app.json"
     ai_json_path = app_root / "config" / "ai.json"
     shell_json_path = app_root / "config" / "shell.json"
+    control_plane_runtime_path = workspace_root / "control_plane" / "config" / "runtime.yaml"
 
     app_config = _read_json(app_json_path)
     ai_config = _read_json(ai_json_path)
@@ -87,11 +91,14 @@ def run(args) -> None:
 
     _apply_app_config(app_config=app_config, app_name=app_name)
     _apply_ai_config(ai_config=ai_config, app_name=app_name, provider=provider, model=model)
+    control_plane_config = _apply_control_plane_config(control_plane_runtime_path)
 
     _write_json(app_json_path, app_config)
     print(f"Updated {app_json_path.relative_to(workspace_root)}")
     _write_json(ai_json_path, ai_config)
     print(f"Updated {ai_json_path.relative_to(workspace_root)}")
+    _write_yaml(control_plane_runtime_path, control_plane_config)
+    print(f"Updated {control_plane_runtime_path.relative_to(workspace_root)}")
     refreshed_shell_config = _maybe_refresh_shell_config(shell_config, app_name)
     if refreshed_shell_config is not None:
         _write_json(shell_json_path, refreshed_shell_config)
@@ -147,6 +154,11 @@ def _read_json(path: Path) -> dict:
 
 def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _write_yaml(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=False), encoding="utf-8")
 
 
 def _prompt_text(
@@ -258,11 +270,26 @@ def _apply_ai_config(*, ai_config: dict, app_name: str, provider: str, model: st
     ai_config["ask"] = deepcopy(defaults["ask"])
     ai_config["chat"] = deepcopy(defaults["chat"])
     ai_config["workflows"] = deepcopy(defaults["workflows"])
-    ai_config["control_plane"] = deepcopy(defaults["control_plane"])
+    ai_config.pop("control_plane", None)
     ai_config["llm"] = {
         "provider": provider,
         "model": model,
     }
+
+
+def _apply_control_plane_config(path: Path) -> dict:
+    existing: dict = {}
+    if path.exists():
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            loaded = None
+        if isinstance(loaded, dict):
+            existing = loaded
+
+    merged = build_default_control_plane_config()
+    merged.update(existing)
+    return merged
 
 
 def _maybe_refresh_shell_config(shell_config: dict, app_name: str) -> dict | None:

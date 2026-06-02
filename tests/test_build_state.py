@@ -35,13 +35,25 @@ def _build_workspace(tmp_path: Path) -> Path:
         {
             "llm": {"provider": "anthropic", "model": "claude-sonnet-4-5"},
             "workflows": {"entry_point": "ValueEngine"},
-            "control_plane": {
-                "enabled": True,
-                "profile": "default",
-                "classifier": {"enabled": True, "llm_profile": "classifier"},
-                "coding": {"enabled": True, "llm_profile": "codegen"},
-            },
         },
+    )
+    (bundle_root / "control_plane" / "config").mkdir(parents=True, exist_ok=True)
+    (bundle_root / "control_plane" / "config" / "runtime.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: mozaiks.control_plane.runtime",
+                "enabled: true",
+                "profile: default",
+                "classifier:",
+                "  enabled: true",
+                "  llm_profile: classifier",
+                "coding:",
+                "  enabled: true",
+                "  llm_profile: codegen",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
     )
     _write_json(app_root / "config" / "shell.json", {"header": {"pages": [], "actions": []}})
     _write_json(app_root / "brand" / "theme_config.json", {"theme": {"primary": "blue"}, "identity": {"tagline": "Private revenue workflows"}})

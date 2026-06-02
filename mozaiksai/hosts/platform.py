@@ -38,6 +38,7 @@ from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.observability.performance_manager import get_performance_manager
 from mozaiksai.core.runtime.app.loader import AppLoadError, AppLoader
+from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
     mount_declared_routers,
@@ -123,11 +124,10 @@ def _get_ordered_workflow_names() -> List[str]:
 def _get_configured_entry_point() -> Optional[str]:
     app_root = resolve_app_root()
     ai_path = app_root / "config" / "ai.json"
-    if not ai_path.exists():
-        return None
 
     try:
-        ai = json.loads(ai_path.read_text(encoding="utf-8"))
+        ai = json.loads(ai_path.read_text(encoding="utf-8")) if ai_path.exists() else {}
+        ai = resolve_runtime_ai_config(ai, app_root=app_root)
         candidate = ((ai.get("workflows") or {}).get("entry_point") or "").strip()
         return candidate or None
     except Exception:
@@ -1039,16 +1039,16 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     except Exception as exc:
         logger.warning("[shell-config] Could not read app startup config: %s", exc)
 
-    if ai_path.exists():
-        try:
-            ai = json.loads(ai_path.read_text(encoding="utf-8"))
-            chat = ai.get("chat") or {}
-            workflows = ai.get("workflows") or {}
-            result["chat_startup_mode"] = chat.get("chat_startup_mode") or chat.get("startup_mode") or "ask"
-            result["entry_point"] = workflows.get("entry_point")
-            result["resume_policy"] = workflows.get("resume_policy")
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to read shell config: {exc}") from exc
+    try:
+        ai = json.loads(ai_path.read_text(encoding="utf-8")) if ai_path.exists() else {}
+        ai = resolve_runtime_ai_config(ai, app_root=app_root)
+        chat = ai.get("chat") or {}
+        workflows = ai.get("workflows") or {}
+        result["chat_startup_mode"] = chat.get("chat_startup_mode") or chat.get("startup_mode") or "ask"
+        result["entry_point"] = workflows.get("entry_point")
+        result["resume_policy"] = workflows.get("resume_policy")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read shell config: {exc}") from exc
 
     try:
         shell_config_path = _resolve_shell_config_path()

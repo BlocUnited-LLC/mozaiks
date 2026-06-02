@@ -214,3 +214,6 @@ class LoadedControlPlanePack(BaseModel):
                 if artifact.artifact_kind == candidate:
                     return artifact
         return None
+
+
+ControlPlaneManifest.model_rebuild()

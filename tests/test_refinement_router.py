@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import yaml
 
 from mozaiksai.control_plane import (
     ControlPlaneArtifactChangeRoutesManifest,
@@ -2012,15 +2013,14 @@ async def test_design_route_context_seed_has_no_llm_profile() -> None:
 # ---------------------------------------------------------------------------
 
 def _load_ai_json() -> dict:
-    import json
-    ai_json_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "ai.json"
-    return json.loads(ai_json_path.read_text(encoding="utf-8"))
+    runtime_yaml_path = Path(__file__).resolve().parents[1] / "factory_app" / "control_plane" / "config" / "runtime.yaml"
+    return yaml.safe_load(runtime_yaml_path.read_text(encoding="utf-8"))
 
 
 def test_ai_json_declares_architecture_llm_profile() -> None:
-    """ai.json control_plane.llm_profiles declares an 'architecture' profile."""
+    """control-plane runtime config declares an 'architecture' profile."""
     ai = _load_ai_json()
-    profiles = ai["control_plane"]["llm_profiles"]
+    profiles = ai["llm_profiles"]
     assert "architecture" in profiles
     arch = profiles["architecture"]
     assert "purpose" in arch
@@ -2031,13 +2031,13 @@ def test_ai_json_declares_architecture_llm_profile() -> None:
 def test_ai_json_classifier_profile_unchanged() -> None:
     """classifier llm_profile still points to the classifier profile (unchanged)."""
     ai = _load_ai_json()
-    assert ai["control_plane"]["classifier"]["llm_profile"] == "classifier"
+    assert ai["classifier"]["llm_profile"] == "classifier"
 
 
 def test_ai_json_coding_profile_unchanged() -> None:
     """coding llm_profile still points to the codegen profile (unchanged)."""
     ai = _load_ai_json()
-    assert ai["control_plane"]["coding"]["llm_profile"] == "codegen"
+    assert ai["coding"]["llm_profile"] == "codegen"
 
 
 # ---------------------------------------------------------------------------

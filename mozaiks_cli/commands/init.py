@@ -8,6 +8,8 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+import yaml
+
 from mozaiks_cli.agent_guidance import build_agent_guidance_files
 from mozaiks_cli.workspace import is_framework_repo_root
 from mozaiksai.resources import resolve_factory_app_root, resolve_factory_brand_root
@@ -210,117 +212,125 @@ def _prompt_admin_email() -> str:
 
 
 def _create_bundle_scaffold(
-    *,
-    target_dir: Path,
-    preset: str,
-    app_name: str,
-    admin_email: str | None,
-    starter: bool,
+  *,
+  target_dir: Path,
+  preset: str,
+  app_name: str,
+  admin_email: str | None,
+  starter: bool,
 ) -> None:
-    app_root = target_dir / "app"
-    config_dir = app_root / "config"
-    services_dir = app_root / "services"
-    service_integrations_dir = services_dir / "integrations"
-    service_adapters_dir = services_dir / "adapters"
-    service_security_dir = services_dir / "security"
-    service_routes_dir = services_dir / "routes"
-    service_data_dir = services_dir / "data"
-    modules_dir = app_root / "modules"
-    workflows_dir = target_dir / "workflows"
-    brand_dir = app_root / "brand"
-    assets_dir = brand_dir / "assets"
-    fonts_dir = brand_dir / "fonts"
-    ui_dir = app_root / "ui"
-    ui_components_dir = ui_dir / "components"
-    ui_pages_dir = ui_dir / "pages"
-    ui_routes_dir = ui_dir / "routes"
+  app_root = target_dir / "app"
+  config_dir = app_root / "config"
+  control_plane_config_dir = target_dir / "control_plane" / "config"
+  services_dir = app_root / "services"
+  service_integrations_dir = services_dir / "integrations"
+  service_adapters_dir = services_dir / "adapters"
+  service_security_dir = services_dir / "security"
+  service_routes_dir = services_dir / "routes"
+  service_data_dir = services_dir / "data"
+  modules_dir = app_root / "modules"
+  workflows_dir = target_dir / "workflows"
+  brand_dir = app_root / "brand"
+  assets_dir = brand_dir / "assets"
+  fonts_dir = brand_dir / "fonts"
+  ui_dir = app_root / "ui"
+  ui_components_dir = ui_dir / "components"
+  ui_pages_dir = ui_dir / "pages"
+  ui_routes_dir = ui_dir / "routes"
 
-    for directory in (
-        app_root,
-        config_dir,
-        services_dir,
-        service_integrations_dir,
-        service_adapters_dir,
-        service_security_dir,
-        service_routes_dir,
-        service_data_dir,
-        *(service_adapters_dir / area for area in (
-            "auth",
-            "source_control",
-            "deployment",
-            "dns",
-            "registrar",
-            "cloud",
-            "storage",
-            "secrets",
-            "payments",
-        )),
-        modules_dir,
-        workflows_dir,
-        brand_dir,
-        assets_dir,
-        fonts_dir,
-        ui_dir,
-        ui_components_dir,
-        ui_pages_dir,
-        ui_routes_dir,
-    ):
-        directory.mkdir(parents=True, exist_ok=True)
+  for directory in (
+    app_root,
+    config_dir,
+    control_plane_config_dir,
+    services_dir,
+    service_integrations_dir,
+    service_adapters_dir,
+    service_security_dir,
+    service_routes_dir,
+    service_data_dir,
+    *(service_adapters_dir / area for area in (
+      "auth",
+      "source_control",
+      "deployment",
+      "dns",
+      "registrar",
+      "cloud",
+      "storage",
+      "secrets",
+      "payments",
+    )),
+    modules_dir,
+    workflows_dir,
+    brand_dir,
+    assets_dir,
+    fonts_dir,
+    ui_dir,
+    ui_components_dir,
+    ui_pages_dir,
+    ui_routes_dir,
+  ):
+    directory.mkdir(parents=True, exist_ok=True)
 
-    print("Created scaffold directories: app/config, app/services, app/modules, workflows, app/ui, app/brand")
+  print("Created scaffold directories: app/config, control_plane/config, app/services, app/modules, workflows, app/ui, app/brand")
 
-    features = TIER_PRESETS[preset]
-    resolved_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else None
-    admins = [resolved_admin] if resolved_admin else []
-    app_json = {
-        "appName": app_name,
-        "preset": preset,
-        "startup": {
-            "landing_spot": "/",
-        },
-        "targets": {
-            "web": True,
-            "mobile": False,
-        },
-        "authRequired": features.get("auth", False),
-        "admins": admins,
-    }
-    _write_json(app_root / "app.json", app_json)
-    print(f"Created app/app.json (preset={preset})")
+  features = TIER_PRESETS[preset]
+  resolved_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else None
+  admins = [resolved_admin] if resolved_admin else []
+  app_json = {
+    "appName": app_name,
+    "preset": preset,
+    "startup": {
+      "landing_spot": "/",
+    },
+    "targets": {
+      "web": True,
+      "mobile": False,
+    },
+    "authRequired": features.get("auth", False),
+    "admins": admins,
+  }
+  _write_json(app_root / "app.json", app_json)
+  print(f"Created app/app.json (preset={preset})")
 
-    _write_json(config_dir / "ai.json", _build_ai_config(app_name, starter=starter))
-    print("Created app/config/ai.json")
+  _write_json(config_dir / "ai.json", _build_ai_config(app_name, starter=starter))
+  print("Created app/config/ai.json")
 
-    _write_json(config_dir / "shell.json", _build_shell_config(app_name))
-    print("Created app/config/shell.json")
+  _write_text(
+    control_plane_config_dir / "runtime.yaml",
+    yaml.safe_dump(build_default_control_plane_config(), sort_keys=False, allow_unicode=False),
+  )
+  print("Created control_plane/config/runtime.yaml")
 
-    _write_text(config_dir / "secrets.yaml", _secrets_yaml_placeholder())
-    print("Created app/config/secrets.yaml")
+  _write_json(config_dir / "shell.json", _build_shell_config(app_name))
+  print("Created app/config/shell.json")
 
-    _write_json(config_dir / "data.json", _data_contract_placeholder())
-    print("Created app/config/data.json")
+  _write_text(config_dir / "secrets.yaml", _secrets_yaml_placeholder())
+  print("Created app/config/secrets.yaml")
 
-    _write_service_support_stubs(services_dir)
-    print("Created app/services support stubs")
+  _write_json(config_dir / "data.json", _data_contract_placeholder())
+  print("Created app/config/data.json")
 
-    _write_text(service_data_dir / "__init__.py", '"""Data contract helpers declared by app/config/data.json."""\n')
-    print("Created app/services/data/")
+  _write_service_support_stubs(services_dir)
+  print("Created app/services support stubs")
 
-    _copy_default_brand_bundle(brand_dir, app_name)
-    print("Created app/brand from factory_app default brand")
+  _write_text(service_data_dir / "__init__.py", '"""Data contract helpers declared by app/config/data.json."""\n')
+  print("Created app/services/data/")
 
-    _write_json(ui_dir / "route_manifest.json", {"pages": []})
-    print("Created app/ui/route_manifest.json")
+  _copy_default_brand_bundle(brand_dir, app_name)
+  print("Created app/brand from factory_app default brand")
 
-    _write_text(ui_dir / "index.js", _ui_component_registry_index())
-    print("Created app/ui/index.js")
+  _write_json(ui_dir / "route_manifest.json", {"pages": []})
+  print("Created app/ui/route_manifest.json")
 
-    _write_text(modules_dir / "README.md", _modules_stub_readme())
-    _write_text(workflows_dir / "README.md", _workflows_stub_readme())
-    _write_text(ui_pages_dir / "README.md", _pages_stub_readme())
+  _write_text(ui_dir / "index.js", _ui_component_registry_index())
+  print("Created app/ui/index.js")
 
-    if starter:
-        _create_starter_workflow(workflows_dir)
+  _write_text(modules_dir / "README.md", _modules_stub_readme())
+  _write_text(workflows_dir / "README.md", _workflows_stub_readme())
+  _write_text(ui_pages_dir / "README.md", _pages_stub_readme())
+
+  if starter:
+    _create_starter_workflow(workflows_dir)
 
 
 def _create_standard_consumer_files(
@@ -869,8 +879,21 @@ def _load_factory_ai_config() -> dict:
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError(f"Factory AI config must be a JSON object: {config_path}")
-    if not isinstance(payload.get("control_plane"), dict):
-        raise ValueError(f"Factory AI config must declare control_plane: {config_path}")
+    return payload
+
+
+def _load_factory_control_plane_runtime_config() -> dict:
+    factory_root = resolve_factory_app_root()
+    if factory_root is None:
+        raise FileNotFoundError("Unable to resolve the packaged factory_app root.")
+
+    config_path = factory_root / "control_plane" / "config" / "runtime.yaml"
+    if not config_path.exists():
+        return {}
+
+    payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Factory control-plane runtime config must be a YAML object: {config_path}")
     return payload
 
 
@@ -890,35 +913,38 @@ def _load_factory_shell_config() -> dict:
 
 
 def build_default_ai_config(app_name: str, *, starter: bool = False) -> dict:
-    """Build the canonical app-level AI config from the first-party Studio contract."""
-    factory_ai = _load_factory_ai_config()
-    ask = deepcopy(factory_ai.get("ask") or {})
-    chat = deepcopy(factory_ai.get("chat") or {})
-    workflows = deepcopy(factory_ai.get("workflows") or {})
+  """Build the canonical app-level AI config from the first-party Studio contract."""
+  factory_ai = _load_factory_ai_config()
+  ask = deepcopy(factory_ai.get("ask") or {})
+  chat = deepcopy(factory_ai.get("chat") or {})
+  workflows = deepcopy(factory_ai.get("workflows") or {})
 
-    ask.setdefault(
-        "ask_mode_prompt",
-        (
-            f"You are the Mozaiks assistant for {app_name}. Help users shape, generate, "
-            "connect, and refine apps in Mozaiks Studio using the shared builder workflows."
-        ),
-    )
-    ask.setdefault("ask_context_variables", None)
+  ask.setdefault(
+    "ask_mode_prompt",
+    (
+      f"You are the Mozaiks assistant for {app_name}. Help users shape, generate, "
+      "connect, and refine apps in Mozaiks Studio using the shared builder workflows."
+    ),
+  )
+  ask.setdefault("ask_context_variables", None)
 
-    chat["chat_startup_mode"] = "workflow" if starter else (chat.get("chat_startup_mode") or "ask")
-    workflows["entry_point"] = "HelloWorkflow" if starter else (workflows.get("entry_point") or "ValueEngine")
-    workflows.setdefault("resume_policy", "last_active_then_oldest_then_entry_point")
+  chat["chat_startup_mode"] = "workflow" if starter else (chat.get("chat_startup_mode") or "ask")
+  workflows["entry_point"] = "HelloWorkflow" if starter else (workflows.get("entry_point") or "ValueEngine")
+  workflows.setdefault("resume_policy", "last_active_then_oldest_then_entry_point")
 
-    return {
-        "ask": ask,
-        "chat": chat,
-        "workflows": workflows,
-        "control_plane": deepcopy(factory_ai["control_plane"]),
-    }
+  return {
+    "ask": ask,
+    "chat": chat,
+    "workflows": workflows,
+  }
 
 
 def _build_ai_config(app_name: str, *, starter: bool) -> dict:
     return build_default_ai_config(app_name, starter=starter)
+
+
+def build_default_control_plane_config() -> dict:
+    return deepcopy(_load_factory_control_plane_runtime_config())
 
 
 def build_default_shell_config(app_name: str) -> dict:

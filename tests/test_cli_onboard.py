@@ -45,6 +45,7 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
 
     app_json = _load_json(target_dir / "app" / "app.json")
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
+    control_plane_runtime = (target_dir / "control_plane" / "config" / "runtime.yaml").read_text(encoding="utf-8")
     shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
 
     assert app_json["appName"] == "Atlas CRM"
@@ -56,9 +57,10 @@ def test_onboard_command_updates_scaffold_surfaces_non_interactively(tmp_path) -
     }
     assert ai_json["chat"]["chat_startup_mode"] == "ask"
     assert ai_json["workflows"]["entry_point"] == "ValueEngine"
-    assert ai_json["control_plane"]["enabled"] is True
-    assert ai_json["control_plane"]["classifier"]["llm_profile"] == "classifier"
-    assert ai_json["control_plane"]["coding"]["llm_profile"] == "codegen"
+    assert "control_plane" not in ai_json
+    assert "enabled: true" in control_plane_runtime
+    assert "llm_profile: classifier" in control_plane_runtime
+    assert "llm_profile: codegen" in control_plane_runtime
     assert "app_context" not in ai_json
     assert shell_json["header"]["actions"]
     assert shell_json["notifications"]["show"] is True
@@ -188,7 +190,7 @@ def test_onboard_command_defaults_provider_when_not_provided(tmp_path) -> None:
     # Default provider is anthropic
     assert ai_json["llm"]["provider"] == "anthropic"
     assert ai_json["llm"]["model"] == "claude-sonnet-4-5"
-    assert ai_json["control_plane"]["enabled"] is True
+    assert "control_plane" not in ai_json
     assert shell_json["header"]["actions"]
 
 
@@ -218,7 +220,7 @@ def test_onboard_command_prompts_when_values_are_missing(monkeypatch, tmp_path) 
     assert "onboarding" not in app_json
     assert ai_json["llm"]["provider"] == "openai"
     assert ai_json["llm"]["model"] == "gpt-4.1"
-    assert ai_json["control_plane"]["enabled"] is True
+    assert "control_plane" not in ai_json
 
 
 def test_workspace_helpers_keep_brand_and_ui_inside_active_app_root(tmp_path) -> None:

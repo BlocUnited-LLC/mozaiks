@@ -1,7 +1,14 @@
 from __future__ import annotations
-"""Lean Performance Manager aligned with new ChatSessions schema.
+"""Lean Performance Manager aligned with ChatSessions as the run-level record.
 
-Maintains minimal in-memory metrics and updates session duration / a few flattened usage fields.
+In the current runtime, `chat_id` is the concrete workflow-run identifier
+persisted in `ChatSessions`. Session continuity remains owned by
+`SessionRouterState` (`session_router::{app_id}::{user_id}`).
+
+This manager keeps minimal in-memory metrics for one workflow run while
+optionally carrying session-router linkage (`session_router_session_id`,
+`journey_instance_id`) so run-level observability can be correlated back to the
+owning orchestration session.
 """
 
 import asyncio
@@ -28,6 +35,8 @@ class ChatPerfState:
     app_id: str
     workflow_name: str
     user_id: str
+    session_router_session_id: Optional[str] = None
+    journey_instance_id: Optional[str] = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     ended_at: Optional[datetime] = None
     agent_turns: int = 0
@@ -51,13 +60,14 @@ class PerformanceManager:
         self.initialized = False
 
     # --------------------------------------------------
-    # Snapshot helpers (in-memory only, no DB dependency)
+    # Run snapshots keyed by chat_id (in-memory only)
     # --------------------------------------------------
     async def snapshot_chat(self, chat_id: str) -> Optional[Dict[str, Any]]:
-        """Return an in-memory snapshot for a single chat (no DB reads).
+        """Return an in-memory snapshot for one workflow run keyed by `chat_id`.
 
-        Includes derived runtime duration (seconds) whether or not workflow ended.
-        Returns None if chat_id not tracked yet.
+        This is intentionally run-scoped rather than SessionRouter session-scoped.
+        Includes derived runtime duration (seconds) whether or not the workflow
+        ended. Returns None if the chat_id/run is not tracked yet.
         """
         async with self._lock:
             st = self._states.get(chat_id)
@@ -70,6 +80,8 @@ class PerformanceManager:
                 "app_id": st.app_id,
                 "workflow_name": st.workflow_name,
                 "user_id": st.user_id,
+                "session_router_session_id": st.session_router_session_id,
+                "journey_instance_id": st.journey_instance_id,
                 "started_at": st.started_at.isoformat(),
                 "ended_at": st.ended_at.isoformat() if st.ended_at else None,
                 "runtime_sec": runtime_sec,
@@ -93,7 +105,7 @@ class PerformanceManager:
         return out
 
     async def aggregate(self) -> Dict[str, Any]:
-        """Aggregate simple counters across all tracked chats for quick polling."""
+        """Aggregate simple counters across all tracked workflow runs."""
         snaps = await self.snapshot_all()
         total_agent_turns = sum(s["agent_turns"] for s in snaps)
         total_tool_calls = sum(s["tool_calls"] for s in snaps)
@@ -124,6 +136,37 @@ class PerformanceManager:
             self._chat_coll = client_obj["mozaiksai"]["ChatSessions"]
         return self._chat_coll
 
+    async def _load_chat_scope_metadata(self, chat_id: str) -> Dict[str, Optional[str]]:
+        """Load persisted session/journey linkage for a chat if present."""
+        try:
+            coll = await self._get_coll()
+            doc = await coll.find_one(
+                {"_id": chat_id},
+                {
+                    "session_router_session_id": 1,
+                    "journey_instance_id": 1,
+                },
+            )
+        except Exception:
+            logger.debug("Failed to load chat scope metadata", exc_info=True)
+            return {
+                "session_router_session_id": None,
+                "journey_instance_id": None,
+            }
+
+        if not isinstance(doc, dict):
+            return {
+                "session_router_session_id": None,
+                "journey_instance_id": None,
+            }
+
+        session_router_session_id = str(doc.get("session_router_session_id") or "").strip() or None
+        journey_instance_id = str(doc.get("journey_instance_id") or "").strip() or None
+        return {
+            "session_router_session_id": session_router_session_id,
+            "journey_instance_id": journey_instance_id,
+        }
+
     async def initialize(self):
         if self.initialized:
             logger.info("🔍 PERF_INIT: Performance manager already initialized, skipping")
@@ -151,7 +194,16 @@ class PerformanceManager:
             for cid in ids:
                 await self.flush(cid)
 
-    async def record_workflow_start(self, chat_id: str, app_id: str, workflow_name: str, user_id: str):
+    async def record_workflow_start(
+        self,
+        chat_id: str,
+        app_id: str,
+        workflow_name: str,
+        user_id: str,
+        *,
+        session_router_session_id: Optional[str] = None,
+        journey_instance_id: Optional[str] = None,
+    ):
         async with self._lock:
             if chat_id not in self._states:
                 self._states[chat_id] = ChatPerfState(
@@ -188,6 +240,22 @@ class PerformanceManager:
                 }},
                 upsert=True,
             )
+
+        scope_metadata = await self._load_chat_scope_metadata(chat_id)
+        resolved_session_router_session_id = (
+            str(session_router_session_id or "").strip()
+            or scope_metadata["session_router_session_id"]
+        )
+        resolved_journey_instance_id = (
+            str(journey_instance_id or "").strip()
+            or scope_metadata["journey_instance_id"]
+        )
+
+        async with self._lock:
+            st = self._states.get(chat_id)
+            if st is not None:
+                st.session_router_session_id = resolved_session_router_session_id
+                st.journey_instance_id = resolved_journey_instance_id
         perf_logger.info("workflow_start", chat_id=chat_id, workflow=workflow_name)
 
     async def attach_trace_id(self, chat_id: str, trace_id: str):

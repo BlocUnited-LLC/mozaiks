@@ -8,6 +8,7 @@ import yaml
 from mozaiksai.control_plane import (
     ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS,
     ControlPlaneConfig,
+    ControlPlaneManifest,
     load_control_plane_config,
 )
 
@@ -31,6 +32,17 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
         "model": "gpt-5.2-codex",
         "temperature": 0.1,
     }
+
+
+def test_factory_control_plane_runtime_config_is_staged_under_control_plane_dir() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    runtime_path = repo_root / "factory_app" / "control_plane" / "config" / "runtime.yaml"
+    data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
+
+    assert data["enabled"] is True
+    assert data["profile"] == "default"
+    assert data["classifier"]["llm_profile"] == "classifier"
+    assert data["coding"]["llm_profile"] == "codegen"
 
 
 def test_control_plane_rejects_unknown_llm_profile_id() -> None:
@@ -92,8 +104,9 @@ def test_factory_workflows_do_not_reference_undeclared_llm_profiles() -> None:
     declared = set(config.llm_profiles)
     references: list[str] = []
 
-    ai_data = json.loads((app_root / "config" / "ai.json").read_text(encoding="utf-8"))
-    control_plane = ai_data["control_plane"]
+    control_plane = yaml.safe_load(
+        (repo_root / "factory_app" / "control_plane" / "config" / "runtime.yaml").read_text(encoding="utf-8")
+    )
     for value in control_plane.values():
         if isinstance(value, dict) and isinstance(value.get("llm_profile"), str):
             references.append(value["llm_profile"])

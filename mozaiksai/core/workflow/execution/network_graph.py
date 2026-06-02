@@ -127,6 +127,7 @@ def resolve_next_agent(
     context_variables: Mapping[str, Any],
     agent_name_by_id: Mapping[str, str] | None = None,
     participant_order: Sequence[str] | None = None,
+    turn_count: int = 1,
 ) -> str | None:
     """Resolve the next workflow speaker from an AG2 `TransitionGraph`.
 
@@ -146,7 +147,7 @@ def resolve_next_agent(
         participant_order=order,
         expected_next_speaker=current_id,
         last_speaker_id=current_id,
-        turn_count=1,
+        turn_count=turn_count,
         creator_id="user",
         graph_data=graph.to_dict(),
         context_vars=dict(context_variables or {}),

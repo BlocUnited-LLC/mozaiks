@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal, Optional
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mozaiksai.resources import resolve_factory_app_root
@@ -128,9 +129,38 @@ def load_ai_config_json(app_root: Optional[Path] = None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def resolve_control_plane_runtime_config_path(app_root: Optional[Path] = None) -> Path:
+    if app_root is not None:
+        return (app_root.parent / "control_plane" / "config" / "runtime.yaml").resolve()
+
+    active_root = resolve_active_app_root()
+    active_path = (active_root.parent / "control_plane" / "config" / "runtime.yaml").resolve()
+    if active_path.exists():
+        return active_path
+
+    factory_root = resolve_factory_app_root()
+    if factory_root is not None:
+        factory_path = (factory_root / "control_plane" / "config" / "runtime.yaml").resolve()
+        if factory_path.exists():
+            return factory_path
+
+    return active_path
+
+
+def load_control_plane_config_yaml(app_root: Optional[Path] = None) -> dict[str, Any]:
+    config_path = resolve_control_plane_runtime_config_path(app_root)
+    if not config_path.exists():
+        return {}
+
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def load_control_plane_config(app_root: Optional[Path] = None) -> ControlPlaneConfig:
-    ai_config = load_ai_config_json(app_root)
-    raw = ai_config.get("control_plane")
-    if not isinstance(raw, dict):
+    raw = load_control_plane_config_yaml(app_root)
+    if not isinstance(raw, dict) or not raw:
         return ControlPlaneConfig()
     return ControlPlaneConfig.model_validate(raw)

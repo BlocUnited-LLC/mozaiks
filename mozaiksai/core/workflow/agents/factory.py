@@ -89,7 +89,6 @@ def llm_config_to_openai_config(llm_config: Dict[str, Any]) -> OpenAIConfig:
         api_key=entry.get("api_key") or None,
         base_url=entry.get("base_url") or None,
         temperature=llm_config.get("temperature"),
-        seed=llm_config.get("cache_seed") or None,
         streaming=True,
     )
 
@@ -173,7 +172,7 @@ def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge
 # ASSEMBLY POLICY — hook-driven prompt injection via AG2 AssemblyPolicy
 # ------------------------------------------------------------------
 
-class MozaiksHookPolicy:
+class MozaiksHookPolicy(AssemblyPolicy):
     """Wraps ``update_agent_state`` hooks as an AG2 ``AssemblyPolicy``.
 
     Runs before each LLM call.  If a hook calls ``agent.update_system_message()``

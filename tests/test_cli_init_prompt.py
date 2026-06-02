@@ -33,10 +33,12 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     target_dir = tmp_path / "prompted-app"
     app_json = _load_json(target_dir / "app" / "app.json")
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
+    control_plane_runtime = (target_dir / "control_plane" / "config" / "runtime.yaml").read_text(encoding="utf-8")
     shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
     assert app_json["appName"] == "prompted-app"
     assert ai_json["workflows"]["entry_point"] == "ValueEngine"
-    assert ai_json["control_plane"]["enabled"] is True
+    assert "control_plane" not in ai_json
+    assert "enabled: true" in control_plane_runtime
     assert "app_context" not in ai_json
     assert (target_dir / "app" / "config" / "ai.json").exists()
     assert (target_dir / "app" / "config" / "shell.json").exists()
@@ -98,7 +100,7 @@ def test_init_command_starter_scaffold_seeds_entry_workflow(tmp_path) -> None:
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
     assert ai_json["chat"]["chat_startup_mode"] == "workflow"
     assert ai_json["workflows"]["entry_point"] == "HelloWorkflow"
-    assert ai_json["control_plane"]["enabled"] is True
+    assert "control_plane" not in ai_json
     assert (target_dir / "workflows" / "HelloWorkflow" / "orchestrator.yaml").exists()
 
 

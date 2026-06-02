@@ -605,10 +605,10 @@ async def _run_beta_orchestration_loop(
             run_completed = True
             break
 
-        # After ask() completes, sync context_vars_dict with any updates from variables
-        # (AG2 tool calls receive the per-turn variables object and may mutate it).
-        for key, value in turn_vars.items():
-            context_vars_dict[key] = value
+        # Tools are wrapped with context_bridge which writes directly to
+        # context_vars_dict (same dict reference). No sync-back needed here —
+        # syncing turn_vars back would overwrite those mutations with the
+        # pre-turn snapshot.
 
         # Apply agent_text derived context triggers before routing.
         if derived_context_manager is not None and last_reply is not None:
@@ -689,6 +689,7 @@ async def _run_beta_orchestration_loop(
             context_variables=context_vars_dict,
             agent_name_by_id=agent_name_by_id,
             participant_order=list(agent_id_by_name.values()),
+            turn_count=turn + 1,
         )
         wf_logger.info("[%s] Routing: %s -> %s", workflow_name_upper, current_agent_name, next_agent)
 

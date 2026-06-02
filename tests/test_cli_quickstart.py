@@ -76,7 +76,7 @@ def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_pa
     assert ai_json["llm"]["provider"] == "openai"
     assert ai_json["llm"]["model"] == "gpt-4.1"
     assert ai_json["workflows"]["entry_point"] == "ValueEngine"
-    assert ai_json["control_plane"]["enabled"] is True
+    assert "control_plane" not in ai_json
     assert "app_context" not in ai_json
     assert shell_json["header"]["actions"]
     assert shell_json["notifications"]["show"] is True

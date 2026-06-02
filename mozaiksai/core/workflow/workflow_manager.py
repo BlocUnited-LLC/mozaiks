@@ -12,6 +12,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from .declarative import (
     parse_a2a_config,
     parse_agents_config,
@@ -770,20 +771,28 @@ class UnifiedWorkflowManager:
 
     def _load_ai_config(self) -> Dict[str, Any]:
         path = self._resolve_ai_config_path()
+        sibling_app_root = (self.workflows_base_path.resolve().parent / "app").resolve()
+        sibling_app_ai_path = (sibling_app_root / "config" / "ai.json").resolve()
+        app_root = sibling_app_root if (sibling_app_root / "app.json").exists() else path.parent.parent
+
         if not path.exists():
-            logger.info(f"AI config not found, skipping workflow AI metadata: {path}")
-            return {}
+            if sibling_app_ai_path.exists():
+                path = sibling_app_ai_path
+                app_root = sibling_app_root
+            else:
+                logger.info(f"AI config not found, skipping workflow AI metadata: {path}")
+                return resolve_runtime_ai_config({}, app_root=app_root)
 
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 logger.warning(f"AI config must be a JSON object: {path}")
-                return {}
-            return data
+                return resolve_runtime_ai_config({}, app_root=app_root)
+            return resolve_runtime_ai_config(data, app_root=app_root)
         except Exception as e:
             logger.error(f"Failed reading AI config {path}: {e}")
-            return {}
+            return resolve_runtime_ai_config({}, app_root=app_root)
 
     def _load_modular_workflow_config(self, workflow_path: Path) -> Dict[str, Any]:
         """Load modular workflow configuration from YAML files.

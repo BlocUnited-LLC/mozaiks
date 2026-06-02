@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from mozaiksai.control_plane import load_control_plane_config
 from mozaiksai.core.data.persistence.namespaces import (
     SYSTEM_DATABASE,
     BuilderCollections,
     PlatformCollections,
 )
+from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     build_app_validation_strategy_summary,
 )
@@ -93,18 +95,20 @@ def build_app_overview_summary(
 ) -> dict:
     app_config = _read_json(app_root / "app.json")
     ai_config = _read_json(app_root / "config" / "ai.json")
+    runtime_ai_config = resolve_runtime_ai_config(ai_config, app_root=app_root)
+    control_plane_config = load_control_plane_config(app_root)
     shell_config = _read_json(app_root / "config" / "shell.json")
     theme_config = _read_json(_resolve_theme_config_path(app_root))
     ui_route_manifest = _read_json(_resolve_ui_route_manifest_path(app_root))
 
     llm = ai_config.get("llm") or {}
-    control_plane = _summarize_control_plane(ai_config.get("control_plane"))
+    control_plane = _summarize_control_plane(control_plane_config.model_dump())
     identity = theme_config.get("identity") or {}
     workflow_names = _list_workflows(app_root)
     workflow_count = len(workflow_names)
     custom_page_count = len(ui_route_manifest.get("pages") or [])
     schema_page_count = _count_schema_pages(app_root)
-    entry_point = (ai_config.get("workflows") or {}).get("entry_point")
+    entry_point = (runtime_ai_config.get("workflows") or {}).get("entry_point")
     admins = _resolve_admins(app_config)
     app_id = app_config.get("appId") or app_root.name
 
@@ -783,7 +787,10 @@ def _recommend_next_step(
     if workflow_count == 0:
         return "Open Studio and submit the first build request; shared builder workflows run from the factory workflow pack."
     if not entry_point:
-        return "Set workflows.entry_point in app/config/ai.json before starting runtime workflow sessions."
+        return (
+            "Set workflows.entry_point in app/config/ai.json or in "
+            "control_plane/config/control_plane.yaml startup before starting runtime workflow sessions."
+        )
     return "Review the current workspace state and make the next approved build request from the app overview."
 
 
