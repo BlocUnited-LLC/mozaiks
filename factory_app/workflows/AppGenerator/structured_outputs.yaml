@@ -2429,8 +2429,8 @@ models:
         type: literal
         values:
         - clarify
-        - fail
-        description: Behavior when inferred scope exceeds max_selected_paths.
+        - workflow
+        description: Behavior when inferred scope exceeds max_selected_paths. Use workflow to escalate to a full workflow sequence.
 
   ControlPlanePoliciesManifestOutput:
     type: model

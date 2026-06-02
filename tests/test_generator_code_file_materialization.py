@@ -297,9 +297,10 @@ def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pac
                             "artifact_kind": "app_bundle",
                             "label": "app bundle",
                             "routes": {
-                                "patch": {
-                                    "workflow_sequence": "app_revision",
-                                }
+                                "patch": {"workflow_sequence": "app_revision"},
+                                "design": {"workflow_sequence": "app_surface_revision"},
+                                "feature": {"workflow_sequence": "app_revision"},
+                                "core": {"workflow_sequence": "full_rebuild"},
                             },
                         }
                     ],
@@ -311,9 +312,12 @@ def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pac
                 "tools": [],
             },
             "policies_yaml": {
+                "schema_version": "mozaiks.control_plane.policies",
                 "scope": {
-                    "max_files": 12,
-                }
+                    "max_selected_paths": 3,
+                    "auto_apply_max_paths": 1,
+                    "overflow_behavior": "clarify",
+                },
             },
             "prompt_files": [
                 {
@@ -381,6 +385,89 @@ def test_appgenerator_control_plane_pack_rejects_prompt_paths_outside_pack() -> 
     }
 
     with pytest.raises(ValueError, match="control-plane prompt files"):
+        extract_appgenerator_code_file_map(payload)
+
+
+def test_appgenerator_control_plane_pack_rejects_schema_violations() -> None:
+    """Schema round-trip in codegen catches extra fields and wrong field names at generation time."""
+    payload = {
+        "control_plane_pack": {
+            "control_plane_yaml": {
+                "schema_version": "mozaiks.control_plane",
+                "profile": {"id": "demo", "display_name": "Demo", "description": "Demo"},
+                "harness": {
+                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
+                },
+                "routing": {
+                    "default_artifact_kind": "app_bundle",
+                    "artifacts": [
+                        {
+                            "artifact_kind": "app_bundle",
+                            "label": "app bundle",
+                            "routes": {
+                                "patch": {
+                                    # Wrong field name: route_to instead of workflow_sequence
+                                    "route_to": "app_revision",
+                                },
+                                "design": {"workflow_sequence": "app_surface_revision"},
+                                "feature": {"workflow_sequence": "app_revision"},
+                                "core": {"workflow_sequence": "full_rebuild"},
+                            },
+                        }
+                    ],
+                },
+                "checkpoints": [],
+            },
+            "tools_yaml": {
+                "schema_version": "mozaiks.control_plane.tools",
+                "tools": [],
+            },
+        }
+    }
+
+    with pytest.raises(ValueError, match="schema validation"):
+        extract_appgenerator_code_file_map(payload)
+
+
+def test_appgenerator_control_plane_pack_rejects_extra_route_fields() -> None:
+    """Extra fields on route objects are rejected by the strict runtime schema."""
+    payload = {
+        "control_plane_pack": {
+            "control_plane_yaml": {
+                "schema_version": "mozaiks.control_plane",
+                "profile": {"id": "demo", "display_name": "Demo", "description": "Demo"},
+                "harness": {
+                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
+                },
+                "routing": {
+                    "default_artifact_kind": "app_bundle",
+                    "artifacts": [
+                        {
+                            "artifact_kind": "app_bundle",
+                            "label": "app bundle",
+                            "routes": {
+                                "patch": {
+                                    "workflow_sequence": "app_revision",
+                                    # Extra field that must be rejected
+                                    "affected_workflows": ["AppGenerator"],
+                                },
+                                "design": {"workflow_sequence": "app_surface_revision"},
+                                "feature": {"workflow_sequence": "app_revision"},
+                                "core": {"workflow_sequence": "full_rebuild"},
+                            },
+                        }
+                    ],
+                },
+                "checkpoints": [],
+            },
+            "tools_yaml": {
+                "schema_version": "mozaiks.control_plane.tools",
+                "tools": [],
+            },
+        }
+    }
+
+    with pytest.raises(ValueError, match="schema validation"):
         extract_appgenerator_code_file_map(payload)
 
 

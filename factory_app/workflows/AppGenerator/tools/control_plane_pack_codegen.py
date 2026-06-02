@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from typing import Any, Dict, List
 
 import yaml
+from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_control_plane_runtime_config,
@@ -46,6 +47,28 @@ def _safe_prompt_path(raw: Any, prompt_id: str) -> str:
     return str(path)
 
 
+def _validate_control_plane_manifest(manifest_dict: Dict[str, Any]) -> None:
+    """Parse the generated control_plane.yaml through the runtime schema.
+
+    This catches structural errors (extra fields, wrong field names, missing
+    required fields) at generation time rather than when the app loads the pack.
+    Sequence cross-checking against extension_registry.json is intentionally
+    deferred to the loader — the generator may run before the registry is stable.
+
+    The import is deferred to avoid a circular import:
+    control_plane_pack_codegen → mozaiksai.control_plane → coding_worker →
+    app_validation → code_file_utils → control_plane_pack_codegen.
+    """
+    from mozaiksai.control_plane.schema import ControlPlaneManifest  # noqa: PLC0415
+
+    try:
+        ControlPlaneManifest.model_validate(manifest_dict)
+    except ValidationError as exc:
+        raise ValueError(
+            f"Generated control_plane.yaml failed schema validation: {exc}"
+        ) from exc
+
+
 def build_control_plane_pack_code_files(raw: Any) -> List[Dict[str, str]]:
     """Materialize a typed ControlPlanePackBundle into bundle files."""
 
@@ -58,6 +81,8 @@ def build_control_plane_pack_code_files(raw: Any) -> List[Dict[str, str]]:
         raise ValueError("control_plane_pack.control_plane_yaml must be an object")
     if not isinstance(tools_yaml, dict):
         raise ValueError("control_plane_pack.tools_yaml must be an object")
+
+    _validate_control_plane_manifest(control_plane_yaml)
 
     files: Dict[str, str] = {
         _CONTROL_PLANE_CONFIG: _dump_yaml(control_plane_yaml),
