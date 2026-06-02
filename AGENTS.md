@@ -76,6 +76,10 @@ If a new contract is introduced, update all affected layers together:
 - docs
 - tests
 
+## Rules
+
+Scoped rules live in `.claude/rules/`. Apply them when working in their target directories.
+
 ## Clean Code Standard
 
 Avoid "AI slop":

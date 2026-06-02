@@ -12,6 +12,26 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Removed
+
+- Deleted `mozaiksai/core/workflow/stream/` and `mozaiksai/core/workflow/streaming/` —
+  handler-based stream architecture superseded by the inline `_forward_beta_events`
+  AG2 beta MemoryStream subscription in `orchestration_patterns.py`.
+- Deleted `mozaiksai/core/observability/ag2_runtime_logger.py` —
+  `AG2RuntimeLoggingController` wrapped the legacy pre-beta `autogen.runtime_logging`
+  API. Removed `ag2_logging_session` context manager from `orchestration_patterns.py`.
+- Deleted `mozaiksai/core/observability/realtime_token_logger.py` —
+  `RealtimeTokenLogger` was only referenced from the deleted stream handlers.
+- Deleted `mozaiksai/core/events/ag2_events.py` — custom AG2 event classes using
+  the deprecated `@wrap_event` decorator. The single live call site in
+  `orchestration_patterns.py` was guarded by a silent `except Exception` and had no
+  actual subscribers; removed together with the try/except guard.
+- Removed stale AG2 groupchat guidance block (including a private local machine path)
+  from `AGENTS.md`, `ARCHITECTURE.md`, and `CLAUDE.md` — groupchat removal is
+  complete and the private path was never appropriate in OSS docs.
+- Deleted `tests/test_realtime_token_logger.py` and `tests/test_mozaiks_event_handler.py`
+  alongside their subject modules.
+
 ### Added
 
 - `WorkflowEntry` in the pack-graph schema now accepts a `startup_mode` field

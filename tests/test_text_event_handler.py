@@ -36,16 +36,11 @@ class _FakeLogger:
 @pytest.mark.asyncio
 async def test_emit_validated_agent_output_uses_auto_tool_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     dispatcher = _FakeDispatcher()
-    ag2_calls: list[dict] = []
     context_bridge = SimpleNamespace(data={"stage": "test"})
 
     monkeypatch.setattr(
         "mozaiksai.core.events.unified_event_dispatcher.get_event_dispatcher",
         lambda: dispatcher,
-    )
-    monkeypatch.setattr(
-        "mozaiksai.core.events.ag2_events.emit_structured_output",
-        lambda **kwargs: ag2_calls.append(kwargs) or True,
     )
 
     structured = await _emit_validated_agent_output(
@@ -64,15 +59,6 @@ async def test_emit_validated_agent_output_uses_auto_tool_flag(monkeypatch: pyte
     )
 
     assert structured == {"agent_message": "done", "summary": "ok"}
-    assert ag2_calls == [
-        {
-            "agent_name": "RuntimeSmokeAgent",
-            "chat_id": "chat-1",
-            "output_type": "_RuntimeSmokeResult",
-            "output_data": {"agent_message": "done", "summary": "ok"},
-            "validation_passed": True,
-        }
-    ]
     assert len(dispatcher.calls) == 1
     kind, payload = dispatcher.calls[0]
     assert kind == RUNTIME_AGENT_OUTPUT_VALIDATED

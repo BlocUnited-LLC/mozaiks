@@ -10,7 +10,6 @@ _dispatcher_mod = importlib.import_module("mozaiksai.core.events.unified_event_d
 _ports_mod = importlib.import_module("mozaiksai.core.ports.orchestration")
 _serialization_mod = importlib.import_module("mozaiksai.core.events.event_serialization")
 _runtime_events_mod = importlib.import_module("mozaiksai.core.events.runtime_events")
-_ag2_events_mod = importlib.import_module("mozaiksai.core.events.ag2_events")
 
 UnifiedEventDispatcher = _dispatcher_mod.UnifiedEventDispatcher
 DomainEvent = _ports_mod.DomainEvent
@@ -23,8 +22,6 @@ build_runtime_agent_output_validated_event = _runtime_events_mod.build_runtime_a
 build_artifact_lifecycle_event = _runtime_events_mod.build_artifact_lifecycle_event
 build_runtime_context_payload = _runtime_events_mod.build_runtime_context_payload
 build_turn_idempotency_key = _runtime_events_mod.build_turn_idempotency_key
-ArtifactUpdatedEvent = _ag2_events_mod.ArtifactUpdatedEvent
-ArtifactReadyEvent = _ag2_events_mod.ArtifactReadyEvent
 
 
 @pytest.mark.asyncio

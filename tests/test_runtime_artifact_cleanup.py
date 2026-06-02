@@ -50,13 +50,9 @@ def test_runtime_artifact_startup_flag_is_explicit(monkeypatch) -> None:
 
 
 def test_runtime_artifact_writers_use_shared_helpers() -> None:
-    text_handler = _read("mozaiksai/core/workflow/stream/handlers/text_handler.py")
     orchestration = _read("mozaiksai/core/workflow/orchestration_patterns.py")
     workflow_download = _read("factory_app/workflows/AgentGenerator/tools/generate_and_download.py")
     workflow_converter = _read("factory_app/workflows/AgentGenerator/tools/workflow_converter.py")
-
-    assert "get_agent_outputs_dir" in text_handler
-    assert 'Path("logs/agent_outputs")' not in text_handler
 
     assert "get_agent_outputs_dir" in orchestration
     assert 'Path("logs/agent_outputs")' not in orchestration

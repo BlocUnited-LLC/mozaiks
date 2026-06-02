@@ -4,39 +4,30 @@
 # ==============================================================================
 
 """
-mozaiksai Unified Event System - Three Distinct Event Types
+mozaiksai Unified Event System
 
-This package handles THREE separate event systems, each with different purposes:
+This package handles two event categories:
 
 1. BUSINESS EVENTS (System Monitoring & Logging)
-   - Field: log_event_type  
    - Purpose: Application lifecycle, performance, monitoring
    - Usage: emit_business_event("SERVER_STARTUP_COMPLETED", "Server ready")
 
 2. TOOL CALL REQUEST EVENTS (Agent-to-UI Communication)
-   - Field: tool_name
    - Purpose: Interactive components, user input requests, dynamic UI
-    - Usage: emit_tool_call_request("agent_api_key_input", {...}, workflow_name="SomeWorkflow")
+   - Usage: emit_tool_call_request("agent_api_key_input", {...}, workflow_name="SomeWorkflow")
 
-3. AG2 RUNTIME EVENTS (AutoGen Workflow Events)
-   - Field: kind (internal) -> type (WebSocket)  
-   - Purpose: AG2 agent messages, state changes, workflow execution
-   - Processed via: event_serialization.py -> WebSocket transport
+AG2 runtime events (agent messages, state changes, workflow execution) are
+handled directly by the orchestration layer via event_serialization.py and
+the AG2 beta MemoryStream subscription — no separate event wrapper needed.
 
 Usage Examples:
 
-    # Business events (monitoring/logging)
     from mozaiksai.core.events import emit_business_event
     await emit_business_event("WORKFLOW_STARTED", "Workflow initialized")
 
-    # Tool call request events (agent-UI interaction)
     from mozaiksai.core.events import emit_tool_call_request
     await emit_tool_call_request("api_key_input", {"service": "openai"}, "SomeWorkflow")
 
-    # AG2 runtime events are handled automatically by the orchestration layer
-    # via event_serialization.py - no direct API needed
-
-    # Direct dispatcher access (advanced / internal)
     from mozaiksai.core.events import get_event_dispatcher
     dispatcher = get_event_dispatcher()
     metrics = dispatcher.get_metrics()
@@ -63,38 +54,6 @@ from .unified_event_dispatcher import (
 
 from .handoff_events import emit_handoff_event, HANDOFF_EVENT_TYPE
 
-# AG2-native custom events (forward-compatible with AG2 beta streams)
-from .ag2_events import (
-    # Control events
-    WorkflowTriggeredEvent,
-    HandoffRequestedEvent,
-    PlanCreatedEvent,
-    PrerequisitesRequiredEvent,
-    # Runtime events
-    AgentThinkingEvent,
-    StructuredOutputEvent,
-    TaskBatchPlannedEvent,
-    ArtifactUpdatedEvent,
-    ArtifactReadyEvent,
-    ToolCallRequestedEvent,
-    ContextUpdatedEvent,
-    # Task batch events
-    TaskBatchStartedEvent,
-    TaskBatchCompletedEvent,
-    # Helpers
-    emit_ag2_event,
-    emit_handoff_requested,
-    emit_structured_output,
-    emit_artifact_ready,
-    emit_artifact_updated,
-    emit_tool_call_requested,
-    # Event registries
-    MOZAIKSAI_CONTROL_EVENTS,
-    MOZAIKSAI_RUNTIME_EVENTS,
-    MOZAIKSAI_TASK_BATCH_EVENTS,
-    ALL_MOZAIKSAI_EVENTS,
-)
-
 __all__ = [
     # Core dispatcher
     "UnifiedEventDispatcher",
@@ -116,34 +75,5 @@ __all__ = [
     "emit_tool_call_request",
     "emit_handoff_event",
     "HANDOFF_EVENT_TYPE",
-
-    # AG2-native custom events
-    "WorkflowTriggeredEvent",
-    "HandoffRequestedEvent",
-    "PlanCreatedEvent",
-    "PrerequisitesRequiredEvent",
-    "AgentThinkingEvent",
-    "StructuredOutputEvent",
-    "TaskBatchPlannedEvent",
-    "ArtifactUpdatedEvent",
-    "ArtifactReadyEvent",
-    "ToolCallRequestedEvent",
-    "ContextUpdatedEvent",
-    "TaskBatchStartedEvent",
-    "TaskBatchCompletedEvent",
-
-    # AG2 event helpers
-    "emit_ag2_event",
-    "emit_handoff_requested",
-    "emit_structured_output",
-    "emit_artifact_ready",
-    "emit_artifact_updated",
-    "emit_tool_call_requested",
-
-    # Event registries (for yield_on)
-    "MOZAIKSAI_CONTROL_EVENTS",
-    "MOZAIKSAI_RUNTIME_EVENTS",
-    "MOZAIKSAI_TASK_BATCH_EVENTS",
-    "ALL_MOZAIKSAI_EVENTS",
 ]
 

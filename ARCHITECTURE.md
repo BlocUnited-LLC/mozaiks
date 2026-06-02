@@ -511,7 +511,7 @@ App workspaces and generated app output must not bundle their own copies of Reac
 **Key responsibilities:**
 - Run AI workflow executions with AG2 beta agents and transition graphs
 - Stream events to frontend via WebSocket
-- Persist chat sessions to MongoDB
+- Persist workflow-run metadata to MongoDB and AG2 run history through a persistent per-run stream
 - Handle tool calls from agents
 - Manage workflow state (in-progress, completed)
 - Token accounting and observability
@@ -696,6 +696,8 @@ Every bundle (module, workflow, page) declares a `visibility`: `public` (all use
 
 ### Workflow
 A multi-agent AI conversation executed by AG2. Declared in workspace-root `workflows/` for app-owned workflows, or `factory_app/workflows/` for shared builder workflows. Declares `events.emits` (what its tools publish) and `triggers` (what external events start or resume it).
+
+Current runtime note: one workflow run owns one persistent AG2 `MemoryStream` keyed by `app_id + chat_id`. `ChatSessions` stores run metadata and projections such as status, usage, artifacts, and session/journey linkage; AG2 run-stream history is the canonical execution record used for resume and replay.
 
 ### Lifecycle Tools (`lifecycle_tools` in `tools.yaml`)
 
