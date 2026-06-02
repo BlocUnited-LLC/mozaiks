@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from mozaiks_cli.commands import init_command
 from tests.import_utils import import_module_directly
 
@@ -22,13 +24,20 @@ def test_factory_app_entry_point_uses_value_engine() -> None:
     assert data["workflows"]["entry_point"] == "ValueEngine"
 
 
-def test_factory_app_control_plane_defaults_are_declared() -> None:
+def test_factory_app_ai_config_keeps_runtime_startup_sections() -> None:
     ai_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "ai.json"
     data = json.loads(ai_path.read_text(encoding="utf-8"))
 
-    assert data["control_plane"]["enabled"] is True
-    assert data["control_plane"]["profile"] == "default"
-    assert sorted(data["control_plane"]["llm_profiles"]) == [
+    assert sorted(data.keys()) == ["ask", "chat", "workflows"]
+
+
+def test_factory_app_control_plane_defaults_are_declared() -> None:
+    runtime_path = Path(__file__).resolve().parents[1] / "factory_app" / "control_plane" / "config" / "runtime.yaml"
+    data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
+
+    assert data["enabled"] is True
+    assert data["profile"] == "default"
+    assert sorted(data["llm_profiles"]) == [
         "architecture",
         "classifier",
         "codegen",
@@ -36,20 +45,31 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
         "planner_replanner",
         "reviewer_validator",
     ]
-    assert data["control_plane"]["classifier"]["enabled"] is True
-    assert data["control_plane"]["classifier"]["llm_profile"] == "classifier"
-    assert data["control_plane"]["coding"]["llm_profile"] == "codegen"
-    assert data["control_plane"]["llm_profiles"]["classifier"]["llm_config"]["model"] == "gpt-5-nano"
+    assert data["classifier"]["enabled"] is True
+    assert data["classifier"]["llm_profile"] == "classifier"
+    assert data["coding"]["llm_profile"] == "codegen"
+    assert data["llm_profiles"]["classifier"]["llm_config"]["model"] == "gpt-5-nano"
 
 
 def test_generated_ai_config_uses_factory_control_plane_defaults() -> None:
-    ai_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "ai.json"
+    repo_root = Path(__file__).resolve().parents[1]
+    ai_path = repo_root / "factory_app" / "app" / "config" / "ai.json"
+    runtime_path = repo_root / "factory_app" / "control_plane" / "config" / "runtime.yaml"
     factory_data = json.loads(ai_path.read_text(encoding="utf-8"))
+    runtime_data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
     generated_data = init_command.build_default_ai_config("Generated App")
 
-    assert generated_data["workflows"]["entry_point"] == "ValueEngine"
-    assert generated_data["control_plane"] == factory_data["control_plane"]
+    assert generated_data["ask"] == factory_data["ask"]
+    assert generated_data["chat"] == factory_data["chat"]
+    assert generated_data["workflows"] == factory_data["workflows"]
+    assert runtime_data["classifier"]["llm_profile"] == "classifier"
     assert "app_context" not in generated_data
+
+
+def test_workflow_manager_uses_control_plane_startup_entry_point() -> None:
+    config = _mozaiks_workflow_manager().get_config("ValueEngine")
+
+    assert config.get("entry_point") is True
 
 
 def test_create_launcher_workflow_is_removed() -> None:

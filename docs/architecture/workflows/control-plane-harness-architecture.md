@@ -26,8 +26,9 @@ Examples:
 - "This should become investor-facing."
 
 In the first-party builder experience today, this refinement loop is driven by
-checkpoint routing declared through `app/config/ai.json` and the selected
-`control_plane.yaml` pack. Do not document a dedicated `RefinementWorkflow`
+startup declared through `app/config/ai.json`, control-plane runtime policy in
+`control_plane/config/runtime.yaml`, and the selected
+`control_plane/config/control_plane.yaml` pack. Do not document a dedicated `RefinementWorkflow`
 unless the runtime actually introduces one.
 
 Those requests need:
@@ -183,6 +184,12 @@ AppGenerator may emit an app-local harness only when the product explicitly
 needs checkpointed lifecycle, refinement, session, or coding-control behavior
 that cannot be expressed as normal workflow transitions.
 
+Keep startup separate from the harness pack:
+
+- `app/config/ai.json` owns `ask`, `chat`, and `workflows` startup
+- `control_plane/config/runtime.yaml` owns control-plane runtime policy
+- `control_plane/config/control_plane.yaml` owns declarative checkpoints and routing
+
 The canonical AppGenerator build task is:
 
 ```yaml
@@ -191,6 +198,7 @@ surface_kind: control_plane
 capability_pack_id: null
 initial_agent: ControlPlaneAgent
 owned_paths:
+  - control_plane/config/runtime.yaml
   - control_plane/config/control_plane.yaml
   - control_plane/config/tools.yaml
 ```
@@ -419,11 +427,12 @@ The current first-party tools live under:
 
 At runtime:
 
-1. the host loads `control_plane` settings from `app/config/ai.json`
-2. `mozaiksai/control_plane/loader.py` resolves the active pack
-3. `mozaiksai/control_plane/runtime.py` builds a checkpoint runtime
-4. the harness entrypoint is instantiated from `harness.implementation`
-5. the harness binds and runs the checkpoints it needs
+1. `mozaiksai/core/runtime/app/ai_config.py` resolves startup from `app/config/ai.json`
+2. `mozaiksai/control_plane/config.py` resolves runtime policy from `control_plane/config/runtime.yaml`
+3. `mozaiksai/control_plane/loader.py` resolves the active pack from `control_plane/config/control_plane.yaml`
+4. `mozaiksai/control_plane/runtime.py` builds a checkpoint runtime
+5. the harness entrypoint is instantiated from `harness.implementation`
+6. the harness binds and runs the checkpoints it needs
 
 Current Studio refinement flow:
 

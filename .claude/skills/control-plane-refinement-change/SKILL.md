@@ -8,8 +8,9 @@ Use this skill when a change touches control-plane or refinement behavior.
 
 Typical triggers:
 
-- `app/config/ai.json` control-plane settings in the canonical contract or the first-party repo path `factory_app/app/config/ai.json`
-- `factory_app/control_plane/config/control_plane.yaml`
+- `app/config/ai.json` startup settings in the canonical contract or the first-party repo path `factory_app/app/config/ai.json`
+- `control_plane/config/runtime.yaml` or `factory_app/control_plane/config/runtime.yaml`
+- `control_plane/config/control_plane.yaml` or `factory_app/control_plane/config/control_plane.yaml`
 - checkpoint or re-entry behavior
 - refinement classification and `patch|design|feature|core` routing
 - `routing.artifacts[]` or artifact-family ownership
@@ -21,6 +22,7 @@ Inspect first:
 
 - `app/config/ai.json` in the canonical contract and the first-party repo path `factory_app/app/config/ai.json`
 - `factory_app/app/config/ai.json`
+- `factory_app/control_plane/config/runtime.yaml`
 - `factory_app/control_plane/config/control_plane.yaml`
 - `factory_app/workflows/extended_orchestration/extension_registry.json`
 - `docs/architecture/workflows/refinement-control-plane.md`
@@ -38,6 +40,9 @@ Current truth:
 
 - refinement is checkpoint/control-plane re-entry, not a dedicated
   `RefinementWorkflow`
+- `app/config/ai.json` owns runtime startup for `ask`, `chat`, and `workflows`
+- `control_plane/config/runtime.yaml` owns control-plane runtime policy
+- `control_plane/config/control_plane.yaml` owns declarative checkpoints and routing
 - the first-party harness runtime lives in `mozaiksai/control_plane/`
 - `factory_app/control_plane/` is the declarative first-party pack
 - `factory_app/app/modules/factory_control_plane/` is a Studio identity stub only

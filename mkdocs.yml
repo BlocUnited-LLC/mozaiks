@@ -92,7 +92,7 @@ nav:
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
-      - Add Control Plane: guides/adding-control-plane/01-overview.md
+      - Extending AI Functionality: guides/adding-control-plane/01-overview.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Platform Intelligence:
           - Context Graph: guides/platform-intelligence/01-context-graph.md

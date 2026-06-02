@@ -1,22 +1,49 @@
-# Add the Control Plane
+# Extending AI Functionality
 
-Mozaiks does not just generate apps. It knows how to change them intelligently after generation.
+Mozaiks does not just generate apps. You can extend the AI behavior of a
+generated app after generation by editing a small set of declarative files.
 
-When you ask for a change, Mozaiks does not treat every request like a blind code edit. It understands whether you are asking for a tiny patch, a design adjustment, a new capability, or a concept-level pivot. It routes to the smallest accurate next step, preserves everything above the change, and only regenerates what actually needs to move.
+When you ask for a change, Mozaiks does not treat every request like a blind
+code edit. It understands whether you are asking for a tiny patch, a design
+adjustment, a new capability, or a concept-level pivot. It routes to the
+smallest accurate next step, preserves everything above the change, and only
+regenerates what actually needs to move.
 
-This is the Mozaiks Control Plane.
+This guide shows the control-plane files you edit to extend AI behavior in a
+generated app.
+
+In the canonical app workspace contract, `app/config/ai.json` owns runtime
+startup for `ask`, `chat`, and `workflows`. Optional control-plane behavior
+lives beside the app bundle under `control_plane/config/`.
+
+In this repo's first-party builder workspace, those canonical paths are
+dogfooded as:
+
+- `factory_app/app/config/ai.json`
+- `factory_app/control_plane/config/runtime.yaml`
+- `factory_app/control_plane/config/control_plane.yaml`
+- `factory_app/workflows/extended_orchestration/extension_registry.json`
 
 ## Schema Shapes
 
 | File | Shape | What it controls | Derived from |
 |---|---|---|---|
-| `factory_app/app/config/ai.json` | app config JSON with `control_plane` settings | Enables the control plane and selects model profiles | The app's control-plane policy and model budget |
-| `factory_app/control_plane/config/control_plane.yaml` | control-plane manifest YAML | Declares checkpoints, prompts, routes, tools, and the harness implementation | The first-party pack for this app workspace |
-| `factory_app/workflows/extended_orchestration/extension_registry.json` | workflow registry JSON | Defines the workflow sequences the router can re-enter | The build and revision graph |
+| `app/config/ai.json` | app runtime startup JSON | `ask`, `chat`, and `workflows` startup defaults only | The app's runtime startup contract |
+| `control_plane/config/runtime.yaml` | control-plane runtime policy YAML | `enabled`, `profile`, `llm_profiles`, classifier/coding/contract-surface policy | The app's control-plane runtime policy and model budget |
+| `control_plane/config/control_plane.yaml` | control-plane manifest YAML | Harness, checkpoints, routing, prompts, and tool ids | The app's declarative harness pack |
+| `workflows/extended_orchestration/extension_registry.json` | workflow registry JSON | The `workflow_sequences` the router may re-enter | The build and revision graph |
 
-## `factory_app/app/config/ai.json`
+## `app/config/ai.json`
 
-This file turns the control plane on and selects the model profiles it uses.
+This file keeps runtime startup only. It does not carry control-plane policy.
+
+Use it for:
+
+- `ask.ask_mode_prompt`
+- `ask.ask_context_variables`
+- `chat.chat_startup_mode`
+- `workflows.entry_point`
+- `workflows.resume_policy`
 
 ```json
 {
@@ -30,65 +57,52 @@ This file turns the control plane on and selects the model profiles it uses.
   "workflows": {
     "entry_point": "ValueEngine",
     "resume_policy": "last_active_then_oldest_then_entry_point"
-  },
-  "control_plane": {
-    "enabled": true,
-    "profile": "default",
-    "llm_profiles": {
-      "classifier": { "purpose": "...", "expected_behavior": "...", "llm_config": { "model": "gpt-5-nano", "temperature": 0 } },
-      "impact_analyzer": { "purpose": "...", "expected_behavior": "..." },
-      "architecture": { "purpose": "...", "expected_behavior": "..." },
-      "planner_replanner": { "purpose": "...", "expected_behavior": "..." },
-      "codegen": { "purpose": "...", "expected_behavior": "..." },
-      "reviewer_validator": { "purpose": "...", "expected_behavior": "..." }
-    },
-    "classifier": { "enabled": true, "llm_profile": "classifier" },
-    "coding": { "enabled": true, "llm_profile": "codegen" },
-    "contract_surface": { "enabled": true, "llm_profile": "codegen" }
   }
 }
 ```
 
-The `ask`, `chat`, and `workflows` sections are the other top-level shapes in
-this file.
+## `control_plane/config/runtime.yaml`
 
-### `ask`
+This file is the app-local control-plane runtime policy.
 
-The `ask` section sets the prompt used for the shared Studio assistant entry.
+Use it for:
 
-```json
-"ask": {
-  "ask_mode_prompt": "You are the Mozaiks assistant. Help users shape, generate, connect, and refine apps in Mozaiks Studio using the shared builder workflows.",
-  "ask_context_variables": null
-}
+- `enabled`
+- `profile`
+- `llm_profiles`
+- `classifier`
+- `coding`
+- `contract_surface`
+
+```yaml
+schema_version: mozaiks.control_plane.runtime
+enabled: true
+profile: default
+llm_profiles:
+  classifier:
+    purpose: Change classification for refinement routing.
+    expected_behavior: Distinguish patch, design, feature, and core requests.
+    llm_config:
+      model: gpt-5-nano
+      temperature: 0
+  codegen:
+    purpose: Scoped coding and contract-surface refinement.
+    expected_behavior: Produce bounded repair or extension plans.
+    llm_config:
+      model: gpt-5.2-codex
+      temperature: 0.1
+classifier:
+  enabled: true
+  llm_profile: classifier
+coding:
+  enabled: true
+  llm_profile: codegen
+contract_surface:
+  enabled: true
+  llm_profile: codegen
 ```
 
-### `chat`
-
-The `chat` section chooses the startup mode for the shared chat experience.
-
-```json
-"chat": {
-  "chat_startup_mode": "ask"
-}
-```
-
-### `workflows`
-
-The `workflows` section sets the default workflow entry point and the resume
-policy.
-
-```json
-"workflows": {
-  "entry_point": "ValueEngine",
-  "resume_policy": "last_active_then_oldest_then_entry_point"
-}
-```
-
-Together, `ask`, `chat`, and `workflows` define the non-control-plane runtime
-surfaces that sit around the control plane in the same app config file.
-
-## `factory_app/control_plane/config/control_plane.yaml`
+## `control_plane/config/control_plane.yaml`
 
 This file declares the actual control-plane manifest: the harness, routing,
 checkpoints, prompts, and tool bindings.
@@ -122,7 +136,7 @@ checkpoints:
     tool_ids: [get_revision_context, get_artifact_summary, get_stale_artifact_families]
 ```
 
-## `factory_app/workflows/extended_orchestration/extension_registry.json`
+## `workflows/extended_orchestration/extension_registry.json`
 
 This file defines the workflow sequences the control plane can re-enter.
 
@@ -153,6 +167,32 @@ This file defines the workflow sequences the control plane can re-enter.
   ]
 }
 ```
+
+## When To Add A Control Plane
+
+Most apps should not have one.
+
+Omit a control plane when the app is mostly:
+
+- deterministic modules and CRUD
+- one known workflow launch
+- fixed `workflow_sequences` or transitions with no semantic router above them
+
+Add a control plane when the app needs at least two of these signals, or one
+governance-critical signal is dominant:
+
+- semantic request intake across multiple valid execution paths
+- checkpointed revision or session continuity
+- policy, approval, escalation, or risk gating above workflows/modules
+- scoped coding or contract-surface planning after route selection
+- artifact routing based on request meaning rather than fixed sequence wiring
+
+Ownership is split deliberately:
+
+- `ValueEngine` may hint that a control-plane surface is needed
+- `DesignDocs` decides whether `surface_kind = control_plane` is actually warranted
+- `AppGenerator` materializes `control_plane/config/runtime.yaml`, `control_plane/config/control_plane.yaml`, and related files
+- `AgentGenerator` stays responsible for workflow bundles that the control plane may route into
 
 ## Read Next
 

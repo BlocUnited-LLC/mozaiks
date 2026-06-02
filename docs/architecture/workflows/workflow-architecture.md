@@ -7,8 +7,9 @@ This document defines what workflows are in Mozaiks.
 Workflows are for agentic work.
 
 Builder-session harness behavior is not authored in workflow packs. It is
-enabled per app through `app/config/ai.json -> control_plane`, then layered
-above workflow execution by the host/control plane.
+driven by app startup in `app/config/ai.json` plus optional app-local
+control-plane policy and manifest files under `control_plane/config/`, then
+layered above workflow execution by the host/harness.
 
 Use a workflow when the value comes from:
 

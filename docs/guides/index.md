@@ -28,6 +28,15 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     [:octicons-arrow-right-24: Add a Page](adding-pages/01-overview.md)
 
+-   :material-braces: **Extending AI Functionality**
+
+    ---
+
+    Extend a generated app's AI behavior through app config, the control-plane
+    manifest, and the workflow registry.
+
+    [:octicons-arrow-right-24: Extending AI Functionality](adding-control-plane/01-overview.md)
+
 -   :material-view-dashboard-outline: **App Shell & Branding**
 
     ---

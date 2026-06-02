@@ -17,11 +17,24 @@
 
 ---
 
-Mozaiks is an open-source AI app builder. Describe what you want to build,
-and Mozaiks plans it, generates the app files, and walks you through review —
-all inside a chat interface.
+## What is Mozaiks?
 
----
+Mozaiks is an open-source AI app factory for building, running, and iterating on
+AI-native software products.
+
+It brings together three things that usually live in separate tools:
+
+- **Mozaiks Studio** for creating apps, continuing builds, and managing them.
+- **AI workflow orchestration powered by AG2** for planning, tool use, human
+  review, and generation.
+- **Generated app files** with modules, pages, workflows, config, and brand
+  assets that Mozaiks validates before making active.
+
+The goal is not to generate a throwaway demo. Mozaiks stages production-shaped
+artifacts, validates them against strict contracts, and keeps runtime concerns
+separate from builder workflows.
+
+--- 
 
 ## See It In Action
 

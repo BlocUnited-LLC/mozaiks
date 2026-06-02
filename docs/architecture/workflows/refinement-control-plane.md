@@ -19,9 +19,11 @@ The goal is simple:
 - refinement workflows adjust that shape safely and quickly
 - the control plane decides when a change is small, scoped, design-only, or concept-breaking
 
-The refinement control plane is enabled and configured at the app level through
-`app/config/ai.json -> control_plane`. The classifier and coding worker do not
-read workflow-local AG2 config for this.
+The refinement control plane uses `app/config/ai.json` for runtime startup,
+`control_plane/config/runtime.yaml` for control-plane runtime policy, and
+`control_plane/config/control_plane.yaml` for checkpoint and routing
+declarations. The classifier and coding worker do not read workflow-local AG2
+config for this.
 
 This is a pre-production design. Use the canonical contract instead of retaining
 outdated refinement paths.

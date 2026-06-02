@@ -26,8 +26,9 @@ refinement behavior.
   `transitions[]` for routed entry and user choice flows, and `task_batches.yaml`
   for bounded workflow-local parallel task work.
 - Current refinement is checkpoint/control-plane re-entry driven by
-  `app/config/ai.json` and the selected `control_plane.yaml` pack. Do not claim
-  a dedicated `RefinementWorkflow` unless the runtime introduces one.
+  `app/config/ai.json` startup, `control_plane/config/runtime.yaml` runtime
+  policy, and the selected `control_plane/config/control_plane.yaml` pack. Do
+  not claim a dedicated `RefinementWorkflow` unless the runtime introduces one.
 - If module event/reaction docs differ from the current implementation, direct
   contributors to inspect the module loader and tests and follow the implemented
   runtime truth for that change.

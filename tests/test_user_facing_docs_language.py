@@ -55,8 +55,7 @@ def test_docs_homepage_uses_plain_summary_language() -> None:
     doc = _read("docs/index.md")
     normalized = " ".join(doc.split())
 
-    assert "Mozaiks is an open-source AI app builder." in doc
-    assert "all inside a chat interface" in normalized
+    assert "Mozaiks is an open-source AI app factory" in doc
     assert "Install Mozaiks, open Studio, and create your first app in minutes." in doc
     assert "generated app workspace contract" not in doc
     assert "Production-readiness gates" not in doc
