@@ -628,10 +628,16 @@ agents:
          - `workflows`: one entry per workflow in `workflows_spec` with:
            - `id` = workflow name
            - `description` = from `WorkflowInPack.description`
+           - `startup_mode` = read from the workflow bundle's `orchestrator.yaml` `workflow_startup_mode` field:
+             - `"BackendOnly"` for AI-native pack workflows (review, analysis, extraction) triggered by domain events — no user session, no UI entrypoint
+             - `"UserDriven"` for workflows the user starts directly (entered via an entrypoint or user-choice transition)
+             - `"AgentDriven"` for workflows advanced through a sequence by an upstream workflow or agent handoff
+             - Omit (null) only when startup mode is genuinely ambiguous
            - `dependencies` = explicit prerequisites only; do not infer from journey order
 
       2. **Workflow sequences (optional)**:
          - Only create a sequence when the pack must auto-advance through a linear chain of phases.
+         - **NEVER include a `startup_mode: BackendOnly` workflow in any sequence step.** BackendOnly workflows run when a domain event fires — they are not user journey phases.
          - `workflow_sequences`: `id`, `description`, `steps` (ordered phases).
          - Use one workflow per phase for serial execution.
          - Use multiple workflows in one phase when they run in parallel.
@@ -639,6 +645,7 @@ agents:
       3. **Entrypoints (optional)**:
          - Use `entrypoints` for shell routes that enter this workflow pack.
          - Do not put persistent product page routes here.
+         - **NEVER add an entrypoint that points directly to a `startup_mode: BackendOnly` workflow.** BackendOnly workflows are not user-reachable.
          - Each entrypoint must declare exactly one of `transition` or `workflow`.
 
       4. **Dependencies**:

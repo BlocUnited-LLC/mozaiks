@@ -21,13 +21,13 @@
   },
 
   "workflows": [
-    { "id": "ValueEngine",          "description": "Concept & value decomposition" },
-    { "id": "ThemeCapture",         "description": "Captures visual identity and produces theme_config.json", "dependencies": ["ValueEngine"] },
-    { "id": "DesignDocs",           "description": "Frontend, backend, database design docs", "dependencies": ["ValueEngine"] },
-    { "id": "AgentGenerator",       "description": "Generates workflow artifacts and agent specs", "dependencies": ["DesignDocs"] },
-    { "id": "AppGenerator",         "description": "Generates app schema and module files", "dependencies": ["DesignDocs", "AgentGenerator", "ThemeCapture"] },
-    { "id": "ExistingAppDiscovery", "description": "Discovery workflow for existing-app adopters" },
-    { "id": "AppReview", "description": "In-chat build review and promote-or-revise HITL step", "dependencies": ["AppGenerator"] }
+    { "id": "ValueEngine",          "description": "Concept & value decomposition", "startup_mode": "UserDriven" },
+    { "id": "ThemeCapture",         "description": "Captures visual identity and produces theme_config.json", "startup_mode": "AgentDriven", "dependencies": ["ValueEngine"] },
+    { "id": "DesignDocs",           "description": "Frontend, backend, database design docs", "startup_mode": "AgentDriven", "dependencies": ["ValueEngine"] },
+    { "id": "AgentGenerator",       "description": "Generates workflow artifacts and agent specs", "startup_mode": "AgentDriven", "dependencies": ["DesignDocs"] },
+    { "id": "AppGenerator",         "description": "Generates app schema and module files", "startup_mode": "AgentDriven", "dependencies": ["DesignDocs", "AgentGenerator", "ThemeCapture"] },
+    { "id": "ExistingAppDiscovery", "description": "Discovery workflow for existing-app adopters", "startup_mode": "UserDriven" },
+    { "id": "AppReview",            "description": "In-chat build review and promote-or-revise HITL step", "startup_mode": "AgentDriven", "dependencies": ["AppGenerator"] }
   ],
 
   "entrypoints": [

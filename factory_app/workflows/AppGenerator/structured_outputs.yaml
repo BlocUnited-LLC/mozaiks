@@ -429,12 +429,17 @@ models:
         - external_integration
         - ui_only
         description: Concrete realization boundary for this surface.
-      source_pack_id:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Capability pack most directly associated with this surface, or null when cross-cutting.
+      owner:
+        type: literal
+        values:
+        - app
+        - hosted
+        - platform
+        description: Runtime owner responsible for this surface. Preserved from DesignDocs surface_map. app = generated app-owned module or integration; hosted = hosted product service; platform = platform-provided capability.
+      source_capability_packs:
+        type: optional_list
+        items: str
+        description: Capability-pack hints this surface realizes, preserved from DesignDocs surface_map.
       label:
         type: str
         description: Human-readable surface label.
@@ -445,10 +450,22 @@ models:
         type: optional_list
         items: str
         description: Domain entities primarily owned by this surface.
-      primary_pages:
+      owned_pages:
         type: optional_list
         items: str
-        description: Persistent pages or screens associated with this surface.
+        description: Persistent pages primarily owned by this surface.
+      owned_mutations:
+        type: optional_list
+        items: str
+        description: Deterministic mutations or actions owned by this surface.
+      events_emitted:
+        type: optional_list
+        items: str
+        description: Domain events this surface may emit.
+      workflow_triggers:
+        type: optional_list
+        items: str
+        description: Workflow capability ids or trigger intents this surface may start.
       dependencies:
         type: optional_list
         items: str
@@ -490,6 +507,9 @@ models:
         - notifications_pack
         - analytics_pack
         - agent_backend_integration
+        - ai_review_pack
+        - ai_analysis_pack
+        - ai_extraction_pack
         - custom_domain
         description: Canonical pack family selected for the product.
       label:
@@ -4984,26 +5004,153 @@ models:
         - 'null'
         description: Optional human-readable rationale for the alias.
 
+  DataContractOwnership:
+    type: model
+    fields:
+      surface_id:
+        type: str
+        description: Surface identifier that owns this collection — matches the parent DataContractSurface.surface_id.
+      surface_kind:
+        type: str
+        description: Surface kind — typically "module".
+
+  DataContractLifecycle:
+    type: model
+    fields:
+      write_mode:
+        type: str
+        description: How records are written — e.g. "module_action" or "direct".
+      migration_policy:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Migration policy — e.g. "additive_only". Null to inherit the platform default.
+
+  DataContractField:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Field name as stored in the document.
+      type:
+        type: str
+        description: Field value type — e.g. "string", "int", "bool", "datetime".
+      required:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Whether the field is required on write. Null means optional.
+
+  DataContractIndexKey:
+    type: model
+    fields:
+      field:
+        type: str
+        description: Document field path to index.
+      order:
+        type: int
+        description: Sort order — 1 for ascending, -1 for descending.
+
+  DataContractIndex:
+    type: model
+    fields:
+      name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional index name.
+      keys:
+        type: list
+        items: DataContractIndexKey
+        description: >
+          Ordered list of index keys. Each key specifies a field and sort direction.
+          Example: [{"field": "app_id", "order": 1}, {"field": "created_at", "order": -1}].
+      unique:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Whether the index enforces uniqueness. Null means non-unique.
+      sparse:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Whether the index skips documents missing the indexed field.
+
+  DataContractCollection:
+    type: model
+    fields:
+      name:
+        type: str
+        description: Canonical collection name used in ctx.persistence.collection(module_id, name).
+      scope:
+        type: str
+        description: Isolation scope — typically "app".
+      ownership:
+        type: DataContractOwnership
+        description: >
+          Ownership record with surface_id and surface_kind matching the parent surface.
+      fields:
+        type: optional_list
+        items: DataContractField
+        description: Field declarations for this collection.
+      indexes:
+        type: optional_list
+        items: DataContractIndex
+        description: Index declarations for this collection.
+      lifecycle:
+        type: union
+        variants:
+        - DataContractLifecycle
+        - 'null'
+        description: Optional lifecycle policy. Null to use platform defaults.
+
+  DataContractSurface:
+    type: model
+    fields:
+      surface_id:
+        type: str
+        description: >
+          Stable identifier for this persistence surface — typically matches the module_id
+          that owns these collections (e.g., "tasks", "projects").
+      surface_kind:
+        type: str
+        description: >
+          Surface kind — typically "module". Use "external" for existing-DB surfaces.
+      collections:
+        type: list
+        items: DataContractCollection
+        description: Collections owned by this surface.
+
   DataContract:
     type: model
     fields:
       version:
         type: str
-        description: Contract version string.
-      mode:
-        type: literal
-        values:
-        - app_data_contract
-        - external_existing_db
-        description: Data contract mode selected for the app.
+        description: Contract version string — use "1".
+      surfaces:
+        type: list
+        items: DataContractSurface
+        description: >
+          Persistence surfaces. One entry per module that owns durable collections.
+          Each surface declares its collections with fields, indexes, and lifecycle policy.
+          Required — must be a non-empty list for apps with durable persistence.
       aliases:
-        type: list
+        type: optional_list
         items: DataContractAlias
-        description: Declared collection aliases and ownership boundaries.
+        description: >
+          Optional cross-surface alias declarations for collections accessed
+          outside their owning module. Omit when all access is module-local.
       shared_collections:
-        type: list
+        type: optional_list
         items: str
-        description: Explicit collection names that the app may own or reference across surfaces.
+        description: >
+          Optional explicit list of collection names shared across surfaces.
+          Omit when all collections are owned by a single module.
 
   ControllerOutput:
     type: model

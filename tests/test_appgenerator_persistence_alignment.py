@@ -266,6 +266,51 @@ def test_generated_schema_fixture_remains_canonical_and_models_are_forbidden() -
     assert all("backend/models/" not in path for path in files)
 
 
+def test_data_contract_structured_output_model_has_surfaces() -> None:
+    """DataContract model must declare surfaces — the validator requires it."""
+    data = yaml.safe_load(_read(APPGEN / "structured_outputs.yaml"))
+    models = data["models"]
+
+    assert "DataContract" in models, "DataContract model must exist"
+    fields = models["DataContract"]["fields"]
+    assert "surfaces" in fields, (
+        "DataContract.surfaces is required — validator and runtime data contract loader "
+        "both expect surfaces[].{surface_id, surface_kind, collections[]}"
+    )
+    assert "DataContractSurface" in models, "DataContractSurface model must exist"
+    surface_fields = models["DataContractSurface"]["fields"]
+    assert "surface_id" in surface_fields
+    assert "surface_kind" in surface_fields
+    assert "collections" in surface_fields
+
+    assert "DataContractCollection" in models, "DataContractCollection model must exist"
+
+
+def test_database_agent_output_example_contains_no_placeholder_content() -> None:
+    """DatabaseAgent output format example must not use '{...}' as content.
+
+    A literal '{...}' placeholder in the output example teaches the LLM to write
+    '{...}' into data.json rather than real JSON. The example must show the actual
+    DataContract JSON shape.
+    """
+    block = _agent_block("DatabaseAgent")
+    output_section_start = block.index("[OUTPUT FORMAT]")
+    output_section = block[output_section_start:]
+
+    # Check that the greenfield content example isn't a bare placeholder
+    assert '"{...}"' not in output_section, (
+        "DatabaseAgent [OUTPUT FORMAT] must not use '{...}' as a content placeholder. "
+        "Provide a real DataContract JSON example with surfaces, surface_id, collections."
+    )
+    # Verify the example contains the real shape keywords (escaped in YAML inline JSON)
+    assert "surfaces" in output_section, (
+        "DatabaseAgent [OUTPUT FORMAT] greenfield example must show the surfaces field "
+        "so the LLM generates a valid DataContract."
+    )
+    assert "surface_id" in output_section
+    assert "collections" in output_section
+
+
 def test_module_archetypes_do_not_reference_removed_manifest_or_model_paths() -> None:
     text = _read(APPGEN / "tools" / "module_archetypes.yaml")
     hook_text = _read(APPGEN / "tools" / "hook_scope_transform.py")

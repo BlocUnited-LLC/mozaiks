@@ -267,6 +267,7 @@ class WorkflowEntry(BaseModel):
 
     id: str
     description: Optional[str] = None
+    startup_mode: Optional[Literal["UserDriven", "AgentDriven", "BackendOnly"]] = None
     dependencies: List[Union[str, WorkflowDependency]] = Field(
         default_factory=list,
         description=(
@@ -627,6 +628,24 @@ class GlobalPackGraph(BaseModel):
                             f"journey '{journey.id}' places workflow '{workflow_id}' "
                             f"before or with required dependency '{dep_id}'"
                         )
+        backend_only_ids = {w.id for w in self.workflows if w.startup_mode == "BackendOnly"}
+        if backend_only_ids:
+            for journey in self.journeys:
+                for group in journey.steps:
+                    for wf_id in group.workflows:
+                        if wf_id in backend_only_ids:
+                            raise ValueError(
+                                f"journey '{journey.id}' includes BackendOnly workflow '{wf_id}' — "
+                                "BackendOnly workflows are triggered by domain events and must not "
+                                "appear in workflow_sequences"
+                            )
+            for entrypoint in self.entrypoints:
+                if entrypoint.workflow and entrypoint.workflow in backend_only_ids:
+                    raise ValueError(
+                        f"entrypoint '{entrypoint.id}' points to BackendOnly workflow "
+                        f"'{entrypoint.workflow}' — BackendOnly workflows are not "
+                        "user-reachable and must not have entrypoints"
+                    )
         return self
 
 

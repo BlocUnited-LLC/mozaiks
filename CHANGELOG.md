@@ -12,8 +12,50 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- `WorkflowEntry` in the pack-graph schema now accepts a `startup_mode` field
+  (`UserDriven`, `AgentDriven`, or `BackendOnly`). `GlobalPackGraph` enforces
+  that `BackendOnly` workflows are not placed in `workflow_sequences` or
+  assigned entrypoints — they are domain-event-triggered only.
+- `PackGraphWorkflow` in AgentGenerator's structured output now carries
+  `startup_mode` so generated workflow bundles declare the correct entry
+  classification from the start.
+- All seven factory workflows in `extension_registry.json` now carry explicit
+  `startup_mode` annotations (`ValueEngine` and `ExistingAppDiscovery` are
+  `UserDriven`; the rest are `AgentDriven`).
+
+### Changed
+
+- `DataContract` structured output model for AppGenerator now includes a
+  `surfaces` field (list of `DataContractSurface`) with fully typed sub-models
+  (`DataContractCollection`, `DataContractOwnership`, `DataContractLifecycle`,
+  `DataContractField`, `DataContractIndex`, `DataContractIndexKey`). This
+  matches what the `_validate_data_contract` runtime gate and the data-contract
+  loader both expect, and keeps `AppSchemaOutput` and `AppBuildPlanOutput`
+  compatible with provider strict structured-output mode.
+- AppGenerator now seeds generated app bundles with `config/ai.json` from the
+  current factory runtime defaults, and `control_plane_pack` outputs now stage
+  `control_plane/config/runtime.yaml` alongside `control_plane.yaml` and
+  `tools.yaml`. This keeps `ask` / `chat` / `workflows` startup in `ai.json`
+  while moving app-local control-plane runtime policy under
+  `control_plane/config/`.
+- `IntegrationTestAgent` removed from the AppGenerator agent roster.
+  Integration and wiring validation (`run_integration_tests`,
+  `validate_wiring`) are deterministic runtime-gate tools called by
+  `AppValidationAgent`'s auto-invoked gate — they are no longer exposed as
+  agent-callable tools.
+
 ### Fixed
 
+- Fixed `DatabaseAgent` OUTPUT FORMAT example, which contained a `"{...}"`
+  placeholder as the `data_contract_json` file content. The LLM was copying
+  this literally, writing `{...}` into `config/data.json` for all generated
+  apps. The example now shows the correct `DataContract` shape with `surfaces`,
+  `surface_id`, and `collections`.
+- Fixed `DesignDocs` `workflow_startup_mode` from `BackendOnly` to
+  `AgentDriven`. DesignDocs runs in sequence-driven builds; it is not a
+  domain-event-triggered workflow.
 - Fixed strict structured-output schemas for workflow planners by marking
   declared fields as truly required in generated Pydantic models. This restores
   provider-enforced `response_format` compatibility for live AG2 workflow runs

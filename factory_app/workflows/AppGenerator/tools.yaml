@@ -215,24 +215,28 @@ tools:
   tool_type: Agent_Tool
   auto_tool_call: true
   bind_to_agent: false
-- agent: IntegrationTestAgent
+- agent: AppValidationAgent
   file: integration_tests.py
   function: run_integration_tests
-  description: Run lightweight integration checks between the generated frontend app
-    and the agent backend context (env var wiring, endpoint availability).
+  description: >
+    Run lightweight integration checks between the generated frontend app and the
+    agent backend context (env var wiring, endpoint availability). Called internally
+    by the AppValidationAgent runtime gate.
   tool_type: Agent_Tool
   auto_tool_call: false
-- agent: IntegrationTestAgent
+  bind_to_agent: false
+- agent: AppValidationAgent
   file: validate_wiring.py
   function: validate_wiring
   description: >
     Cross-reference every page api_endpoint field against the known module action
     registry (capability_packs + modules/*/module.yaml). Flags orphaned page
     endpoints, query-string endpoints, and fragment endpoints (blocking), and
-    unreferenced module actions (advisory). Must be called alongside
-    run_integration_tests before finalizing the build.
+    unreferenced module actions (advisory). Called internally by the
+    AppValidationAgent runtime gate alongside run_integration_tests.
   tool_type: Agent_Tool
   auto_tool_call: false
+  bind_to_agent: false
 lifecycle_tools:
   - trigger: before_chat
     agent: null

@@ -1,7 +1,7 @@
 workflow_name: DesignDocs
 max_turns: 8
 human_in_the_loop: false
-workflow_startup_mode: BackendOnly
+workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
 initial_message_to_user: null
 initial_message: 'DesignDocsAgent: concept_overview is provided via context variables

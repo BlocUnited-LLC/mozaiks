@@ -484,9 +484,6 @@ class TicketsPolicy:
 
 
 def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:
-    from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
-
-    mapping = load_agent_tool_functions("AppGenerator")
-    validate_wiring = next(fn for fn in mapping["IntegrationTestAgent"] if fn.__name__ == "validate_wiring")
+    from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 
     assert validate_wiring.__annotations__["context_variables"] != "Optional[Dict[str, Any]]"

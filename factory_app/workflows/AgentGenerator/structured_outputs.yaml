@@ -1704,6 +1704,13 @@ models:
         - hidden
         description: 'How to display workflow transitions: dropdown (visual stack),
           inline (text message), hidden (seamless)'
+  PackGraphStartupMode:
+    type: literal
+    values:
+    - UserDriven
+    - AgentDriven
+    - BackendOnly
+
   PackGraphWorkflow:
     type: model
     fields:
@@ -1716,6 +1723,18 @@ models:
         - str
         - 'null'
         description: Human-readable description
+      startup_mode:
+        type: union
+        variants:
+        - PackGraphStartupMode
+        - 'null'
+        description: >
+          How this workflow is started. UserDriven = user session initiates it and
+          it may appear in workflow_sequences and entrypoints. AgentDriven = triggered
+          by an upstream workflow or agent handoff, not a direct user action. BackendOnly =
+          triggered exclusively by domain events; MUST NOT appear in workflow_sequences
+          or entrypoints. Read from the workflow bundle's orchestrator.yaml startup_mode
+          field. Leave null only when startup mode is genuinely ambiguous.
       dependencies:
         type: list
         items: PackGraphDependency

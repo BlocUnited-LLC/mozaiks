@@ -334,6 +334,7 @@ def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pac
     file_map = extract_appgenerator_code_file_map(payload)
 
     assert set(file_map) == {
+        "control_plane/config/runtime.yaml",
         "control_plane/config/control_plane.yaml",
         "control_plane/config/tools.yaml",
         "control_plane/config/policies.yaml",

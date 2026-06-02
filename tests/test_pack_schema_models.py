@@ -512,3 +512,126 @@ def test_parse_global_pack_graph_allows_same_phase_optional_dependency() -> None
     assert graph.journeys[0].steps[0].workflows == ["ThemeCapture", "ExistingAppDiscovery"]
 
 
+# ---------------------------------------------------------------------------
+# startup_mode — Gap #8: BackendOnly enforcement
+# ---------------------------------------------------------------------------
+
+
+def test_parse_global_pack_graph_allows_backend_only_workflow() -> None:
+    """BackendOnly workflow registered in workflows[] is valid on its own."""
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [
+                {"id": "ProposalReviewWorkflow", "startup_mode": "BackendOnly"},
+                {"id": "AppGenerator"},
+            ],
+            "transitions": [],
+            "workflow_sequences": [
+                {"id": "build", "steps": [{"workflows": ["AppGenerator"]}]}
+            ],
+        }
+    )
+    backend_entry = next(w for w in graph.workflows if w.id == "ProposalReviewWorkflow")
+    assert backend_entry.startup_mode == "BackendOnly"
+
+
+def test_parse_global_pack_graph_rejects_backend_only_in_sequence() -> None:
+    """BackendOnly workflow must not appear in a workflow_sequence step."""
+    with pytest.raises(ValueError, match="BackendOnly"):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [
+                    {"id": "ProposalReviewWorkflow", "startup_mode": "BackendOnly"},
+                    {"id": "AppGenerator"},
+                ],
+                "transitions": [],
+                "workflow_sequences": [
+                    {
+                        "id": "build",
+                        "steps": [
+                            {"workflows": ["AppGenerator"]},
+                            {"workflows": ["ProposalReviewWorkflow"]},
+                        ],
+                    }
+                ],
+            }
+        )
+
+
+def test_parse_global_pack_graph_rejects_backend_only_entrypoint() -> None:
+    """BackendOnly workflow must not be the target of an entrypoint."""
+    with pytest.raises(ValueError, match="BackendOnly"):
+        parse_global_pack_graph(
+            {
+                "version": 3,
+                "workflows": [
+                    {"id": "DocumentsAnalysisWorkflow", "startup_mode": "BackendOnly"},
+                ],
+                "entrypoints": [
+                    {
+                        "id": "start_analysis",
+                        "path": "/analysis",
+                        "label": "Start Analysis",
+                        "workflow": "DocumentsAnalysisWorkflow",
+                    }
+                ],
+                "transitions": [],
+                "workflow_sequences": [],
+            }
+        )
+
+
+def test_parse_global_pack_graph_startup_mode_round_trips() -> None:
+    """UserDriven and AgentDriven startup_mode values parse correctly."""
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [
+                {"id": "ValueEngine", "startup_mode": "UserDriven"},
+                {"id": "AppGenerator", "startup_mode": "AgentDriven"},
+            ],
+            "transitions": [],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"workflows": ["ValueEngine"]},
+                        {"workflows": ["AppGenerator"]},
+                    ],
+                }
+            ],
+        }
+    )
+    mode_map = {w.id: w.startup_mode for w in graph.workflows}
+    assert mode_map["ValueEngine"] == "UserDriven"
+    assert mode_map["AppGenerator"] == "AgentDriven"
+
+
+def test_pack_metadata_structured_output_workflow_has_startup_mode() -> None:
+    """PackGraphWorkflow in AgentGenerator structured_outputs.yaml must declare startup_mode."""
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "factory_app"
+        / "workflows"
+        / "AgentGenerator"
+        / "structured_outputs.yaml"
+    )
+    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    wf_fields = spec["models"]["PackGraphWorkflow"]["fields"]
+    assert "startup_mode" in wf_fields, "PackGraphWorkflow must declare startup_mode"
+    sm = wf_fields["startup_mode"]
+    assert sm["type"] == "union"
+    assert "null" in sm["variants"]
+    # Must reference the PackGraphStartupMode literal or a string type
+    non_null = [v for v in sm["variants"] if v != "null"]
+    assert non_null, "startup_mode union must have a non-null variant"
+    # PackGraphStartupMode literal must exist and include BackendOnly
+    assert "PackGraphStartupMode" in spec["models"]
+    values = spec["models"]["PackGraphStartupMode"]["values"]
+    assert "BackendOnly" in values
+    assert "UserDriven" in values
+    assert "AgentDriven" in values
+
+
