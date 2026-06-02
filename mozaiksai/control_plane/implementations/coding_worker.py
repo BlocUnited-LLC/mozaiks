@@ -7,6 +7,10 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from autogen.beta import Agent, MemoryStream
+from autogen.beta.config import OpenAIConfig
+from autogen.beta.middleware import RetryMiddleware
+from autogen.beta.observers import TokenMonitor
 from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
@@ -25,7 +29,6 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.artifacts.content_store import get_artifact_content_store
-from mozaiksai.core.capabilities import get_general_capability_service
 
 _ELIGIBLE_CHANGE_CLASSES = {"patch"}
 _ELIGIBLE_ARTIFACT_KINDS = {"app_bundle", "workflow_bundle", "theme_config"}
@@ -51,7 +54,7 @@ class ScopedRefinementCodingWorker:
     def __init__(
         self,
         *,
-        capability_service: Any = None,
+        agent_factory: Any = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_control_plane_pack,
         tool_executor: Any = None,
@@ -59,7 +62,7 @@ class ScopedRefinementCodingWorker:
         artifact_store: Any = None,
         output_root: Any = None,
     ) -> None:
-        self._service = capability_service or get_general_capability_service()
+        self._agent_factory = agent_factory
         self._config_loader = config_loader
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
@@ -82,20 +85,22 @@ class ScopedRefinementCodingWorker:
             )
 
         try:
-            llm_config = self._load_config().resolve_capability_llm_config("coding")
+            llm_config = self._load_config().resolve_capability_llm_config("coding") or {}
             system_prompt = self._load_system_prompt()
             control_plane_context = await self._load_control_plane_context(request)
             user_prompt = self._build_user_prompt(request=request, control_plane_context=control_plane_context)
-            response = await self._service.generate_json_completion(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                app_id=request.app_id,
-                user_id=request.user_id,
-                ui_context={"surface": request.source_surface or "coding_worker"},
-                llm_config=llm_config,
-                temperature=self._resolve_temperature(llm_config),
+            agent = self._make_agent(system_prompt=system_prompt, llm_config=llm_config)
+            stream = MemoryStream()
+            reply = await agent.ask(
+                user_prompt,
+                stream=stream,
+                middleware=[RetryMiddleware(max_retries=2)],
+                observers=[TokenMonitor()],
+                response_schema=CodingWorkerPlan,
             )
-            plan = CodingWorkerPlan.model_validate(response.get("parsed") or {})
+            plan = await reply.content()
+            if plan is None:
+                raise ValueError("CodingWorker returned an empty response")
         except Exception as exc:
             return CodingWorkerResult(
                 eligible=True,
@@ -291,17 +296,17 @@ class ScopedRefinementCodingWorker:
 
         return {path: str(content) for path, content in plan.updated_files.items()}
 
-    @staticmethod
-    def _resolve_temperature(llm_config: dict[str, Any] | None) -> float | None:
-        if not isinstance(llm_config, dict):
-            return None
-        value = llm_config.get("temperature")
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except Exception:
-            return None
+    def _make_agent(self, *, system_prompt: str, llm_config: dict[str, Any]) -> Any:
+        if self._agent_factory is not None:
+            return self._agent_factory(system_prompt, llm_config)
+        return Agent(
+            "CodingWorker",
+            system_prompt,
+            config=OpenAIConfig(
+                model=llm_config.get("model") or "gpt-4o",
+                temperature=llm_config.get("temperature"),
+            ),
+        )
 
     @staticmethod
     def _resolve_validation_strategy(raw: str) -> str:

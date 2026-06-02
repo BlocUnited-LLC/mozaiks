@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
+from autogen.beta import Agent, MemoryStream
+from autogen.beta.config import OpenAIConfig
+from autogen.beta.middleware import RetryMiddleware
+from autogen.beta.observers import TokenMonitor
 from pydantic import BaseModel, ConfigDict, Field
 
-from mozaiksai.core.capabilities import get_general_capability_service
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import ControlPlaneToolCall, ControlPlaneToolContext
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
@@ -27,17 +30,17 @@ class ChangeClassifierResult(BaseModel):
 
 
 class LLMChangeClassifier:
-    """Authoritative LLM-backed refinement change classifier."""
+    """Authoritative AG2-backed refinement change classifier."""
 
     def __init__(
         self,
         *,
-        capability_service: Any = None,
+        agent_factory: Optional[Callable[[str, dict[str, Any]], Any]] = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_control_plane_pack,
         tool_executor: Any = None,
     ) -> None:
-        self._service = capability_service or get_general_capability_service()
+        self._agent_factory = agent_factory
         self._config_loader = config_loader
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
@@ -62,13 +65,7 @@ class LLMChangeClassifier:
         if not control_plane.classifier_enabled():
             raise RuntimeError("Control-plane classifier is disabled in app/config/ai.json")
 
-        llm_config = control_plane.resolve_capability_llm_config("classifier")
-        temperature = None
-        if isinstance(llm_config, dict) and llm_config.get("temperature") is not None:
-            try:
-                temperature = float(llm_config["temperature"])
-            except Exception:
-                temperature = None
+        llm_config = control_plane.resolve_capability_llm_config("classifier") or {}
 
         user_prompt = self._build_user_prompt(
             artifact_kind=artifact_kind,
@@ -91,16 +88,35 @@ class LLMChangeClassifier:
             ),
             extra=extra or {},
         )
-        response = await self._service.generate_json_completion(
+
+        agent = self._make_agent(
             system_prompt=self._load_system_prompt(),
-            user_prompt=user_prompt,
-            app_id=app_id,
-            user_id=user_id,
-            ui_context={"surface": source_surface or "refinement_classifier"},
             llm_config=llm_config,
-            temperature=temperature,
         )
-        return ChangeClassifierResult.model_validate(response.get("parsed") or {})
+        stream = MemoryStream()
+        reply = await agent.ask(
+            user_prompt,
+            stream=stream,
+            middleware=[RetryMiddleware(max_retries=2)],
+            observers=[TokenMonitor()],
+            response_schema=ChangeClassifierResult,
+        )
+        result = await reply.content()
+        if result is None:
+            raise ValueError("ChangeClassifier returned an empty response")
+        return result
+
+    def _make_agent(self, *, system_prompt: str, llm_config: dict[str, Any]) -> Any:
+        if self._agent_factory is not None:
+            return self._agent_factory(system_prompt, llm_config)
+        return Agent(
+            "ChangeClassifier",
+            system_prompt,
+            config=OpenAIConfig(
+                model=llm_config.get("model") or "gpt-4o",
+                temperature=llm_config.get("temperature"),
+            ),
+        )
 
     def _load_config(self) -> ControlPlaneConfig:
         config = self._config_loader()
@@ -195,11 +211,6 @@ class LLMChangeClassifier:
             lines.append(json.dumps(control_plane_context, indent=2, sort_keys=True, default=str))
         if extra:
             lines.append(f"extra_context: {extra}")
-        lines.append("")
-        lines.append("Return a JSON object with this exact shape:")
-        lines.append(
-            '{"change_class":"patch|design|feature|core","rationale":"...","confidence":0.0,"signals":["..."]}'
-        )
         return "\n".join(lines)
 
 

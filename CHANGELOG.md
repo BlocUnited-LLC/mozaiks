@@ -18,14 +18,15 @@ This project follows a practical pre-1.0 changelog format:
   handler-based stream architecture superseded by the inline `_forward_beta_events`
   AG2 beta MemoryStream subscription in `orchestration_patterns.py`.
 - Deleted `mozaiksai/core/observability/ag2_runtime_logger.py` —
-  `AG2RuntimeLoggingController` wrapped the legacy pre-beta `autogen.runtime_logging`
-  API. Removed `ag2_logging_session` context manager from `orchestration_patterns.py`.
+  `AG2RuntimeLoggingController` wrapped the pre-beta `autogen.runtime_logging`
+  API, now superseded by the AG2 beta observer model. Removed `ag2_logging_session`
+  context manager from `orchestration_patterns.py`.
 - Deleted `mozaiksai/core/observability/realtime_token_logger.py` —
   `RealtimeTokenLogger` was only referenced from the deleted stream handlers.
-- Deleted `mozaiksai/core/events/ag2_events.py` — custom AG2 event classes using
-  the deprecated `@wrap_event` decorator. The single live call site in
-  `orchestration_patterns.py` was guarded by a silent `except Exception` and had no
-  actual subscribers; removed together with the try/except guard.
+- Deleted `mozaiksai/core/events/ag2_events.py` — custom AG2 event classes that
+  used the `@wrap_event` decorator, which was removed in the AG2 beta. The single
+  call site in `orchestration_patterns.py` was guarded by a silent `except Exception`
+  and had no actual subscribers; removed together with the try/except guard.
 - Removed stale AG2 groupchat guidance block (including a private local machine path)
   from `AGENTS.md`, `ARCHITECTURE.md`, and `CLAUDE.md` — groupchat removal is
   complete and the private path was never appropriate in OSS docs.
@@ -46,6 +47,13 @@ This project follows a practical pre-1.0 changelog format:
   `UserDriven`; the rest are `AgentDriven`).
 
 ### Changed
+
+- `LLMChangeClassifier` and `ScopedRefinementCodingWorker` in the control plane
+  now use `autogen.beta.Agent.ask()` with `MemoryStream`, `RetryMiddleware`, and
+  `TokenMonitor` instead of a raw `generate_json_completion()` call. Both classes
+  accept an `agent_factory` parameter for test injection; their tests now use a
+  `_FakeAgent`/`_FakeReply` pattern that exercises the full classify/execute path
+  without hitting the network.
 
 - `DataContract` structured output model for AppGenerator now includes a
   `surfaces` field (list of `DataContractSurface`) with fully typed sub-models

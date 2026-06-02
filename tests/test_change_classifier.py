@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from mozaiksai.control_plane import (
@@ -19,25 +22,39 @@ from mozaiksai.control_plane import (
     LLMChangeClassifier,
     LoadedControlPlanePack,
 )
-from pathlib import Path
 
 
-class _FakeCapabilityService:
-    def __init__(self) -> None:
+# ---------------------------------------------------------------------------
+# Fake AG2 agent infrastructure
+# ---------------------------------------------------------------------------
+
+class _FakeReply:
+    def __init__(self, result: Any) -> None:
+        self._result = result
+        self.body = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
+
+    async def content(self, *, retries: int = 0) -> Any:
+        return self._result
+
+
+class _FakeAgent:
+    """Records ask() calls and returns a preset ChangeClassifierResult."""
+
+    def __init__(self, system_prompt: str, llm_config: dict[str, Any]) -> None:
+        self.system_prompt = system_prompt
+        self.llm_config = llm_config
         self.calls: list[dict] = []
 
-    async def generate_json_completion(self, **kwargs):  # noqa: ANN003
-        self.calls.append(kwargs)
-        return {
-            "content": '{"change_class":"feature","rationale":"Adds a new capability.","confidence":0.8,"signals":["new_capability"]}',
-            "parsed": {
-                "change_class": "feature",
-                "rationale": "Adds a new capability.",
-                "confidence": 0.8,
-                "signals": ["new_capability"],
-            },
-            "usage": {},
-        }
+    async def ask(self, user_prompt: str, **kwargs: Any) -> _FakeReply:
+        self.calls.append({"user_prompt": user_prompt, **kwargs})
+        return _FakeReply(
+            ChangeClassifierResult(
+                change_class="feature",
+                rationale="Adds a new capability.",
+                confidence=0.8,
+                signals=["new_capability"],
+            )
+        )
 
 
 class _FakeToolExecutor:
@@ -125,14 +142,24 @@ def _pack() -> LoadedControlPlanePack:
 
 @pytest.mark.asyncio
 async def test_change_classifier_uses_control_plane_llm_config() -> None:
-    service = _FakeCapabilityService()
+    agent = _FakeAgent("", {})
     tool_executor = _FakeToolExecutor()
+
     classifier = LLMChangeClassifier(
-        capability_service=service,
+        agent_factory=lambda system_prompt, llm_config: _FakeAgent(system_prompt, llm_config),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=tool_executor,
     )
+    # Capture the agent that the factory creates
+    created: list[_FakeAgent] = []
+
+    def capturing_factory(system_prompt: str, llm_config: dict) -> _FakeAgent:
+        a = _FakeAgent(system_prompt, llm_config)
+        created.append(a)
+        return a
+
+    classifier._agent_factory = capturing_factory  # type: ignore[assignment]
 
     result = await classifier.classify(
         artifact_kind="app_bundle",
@@ -146,15 +173,15 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
     assert result.rationale == "Adds a new capability."
     assert result.confidence == 0.8
     assert result.signals == ["new_capability"]
-    assert len(service.calls) == 1
-    assert service.calls[0]["llm_config"] == {
-        "model": "gpt-5-nano",
-        "temperature": 0.0,
-    }
-    assert service.calls[0]["temperature"] == 0.0
-    assert service.calls[0]["system_prompt"] == "system prompt from pack"
-    assert "control_plane_context_json:" in service.calls[0]["user_prompt"]
-    assert '"get_revision_context"' in service.calls[0]["user_prompt"]
+
+    assert len(created) == 1
+    assert created[0].system_prompt == "system prompt from pack"
+    assert created[0].llm_config == {"model": "gpt-5-nano", "temperature": 0.0}
+
+    assert len(created[0].calls) == 1
+    assert "control_plane_context_json:" in created[0].calls[0]["user_prompt"]
+    assert '"get_revision_context"' in created[0].calls[0]["user_prompt"]
+
     assert len(tool_executor.calls) == 2
     assert tool_executor.calls[0]["context"].artifact_kind == "app_bundle"
     assert tool_executor.calls[0]["context"].artifact_key == "app_bundle"
@@ -163,7 +190,7 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
 @pytest.mark.asyncio
 async def test_change_classifier_requires_enabled_control_plane() -> None:
     classifier = LLMChangeClassifier(
-        capability_service=_FakeCapabilityService(),
+        agent_factory=lambda sp, lc: _FakeAgent(sp, lc),
         config_loader=lambda: ControlPlaneConfig(enabled=False),
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),

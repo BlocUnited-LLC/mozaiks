@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from mozaiksai.control_plane import (
+    CodingWorkerPlan,
     CodingWorkerRequest,
     ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
@@ -22,37 +24,56 @@ from mozaiksai.control_plane import (
 )
 
 
-class _FakeCapabilityService:
-    def __init__(self) -> None:
+# ---------------------------------------------------------------------------
+# Fake AG2 agent infrastructure
+# ---------------------------------------------------------------------------
+
+_GOOD_PLAN = CodingWorkerPlan(
+    summary="Patch the dashboard file.",
+    owned_paths=["app/ui/pages/Dashboard.jsx"],
+    updated_files={
+        "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }'
+    },
+    validation_strategy="local",
+    validation_commands=["npm run build"],
+    start_preview=False,
+    needs_human_review=False,
+    rationale="Single-file UI patch.",
+)
+
+_BAD_PLAN = CodingWorkerPlan(
+    summary="Bad edit",
+    owned_paths=["app/ui/pages/Other.jsx"],
+    updated_files={"app/ui/pages/Other.jsx": "x"},
+    validation_strategy="skip",
+    validation_commands=[],
+    start_preview=False,
+    needs_human_review=False,
+    rationale="bad",
+)
+
+
+class _FakeReply:
+    def __init__(self, result: Any) -> None:
+        self._result = result
+        self.body = result.model_dump_json() if hasattr(result, "model_dump_json") else str(result)
+
+    async def content(self, *, retries: int = 0) -> Any:
+        return self._result
+
+
+class _FakeAgent:
+    """Records ask() calls and returns a preset CodingWorkerPlan."""
+
+    def __init__(self, system_prompt: str, llm_config: dict[str, Any], plan: CodingWorkerPlan = _GOOD_PLAN) -> None:
+        self.system_prompt = system_prompt
+        self.llm_config = llm_config
+        self.plan = plan
         self.calls: list[dict] = []
 
-    async def generate_json_completion(self, **kwargs):  # noqa: ANN003
-        self.calls.append(kwargs)
-        return {
-            "content": (
-                '{"summary":"Patch the dashboard file.",'
-                '"owned_paths":["app/ui/pages/Dashboard.jsx"],'
-                '"updated_files":{"app/ui/pages/Dashboard.jsx":"export default function Dashboard() { return \\"patched\\"; }"},'
-                '"validation_strategy":"local",'
-                '"validation_commands":["npm run build"],'
-                '"start_preview":false,'
-                '"needs_human_review":false,'
-                '"rationale":"Single-file UI patch."}'
-            ),
-            "parsed": {
-                "summary": "Patch the dashboard file.",
-                "owned_paths": ["app/ui/pages/Dashboard.jsx"],
-                "updated_files": {
-                    "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }'
-                },
-                "validation_strategy": "local",
-                "validation_commands": ["npm run build"],
-                "start_preview": False,
-                "needs_human_review": False,
-                "rationale": "Single-file UI patch.",
-            },
-            "usage": {},
-        }
+    async def ask(self, user_prompt: str, **kwargs: Any) -> _FakeReply:
+        self.calls.append({"user_prompt": user_prompt, **kwargs})
+        return _FakeReply(self.plan)
 
 
 class _FakeToolExecutor:
@@ -151,11 +172,17 @@ def _pack() -> LoadedControlPlanePack:
 
 @pytest.mark.asyncio
 async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -> None:
-    service = _FakeCapabilityService()
+    created: list[_FakeAgent] = []
     tool_executor = _FakeToolExecutor()
     artifact_store = _FakeArtifactStore()
+
+    def capturing_factory(system_prompt: str, llm_config: dict) -> _FakeAgent:
+        a = _FakeAgent(system_prompt, llm_config)
+        created.append(a)
+        return a
+
     worker = ScopedRefinementCodingWorker(
-        capability_service=service,
+        agent_factory=capturing_factory,
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=tool_executor,
@@ -189,10 +216,13 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert result.validation_result["validation_status"] == "passed"
     assert result.metadata["artifact_version_id"] == "av_child_1"
     assert result.metadata["bundle_mode"] == "workspace_snapshot"
-    assert service.calls[0]["system_prompt"] == "coding system prompt from pack"
-    assert service.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
-    assert '"input_files"' in service.calls[0]["user_prompt"]
-    assert '"control_plane_context"' in service.calls[0]["user_prompt"]
+
+    assert len(created) == 1
+    assert created[0].system_prompt == "coding system prompt from pack"
+    assert created[0].llm_config == {"model": "gpt-5.2-codex", "temperature": 0.1}
+    assert '"input_files"' in created[0].calls[0]["user_prompt"]
+    assert '"control_plane_context"' in created[0].calls[0]["user_prompt"]
+
     assert len(tool_executor.calls) == 2
     assert artifact_store.calls[0]["parent_version_id"] == "av_123"
     assert artifact_store.calls[0]["artifact_kind"] == "app_bundle"
@@ -206,7 +236,7 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
 @pytest.mark.asyncio
 async def test_coding_worker_rejects_non_patch_requests() -> None:
     worker = ScopedRefinementCodingWorker(
-        capability_service=_FakeCapabilityService(),
+        agent_factory=lambda sp, lc: _FakeAgent(sp, lc),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -234,25 +264,8 @@ async def test_coding_worker_rejects_non_patch_requests() -> None:
 
 @pytest.mark.asyncio
 async def test_coding_worker_fails_when_model_edits_outside_scoped_files(tmp_path: Path) -> None:
-    class _BadCapabilityService:
-        async def generate_json_completion(self, **kwargs):  # noqa: ANN003
-            return {
-                "content": '{"summary":"Bad edit","owned_paths":["app/ui/pages/Other.jsx"],"updated_files":{"app/ui/pages/Other.jsx":"x"},"validation_strategy":"skip","validation_commands":[],"start_preview":false,"needs_human_review":false,"rationale":"bad"}',
-                "parsed": {
-                    "summary": "Bad edit",
-                    "owned_paths": ["app/ui/pages/Other.jsx"],
-                    "updated_files": {"app/ui/pages/Other.jsx": "x"},
-                    "validation_strategy": "skip",
-                    "validation_commands": [],
-                    "start_preview": False,
-                    "needs_human_review": False,
-                    "rationale": "bad",
-                },
-                "usage": {},
-            }
-
     worker = ScopedRefinementCodingWorker(
-        capability_service=_BadCapabilityService(),
+        agent_factory=lambda sp, lc: _FakeAgent(sp, lc, plan=_BAD_PLAN),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -288,7 +301,7 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
             raise RuntimeError('artifact store unavailable')
 
     worker = ScopedRefinementCodingWorker(
-        capability_service=_FakeCapabilityService(),
+        agent_factory=lambda sp, lc: _FakeAgent(sp, lc),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),
@@ -315,4 +328,3 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
 
     assert result.status == "validated"
     assert result.metadata["artifact_persistence_error"] == "artifact store unavailable"
-
