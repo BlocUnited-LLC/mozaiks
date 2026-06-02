@@ -35,6 +35,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- `docs/architecture/app/control-plane-pack.md` — canonical reference for
+  app-local control plane packs. Covers when to use a pack, the full file
+  layout, annotated starter templates for all four config files
+  (`runtime.yaml`, `control_plane.yaml`, `tools.yaml`, `policies.yaml`), prompt
+  starters for all four LLM-backed checkpoints, and route rules. This is the
+  authoritative AppGenerator reference for `control_plane_pack` build tasks.
+
 - `WorkflowEntry` in the pack-graph schema now accepts a `startup_mode` field
   (`UserDriven`, `AgentDriven`, or `BackendOnly`). `GlobalPackGraph` enforces
   that `BackendOnly` workflows are not placed in `workflow_sequences` or
@@ -47,6 +54,18 @@ This project follows a practical pre-1.0 changelog format:
   `UserDriven`; the rest are `AgentDriven`).
 
 ### Changed
+
+- `docs/architecture/workflows/control-plane-harness-architecture.md` updated:
+  file trees corrected (added `contract_surface_planner.py`, `runtime.yaml`,
+  `contract_surface_selection_system.yaml`, all 11 context tools); new "AG2
+  Implementation Model" section covering `agent.ask()` pattern, structured
+  output enforcement, `agent_factory` injection, and LLM config resolution;
+  full six-checkpoint runtime flow; expanded "Generated App Authoring" section
+  pointing to the new starter pack reference.
+- `docs/guides/platform-intelligence/03-refinement.md` updated with a
+  "How Classification Works" and "How Patch Coding Works" section explaining
+  the AG2-backed classifier and coding worker, plus an "Opting In" section
+  showing the `app/config/ai.json` control plane block.
 
 - `LLMChangeClassifier` and `ScopedRefinementCodingWorker` in the control plane
   now use `autogen.beta.Agent.ask()` with `MemoryStream`, `RetryMiddleware`, and

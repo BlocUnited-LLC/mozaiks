@@ -120,6 +120,7 @@ nav:
           - UI Surface and Layout Architecture: architecture/app/ui-surface-and-layout-architecture.md
           - Admin System: architecture/app/admin-system.md
           - Account, Admin, and Platform Services: architecture/app/account-admin-and-platform-services.md
+          - App-Local Control Plane Pack: architecture/app/control-plane-pack.md
       - Module Systems:
           - Overview: architecture/modules-systems/index.md
           - Module System: architecture/modules-systems/module-system.md

@@ -67,13 +67,16 @@ mozaiksai/control_plane/
   ports.py
   runtime.py
   schema.py
+  tools/
+    get_revision_context.py
   implementations/
     change_classifier.py
-    refinement_router.py
-    harness_decision.py
-    scope_proposer.py
     coding_worker.py
+    contract_surface_planner.py
+    harness_decision.py
     orchestration_control.py
+    refinement_router.py
+    scope_proposer.py
 ```
 
 This layer owns:
@@ -94,18 +97,28 @@ First-party builder/reference app declaratives and builder-specific tools.
 factory_app/control_plane/
   config/
     control_plane.yaml
+    runtime.yaml
     tools.yaml
     policies.yaml
   prompts/
     change_classifier_system.yaml
-    coding_scope_selection_system.yaml
     coding_refinement_system.yaml
+    coding_scope_selection_system.yaml
+    contract_surface_selection_system.yaml
   tools/
-    get_revision_context.py
     get_artifact_summary.py
     get_artifact_workspace_catalog.py
     get_artifact_workspace_scope.py
+    get_carry_forward_candidates.py
+    get_context_graph_catalog.py
+    get_context_graph_scope.py
+    get_contract_surface_context.py
+    get_stale_artifact_families.py
+    read_carry_forward_module_contract.py
+    resolve_carry_forward_preservation.py
     _artifact_workspace.py
+    _context_graph.py
+    _module_inventory.py
     _shared.py
   ui/
 ```
@@ -184,13 +197,21 @@ AppGenerator may emit an app-local harness only when the product explicitly
 needs checkpointed lifecycle, refinement, session, or coding-control behavior
 that cannot be expressed as normal workflow transitions.
 
+See [app/control-plane-pack.md](../../architecture/app/control-plane-pack.md)
+for the full starter pack reference, annotated templates, and guidance on which
+checkpoints and tools a generated app should include.
+
+### Ownership Split
+
 Keep startup separate from the harness pack:
 
 - `app/config/ai.json` owns `ask`, `chat`, and `workflows` startup
-- `control_plane/config/runtime.yaml` owns control-plane runtime policy
+- `control_plane/config/runtime.yaml` owns runtime policy (LLM profiles, feature flags)
 - `control_plane/config/control_plane.yaml` owns declarative checkpoints and routing
 
-The canonical AppGenerator build task is:
+### AppGenerator Build Task
+
+The canonical AppGenerator build task for a control plane pack:
 
 ```yaml
 task_type: control_plane_pack
@@ -210,6 +231,8 @@ Optional owned paths:
 - control_plane/prompts/*.yaml
 ```
 
+### Pack Constraints
+
 Generated control-plane packs are declarative only:
 
 - no `module.yaml`
@@ -219,15 +242,19 @@ Generated control-plane packs are declarative only:
 - no business-domain logic
 
 The generated pack uses shipped `mozaiksai.control_plane` implementations and
-declared tool entrypoints. Custom harness Python is not a v1 generator contract.
+declared tool entrypoints from `mozaiksai.control_plane.tools.*` and
+`factory_app.control_plane.tools.*`. Custom harness Python is not a v1
+generator contract.
 
-Route rules remain strict:
+### Route Rules
 
 - `control_plane.yaml` routes declare `workflow_sequence` only.
 - each `workflow_sequence` must exist in
   `workflows/extended_orchestration/extension_registry.json`
 - sequence impact metadata, including `affected_declarative_families`, lives on
   the sequence in `extension_registry.json`, not in `control_plane.yaml`
+- do not declare `affected_workflows`, `requires_replanning`, or
+  `requires_rebuild` in route manifests; these are derived at runtime
 
 ## Declarative Files
 
@@ -252,8 +279,6 @@ profile:
   description: First-party declarative control-plane pack for the Mozaiks build experience.
 harness:
   implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
-  supported_trigger_sources:
-    - refinement
 routing:
   default_artifact_kind: app_bundle
   artifacts:
@@ -277,13 +302,38 @@ checkpoints:
       - get_revision_context
       - get_artifact_summary
 
-  - id: route
+  - id: refinement_route
     event: route_requested
     entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
 
   - id: decision
     event: decision_requested
     entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
+
+  - id: scope_selection
+    event: scope_requested
+    entrypoint: mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer
+    prompt_id: coding_scope_selection_system
+    tool_ids:
+      - get_revision_context
+      - get_artifact_summary
+      - get_artifact_workspace_catalog
+
+  - id: contract_surface_planning
+    event: contract_surface_requested
+    entrypoint: mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner
+    prompt_id: contract_surface_selection_system
+    tool_ids:
+      - get_contract_surface_context
+
+  - id: coding_refinement
+    event: coding_requested
+    entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
+    prompt_id: coding_refinement_system
+    tool_ids:
+      - get_revision_context
+      - get_artifact_summary
+      - get_artifact_workspace_scope
 ```
 
 Route rules:
@@ -350,6 +400,7 @@ Current first-party checkpoints:
 - `route_requested`
 - `decision_requested`
 - `scope_requested`
+- `contract_surface_requested`
 - `coding_requested`
 
 These are the harness-native units of execution.
@@ -394,6 +445,18 @@ Current first-party handler:
 
 - `mozaiksai/control_plane/implementations/scope_proposer.py`
 
+### `contract_surface_requested`
+
+LLM-backed contract surface planning for feature and design refinements.
+Maps the request to the specific Mozaiks contract surfaces that need updating
+(`module_action`, `page_binding`, `data_schema`, `workflow_agent`, etc.) before
+workflow re-entry. Fires when a request is broader than a coding patch but
+narrow enough to target specific contract surfaces rather than a full rebuild.
+
+Current first-party handler:
+
+- `mozaiksai/control_plane/implementations/contract_surface_planner.py`
+
 ### `coding_requested`
 
 Scoped coding-worker execution for eligible patch refinements.
@@ -423,6 +486,78 @@ The current first-party tools live under:
 
 - `factory_app/control_plane/tools/*`
 
+## AG2 Implementation Model
+
+LLM-backed checkpoints use `autogen.beta.Agent.ask()` to enforce structured
+outputs without custom JSON-parsing fallbacks.
+
+### Structured Output Pattern
+
+Every LLM-backed handler follows this pattern:
+
+```python
+agent = self._make_agent(system_prompt=system_prompt, llm_config=llm_config)
+stream = MemoryStream()
+reply = await agent.ask(
+    user_prompt,
+    stream=stream,
+    middleware=[RetryMiddleware(max_retries=2)],
+    observers=[TokenMonitor()],
+    response_schema=ChangeClassifierResult,
+)
+result = await reply.content()
+```
+
+- `response_schema` — AG2 enforces the Pydantic model at the provider level.
+  No JSON extraction or repair is needed in handler code.
+- `RetryMiddleware(max_retries=2)` — transient failures retry automatically.
+- `TokenMonitor()` — token accounting without custom hooks.
+- `MemoryStream` — captures the full conversation for observability.
+
+### Agent Factory Injection
+
+Every LLM-backed handler accepts an `agent_factory` callable:
+
+```python
+LLMChangeClassifier(
+    agent_factory=lambda system_prompt, llm_config: _FakeAgent(system_prompt, llm_config),
+    config_loader=...,
+    pack_loader=...,
+)
+```
+
+Production code passes `None` — the default builds a real `Agent` from the
+resolved `llm_config`. Tests inject a fake agent that records calls and returns
+preset structured responses without hitting the network. This makes every
+checkpoint independently unit-testable.
+
+LLM-backed checkpoints:
+
+| Checkpoint | Handler | Response schema |
+|---|---|---|
+| `request_submitted` | `LLMChangeClassifier` | `ChangeClassifierResult` |
+| `scope_requested` | `ArtifactScopeProposer` | `ScopeProposal` |
+| `contract_surface_requested` | `ContractSurfacePlanner` | `ContractSurfacePlan` |
+| `coding_requested` | `ScopedRefinementCodingWorker` | `CodingWorkerPlan` |
+
+Deterministic checkpoints (`route_requested`, `decision_requested`) do not use
+AG2 at all — they derive results from typed inputs and routing tables.
+
+### LLM Config Resolution
+
+LLM config flows from the declarative pack, not from workflow-local AG2 config:
+
+1. `control_plane/config/runtime.yaml` declares `llm_profiles` keyed by
+   capability name, each with `model` and `temperature`.
+2. `ControlPlaneConfig.resolve_capability_llm_config(capability)` returns a flat
+   `{"model": ..., "temperature": ...}` dict for the resolved profile.
+3. The dict maps directly to `OpenAIConfig(model=..., temperature=...)` inside
+   each handler's `_make_agent()`.
+
+App-level overrides in `app/config/ai.json` under
+`control_plane.<capability>.llm_config` take precedence over the profile
+default.
+
 ## Runtime Flow
 
 At runtime:
@@ -439,16 +574,24 @@ Current Studio refinement flow:
 ```text
 Studio trigger
   -> OrchestrationControlHarness
-  -> request_submitted
-  -> route_requested
-  -> decision_requested
+  -> request_submitted   (LLMChangeClassifier)
+  -> route_requested     (RefinementTriggerRouteResolver)
+  -> decision_requested  (FirstPartyHarnessDecisionPolicy)
   -> SessionRouter | coding worker | harness decision response
 ```
 
-If coding is eligible:
+If coding is eligible (`patch` + scoped files):
 
 ```text
-... -> scope_requested -> coding_requested
+... -> scope_requested     (ArtifactScopeProposer)
+    -> coding_requested    (ScopedRefinementCodingWorker)
+```
+
+If contract surface planning is needed (`feature` or `design`):
+
+```text
+... -> contract_surface_requested  (ContractSurfacePlanner)
+    -> workflow re-entry via resolved workflow_sequence
 ```
 
 ## Relation To Workflows And Extensions
