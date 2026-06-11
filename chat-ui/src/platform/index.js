@@ -206,9 +206,12 @@ export {
   typography,
 } from './workflowSurfaceStyles.js';
 export {
-  TransitionChoiceCard,
-  TransitionChoicePanel,
+  useTransitionMotion,
   useTransitionChoiceMotion,
+  TransitionChoicePanel,
+  TransitionChoiceCard,
+  TransitionActionPanel,
+  TransitionActionButton,
 } from './transitionPrimitives.jsx';
 
 export default platform;

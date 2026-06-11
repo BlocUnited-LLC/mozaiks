@@ -209,18 +209,29 @@ function AdminSidebar({ adminPages = null, onNavigate = null, navGroups: provide
 
 function AdminMobileNavTrigger({ onOpenMenu, activeLabel = 'Studio' }) {
   return (
-    <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+5.5rem)] left-4 z-[56] lg:hidden">
+    <div className="sticky top-[calc(env(safe-area-inset-top,0px)+4.5rem)] z-30 mb-4 lg:hidden">
       <button
         type="button"
         onClick={onOpenMenu}
-        className="inline-flex h-11 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/45 bg-background/90 px-4 text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
+        className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border/45 bg-background/92 px-4 py-3 text-left text-foreground shadow-lg shadow-black/15 backdrop-blur-md transition hover:bg-muted/35"
         aria-label="Open Studio navigation"
       >
-        <MenuGlyph />
-        <span className="text-sm font-semibold">Studio</span>
-        <span className="max-w-[9rem] truncate border-l border-border pl-2 text-xs font-medium text-muted-foreground">
-          {activeLabel}
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/24 bg-primary/10 text-primary shadow-sm shadow-primary/10">
+            <MenuGlyph />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/84">
+              Studio navigation
+            </span>
+            <span className="block truncate text-sm font-semibold text-foreground">
+              {activeLabel}
+            </span>
+          </span>
         </span>
+        <svg className="h-4 w-4 shrink-0 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m9 6 6 6-6 6" />
+        </svg>
       </button>
     </div>
   )
@@ -289,10 +300,10 @@ export function AdminWorkspaceLayout({ children, adminPages = null }) {
           </div>
         ) : null}
 
-        <div className="min-w-0 flex-1 space-y-5 pb-24 md:pb-10 lg:pb-0">
+        <div className="min-w-0 flex-1 space-y-5 pb-10 md:pb-10 lg:pb-0">
+          <AdminMobileNavTrigger onOpenMenu={() => setMobileOpen(true)} activeLabel={activeLabel} />
           {children}
         </div>
-        <AdminMobileNavTrigger onOpenMenu={() => setMobileOpen(true)} activeLabel={activeLabel} />
       </div>
     </div>
   )

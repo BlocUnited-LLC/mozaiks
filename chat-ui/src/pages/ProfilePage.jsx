@@ -151,6 +151,11 @@ function parseSettingsText(raw) {
   return parsed;
 }
 
+function formatCompactNumber(value) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) ? numeric.toLocaleString() : '0';
+}
+
 // ---------------------------------------------------------------------------
 // Built-in panels (Identity + Preferences)
 // ---------------------------------------------------------------------------
@@ -399,6 +404,86 @@ function PreferencesPanel({ backendUrl, auth }) {
   );
 }
 
+function UsagePanel({ backendUrl, auth }) {
+  const [usage, setUsage] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWithAuth(`${backendUrl}/api/me/usage`, {}, auth)
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        return res.json();
+      })
+      .then((body) => { if (!cancelled) { setUsage(body); setError(null); } })
+      .catch((e) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [backendUrl, auth]);
+
+  if (loading) return <Spinner />;
+  if (error) return <ErrorBox message={`Could not load usage: ${error}`} />;
+
+  const totals = usage?.totals || {};
+  const plans = Array.isArray(usage?.subscription_usage?.plans) ? usage.subscription_usage.plans : [];
+  const defaultPlanId = usage?.subscription_usage?.default_plan_id;
+  const defaultPlan = plans.find((plan) => plan.plan_id === defaultPlanId) || plans[0];
+  const tokenLimit = (defaultPlan?.usage_limits || []).find((limit) => limit.unit === 'tokens');
+  const usedTokens = Number(totals.total_tokens || 0);
+  const monthlyLimit = Number(tokenLimit?.monthly_limit || 0);
+  const percent = monthlyLimit > 0 ? Math.min(100, Math.round((usedTokens / monthlyLimit) * 100)) : 0;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-6">
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-foreground">AI Usage</h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Runtime token usage measured by the app backend.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="rounded-xl border border-border bg-background/60 px-4 py-3">
+          <span className="block text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Total</span>
+          <span className="text-lg font-semibold text-foreground">{formatCompactNumber(totals.total_tokens)}</span>
+        </div>
+        <div className="rounded-xl border border-border bg-background/60 px-4 py-3">
+          <span className="block text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Input</span>
+          <span className="text-lg font-semibold text-foreground">{formatCompactNumber(totals.prompt_tokens)}</span>
+        </div>
+        <div className="rounded-xl border border-border bg-background/60 px-4 py-3">
+          <span className="block text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Output</span>
+          <span className="text-lg font-semibold text-foreground">{formatCompactNumber(totals.completion_tokens)}</span>
+        </div>
+        <div className="rounded-xl border border-border bg-background/60 px-4 py-3">
+          <span className="block text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">LLM calls</span>
+          <span className="text-lg font-semibold text-foreground">{formatCompactNumber(totals.llm_calls)}</span>
+        </div>
+      </div>
+
+      {tokenLimit && (
+        <div className="mt-5 rounded-xl border border-border bg-background/60 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-foreground">{tokenLimit.label || tokenLimit.meter_id}</div>
+              <div className="text-xs text-muted-foreground">
+                {defaultPlan?.label || defaultPlan?.plan_id || 'Default plan'} monthly limit
+              </div>
+            </div>
+            <div className="text-sm text-muted-foreground tabular-nums">
+              {formatCompactNumber(usedTokens)} / {formatCompactNumber(monthlyLimit)}
+            </div>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
+            <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Module panel renderers
 // ---------------------------------------------------------------------------
@@ -555,6 +640,9 @@ export default function ProfilePage() {
             <ModulePanelSection panel={panel} />
           </div>
         ))}
+
+        <SectionHeading>Usage</SectionHeading>
+        <UsagePanel backendUrl={backendUrl} auth={auth} />
 
         {/* App Preferences — always last */}
         <SectionHeading>Preferences</SectionHeading>

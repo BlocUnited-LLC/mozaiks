@@ -1,0 +1,386 @@
+version: 1
+description: |
+  Transition UI primitive catalog for Mozaiks transition components.
+
+  Every custom transition component — whether registered as a core shell component
+  or as a workflow-specific component in any workflow's ui/index.js — MUST import
+  from this primitive set instead of building its own layout, motion, or button
+  system. This ensures visual and behavioral consistency across all transition
+  screens regardless of which workflow generates them.
+
+  This catalog lives alongside the primitives it documents:
+    chat-ui/src/platform/transitionPrimitives.jsx
+
+  Import path: @mozaiks/chat-ui/platform
+
+  All components render inside TransitionOverlayFrame (bottom sheet on mobile,
+  centered modal on desktop). The frame is injected by TransitionScreen — custom
+  components do not need to handle their own overlay or backdrop.
+
+# ---------------------------------------------------------------------------
+# Component contract
+# Every registered transition component receives these props from TransitionScreen.
+# ---------------------------------------------------------------------------
+component_contract:
+  description: |
+    Every transition component registered via coreComponents.js or a workflow's
+    ui/index.js must accept the following prop shape.
+  props:
+    transition:
+      type: "WorkflowTransition & { context?: Record<string, any> }"
+      description: |
+        Full transition object from extension_registry.json plus runtime context
+        merged from pendingTransitionContext. Read runtime values (workflowName,
+        summary, build_registry_id, etc.) from transition.context.
+    onResolve:
+      type: "(option_id: string | null, context_variables?: Record<string, any>) => void"
+      description: |
+        Call to advance the transition. For choice screens: pass the selected
+        option_id. For action/completion screens: pass null. Optionally pass
+        context_variables to seed the next workflow.
+    overlayTitleId:
+      type: string
+      description: Pass to the panel's title element id for accessible aria-labelledby.
+    overlayDescriptionId:
+      type: string
+      description: Pass to the panel's body element id for aria-describedby.
+
+# ---------------------------------------------------------------------------
+# Hooks
+# ---------------------------------------------------------------------------
+hooks:
+  useTransitionMotion:
+    import: "@mozaiks/chat-ui/platform"
+    description: |
+      Returns { entered, prefersReducedMotion } for entry animation.
+      Call at the top of every custom transition component and pass the values
+      to the panel and card primitives.
+    returns:
+      entered:
+        type: boolean
+        description: True after the first animation frame — triggers entry transitions.
+      prefersReducedMotion:
+        type: boolean
+        description: True if the user has prefers-reduced-motion set. Pass to all primitives.
+
+# ---------------------------------------------------------------------------
+# Primitives
+# ---------------------------------------------------------------------------
+primitives:
+
+  TransitionChoicePanel:
+    import: "@mozaiks/chat-ui/platform"
+    use_for:
+      - user_choice
+      - user_choice_context
+      - user_choice_route
+    description: |
+      Full-height layout wrapper for choice screens. Provides the eyebrow/title/
+      subtitle header, ambient glow blobs, and the flex card grid. Place
+      TransitionChoiceCard elements as children.
+    props:
+      eyebrow:
+        type: string
+        default: "Transition"
+        description: Small uppercase label above the title (e.g. "Build Mode", "Start Here").
+      title:
+        type: string
+        required: true
+        description: Primary screen heading.
+      subtitle:
+        type: string
+        description: Optional supporting text below the title.
+      overlayTitleId:
+        type: string
+        description: Pass through from component props for aria-labelledby.
+      overlayDescriptionId:
+        type: string
+        description: Pass through from component props for aria-describedby.
+      entered:
+        type: boolean
+        note: "From useTransitionMotion()"
+      prefersReducedMotion:
+        type: boolean
+        note: "From useTransitionMotion()"
+      children:
+        type: ReactNode
+        description: TransitionChoiceCard elements.
+
+  TransitionChoiceCard:
+    import: "@mozaiks/chat-ui/platform"
+    use_for:
+      - user_choice
+      - user_choice_context
+      - user_choice_route
+    description: |
+      Selectable option card. Image, label, description, CTA button, badge,
+      staggered entry animation. Use inside TransitionChoicePanel.
+      onResolve is called with optionId matching transition.options[].id.
+    props:
+      optionId:
+        type: string
+        required: true
+        description: Must match the corresponding transition.options[].id value.
+      label:
+        type: string
+        required: true
+        description: Card heading.
+      description:
+        type: string
+        description: Supporting body text below the label.
+      image:
+        type: string
+        description: |
+          URL for the card image. Displayed at h-56 with object-contain.
+          If omitted, a pill badge is shown instead.
+      cta:
+        type: string
+        required: true
+        description: CTA button label (e.g. "Start Build", "Choose Guided").
+      badge:
+        type: string
+        description: Small top-right badge label (e.g. "Fastest path", "Recommended").
+      helperText:
+        type: string
+        description: Small helper note below description. Shown in warning tone when disabled.
+      disabled:
+        type: boolean
+        default: false
+      onResolve:
+        type: "(optionId: string) => void"
+        required: true
+        description: Called with optionId when the card is clicked.
+      entered:
+        type: boolean
+        note: "From useTransitionMotion()"
+      prefersReducedMotion:
+        type: boolean
+        note: "From useTransitionMotion()"
+      delayMs:
+        type: number
+        description: |
+          Entry animation stagger delay in ms. Natural cascade:
+            delayMs={120 + index * 80}
+
+  TransitionActionPanel:
+    import: "@mozaiks/chat-ui/platform"
+    use_for:
+      - confirm
+      - workflow_complete
+    description: |
+      Full-height layout wrapper for completion, confirmation, and info screens.
+      Provides an icon, eyebrow/title/body header, ambient glow, and a centered
+      action slot. Place TransitionActionButton elements as children.
+    props:
+      eyebrow:
+        type: string
+        default: "Next Step"
+        description: Small uppercase label above the title (e.g. "Confirmation", "Build Complete").
+      title:
+        type: string
+        required: true
+        description: Primary screen heading.
+      body:
+        type: string
+        description: Optional supporting text below the title.
+      icon:
+        type: "'success' | 'warning' | 'info' | null"
+        default: "null"
+        description: |
+          Optional icon shown above the title:
+            success — green checkmark circle (use for workflow_complete)
+            warning — amber triangle (use for destructive confirms)
+            info    — blue info circle (use for standard confirms)
+            null    — no icon
+      overlayTitleId:
+        type: string
+        description: Pass through from component props for aria-labelledby.
+      overlayDescriptionId:
+        type: string
+        description: Pass through from component props for aria-describedby.
+      entered:
+        type: boolean
+        note: "From useTransitionMotion()"
+      prefersReducedMotion:
+        type: boolean
+        note: "From useTransitionMotion()"
+      children:
+        type: ReactNode
+        description: |
+          TransitionActionButton elements and optional summary/detail content.
+          Wrap multiple buttons in:
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
+
+  TransitionActionButton:
+    import: "@mozaiks/chat-ui/platform"
+    use_for:
+      - confirm
+      - workflow_complete
+    description: |
+      Styled action button for use inside TransitionActionPanel.
+      Use variant="primary" for the affirmative action and variant="secondary"
+      for cancel or dismissal.
+    props:
+      label:
+        type: string
+        required: true
+      variant:
+        type: "'primary' | 'secondary'"
+        default: "primary"
+        description: |
+          primary   — filled brand button (confirm, continue, proceed)
+          secondary — muted outlined button (cancel, dismiss, go back)
+      onClick:
+        type: "() => void"
+        required: true
+      disabled:
+        type: boolean
+        default: false
+
+# ---------------------------------------------------------------------------
+# Patterns
+# ---------------------------------------------------------------------------
+patterns:
+
+  choice_screen:
+    use_for: [user_choice, user_choice_context, user_choice_route]
+    description: Standard pattern for custom user_choice transition components.
+    template: |
+      import {
+        TransitionChoicePanel,
+        TransitionChoiceCard,
+        useTransitionMotion,
+      } from '@mozaiks/chat-ui/platform';
+
+      const OPTION_VIEW = {
+        option_a: {
+          label: 'Option A',
+          description: 'What this path does.',
+          cta: 'Choose A',
+          badge: 'Recommended',
+        },
+        option_b: {
+          label: 'Option B',
+          description: 'What this path does.',
+          cta: 'Choose B',
+        },
+      };
+
+      const toLabel = (value) =>
+        String(value || 'continue')
+          .replace(/[_-]+/g, ' ')
+          .replace(/\b\w/g, (m) => m.toUpperCase());
+
+      export default function MySelector({ transition, onResolve, overlayTitleId, overlayDescriptionId }) {
+        const options = Array.isArray(transition?.options) ? transition.options : [];
+        const motion = useTransitionMotion();
+
+        return (
+          <TransitionChoicePanel
+            eyebrow="Step Label"
+            title="Choose Your Path"
+            subtitle="Supporting description of the choice."
+            overlayTitleId={overlayTitleId}
+            overlayDescriptionId={overlayDescriptionId}
+            entered={motion.entered}
+            prefersReducedMotion={motion.prefersReducedMotion}
+          >
+            {options.map((option, index) => {
+              const meta = OPTION_VIEW[option.id] || {
+                label: toLabel(option.id),
+                description: '',
+                cta: 'Continue',
+              };
+              return (
+                <TransitionChoiceCard
+                  key={option.id}
+                  optionId={option.id}
+                  label={meta.label}
+                  description={meta.description}
+                  cta={meta.cta || 'Continue'}
+                  badge={meta.badge || ''}
+                  onResolve={onResolve}
+                  entered={motion.entered}
+                  prefersReducedMotion={motion.prefersReducedMotion}
+                  delayMs={120 + index * 80}
+                />
+              );
+            })}
+          </TransitionChoicePanel>
+        );
+      }
+
+  action_screen:
+    use_for: [confirm, workflow_complete]
+    description: Standard pattern for confirm or completion transition components.
+    template: |
+      import {
+        TransitionActionPanel,
+        TransitionActionButton,
+        useTransitionMotion,
+      } from '@mozaiks/chat-ui/platform';
+
+      export default function MyActionScreen({ transition, onResolve, overlayTitleId, overlayDescriptionId }) {
+        const motion = useTransitionMotion();
+        const ctx = transition?.context || {};
+
+        return (
+          <TransitionActionPanel
+            eyebrow="Confirm"
+            title="Are you ready?"
+            body={ctx.message || 'This will proceed to the next step.'}
+            icon="info"
+            overlayTitleId={overlayTitleId}
+            overlayDescriptionId={overlayDescriptionId}
+            entered={motion.entered}
+            prefersReducedMotion={motion.prefersReducedMotion}
+          >
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
+              <TransitionActionButton
+                label="Cancel"
+                variant="secondary"
+                onClick={() => onResolve('cancel')}
+              />
+              <TransitionActionButton
+                label="Confirm"
+                variant="primary"
+                onClick={() => onResolve('confirm')}
+              />
+            </div>
+          </TransitionActionPanel>
+        );
+      }
+
+# ---------------------------------------------------------------------------
+# Transition type to primitive mapping
+# ---------------------------------------------------------------------------
+transition_type_to_primitive:
+  user_choice:        [TransitionChoicePanel, TransitionChoiceCard]
+  user_choice_context: [TransitionChoicePanel, TransitionChoiceCard]
+  user_choice_route:  [TransitionChoicePanel, TransitionChoiceCard]
+  confirm:            [TransitionActionPanel, TransitionActionButton]
+  workflow_complete:  [TransitionActionPanel, TransitionActionButton]
+  silent:             []
+  progress_view:      []
+  prerequisite_redirect: []
+  condition:          []
+  chat_session:       []
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+registration:
+  description: |
+    Custom transition components must be registered so TransitionScreen can look
+    them up by name. Two registration paths exist:
+
+    1. Core shell components (shipped with chat-ui):
+       Register in chat-ui/src/registry/coreComponents.js using registerComponent().
+       Example: WorkflowCompletion, LauncherScreen, ConfirmScreen.
+
+    2. Workflow-specific components (per-workflow transition UI):
+       Export from the workflow's ui/index.js barrel.
+       Example: AppTypeSelector in factory_app/workflows/extended_orchestration/ui/index.js.
+
+    The component name in extension_registry.json transition.ui.component MUST
+    match the key used in registerComponent() or the index.js export name exactly.

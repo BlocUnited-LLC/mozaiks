@@ -24,6 +24,7 @@ import ProfilePage from '../pages/ProfilePage.jsx';
 // Transition renderers — referenced by transition.ui.component
 import { LauncherScreen } from '../ui/screens/LauncherScreen.jsx';
 import { ConfirmScreen } from '../ui/screens/ConfirmScreen.jsx';
+import WorkflowCompletion from '../components/chat/WorkflowCompletion.jsx';
 
 registerComponent('ChatPage', ChatPage, {
   core: true,
@@ -50,6 +51,11 @@ registerComponent('ProfilePage', ProfilePage, {
   description: 'Host-owned account page — calls /api/me and /api/me/preferences.',
 });
 
-export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'ProfilePage'];
+registerComponent('WorkflowCompletion', WorkflowCompletion, {
+  core: true,
+  description: 'Terminal transition screen shown when a workflow run completes with no server transition pending. Receives { transition, onResolve } from TransitionScreen.',
+});
+
+export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'ProfilePage', 'WorkflowCompletion'];
 
 console.log('[CoreComponents] Registered core chat-ui components:', CORE_COMPONENTS);

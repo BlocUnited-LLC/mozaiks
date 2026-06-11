@@ -7,10 +7,15 @@
  *
  * For a full product app, wire these primitives into your app shell and auth/runtime adapters.
  */
+import './demo.css';
+import './styles/chatShell.css';
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ChatUIProvider } from './context/ChatUIContext';
+import { NavigationProvider } from './providers/NavigationProvider';
+import BrandingProvider from './providers/BrandingProvider';
 import ChatPage from './pages/ChatPage';
 
 /**
@@ -45,29 +50,22 @@ const mockApiAdapter = {
 function DemoApp() {
   return (
     <BrowserRouter>
-      <ChatUIProvider
-        authAdapter={mockAuthAdapter}
-        apiAdapter={mockApiAdapter}
-      >
-        <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-          <header style={{
-            padding: '8px 16px',
-            borderBottom: '1px solid var(--color-border, #333)',
-            background: 'var(--color-surface, #1a1a1a)',
-            color: 'var(--color-text, #e0e0e0)',
-            fontSize: '14px',
-          }}>
-            mozaiks — dev shell
-          </header>
-          <main style={{ flex: 1, overflow: 'hidden' }}>
-            <Routes>
-              <Route path="/" element={<ChatPage />} />
-              <Route path="/chat" element={<ChatPage />} />
-              <Route path="/chat/:chatId" element={<ChatPage />} />
-            </Routes>
-          </main>
-        </div>
-      </ChatUIProvider>
+      <BrandingProvider>
+        <NavigationProvider>
+          <ChatUIProvider
+            authAdapter={mockAuthAdapter}
+            apiAdapter={mockApiAdapter}
+          >
+            <main style={{ height: '100vh', overflow: 'hidden' }}>
+              <Routes>
+                <Route path="/" element={<Navigate to="/chat/demo-app" replace />} />
+                <Route path="/chat" element={<Navigate to="/chat/demo-app" replace />} />
+                <Route path="/chat/:chatId" element={<ChatPage />} />
+              </Routes>
+            </main>
+          </ChatUIProvider>
+        </NavigationProvider>
+      </BrandingProvider>
     </BrowserRouter>
   );
 }

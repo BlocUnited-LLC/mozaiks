@@ -48,6 +48,11 @@ const ArtifactPanel = ({
     return typeof type === 'string' && type.startsWith('core.');
   };
 
+  const emptyStateTitle = workflowName ? `${workflowName} artifacts` : 'Artifact canvas';
+  const emptyStateMessage = isViewSurface
+    ? 'This surface is ready for generated artifacts, but nothing has been published into it yet.'
+    : 'Artifacts from workflow tools will appear here once the session publishes a UI payload.';
+
   return (
     <div className={containerClasses}>
       {/* Mobile backdrop */}
@@ -65,13 +70,24 @@ const ArtifactPanel = ({
             {/* If no content, show just the Mozaiks logo */}
             {(!messages || messages.length === 0) ? (
               <div className="flex flex-1 items-center justify-center min-h-full md:min-h-[500px]">
-                <div className="w-24 h-24 sm:w-32 sm:h-32 md:w-40 md:h-40 bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 rounded-2xl sm:rounded-3xl border-2 border-[var(--color-primary-light)]/50 flex items-center justify-center backdrop-blur-sm shadow-2xl">
-                  <img
-                    src={brandLogoSrc}
-                    alt="Mozaiks Logo"
-                    className="w-16 h-16 sm:w-20 sm:h-20 md:w-28 md:h-28"
-                    onError={applyBrandImageFallback}
-                  />
+                <div className="max-w-md w-full rounded-3xl border border-[rgba(var(--color-primary-light-rgb),0.28)] bg-[rgba(6,11,25,0.72)] shadow-[0_24px_60px_rgba(2,6,23,0.55)] backdrop-blur-xl px-6 py-8 sm:px-8 sm:py-10 text-center">
+                  <div className="mx-auto mb-5 w-24 h-24 sm:w-28 sm:h-28 bg-gradient-to-br from-[var(--color-primary)]/20 to-[var(--color-secondary)]/20 rounded-2xl sm:rounded-3xl border-2 border-[var(--color-primary-light)]/45 flex items-center justify-center backdrop-blur-sm shadow-2xl">
+                    <img
+                      src={brandLogoSrc}
+                      alt="Mozaiks Logo"
+                      className="w-16 h-16 sm:w-20 sm:h-20"
+                      onError={applyBrandImageFallback}
+                    />
+                  </div>
+                  <div className="text-[11px] uppercase tracking-[0.28em] text-[rgba(var(--color-primary-light-rgb),0.72)] mb-3 heading-font">
+                    {emptyStateTitle}
+                  </div>
+                  <div className="text-lg sm:text-xl font-semibold text-white mb-2 heading-font">
+                    No artifacts yet
+                  </div>
+                  <div className="text-sm sm:text-base text-[rgba(226,232,240,0.78)] leading-6">
+                    {emptyStateMessage}
+                  </div>
                 </div>
               </div>
             ) : (
