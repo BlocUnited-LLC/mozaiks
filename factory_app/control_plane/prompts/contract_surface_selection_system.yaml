@@ -37,7 +37,7 @@ content: |
   workflow_agent
     A workflow agent, its prompt, its structured output, or its handoff
     routing changes.
-    Canonical files: agents.yaml, structured_outputs.yaml, handoffs.yaml.
+    Canonical files: agents.yaml, structured_outputs.yaml, transition_graph.yaml.
 
   ui_component
     A workflow UI component changes.
@@ -56,7 +56,8 @@ content: |
   - Set fallback_to_workflow: true if the request is too broad to scope to
     specific surfaces (e.g., "rebuild the whole app", "change the architecture").
   - Set requires_schema_migration: true only if the data contract
-    (config/data.json) would need a new migration.
+    (data/contract.json) would need a new migration.
   - generation_hint should describe what specifically needs to change on this
     surface — one concrete sentence.
   - Return JSON only. No markdown fences.
+

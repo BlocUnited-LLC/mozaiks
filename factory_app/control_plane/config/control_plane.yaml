@@ -1,10 +1,4 @@
 schema_version: mozaiks.control_plane
-profile:
-  id: factory_app
-  display_name: Factory App Harness
-  description: First-party declarative control-plane pack for the Mozaiks builder/reference app workspace.
-harness:
-  implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
 routing:
   default_artifact_kind: app_bundle
   artifacts:
@@ -53,38 +47,24 @@ routing:
         core:
           workflow_sequence: full_rebuild
 checkpoints:
-  - id: request_intake
-    event: request_submitted
-    entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
+  - event: request_submitted
     prompt_id: change_classifier_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
       - get_stale_artifact_families
-  - id: refinement_route
-    event: route_requested
-    entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
-  - id: decision
-    event: decision_requested
-    entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
-  - id: scope_selection
-    event: scope_requested
-    entrypoint: mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer
+  - event: scope_requested
     prompt_id: coding_scope_selection_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
       - get_artifact_workspace_catalog
       - get_context_graph_catalog
-  - id: contract_surface_planning
-    event: contract_surface_requested
-    entrypoint: mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner
+  - event: contract_surface_requested
     prompt_id: contract_surface_selection_system
     tool_ids:
       - get_contract_surface_context
-  - id: coding_refinement
-    event: coding_requested
-    entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
+  - event: coding_requested
     prompt_id: coding_refinement_system
     tool_ids:
       - get_revision_context

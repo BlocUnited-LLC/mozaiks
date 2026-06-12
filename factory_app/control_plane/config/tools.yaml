@@ -67,3 +67,10 @@ tools:
     entrypoint: factory_app.control_plane.tools.get_carry_forward_candidates:get_carry_forward_candidates
     available_to:
       - route_requested
+  - id: read_artifact_file
+    kind: context_tool
+    description: Read a single file from the artifact workspace by its relative path. Returns file content up to 80,000 characters. Use when an agent needs to inspect a specific artifact file by known path rather than browsing the full workspace catalog.
+    entrypoint: factory_app.control_plane.tools.read_artifact_file:read_artifact_file
+    available_to:
+      - scope_requested
+      - coding_requested

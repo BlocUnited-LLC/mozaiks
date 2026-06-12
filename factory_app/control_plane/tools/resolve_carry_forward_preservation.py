@@ -53,12 +53,12 @@ _DENYLIST_BASENAMES: frozenset[str] = frozenset({
 _DENYLIST_FULL_PATHS: frozenset[str] = frozenset({
     "ui/route_manifest.json",
     "ui/index.js",
-    "config/data.json",
+    "data/contract.json",
 })
 
 # Path prefixes that are always rejected
 _DENYLIST_PREFIXES: tuple[str, ...] = (
-    "config/data_migrations/",
+    "data/migrations/",
     "ui/pages/custom/",
     "services/integrations/",
     "services/routes/",
