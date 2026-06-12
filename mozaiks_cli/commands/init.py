@@ -228,6 +228,7 @@ def _create_bundle_scaffold(
   service_security_dir = services_dir / "security"
   service_routes_dir = services_dir / "routes"
   service_data_dir = services_dir / "data"
+  data_dir = app_root / "data"
   modules_dir = app_root / "modules"
   workflows_dir = target_dir / "workflows"
   brand_dir = app_root / "brand"
@@ -248,6 +249,7 @@ def _create_bundle_scaffold(
     service_security_dir,
     service_routes_dir,
     service_data_dir,
+    data_dir,
     *(service_adapters_dir / area for area in (
       "auth",
       "source_control",
@@ -307,13 +309,13 @@ def _create_bundle_scaffold(
   _write_text(config_dir / "secrets.yaml", _secrets_yaml_placeholder())
   print("Created app/config/secrets.yaml")
 
-  _write_json(config_dir / "data.json", _data_contract_placeholder())
-  print("Created app/config/data.json")
+  _write_json(data_dir / "contract.json", _data_contract_placeholder())
+  print("Created app/data/contract.json")
 
   _write_service_support_stubs(services_dir)
   print("Created app/services support stubs")
 
-  _write_text(service_data_dir / "__init__.py", '"""Data contract helpers declared by app/config/data.json."""\n')
+  _write_text(service_data_dir / "__init__.py", '"""Data contract helpers declared by app/data/contract.json."""\n')
   print("Created app/services/data/")
 
   _copy_default_brand_bundle(brand_dir, app_name)
@@ -1098,16 +1100,14 @@ triggers:
     structured_outputs_required: false
 """
 
-    handoffs_yaml = """handoff_rules:
+    transition_graph_yaml = """transition_rules:
   - source_agent: user
     target_agent: GreeterAgent
-    handoff_type: condition
-    condition_type: string_llm
-    condition: "When the user starts the conversation or asks what this app can do."
+    transition_type: after_turn
     transition_target: AgentTarget
   - source_agent: GreeterAgent
     target_agent: user
-    handoff_type: after_work
+    transition_type: after_turn
     transition_target: RevertToUserTarget
 """
 
@@ -1132,18 +1132,18 @@ chat_pane_agents:
 artifact_agents: []
 """
 
-    hooks_yaml = """hooks: []
+    middleware_yaml = """prompt_middleware: []
 """
 
     workflow_files = {
         "orchestrator.yaml": orchestrator,
         "agents.yaml": agents_yaml,
-        "handoffs.yaml": handoffs_yaml,
+        "transition_graph.yaml": transition_graph_yaml,
         "context_variables.yaml": context_variables_yaml,
         "structured_outputs.yaml": structured_outputs_yaml,
         "tools.yaml": tools_yaml,
         "ui_config.yaml": ui_config_yaml,
-        "hooks.yaml": hooks_yaml,
+        "middleware.yaml": middleware_yaml,
     }
     for filename, content in workflow_files.items():
         _write_text(workflow_dir / filename, content)
@@ -1208,12 +1208,12 @@ Each workflow lives under `workflows/<WorkflowName>/` and usually includes:
 
 - `orchestrator.yaml`
 - `agents.yaml`
-- `handoffs.yaml`
+- `transition_graph.yaml`
 - `context_variables.yaml`
 - `structured_outputs.yaml`
 - `tools.yaml`
 - `ui_config.yaml`
-- `hooks.yaml`
+- `middleware.yaml`
 
 Use `mozaiks gen workflow` only after you know what the workflow is supposed to do.
 """
@@ -1241,5 +1241,6 @@ export function register(registerComponent) {
   // is not enough. Use app/ui/pages/custom/ for full-page custom routes.
 }
 """
+
 
 

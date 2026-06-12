@@ -100,8 +100,8 @@ _ORCHESTRATOR_DROP_FIELDS: set[str] = set()
 
 # Fields that need to be stripped from nested list items in specific files
 _LIST_ITEM_DROP_FIELDS = {
-    "handoffs.yaml": {
-        "handoff_rules": {"description"},
+    "transition_graph.yaml": {
+        "transition_rules": {"description"},
     },
     "tools.yaml": {
         "lifecycle_tools": {"tool_type", "auto_tool_call"},

@@ -13,11 +13,11 @@ Canonical workflow shape:
 workflows/{WorkflowName}/
   orchestrator.yaml
   agents.yaml
-  handoffs.yaml
+  transition_graph.yaml
   context_variables.yaml
   structured_outputs.yaml
   tools.yaml
-  hooks.yaml
+  middleware.yaml
   ui_config.yaml
   tools/
   ui/
@@ -31,3 +31,4 @@ workflows/{WorkflowName}/
 - Do not put classification/inference heuristics in tools.
 - Use declared triggers and handoffs instead of hardcoded runtime assumptions.
 - Keep workflow-specific UI under the workflow `ui/` folder only when the workflow needs an artifact surface.
+

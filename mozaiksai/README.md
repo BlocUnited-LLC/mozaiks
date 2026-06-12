@@ -26,7 +26,7 @@ compose app-local hosts on top of Studio instead of adding product hosts here.
 - Persists chat sessions to MongoDB
 - Handles tool calls from agents
 - Manages workflow state (in-progress, completed)
-- Token accounting and observability
+- AG2 beta telemetry and neutral runtime usage measurement
 
 It must not own:
 
@@ -47,11 +47,12 @@ mozaiksai/
 │   ├── data/             # Runtime persistence and storage helpers
 │   ├── events/           # Runtime event dispatch and envelopes
 │   ├── multitenant/      # app_id/user_id/chat_id scoping
-│   ├── observability/    # Performance tracking and token logging
+│   ├── observability/    # AG2 telemetry middleware wiring
 │   ├── ports/            # Engine-agnostic contracts
 │   ├── runtime/          # App/runtime loading and composition helpers
 │   ├── session/          # Session lifecycle helpers
-│   ├── tokens/           # Token accounting
+│   ├── tokens/           # Neutral usage event emission
+│   ├── usage/            # Runtime usage ledger and AG2 usage middleware
 │   ├── transport/        # WebSocket transport and session registry
 │   └── workflow/         # Workflow execution patterns and context management
 ```
@@ -103,7 +104,7 @@ run_workflow_orchestration(workflow_name, chat_id, ...)
     ↓
 Load workflow config from factory_app/workflows/{name}/
     ↓
-Create AG2 beta agents and compile handoffs.yaml to a TransitionGraph
+Create AG2 beta agents and compile transition_graph.yaml to a TransitionGraph
     ↓
 Run agent turns through the AG2 orchestration adapter
     ↓
@@ -135,7 +136,7 @@ class OrchestrationPort(Protocol):
 Workflows are defined in `factory_app/workflows/{name}/`:
 - `orchestrator.yaml` — Workflow metadata and triggers
 - `agents.yaml` — Agent definitions
-- `handoffs.yaml` — Agent routing rules
+- `transition_graph.yaml` — Agent routing rules
 - `context_variables.yaml` — Shared workflow state
 - `tools.yaml` — Tool bindings
 - `tools/*.py` — Tool implementations
@@ -245,3 +246,4 @@ complete.
 Both require a working `.env` with `OPENAI_API_KEY` and `MONGO_URI`, plus a reachable MongoDB instance.
 If you rely on the repo Docker Compose service, Docker Desktop must be running before
 `docker compose -f infra/compose/docker-compose.yml up -d mongo`.
+

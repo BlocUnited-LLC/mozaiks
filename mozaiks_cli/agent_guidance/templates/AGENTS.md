@@ -43,7 +43,7 @@ This repo owns app-specific behavior only:
 - `app/brand/` - app branding assets and theme config
 - `app/services/` - optional app-owned support code such as thin integrations, provider adapters, security helpers, and app-level routes
 - `app/modules/` - deterministic app capabilities
-- `app/config/data.json` and `app/config/data_migrations/` - canonical app data contract and additive migration artifacts; generic helper code lives in `app/services/data/` when needed
+- `app/data/contract.json` and `app/data/migrations/` - canonical app data contract and additive migration artifacts; generic helper code lives in `app/services/data/` when needed
 - `workflows/` - app-local AI workflows
 - `app/ui/` - app pages, route manifest, and custom UI registration
 - `generated/` - staged generator output awaiting review/promotion

@@ -36,7 +36,7 @@ and web shell behavior.
 | App-specific auth provider mechanics | `app/services/adapters/auth/<provider>.py` |
 | Provider-neutral auth/secret helpers | `app/services/security/` |
 | App-level routes, only when needed | `app/services/routes/` |
-| Data contract and migration artifacts, only when `config/data.json` is present | `app/config/data.json`, `app/config/data_migrations/`, `app/services/data/` |
+| Data contract and migration artifacts, only when `data/contract.json` is present | `app/data/contract.json`, `app/data/migrations/`, `app/services/data/` |
 | Deterministic app capabilities | `app/modules/<module_id>/` |
 | AI workflow behavior | `workflows/<WorkflowName>/` |
 | Declarative pages | `app/ui/pages/` |

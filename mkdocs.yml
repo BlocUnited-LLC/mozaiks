@@ -92,7 +92,12 @@ nav:
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
-      - Extending AI Functionality: guides/adding-control-plane/01-overview.md
+      - Extending AI Functionality:
+          - Overview: guides/extending-ai-functionality/01-overview.md
+          - AI Runtime Startup: guides/extending-ai-functionality/02-ai-runtime-startup.md
+          - Control-Plane Runtime Policy: guides/extending-ai-functionality/03-control-plane-runtime-policy.md
+          - Control-Plane Manifest: guides/extending-ai-functionality/04-control-plane-manifest.md
+          - Workflow Sequences: guides/extending-ai-functionality/05-workflow-sequences.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
       - Platform Intelligence:
           - Context Graph: guides/platform-intelligence/01-context-graph.md
@@ -125,7 +130,7 @@ nav:
           - Overview: architecture/modules-systems/index.md
           - Module System: architecture/modules-systems/module-system.md
           - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
-          - Capability Pack Model: architecture/modules-systems/capability-pack-model.md
+          - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
           - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
       - Workflows:
           - Overview: architecture/workflows/index.md
@@ -133,8 +138,13 @@ nav:
           - Workflow Authoring Contracts: architecture/workflows/workflow-authoring-contracts.md
           - Workflow Routing Transitions: architecture/workflows/workflow-routing-transitions.md
           - Orchestration Control Loops: architecture/workflows/orchestration-control-loops.md
+          - AG2 Ownership Boundary: architecture/workflows/ag2-ownership-boundary.md
+          - AG2 Update Watchpoints: architecture/workflows/ag2-update-watchpoints.md
+          - AG2 Execution Alignment Plan: architecture/workflows/ag2-execution-alignment-plan.md
           - Declarative AG2 Mapping: architecture/workflows/declarative-ag2-mapping.md
           - AG2 Network Patternbook: architecture/workflows/ag2-network-patternbook.md
+          - Build Context Packs: architecture/workflows/build-context-packs.md
+          - Domain-Agnostic Build Factory: architecture/workflows/domain-agnostic-build-factory.md
           - Structured Output Extraction: architecture/workflows/structured-output-extraction-contract.md
           - Refinement Control Plane: architecture/workflows/refinement-control-plane.md
           - Session Router: architecture/workflows/session-router.md
@@ -145,7 +155,7 @@ nav:
               - Workflow Task Batches: architecture/mozaiksai/task-batches.md
               - Universal Orchestrator: architecture/mozaiksai/universal-orchestrator.md
               - Pack Graph Semantics: architecture/mozaiksai/pack-graph-semantics.md
-              - Handoff Condition Scope: architecture/mozaiksai/handoff-condition-scope.md
+              - Handoff Context Conditions: architecture/mozaiksai/handoff-context-conditions.md
           - UI and Interaction:
               - UI Interaction Patterns: architecture/mozaiksai/ui-interaction-patterns.md
               - Lifecycle Tools: architecture/mozaiksai/lifecycle-tools.md
