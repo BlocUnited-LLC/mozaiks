@@ -1,13 +1,12 @@
 """
-Hook: Inject Workflow Archetype Library into WorkflowBundleBuilderAgent
+Hook: Inject Workflow Archetype Library into WorkflowBundleBuilderAgent.
 
-Fires as an update_agent_state hook on WorkflowBundleBuilderAgent.
+Fires as a prompt middleware function on WorkflowBundleBuilderAgent.
 
-Closes Gap #7 (archetype library gap) — WorkflowBundleBuilderAgent previously had
-access to the AG2 orchestration pattern guidance (Pipeline, Feedback Loop, etc.)
-but not the higher-level workflow archetypes that define:
+WorkflowBundleBuilderAgent receives AG2 orchestration pattern guidance and the
+higher-level workflow archetypes that define:
   - Canonical agent sequences for AI-native packs (ai_review, ai_analysis, ai_extraction)
-  - Per-archetype hard constraints (startup_mode, result action contract, forbidden operations)
+  - Per-archetype hard constraints (workflow_startup_mode, result action contract, forbidden operations)
   - Orchestrator defaults (human_in_the_loop, max_turns, workflow_startup_mode)
 
 When the worker's current_task has a capability_id ending in a known AI-native
@@ -21,15 +20,15 @@ No-ops for non-AI-native workflows.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
+from factory_app.workflows._shared.hook_utils import workflow_context_path
+
 logger = logging.getLogger(__name__)
 
-_TOOLS_DIR = Path(__file__).parent.parent.parent / "AppGenerator" / "tools"
-_WORKFLOW_ARCHETYPES_PATH = _TOOLS_DIR / "workflow_archetypes.yaml"
+_WORKFLOW_ARCHETYPES_PATH = workflow_context_path("AppGenerator", "workflow_archetypes.yaml")
 
 _HEADER_PREFIX = "[WORKFLOW ARCHETYPE]"
 
@@ -40,7 +39,7 @@ _SUFFIX_TO_ARCHETYPE = {
 }
 
 
-def _load_archetypes() -> Dict[str, Any]:
+def _load_archetypes() -> dict[str, Any]:
     try:
         with _WORKFLOW_ARCHETYPES_PATH.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -50,9 +49,9 @@ def _load_archetypes() -> Dict[str, Any]:
         return {}
 
 
-def _detect_archetype_name(context_variables: Any) -> Optional[str]:
+def _detect_archetype_name(context_variables: Any) -> str | None:
     """Return the archetype name for the current task if it is an AI-native workflow."""
-    ctx: Dict[str, Any] = {}
+    ctx: dict[str, Any] = {}
     if hasattr(context_variables, "data"):
         ctx = context_variables.data
     elif isinstance(context_variables, dict):
@@ -75,10 +74,10 @@ def _detect_archetype_name(context_variables: Any) -> Optional[str]:
     return None
 
 
-def _render_archetype_section(name: str, archetype: Dict[str, Any]) -> str:
+def _render_archetype_section(name: str, archetype: dict[str, Any]) -> str:
     """Render a single archetype entry as readable guidance."""
-    lines: List[str] = [
-        f"You are generating a workflow bundle for an AI-native pack workflow.",
+    lines: list[str] = [
+        "You are generating a workflow bundle for an AI-native pack workflow.",
         f"The assigned archetype is: {name}",
         "",
     ]
@@ -88,9 +87,9 @@ def _render_archetype_section(name: str, archetype: Dict[str, Any]) -> str:
         lines.append(f"SUMMARY: {summary}")
         lines.append("")
 
-    startup_mode = str(archetype.get("startup_mode", "")).strip()
-    if startup_mode:
-        lines.append(f"startup_mode: {startup_mode}")
+    workflow_startup_mode = str(archetype.get("workflow_startup_mode", "")).strip()
+    if workflow_startup_mode:
+        lines.append(f"workflow_startup_mode: {workflow_startup_mode}")
 
     orchestration_pattern = str(archetype.get("orchestration_pattern", "")).strip()
     if orchestration_pattern:
@@ -163,7 +162,7 @@ def _inject_section(agent: Any, header: str, body: str) -> None:
         elif hasattr(agent, "_system_message"):
             agent._system_message = new_message
         else:
-            setattr(agent, "_system_message", new_message)
+            agent._system_message = new_message
     except Exception as exc:
         logger.error(
             "[WorkflowBundleBuilderAgent] Failed to inject archetype section: %s", exc
@@ -172,10 +171,10 @@ def _inject_section(agent: Any, header: str, body: str) -> None:
 
 def inject_workflow_archetypes_context(
     agent: Any,
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> None:
     """
-    update_agent_state hook for WorkflowBundleBuilderAgent.
+    prompt middleware function for WorkflowBundleBuilderAgent.
 
     Injects [WORKFLOW ARCHETYPE: <name>] from workflow_archetypes.yaml when the
     current task is an AI-native pack workflow (capability_id ending in
@@ -211,3 +210,6 @@ def inject_workflow_archetypes_context(
 
 
 __all__ = ["inject_workflow_archetypes_context"]
+
+
+

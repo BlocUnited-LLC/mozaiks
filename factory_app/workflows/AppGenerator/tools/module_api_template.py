@@ -161,3 +161,4 @@ export function moduleWebSocketUrl(path, params = {}) {
 def get_module_api_template() -> str:
     """Return the canonical ui/lib/moduleApi.js template content."""
     return _MODULE_API_TEMPLATE
+

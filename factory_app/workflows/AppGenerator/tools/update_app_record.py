@@ -38,3 +38,4 @@ async def update_build_status(
         logger.info("Updated build registry record %s → %s", record_id, status)
     except Exception as exc:
         logger.debug("app_registry status update failed (non-fatal): %s", exc)
+

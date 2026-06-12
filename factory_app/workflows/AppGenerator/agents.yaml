@@ -76,10 +76,12 @@ agents:
       - User management (admin: list users, roles, ban/unban)
       - Settings system
       - Notifications system
-      - Subscription/entitlement system
+      - Generic subscription/entitlement runtime primitives (`app/config/subscriptions.yaml`, `entitlement_gate`, and `EntitlementPort`)
+      - Runtime AI token usage measurement (`/api/me/usage`, `/api/admin/usage`)
       - WebSocket infrastructure
       - Admin portal (`/admin` route — platform-owned)
-      If the user mentions any of these, acknowledge they are built-in and move on.
+      If the user mentions these as framework infrastructure, acknowledge they are built-in and move on.
+      If the user wants their generated app to sell plans, expose a billing portal, or gate end-user features, treat those as app-owned SaaS modules/config that can be generated on top of the built-in entitlement and runtime usage primitives. Do not generate a second AI-token usage ledger.
       If the product needs domain-specific profile records (for example investor profiles, seller profiles, creator profiles, or member profiles), treat those as module-owned domain entities rather than replacements for the host-owned account/profile primitive.
   max_consecutive_auto_reply: 8
   structured_outputs_required: false
@@ -119,6 +121,9 @@ agents:
       - Use the existing context instead of re-interviewing.
 
       Your output becomes the shared contract for downstream generation agents. Decompose into product capability packs first, not arbitrary code tasks first.
+  - id: capability_directory
+    heading: '[CAPABILITY DIRECTORY]'
+    content: '{{CAPABILITY_DIRECTORY_CONTEXT}}'
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -169,18 +174,17 @@ agents:
          - Use `concept_blueprint.capability_pack_hints` and `build_plan.capability_packs` when available.
          - Capability packs remain planning units; they are not automatically modules.
          - Every capability pack must declare `surface_id` and `surface_kind`.
-         - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `notifications_pack`, `analytics_pack`, `entitlements`, and `agent_backend_integration`.
-           Use `entitlements` for any app that needs SaaS plan/tier management, feature gates, or trial lifecycle — this is a framework_pack, not a module to generate.
+         - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `notifications_pack`, `analytics_pack`, and `agent_backend_integration`.
+         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS monetization, subscription billing, usage billing, checkout, billing portal, or wallet/account connection, use the `billing_pack` capability pack or generate a provider-neutral `external_adapter` path when the user names a specific provider.
          - **NEVER include these as capability packs** — they are first-class runtime features already provided by the Mozaiks platform host and must not be scaffolded:
-           `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `websocket`
+           `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `websocket`, `token_usage_ledger`, `ai_token_metering`
            If the product spec mentions any of these, reference them as existing runtime capabilities in `service_scope`, not as packs to generate.
-           SaaS plan/subscription management is NOT in this list — use the `entitlements` framework_pack for that.
          - If the product needs domain-specific profile records (for example investor profiles, founder profiles, vendor profiles, or creator profiles), model them as module-owned entities/actions/events inside the relevant capability pack. They do not replace the host-owned `/api/me` account/profile contract.
          - Distinguish deterministic product behavior from optional agentic augmentation.
       5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
       5a. **When `experience_spec.pages[]` is present, use the designed pages as the canonical page list** — do not invent or re-derive page structure from capability packs. For each designed page:
          - Preserve `name`, `route`, `layout`, and `intent` from the design.
-         - Map each `experience_spec.pages[i].sections[j]` to one `PrimitiveSectionHint` in `sections_hint[]`, carrying over `primitive`, `id` (as `section_id_hint`), `intent`, and `config_hint`.
+         - Map each `experience_spec.pages[i].sections[j]` to one `PrimitiveSectionHint` in `sections_hint[]`, carrying over `primitive`, `id` (as `section_id_hint`), `intent`, and `config_hint`. Note: `config_hint` in `experience_spec` is a JSON-encoded string — parse it to a dict when populating `PrimitiveSectionHint.config_hint`.
          - Extend `sections_hint[]` with additional sections only when the capability pack context reveals a clear need not covered by the design (for example a workflow launch button required by an integration).
          - Set `design_intent` on the page from `experience_spec.pages[i].intent`.
          - Only infer page structure from scratch when `experience_spec` is null.
@@ -188,12 +192,11 @@ agents:
          - For durable CRUD entities (create/list/update/delete/status changes), plan generated module persistence explicitly:
            - populate top-level `data_contract` with the canonical projects/tasks collection plan;
            - keep `data_contract` null only when the app has no durable app-owned persistence;
-           - when `data_contract` is needed, keep it generic and emit `config/data.json`; do not plan ad hoc shared folders or host-internal helper names;
+           - when `data_contract` is needed, keep it generic and emit `data/contract.json`; do not plan ad hoc shared folders or host-internal helper names;
            - populate top-level `pending_schema_migration` when indexes or additive collection setup are needed, otherwise set it to null;
            - include a `persistence_contract` build task with `initial_agent: DatabaseAgent`;
-           - include `config/data.json` in that task's `owned_paths`;
-           - include `config/data.json` in that task's `owned_paths` only when `data_contract` is non-null;
-           - include `config/data_migrations/{migration_id}.json` when indexes or additive schema changes are planned;
+           - include `data/contract.json` in that task's `owned_paths` only when `data_contract` is non-null;
+           - include `data/migrations/{migration_id}.json` when indexes or additive schema changes are planned;
            - pass collection ownership for every persistent module/entity in the task `initial_message`;
            - do not plan removed model or database-schema artifacts.
          - For project/task CRUD apps, prefer separate app-owned generated modules for `projects` and `tasks` unless the user explicitly asks for a single combined module. Each persistent module must be decomposed into a contract task, a schema/model task, and a service implementation task so YAML, typed shapes, and runtime logic have separate owners.
@@ -225,20 +228,21 @@ agents:
         - The injected `[FILE CONTRACTS CONTEXT]` is the prompt-time source for active task vocabulary, ownership, and allowed output families. Do not invent extra task types or alternate file lanes beyond that contract.
         - The injected `[WORKFLOW ARCHETYPE CONTEXT]` provides archetype guidance for workflow-surface capability packs. When a workflow capability pack's purpose is to plan, assess, or recommend (not execute), use the `proposal_only` archetype: set `human_in_the_loop: true`, follow the canonical agent sequence (IntakeAgent → PlannerAgent → OutputAgent), constrain tools to `list_*/get_*/read_*/save_*`, forbid `execute_action`, and ensure `OutputAgent` enforces `human_review_required: true` and `status: proposed` as output invariants. Workflow packs that execute actions during the session use the `standard` archetype.
         - For persistent modules, include all of:
-          1. one `persistence_contract` task owned by `DatabaseAgent` for `config/data.json` and optional `config/data_migrations/{migration_id}.json`;
+          1. one `persistence_contract` task owned by `DatabaseAgent` for `data/contract.json` and optional `data/migrations/{migration_id}.json`;
           2. one `module_contract` task per app-owned module, owned by `ConfigMiddlewareAgent`, with owned paths only for `modules/{module_id}/module.yaml`, needed `modules/{module_id}/contracts/*.yaml`, and optional `modules/{module_id}/runtime_extensions.yaml`;
           3. one `data_models` task per persistent module, owned by `ModelAgent`, with owned path `modules/{module_id}/backend/schemas.py`;
           4. one `business_services` task per persistent module, owned by `ServiceAgent`, with owned paths for `modules/{module_id}/backend/handler.py`, `modules/{module_id}/backend/service.py`, `modules/{module_id}/backend/repo.py`, `modules/{module_id}/backend/policy.py`, and any optional backend hook files declared by the module contract.
           Generated module repos use `ctx.persistence.collection(module_id, entity_name)` downstream. Keep removed database adapter APIs, hardcoded database names, and removed model/database artifacts out of the plan.
-          Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `config/data.json` and optional generic `services/data/` helpers; do not generate non-canonical app-level backend or shared-persistence folders or a special hosted/platform folder.
+          Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `data/contract.json`; do not generate non-canonical app-level backend, `services/data/` helpers, shared-persistence folders, or a special hosted/platform folder.
+          `config/data.json` is a removed path and must never appear in owned_paths, initial_message, data_contract, database_files, code_files, or task output.
           Each module-local task must set `capability_pack_id` to the module id. For a projects/tasks app, this means separate task trios with literal owned paths under `modules/projects/` and `modules/tasks/`; do not collapse them into one `project_management` module or rename them to `projects_core` / `tasks_core`.
       11a. Treat persistent application UI as schema-first:
-        - The default owner of persistent pages is `AppSchemaAgent`.
+        - `AppBuildPlan.pages[]` is the authoritative persistent page inventory. `AppSchemaAgent` enriches and materializes that inventory through the schema lane.
         - Ordinary app pages must compile into `app.json` + `ui/pages/*.yaml`, with visual deltas in `theme_config_patch`, shell content in `shell_config`, and media inventory in `asset_manifest` when non-default assets are required.
         - Persistent pages may launch workflow sessions, but they do so through declarative page actions (`action_type: workflow`) inside the page schema contract, not through raw React or workflow-local UI components.
         - Once a page launches a workflow, the live session UX belongs to the shell workflow UI contract and AgentGenerator's workflow primitive catalog, not AppGenerator.
         - Do NOT plan a second raw-frontend lane inside AppGenerator.
-        - `page_bundle` tasks must start at `AppSchemaAgent` and produce the declarative page bundle, not raw React files.
+        - `page_bundle` tasks must start at `AppSchemaAgent` and produce the declarative page bundle for the declared `AppBuildPlan.pages[]`, not raw React files or a second page list.
         - If the shipped primitive system cannot represent a requested persistent surface, first try to narrow it into the existing primitives. Only when a real primitive gap remains should AppSchemaAgent use the bounded custom route contract.
         - Custom full-page React is a rare explicit escape hatch, not a default page lane. When needed, it must be emitted only through the typed `custom_route_bundle` contract that persists `ui/route_manifest.json` + `ui/pages/custom/*.jsx` and never through ad hoc raw frontend files.
       11b. For every page in `pages[]`, populate `page_type_hint`, `shell_mode_hint`, and typed `sections_hint`:
@@ -258,8 +262,9 @@ agents:
         - `shell_mode_hint` must be one of `standard`, `workspace`, `conversation`, `focused`, `immersive`, `public`, or null only when genuinely ambiguous.
         - Use `conversation` for DM/chat/thread pages, `workspace` for dense module/profile/admin-like work surfaces, `focused` for setup/review/transition-adjacent pages, `public` for legal/marketing/public pages, `immersive` for canvas/media/full-viewport experiences, and `standard` for ordinary app pages.
         - Include one hint per expected UI section. Downstream page schema generation will refine and extend these — do not leave them empty.
-        - Each hint must include `primitive` (exact registered name), `config_hint` (partial config with required fields), `section_id_hint` (kebab-case), and `title_hint`.
-        - Every `config_hint.api_endpoint` must be a canonical module action path using the exact generated action id: `/api/modules/{module_id}/{action_id}`. If the module action is `list_tickets`, the endpoint is `/api/modules/tickets/list_tickets`; do not shorten it to `/api/modules/tickets/list` or `/api/tickets`.
+        - Each hint must include `primitive` (exact registered name), `config_hint` (JSON-encoded partial config with required fields, or null), `section_id_hint` (kebab-case), and `title_hint`.
+        - `config_hint` must be a JSON-encoded string or null. JSON-encode the config object before setting it. Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/modules/tasks/list_tasks\"}"`.
+        - The `api_endpoint` value inside config_hint must be a canonical module action path using the exact generated action id: `/api/modules/{module_id}/{action_id}`. If the module action is `list_tickets`, the endpoint is `/api/modules/tickets/list_tickets`; do not shorten it to `/api/modules/tickets/list` or `/api/tickets`.
         - Required fields per primitive (consult [SHIPPED PAGE PRIMITIVES] if injected):
           - DataTable: `columns` (list of string column names or column objects)
           - Form: `fields` (list of {name, label, type} objects)
@@ -303,7 +308,7 @@ agents:
         - Only capability packs with `surface_kind = module` may emit `task_type: module_contract`.
         Capability source rules:
         - `host_universal` capabilities: do NOT scaffold or plan any code — they are already in the platform runtime.
-        - `hosted_pack` capabilities: Do NOT plan a `module_contract` build task for it. The module already exists in the deployed host. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: hosted_pack`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for hosted pack template expansion during assembly.
+        - `hosted_pack` capabilities: Do NOT plan a `module_contract` build task for it — meaning for the hosted pack id itself. The hosted product module already exists in the deployed host. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: hosted_pack`; `capability_source` must be present in the AppBuildPlan output and must not be replaced by `pack_type`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for hosted pack template expansion during assembly. When pages or app-owned actions need to call the hosted pack, also plan a generated facade module with its own module id, `surface_kind: module`, and `capability_source: generated_module`; pages bind to that facade module, not the hosted pack id. Every hosted-pack facade module must have the normal generated module task set: `module_contract`, `data_models`, and `business_services`, unless a pack template explicitly supplies a narrower declared output family.
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract`, `data_models`, and `business_services` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no hosted business logic. Use app-bundle-relative `services/integrations/{service}_client.py` for external or hosted API clients. Use `services/adapters/{area}/{provider}.py` for provider-specific implementation boundaries that are called by modules or workflows. Use `services/security/` for provider-neutral auth/secret helpers and `services/routes/` for app-level routes only when needed. These assemble into physical `app/services/**` workspace paths. Valid adapter areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is provider mechanics rather than product state.
         - If an app needs durable runtime secrets, plan `config/secrets.yaml` as a names-only contract for provider/vault policy, env handles, and secret names. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
@@ -319,7 +324,6 @@ agents:
           - Include `control_plane_pack`: approval-gated operations console that must choose between automate, clarify, escalate, or resume based on policy.
         - Do NOT use `service_foundation`, `api_surface`, or `module_contract` for control-plane surfaces.
         - `surface_kind = external_integration` packs should use `api_surface` for thin API clients, `service_foundation` for app-owned provider adapters under `services/adapters/**`, or `agent_backend_integration` for workflow touchpoints, not `module_contract`.
-        - `surface_kind = framework_pack` packs MUST use `pack_overlay` tasks (`task_type: pack_overlay`, `initial_agent: ConfigMiddlewareAgent`). A `pack_overlay` task generates ONLY app-specific wiring — subscriptions/event-flow bindings, facade module actions, page composition overlays. Do NOT use `module_contract` for framework_pack surfaces. Do NOT regenerate pack internals. `capability_pack_id` MUST be set.
         - Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references services such as email_provider, analytics_provider, crm_provider, or storage_provider that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
         - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, and required_by. This is task metadata for the IntegrationReadinessAgent checkpoint, not a manual preflight requirement.
@@ -330,7 +334,7 @@ agents:
         - `owned_paths` must contain the minimal YAML family required for the pack: `module.yaml` is always required; add optional files only when the product scope actually needs them.
         - `owned_paths` must not include `backend/*.py`. Backend Python belongs to the sibling `data_models` and `business_services` tasks.
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
-        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: users`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `control_plane`, `ui_only`, `external_integration`, or `framework_pack` — those surfaces are not durable entity modules.
+        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: users`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `control_plane`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
         - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement those stubs.
         - For generated durable modules, set every `actions[].handler_method` equal to the action `id` unless a non-generated carry-forward contract already requires a different method. This keeps generated module.yaml, handler.py, and page endpoints deterministic.
@@ -455,21 +459,13 @@ agents:
               "sections_hint": [
                 {
                   "primitive": "DataTable",
-                  "config_hint": {
-                    "columns": ["id", "name", "status"],
-                    "selection": "single",
-                    "search": true,
-                    "api_endpoint": "/api/modules/<module_id>/<action_id>"
-                  },
+                  "config_hint": "{\"columns\": [\"id\", \"name\", \"status\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/<module_id>/<action_id>\"}",
                   "section_id_hint": "<resource>-table",
                   "title_hint": "All <Resources>"
                 },
                 {
                   "primitive": "ActionButton",
-                  "config_hint": {
-                    "layout": "row",
-                    "actions": [{ "label": "Create <Resource>", "action_type": "event", "event_type": "ui.modal.open" }]
-                  },
+                  "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Create <Resource>\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\"}]}",
                   "section_id_hint": "create-action",
                   "title_hint": null
                 }
@@ -610,8 +606,8 @@ agents:
             "execution_target": "AppGenerator",
             "initial_agent": "DatabaseAgent",
             "description": "Stage data contract and additive index migrations for projects and tasks.",
-            "initial_message": "Create data_contract entries for projects/projects and tasks/tasks. Stage config/data.json and optional config/data_migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
-            "owned_paths": ["config/data.json", "config/data_migrations/001_projects_tasks_indexes.json"],
+            "initial_message": "Create data_contract entries for projects/projects and tasks/tasks. Stage data/contract.json and optional data/migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
+            "owned_paths": ["data/contract.json", "data/migrations/001_projects_tasks_indexes.json"],
             "depends_on": [],
             "acceptance_criteria": ["data_contract declares projects/projects and tasks/tasks"]
           },
@@ -672,18 +668,18 @@ agents:
             "acceptance_criteria": ["page endpoints bind to app-owned modules", "persistent pages are declarative"]
           },
           {
-            "task_id": "task_wallet_adapter",
+            "task_id": "task_hosted_payments_adapter",
             "task_type": "api_surface",
-            "capability_pack_id": "wallet",
-            "surface_id": "wallet",
+            "capability_pack_id": "hosted_payments",
+            "surface_id": "hosted_payments",
             "surface_kind": "external_integration",
             "execution_target": "AppGenerator",
             "initial_agent": "ControllerAgent",
-            "description": "Generate a thin adapter client for the hosted wallet pack.",
-            "initial_message": "Generate services/integrations/wallet_client.py as a thin adapter client. current_build_task_type is api_surface. No hosted business logic — only thin client wiring to the hosted wallet service API.",
-            "owned_paths": ["services/integrations/wallet_client.py"],
+            "description": "Generate a thin adapter client for the selected hosted payments pack.",
+            "initial_message": "Generate services/integrations/hosted_payments_client.py as a thin adapter client. current_build_task_type is api_surface. No hosted business logic — only thin client wiring to the selected hosted payments service API.",
+            "owned_paths": ["services/integrations/hosted_payments_client.py"],
             "depends_on": [],
-            "acceptance_criteria": ["adapter delegates to hosted wallet API", "no hosted pack internals in generated file"]
+            "acceptance_criteria": ["adapter delegates to the selected hosted provider API", "no hosted pack internals in generated file"]
           }
         ]
       }
@@ -701,7 +697,7 @@ agents:
     heading: '[OBJECTIVE]'
     content: |-
       - Read the canonical app build plan and any available design documents.
-      - Produce one AppSchemaOutput covering: app startup/product intent (app.json), zero or more declarative AppPageSchema files (ui/pages/*.yaml), an optional bounded custom_route_bundle (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`), optional theme_config patch, optional shell_config, and optional asset_manifest.
+      - Produce one AppSchemaOutput covering: app startup/product intent (app.json), declarative AppPageSchema files for the exact `app_build_plan.pages[]` set (ui/pages/*.yaml), an optional bounded custom_route_bundle (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`), optional theme_config patch, optional shell_config, and optional asset_manifest.
       - Every page section must use a named primitive from the platform primitive system.
       - Keep persistent app pages declarative by default. Only emit custom full-page React when a true primitive gap remains after exhausting primitive composition.
       - When emitting custom_route_bundle, stay within the bounded app-level contract. Do not invent parallel routing systems, CSS frameworks, or shell-owned UI.
@@ -710,7 +706,8 @@ agents:
     heading: '[CONTEXT]'
     content: |-
       **Primary inputs**:
-      - `app_build_plan`: canonical capability packs, page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (partial config with required fields already populated by AppPlanAgent), `section_id_hint`, and `title_hint`. Use `config_hint` as the base config for that section and extend it; do not discard it.
+      - `app_build_plan`: canonical capability packs, authoritative page list, theme preferences, structured `brand_intent`, optional `shell_preset_hint`, and `ui_layout` / `shell_mode_hint` / `sections_hint` fields. `sections_hint` is now typed `PrimitiveSectionHint[]` — each entry carries `primitive` (validated name), `config_hint` (JSON-encoded partial config string with required fields already populated by AppPlanAgent, or null), `section_id_hint`, and `title_hint`. When `config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — extend it with additional fields from page context; do not discard it.
+      - In task-batch execution, page YAML materialization is deterministic and driven by `app_build_plan.pages`; the runtime marks page task outputs with `_page_materialization_source: "app_build_plan.pages"`. AppSchemaAgent enriches and validates those declared pages. It must not invent a second page list or replace the planner's selected routes.
       - `design_surface_map`: canonical typed surface realization contract from DesignDocs when available. Use it to confirm which surface owns each persistent page.
       - `captured_theme_config`: canonical ThemeCapture output when available. This is the strongest visual input and should be preferred over heuristic inference.
       - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. In the current pipeline this is serialized under `ui_schema`.
@@ -852,7 +849,7 @@ agents:
       - When genuinely ambiguous, null is the correct answer
 
       **Output contract**:
-      - manifest.pages must list every AppPageSchema.name produced.
+      - manifest.pages must list every `app_build_plan.pages[].name` materialized as AppPageSchema.
       - manifest.custom_routes must list every AppCustomRouteEntry.id produced in custom_route_bundle.route_manifest, or be null/empty when no custom routes exist.
       - Each persistent route must have exactly one owner: either an AppPageSchema.route or an AppCustomRouteEntry.path, never both.
       - sections[*].id must be unique within a page and kebab-cased.
@@ -860,7 +857,7 @@ agents:
       - Use canonical schema keys only: `actions`, `submit_action`, `payload`, and `columns`.
       - Use `ui.*` events only for transient browser reactions such as refresh, modal open/close, field set, toast, or navigation. Do not emit `domain.*`, `workflow.*`, `runtime.*`, `platform.*`, or `hosted.*` from page schemas.
       - Use `action_type: workflow` only for direct session launches from persistent pages. Do not fake workflow starts with `navigate` or `event` actions.
-      - Persistent page ownership is exclusive to `AppSchemaAgent`. If custom full-page React is required, it must still be emitted through AppSchemaOutput.custom_route_bundle rather than a second freeform frontend lane.
+      - Persistent page materialization is exclusively AppBuildPlan-driven and AppSchemaAgent-enriched. If custom full-page React is required, it must still be emitted through AppSchemaOutput.custom_route_bundle rather than a second freeform frontend lane.
       - Persistent app pages stay declarative by default. Rich customization comes from primitive composition, config depth, theme_config_patch, shell_config, and asset_manifest references.
       - Only use custom_route_bundle when a requested page experience exceeds the shipped primitive set in a way that cannot be represented cleanly through YAML.
       - Every custom route file must:
@@ -894,7 +891,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Read `app_build_plan.capability_packs`, `app_build_plan.pages`, and `app_build_plan.workflow_touchpoints`. For each page, map `purpose`, `primary_entities`, `primary_actions`, `ui_layout`, `sections_hint`, any workflow touchpoints, and any pack-specific behaviors to concrete primitive sections. When `sections_hint[i].config_hint` is present, use it as the base config for that section — merge it with any additional fields required by the primitive contract and page context. Do not discard or ignore provided `config_hint` values.
+      1. Read `app_build_plan.capability_packs`, `app_build_plan.pages`, and `app_build_plan.workflow_touchpoints`. Treat `app_build_plan.pages` as the authoritative page inventory. For each declared page, map `purpose`, `primary_entities`, `primary_actions`, `ui_layout`, `sections_hint`, any workflow touchpoints, and any pack-specific behaviors to concrete primitive sections. When `sections_hint[i].config_hint` is a non-null string, JSON-decode it to a dict and use it as the base config for that section — merge it with any additional fields required by the primitive contract and page context. Do not discard or ignore provided `config_hint` values.
       2. Prefer `design_surface_map` for page ownership decisions, then `experience_spec_document`, then `ui_design_document`, before falling back to inference.
       3. For each page:
           a. Set `page_type` from `page_type_hint` in the build plan. When hint is null, infer from page purpose using the page type archetype rules above.
@@ -905,7 +902,7 @@ agents:
           f. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
           g. Set `extensions` only when a specific UI zone cannot be expressed with primitives (see extension slot rules above). Null for most pages.
       4. Build the `manifest`:
-          a. `pages` — list every page name.
+          a. `pages` — list every declared `app_build_plan.pages[].name`.
           b. `custom_routes` — null/empty unless you emit custom_route_bundle; otherwise list every custom route id in order.
           c. `auth_strategy` and `roles` from `app_build_plan`.
           d. `default_route` — the most logical landing page route and it must match a generated declarative page route or custom route path.
@@ -1199,8 +1196,9 @@ agents:
       - Read `data_contract` from context; it is the canonical typed database source of truth.
       - Read `data_contract` from context when present; it is the opt-in contract for durable app-owned collections or explicit existing database integration.
       - Validate that persistent surfaces and collections are represented in `data_contract`.
-      - Stage the app artifact at `config/data.json`.
-      - Stage `config/data.json` only when `data_contract` is non-null.
+      - Stage the app artifact at `data/contract.json`.
+      - Stage `data/contract.json` only when `data_contract` is non-null.
+      - Never emit `config/data.json`; it is a removed path.
       - Do not emit removed `backend/database/schema.json` or seed files.
       - Do not call live database provisioning, schema application, or seeding tools in the OSS flow.
 
@@ -1208,7 +1206,7 @@ agents:
       - Read `revision_scope` to determine your action (see Instructions).
       - Compare prior and target `data_contract` values when both are available.
       - Produce a migration document only for additive collection, field, or index changes.
-      - Write migration artifacts under `config/data_migrations/{migration_id}.json`.
+      - Write migration artifacts under `data/migrations/{migration_id}.json`.
       - Set `pending_schema_migration` in your structured output when a migration is staged.
       - Do not generate destructive migrations.
   - id: context
@@ -1225,7 +1223,7 @@ agents:
 
       **Downstream**:
       - ConfigMiddlewareAgent and ServiceAgent use `data_contract` to keep `repo.py`, `policy.py`, and `schemas.py` aligned.
-      - ConfigMiddlewareAgent and ServiceAgent may use `data_contract` only for modules/access paths declared in `config/data.json`.
+      - ConfigMiddlewareAgent and ServiceAgent may use `data_contract` only for modules/access paths declared in `data/contract.json`.
       - `generate_and_download` will inject `pending_schema_migration` into the bundle automatically.
       - Runtime supports `ctx.persistence` for generated module repositories. Generated `repo.py` must use `ctx.persistence.collection(module_id, entity_name)`, must not use `ctx.db`, and must not import `get_mongo_client()`.
   - id: instructions
@@ -1235,7 +1233,7 @@ agents:
       1. Read `data_contract` from context.
       2. Reconcile it with `app_build_plan.entities` and `database_design_document`.
       3. If it is missing or incomplete for a persistent module, describe the gap in `agent_message`.
-      4. If `data_contract` is non-null, produce one `database_files` entry for `config/data.json` with kind `data_contract_json`. Keep names generic; do not use non-canonical app-level backend or shared-persistence paths.
+      4. If `data_contract` is non-null, produce one `database_files` entry for `data/contract.json` with kind `data_contract_json`. Keep names generic; do not use non-canonical app-level backend or shared-persistence paths.
       5. Mirror database entries into `code_files`.
       6. Set `pending_schema_migration` to null in your output.
 
@@ -1253,7 +1251,7 @@ agents:
         4. For `patch`: block database changes by default unless the refinement explicitly escalates scope.
         5. Set `pending_schema_migration` to the migration document in your output when staged.
         6. Include the migration file in `database_files` and `code_files` at:
-           `config/data_migrations/{migration_id}.json`
+           `data/migrations/{migration_id}.json`
 
       - `core`: This should not reach DatabaseAgent — full re-provisioning belongs to ValueEngine.
         If you receive it, emit a warning and do not stage destructive migration operations.
@@ -1262,7 +1260,7 @@ agents:
     content: |-
       Output MUST be a valid JSON object matching `DatabaseOutput` and NO additional text:
       If `data_contract` is non-null, include a second
-      `database_files` entry at `config/data.json` with kind
+      `database_files` entry at `data/contract.json` with kind
       `data_contract_json`.
 
       **Greenfield**:
@@ -1270,7 +1268,7 @@ agents:
       {
         "database_files": [
           {
-            "path": "config/data.json",
+            "path": "data/contract.json",
             "kind": "data_contract_json",
             "purpose": "Canonical generated app data contract.",
             "entity_refs": ["tasks", "projects"],
@@ -1278,7 +1276,7 @@ agents:
           }
         ],
         "code_files": [
-          { "filename": "config/data.json", "content": "{\"version\": \"1\", \"surfaces\": [{\"surface_id\": \"tasks\", \"surface_kind\": \"module\", \"collections\": [{\"name\": \"tasks\", \"scope\": \"app\", \"ownership\": {\"surface_id\": \"tasks\", \"surface_kind\": \"module\"}, \"fields\": [{\"name\": \"app_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"task_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"title\", \"type\": \"string\", \"required\": true}], \"indexes\": [{\"name\": \"tasks_app_task\", \"keys\": [{\"field\": \"app_id\", \"order\": 1}, {\"field\": \"task_id\", \"order\": 1}], \"unique\": true}], \"lifecycle\": {\"write_mode\": \"module_action\", \"migration_policy\": \"additive_only\"}}]}], \"aliases\": [], \"shared_collections\": []}" }
+          { "filename": "data/contract.json", "content": "{\"version\": \"1\", \"surfaces\": [{\"surface_id\": \"tasks\", \"surface_kind\": \"module\", \"collections\": [{\"name\": \"tasks\", \"scope\": \"app\", \"ownership\": {\"surface_id\": \"tasks\", \"surface_kind\": \"module\"}, \"fields\": [{\"name\": \"app_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"task_id\", \"type\": \"string\", \"required\": true}, {\"name\": \"title\", \"type\": \"string\", \"required\": true}], \"indexes\": [{\"name\": \"tasks_app_task\", \"keys\": [{\"field\": \"app_id\", \"order\": 1}, {\"field\": \"task_id\", \"order\": 1}], \"unique\": true}], \"lifecycle\": {\"write_mode\": \"module_action\", \"migration_policy\": \"additive_only\"}}]}], \"aliases\": [], \"shared_collections\": []}" }
         ],
         "pending_schema_migration": null,
         "agent_message": "Staged canonical data contract artifact."
@@ -1290,7 +1288,7 @@ agents:
       {
         "database_files": [
           {
-            "path": "config/data_migrations/{migration_id}.json",
+            "path": "data/migrations/{migration_id}.json",
             "kind": "data_migration_json",
             "purpose": "Additive data migration artifact.",
             "entity_refs": ["tasks"],
@@ -1299,7 +1297,7 @@ agents:
         ],
         "code_files": [
           {
-            "filename": "config/data_migrations/{migration_id}.json",
+            "filename": "data/migrations/{migration_id}.json",
             "content": "{...migration document...}"
           }
         ],
@@ -1334,8 +1332,19 @@ agents:
       ```
 
       **CRITICAL**: Output ONLY the raw JSON object.
+  - id: self_validation
+    heading: '[SELF-VALIDATION]'
+    content: |-
+      Before emitting DatabaseOutput, validate every JSON file you plan to include.
+
+      For each JSON file (data/contract.json, data/migrations/*.json):
+      1. Write the content to `/tmp/validate_db_artifact.json`.
+      2. Run `python -c "import json,sys; json.load(open('/tmp/validate_db_artifact.json'))"` — fix any JSON parse errors before continuing.
+
+      Emit DatabaseOutput only after all files pass. Do not include validation shell output in the JSON.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
+  sandbox_shell: true
 - name: ConfigMiddlewareAgent
   prompt_sections:
   - id: role
@@ -1416,6 +1425,15 @@ agents:
         - If `generated_workflow_trigger_events` is non-empty, generate one reaction entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
       8. **notifications.yaml**: include `schema_version: mozaiks.notifications.v1` and one rule per event that warrants a notification. Use `in_app` by default; add `email` only for high-value events. Use `audience.resolver` or `renderer` only when static roles/permissions and plain templates are insufficient, and mirror those entrypoints in `python_stubs`.
       9. **settings.yaml**: include `schema_version: mozaiks.settings.v1`, module-local `settings[]`, and `features[]`. Settings may reference optional Python hooks (`validator`, `on_change`) but must not contain secrets. Every hook reference must be module-local and mirrored in `python_stubs`.
+      9a. **profile.yaml** (optional — emit only when warranted): set `profile_yaml` to a `ModuleProfileManifest` object when the module has user-scoped data worth surfacing on the user profile page. Otherwise set `profile_yaml` to null.
+         - **When to emit**: the module owns user-facing summary data such as account stats, notification preferences, usage history, subscription status, or activity feeds.
+         - **When to omit**: UI-only modules, framework packs, admin-only modules, modules without user-owned data, and any module where `/api/me` already covers the surface. Do not add profile.yaml to every module.
+         - **Schema version**: always `mozaiks.profile.v1`.
+         - **Panel kinds**: use `metrics` for KPI or count fields, `list` for tabular user records, `component` for custom React rendering. Never emit `kind: form` — it is reserved and rejected at load time.
+         - **Action binding**: each panel's `action` field must reference an action id declared in `module.yaml`. The platform calls that action at `/api/me/profile-panels` request time and attaches the result as `data`. Omit `action` only for `kind: component` panels that render purely client-side.
+         - **Field constraint**: `metrics` and `list` panels require a non-empty `fields[]`. `component` panels must have a `component` key and no `fields[]`.
+         - **Field types**: use only `string`, `number`, `currency`, `date`, `boolean`, or `status` — unknown types are rejected at load time.
+         - **Boundaries**: profile panels must not expose admin-only actions or secrets. Profile panels do not replace `/api/me` identity — auth identity and core account data remain platform-owned.
       10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. **Derive admin panels from the module's declared actions** — do not leave `panels[]` empty for durable module surfaces. Apply this derivation:
          - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
          - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action. Use `value_key` only for fields declared by the action output schema. Use `trend_key` only when the action contract explicitly describes a real historical comparison or metrics snapshot; otherwise omit trend fields so the UI renders no fake change value.
@@ -1461,7 +1479,7 @@ agents:
 
       **If `current_build_task_type` is anything else**:
 
-      1. Fail the task rather than guessing a fallback mode.
+      1. Fail the task — do not guess a fallback mode.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1498,8 +1516,23 @@ agents:
       Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
+  - id: self_validation
+    heading: '[SELF-VALIDATION]'
+    content: |-
+      Before emitting ConfigMiddlewareOutput, validate every Python and YAML file you plan to include.
+
+      For each `.py` file (handler.py, service.py, repo.py, etc.):
+      1. Write content to `/tmp/validate_config_<stem>.py`.
+      2. Run `python -m py_compile /tmp/validate_config_<stem>.py` — fix syntax errors before continuing.
+
+      For each `.yaml` file (module.yaml, events.yaml, reactions.yaml, etc.):
+      1. Write content to `/tmp/validate_config_<stem>.yaml`.
+      2. Run `python -c "import yaml,sys; yaml.safe_load(open('/tmp/validate_config_<stem>.yaml'))"` — fix parse errors before continuing.
+
+      Emit ConfigMiddlewareOutput only after all files pass. Do not include validation shell output in the JSON.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
+  sandbox_shell: true
 - name: ControlPlaneAgent
   prompt_sections:
   - id: role
@@ -1549,13 +1582,13 @@ agents:
       5a. `control_plane/config/runtime.yaml` is the runtime policy surface for the harness. It is seeded from the current factory runtime default. Do not put `ask`, `chat`, or `workflows` startup in `control_plane.yaml`.
       6. Set `control_plane_yaml.schema_version` to `mozaiks.control_plane`.
       7. Set `tools_yaml.schema_version` to `mozaiks.control_plane.tools`.
-      8. Use `harness.implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness` unless the task explicitly names another shipped implementation.
-      9. Use checkpoint entrypoints only from shipped implementations:
-         - `mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier`
-         - `mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver`
-         - `mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy`
-         - `mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer`
-         - `mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker`
+      8. Do not emit `profile`, `harness`, Python handler entrypoints, checkpoint ids, checkpoint modes, or output contracts. Mozaiks runtime infers those from canonical checkpoint events.
+      9. Declare only LLM-backed checkpoints that need app-specific prompts/tools:
+         - `request_submitted` for change classification.
+         - `scope_requested` for file/scope selection.
+         - `contract_surface_requested` for contract-surface planning.
+         - `coding_requested` for scoped coding plans.
+         Do not declare deterministic router or decision checkpoints; runtime supplies them.
       10. Use tool entrypoints only from shipped context tools:
          - `mozaiksai.control_plane.tools.get_revision_context:get_revision_context`
          - `factory_app.control_plane.tools.get_artifact_summary:get_artifact_summary`
@@ -1576,15 +1609,6 @@ agents:
         "control_plane_pack": {
           "control_plane_yaml": {
             "schema_version": "mozaiks.control_plane",
-            "profile": {
-              "id": "app_refinement_harness",
-              "display_name": "App Refinement Harness",
-              "description": "App-local refinement and lifecycle harness."
-            },
-            "harness": {
-              "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-              "supported_trigger_sources": ["refinement"]
-            },
             "routing": {
               "default_artifact_kind": "app_bundle",
               "artifacts": [
@@ -1600,7 +1624,13 @@ agents:
                 }
               ]
             },
-            "checkpoints": []
+            "checkpoints": [
+              {
+                "event": "request_submitted",
+                "prompt_id": "change_classifier_system",
+                "tool_ids": ["get_revision_context", "get_artifact_summary"]
+              }
+            ]
           },
           "tools_yaml": {
             "schema_version": "mozaiks.control_plane.tools",
@@ -1734,8 +1764,20 @@ agents:
       ```
 
       **CRITICAL**: Output ONLY the raw JSON object.
+  - id: self_validation
+    heading: '[SELF-VALIDATION]'
+    content: |-
+      Before emitting ModelOutput, validate every Python file you plan to include.
+
+      For each `schemas.py` file:
+      1. Write content to `/tmp/validate_model_<module_id>.py`.
+      2. Run `python -m py_compile /tmp/validate_model_<module_id>.py` — fix syntax errors before continuing.
+      3. Run `ruff check --select E,F /tmp/validate_model_<module_id>.py` — fix undefined-name or import errors before continuing.
+
+      Emit ModelOutput only after all files pass. Do not include validation shell output in the JSON.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
+  sandbox_shell: true
 - name: AppValidationAgent
   prompt_sections:
   - id: role
@@ -1898,7 +1940,7 @@ agents:
       - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `context.events.publish(...)` for event emission.
       - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
       - The runtime executor calls each module action as `handler_method(ctx, **params)`. Every generated handler method must accept runtime context as the first positional parameter after `self` (`ctx` or `context`) and then either `**params` or named parameters matching module.yaml input_schema fields.
-      - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `config/data.json`.
+      - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `data/contract.json`.
       - Generated module code must not use `ctx.db` or `context.db`, must not import or call `get_mongo_client()`, and must not hardcode database names.
       - Publish events through the runtime context: `await context.events.publish("domain.task_manager.task_created", payload)`.
       - Event types must exactly match `events.yaml.events[].type`.
@@ -1937,7 +1979,7 @@ agents:
       19. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
       20. Hosted adapter integration rule: When generating a facade module_contract that
           wraps a hosted_pack, import the adapter client generated by the api_surface task:
-              from backend.integrations.{pack_id}_client import {PackIdClient}
+              from services.integrations.{pack_id}_client import {PackIdClient}
           Do NOT call the hosted pack module API directly from service logic.
       20a. For list_* actions, serialize each repo record through an explicit allowlist helper before returning.
            Define a module-local helper in backend/schemas.py — for example,
@@ -1956,6 +1998,17 @@ agents:
              rows = await self.repo.list_items(context=context, query=query, limit=limit)
              items = [_serialize_inventory_row(r) for r in rows]
              return {"success": True, "items": items, "count": len(items)}
+  - id: self_validation
+    heading: '[SELF-VALIDATION]'
+    content: |-
+      Before emitting your final ServiceOutput JSON, validate every Python file you plan to include.
+
+      For each `.py` file in your planned output:
+      1. Write the file content to a temp path such as `/tmp/validate_handler.py` (use the actual filename stem).
+      2. Run `python -m py_compile /tmp/validate_handler.py` — fix any syntax errors before continuing.
+      3. Run `ruff check --select E,F /tmp/validate_handler.py` — fix any undefined-name or import errors before continuing.
+
+      Emit ServiceOutput only after all files pass both checks. Do not include validation shell output in ServiceOutput.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -2014,6 +2067,7 @@ agents:
       **CRITICAL**: Output ONLY the raw JSON object.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
+  sandbox_shell: true
 - name: ModuleRuntimeQualityAgent
   prompt_sections:
   - id: role
@@ -2160,8 +2214,19 @@ agents:
       ```
 
       **CRITICAL**: Output ONLY the raw JSON object.
+  - id: self_validation
+    heading: '[SELF-VALIDATION]'
+    content: |-
+      Before emitting FrontendStubOutput, validate every JS/JSX file you plan to include.
+
+      For each `.jsx` or `.js` file:
+      1. Write content to `/tmp/validate_frontend_<stem>.js`.
+      2. Run `node --input-type=module --eval "$(cat /tmp/validate_frontend_<stem>.js)" 2>&1 | head -5` — if a SyntaxError is printed, fix it before continuing. If node is unavailable, skip this step.
+
+      Emit FrontendStubOutput only after all files are checked. Do not include validation shell output in the JSON.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
+  sandbox_shell: true
 - name: ControllerAgent
   prompt_sections:
   - id: role
@@ -2226,8 +2291,8 @@ agents:
       {
         "current_build_task_type": "api_surface",
         "surface_kind": "external_integration",
-        "capability_pack_id": "wallet",
-        "owned_paths": ["services/integrations/wallet_client.py"]
+        "capability_pack_id": "hosted_payments",
+        "owned_paths": ["services/integrations/hosted_payments_client.py"]
       }
       ```
   - id: output_format
@@ -2268,8 +2333,20 @@ agents:
       Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
+  - id: self_validation
+    heading: '[SELF-VALIDATION]'
+    content: |-
+      Before emitting ControllerOutput, validate every Python file you plan to include.
+
+      For each `.py` file (api.py, admin_config.py, routes/admin.py, etc.):
+      1. Write content to `/tmp/validate_controller_<stem>.py`.
+      2. Run `python -m py_compile /tmp/validate_controller_<stem>.py` — fix syntax errors before continuing.
+      3. Run `ruff check --select E,F /tmp/validate_controller_<stem>.py` — fix undefined-name errors before continuing.
+
+      Emit ControllerOutput only after all files pass. Do not include validation shell output in the JSON.
   max_consecutive_auto_reply: 10
   structured_outputs_required: true
+  sandbox_shell: true
 - name: AdminRegistryAgent
   prompt_sections:
   - id: role
@@ -2297,9 +2374,10 @@ agents:
       **Inputs**:
       - `app_build_plan`: full app build plan. Read `capability_packs`, `pages`,
         `auth_strategy`, and `build_tasks` to infer which admin pages are relevant.
-      - `available_hosted_packs`: list of hosted capability pack ids available on the deployment
-        platform. Null or empty in OSS/self-hosted contexts. Use this to include hosted-only pages
-        that are not part of the standard framework admin surface.
+      - `capability_packs`: operator or framework capability pack descriptors available
+        for this build. Null or empty in OSS contexts without workspace build context.
+        Use this to include provider-backed/operator pages that are not part of the
+        standard framework admin surface.
 
       **Standard app-scope page inclusion rules** (apply per capability set):
       - `overview` — always include; path `/admin`; icon `dashboard`; order 0
@@ -2312,8 +2390,8 @@ agents:
       - `integrations` — include when any pack has third-party connector, webhook, or OAuth entities; path `/apps/:appId/integrations`; icon `plug`; order 70
       - `support` — include when any pack has ticket, helpdesk, or support entities; path `/apps/:appId/support`; icon `support`; order 80
 
-      **Hosted-only page inclusion rules** (apply only when `available_hosted_packs` is non-empty):
-      - `hosting` — include when `available_hosted_packs` contains `hosting` or `deployment`; path `/apps/:appId/hosting`; icon `server`; order 90; scope `app`
+      **Operator page inclusion rules** (apply only when `capability_packs` is non-empty):
+      - `hosting` — include when capability packs contain `hosting` or `deployment`; path `/apps/:appId/hosting`; icon `server`; order 90; scope `app`
 
       **Page id conventions**:
       - Use stable lowercase kebab-case ids matching the names above.
@@ -2349,8 +2427,8 @@ agents:
          explicitly manages member entities.
       3. Always include `overview` and `settings`.
       4. Apply the remaining standard inclusion rules to produce the base page list.
-      5. Read `available_hosted_packs` — if non-empty, apply the hosted-only inclusion
-         rules. If null or empty, skip all hosted-only pages entirely.
+      5. Read `capability_packs` — if non-empty, apply the operator page inclusion
+         rules. If null or empty, skip all operator-only pages entirely.
       6. Set `schema_version: mozaiks.admin.registry.v1`.
       7. Order pages by `order` field (0, 10, 20, …). All pages are `scope: app` for
          standard generated apps.

@@ -377,3 +377,4 @@ class ArtifactSandboxManager:
                     self._artifact_to_sandbox.pop(st.artifact_id, None)
 
             await self._broadcast(sandbox_id, {"type": "status", "status": "error", "error": "stopped"})
+

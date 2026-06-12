@@ -1,93 +1,74 @@
-hooks:
-- hook_type: update_agent_state
-  hook_agent: all
+prompt_middleware:
+- agent: all
   filename: ../_shared/context_graph/hook_context_graph.py
   function: inject_context_graph_context
-- hook_type: update_agent_state
-  hook_agent: AppSchemaAgent
+- agent: AppSchemaAgent
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog
-- hook_type: update_agent_state
-  hook_agent: AppUIQualityAgent
+- agent: AppUIQualityAgent
   filename: hook_app_ui_quality_gate.py
   function: run_app_ui_quality_gate
-- hook_type: update_agent_state
-  hook_agent: ModuleContractQualityAgent
+- agent: ModuleContractQualityAgent
   filename: hook_module_contract_quality_gate.py
   function: run_module_contract_quality_gate
-- hook_type: update_agent_state
-  hook_agent: ModuleRuntimeQualityAgent
+- agent: ModuleRuntimeQualityAgent
   filename: hook_module_runtime_quality_gate.py
   function: run_module_runtime_quality_gate
-- hook_type: update_agent_state
-  hook_agent: InterviewAgent
+- agent: InterviewAgent
   filename: hook_agent_backend_context.py
   function: inject_agent_backend_context
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
   filename: hook_agent_backend_context.py
   function: inject_agent_backend_context
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
   filename: hook_workflow_integration_contract.py
   function: inject_workflow_integration_contract
-- hook_type: update_agent_state
-  hook_agent: ConfigMiddlewareAgent
+- agent: ConfigMiddlewareAgent
   filename: hook_workflow_integration_contract.py
   function: inject_workflow_integration_contract
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
   filename: hook_domain_catalog_context.py
   function: inject_domain_catalog_context
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
   filename: hook_shell_preset_context.py
   function: inject_shell_preset_context
-- hook_type: update_agent_state
-  hook_agent: AppSchemaAgent
+- agent: AppSchemaAgent
   filename: hook_shell_preset_context.py
   function: inject_shell_preset_context
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
   filename: hook_capability_routing_context.py
   function: inject_capability_routing_context
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
+  function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
+- agent: AppPlanAgent
   filename: hook_hosted_capabilities_context.py
   function: inject_hosted_capabilities_context
-- hook_type: update_agent_state
-  hook_agent: AppPlanAgent
+- agent: AppPlanAgent
   filename: hook_ai_pack_workflow_context.py
   function: inject_ai_pack_workflow_context
-- hook_type: update_agent_state
-  hook_agent: AppSchemaAgent
+- agent: AppSchemaAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-- hook_type: update_agent_state
-  hook_agent: ControlPlaneAgent
+- agent: ControlPlaneAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-- hook_type: update_agent_state
-  hook_agent: ConfigMiddlewareAgent
+- agent: ConfigMiddlewareAgent
   filename: hook_domain_catalog_context.py
   function: inject_module_file_manifest_guard
-- hook_type: update_agent_state
-  hook_agent: ConfigMiddlewareAgent
+- agent: ConfigMiddlewareAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-- hook_type: update_agent_state
-  hook_agent: ServiceAgent
+- agent: ServiceAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-- hook_type: update_agent_state
-  hook_agent: FrontendStubAgent
+- agent: FrontendStubAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-- hook_type: update_agent_state
-  hook_agent: ControllerAgent
+- agent: ControllerAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
+
+

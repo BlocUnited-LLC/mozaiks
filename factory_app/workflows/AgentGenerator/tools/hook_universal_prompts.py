@@ -8,7 +8,7 @@ This single hook consolidates all universal and shared prompt sections:
 Separation of Concerns (with other hooks):
 - hook_universal_prompts.py: ALL universal behavior and compliance (this file)
 - hook_file_generation.py: Code generation best practices (UIFileGenerator, AgentToolsFileGenerator)
-- update_agent_state_pattern.py: Dynamic pattern-specific guidance
+- prompt middleware pattern helpers: Dynamic pattern-specific guidance
 """
 
 import logging
@@ -206,7 +206,7 @@ Before you emit your final JSON, verify these checks:
 
 □ Every `agent` or `agent_name` field matches an agent from StageAgents EXACTLY
 □ Every `tool`, `function`, or tool name matches a tool from upstream EXACTLY  
-□ Every `source_agent` and `target_agent` in handoffs exists in the agents list
+□ Every `source_agent` and `target_agent` in transition_graph.yaml exists in the agents list
 □ Every context variable reference matches a variable from ContextVariablesPlan
 □ Every `stage_name` reference matches WorkflowStrategy.workflow_stages[].stage_name EXACTLY
 □ No fabricated names that weren't in upstream outputs
@@ -305,9 +305,8 @@ def inject_universal_prompts(agent, messages: List[Dict[str, Any]], run_context:
         
         # Agents that read names from upstream and must copy them exactly
         cross_referencing_agents = {
-            "ToolsManagerAgent", "ContextVariablesAgent", "AgentsAgent", 
-            "HandoffsAgent", "OrchestratorAgent", "StructuredOutputsAgent",
-            "UIFileGenerator", "AgentToolsFileGenerator", "HookAgent"
+            "PatternAgent", "WorkflowBundleBuilderAgent", "PackMetadataAgent",
+            "ProjectOverviewAgent", "DownloadAgent",
         }
         
         if agent_name in cross_referencing_agents and "[SEMANTIC REFERENCE RULES]" not in system_message:
@@ -317,16 +316,15 @@ def inject_universal_prompts(agent, messages: List[Dict[str, Any]], run_context:
         # Agents whose outputs become final workflow artifacts (JSON files or code)
         # Need cross-reference validation before emitting
         artifact_producing_agents = {
-            "ToolsManagerAgent", "AgentsAgent", "HandoffsAgent", 
-            "OrchestratorAgent", "StructuredOutputsAgent",
-            "UIFileGenerator", "AgentToolsFileGenerator", "HookAgent"
+            "WorkflowBundleBuilderAgent", "PackMetadataAgent", "DownloadAgent",
+            "ProjectOverviewAgent",
         }
-        
+
         if agent_name in artifact_producing_agents and "[CROSS-REFERENCE VALIDATION]" not in system_message:
             system_message += f"\n\n{VALIDATION_CHECKLIST}"
             sections_added.append("VALIDATION_CHECKLIST")
 
-        ui_surface_agents = {"ToolPlanningAgent", "ToolsManagerAgent", "UIFileGenerator", "PackMetadataAgent"}
+        ui_surface_agents = {"WorkflowBundleBuilderAgent", "PackMetadataAgent"}
         if agent_name in ui_surface_agents and "[UI SURFACE LANE DISCIPLINE]" not in system_message:
             system_message += f"\n\n{UI_SURFACE_LANE_DISCIPLINE}"
             sections_added.append("UI_SURFACE_LANE_DISCIPLINE")
@@ -344,4 +342,6 @@ def inject_universal_prompts(agent, messages: List[Dict[str, Any]], run_context:
     except Exception as e:
         logger.error(f"Error injecting prompts for {getattr(agent, 'name', 'unknown')}: {e}", exc_info=True)
         return getattr(agent, 'system_message', '') or ""
+
+
 

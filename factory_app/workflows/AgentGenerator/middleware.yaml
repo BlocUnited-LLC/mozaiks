@@ -1,0 +1,26 @@
+prompt_middleware:
+- agent: all
+  filename: hook_universal_prompts.py
+  function: inject_universal_prompts
+- agent: all
+  filename: ../_shared/context_graph/hook_context_graph.py
+  function: inject_context_graph_context
+- agent: PackMetadataAgent
+  filename: hook_primitive_catalog.py
+  function: inject_primitive_catalog
+- agent: PatternAgent
+  function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
+- agent: PatternAgent
+  filename: tools/hook_ai_pack_archetype_context.py
+  function: inject_ai_pack_archetype_context
+- agent: WorkflowBundleBuilderAgent
+  function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
+- agent: WorkflowBundleBuilderAgent
+  filename: tools/hook_ai_pack_archetype_context.py
+  function: inject_ai_pack_archetype_context
+- agent: WorkflowBundleBuilderAgent
+  filename: tools/hook_workflow_archetypes_context.py
+  function: inject_workflow_archetypes_context
+
+
+

@@ -34,17 +34,16 @@ models:
           Primitive type name from the shipped chat-ui primitive registry.
           Must match exactly — AppSchemaAgent validates against this list.
       config_hint:
-        type: union
-        variants:
-        - dict
-        - 'null'
+        type: optional_str
         description: >
-          Partial primitive config scaffold. Keys must match the primitive's
-          contract (see [SHIPPED PAGE PRIMITIVES] for per-primitive field
-          definitions). Required fields for the primitive must be present.
-          AppSchemaAgent merges this with additional context — do not omit
-          required fields here. Null only when config is entirely
+          JSON-encoded partial primitive config scaffold, or null when config is
+          entirely context-dependent. Keys must match the primitive's contract
+          (see [SHIPPED PAGE PRIMITIVES] for per-primitive field definitions).
+          Required fields for the primitive must be present. AppSchemaAgent
+          decodes this JSON string and merges it with additional context — do
+          not omit required fields here. Null only when config is entirely
           context-dependent and cannot be scaffolded at planning time.
+          Example: "{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/modules/tasks/list_tasks\"}"
       section_id_hint:
         type: union
         variants:
@@ -550,11 +549,62 @@ models:
         type: optional_str
         description: >
           Implementation origin of this capability pack. Use one of:
-          hosted_pack (provided by a hosted platform capability — no module_contract),
+          hosted_pack (provided by a hosted platform capability — do not generate
+          a module_contract for the hosted pack id itself; generate app-owned
+          facade module_contract tasks when UI/pages need local app actions),
           host_universal (provided universally by the platform host — no scaffold needed),
-          framework_pack (platform framework extension),
+          framework_pack (provided by an OSS or operator framework pack — generate only
+          the declared app-specific wiring),
           generated_module (app-owned generated module — generate full module contracts),
           external_adapter (third-party external service adapter — api_surface only).
+  BuildTaskBase:
+    type: model
+    description: >
+      Stable harness ABI contract. Every domain task model must include these
+      fields. The task batch harness reads only these fields; domain-specific
+      fields belong in domain_context and are invisible to the harness.
+    fields:
+      task_id:
+        type: str
+        description: Stable task identifier for the build unit.
+      initial_agent:
+        type: str
+        description: Agent that should execute this task batch item.
+      initial_message:
+        type: str
+        description: Seed message instructing the task worker on exactly what to generate.
+      owned_paths:
+        type: optional_list
+        items: str
+        description: Canonical file paths this task exclusively owns.
+      depends_on:
+        type: optional_list
+        items: str
+        description: Task ids that must complete before this task runs.
+      acceptance_criteria:
+        type: optional_list
+        items: str
+        description: Concrete completion checks for the task output.
+      context_variables:
+        type: optional_list
+        items: AppContextVariable
+        description: Context variables seeded into task batch execution.
+      integration_needs:
+        type: optional_list
+        items: AppIntegrationNeed
+        description: Third-party connectors this build task expects to need.
+      domain_context:
+        type: optional_str
+        default: null
+        description: >
+          JSON-encoded domain-specific pass-through string. The harness reads
+          BuildTaskBase fields only and ignores this field entirely.
+          Domain execution agents JSON-decode domain_context to access task_type,
+          capability_pack_id, surface_kind, and any other domain-specific
+          routing fields. A future non-webapp task model populates this with
+          its own vocabulary without changing the harness contract.
+          Must be a valid JSON object string or null.
+
   AppBuildTask:
     type: model
     fields:
@@ -573,7 +623,6 @@ models:
         - page_bundle
         - agent_backend_integration
         - control_plane_pack
-        - pack_overlay
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
@@ -600,10 +649,6 @@ models:
           services/adapters/, services/security/, or services/routes/, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
-          `pack_overlay` generates ONLY the app-specific wiring for a selected framework_pack
-          (subscriptions/event-flow bindings, facade module actions, page composition overlays).
-          Must start at ConfigMiddlewareAgent. capability_pack_id MUST identify the framework_pack.
-          Do NOT use pack_overlay to regenerate pack internals (handler.py, service.py, etc.).
       capability_pack_id:
         type: union
         variants:
@@ -621,11 +666,7 @@ models:
         - control_plane
         - external_integration
         - ui_only
-        - framework_pack
-        description: >
-          Surface kind realized by this task.
-          `framework_pack` is paired with task_type=pack_overlay — indicates the task
-          generates app-specific wiring for a selected framework_pack, not module internals.
+        description: Surface kind realized by this task.
       execution_target:
         type: str
         description: Runtime or generator system responsible for executing the task.
@@ -661,6 +702,16 @@ models:
           Third-party connectors this build task expects to need. Agents may
           discover more at execution time with record_integration_need; the
           IntegrationReadinessAgent fans all needs in before validation/download.
+      domain_context:
+        type: optional_str
+        default: null
+        description: >
+          JSON-encoded domain-specific pass-through string seeded by AppPlanAgent
+          for execution agents. The harness ignores this field. Webapp tasks
+          JSON-encode task_type, capability_pack_id, surface_kind, execution_target,
+          and surface_id here so that future domain packs can substitute their
+          own vocabulary without changing the harness contract.
+          Must be a valid JSON object string or null.
   CarryForwardDecision:
     type: model
     fields:
@@ -712,6 +763,10 @@ models:
       agent_message:
         type: str
         description: Short planning summary for the build plan.
+      pages:
+        type: optional_list
+        items: AppBuildPage
+        description: Ordered pages planned for the app. AppSchemaAgent materializes each page into a full AppPageSchema.
       entities:
         type: optional_list
         items: AppBuildEntity
@@ -805,7 +860,7 @@ models:
         description: >
           Canonical generated data planning object for persistent app modules,
           cross-module aggregate ownership, or explicit existing database
-          integration. It is written to config/data.json by DatabaseAgent.
+          integration. It is written to data/contract.json by DatabaseAgent.
           Ordinary generated apps may set this to null when generated-scoped
           ctx.persistence is sufficient.
       pending_schema_migration:
@@ -813,7 +868,7 @@ models:
         variants:
         - DataMigrationDocument
         - 'null'
-        description: Optional additive data migration intent for config/data_migrations/{migration_id}.json, or null when no migration is planned.
+        description: Optional additive data migration intent for data/migrations/{migration_id}.json, or null when no migration is planned.
       deployment_targets:
         type: optional_list
         items: DeployTargetSpec
@@ -1194,7 +1249,7 @@ models:
     fields:
       path:
         type: str
-        description: Concrete database artifact path such as config/data.json or config/data_migrations/{migration_id}.json.
+        description: Concrete database artifact path such as data/contract.json or data/migrations/{migration_id}.json.
       kind:
         type: literal
         values:
@@ -1291,7 +1346,7 @@ models:
     fields:
       migration_id:
         type: str
-        description: Stable migration id used in config/data_migrations/{migration_id}.json.
+        description: Stable migration id used in data/migrations/{migration_id}.json.
       version:
         type: str
         description: Migration document version.
@@ -1321,7 +1376,7 @@ models:
         variants:
         - DataMigrationDocument
         - 'null'
-        description: Additive migration document staged under config/data_migrations/{migration_id}.json, or null when no migration is staged.
+        description: Additive migration document staged under data/migrations/{migration_id}.json, or null when no migration is staged.
       agent_message:
         type: union
         variants:
@@ -1727,6 +1782,15 @@ models:
         type: optional_list
         items: str
         description: Event types declared in events.yaml that this action may publish.
+      entitlement_gate:
+        type: optional_str
+        description: >
+           Capability id to check via EntitlementPort before dispatching this action.
+           Set only on actions that require an active end-user SaaS plan grant in
+           the generated app (e.g. "analytics.dashboard"). Null/absent for actions
+           with no generated-app entitlement requirement — the no-op adapter grants
+           those unconditionally. Do NOT set this on admin_internal actions, and do
+           not use it to model hosted product pack-access licensing.
 
   ModuleCapability:
     type: model
@@ -1892,7 +1956,9 @@ models:
     type: model
     fields:
       schema_version:
-        type: str
+        type: literal
+        values:
+          - mozaiks.events.v1
         description: Must be mozaiks.events.v1.
       events:
         type: list
@@ -1956,7 +2022,9 @@ models:
     type: model
     fields:
       schema_version:
-        type: str
+        type: literal
+        values:
+          - mozaiks.reactions.v1
         description: Must be mozaiks.reactions.v1.
       reactions:
         type: list
@@ -2020,7 +2088,9 @@ models:
     type: model
     fields:
       schema_version:
-        type: str
+        type: literal
+        values:
+          - mozaiks.notifications.v1
         description: Must be mozaiks.notifications.v1.
       notifications:
         type: list
@@ -2110,7 +2180,9 @@ models:
     type: model
     fields:
       schema_version:
-        type: str
+        type: literal
+        values:
+          - mozaiks.settings.v1
         description: Must be mozaiks.settings.v1.
       settings:
         type: list
@@ -2125,7 +2197,9 @@ models:
     type: model
     fields:
       schema_version:
-        type: str
+        type: literal
+        values:
+          - mozaiks.admin.v2
         description: Must be mozaiks.admin.v2.
       panels:
         type: list
@@ -2223,6 +2297,97 @@ models:
         items: ModuleRuntimeExtension
         description: List of host-level extensions declared by this module.
 
+  ModuleProfileField:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable field id. Used as the data key in the rendered panel.
+      label:
+        type: str
+        description: Human-readable field label.
+      type:
+        type: literal
+        values:
+          - string
+          - number
+          - currency
+          - date
+          - boolean
+          - status
+        description: Field display type. Must be one of the six runtime-supported types. Unknown types are rejected at load time.
+
+  ModuleProfilePanel:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable panel id. Must be unique within the profile manifest.
+      title:
+        type: str
+        description: Human-readable panel title shown on the profile page.
+      description:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: Optional subtitle or helper text.
+      kind:
+        type: literal
+        values:
+          - metrics
+          - list
+          - component
+        description: >
+          Panel display kind. metrics and list require a non-empty fields[].
+          component requires a component key and no fields[]. form is reserved
+          and rejected at load time — never emit kind=form.
+      action:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: >
+          Module action id that populates the panel at /api/me/profile-panels
+          request time. Must reference an action declared in module.yaml.
+          Omit for component panels that do not call a module action.
+      component:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: >
+          Custom React component registry key. Required when kind=component.
+          Must be mirrored in js_stubs. Null for metrics and list panels.
+      fields:
+        type: optional_list
+        items: ModuleProfileField
+        description: >
+          Data fields rendered inside the panel. Required (non-empty) for
+          metrics and list panels. Must be omitted for component panels.
+      order:
+        type: union
+        variants:
+          - int
+          - 'null'
+        description: Optional display order. Lower numbers appear first. Defaults to 100.
+
+  ModuleProfileManifest:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+          - mozaiks.profile.v1
+        description: Must be mozaiks.profile.v1.
+      panels:
+        type: list
+        items: ModuleProfilePanel
+        description: >
+          Profile panels declared by this module. Panel ids must be unique.
+          Emit only panels the module can meaningfully populate from its own
+          declared actions. Do not expose admin-only actions or secrets.
+
   ModuleContractBundle:
     type: model
     fields:
@@ -2247,6 +2412,16 @@ models:
       admin_yaml:
         type: ModuleAdminManifest
         description: admin.yaml contract object for feature panels mounted inside semantic /admin sections.
+      profile_yaml:
+        type: union
+        variants:
+          - ModuleProfileManifest
+          - 'null'
+        description: >
+          Optional contracts/profile.yaml. Emit only when this module has
+          user-scoped data worth surfacing on the user profile page — for
+          example account summary, notification preferences, or usage stats.
+          Null for most modules. Do not emit for every module.
       python_stubs:
         type: optional_list
         items: ModulePythonStub
@@ -2311,51 +2486,23 @@ models:
         items: ControlPlaneArtifactRouting
         description: Artifact routing policies for the harness.
 
-  ControlPlaneProfileManifest:
-    type: model
-    fields:
-      id:
-        type: str
-        description: Stable harness profile id.
-      display_name:
-        type: str
-        description: Human-facing harness profile name.
-      description:
-        type: str
-        description: Short description of why this app needs a harness pack.
-
-  ControlPlaneHarnessManifestOutput:
-    type: model
-    fields:
-      implementation:
-        type: str
-        description: >
-          Shipped harness implementation entrypoint. Use
-          mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
-          unless a runtime-provided harness entrypoint is explicitly supplied.
-      supported_trigger_sources:
-        type: optional_list
-        items: str
-        description: Optional trigger sources handled by this harness, such as refinement.
-
   ControlPlaneCheckpointManifestOutput:
     type: model
     fields:
-      id:
-        type: str
-        description: Stable checkpoint id.
       event:
-        type: str
-        description: Control-plane checkpoint event name.
-      entrypoint:
-        type: str
-        description: Shipped checkpoint implementation entrypoint.
+        type: literal
+        values:
+        - request_submitted
+        - scope_requested
+        - contract_surface_requested
+        - coding_requested
+        description: >
+          LLM-backed control-plane checkpoint event. Mozaiks infers checkpoint
+          id, mode, handler implementation, and structured output contract from
+          this event.
       prompt_id:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Optional prompt id declared in control_plane/prompts/*.yaml.
+        type: str
+        description: Prompt id declared in control_plane/prompts/*.yaml.
       tool_ids:
         type: optional_list
         items: str
@@ -2369,19 +2516,15 @@ models:
         values:
         - mozaiks.control_plane
         description: Control-plane manifest schema version.
-      profile:
-        type: ControlPlaneProfileManifest
-        description: Harness profile metadata.
-      harness:
-        type: ControlPlaneHarnessManifestOutput
-        description: Shipped harness binding.
       routing:
         type: ControlPlaneRoutingManifest
         description: Artifact routing policy. Routes may contain workflow_sequence only.
       checkpoints:
         type: list
         items: ControlPlaneCheckpointManifestOutput
-        description: Checkpoint handlers used by the harness.
+        description: >
+          LLM-backed checkpoint prompts/tools. Do not declare deterministic
+          handler checkpoints; Mozaiks supplies them in runtime.
 
   ControlPlaneToolDefinition:
     type: model
@@ -4973,7 +5116,7 @@ models:
         - 'null'
         default: null
         description: >
-          Optional data contract persisted as config/data.json. Leave null only
+          Optional data contract persisted as data/contract.json. Leave null only
           for apps with no durable app-owned persistence. Use it for module
           collections, cross-module aggregate ownership, or an explicit existing
           database contract, and keep helper naming generic under services/data/.

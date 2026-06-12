@@ -1,5 +1,4 @@
 import ast
-import re
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Dict, List, Optional
 
@@ -9,6 +8,14 @@ import yaml
 from .assembly_phase import assemble_features
 from .code_file_utils import collect_generated_app_file_entries
 from .generate_module_interface_files import generate_module_interface_files
+from .resolve_hosted_pack_templates import resolve_hosted_pack_templates
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _decode_config_hint,
+    _page_from_plan,
+    _page_stem_from_path,
+    _page_stems,
+    _slug,
+)
 
 
 def _is_truthy(value: Any) -> bool:
@@ -17,86 +24,6 @@ def _is_truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "passed", "ready"}
     return bool(value)
-
-
-def _slug(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip()).strip("_").lower()
-
-
-def _page_stem_from_path(path: str) -> Optional[str]:
-    normalized = str(path or "").replace("\\", "/").strip()
-    if not normalized or normalized.startswith("/") or ".." in normalized.split("/"):
-        return None
-    pure = PurePosixPath(normalized)
-    if len(pure.parts) == 3 and pure.parts[0] == "ui" and pure.parts[1] == "pages" and pure.suffix in {".yaml", ".yml"}:
-        return _slug(pure.stem)
-    return None
-
-
-def _page_stems(page: Dict[str, Any]) -> set[str]:
-    stems: set[str] = set()
-    route = str(page.get("route") or "").strip()
-    if route and route != "/":
-        stems.add(_slug(route.strip("/").split("/")[-1]))
-    for key in ("name", "id", "surface_id"):
-        value = str(page.get(key) or "").strip()
-        if value:
-            stems.add(_slug(value))
-    return {stem for stem in stems if stem}
-
-
-def _page_from_plan(page: Dict[str, Any], stem: str) -> Dict[str, Any]:
-    title = str(page.get("title") or page.get("name") or stem.replace("_", " ").title()).strip()
-    route = str(page.get("route") or f"/{stem.replace('_', '-')}").strip()
-    sections: List[Dict[str, Any]] = []
-    hints = page.get("sections_hint")
-    if isinstance(hints, list):
-        for index, hint in enumerate(hints):
-            if not isinstance(hint, dict):
-                continue
-            primitive = str(hint.get("primitive") or "PageHeader").strip()
-            section_id = str(hint.get("section_id_hint") or f"{stem}-{index + 1}").strip()
-            sections.append(
-                {
-                    "id": section_id,
-                    "primitive": primitive,
-                    "title": hint.get("title_hint"),
-                    "config": hint.get("config_hint") if isinstance(hint.get("config_hint"), dict) else {},
-                    "event_triggers": [],
-                    "roles": None,
-                }
-            )
-    if not sections:
-        sections.append(
-            {
-                "id": f"{stem}-header",
-                "primitive": "PageHeader",
-                "title": None,
-                "config": {"title": title, "subtitle": str(page.get("purpose") or "").strip()},
-                "event_triggers": [],
-                "roles": None,
-            }
-        )
-    return {
-        "name": str(page.get("name") or title).strip(),
-        "route": route,
-        "title": title,
-        "page_type": str(page.get("page_type") or page.get("page_type_hint") or page.get("ui_layout") or "standard").strip(),
-        "layout": str(page.get("layout") or "stack").strip(),
-        "shell_mode": str(page.get("shell_mode") or page.get("shell_mode_hint") or "workspace").strip(),
-        "roles": page.get("roles"),
-        "navigation": {
-            "id": stem,
-            "label": title,
-            "icon": None,
-            "scope": "global",
-            "order": 10,
-            "visible": True,
-            "placement": None,
-        },
-        "sections": sections,
-        "extensions": None,
-    }
 
 
 def _apply_planned_page_contracts(
@@ -203,6 +130,33 @@ def _apply_module_handler_method_alignment(
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
+def _apply_hosted_pack_templates(
+    code_files: List[Dict[str, str]],
+    *,
+    app_build_plan: Any,
+    context_variables: Any,
+) -> List[Dict[str, str]]:
+    if not isinstance(app_build_plan, dict):
+        return code_files
+
+    capability_packs = None
+    if context_variables and hasattr(context_variables, "get"):
+        capability_packs = context_variables.get("capability_packs")
+    if not capability_packs:
+        capability_packs = app_build_plan.get("capability_packs")
+    if not isinstance(capability_packs, list):
+        return code_files
+
+    template_files = resolve_hosted_pack_templates(capability_packs)
+    if not template_files:
+        return code_files
+
+    file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    for file in template_files:
+        file_map[str(file["filename"])] = str(file["content"])
+    return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
+
+
 async def assemble_app_tasks(
     *,
     context_variables: Annotated[
@@ -289,6 +243,11 @@ async def assemble_app_tasks(
 
     code_files = _apply_planned_page_contracts(code_files, app_build_plan)
     code_files = _apply_module_handler_method_alignment(code_files)
+    code_files = _apply_hosted_pack_templates(
+        code_files,
+        app_build_plan=app_build_plan,
+        context_variables=context_variables,
+    )
 
     # Write the assembled flat file map to context so the carry-forward
     # preservation resolver (which runs after AssemblyAgent's turn) can read

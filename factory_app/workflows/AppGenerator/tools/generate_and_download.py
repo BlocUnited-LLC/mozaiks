@@ -323,8 +323,8 @@ async def _persist_pending_schema_migration(
 
     migration_path = (
         Path(generated_app_dir)
-        / "config"
-        / "data_migrations"
+        / "data"
+        / "migrations"
         / f"{migration_id}.json"
     )
     migration_path.parent.mkdir(parents=True, exist_ok=True)
@@ -360,7 +360,7 @@ async def _persist_pending_schema_migration(
             context_variables.set("persisted_database_migration", record)
             context_variables.set(
                 "staged_database_migration_path",
-                f"config/data_migrations/{migration_id}.json",
+                f"data/migrations/{migration_id}.json",
             )
         except Exception:
             pass
@@ -648,9 +648,18 @@ async def generate_and_download(
         files_map["ui/lib/moduleApi.js"] = get_module_api_template()
 
     # Scan for forbidden patterns before the bundle is written to disk.
-    # Blocks delivery if the generated app contains direct Stripe SDK usage,
-    # Stripe Refunds API calls, or embedded secret key literals.
-    bundle_scan_errors = scan_generated_bundle(files_map)
+    # Blocks delivery if the generated app contains noncanonical paths,
+    # contract drift, or embedded raw secret literals.
+    app_build_plan = _context_get(context_variables, "app_build_plan")
+    selected_capability_packs = []
+    if isinstance(app_build_plan, dict):
+        raw_packs = app_build_plan.get("capability_packs")
+        if isinstance(raw_packs, list):
+            selected_capability_packs = [pack for pack in raw_packs if isinstance(pack, dict)]
+    bundle_scan_errors = scan_generated_bundle(
+        files_map,
+        capability_packs=selected_capability_packs,
+    )
     if bundle_scan_errors:
         for _scan_err in bundle_scan_errors:
             wf_logger.error("Generated bundle forbidden pattern: %s", _scan_err)
@@ -964,4 +973,6 @@ async def generate_and_download(
         "files_written": download_result["files_written"],
         "storage_backend": storage_backend,
     }
+
+
 

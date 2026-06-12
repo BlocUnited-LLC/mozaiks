@@ -1,7 +1,7 @@
 """
 Hook: Module Contract Quality Gate
 
-Fires as an update_agent_state hook on ModuleContractQualityAgent.
+Fires as an prompt middleware function on ModuleContractQualityAgent.
 
 Runs the deterministic module contract audit before the agent speaks so that
 AG2 handoff conditions (``module_contract_quality_status == "passed"`` /
@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.review_module_contract_quality import (
     review_module_contract_quality,
 )
@@ -60,3 +60,5 @@ def run_module_contract_quality_gate(
 
 
 __all__ = ["run_module_contract_quality_gate"]
+
+

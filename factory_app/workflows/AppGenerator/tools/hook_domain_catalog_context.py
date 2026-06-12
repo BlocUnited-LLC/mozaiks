@@ -1,10 +1,10 @@
 """
 Hook: Inject Domain Catalog Context
 
-Fires as update_agent_state hooks on AppPlanAgent and ConfigMiddlewareAgent.
+Fires as prompt middleware functions on AppPlanAgent and ConfigMiddlewareAgent.
 
 AppPlanAgent hook  — inject_domain_catalog_context
-  Reads domain_catalogs.yaml from the same tools/ directory, scores domains
+  Reads the factory build-context domain catalog, scores domains
   against the current app concept, and injects a compact [DOMAIN CATALOG CONTEXT]
   block into the agent system message. This gives AppPlanAgent realistic module
     and domain priors without dumping the entire catalog.
@@ -31,13 +31,15 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
+from factory_app.workflows._shared.hook_utils import workflow_context_path
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_CATALOG_PATH = Path(__file__).parent / "domain_catalogs.yaml"
+_CATALOG_PATH = workflow_context_path("AppGenerator", "domain_catalogs.yaml")
 
 _DOMAIN_CONTEXT_HEADER = "[DOMAIN CATALOG CONTEXT]"
 _MANIFEST_GUARD_HEADER = "[MODULE FILE MANIFEST GUARD]"
@@ -262,7 +264,7 @@ def _build_app_plan_body(
             "  - Use these domains as a starting point; adapt to what this specific app needs.",
             "  - Treat recommended_module_type as a planning prior, not runtime truth.",
             "  - Use the injected [FILE CONTRACTS CONTEXT] for task ownership and allowed file families.",
-            "  - Use the injected [MODULE ARCHETYPES CONTEXT] for cookie-cutter module.type conventions.",
+            "  - Use the injected [MODULE ARCHETYPES CONTEXT] for backend archetype conventions only; do not emit module.type.",
             "  - Do NOT include all six YAML files by default for every module.",
             "  - Include module.yaml always.",
             "  - Include events.yaml only if the module publishes domain events.",
@@ -322,7 +324,7 @@ def _build_manifest_guard_body(
 
 def inject_domain_catalog_context(agent: Any, messages: List[Dict[str, Any]]) -> None:
     """
-    update_agent_state hook for AppPlanAgent.
+    prompt middleware function for AppPlanAgent.
 
     Reads domain_catalogs.yaml, scores domains against the current concept,
     and injects a compact [DOMAIN CATALOG CONTEXT] block into the agent system
@@ -358,7 +360,7 @@ def inject_domain_catalog_context(agent: Any, messages: List[Dict[str, Any]]) ->
 
 def inject_module_file_manifest_guard(agent: Any, messages: List[Dict[str, Any]]) -> None:
     """
-    update_agent_state hook for ConfigMiddlewareAgent.
+    prompt middleware function for ConfigMiddlewareAgent.
 
     Reads current_build_task from context variables. If this is a module_contract
     task, derives the declared YAML files from owned_paths and injects a
@@ -425,3 +427,7 @@ __all__ = [
     "inject_domain_catalog_context",
     "inject_module_file_manifest_guard",
 ]
+
+
+
+

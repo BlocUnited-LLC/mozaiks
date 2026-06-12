@@ -3,9 +3,9 @@ App validation tool for generated applications.
 
 This tool can:
 - resolve generated files from an explicit `files` mapping or persisted agent outputs
-- validate the generated app with an explicit strategy: `e2b`, `local`, or `skip`
+- validate the generated app with an explicit strategy: `e2b`, `docker`, `local`, or `skip`
 - run build/test commands
-- optionally start a preview server for the E2B strategy
+- optionally start a preview server (e2b and docker strategies expose a URL)
 """
 
 
@@ -32,10 +32,6 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )
 
-try:
-    from e2b_code_interpreter import Sandbox  # type: ignore
-except Exception:  # pragma: no cover
-    Sandbox = None  # type: ignore
 
 def _local_validation_available() -> bool:
     return local_app_validation_available()
@@ -54,50 +50,6 @@ def _base_result(*, strategy: str, status: str) -> Dict[str, Any]:
         "test_results": None,
         "parsed_errors": [],
     }
-
-
-def _create_sandbox(*, timeout_seconds: int) -> Any:
-    if Sandbox is None:
-        raise RuntimeError("Sandbox SDK not available")
-
-    create_fn = getattr(Sandbox, "create", None)
-    if callable(create_fn):
-        return create_fn(timeout=timeout_seconds)
-
-    try:
-        return Sandbox(api_key=os.getenv("E2B_API_KEY", "").strip(), timeout=timeout_seconds)
-    except TypeError:
-        return Sandbox(timeout_seconds)
-
-
-def _sandbox_filesystem(sandbox: Any) -> Any:
-    return getattr(sandbox, "files", None) or getattr(sandbox, "filesystem", None)
-
-
-def _sandbox_run_command(sandbox: Any, cmd: str, *, background: bool = False) -> Any:
-    commands = getattr(sandbox, "commands", None)
-    if commands is not None and callable(getattr(commands, "run", None)):
-        return commands.run(cmd, background=background)
-    process = getattr(sandbox, "process", None)
-    if process is not None and callable(getattr(process, "start", None)):
-        return process.start(cmd, background=background)
-    raise AttributeError("Sandbox has no command runner")
-
-
-def _sandbox_get_host(sandbox: Any, port: int) -> Optional[str]:
-    fn = getattr(sandbox, "get_host", None)
-    if callable(fn):
-        try:
-            return str(fn(port))
-        except Exception:
-            return None
-
-    fn = getattr(sandbox, "get_hostname", None)
-    if callable(fn):
-        try:
-            return str(fn(port))
-        except Exception:
-            return None
     return None
 
 
@@ -846,78 +798,79 @@ def validate_module_implementation_contract(files: Dict[str, str]) -> Dict[str, 
     }
 
 
-async def _run_e2b_validation(
+async def _run_sandbox_validation(
     *,
+    strategy: str,
     resolved_files: Dict[str, str],
     commands: List[str],
     start_dev_server: bool,
     timeout_seconds: int,
 ) -> Dict[str, Any]:
-    e2b_api_key = os.getenv("E2B_API_KEY", "").strip()
-    if not e2b_api_key:
-        return {
-            **_base_result(strategy="e2b", status="failed"),
-            "errors": ["E2B_API_KEY not configured"],
-        }
+    """Run build validation through a SandboxPort adapter (e2b or docker)."""
+    from mozaiksai.core.adapters import get_sandbox_adapter
 
-    if Sandbox is None:
-        return {
-            **_base_result(strategy="e2b", status="failed"),
-            "errors": ["e2b_code_interpreter is not installed"],
-        }
-
-    result = _base_result(strategy="e2b", status="passed")
-    sandbox = None
     try:
-        sandbox = _create_sandbox(timeout_seconds=timeout_seconds)
-        fs = _sandbox_filesystem(sandbox)
-        if fs is None:
-            raise RuntimeError("Sandbox filesystem unavailable")
+        adapter = get_sandbox_adapter(strategy)
+    except Exception as exc:
+        return {
+            **_base_result(strategy=strategy, status="failed"),
+            "errors": [str(exc)],
+        }
 
-        for filepath, content in resolved_files.items():
-            dir_path = str(PurePosixPath(filepath).parent)
-            if dir_path and dir_path != ".":
-                try:
-                    fs.make_dir(dir_path)
-                except Exception:
-                    pass
-            fs.write(filepath, content)
+    result = _base_result(strategy=strategy, status="passed")
+    session_id: Optional[str] = None
+    try:
+        session = await adapter.create_session(timeout_seconds=timeout_seconds)
+        session_id = session.session_id
+
+        await adapter.write_files(session_id=session_id, files=resolved_files)
 
         for cmd in commands:
-            proc = _sandbox_run_command(sandbox, cmd)
-            stdout = proc.stdout or ""
-            stderr = proc.stderr or ""
-            _append_command_output(result, command=cmd, stdout=stdout, stderr=stderr)
-            if int(proc.exit_code) != 0:
+            run_result = await adapter.run_command(
+                session_id=session_id,
+                command=cmd,
+                timeout_seconds=float(timeout_seconds),
+            )
+            _append_command_output(
+                result,
+                command=cmd,
+                stdout=run_result.stdout,
+                stderr=run_result.stderr,
+            )
+            if not run_result.success:
                 result["success"] = False
                 result["validation_status"] = "failed"
-                result["errors"].append(f"{cmd} failed: {stderr or stdout}")
+                result["errors"].append(
+                    f"{cmd} failed: {run_result.stderr or run_result.stdout}"
+                )
                 break
-            if stderr and "warning" in stderr.lower():
-                result["warnings"].append(stderr)
+            if run_result.stderr and "warning" in run_result.stderr.lower():
+                result["warnings"].append(run_result.stderr)
 
         result["parsed_errors"] = parse_build_errors(result.get("build_output", ""))
 
         if result["validation_status"] == "passed":
             try:
-                scripts = _read_package_scripts_from_text(fs.read("package.json"))
+                pkg_content = await adapter.read_file(session_id=session_id, path="package.json")
+                scripts = _read_package_scripts_from_text(str(pkg_content))
                 if "test" in scripts:
-                    test_proc = _sandbox_run_command(sandbox, "npm test -- --watchAll=false")
-                    result["test_results"] = test_proc.stdout or ""
-                    if int(test_proc.exit_code) != 0:
-                        result["warnings"].append(f"Tests failed: {test_proc.stderr or ''}")
+                    test_run = await adapter.run_command(
+                        session_id=session_id,
+                        command="npm test -- --watchAll=false",
+                        timeout_seconds=float(timeout_seconds),
+                    )
+                    result["test_results"] = test_run.stdout
+                    if not test_run.success:
+                        result["warnings"].append(f"Tests failed: {test_run.stderr or ''}")
             except Exception:
                 pass
 
         if result["validation_status"] == "passed" and start_dev_server:
             try:
+                preview_port = int(os.getenv("SANDBOX_PREVIEW_PORT", "3000"))
                 try:
-                    preview_port = int(os.getenv("E2B_PREVIEW_PORT", "3000"))
-                except Exception:
-                    preview_port = 3000
-
-                try:
-                    scripts = _read_package_scripts_from_text(fs.read("package.json"))
+                    pkg_content = await adapter.read_file(session_id=session_id, path="package.json")
+                    scripts = _read_package_scripts_from_text(str(pkg_content))
                 except Exception:
                     scripts = {}
 
@@ -928,14 +881,18 @@ async def _run_e2b_validation(
                 else:
                     server_cmd = f"npm run dev -- --host 0.0.0.0 --port {preview_port}"
 
-                _sandbox_run_command(sandbox, server_cmd, background=True)
+                await adapter.run_command(
+                    session_id=session_id,
+                    command=server_cmd,
+                    background=True,
+                    timeout_seconds=float(timeout_seconds),
+                )
                 await asyncio.sleep(3)
 
-                host = _sandbox_get_host(sandbox, preview_port)
-                if host and host.strip():
-                    preview_url = host.strip()
-                    if not preview_url.startswith("http"):
-                        preview_url = f"https://{preview_url}"
+                preview_url = await adapter.get_preview_url(
+                    session_id=session_id, port=preview_port
+                )
+                if preview_url:
                     result["preview_url"] = preview_url
             except Exception as server_err:
                 result["warnings"].append(f"Dev server not started: {server_err}")
@@ -946,15 +903,15 @@ async def _run_e2b_validation(
             **result,
             "success": False,
             "validation_status": "failed",
-            "errors": [f"E2B validation error: {exc}"],
+            "errors": [f"{strategy} validation error: {exc}"],
             "preview_url": None,
         }
     finally:
-        try:
-            if sandbox is not None and hasattr(sandbox, "close"):
-                sandbox.close()
-        except Exception:
-            pass
+        if session_id is not None:
+            try:
+                await adapter.terminate_session(session_id=session_id)
+            except Exception:
+                pass
 
 
 async def _run_local_validation(
@@ -1134,7 +1091,9 @@ async def validate_app_build(
         _persist_validation_context(context_variables=context_variables, result=result)
         return result
 
-    result = await _run_e2b_validation(
+    # e2b and docker both route through the SandboxPort abstraction
+    result = await _run_sandbox_validation(
+        strategy=strategy,
         resolved_files=resolved_files,
         commands=list(commands),
         start_dev_server=bool(start_dev_server),
@@ -1320,3 +1279,4 @@ __all__ = [
     "validate_app_build",
     "validate_app_bundle_from_request",
 ]
+

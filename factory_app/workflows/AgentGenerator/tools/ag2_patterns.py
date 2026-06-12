@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Mapping
 
 import yaml
 
-PATTERNBOOK_PATH = Path(__file__).with_name("ag2_network_patterns.yaml")
+from factory_app.workflows._shared.hook_utils import workflow_context_path
+
+PATTERNBOOK_PATH = workflow_context_path("AgentGenerator", "ag2_network_patterns.yaml")
 
 
 def normalize_pattern_name(value: Any) -> str:
@@ -144,13 +145,13 @@ def render_pattern_guidance(pattern_id: int | str | None) -> str:
             f"Required context variables: {', '.join(context) if context else 'none'}",
             f"Required tools: {', '.join(tools) if tools else 'none'}",
             "",
-            "Handoff generation:",
-            f"- Strategy: {pattern.get('handoff_generation', {}).get('strategy')}",
+            "Transition generation:",
+            f"- Strategy: {pattern.get('transition_generation', {}).get('strategy')}",
         ]
     )
-    for item in pattern.get("handoff_generation", {}).get("ordering") or []:
+    for item in pattern.get("transition_generation", {}).get("ordering") or []:
         lines.append(f"- Ordering: {item}")
-    terminal_rule = pattern.get("handoff_generation", {}).get("terminal_rule")
+    terminal_rule = pattern.get("transition_generation", {}).get("terminal_rule")
     if terminal_rule:
         lines.append(f"- Terminal rule: {terminal_rule}")
 

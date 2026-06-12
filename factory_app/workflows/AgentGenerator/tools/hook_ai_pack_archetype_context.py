@@ -1,7 +1,7 @@
 """
 Hook: Inject AI Pack Archetype and Callback Context
 
-Fires as an update_agent_state hook on PatternAgent and WorkflowBundleBuilderAgent.
+Fires as an prompt middleware function on PatternAgent and WorkflowBundleBuilderAgent.
 
 Closes Gap #5 (async event callback loop) — ensures that AI-native pack workflows
 generate:
@@ -11,7 +11,7 @@ generate:
 
 **PatternAgent** — detects AI-native workflow surfaces in design_surface_map and
 injects [AI PACK ARCHETYPE CONTEXT] so PatternAgent:
-  - Uses the fixed archetype + startup_mode instead of free-form selection
+  - Uses the fixed archetype + workflow_startup_mode instead of free-form selection
   - Writes a rich initial_message for the WorkflowBundleBuilderAgent worker that
     includes module_id, callback_endpoint, and explicit generation requirements
 
@@ -42,7 +42,7 @@ _ARCHETYPE_MAP = {
     _REVIEW_SUFFIX: {
         "archetype": "ai_review",
         "pattern": "Feedback Loop",
-        "startup_mode": "BackendOnly",
+        "workflow_startup_mode": "BackendOnly",
         "agents": "IntakeAgent → ReviewerAgent → ResultAgent",
         "result_action": "record_review_result",
         "result_agent": "ResultAgent",
@@ -50,7 +50,7 @@ _ARCHETYPE_MAP = {
     _ANALYSIS_SUFFIX: {
         "archetype": "ai_analysis",
         "pattern": "Pipeline",
-        "startup_mode": "BackendOnly",
+        "workflow_startup_mode": "BackendOnly",
         "agents": "ContextReaderAgent → AnalysisAgent → ResultWriterAgent",
         "result_action": "store_analysis_result",
         "result_agent": "ResultWriterAgent",
@@ -58,7 +58,7 @@ _ARCHETYPE_MAP = {
     _EXTRACTION_SUFFIX: {
         "archetype": "ai_extraction",
         "pattern": "Triage with Tasks",
-        "startup_mode": "BackendOnly",
+        "workflow_startup_mode": "BackendOnly",
         "agents": "TriageAgent → ExtractionWorkerAgent (task_batches) → SynthesisAgent",
         "result_action": "store_extraction_results",
         "result_agent": "SynthesisAgent",
@@ -158,10 +158,10 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
     lines: list[str] = [
         "The design_surface_map contains AI-native workflow surfaces. "
         "These use FIXED archetypes — do NOT apply free-form pattern selection. "
-        "Use the archetype, startup_mode, and initial_message template below for each.\n",
+        "Use the archetype, workflow_startup_mode, and initial_message template below for each.\n",
         "RULES FOR AI-NATIVE WORKFLOWS:\n"
         "  - role: supporting (all AI-native workflows run in the background)\n"
-        "  - startup_mode: BackendOnly (no user chat session)\n"
+        "  - workflow_startup_mode: BackendOnly (no user chat session)\n"
         "  - human_in_the_loop: false\n"
         "  - The initial_message MUST include module_id, callback_action, and callback_endpoint\n"
         "    so the WorkflowBundleBuilderAgent worker knows the full return-path contract.\n",
@@ -182,7 +182,7 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
             f"Generate a BackendOnly {archetype} workflow bundle. "
             f"capability_id={cap_id}, workflow_name={_to_pascal(cap_id)}. "
             f"Use the {pattern} orchestration pattern with agent sequence: {agents_seq}. "
-            f"startup_mode=BackendOnly, human_in_the_loop=false. "
+            f"workflow_startup_mode=BackendOnly, human_in_the_loop=false. "
             f"CALLBACK CONTRACT: the {result_agent} MUST call backend_request "
             f"(POST {callback_endpoint}) to write the result back to the owning module. "
             f"Declare backend_request from mozaiksai.core.workflow.app_backend_tools in tools.yaml. "
@@ -197,7 +197,7 @@ def _build_pattern_body(ai_surfaces: list[dict]) -> str:
             f"  module_id: {module_id}\n"
             f"  archetype: {archetype}\n"
             f"  pattern: {pattern}\n"
-            f"  startup_mode: BackendOnly\n"
+            f"  workflow_startup_mode: BackendOnly\n"
             f"  agent_sequence: {agents_seq}\n"
             f"  result_agent: {result_agent}\n"
             f"  result_callback_action: {result_action}\n"
@@ -307,10 +307,10 @@ def inject_ai_pack_archetype_context(
     messages: List[Dict[str, Any]],
 ) -> None:
     """
-    update_agent_state hook for PatternAgent and WorkflowBundleBuilderAgent.
+    prompt middleware function for PatternAgent and WorkflowBundleBuilderAgent.
 
     PatternAgent: injects [AI PACK ARCHETYPE CONTEXT] with fixed archetype,
-    startup_mode, and enriched initial_message templates.
+    workflow_startup_mode, and enriched initial_message templates.
 
     WorkflowBundleBuilderAgent: injects [AI PACK CALLBACK CONTRACT] so any
     worker generating an AI-native pack workflow knows to generate
@@ -355,3 +355,4 @@ def inject_ai_pack_archetype_context(
 
 
 __all__ = ["inject_ai_pack_archetype_context"]
+

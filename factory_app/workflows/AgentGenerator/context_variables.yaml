@@ -282,6 +282,12 @@ definitions:
       type: config
       env_var: MONETIZATION_ENABLED
       default: false
+  builder_options:
+    type: object
+    description: Optional app-agnostic builder UI option payload carried through workflow sequences.
+    source:
+      type: state
+      default: null
   context_include_schema:
     type: boolean
     description: Flag indicating if database schema access is enabled for this workflow

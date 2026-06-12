@@ -107,3 +107,4 @@ async def apply_schema_migration(
         logger.error(f"Failed to apply migration {migration_id}: {e}")
         return {"error": str(e), "migration_id": migration_id}
 
+

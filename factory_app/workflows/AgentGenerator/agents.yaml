@@ -24,7 +24,7 @@ agents:
       **Runtime Behavior**:
       - You always speak first when a new workflow session launches.
       - The runtime persists your responses automatically.
-      - Your `NEXT` token triggers automatic handoff to the pattern selection phase.
+      - Your `NEXT` token lets the AG2 Network transition graph advance to the pattern selection phase.
       - No tool calling, no structured outputs - just natural conversation.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -36,8 +36,8 @@ agents:
            - Read `refinement_request` — this is the scoped change the user wants applied to the existing workflow bundle.
            - Read `revision_scope` to calibrate depth:
              - `patch`: confirm the targeted change only (e.g. a specific agent prompt or tool update); emit NEXT immediately.
-             - `design`: confirm agent design intent only (e.g. handoff structure, pattern change); do not re-derive the full workflow.
-             - `feature`: confirm the new capability's boundary only (e.g. adding a new agent or tool); preserve existing agents/tools/handoffs.
+             - `design`: confirm agent design intent only (e.g. transition graph structure, pattern change); do not re-derive the full workflow.
+             - `feature`: confirm the new capability's boundary only (e.g. adding a new agent or tool); preserve existing agents, tools, and AG2 transitions.
              - `core`: this should not reach InterviewAgent in refinement mode — escalate to ValueEngine.
            - Emit ONLY the token: `NEXT` once the refinement scope is clear.
 
@@ -128,7 +128,7 @@ agents:
   - id: pack_partition_concept
     heading: '[PACK PARTITIONING]'
     content: |-
-      **Most requests should produce one workflow.** A single workflow with sequential AG2 handoffs handles the vast majority of automation requests.
+      **Most requests should produce one workflow.** A single workflow with an AG2 Network transition graph handles the vast majority of automation requests.
 
       Use a multi-workflow pack only when ALL of the following are true:
       - The request involves 2+ genuinely distinct functional domains (e.g. a booking system + a notification service + a reporting dashboard — these are separate concerns that could be deployed and run independently).
@@ -136,7 +136,7 @@ agents:
       - The domains have clear workflow-level dependencies or entrypoints that PackMetadataAgent can declare in extension_registry.json.
 
       Do NOT create extra workflows for:
-      - A single workflow that has multiple steps or phases (use sequential agent handoffs instead).
+      - A single workflow that has multiple steps or phases (use AG2 Network transitions between agents instead).
       - A workflow that needs to process multiple items of the same type (use workflow-local task_batches.yaml when parallel task work is justified).
       - A workflow that calls multiple APIs or integrations (these are tools, not separate workflows).
       - Any case where you are unsure — default to single workflow and explain the choice in `pack_partition_reason`.
@@ -193,7 +193,7 @@ agents:
 
       ## STEP 4: Select AG2 Network Pattern for Each Workflow
 
-      Use the injected AG2 Network patternbook as the canonical source of truth for pattern IDs, names, intent signals, support level, required context variables, required tools, and handoff-generation strategy.
+      Use the injected AG2 Network patternbook as the canonical source of truth for pattern IDs, names, intent signals, support level, required context variables, required tools, and transition graph generation strategy.
 
       Selection rules:
       - User-facing primary workflows: match the user's core interaction style.
@@ -217,9 +217,9 @@ agents:
 
       For each workflow in `workflows[]`, write an `initial_message` that gives the WorkflowBundleBuilderAgent worker its full generation brief. Include:
       - Workflow name, role, and one-sentence description
-      - Assigned pattern and what topology it implies (agent archetypes, handoff shape)
+      - Assigned pattern and what topology it implies (agent archetypes, transition graph shape)
       - Any critical domain constraints from concept_overview or design_surface_map
-      - The startup_mode to use (UserDriven / AgentDriven / BackendOnly)
+      - The `workflow_startup_mode` to write in `orchestrator.yaml` (UserDriven / AgentDriven / BackendOnly)
       - Whether human-in-the-loop review is needed
       - Key integrations or data sources this workflow owns
 
@@ -232,6 +232,10 @@ agents:
       - Every workflow has a valid `pattern_id` (1–9).
       - Every workflow has `initial_agent: "WorkflowBundleBuilderAgent"`.
       - Every workflow has a concrete `initial_message`.
+      - Every workflow has a `depends_on` list (empty `[]` if no prerequisites).
+      - All names in `depends_on` reference other workflow names in this exact `workflows[]` list.
+      - Primary/independent workflows have `depends_on: []` so they run in parallel immediately.
+      - Supporting workflows that need a primary workflow's output declare it in `depends_on`.
       - `pack_partition_reason` explains the multi-workflow decision (or null for single workflow).
 
   - id: output_format
@@ -253,7 +257,8 @@ agents:
               "pattern_id": <int 1-9>,
               "pattern_name": "<label>",
               "initial_agent": "WorkflowBundleBuilderAgent",
-              "initial_message": "<full generation brief for this workflow's worker>"
+              "initial_message": "<full generation brief for this workflow's worker>",
+              "depends_on": []
             }
           ]
         }
@@ -275,7 +280,8 @@ agents:
               "pattern_id": 8,
               "pattern_name": "Star",
               "initial_agent": "WorkflowBundleBuilderAgent",
-              "initial_message": "Generate a complete workflow bundle for ContentFeedAI. Pattern: Star (8) — hub agent fans out to scoring, trend, and personalisation specialist spokes then synthesises a ranked feed. startup_mode: BackendOnly. No HITL. Integrations: content DB (read), ranking service (write)."
+              "initial_message": "Generate a complete workflow bundle for ContentFeedAI. Pattern: Star (8) — hub agent fans out to scoring, trend, and personalisation specialist spokes then synthesises a ranked feed. workflow_startup_mode: BackendOnly. No HITL. Integrations: content DB (read), ranking service (write).",
+              "depends_on": []
             },
             {
               "name": "ModerationAI",
@@ -284,7 +290,8 @@ agents:
               "pattern_id": 9,
               "pattern_name": "Triage with Tasks",
               "initial_agent": "WorkflowBundleBuilderAgent",
-              "initial_message": "Generate a complete workflow bundle for ModerationAI. Pattern: Triage with Tasks (9) — 5-stage pipeline: intake → triage → analyse → decision → action. startup_mode: BackendOnly. No HITL. Owns moderation_queue collection."
+              "initial_message": "Generate a complete workflow bundle for ModerationAI. Pattern: Triage with Tasks (9) — 5-stage pipeline: intake → triage → analyse → decision → action. workflow_startup_mode: BackendOnly. No HITL. Owns moderation_queue collection.",
+              "depends_on": []
             }
           ]
         }
@@ -315,7 +322,7 @@ agents:
       - `ContextVariables.pack_name`: Pack name for the diagram title.
 
       **What the diagram gates**:
-      - User approval here triggers PackBuildCoordinator, which fires the task_batches.yaml parallel generation.
+      - User approval here triggers a tool which fires the task_batches.yaml parallel generation.
       - Revision request here routes back to PatternAgent to re-plan.
   - id: instructions
     heading: '[INSTRUCTIONS]'
@@ -400,14 +407,14 @@ agents:
       Generate a production-ready workflow bundle for the assigned workflow. The bundle must include:
 
       **Required YAML files** (at workflow root):
-      - `orchestrator.yaml` — workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message/initial_message_to_user, triggers[], visual_agents[]
+      - `orchestrator.yaml` — workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message/initial_message_to_user, triggers[]
       - `agents.yaml` — agents list with name, prompt_sections (role/objective/context/instructions/output_format), max_consecutive_auto_reply, structured_outputs_required
-      - `handoffs.yaml` — handoff_rules derived from the assigned pattern's handoff_generation.strategy
+      - `transition_graph.yaml` — transition_rules derived from the assigned pattern's transition_generation.strategy
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below
       - `context_variables.yaml` — definitions + agents exposure sections
       - `structured_outputs.yaml` — models + registry (agents → output model)
-      - `hooks.yaml` — hooks list (at minimum hook_universal_prompts.py for all agents)
-      - `ui_config.yaml` — visual_agents list
+      - `middleware.yaml` — prompt middleware declarations (at minimum hook_universal_prompts.py for all agents)
+      - `ui_config.yaml` — visual_agents list. `visual_agents` belongs only in ui_config.yaml, never in orchestrator.yaml.
 
       **Python tool stubs** (under `tools/`):
       - One `.py` file per declared tool function
@@ -415,10 +422,16 @@ agents:
 
       **UI components** (under `ui/<WorkflowName>/`, optional):
       - Only when the workflow needs a custom React UI surface beyond the shipped workflow primitives
+      - `agents.yaml` must use `prompt_sections` as a list of section objects:
+        `[{id, heading, content}, ...]`. Never emit `prompt_sections` as a
+        mapping keyed by role/objective/context.
+      - `transition_graph.yaml` must use flat rule objects with `source_agent`,
+        `target_agent`, and `transition_type`. Never emit nested keys such as
+        `after_turn: {source_agent: ...}`.
   - id: context
     heading: '[CONTEXT]'
     content: |-
-      **Your task brief** (from `initial_message`): Contains workflow_name, pattern, role, description, startup_mode, HITL flag, key integrations.
+      **Your task brief** (from `initial_message`): Contains workflow_name, pattern, role, description, workflow_startup_mode, HITL flag, key integrations.
 
       **Concept context** (from context_variables):
       - `concept_overview`: Overall product intent — use to ensure your workflow fits the product design.
@@ -426,7 +439,7 @@ agents:
       - `backend_design_document`: Backend design intent — use for event names, module boundaries, data shapes.
       - `experience_spec_document`: UI intent — use for agent interaction modes and UI primitive selection.
 
-      **Pattern guidance**: Injected at runtime by the hook. Contains the full patternbook entry for your assigned pattern — agent archetypes, beta primitives, handoff_generation strategy, required context variables, required tools, and generator notes. Use this as your structural template.
+      **Pattern guidance**: Injected at runtime by Mozaiks prompt middleware. Contains the full patternbook entry for your assigned pattern — agent archetypes, AG2 Network primitives, transition graph strategy, required context variables, required tools, and generator notes. Use this as your structural template.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -436,19 +449,19 @@ agents:
       - `workflow_name` (PascalCase)
       - `pattern_id` and `pattern_name`
       - `role` (primary / supporting)
-      - `startup_mode` (UserDriven / AgentDriven / BackendOnly)
+      - `workflow_startup_mode` (UserDriven / AgentDriven / BackendOnly)
       - `human_in_the_loop` (true/false)
       - Key integrations and data sources
 
       ## STEP 2: Derive Agent Topology from Pattern
 
-      Read the injected pattern guidance for your assigned pattern. Use the `agent_archetypes` and `handoff_generation.strategy` to derive your agents:
+      Read the injected pattern guidance for your assigned pattern. Use the `agent_archetypes` and transition graph strategy to derive your agents:
 
       - **Pipeline (6)**: Sequential chain A → B → C → D. Each agent owns one stage. No branching.
       - **Star (8)**: Hub agent fans out via `ask_spoke()` tool to N specialists, collects replies, synthesises. Hub + N specialist agents.
       - **Context-Aware Routing (1)**: RouterAgent classifies and sets a context variable. SpecialistAgents terminate after handling. Rules: specialist termination first, then sticky context routes.
       - **Feedback Loop (3)**: Generator agent produces draft. Reviewer agent evaluates and gates. Loop back on revision request, terminate on approval.
-      - **Coordinator (5)**: Coordinator uses a generic `handoff(to)` tool. LLM picks target. Specialists have `default_target` back to coordinator.
+      - **Coordinator (5)**: Coordinator uses AG2-supported routing tools or context updates to select a target. Specialists have graph routes back to coordinator.
       - **Hierarchical (4)**: Three-tier: coordinator directs specialists (researcher, writer). Return-to-coordinator after each specialist completes.
       - **Triage with Tasks (9)**: 5-stage pipeline with context-driven routing: intake → triage → researcher → writer → reviewer.
       - **Escalation (2)**: Primary attempts resolution, escalates on failure condition.
@@ -462,17 +475,17 @@ agents:
       - Does it need to persist structured output to context? → `Agent_Tool` with `auto_tool_call: true`
       - Does it need to present UI to the user? → `UI_Tool` (interactive) or `UI_Surface` (one-way)
       - Does it call an external API? → `Agent_Tool` for the API call
-      - Does it route via Coordinator pattern? → `Agent_Tool` for `handoff(to)` stub
+      - Does it route via Coordinator pattern? → `Agent_Tool` for a typed AG2 beta `Handoff(target=...)` result when WorkflowAdapter dynamic routing is required
 
       Prefer shipped workflow primitives (approval_card, form_card, diagram_viewer, download_center) over custom React. Only generate `ui/<WorkflowName>/*.jsx` for genuinely custom surfaces.
 
       ## STEP 4: Plan Context Variables
 
       Always include: `tenant_id`, `app_id`, `user_id` as data_reference.
-      Add state variables for every routing condition in handoffs.yaml (each `${var}` reference needs a declaration).
+      Add state variables for every transition_graph.yaml `condition_key` and every `${context_variable}` referenced by `context_expression`.
       Add config variables for any env-var-backed settings.
       Add computed variables for business-logic outputs.
-      Add task_batch result/status keys if the workflow itself uses task_batches.yaml.
+      If the workflow itself uses task_batches.yaml, add the conveyor result/status keys derived from the conveyor id: `${id}_results` and `${id}_status`.
 
       ## STEP 5: Plan Structured Outputs
 
@@ -481,13 +494,58 @@ agents:
       - Register the agent → model in `registry:`.
       - Every model field must have `type` and `description`. No `default: null` on required fields.
 
-      ## STEP 6: Write Handoffs
+      ## STEP 6: Write AG2 Network Transitions
 
-      Derive handoff_rules from the pattern's `handoff_generation.strategy`:
-      - Use `after_work` for unconditional sequential handoffs.
-      - Use `condition` (condition_type: expression) for context-variable-gated routing: `${var} == "value"`.
-      - Terminal agents hand off to `terminate` (background) or `user` (chat-facing).
+      Derive transition_rules from the pattern's `transition_generation.strategy`:
+      - Use `after_turn` for unconditional sequential transitions.
+      - Use `condition_type: context_equals` with `condition_key` and `condition_value` for context-variable-gated routing.
+      - Use `condition_type: context_expression` with `context_expression` for composite deterministic context routing over declared `${context_variable}` references; prefer `context_equals` for simple equality.
+      - Use `condition_type: tool_called` with `tool_name` only when the runtime host supports AG2 routing tools for that workflow.
+      - Put same-source condition rules before fallback `after_turn` rules because AG2 evaluates lower priority first.
+      - These rules compile to AG2 beta `TransitionGraph` and are resolved through `WorkflowAdapter`.
+      - Terminal agents route to `terminate` (background) or `user` (chat-facing).
       - Follow the pattern's `terminal_rule` exactly.
+      - Use this flat YAML shape:
+        ```yaml
+        transition_rules:
+          - source_agent: PlannerAgent
+            target_agent: WorkerAgent
+            transition_type: after_turn
+          - source_agent: WorkerAgent
+            target_agent: terminate
+            transition_type: after_turn
+        ```
+      - orchestrator.yaml `triggers[]` entries may use only runtime-supported keys:
+        `type`, `event`, `capability_id`, `endpoint`, `method`, and `description`.
+        Do not emit `source`, `topic`, `queue`, or product-specific trigger keys.
+
+      If the workflow requires decomposition fan-out, emit `extended_orchestration/task_batches.yaml` with the canonical conveyor shape:
+      - `version: 1`
+      - `conveyors[]`
+      - every conveyor must include `id`
+      - `decomposition_agent`
+      - `execution_agents[]`
+      - optional `concurrency`, `failure_policy`, `retry_limit`, `timeout_seconds`, and `require_owned_paths`
+
+      Example:
+      ```yaml
+      version: 1
+      conveyors:
+        - id: triage_tasks
+          decomposition_agent: TriageAgent
+          execution_agents:
+            - QueueWorkerAgent
+            - PriorityWorkerAgent
+          concurrency: 4
+          failure_policy: fail_batch
+          retry_limit: 0
+          require_owned_paths: false
+      ```
+
+      Do not put `DecompositionPlan`, `tasks`, or concrete task rows inside
+      task_batches.yaml. The decomposition agent's structured output model must
+      include `DecompositionPlan.tasks[]`; each runtime task chooses an
+      `execution_agent`, includes `task_prompt`, and may include `depends_on`.
 
       ## STEP 7: Assemble Output
 
@@ -503,6 +561,7 @@ agents:
       - `installRequirements`: external pip packages needed ([] for none)
 
       ## RULES
+      - `orchestrator.yaml` must use `workflow_startup_mode`; never emit an orchestrator `startup_mode` key.
       - Do NOT generate `backend/models.py`, `ctx.db`, or app-module files — those belong to AppGenerator.
       - Do NOT generate runtime infrastructure, platform substrate, or transport code.
       - Do NOT import from `_shared/` — all imports must be workflow-local or `mozaiksai.*`.
@@ -510,7 +569,7 @@ agents:
       - YAML files must be valid YAML. No duplicate keys.
       - Every agent in agents.yaml must have a registry entry in structured_outputs.yaml (null if no structured output).
       - Every tool declared in tools.yaml must have a corresponding `tools/<name>.py` file in `files[]`.
-      - Every `${var}` reference in handoffs.yaml must have a matching definition in context_variables.yaml.
+      - Every `${context_variable}` reference in a transition_graph.yaml `context_expression` must have a matching definition in context_variables.yaml.
 
       ## EVENT BOUNDARY RULES
       9. **Derive `event_boundary`** from `WorkflowStrategy` before writing any trigger or event declarations.
@@ -544,6 +603,26 @@ agents:
   - id: pattern_guidance_and_examples
     heading: '[PATTERN GUIDANCE]'
     content: '{{PATTERN_GUIDANCE_AND_EXAMPLES}}'
+
+  - id: contract_check
+    heading: '[CONTRACT CHECK]'
+    content: |-
+      Before emitting your final WorkflowBundleBuilderOutput JSON, check the bundle
+      against the runtime contract:
+      - every required root YAML file is present
+      - every YAML file is complete and parseable
+      - orchestrator.yaml uses workflow_startup_mode and never startup_mode
+      - orchestrator.yaml does not contain visual_agents
+      - orchestrator.yaml triggers use only type, event, capability_id, endpoint,
+        method, and description
+      - transition_graph.yaml uses only after_turn, context_equals,
+        context_expression, or tool_called transitions
+      - transition_graph.yaml transition rules are flat mappings, never nested
+        under transition type names
+      - middleware.yaml and ui_config.yaml are present even when they contain only
+        empty/default declarations
+      - tools.yaml entries have matching workflow-local tools/<name>.py files
+      - task_batches.yaml is emitted only when the workflow requires a conveyor
 
   - id: output_format
     heading: '[OUTPUT FORMAT]'
@@ -631,9 +710,15 @@ agents:
            - `startup_mode` = read from the workflow bundle's `orchestrator.yaml` `workflow_startup_mode` field:
              - `"BackendOnly"` for AI-native pack workflows (review, analysis, extraction) triggered by domain events — no user session, no UI entrypoint
              - `"UserDriven"` for workflows the user starts directly (entered via an entrypoint or user-choice transition)
-             - `"AgentDriven"` for workflows advanced through a sequence by an upstream workflow or agent handoff
+             - `"AgentDriven"` for workflows advanced through a sequence or upstream workflow route
              - Omit (null) only when startup mode is genuinely ambiguous
-           - `dependencies` = explicit prerequisites only; do not infer from journey order
+           - `dependencies` = exactly the explicit `depends_on[]` values from the
+             matching `workflows_spec` item. Do not infer dependencies from journey
+             order, workflow role, or domain assumptions.
+         - Never use placeholder workflow ids from examples. Every workflow id must
+           exactly match a workflow_name present in `workflow_bundle_results`.
+         - Never infer `startup_mode`. Parse it from each generated bundle's
+           `orchestrator.yaml` file content.
 
       2. **Workflow sequences (optional)**:
          - Only create a sequence when the pack must auto-advance through a linear chain of phases.
@@ -658,7 +743,12 @@ agents:
          - Canonical shell transition components: `LauncherScreen`, `ConfirmScreen`, `TransitionChoicePanel`, `TransitionChoiceCard`.
          - Use `transition_type: "user_choice_context"` for context seeding, `"user_choice_route"` for branch routing, `"confirm"` for simple gates.
 
-      6. **Emit Output**:
+      6. **JSON-encoded string fields** — three fields use JSON-encoded strings, not raw objects:
+         - `entrypoints[i].meta` — JSON-encode the metadata dict, or set null. Example: `"{\"title\": \"Create App\"}"`
+         - `transitions[i].options[j].context_variables` — JSON-encode the seeded variables dict, or set null. Example: `"{\"build_mode\": \"revision\"}"`
+         - `transitions[i].ui.props` — JSON-encode the presentation props dict, or set null. Example: `"{\"title\": \"Choose Mode\"}"`
+
+      7. **Emit Output**:
          - Generate `PackMetadataOutput` JSON with workflow_graph only.
 
       [OUTPUT EXAMPLE] -----  {{PATTERN_GUIDANCE_AND_EXAMPLES}}
@@ -683,13 +773,30 @@ agents:
                 ]
               }
             ],
-            "entrypoints": [],
+            "entrypoints": [
+              {
+                "id": "<string>", "path": "/<string>", "label": "<string>",
+                "transition": "<transition_id|null>", "workflow": "<workflow_id|null>",
+                "sequence": null, "requiresAuth": true, "order": 1,
+                "meta": "{\"title\": \"<route label>\"}"
+              }
+            ],
             "workflow_sequences": [],
-            "transitions": []
+            "transitions": [
+              {
+                "id": "<string>", "transition_type": "user_choice_context",
+                "ui": {"component": "LauncherScreen", "mode": "screen", "shell_mode": "focused", "props": null},
+                "options": [
+                  {"id": "<string>", "route_to": "<workflow_id>", "sequence": null, "context_variables": "{\"build_mode\": \"new\"}"}
+                ]
+              }
+            ]
           }
         }
       }
       ```
+
+      `meta`, `context_variables`, and `props` are JSON-encoded strings or null — never raw objects.
 
       **CRITICAL**: Output ONLY the raw JSON object. NO markdown fences, NO explanatory text, NO commentary.
   max_consecutive_auto_reply: 5

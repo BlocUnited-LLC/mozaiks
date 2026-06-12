@@ -179,3 +179,4 @@ def inject_contracts_context(agent, messages: List[Dict[str, Any]]) -> None:
 
     except Exception as exc:
         logger.error("[%s] Failed to inject contracts context: %s", agent.name, exc)
+

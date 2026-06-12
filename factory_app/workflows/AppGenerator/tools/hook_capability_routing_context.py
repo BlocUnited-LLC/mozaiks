@@ -1,9 +1,9 @@
 """
 Hook: Inject Capability Routing Context
 
-Fires as an update_agent_state hook on AppPlanAgent.
+Fires as an prompt middleware function on AppPlanAgent.
 
-Reads capability_routing.yaml from the same tools/ directory and injects a
+Reads the AppGenerator capability routing catalog and injects a
 compact [CAPABILITY ROUTING CONTEXT] block into the AppPlanAgent system message.
 
 This block tells AppPlanAgent the four routing layers — runtime_provided,
@@ -19,16 +19,16 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 
-from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.hook_utils import update_agent_section
 
 logger = logging.getLogger(__name__)
 
-_ROUTING_PATH = Path(__file__).parent / "capability_routing.yaml"
+_ROUTING_PATH = workflow_context_path("AppGenerator", "capability_routing.yaml")
 _ROUTING_HEADER = "[CAPABILITY ROUTING CONTEXT]"
 _EXPECTED_VERSION = 1
 
@@ -116,10 +116,10 @@ def _build_routing_body(routing: Dict[str, Any]) -> str:
     if naming_note:
         parts.append(f"Naming note:\n{naming_note}")
 
-    # Surface hosted-only pack guidance when present
-    hosted_only_note = str(cap_layer.get("hosted_only_note") or "").strip()
-    if hosted_only_note:
-        parts.append(f"Hosted-only packs:\n{hosted_only_note}")
+    # Surface operator-pack guidance when present.
+    operator_pack_note = str(cap_layer.get("operator_pack_note") or "").strip()
+    if operator_pack_note:
+        parts.append(f"Operator capability packs:\n{operator_pack_note}")
 
     parts.append(
         "Decision order:\n"
@@ -137,7 +137,7 @@ def inject_capability_routing_context(
     messages: List[Dict[str, Any]],
 ) -> None:
     """
-    update_agent_state hook for AppPlanAgent.
+    prompt middleware function for AppPlanAgent.
 
     Reads capability_routing.yaml and injects [CAPABILITY ROUTING CONTEXT] into
     the agent system message. Always fires — routing rules are deployment-independent.
@@ -175,3 +175,7 @@ def inject_capability_routing_context(
 
 
 __all__ = ["inject_capability_routing_context"]
+
+
+
+

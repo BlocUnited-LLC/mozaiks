@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 from pydantic import ValidationError
@@ -11,14 +11,13 @@ from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
     load_default_control_plane_runtime_config,
 )
 
-
 _CONTROL_PLANE_CONFIG = "control_plane/config/control_plane.yaml"
 _CONTROL_PLANE_RUNTIME = "control_plane/config/runtime.yaml"
 _CONTROL_PLANE_TOOLS = "control_plane/config/tools.yaml"
 _CONTROL_PLANE_POLICIES = "control_plane/config/policies.yaml"
 
 
-def _dump_yaml(data: Dict[str, Any]) -> str:
+def _dump_yaml(data: dict[str, Any]) -> str:
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
 
@@ -47,7 +46,7 @@ def _safe_prompt_path(raw: Any, prompt_id: str) -> str:
     return str(path)
 
 
-def _validate_control_plane_manifest(manifest_dict: Dict[str, Any]) -> None:
+def _validate_control_plane_manifest(manifest_dict: dict[str, Any]) -> None:
     """Parse the generated control_plane.yaml through the runtime schema.
 
     This catches structural errors (extra fields, wrong field names, missing
@@ -69,7 +68,7 @@ def _validate_control_plane_manifest(manifest_dict: Dict[str, Any]) -> None:
         ) from exc
 
 
-def build_control_plane_pack_code_files(raw: Any) -> List[Dict[str, str]]:
+def build_control_plane_pack_code_files(raw: Any) -> list[dict[str, str]]:
     """Materialize a typed ControlPlanePackBundle into bundle files."""
 
     if not isinstance(raw, dict):
@@ -84,7 +83,7 @@ def build_control_plane_pack_code_files(raw: Any) -> List[Dict[str, str]]:
 
     _validate_control_plane_manifest(control_plane_yaml)
 
-    files: Dict[str, str] = {
+    files: dict[str, str] = {
         _CONTROL_PLANE_CONFIG: _dump_yaml(control_plane_yaml),
         _CONTROL_PLANE_RUNTIME: _dump_yaml(load_default_control_plane_runtime_config()),
         _CONTROL_PLANE_TOOLS: _dump_yaml(tools_yaml),
@@ -110,3 +109,4 @@ def build_control_plane_pack_code_files(raw: Any) -> List[Dict[str, str]]:
 
 
 __all__ = ["build_control_plane_pack_code_files"]
+

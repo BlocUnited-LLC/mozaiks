@@ -5,7 +5,7 @@ batches:
     source:
       kind: context_variable
       path: app_task_batch_items
-      task_model: AppBuildTask
+      task_model: ${build_task_model}
     worker:
       mode: ag2_agent
       agent_field: initial_agent
@@ -20,6 +20,7 @@ batches:
         - acceptance_criteria
         - context_variables
         - integration_needs
+        - domain_context
     execution:
       concurrency: 8
       dependency_field: depends_on

@@ -1,17 +1,17 @@
-"""Inject AppGenerator file contracts, module archetypes, and workflow archetypes into agent prompts."""
+"""Inject factory build-context file, module, and workflow archetypes into prompts."""
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, List
+
+from factory_app.workflows._shared.hook_utils import workflow_context_path
 
 logger = logging.getLogger(__name__)
 
-_TOOLS_DIR = Path(__file__).parent
-_FILE_CONTRACTS_PATH = _TOOLS_DIR / "file_contracts.yaml"
-_MODULE_ARCHETYPES_PATH = _TOOLS_DIR / "module_archetypes.yaml"
-_WORKFLOW_ARCHETYPES_PATH = _TOOLS_DIR / "workflow_archetypes.yaml"
+_FILE_CONTRACTS_PATH = workflow_context_path("AppGenerator", "file_contracts.yaml")
+_MODULE_ARCHETYPES_PATH = workflow_context_path("AppGenerator", "module_archetypes.yaml")
+_WORKFLOW_ARCHETYPES_PATH = workflow_context_path("AppGenerator", "workflow_archetypes.yaml")
 
 _FILE_CONTRACTS_HEADER = "[FILE CONTRACTS CONTEXT]"
 _MODULE_ARCHETYPES_HEADER = "[MODULE ARCHETYPES CONTEXT]"
@@ -178,17 +178,24 @@ def _build_file_contracts_body(agent: Any, file_contracts: Dict[str, Any]) -> st
     return "\n".join(lines) if len(lines) > 3 else ""
 
 
-def _selected_module_type(agent: Any) -> str:
+def _selected_module_archetype(agent: Any) -> str:
     context_variables = getattr(agent, "context_variables", None)
+    current_task = _context_get(context_variables, "current_build_task", {}) or {}
+    if isinstance(current_task, dict):
+        for key in ("module_archetype", "recommended_module_type"):
+            value = str(current_task.get(key) or "").strip()
+            if value:
+                return value
+    # Fall back to module type declared in the module contract
     module_contract = _context_get(context_variables, "module_contract", {}) or {}
     if isinstance(module_contract, dict):
         module_yaml = module_contract.get("module_yaml") or {}
         if isinstance(module_yaml, dict):
-            module_block = module_yaml.get("module") or {}
-            if isinstance(module_block, dict):
-                module_type = str(module_block.get("type") or "").strip()
-                if module_type:
-                    return module_type
+            module_meta = module_yaml.get("module") or {}
+            if isinstance(module_meta, dict):
+                value = str(module_meta.get("type") or "").strip()
+                if value:
+                    return value
     return ""
 
 
@@ -222,10 +229,10 @@ def _build_module_archetypes_body(agent: Any, module_archetypes: Dict[str, Any])
     if not archetypes:
         return ""
 
-    selected_type = _selected_module_type(agent)
+    selected_type = _selected_module_archetype(agent)
     lines = [
-        "Module archetypes keep module.type selection and backend layering cookie-cutter across domains.",
-        "They guide conventions; they do not replace the canonical structured outputs or owned_paths.",
+        "Module archetypes keep backend layering cookie-cutter across domains.",
+        "They guide conventions only; never serialize archetype names into module.yaml or replace owned_paths.",
     ]
 
     if selected_type and selected_type in archetypes:
@@ -235,7 +242,7 @@ def _build_module_archetypes_body(agent: Any, module_archetypes: Dict[str, Any])
         other_names = [name for name in archetypes.keys() if name != selected_type]
         if other_names:
             lines.append("")
-            lines.append("Other available module types: " + ", ".join(other_names))
+            lines.append("Other available backend archetypes: " + ", ".join(other_names))
         return "\n\n".join(lines)
 
     for name, archetype in archetypes.items():
@@ -333,3 +340,6 @@ def inject_cookie_cutter_contracts_context(agent: Any, messages: List[Dict[str, 
 
 
 __all__ = ["inject_cookie_cutter_contracts_context"]
+
+
+

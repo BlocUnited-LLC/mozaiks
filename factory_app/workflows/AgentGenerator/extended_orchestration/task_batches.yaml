@@ -22,7 +22,7 @@ batches:
       dependency_field: depends_on
       failure_policy: fail_batch
       retry_limit: 1
-      timeout_seconds: 300
+      timeout_seconds: 600
     result:
       context_key: workflow_bundle_results
       status_key: workflow_bundle_status

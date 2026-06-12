@@ -1,7 +1,7 @@
 """
 Hook: Inject Workflow Integration Contract
 
-Fires as an update_agent_state hook on AppPlanAgent and ConfigMiddlewareAgent.
+Fires as an prompt middleware function on AppPlanAgent and ConfigMiddlewareAgent.
 
 When AgentGenerator has produced a workflow for this app, this hook injects a
 typed [WORKFLOW INTEGRATION CONTRACT] section directly into the agent system
@@ -33,7 +33,7 @@ SECTION_HEADER = "[WORKFLOW INTEGRATION CONTRACT]"
 
 def inject_workflow_integration_contract(agent, messages: List[Dict[str, Any]]) -> None:
     """
-    update_agent_state hook: inject the AgentGenerator workflow integration contract.
+    prompt middleware function: inject the AgentGenerator workflow integration contract.
 
     Reads generated_workflow_* context variables and appends a [WORKFLOW INTEGRATION
     CONTRACT] block to the agent system message. The block contains the exact
@@ -206,3 +206,5 @@ def _build_generic_block(workflow_name: str, capability_id: str, startup_mode: s
 
 
 __all__ = ["inject_workflow_integration_contract"]
+
+

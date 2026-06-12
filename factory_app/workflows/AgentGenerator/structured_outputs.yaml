@@ -51,27 +51,27 @@ models:
         - after_agent
         description: When this lifecycle operation executes relative to the agent's
           main work.
-  SystemHook:
+  SystemPromptMiddleware:
     type: model
     fields:
       name:
         type: str
-        description: Hook function name (snake_case). The actual callable that executes
-          the hook logic.
+        description: Middleware function name (snake_case). The actual callable that executes
+          the prompt injection logic.
       agent:
         type: union
         variants:
         - str
         - 'null'
-        description: Agent name this hook applies to. Use null for global hooks.
+        description: Agent name this middleware applies to. Use null for global middleware.
       trigger:
         type: literal
         values:
-        - update_agent_state
-        description: AG2 beta prompt-injection hook trigger. Runtime lifecycle work belongs in lifecycle_tools, not hooks.
+        - prompt_middleware
+        description: Mozaiks prompt-injection trigger compiled to AG2 beta middleware. Runtime lifecycle work belongs in lifecycle_tools, not prompt middleware.
       purpose:
         type: str
-        description: Brief explanation of why this hook is needed (<=140 chars).
+        description: Brief explanation of why this middleware is needed (<=140 chars).
   WorkflowAgent:
     type: model
     fields:
@@ -93,12 +93,12 @@ models:
         description: Lifecycle operation tools this agent executes. Each tool specifies
           name, integration, purpose, and trigger timing. Use [] when no lifecycle
           tools are required.
-      system_hooks:
+      system_prompt_middleware:
         type: list
-        items: SystemHook
-        description: System hooks this agent uses for runtime behavior modification.
-          Each hook specifies name, trigger, and purpose. Use [] when no system
-          hooks are required.
+        items: SystemPromptMiddleware
+        description: System prompt middleware this agent uses for prompt modification.
+          Each entry specifies name, trigger, and purpose. Use [] when no system
+          prompt middleware is required.
       human_interaction:
         type: literal
         values:
@@ -222,11 +222,13 @@ models:
         - computed
         - state
         - external
-        description: 'Source classification: config (deployment configuration from
-          env vars), data_reference (read existing MongoDB data), data_entity (create
-          new MongoDB data), computed (business logic outputs), state (workflow
-          orchestration state with triggers), external (third-party API data with
-          caching/retry).'
+        description: >
+          Source classification for declared workflow runtime state. Use config
+          for deployment/env values, data_reference for durable reads, data_entity
+          for durable writes, computed for agent/tool outputs and canonical
+          artifacts, state for AG2 routing/session flags, and external for
+          third-party data. Do not put semantic reasoning here; reasoning belongs
+          in agents.yaml prompts and structured_outputs.yaml models.
       env_var:
         type: union
         variants:
@@ -405,7 +407,9 @@ models:
         variants:
         - str
         - 'null'
-        description: Human readable description explaining the variable purpose.
+        description: Human-readable declaration of what the variable stores and
+          which agent/tool/output sets it. This is contract documentation, not
+          prompt-only reasoning.
       source:
         type: ContextVariableSource
         description: Source metadata describing where the value originates.
@@ -418,7 +422,9 @@ models:
       variables:
         type: list
         items: str
-        description: Variables exposed to the agent (empty list permitted).
+        description: Variables exposed to the agent. Every name must exist in
+          ContextVariablesPlan.definitions; transition_graph.yaml ${var}
+          references and task batch result/status keys must also be declared.
         default: []
   ContextVariablesPlan:
     type: model
@@ -427,7 +433,9 @@ models:
         type: list
         items: ContextVariableDefinitionEntry
         description: Ordered list of context variable definitions (each entry includes
-          name, type, description, and source metadata).
+          name, type, description, and source metadata). This emits
+          context_variables.yaml, the declaration layer for AG2
+          WorkflowState.context_vars.
       agents:
         type: list
         items: ContextVariableAgentExposure
@@ -639,20 +647,15 @@ models:
         type: UIConfig
         description: Optional UI metadata when lifecycle operations surface a UI_Tool
           or UI_Surface (matches tools.yaml).
-  HookFile:
+  MiddlewareFile:
     type: model
     fields:
       filename:
         type: str
-        description: Workflow-local hook file name (e.g., validate_budget.py, audit_decisions.py). Hooks are file-backed contract stubs, not freeform extras.
-      hook_type:
-        type: literal
-        values:
-        - update_agent_state
-        description: AG2 beta prompt-injection hook type. Use lifecycle_tools for before/after workflow or agent execution.
+        description: Workflow-local middleware file name (e.g., validate_budget.py, audit_decisions.py). Middleware files are file-backed contract stubs, not freeform extras.
       py_content:
         type: str
-        description: Complete Python code for hook function
+        description: Complete Python code for middleware function
   PromptSection:
     type: model
     description: Content container for a single prompt section (id + heading + text)
@@ -690,7 +693,13 @@ models:
         type: bool
         description: True when the agent must produce structured outputs (Pydantic
           model enforced); false otherwise.
-  HandoffRule:
+  TransitionConditionType:
+    type: literal
+    values:
+    - context_equals
+    - context_expression
+    - tool_called
+  TransitionRule:
     type: model
     fields:
       source_agent:
@@ -699,36 +708,51 @@ models:
       target_agent:
         type: str
         description: Target agent name or 'user' or 'terminate'
-      handoff_type:
+      transition_type:
         type: literal
         values:
         - condition
-        - after_work
-        description: 'Type of handoff: ''condition'' for immediate deterministic
-          context evaluation, ''after_work'' for post-agent-completion evaluation'
-      condition:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: 'Condition text: null for unconditional after_work, or an expression
-          string with ${var} for deterministic context conditions'
+        - after_turn
+        description: 'Type of transition: ''condition'' for immediate deterministic
+          context evaluation, ''after_turn'' for post-agent-completion evaluation'
       condition_type:
         type: union
         variants:
-        - str
+        - TransitionConditionType
         - 'null'
-        description: 'Condition evaluation method: ''expression'', ''context_expression'',
-          or ''context'' for context variable expressions (${...}); null only for
-          unconditional after_work handoffs'
-      condition_scope:
+        description: >
+          Condition evaluation method for transition_type=condition. Use
+          context_equals for AG2 ContextEquals routing over a declared
+          context variable, context_expression for composite AG2
+          ContextExpression routing over declared `${context_variable}`
+          references, tool_called for AG2 ToolCalled routing, and null only for
+          unconditional after_turn transitions.
+      condition_key:
         type: union
         variants:
         - str
         - 'null'
-        description: 'Evaluation timing for context conditions: ''pre'' for pre-reply
-          evaluation (re-checks every turn, ideal for UI interactions), null for
-          default (Post-Reply). NEVER use ''after''.'
+        description: Declared context variable name for condition_type=context_equals; null otherwise.
+      condition_value:
+        type: union
+        variants:
+        - str
+        - int
+        - bool
+        - 'null'
+        description: Exact value matched by AG2 ContextEquals for condition_type=context_equals; null otherwise.
+      context_expression:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: AG2 ContextExpression string for condition_type=context_expression; null otherwise.
+      tool_name:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Routing tool name for condition_type=tool_called; null otherwise.
       transition_target:
         type: literal
         values:
@@ -893,6 +917,44 @@ models:
       result:
         type: WorkflowTaskBatchResult
         description: Result keys and merge policy.
+  WorkflowTaskConveyorSpec:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable conveyor id. Runtime writes results to `${id}_results`
+          and status to `${id}_status`.
+      decomposition_agent:
+        type: str
+        description: Agent whose structured output contains DecompositionPlan.tasks.
+          This agent breaks user intent into typed task items.
+      execution_agents:
+        type: list
+        items: str
+        description: Allowed AG2 agents that may receive decomposed task prompts.
+          Each task item chooses one of these agents through its execution_agent field.
+      concurrency:
+        type: int
+        description: Maximum concurrent AG2 task channels for ready tasks.
+      failure_policy:
+        type: literal
+        values:
+        - fail_batch
+        - continue_with_available
+        - collect_errors
+        description: How the runtime handles failed task items.
+      retry_limit:
+        type: int
+        description: Maximum per-task retries.
+      timeout_seconds:
+        type: union
+        variants:
+        - int
+        - 'null'
+        description: Optional per-task timeout.
+      require_owned_paths:
+        type: bool
+        description: Whether every task result must stay within declared owned_paths.
   WorkflowTaskBatchesPlan:
     type: model
     fields:
@@ -903,19 +965,19 @@ models:
         type: literal
         values:
         - none
-        - ag2_task_batch
-        description: Use ag2_task_batch only when one planner output can produce
-          bounded, independent task items for AG2 worker calls.
+        - ag2_conveyor
+        description: Use ag2_conveyor only when one decomposition agent can produce
+          bounded task items for parallel AG2 execution agents.
       reason:
         type: union
         variants:
         - str
         - 'null'
         description: Why task batching is or is not needed.
-      batches:
+      conveyors:
         type: list
-        items: WorkflowTaskBatchSpec
-        description: Workflow-local task batch declarations. Empty when required=false.
+        items: WorkflowTaskConveyorSpec
+        description: Canonical workflow-local decomposition conveyors. Empty when required=false.
   WorkflowInputEvent:
     type: model
     fields:
@@ -1012,7 +1074,7 @@ models:
         type: list
         items: str
         description: List of AG2 Network patternbook labels
-      startup_mode:
+      workflow_startup_mode:
         type: literal
         values:
         - UserDriven
@@ -1226,6 +1288,14 @@ models:
           Scoped generation instruction for this workflow's WorkflowBundleBuilderAgent instance.
           Include workflow_name, pattern_name, role, description, and any key design-surface
           constraints derived from the intent. This is what the worker reads as its task prompt.
+      depends_on:
+        type: optional_list
+        items: str
+        description: >
+          Names of other workflows in this pack that must complete before this workflow
+          starts. Use PascalCase workflow names matching the name field. Empty list means
+          this workflow can run immediately in parallel with others. The task batch executor
+          uses this to build the DAG and parallelise independent workflows.
   PatternSelection:
     type: model
     fields:
@@ -1318,12 +1388,12 @@ models:
         type: ContextVariablesPlan
         description: Complete plan with definitions dict (all variables) and agents
           dict (exposure mappings).
-  HandoffRulesOutput:
+  TransitionRulesOutput:
     type: model
     fields:
-      handoff_rules:
+      transition_rules:
         type: list
-        items: HandoffRule
+        items: TransitionRule
   StructuredModelsOutput:
     type: model
     fields:
@@ -1346,7 +1416,7 @@ models:
       human_in_the_loop:
         type: bool
         description: Whether human interaction is required
-      startup_mode:
+      workflow_startup_mode:
         type: literal
         values:
         - AgentDriven
@@ -1423,13 +1493,13 @@ models:
         - 'null'
         description: Human-readable trigger purpose.
 
-  HookFilesOutput:
+  MiddlewareFilesOutput:
     type: model
     fields:
-      hook_files:
+      middleware_files:
         type: list
-        items: HookFile
-        description: Array of hook file objects (can be empty [] if no custom hooks
+        items: MiddlewareFile
+        description: Array of middleware file objects (can be empty [] if no custom middleware
           needed)
   LifecycleRequirements:
     type: model
@@ -1526,10 +1596,10 @@ models:
         type: list
         items: LifecycleTool
         description: Lifecycle operation tools
-      system_hooks:
+      system_prompt_middleware:
         type: list
-        items: SystemHook
-        description: System hooks required
+        items: SystemPromptMiddleware
+        description: System prompt middleware required
       ui_requirements:
         type: list
         items: WorkflowUIComponent
@@ -1731,9 +1801,9 @@ models:
         description: >
           How this workflow is started. UserDriven = user session initiates it and
           it may appear in workflow_sequences and entrypoints. AgentDriven = triggered
-          by an upstream workflow or agent handoff, not a direct user action. BackendOnly =
+          by an upstream workflow sequence or route, not a direct user action. BackendOnly =
           triggered exclusively by domain events; MUST NOT appear in workflow_sequences
-          or entrypoints. Read from the workflow bundle's orchestrator.yaml startup_mode
+          or entrypoints. Read from the workflow bundle's orchestrator.yaml workflow_startup_mode
           field. Leave null only when startup mode is genuinely ambiguous.
       dependencies:
         type: list
@@ -1831,9 +1901,11 @@ models:
         type: int
         description: Route ordering for shell navigation composition.
       meta:
-        type: optional_dict
+        type: optional_str
         default: null
-        description: Route metadata such as title.
+        description: >
+          JSON-encoded route metadata such as title, or null when no metadata is needed.
+          Example: "{\"title\": \"Create App\"}"
   PackGraphTransitionOption:
     type: model
     fields:
@@ -1853,9 +1925,12 @@ models:
         - 'null'
         description: Optional workflow sequence override to bind when this option is selected.
       context_variables:
-        type: optional_dict
+        type: optional_str
         default: null
-        description: Deterministic context variables seeded when this option is selected. Keys must be declared by the target workflow context_variables.yaml.
+        description: >
+          JSON-encoded context variables seeded when this option is selected, or null when
+          no seeding is required. Keys must be declared by the target workflow
+          context_variables.yaml. Example: "{\"build_mode\": \"revision\"}"
   PackGraphShellMode:
     type: literal
     values:
@@ -1887,9 +1962,13 @@ models:
           choice, approval, and review screens unless the transition should inherit
           normal app chrome.
       props:
-        type: optional_dict
+        type: optional_str
         default: null
-        description: Optional transition presentation props consumed by the selected shell component.
+        description: >
+          JSON-encoded presentation props consumed by the selected shell component, or null
+          when the component needs no configuration. For lightweight built-in fallback tuning only;
+          prefer file-backed transition components for complex surfaces.
+          Example: "{\"title\": \"Choose App Mode\", \"subtitle\": \"Select how you want to work\"}"
   PackGraphTransition:
     type: model
     fields:
@@ -2077,8 +2156,9 @@ models:
         items: CodeFile
         description: >
           Ordered list of workflow bundle files. Must include at minimum:
-          orchestrator.yaml, agents.yaml, handoffs.yaml, tools.yaml,
-          context_variables.yaml, structured_outputs.yaml, hooks.yaml, ui_config.yaml.
+          orchestrator.yaml, agents.yaml, transition_graph.yaml, tools.yaml,
+          context_variables.yaml, structured_outputs.yaml, middleware.yaml, ui_config.yaml.
+          middleware.yaml is a prompt middleware declaration file.
           Python tool stubs go under tools/<name>.py.
           UI components go under ui/<WorkflowName>/<Component>.jsx.
   PackBuildCoordinatorOutput:

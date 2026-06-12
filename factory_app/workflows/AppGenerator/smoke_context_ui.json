@@ -153,46 +153,13 @@
             "primitive": "PageHeader",
             "section_id_hint": "tickets-header",
             "title_hint": "Tickets",
-            "config_hint": {
-              "title": "Tickets",
-              "subtitle": "Review tickets and continue the next support action.",
-              "title_font": "body"
-            }
+            "config_hint": "{\"title\": \"Tickets\", \"subtitle\": \"Review tickets and continue the next support action.\", \"title_font\": \"body\"}"
           },
           {
             "primitive": "ResourceTable",
             "section_id_hint": "tickets-table",
             "title_hint": "Ticket queue",
-            "config_hint": {
-                "api_endpoint": "/api/modules/tickets/list_tickets",
-              "data_key": "tickets",
-              "search": true,
-              "search_placeholder": "Search tickets...",
-              "columns": [
-                {"key": "subject", "label": "Ticket", "type": "stack"},
-                {"key": "priority", "label": "Priority", "type": "badge"},
-                {"key": "status", "label": "Status", "type": "badge"},
-                {"key": "updated_at", "label": "Updated", "type": "date"},
-                {"key": "actions", "label": "Action", "type": "actions"}
-              ],
-              "filters": [
-                {"label": "All", "value": "all"},
-                {"label": "Open", "value": "open", "field": "status", "match_values": ["open"]},
-                {"label": "Waiting", "value": "waiting", "field": "status", "match_values": ["waiting"]}
-              ],
-              "actions": [
-                {
-                  "id": "open-ticket",
-                  "label": "Open",
-                  "action_type": "navigate",
-                  "href": "/tickets/{ticket_id}"
-                }
-              ],
-              "empty": {
-                "title": "No tickets yet",
-                "message": "New support tickets will appear here."
-              }
-            }
+            "config_hint": "{\"api_endpoint\": \"/api/modules/tickets/list_tickets\", \"data_key\": \"tickets\", \"search\": true, \"search_placeholder\": \"Search tickets...\", \"columns\": [{\"key\": \"subject\", \"label\": \"Ticket\", \"type\": \"stack\"}, {\"key\": \"priority\", \"label\": \"Priority\", \"type\": \"badge\"}, {\"key\": \"status\", \"label\": \"Status\", \"type\": \"badge\"}, {\"key\": \"updated_at\", \"label\": \"Updated\", \"type\": \"date\"}, {\"key\": \"actions\", \"label\": \"Action\", \"type\": \"actions\"}], \"filters\": [{\"label\": \"All\", \"value\": \"all\"}, {\"label\": \"Open\", \"value\": \"open\", \"field\": \"status\", \"match_values\": [\"open\"]}, {\"label\": \"Waiting\", \"value\": \"waiting\", \"field\": \"status\", \"match_values\": [\"waiting\"]}], \"actions\": [{\"id\": \"open-ticket\", \"label\": \"Open\", \"action_type\": \"navigate\", \"href\": \"/tickets/{ticket_id}\"}], \"empty\": {\"title\": \"No tickets yet\", \"message\": \"New support tickets will appear here.\"}}"
           }
         ]
       },
@@ -209,28 +176,13 @@
             "primitive": "PageHeader",
             "section_id_hint": "settings-header",
             "title_hint": "Settings",
-            "config_hint": {
-              "title": "Settings",
-              "subtitle": "Set queue defaults for the support team.",
-              "title_font": "body"
-            }
+            "config_hint": "{\"title\": \"Settings\", \"subtitle\": \"Set queue defaults for the support team.\", \"title_font\": \"body\"}"
           },
           {
             "primitive": "Form",
             "section_id_hint": "queue-settings-form",
             "title_hint": "Queue defaults",
-            "config_hint": {
-              "fields": [
-                {"name": "default_queue", "label": "Default queue", "type": "text", "required": true},
-                {"name": "sla_hours", "label": "SLA hours", "type": "number", "required": true}
-              ],
-              "submit_label": "Save settings",
-              "submit_action": {
-                "label": "Save settings",
-                "action_type": "submit",
-                "href": "/api/modules/tickets/save_settings"
-              }
-            }
+            "config_hint": "{\"fields\": [{\"name\": \"default_queue\", \"label\": \"Default queue\", \"type\": \"text\", \"required\": true}, {\"name\": \"sla_hours\", \"label\": \"SLA hours\", \"type\": \"number\", \"required\": true}], \"submit_label\": \"Save settings\", \"submit_action\": {\"label\": \"Save settings\", \"action_type\": \"submit\", \"href\": \"/api/modules/tickets/save_settings\"}}"
           }
         ]
       }
@@ -272,13 +224,13 @@
         "execution_target": "AppGenerator",
         "initial_agent": "DatabaseAgent",
         "description": "Generate the data contract for tickets and queue settings.",
-        "initial_message": "Generate only config/data.json for tickets and queue settings persistence.",
+        "initial_message": "Generate only data/contract.json for tickets and queue settings persistence.",
         "owned_paths": [
-          "config/data.json"
+          "data/contract.json"
         ],
         "depends_on": [],
         "acceptance_criteria": [
-          "config/data.json declares tickets collection with app_id scoping",
+          "data/contract.json declares tickets collection with app_id scoping",
           "no backend/database/schema.json or seed.json is emitted"
         ],
         "context_variables": {
@@ -432,8 +384,8 @@
   "app_plan_ready": true,
   "app_validation_strategy": "skip",
   "integration_tests_passed": true,
-  "available_hosted_packs": [],
-  "runtime_capabilities": [],
+  "capability_packs": [],
+  "operator_capabilities": [],
   "pack_sources": []
 }
 

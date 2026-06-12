@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
 from factory_app.workflows.AppGenerator.tools.ui_quality import review_ui_quality
 
@@ -156,3 +156,4 @@ def run_app_ui_quality_gate(agent: Any, messages: List[Dict[str, Any]]) -> None:
 
 
 __all__ = ["run_app_ui_quality_gate"]
+

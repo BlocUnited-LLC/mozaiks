@@ -185,8 +185,8 @@ def _actions_from_capability_packs(capability_packs: List[Any]) -> Set[str]:
     Build action registry from app_build_plan.capability_packs.
 
     Accepted pack shapes:
-      { "id": "wallet",    "actions": ["get_wallet_summary", ...] }
-      { "module_id": "wallet", "actions": [{"id": "get_wallet_summary"}, ...] }
+      { "id": "orders",    "actions": ["list_orders", ...] }
+      { "module_id": "orders", "actions": [{"id": "list_orders"}, ...] }
     """
     valid: Set[str] = set()
     for pack in capability_packs or []:
@@ -515,3 +515,4 @@ async def validate_wiring(
 
 
 __all__ = ["validate_wiring"]
+

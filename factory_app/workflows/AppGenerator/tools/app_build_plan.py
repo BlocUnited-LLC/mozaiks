@@ -1,9 +1,17 @@
 import json
 import logging
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, Iterable, List, Optional
 
 from autogen.tools.dependency_injection import Field
+
+from mozaiksai.core.runtime.app.paths import (
+    APP_SECURITY_SECRETS_PATH,
+    disallowed_legacy_app_paths,
+    noncanonical_app_config_paths,
+    noncanonical_app_root_paths,
+    normalize_app_path,
+)
 
 _logger = logging.getLogger("tools.app_build_plan")
 
@@ -22,7 +30,12 @@ _OBSOLETE_HOST_ADMIN_CONFIG_PATH = "app/config/admin.json"
 _APP_SERVICE_ADMIN_PATHS = {"services/admin_config.py", "services/routes/admin.py"}
 _INTEGRATIONS_PREFIX = "services/integrations/"
 _ADAPTERS_PREFIX = "services/adapters/"
+_ROUTES_PREFIX = "services/routes/"
 _CLIENT_SUFFIX = "_client.py"
+_CANONICAL_SERVICE_FILES = frozenset({"services/config.py", "services/admin_config.py"})
+_CANONICAL_SERVICE_PREFIXES = (_INTEGRATIONS_PREFIX, _ADAPTERS_PREFIX, _ROUTES_PREFIX)
+_SERVICE_FOUNDATION_ALLOWED_FILES = frozenset({"services/config.py", APP_SECURITY_SECRETS_PATH})
+_SERVICE_FOUNDATION_ALLOWED_PREFIXES = (_INTEGRATIONS_PREFIX, _ADAPTERS_PREFIX, _ROUTES_PREFIX)
 _ALLOWED_TASK_TYPES = {
     "service_foundation",
     "module_contract",
@@ -33,7 +46,6 @@ _ALLOWED_TASK_TYPES = {
     "page_bundle",
     "agent_backend_integration",
     "control_plane_pack",
-    "pack_overlay",
 }
 _CANONICAL_INITIAL_AGENTS = {
     "service_foundation": "ConfigMiddlewareAgent",
@@ -42,7 +54,6 @@ _CANONICAL_INITIAL_AGENTS = {
     "data_models": "ModelAgent",
     "business_services": "ServiceAgent",
     "control_plane_pack": "ControlPlaneAgent",
-    "pack_overlay": "ConfigMiddlewareAgent",
     "api_surface": "ControllerAgent",
     "page_bundle": "AppSchemaAgent",
 }
@@ -50,8 +61,8 @@ _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
     "external_integration": frozenset({"api_surface", "service_foundation", "agent_backend_integration"}),
     "control_plane": frozenset({"control_plane_pack"}),
     "ui_only": frozenset({"page_bundle"}),
-    "framework_pack": frozenset({"pack_overlay"}),
 }
+_SHARED_OWNED_PATHS = frozenset({"app.json"})
 _WORKFLOW_SURFACE_KIND = "workflow"
 _MODULE_LOCAL_TASK_TYPES = frozenset({"module_contract", "data_models", "business_services"})
 
@@ -174,10 +185,36 @@ def _raw_frontend_source_path(task: Dict[str, Any]) -> Optional[str]:
 def _normalized_owned_paths(task: Dict[str, Any]) -> List[str]:
     paths: List[str] = []
     for owned_path in _normalize_string_list(task.get("owned_paths")):
-        normalized = owned_path.replace("\\", "/").strip()
+        normalized = normalize_app_path(owned_path)
         if normalized:
             paths.append(normalized)
     return paths
+
+
+def _noncanonical_service_paths(paths: List[str]) -> List[str]:
+    invalid: List[str] = []
+    for path in paths:
+        normalized = normalize_app_path(path)
+        if not normalized.startswith("services/"):
+            continue
+        if normalized in _CANONICAL_SERVICE_FILES:
+            continue
+        if any(normalized.startswith(prefix) for prefix in _CANONICAL_SERVICE_PREFIXES):
+            continue
+        invalid.append(normalized)
+    return sorted(set(invalid))
+
+
+def _invalid_service_foundation_paths(paths: List[str]) -> List[str]:
+    invalid: List[str] = []
+    for path in paths:
+        normalized = normalize_app_path(path)
+        if normalized in _SERVICE_FOUNDATION_ALLOWED_FILES:
+            continue
+        if any(normalized.startswith(prefix) for prefix in _SERVICE_FOUNDATION_ALLOWED_PREFIXES):
+            continue
+        invalid.append(normalized)
+    return sorted(set(invalid))
 
 
 def _infer_module_id_from_owned_paths(task: Dict[str, Any]) -> Optional[str]:
@@ -207,6 +244,672 @@ def _normalize_build_task_identity(task: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 normalized["capability_pack_id"] = module_id
     return normalized
+
+
+def _dedupe_preserving_order(values: Iterable[Any]) -> List[str]:
+    result: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        result.append(text)
+        seen.add(text)
+    return result
+
+
+def _join_unique_text(parts: Iterable[Any], *, separator: str = " ") -> str:
+    return separator.join(_dedupe_preserving_order(parts)).strip()
+
+
+def _merge_persistence_contract_tasks(build_tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    persistence_tasks = [
+        task
+        for task in build_tasks
+        if isinstance(task, dict) and str(task.get("task_type") or "").strip() == "persistence_contract"
+    ]
+    if len(persistence_tasks) <= 1:
+        return build_tasks
+
+    primary = dict(sorted(persistence_tasks, key=_task_sort_key)[0])
+    primary_id = str(primary.get("task_id") or "task_persistence_contract").strip()
+    removed_ids = {
+        str(task.get("task_id") or "").strip()
+        for task in persistence_tasks
+        if str(task.get("task_id") or "").strip() and str(task.get("task_id") or "").strip() != primary_id
+    }
+
+    primary["task_id"] = primary_id
+    primary["description"] = _join_unique_text(
+        task.get("description") for task in persistence_tasks
+    ) or str(primary.get("description") or "")
+    primary["initial_message"] = _join_unique_text(
+        task.get("initial_message") for task in persistence_tasks
+    ) or str(primary.get("initial_message") or "")
+    primary["owned_paths"] = _dedupe_preserving_order(
+        path for task in persistence_tasks for path in _normalized_owned_paths(task)
+    )
+    primary["depends_on"] = _dedupe_preserving_order(
+        dep
+        for task in persistence_tasks
+        for dep in _normalize_string_list(task.get("depends_on"))
+        if str(dep or "").strip() != primary_id and str(dep or "").strip() not in removed_ids
+    )
+    primary["acceptance_criteria"] = _dedupe_preserving_order(
+        criterion
+        for task in persistence_tasks
+        for criterion in _normalize_string_list(task.get("acceptance_criteria"))
+    )
+
+    result: List[Dict[str, Any]] = []
+    inserted_primary = False
+    for task in build_tasks:
+        if not isinstance(task, dict):
+            continue
+        task_type = str(task.get("task_type") or "").strip()
+        task_id = str(task.get("task_id") or "").strip()
+        if task_type == "persistence_contract":
+            if not inserted_primary:
+                result.append(primary)
+                inserted_primary = True
+            continue
+
+        item = dict(task)
+        deps = []
+        for dep in _normalize_string_list(item.get("depends_on")):
+            deps.append(primary_id if dep in removed_ids else dep)
+        item["depends_on"] = _dedupe_preserving_order(deps)
+        result.append(item)
+
+    if not inserted_primary:
+        result.insert(0, primary)
+    return sorted(result, key=_task_sort_key)
+
+
+def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return default
+    try:
+        return context_variables.get(key, default)
+    except Exception:
+        return default
+
+
+def _context_available_pack_map(context_variables: Optional[Any]) -> Dict[str, Dict[str, Any]]:
+    raw_groups = [
+        _context_get(context_variables, "capability_packs", []),
+        _context_get(context_variables, "available_hosted_packs", []),
+    ]
+    result: Dict[str, Dict[str, Any]] = {}
+    for raw_packs in raw_groups:
+        if not isinstance(raw_packs, list):
+            continue
+        for pack in raw_packs:
+            if not isinstance(pack, dict):
+                continue
+            pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+            if pack_id:
+                result[pack_id] = {**result.get(pack_id, {}), **dict(pack)}
+    return result
+
+
+def _context_hosted_pack_ids(context_variables: Optional[Any]) -> frozenset[str]:
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return frozenset()
+    pack_ids: set[str] = set()
+    for key in ("capability_packs", "available_hosted_packs"):
+        raw_packs = _context_get(context_variables, key, [])
+        if not isinstance(raw_packs, list):
+            continue
+        for pack in raw_packs:
+            if not isinstance(pack, dict):
+                continue
+            pack_id = str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+            if pack_id and str(pack.get("capability_source") or "").strip() == "hosted_pack":
+                pack_ids.add(pack_id)
+    return frozenset(pack_ids)
+
+
+def _normalize_capability_pack_sources(
+    capability_packs: List[Dict[str, Any]],
+    *,
+    context_variables: Optional[Any],
+) -> List[Dict[str, Any]]:
+    available_packs = _context_available_pack_map(context_variables)
+    context_hosted_pack_ids = _context_hosted_pack_ids(context_variables)
+    normalized: List[Dict[str, Any]] = []
+    for pack in capability_packs:
+        item = dict(pack)
+        pack_id = str(item.get("capability_pack_id") or item.get("id") or item.get("pack_id") or "").strip()
+        source = str(item.get("capability_source") or "").strip()
+        pack_type = str(item.get("pack_type") or "").strip()
+        available = available_packs.get(pack_id) if pack_id else None
+        available_source = str((available or {}).get("capability_source") or "").strip()
+        if not source and (pack_type == "hosted_pack" or available_source == "hosted_pack" or pack_id in context_hosted_pack_ids):
+            item["capability_source"] = "hosted_pack"
+        if item.get("capability_source") == "hosted_pack":
+            item.setdefault("implementation_mode", "external_integration")
+            item.setdefault("surface_kind", "external_integration")
+        normalized.append(item)
+    return normalized
+
+
+def _infer_hosted_pack_ids_from_adapter_tasks(
+    build_tasks: List[Dict[str, Any]],
+    *,
+    context_variables: Optional[Any],
+) -> frozenset[str]:
+    available_packs = _context_available_pack_map(context_variables)
+    inferred: set[str] = set()
+    for task in build_tasks:
+        if not isinstance(task, dict):
+            continue
+        if str(task.get("task_type") or "").strip() != "api_surface":
+            continue
+        if str(task.get("surface_kind") or "").strip() != "external_integration":
+            continue
+        for owned_path in _normalized_owned_paths(task):
+            pack_id = _infer_pack_id_from_integration_path(owned_path)
+            if not pack_id:
+                continue
+            available = available_packs.get(pack_id) or {}
+            if available.get("capability_source") == "hosted_pack":
+                inferred.add(pack_id)
+    return frozenset(inferred)
+
+
+def _ensure_hosted_pack_entries(
+    capability_packs: List[Dict[str, Any]],
+    *,
+    hosted_pack_ids: frozenset[str],
+    context_variables: Optional[Any],
+) -> List[Dict[str, Any]]:
+    if not hosted_pack_ids:
+        return capability_packs
+    available_packs = _context_available_pack_map(context_variables)
+    existing = {
+        str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+        for pack in capability_packs
+        if isinstance(pack, dict)
+    }
+    result = [dict(pack) for pack in capability_packs]
+    for pack_id in sorted(hosted_pack_ids - existing):
+        available = available_packs.get(pack_id) or {}
+        result.append(
+            {
+                "capability_pack_id": pack_id,
+                "surface_id": f"{pack_id}_hosted",
+                "surface_kind": "external_integration",
+                "pack_type": "hosted_pack",
+                "label": available.get("display_name") or available.get("label") or pack_id,
+                "summary": available.get("description") or f"Hosted {pack_id} capability.",
+                "implementation_mode": "external_integration",
+                "primary_entities": [],
+                "primary_pages": [],
+                "operations": [
+                    str(capability.get("capability_id") or "").strip()
+                    for capability in available.get("capabilities") or []
+                    if isinstance(capability, dict) and str(capability.get("capability_id") or "").strip()
+                ],
+                "required_integrations": [],
+                "agentic_extensions": [],
+                "capability_source": "hosted_pack",
+            }
+        )
+    return result
+
+
+def _pack_id_from_descriptor(pack: Dict[str, Any]) -> str:
+    return str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+
+
+def _ensure_context_selected_capability_packs(
+    capability_packs: List[Dict[str, Any]],
+    *,
+    context_variables: Optional[Any],
+) -> List[Dict[str, Any]]:
+    """Include packs projected by selected build_context even if the LLM omitted them."""
+    available_packs = _context_available_pack_map(context_variables)
+    if not available_packs:
+        return capability_packs
+
+    existing = {
+        _pack_id_from_descriptor(pack)
+        for pack in capability_packs
+        if isinstance(pack, dict)
+    } - {""}
+    result = [dict(pack) for pack in capability_packs]
+    for pack_id, descriptor in sorted(available_packs.items()):
+        if pack_id in existing:
+            continue
+        if str(descriptor.get("capability_source") or "").strip() != "hosted_pack":
+            continue
+        item = dict(descriptor)
+        item.setdefault("capability_pack_id", pack_id)
+        item.setdefault("surface_id", str(item.get("surface_id") or pack_id))
+        item.setdefault("surface_kind", str(item.get("surface_kind") or "external_integration"))
+        item.setdefault("implementation_mode", str(item.get("implementation_mode") or "external_integration"))
+        item.setdefault("pack_type", str(item.get("pack_type") or "hosted_pack"))
+        item.setdefault("label", item.get("display_name") or pack_id)
+        item.setdefault("summary", item.get("description") or f"Hosted {pack_id} capability.")
+        result.append(item)
+        existing.add(pack_id)
+    return result
+
+
+def _pack_facades(descriptor: Dict[str, Any]) -> List[Dict[str, Any]]:
+    facades = _normalize_object_list(descriptor.get("facades"))
+    if facades:
+        return facades
+    pack_section = descriptor.get("pack")
+    if isinstance(pack_section, dict):
+        return _normalize_object_list(pack_section.get("facades"))
+    return []
+
+
+def _facade_pack_descriptor(facade: Dict[str, Any]) -> Dict[str, Any] | None:
+    facade_id = str(facade.get("module_id") or facade.get("facade_id") or "").strip()
+    if not facade_id:
+        return None
+    pages = _normalize_object_list(facade.get("pages"))
+    operations = _dedupe_preserving_order(
+        action
+        for page in pages
+        for action in _normalize_string_list(page.get("primary_actions"))
+    )
+    return {
+        "capability_pack_id": facade_id,
+        "surface_id": facade_id,
+        "surface_kind": "module",
+        "pack_type": "hosted_facade",
+        "label": facade.get("label") or facade_id.replace("_", " ").title(),
+        "summary": facade.get("summary") or f"App-owned facade for {facade_id}.",
+        "implementation_mode": "declarative_module",
+        "capability_source": "generated_module",
+        "primary_entities": _dedupe_preserving_order(
+            entity
+            for page in pages
+            for entity in _normalize_string_list(page.get("primary_entities"))
+        ),
+        "primary_pages": [
+            str(page.get("name") or page.get("page_id") or "").strip().lower().replace(" ", "_")
+            for page in pages
+            if str(page.get("name") or page.get("page_id") or "").strip()
+        ],
+        "operations": operations,
+        "required_integrations": _dedupe_preserving_order([facade.get("provider_module")]),
+    }
+
+
+def _apply_selected_pack_files(
+    *,
+    capability_packs: List[Dict[str, Any]],
+    pages: List[Dict[str, Any]],
+    build_tasks: List[Dict[str, Any]],
+    context_variables: Optional[Any],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Apply deterministic facade pages from selected packs."""
+    available_packs = _context_available_pack_map(context_variables)
+    if not available_packs:
+        return capability_packs, pages, build_tasks
+
+    selected_hosted_pack_ids = {
+        _pack_id_from_descriptor(pack)
+        for pack in capability_packs
+        if isinstance(pack, dict) and str(pack.get("capability_source") or "").strip() == "hosted_pack"
+    } - {""}
+    if not selected_hosted_pack_ids:
+        return capability_packs, pages, build_tasks
+
+    result_packs = [dict(pack) for pack in capability_packs]
+    existing_pack_ids = {
+        _pack_id_from_descriptor(pack)
+        for pack in result_packs
+        if isinstance(pack, dict)
+    } - {""}
+
+    result_pages = [dict(page) for page in pages]
+    existing_page_routes = {
+        str(page.get("route") or "").strip()
+        for page in result_pages
+        if isinstance(page, dict)
+    } - {""}
+    existing_page_names = {
+        str(page.get("name") or page.get("page_id") or "").strip().lower()
+        for page in result_pages
+        if isinstance(page, dict)
+    } - {""}
+
+    result_tasks = [dict(task) for task in build_tasks]
+
+    for pack_id in sorted(selected_hosted_pack_ids):
+        descriptor = available_packs.get(pack_id) or {}
+        facades = _pack_facades(descriptor)
+        for facade in facades:
+            facade_pack = _facade_pack_descriptor(facade)
+            if facade_pack:
+                facade_pack_id = _pack_id_from_descriptor(facade_pack)
+                if facade_pack_id not in existing_pack_ids:
+                    result_packs.append(facade_pack)
+                    existing_pack_ids.add(facade_pack_id)
+
+            for page in _normalize_object_list(facade.get("pages")):
+                route = str(page.get("route") or "").strip()
+                name = str(page.get("name") or page.get("page_id") or "").strip().lower()
+                if (route and route in existing_page_routes) or (name and name in existing_page_names):
+                    continue
+                result_pages.append(page)
+                if route:
+                    existing_page_routes.add(route)
+                if name:
+                    existing_page_names.add(name)
+
+    return result_packs, result_pages, sorted(result_tasks, key=_task_sort_key)
+
+
+def _selected_hosted_pack_descriptors(
+    capability_packs: List[Dict[str, Any]],
+    *,
+    context_variables: Optional[Any],
+) -> Dict[str, Dict[str, Any]]:
+    available_packs = _context_available_pack_map(context_variables)
+    descriptors: Dict[str, Dict[str, Any]] = {}
+    for pack in capability_packs:
+        if not isinstance(pack, dict) or str(pack.get("capability_source") or "").strip() != "hosted_pack":
+            continue
+        pack_id = _pack_id_from_descriptor(pack)
+        if not pack_id:
+            continue
+        descriptor = dict(available_packs.get(pack_id) or pack)
+        descriptors[pack_id] = descriptor
+    return descriptors
+
+
+def _hosted_facade_route_rules(
+    capability_packs: List[Dict[str, Any]],
+    *,
+    context_variables: Optional[Any],
+) -> dict[tuple[str, str], str]:
+    rules: dict[tuple[str, str], str] = {}
+    for pack_id, descriptor in _selected_hosted_pack_descriptors(
+        capability_packs,
+        context_variables=context_variables,
+    ).items():
+        for facade in _pack_facades(descriptor):
+            provider_module = str(facade.get("provider_module") or pack_id).strip()
+            facade_module = str(facade.get("module_id") or facade.get("facade_id") or "").strip()
+            if not provider_module or not facade_module:
+                continue
+            for action in facade.get("provider_actions") or []:
+                action_id = str(action or "").strip()
+                if action_id:
+                    rules[(provider_module, action_id)] = facade_module
+    return rules
+
+
+def _route_page_api_endpoint_to_facade(endpoint: str, rules: dict[tuple[str, str], str]) -> str:
+    normalized = endpoint.replace("\\", "/").strip()
+    prefix = "/api/modules/"
+    if not normalized.startswith(prefix):
+        return endpoint
+    remainder = normalized[len(prefix):]
+    parts = remainder.split("/", 2)
+    if len(parts) < 2:
+        return endpoint
+    module_id, action_id = parts[0], parts[1]
+    target_module = rules.get((module_id, action_id))
+    if not target_module:
+        return endpoint
+    suffix = f"/{parts[2]}" if len(parts) > 2 and parts[2] else ""
+    return f"{prefix}{target_module}/{action_id}{suffix}"
+
+
+def _route_page_api_endpoints_to_facades(value: Any, rules: dict[tuple[str, str], str]) -> Any:
+    if isinstance(value, dict):
+        rewritten: Dict[str, Any] = {}
+        for key, nested in value.items():
+            if key == "api_endpoint" and isinstance(nested, str):
+                rewritten[key] = _route_page_api_endpoint_to_facade(nested, rules)
+            else:
+                rewritten[key] = _route_page_api_endpoints_to_facades(nested, rules)
+        return rewritten
+    if isinstance(value, list):
+        return [_route_page_api_endpoints_to_facades(item, rules) for item in value]
+    return value
+
+
+def _normalize_hosted_page_bindings(
+    pages: List[Dict[str, Any]],
+    *,
+    capability_packs: List[Dict[str, Any]],
+    context_variables: Optional[Any],
+) -> List[Dict[str, Any]]:
+    rules = _hosted_facade_route_rules(
+        capability_packs,
+        context_variables=context_variables,
+    )
+    if not rules:
+        return pages
+    return [
+        _route_page_api_endpoints_to_facades(dict(page), rules)
+        for page in pages
+        if isinstance(page, dict)
+    ]
+
+
+def _normalize_hosted_adapter_task_pack_ids(
+    build_tasks: List[Dict[str, Any]],
+    *,
+    hosted_pack_ids: frozenset[str],
+) -> List[Dict[str, Any]]:
+    if not hosted_pack_ids:
+        return build_tasks
+    normalized: List[Dict[str, Any]] = []
+    for task in build_tasks:
+        item = dict(task)
+        if (
+            str(item.get("task_type") or "").strip() == "api_surface"
+            and str(item.get("surface_kind") or "").strip() == "external_integration"
+        ):
+            for owned_path in _normalized_owned_paths(item):
+                inferred_pack_id = _infer_pack_id_from_integration_path(owned_path)
+                if inferred_pack_id and inferred_pack_id in hosted_pack_ids:
+                    declared_id = str(item.get("capability_pack_id") or "").strip()
+                    if declared_id != inferred_pack_id:
+                        _logger.info(
+                            "Normalized hosted adapter task %s capability_pack_id from %r to %r based on %s",
+                            item.get("task_id") or "<unknown>",
+                            declared_id or None,
+                            inferred_pack_id,
+                            owned_path,
+                        )
+                        item["capability_pack_id"] = inferred_pack_id
+                    break
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_page_task_dependencies(build_tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Ensure page tasks explicitly depend on their app-owned module contract."""
+    module_contract_by_pack: Dict[str, str] = {}
+    module_contract_task_ids: List[str] = []
+    service_task_by_pack: Dict[str, str] = {}
+    for task in build_tasks:
+        if not isinstance(task, dict):
+            continue
+        task_type = str(task.get("task_type") or "").strip()
+        pack_id = str(task.get("capability_pack_id") or "").strip()
+        task_id = str(task.get("task_id") or "").strip()
+        if task_type == "module_contract" and pack_id and task_id:
+            module_contract_by_pack.setdefault(pack_id, task_id)
+        if task_type == "module_contract" and task_id:
+            module_contract_task_ids.append(task_id)
+        if task_type == "business_services" and pack_id and task_id:
+            service_task_by_pack.setdefault(pack_id, task_id)
+
+    normalized: List[Dict[str, Any]] = []
+    for task in build_tasks:
+        if not isinstance(task, dict):
+            continue
+        item = dict(task)
+        if str(item.get("task_type") or "").strip() == "page_bundle":
+            pack_id = str(item.get("capability_pack_id") or "").strip()
+            facade_task_id = module_contract_by_pack.get(pack_id)
+            if not facade_task_id:
+                deps = set(_normalize_string_list(item.get("depends_on")))
+                candidate_packs = [
+                    candidate_pack
+                    for candidate_pack, service_task_id in service_task_by_pack.items()
+                    if service_task_id in deps
+                ]
+                if len(candidate_packs) == 1:
+                    facade_task_id = module_contract_by_pack.get(candidate_packs[0])
+            if not facade_task_id and len(module_contract_task_ids) == 1:
+                facade_task_id = module_contract_task_ids[0]
+            if facade_task_id:
+                deps = _normalize_string_list(item.get("depends_on"))
+                if facade_task_id not in deps:
+                    deps.insert(0, facade_task_id)
+                item["depends_on"] = deps
+        normalized.append(item)
+    return normalized
+
+
+def _normalize_facade_task_dependencies(
+    build_tasks: List[Dict[str, Any]],
+    *,
+    hosted_pack_ids: frozenset[str],
+) -> List[Dict[str, Any]]:
+    """Ensure generated facades depend on the hosted adapter task they call."""
+    adapter_task_by_pack: Dict[str, str] = {}
+    for task in build_tasks:
+        if not isinstance(task, dict):
+            continue
+        if str(task.get("task_type") or "").strip() != "api_surface":
+            continue
+        pack_id = str(task.get("capability_pack_id") or "").strip()
+        task_id = str(task.get("task_id") or "").strip()
+        if task_id and (pack_id in hosted_pack_ids or str(task.get("surface_kind") or "").strip() == "external_integration"):
+            if pack_id:
+                adapter_task_by_pack.setdefault(pack_id, task_id)
+
+    if not adapter_task_by_pack:
+        return build_tasks
+
+    normalized: List[Dict[str, Any]] = []
+    for task in build_tasks:
+        if not isinstance(task, dict):
+            continue
+        item = dict(task)
+        if str(item.get("task_type") or "").strip() == "module_contract":
+            pack_id = str(item.get("capability_pack_id") or "").strip()
+            if pack_id and pack_id not in hosted_pack_ids:
+                adapter_task_id = _facade_adapter_dependency(item, adapter_task_by_pack)
+                deps = _normalize_string_list(item.get("depends_on"))
+                if adapter_task_id and adapter_task_id not in deps:
+                    deps.insert(0, adapter_task_id)
+                item["depends_on"] = deps
+        normalized.append(item)
+    return normalized
+
+
+def _facade_adapter_dependency(
+    task: Dict[str, Any],
+    adapter_task_by_pack: Dict[str, str],
+) -> Optional[str]:
+    """Return the hosted adapter task a facade module explicitly references."""
+    text_parts = [
+        str(task.get("description") or ""),
+        str(task.get("initial_message") or ""),
+        " ".join(str(item) for item in task.get("acceptance_criteria") or []),
+    ]
+    integration_needs = task.get("integration_needs")
+    if isinstance(integration_needs, list):
+        for need in integration_needs:
+            if isinstance(need, dict):
+                text_parts.append(" ".join(str(value) for value in need.values()))
+            else:
+                text_parts.append(str(need))
+    haystack = "\n".join(text_parts).lower()
+    matches = [
+        adapter_task_id
+        for pack_id, adapter_task_id in adapter_task_by_pack.items()
+        if pack_id.lower() in haystack
+        or f"{pack_id.lower()}_client" in haystack
+        or f"{pack_id.lower()}client" in haystack
+    ]
+    unique_matches = sorted(set(matches))
+    if len(unique_matches) == 1:
+        return unique_matches[0]
+    if len(adapter_task_by_pack) == 1:
+        return next(iter(adapter_task_by_pack.values()))
+    return None
+
+
+def _hosted_backing_module_ids(
+    capability_packs: List[Dict[str, Any]],
+    *,
+    context_variables: Optional[Any],
+) -> frozenset[str]:
+    available_packs = _context_available_pack_map(context_variables)
+    module_ids: set[str] = set()
+    hosted_ids = {
+        str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+        for pack in capability_packs
+        if isinstance(pack, dict) and pack.get("capability_source") == "hosted_pack"
+    } - {""}
+    for pack_id in hosted_ids:
+        available = available_packs.get(pack_id) or {}
+        for key in ("backing_module",):
+            value = str(available.get(key) or "").strip()
+            if value:
+                module_ids.add(value)
+        for value in available.get("requires_modules") or []:
+            value = str(value or "").strip()
+            if value:
+                module_ids.add(value)
+        for capability in available.get("capabilities") or []:
+            if isinstance(capability, dict):
+                value = str(capability.get("module") or "").strip()
+                if value:
+                    module_ids.add(value)
+    return frozenset(module_ids - hosted_ids)
+
+
+def _iter_page_api_endpoints(value: Any) -> Iterable[str]:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key == "api_endpoint" and isinstance(nested, str):
+                endpoint = nested.strip()
+                if endpoint:
+                    yield endpoint
+            else:
+                yield from _iter_page_api_endpoints(nested)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_page_api_endpoints(item)
+
+
+def _validate_page_bindings(
+    pages: List[Dict[str, Any]],
+    *,
+    hosted_pack_ids: frozenset[str],
+    hosted_backing_module_ids: frozenset[str],
+) -> None:
+    forbidden_ids = hosted_pack_ids | hosted_backing_module_ids
+    if not forbidden_ids:
+        return
+    for page in pages:
+        page_name = str(page.get("name") or page.get("page_id") or "<unknown>")
+        for endpoint in _iter_page_api_endpoints(page):
+            normalized = endpoint.replace("\\", "/")
+            for module_id in forbidden_ids:
+                if normalized.startswith(f"/api/modules/{module_id}/"):
+                    raise ValueError(
+                        f"Page '{page_name}' binds api_endpoint '{endpoint}' directly to hosted "
+                        f"module '{module_id}'. Hosted pack pages must bind to an app-owned "
+                        "facade module endpoint instead."
+                    )
 
 
 def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: frozenset[str] | None = None) -> None:
@@ -350,7 +1053,7 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
         # Hosted-pack adapter tasks must declare capability_pack_id so that template
         # expansion (resolve_hosted_pack_templates) can locate the correct pack template.
         # This check fires only when the path pattern matches a known hosted pack
-        # (e.g. services/integrations/mozaikspay_client.py -> inferred pack id "mozaikspay").
+        # (e.g. services/integrations/provider_client.py -> inferred pack id "provider").
         if (
             task_type == "api_surface"
             and surface_kind_raw == "external_integration"
@@ -417,16 +1120,56 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                     f"'{task_id}' must own both services/admin_config.py and services/routes/admin.py together."
                 )
 
-        if task_type == "pack_overlay" and not normalized_capability_pack_id:
+        legacy_paths = disallowed_legacy_app_paths(owned_paths)
+        if legacy_paths:
             raise ValueError(
                 "Build task "
-                f"'{task_id}' uses task_type 'pack_overlay' but capability_pack_id is null. "
-                "pack_overlay tasks must identify the framework_pack via capability_pack_id."
+                f"'{task_id}' owns removed app path(s) that are no longer canonical: "
+                f"{legacy_paths}. Use data/contract.json, data/migrations/*.json, "
+                f"and {APP_SECURITY_SECRETS_PATH}."
             )
+
+        invalid_roots = noncanonical_app_root_paths(owned_paths)
+        if invalid_roots:
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' owns path(s) outside canonical app planes: {invalid_roots}. "
+                "Allowed app-root planes are admin, backend, brand, config, control_plane, "
+                "data, modules, security, services, and ui."
+            )
+
+        invalid_config_paths = noncanonical_app_config_paths(owned_paths)
+        if invalid_config_paths:
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' owns noncanonical app config path(s): {invalid_config_paths}. "
+                "Use config/ai.json, config/shell.json, config/asset_manifest.json, "
+                "config/targets.json, or safe metadata under config/integrations/."
+            )
+
+        invalid_service_paths = _noncanonical_service_paths(owned_paths)
+        if invalid_service_paths:
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' owns noncanonical services path(s): {invalid_service_paths}. "
+                "Use services/integrations/, services/adapters/, services/routes/, or "
+                "services/config.py. Data and security are first-class planes under "
+                f"data/ and {APP_SECURITY_SECRETS_PATH}."
+            )
+
+        if task_type == "service_foundation":
+            invalid_foundation_paths = _invalid_service_foundation_paths(owned_paths)
+            if invalid_foundation_paths:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses service_foundation but owns non-service-foundation "
+                    f"path(s): {invalid_foundation_paths}. service_foundation may only own "
+                    "services/config.py, services/integrations/, services/adapters/, "
+                    f"services/routes/, and {APP_SECURITY_SECRETS_PATH}."
+                )
 
         if task_type == "control_plane_pack":
             allowed_config_paths = {
-                "control_plane/config/runtime.yaml",
                 "control_plane/config/control_plane.yaml",
                 "control_plane/config/tools.yaml",
                 "control_plane/config/policies.yaml",
@@ -460,7 +1203,6 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                     "control_plane/prompts/*.yaml."
                 )
             required = {
-                "control_plane/config/runtime.yaml",
                 "control_plane/config/control_plane.yaml",
                 "control_plane/config/tools.yaml",
             }
@@ -486,6 +1228,30 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
                 f"'{task_id}' assigns task_type '{task_type}' to {initial_agent}. "
                 f"`{task_type}` must start at {expected_initial_agent}."
             )
+
+
+def _validate_unique_owned_paths(build_tasks: List[Dict[str, Any]]) -> None:
+    owners_by_path: Dict[str, List[str]] = {}
+    for task in build_tasks:
+        if not isinstance(task, dict):
+            continue
+        task_id = str(task.get("task_id") or "<unknown>").strip()
+        for path in _normalized_owned_paths(task):
+            if path in _SHARED_OWNED_PATHS:
+                continue
+            owners_by_path.setdefault(path, []).append(task_id)
+
+    duplicates = {
+        path: _dedupe_preserving_order(task_ids)
+        for path, task_ids in owners_by_path.items()
+        if len(set(task_ids)) > 1
+    }
+    if duplicates:
+        raise ValueError(
+            "Build tasks declare overlapping owned_paths: "
+            f"{duplicates}. Each generated artifact must have one owner task; "
+            "merge the work or split paths so task batches cannot race."
+        )
 
 
 def _validate_carry_forward_decisions(
@@ -615,15 +1381,40 @@ def app_build_plan(
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")
     brand_intent = AppBuildPlan.get("brand_intent")
-    capability_packs = _normalize_object_list(AppBuildPlan.get("capability_packs"))
+    capability_packs = _ensure_context_selected_capability_packs(
+        _normalize_object_list(AppBuildPlan.get("capability_packs")),
+        context_variables=context_variables,
+    )
+    capability_packs = _normalize_capability_pack_sources(
+        capability_packs,
+        context_variables=context_variables,
+    )
     external_integrations = _normalize_object_list(AppBuildPlan.get("external_integrations"))
-    build_tasks = sorted(
+    build_tasks = _merge_persistence_contract_tasks(sorted(
         [
             _normalize_build_task_identity(task)
             for task in _normalize_object_list(AppBuildPlan.get("build_tasks"))
         ],
         key=_task_sort_key,
+    ))
+    inferred_hosted_pack_ids = _infer_hosted_pack_ids_from_adapter_tasks(
+        build_tasks,
+        context_variables=context_variables,
     )
+    if inferred_hosted_pack_ids:
+        capability_packs = _ensure_hosted_pack_entries(
+            capability_packs,
+            hosted_pack_ids=inferred_hosted_pack_ids,
+            context_variables=context_variables,
+        )
+        capability_packs = _normalize_capability_pack_sources(
+            capability_packs,
+            context_variables=context_variables,
+        )
+        build_tasks = _normalize_hosted_adapter_task_pack_ids(
+            build_tasks,
+            hosted_pack_ids=inferred_hosted_pack_ids,
+        )
     data_contract = AppBuildPlan.get("data_contract")
     pending_schema_migration = AppBuildPlan.get("pending_schema_migration")
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
@@ -631,11 +1422,42 @@ def app_build_plan(
     carry_forward_decisions = _normalize_object_list(AppBuildPlan.get("carry_forward_decisions"))
 
     hosted_pack_ids = frozenset(
-        str(p.get("capability_pack_id") or "").strip()
+        _pack_id_from_descriptor(p)
         for p in capability_packs
         if isinstance(p, dict) and p.get("capability_source") == "hosted_pack"
     ) - {""}
+    capability_packs, pages, build_tasks = _apply_selected_pack_files(
+        capability_packs=capability_packs,
+        pages=pages,
+        build_tasks=build_tasks,
+        context_variables=context_variables,
+    )
+    pages = _normalize_hosted_page_bindings(
+        pages,
+        capability_packs=capability_packs,
+        context_variables=context_variables,
+    )
+    hosted_pack_ids = frozenset(
+        _pack_id_from_descriptor(p)
+        for p in capability_packs
+        if isinstance(p, dict) and p.get("capability_source") == "hosted_pack"
+    ) - {""}
+    build_tasks = _normalize_page_task_dependencies(build_tasks)
+    build_tasks = _normalize_facade_task_dependencies(
+        build_tasks,
+        hosted_pack_ids=hosted_pack_ids,
+    )
+    hosted_backing_module_ids = _hosted_backing_module_ids(
+        capability_packs,
+        context_variables=context_variables,
+    )
     _validate_build_tasks(build_tasks, hosted_pack_ids=hosted_pack_ids)
+    _validate_unique_owned_paths(build_tasks)
+    _validate_page_bindings(
+        pages,
+        hosted_pack_ids=hosted_pack_ids,
+        hosted_backing_module_ids=hosted_backing_module_ids,
+    )
 
     task_ids: frozenset[str] = frozenset(
         str(t.get("task_id") or "") for t in build_tasks if t.get("task_id")
@@ -726,3 +1548,4 @@ def app_build_plan(
 
 
 __all__ = ["app_build_plan"]
+

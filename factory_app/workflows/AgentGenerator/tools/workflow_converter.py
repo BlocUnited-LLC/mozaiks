@@ -4,11 +4,11 @@
 #              for the AgentGenerator workflow.
 # ==============================================================================
 
-from typing import Dict, Any, Optional, List
-from pathlib import Path, PurePosixPath
 import os
 import re
 import shutil
+from pathlib import Path, PurePosixPath
+from typing import Any, Dict, List, Optional
 
 from mozaiksai.core.workflow.workflow_ui_catalog import (
     get_workflow_shipped_component_map,
@@ -17,6 +17,7 @@ from mozaiksai.core.workflow.workflow_ui_catalog import (
 
 RUNTIME_EXTENSION_KINDS = {"api_router", "startup_service"}
 ORCHESTRATOR_TRIGGER_TYPES = {"chat", "event", "route", "action", "schedule"}
+TRANSITION_CONDITION_TYPES = {"context_equals", "context_expression", "tool_called"}
 
 
 def _repo_root() -> Path:
@@ -246,8 +247,8 @@ def _normalize_nullable_text(value: Any) -> Optional[str]:
     return cleaned
 
 
-def _normalize_visual_agents(value: Any, *, startup_mode: Optional[str]) -> Optional[List[str]]:
-    mode = str(startup_mode or "").strip().lower()
+def _normalize_visual_agents(value: Any, *, workflow_startup_mode: Optional[str]) -> Optional[List[str]]:
+    mode = str(workflow_startup_mode or "").strip().lower()
     backend_only = mode == "backendonly"
 
     if value is None:
@@ -283,7 +284,7 @@ def _normalize_visual_agents(value: Any, *, startup_mode: Optional[str]) -> Opti
     return None if backend_only else []
 
 
-def _normalize_handoff_rules(raw_rules: Any) -> List[Dict[str, Any]]:
+def _normalize_transition_rules(raw_rules: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw_rules, list):
         return []
 
@@ -292,21 +293,93 @@ def _normalize_handoff_rules(raw_rules: Any) -> List[Dict[str, Any]]:
         if not isinstance(rule, dict):
             continue
         item = dict(rule)
-        item["condition"] = _normalize_nullable_text(item.get("condition"))
-        item["condition_scope"] = _normalize_nullable_text(item.get("condition_scope"))
-        item["condition_type"] = _normalize_nullable_text(item.get("condition_type"))
-        if str(item.get("condition_type") or "").strip().lower() in {"llm", "string_llm"}:
+        stale_condition = _normalize_nullable_text(item.pop("condition", None))
+        condition_type = _normalize_nullable_text(item.get("condition_type"))
+        if condition_type is not None:
+            condition_type = condition_type.lower()
+        condition_key = _normalize_nullable_text(item.get("condition_key"))
+        context_expression = _normalize_nullable_text(item.get("context_expression"))
+        tool_name = _normalize_nullable_text(item.get("tool_name"))
+        has_condition_value = "condition_value" in item
+        condition_value = item.get("condition_value")
+
+        if condition_type in {"llm", "string_llm"}:
             raise ValueError(
-                "handoffs.yaml no longer supports LLM-evaluated condition_type values. "
-                "Use an expression/context condition and set the routing context through "
-                "a tool, structured output, or the control plane."
+                "transition_graph.yaml does not support LLM-evaluated condition_type values. "
+                "Use AG2-native context_equals/context_expression/tool_called routing and "
+                "set routing context through a tool, structured output, or the control plane."
+            )
+        if condition_type == "expression" or stale_condition is not None:
+            raise ValueError(
+                "transition_graph.yaml no longer supports expression condition strings. "
+                "Use condition_type=context_equals with condition_key/condition_value, "
+                "condition_type=context_expression with context_expression, or "
+                "condition_type=tool_called with tool_name."
             )
 
-        handoff_type = str(item.get("handoff_type") or "").strip().lower()
-        if item.get("condition") is None and handoff_type == "condition":
-            item["handoff_type"] = "after_work"
-        elif item.get("condition") is not None and not handoff_type:
-            item["handoff_type"] = "condition"
+        transition_type = str(item.get("transition_type") or "").strip().lower()
+        if not transition_type and condition_type:
+            item["transition_type"] = "condition"
+        elif not transition_type:
+            item["transition_type"] = "after_turn"
+        elif transition_type not in {"condition", "after_turn"}:
+            raise ValueError(f"Unsupported transition_type in transition_graph.yaml: {transition_type}")
+        else:
+            item["transition_type"] = transition_type
+
+        if item["transition_type"] == "after_turn":
+            if (
+                condition_type
+                or condition_key
+                or context_expression
+                or tool_name
+                or (has_condition_value and condition_value is not None)
+            ):
+                raise ValueError("after_turn transition rules must not declare condition fields")
+            for key in ("condition_type", "condition_key", "condition_value", "context_expression", "tool_name"):
+                item.pop(key, None)
+        else:
+            if condition_type not in TRANSITION_CONDITION_TYPES:
+                raise ValueError(
+                    "condition transition rules require condition_type=context_equals, "
+                    "context_expression, or tool_called"
+                )
+            item["condition_type"] = condition_type
+            if condition_type == "context_equals":
+                if condition_key is None:
+                    raise ValueError("context_equals transition rules require condition_key")
+                if tool_name is not None:
+                    raise ValueError("context_equals transition rules must not declare tool_name")
+                if context_expression is not None:
+                    raise ValueError("context_equals transition rules must not declare context_expression")
+                item["condition_key"] = condition_key
+                if not has_condition_value:
+                    item["condition_value"] = None
+                item.pop("context_expression", None)
+                item.pop("tool_name", None)
+            elif condition_type == "context_expression":
+                if context_expression is None:
+                    raise ValueError("context_expression transition rules require context_expression")
+                if condition_key is not None or (has_condition_value and condition_value is not None) or tool_name is not None:
+                    raise ValueError(
+                        "context_expression transition rules must not declare "
+                        "condition_key, condition_value, or tool_name"
+                    )
+                item["context_expression"] = context_expression
+                for key in ("condition_key", "condition_value", "tool_name"):
+                    item.pop(key, None)
+            else:
+                if tool_name is None:
+                    raise ValueError("tool_called transition rules require tool_name")
+                if (
+                    condition_key is not None
+                    or context_expression is not None
+                    or (has_condition_value and condition_value is not None)
+                ):
+                    raise ValueError("tool_called transition rules must not declare context condition fields")
+                item["tool_name"] = tool_name
+                for key in ("condition_key", "condition_value", "context_expression"):
+                    item.pop(key, None)
 
         normalized.append(item)
     return normalized

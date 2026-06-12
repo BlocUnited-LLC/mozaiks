@@ -1,6 +1,6 @@
 """Hook: Module Runtime Quality Gate.
 
-Fires as an update_agent_state hook on ModuleRuntimeQualityAgent.
+Fires as an prompt middleware function on ModuleRuntimeQualityAgent.
 
 The hook parses the latest ServiceAgent structured output, merges its code_files
 into context, runs the deterministic runtime audit, and injects the result into
@@ -14,7 +14,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
     review_module_runtime_quality,
 )
@@ -164,3 +164,5 @@ def run_module_runtime_quality_gate(agent: Any, messages: List[Dict[str, Any]]) 
 
 
 __all__ = ["run_module_runtime_quality_gate"]
+
+

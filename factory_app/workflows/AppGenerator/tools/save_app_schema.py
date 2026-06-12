@@ -1479,13 +1479,13 @@ def _persist_to_filesystem(
         written.append("config/asset_manifest.json")
 
     if data_contract and isinstance(data_contract, dict):
-        data_contract_path = output_dir / "config" / "data.json"
+        data_contract_path = output_dir / "data" / "contract.json"
         data_contract_path.parent.mkdir(parents=True, exist_ok=True)
         data_contract_path.write_text(
             json.dumps(data_contract, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        written.append("config/data.json")
+        written.append("data/contract.json")
 
     return written
 
@@ -1556,7 +1556,7 @@ def save_app_schema(
     ] = None,
     data_contract: Annotated[
         Optional[Dict[str, Any]],
-        Field(description="Optional canonical data contract persisted to config/data.json. None to skip."),
+        Field(description="Optional canonical data contract persisted to data/contract.json. None to skip."),
     ] = None,
     custom_route_bundle: Annotated[
         Optional[Dict[str, Any]],
@@ -1579,7 +1579,7 @@ def save_app_schema(
       - brand/theme_config.json (merge)  → theme_config_patch when set
       - config/shell.json (merge)        → shell_config when set
       - config/asset_manifest.json       → asset_manifest when set
-      - config/data.json                 → data_contract when set or available in context
+      - data/contract.json                 → data_contract when set or available in context
 
     Stores in context_variables:
       - app_manifest, app_pages, app_theme_config_patch, app_shell_config,
@@ -1734,3 +1734,5 @@ def save_app_schema(
 
 
 __all__ = ["save_app_schema", "promote_generated_app"]
+
+

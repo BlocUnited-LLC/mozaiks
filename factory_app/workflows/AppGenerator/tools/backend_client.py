@@ -152,8 +152,8 @@ class AppGeneratorBackendClient(BackendClient):
         GET /api/apps/{appId}/database/schema/{artifactVersionId}
 
         Returns the recorded data contract/schema for the given artifact version.
-        Canonical generated bundles stage config/data.json and
-        optional config/data_migrations/*.json; these endpoints are not the
+        Canonical generated bundles stage data/contract.json and
+        optional data/migrations/*.json; these endpoints are not the
         current source of truth until platform database adapter support lands.
         Response: {"schema": <dict | null>}
         Returns {"schema": null} when no schema is recorded for that version.
@@ -191,4 +191,6 @@ class AppGeneratorBackendClient(BackendClient):
 
 # Singleton instance
 app_gen_backend_client = AppGeneratorBackendClient()
+
+
 

@@ -3,7 +3,7 @@ Schema Migration — diff and migration generation for AppGenerator refinement r
 
 Compares prior data contract (from the artifact being refined) against the
 new data contract produced by DatabaseAgent and generates a typed migration
-file. The migration is staged under config/data_migrations/ for later
+file. The migration is staged under data/migrations/ for later
 runtime/platform application instead of being applied by AppGenerator.
 
 Change class behaviour:
@@ -152,7 +152,7 @@ def generate_migration(
     Generate a migration document from a schema diff.
 
     The migration is written to:
-      config/data_migrations/migration_{timestamp}.json
+      data/migrations/migration_{timestamp}.json
 
     The document is runtime-compatible (passes _validate_migration) and
     contains an ``operations`` list with ``ensure_collection`` entries for
@@ -242,7 +242,7 @@ def _new_collection_definitions(
 
 def migration_file_path(migration_id: str) -> str:
     """Return the relative path for the migration file in the app bundle."""
-    return f"config/data_migrations/{migration_id}.json"
+    return f"data/migrations/{migration_id}.json"
 
 
 # ---------------------------------------------------------------------------
@@ -352,11 +352,13 @@ def inject_migration_into_bundle(
 ) -> None:
     """
     Write the migration JSON into the generated app bundle (files_map in-place).
-    Also ensures config/data_migrations/.gitkeep exists.
+    Also ensures data/migrations/.gitkeep exists.
     """
     path = migration_file_path(migration["migration_id"])
     files_map[path] = json.dumps(migration, indent=2)
-    gitkeep = "config/data_migrations/.gitkeep"
+    gitkeep = "data/migrations/.gitkeep"
     if gitkeep not in files_map:
         files_map[gitkeep] = ""
+
+
 

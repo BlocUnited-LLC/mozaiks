@@ -1,7 +1,7 @@
 """
 pattern_selection tool - stores AG2 Network patternbook selection from PatternAgent.
 
-Caches the selected pattern so update_agent_state hooks can inject pattern-specific
+Caches the selected pattern so prompt middleware functions can inject pattern-specific
 guidance into downstream agent prompts.
 """
 
@@ -93,3 +93,4 @@ def pattern_selection(
     )
 
     return f"Selected Workflow: {wf_name} — Pattern {pattern_id or '?'} ({pattern_name})"
+

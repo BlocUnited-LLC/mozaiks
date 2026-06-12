@@ -1,22 +1,20 @@
 """
 Hook: Inject Hosted Capabilities Context
 
-Fires as an update_agent_state hook on AppPlanAgent.
+Fires as an prompt middleware function on AppPlanAgent.
 
-When runtime_capabilities, available_hosted_packs, pack_sources, or
-hosted_capability_selection are present in context_variables (populated by a
-hosted deployment overlay), this hook injects a compact
+When ``capability_packs`` is present and non-empty in context_variables
+(populated by an operator at launch), this hook injects a compact
 [HOSTED CAPABILITIES CONTEXT] block into the AppPlanAgent system message.
 
 Capability source taxonomy injected into the block:
   host_universal  — built-in platform features; never generate them
-  framework_pack  — reusable OSS capability pack; AppGenerator generates internals
   hosted_pack     — proprietary hosted capability; use as-is, do not regenerate
-  generated_module — AppGenerator should generate module contracts and backend
+  generated_module — AppGenerator should generate full module contracts
   external_adapter — generate adapter/client wiring only; backend is third-party
 
-In OSS mode (all hosted variables are null/empty) this hook is a complete no-op.
-The block is never injected and AppGenerator behaviour is unchanged.
+In OSS mode (capability_packs is null or empty) this hook is a complete no-op.
+The block is never injected and factory workflow behaviour is unchanged.
 """
 
 from __future__ import annotations
@@ -24,14 +22,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import update_agent_section
 
 logger = logging.getLogger(__name__)
 
 _HOSTED_CAP_HEADER = "[HOSTED CAPABILITIES CONTEXT]"
 
 # ---------------------------------------------------------------------------
-# Capability source taxonomy and guidance
+# Capability source taxonomy guidance (always included when packs are present)
 # ---------------------------------------------------------------------------
 
 _CAPABILITY_SOURCE_GUIDANCE = """\
@@ -39,14 +37,13 @@ Capability source taxonomy:
   host_universal  — Built-in platform feature already provided by the runtime host.
                     Do NOT scaffold or generate code for these. Reference them in
                     service_scope or external_integrations, never as capability packs.
-  framework_pack  — Reusable OSS capability pack selected by the app. Generate ONLY
-                    app-specific wiring (pack_overlay task): event-flow bindings,
-                    facade module actions, page composition. Never regenerate pack internals.
   hosted_pack     — Proprietary hosted capability available in this deployment.
                     Do NOT regenerate its internals. Include it as a capability pack
                     entry with implementation_mode: external_integration and
                     surface_kind: external_integration or module (as declared).
                     The pack is already deployed; only wire it into the generated app.
+  framework_pack  — OSS or operator framework pack. Generate only the declared
+                    app-specific wiring; do not invent undeclared pack internals.
   generated_module — AppGenerator must generate full module contracts and module backend files.
   external_adapter — Generate adapter / client wiring only. The actual service is
                     third-party or separately deployed."""
@@ -61,13 +58,6 @@ def _is_empty(value: Any) -> bool:
     return False
 
 
-def _format_runtime_capabilities(capabilities: List[Any]) -> str:
-    lines = ["Runtime capabilities available in this session:"]
-    for cap in capabilities:
-        lines.append(f"  - {cap}")
-    return "\n".join(lines)
-
-
 def _format_hosted_packs(packs: List[Any]) -> str:
     lines = ["Hosted capability packs available (do NOT regenerate internals):"]
     for pack in packs:
@@ -76,10 +66,7 @@ def _format_hosted_packs(packs: List[Any]) -> str:
             label = pack.get("display_name") or pack.get("label") or pack_id
             description = pack.get("description") or ""
             caps = pack.get("capabilities") or []
-            supersedes = pack.get("supersedes") or []
             line = f"  - {pack_id} ({label}) [capability_source: hosted_pack]"
-            if supersedes:
-                line += f" [supersedes: {', '.join(str(s) for s in supersedes)}]"
             if description:
                 line += f": {description.strip().split(chr(10))[0]}"
             if caps:
@@ -95,12 +82,7 @@ def _format_hosted_packs(packs: List[Any]) -> str:
 
 
 def _format_pack_surfaces(packs: List[Any]) -> str | None:
-    """
-    Render surface groupings from pack descriptors.
-
-    Returns a formatted string when at least one pack defines surfaces,
-    or None when no surfaces are declared (omits the section entirely).
-    """
+    """Render surface groupings. Returns None when no surfaces are declared."""
     surface_lines: list[str] = []
     for pack in packs:
         if not isinstance(pack, dict):
@@ -136,11 +118,7 @@ def _format_pack_surfaces(packs: List[Any]) -> str | None:
 
 
 def _format_pack_supported_domains(packs: List[Any]) -> str | None:
-    """
-    Render domain fit hints from pack descriptors.
-
-    Returns formatted domain guidance, or None when no pack declares domain hints.
-    """
+    """Render domain fit hints. Returns None when no domains are declared."""
     domain_lines: list[str] = []
     for pack in packs:
         if not isinstance(pack, dict):
@@ -170,11 +148,7 @@ def _format_pack_supported_domains(packs: List[Any]) -> str | None:
 
 
 def _format_pack_branding(packs: List[Any]) -> str | None:
-    """
-    Render branding hints from pack descriptors.
-
-    Returns branding guidance, or None when no pack declares branding.
-    """
+    """Render branding hints. Returns None when no packs declare branding."""
     branding_lines: list[str] = []
     for pack in packs:
         if not isinstance(pack, dict):
@@ -208,187 +182,160 @@ def _format_pack_branding(packs: List[Any]) -> str | None:
     return "Pack branding:\n" + "\n".join(branding_lines)
 
 
-def _format_host_generation_rules(packs: List[Any]) -> str | None:
-    """
-    Render optional generation_rules supplied by the host in pack descriptors.
-
-    Hosts may include a ``generation_rules`` list in any pack descriptor to
-    inject host-specific "do not build because the host provides it" guidance.
-    Rules are only rendered when at least one pack supplies them; otherwise
-    this function returns None and nothing is added to the context block.
-
-    Example host-supplied pack descriptor (e.g. in a hosted product overlay):
-        available_hosted_packs:
-          - id: some_hosted_pack
-            label: Some Hosted Pack
-            capability_source: hosted_pack
-            generation_rules:
-              - Do not generate token tracking modules.
-              - Do not generate payment rails.
-              - Use hosted_pack dependency/adapters when needed.
-    """
-    rule_blocks: list[str] = []
-    for pack in packs:
-        if not isinstance(pack, dict):
+def _format_contract_list_items(items: Any, *, key: str) -> list[str]:
+    lines: list[str] = []
+    if not isinstance(items, list):
+        return lines
+    for item in items:
+        if not isinstance(item, dict):
             continue
-        rules = pack.get("generation_rules") or []
-        if not rules:
+        value = item.get(key)
+        if value:
+            lines.append(f"  - {value}")
+    return lines
+
+
+def _format_selection_rules(items: Any) -> list[str]:
+    lines: list[str] = []
+    if not isinstance(items, list):
+        return lines
+    for item in items:
+        if not isinstance(item, dict):
             continue
-        pack_id = pack.get("id") or pack.get("pack_id") or "?"
-        label = pack.get("display_name") or pack.get("label") or pack_id
-        rule_lines = "\n".join(f"  - {r}" for r in rules)
-        rule_blocks.append(f"{pack_id} ({label}):\n{rule_lines}")
-    if not rule_blocks:
+        rule_id = item.get("id") or "rule"
+        action = item.get("action") or ""
+        when = item.get("when") if isinstance(item.get("when"), dict) else {}
+        intents = when.get("intent_any") if isinstance(when, dict) else []
+        intent_text = ", ".join(str(intent) for intent in intents) if isinstance(intents, list) else ""
+        suffix = f" -> {action}" if action else ""
+        lines.append(f"  - {rule_id}{suffix}" + (f" when intent_any: {intent_text}" if intent_text else ""))
+    return lines
+
+
+def _format_facade_contracts(facades: Any) -> list[str]:
+    lines: list[str] = []
+    if not isinstance(facades, list):
+        return lines
+    for facade in facades:
+        if not isinstance(facade, dict):
+            continue
+        module_id = facade.get("module_id") or facade.get("facade_id")
+        provider_module = facade.get("provider_module")
+        if module_id:
+            line = f"  - {module_id}"
+            if provider_module:
+                line += f" wraps {provider_module}"
+            lines.append(line)
+        for page in facade.get("pages") or []:
+            if isinstance(page, dict) and page.get("route"):
+                actions = page.get("primary_actions") or []
+                action_text = f" actions: {', '.join(str(action) for action in actions)}" if actions else ""
+                lines.append(f"      page {page.get('route')}{action_text}")
+    return lines
+
+
+def _format_operator_contracts(contracts: List[Any]) -> str | None:
+    blocks: list[str] = []
+    for contract in contracts:
+        if not isinstance(contract, dict):
+            continue
+        contract_id = contract.get("contract_id") or "operator_contract"
+        lines = [f"{contract_id} ({contract.get('contract_type') or 'contract'}):"]
+        selection = _format_selection_rules(contract.get("selection_rules"))
+        if selection:
+            lines.append("  selection_rules:")
+            lines.extend(selection)
+        required = _format_contract_list_items(contract.get("required_outputs"), key="path")
+        if required:
+            lines.append("  required_outputs:")
+            lines.extend(required)
+        forbidden = _format_contract_list_items(contract.get("forbidden_outputs"), key="path_prefix")
+        if forbidden:
+            lines.append("  forbidden_outputs:")
+            lines.extend(forbidden)
+        boundaries = _format_contract_list_items(contract.get("runtime_boundaries"), key="rule")
+        if boundaries:
+            lines.append("  runtime_boundaries:")
+            lines.extend(boundaries)
+        facades = _format_facade_contracts(contract.get("facades"))
+        if facades:
+            lines.append("  facades:")
+            lines.extend(facades)
+        inactive = contract.get("inactive_surfaces") or []
+        if isinstance(inactive, list) and inactive:
+            lines.append("  inactive_surfaces:")
+            lines.extend(f"  - {surface}" for surface in inactive)
+        blocks.append("\n".join(lines))
+    if not blocks:
         return None
-    header = "Host-provided generation rules (do not build what the host already supplies):"
-    return header + "\n" + "\n".join(rule_blocks)
+    return "Operator build-pack contracts:\n" + "\n".join(blocks)
 
 
-def _format_pack_sources(sources: List[Any]) -> str:
-    lines = ["Pack source roots (build-time planning reference only):"]
-    for src in sources:
-        if isinstance(src, dict):
-            src_id = src.get("id") or "?"
-            kind = src.get("kind") or "?"
-            cap_source = src.get("capability_source") or "?"
-            lines.append(f"  - {src_id}: kind={kind}, capability_source={cap_source}")
-        else:
-            lines.append(f"  - {src}")
-    lines.append("  Note: pack_sources is planning context only. Do not expand into build_tasks or runtime paths.")
-    return "\n".join(lines)
-
-
-def _format_hosted_capability_selection(selection: Any) -> str | None:
-    """
-    Render optional host-selected capability intent for this build session.
-
-    Hosts can use this to pass a builder UI choice such as selected capability
-    surfaces or a preferred hosted pack. The hook stays generic: host-specific
-    names and rules must come from the host-provided context, not OSS defaults.
-    """
-    if _is_empty(selection):
-        return None
-
-    lines = ["Host-selected capability intent for this build session:"]
-
-    if isinstance(selection, dict):
-        intent = selection.get("intent_id") or selection.get("intent") or selection.get("id")
-        pack_id = selection.get("pack_id") or selection.get("capability_pack_id")
-        source = selection.get("source")
-        surfaces = (
-            selection.get("surface_ids")
-            or selection.get("surfaces")
-            or selection.get("selected_surfaces")
-            or []
-        )
-        requirements = (
-            selection.get("requirements")
-            or selection.get("notes")
-            or selection.get("reason")
-        )
-
-        if intent:
-            lines.append(f"  - intent: {intent}")
-        if pack_id:
-            lines.append(f"  - preferred hosted pack: {pack_id}")
-        if source:
-            lines.append(f"  - source: {source}")
-        if surfaces:
-            if isinstance(surfaces, (list, tuple, set)):
-                lines.append(f"  - selected surfaces: {', '.join(str(s) for s in surfaces)}")
-            else:
-                lines.append(f"  - selected surfaces: {surfaces}")
-        if requirements:
-            if isinstance(requirements, (list, tuple, set)):
-                for requirement in requirements:
-                    lines.append(f"  - requirement: {requirement}")
-            else:
-                lines.append(f"  - requirement: {requirements}")
-
-        if len(lines) == 1:
-            lines.append(f"  - {selection}")
-    elif isinstance(selection, list):
-        for item in selection:
-            lines.append(f"  - {item}")
-    else:
-        lines.append(f"  - {selection}")
-
-    lines.append(
-        "  Treat this as selection context only; use hosted packs and surfaces declared in the host context."
-    )
-    return "\n".join(lines)
-
-
-def _build_hosted_context_body(
-    runtime_capabilities: List[Any] | None,
-    available_hosted_packs: List[Any] | None,
-    pack_sources: List[Any] | None,
-    hosted_capability_selection: Any | None = None,
-) -> str:
+def _build_hosted_context_body(capability_packs: List[Any], operator_contracts: List[Any] | None = None) -> str:
     parts: list[str] = [_CAPABILITY_SOURCE_GUIDANCE]
 
-    if not _is_empty(runtime_capabilities):
-        parts.append(_format_runtime_capabilities(runtime_capabilities))
+    parts.append(_format_hosted_packs(capability_packs))
+    parts.append(
+        "Planning rules for hosted_pack entries:\n"
+        "1. Include each hosted_pack in AppBuildPlan.capability_packs exactly once with\n"
+        "   these REQUIRED fields and values:\n"
+        "   - capability_pack_id: the hosted pack id exactly as listed above\n"
+        "   - capability_source: hosted_pack\n"
+        "   - implementation_mode: external_integration\n"
+        "   - surface_kind: external_integration\n"
+        "   The capability_source field MUST be present and MUST be \"hosted_pack\".\n"
+        "   Do not substitute pack_type: hosted_pack for capability_source.\n"
+        "   Do not mark the hosted pack entry as generated_module.\n"
+        "2. Do NOT generate a module_contract build task for the hosted_pack itself —\n"
+        "   the module is already deployed in the host.\n"
+        "3. For each hosted_pack with surface_kind: external_integration, generate one\n"
+        "   api_surface adapter task for the hosted pack. Then, for each selected active\n"
+        "   pack surface that needs app-owned actions or page endpoints, generate the\n"
+        "   corresponding app-owned facade module and page tasks declared by the typed\n"
+        "   operator contract:\n"
+        "   a) task_type: api_surface — surface_kind: external_integration\n"
+        "      capability_pack_id: {pack_id}  (REQUIRED — do NOT set to null)\n"
+        "      initial_agent: ControllerAgent\n"
+        "      owned_paths: [\"services/integrations/{pack_id}_client.py\"]\n"
+        "      This thin adapter wraps calls to the hosted pack API.\n"
+        "      The capability_pack_id identifies which hosted pack template to copy.\n"
+        "   b) task_type: module_contract — surface_kind: module  (NOT external_integration)\n"
+        "      initial_agent: ConfigMiddlewareAgent\n"
+        "      capability_pack_id: {app_owned_facade_id}  (e.g. {pack_id}_dashboard)\n"
+        "      This is an app-owned facade module that uses the adapter above.\n"
+        "      depends_on: [the api_surface task id above]\n"
+        "      The facade module is generated_module; the hosted pack remains hosted_pack.\n"
+        "      Also plan the matching data_models and business_services tasks for this\n"
+        "      facade module unless selected pack templates provide those outputs.\n"
+        "   c) task_type: page_bundle — surface_kind: ui_only\n"
+        "      initial_agent: AppSchemaAgent\n"
+        "      owned_paths: UI page yaml files for this feature\n"
+        "      depends_on: [the module_contract task id above]\n"
+        "4. Page bundles must bind to the app-owned facade module route\n"
+        "   (e.g. /api/modules/{facade_id}/), never to /api/modules/{pack_id}/ directly.\n"
+        "5. Before emitting AppBuildPlan, verify every page config_hint.api_endpoint for\n"
+        "   hosted-pack features uses /api/modules/{app_owned_facade_id}/{action_id}.\n"
+        "   Direct /api/modules/{pack_id}/, hosted backing module, wallet, hosted_billing,\n"
+        "   hosted_usage, or hosted_entitlements endpoints are invalid page bindings."
+    )
 
-    selection_block = _format_hosted_capability_selection(hosted_capability_selection)
-    if selection_block is not None:
-        parts.append(selection_block)
+    surfaces_block = _format_pack_surfaces(capability_packs)
+    if surfaces_block is not None:
+        parts.append(surfaces_block)
 
-    if not _is_empty(available_hosted_packs):
-        parts.append(_format_hosted_packs(available_hosted_packs))
-        parts.append(
-            "Planning rules for hosted_pack entries:\n"
-            "1. Include each hosted_pack in capability_packs exactly as shown:\n"
-            "   {\"capability_pack_id\": \"{pack_id}\", \"capability_source\": \"hosted_pack\",\n"
-            "    \"implementation_mode\": \"external_integration\",\n"
-            "    \"surface_kind\": \"external_integration\"}\n"
-            "   The capability_source field MUST be \"hosted_pack\" — not \"generated_module\".\n"
-            "2. Do NOT generate a module_contract build task for the hosted_pack itself —\n"
-            "   the module is already deployed in the host.\n"
-            "3. For each hosted_pack with surface_kind: external_integration, generate three\n"
-            "   build tasks in the app:\n"
-            "   a) task_type: api_surface — surface_kind: external_integration\n"
-            "      capability_pack_id: {pack_id}  (REQUIRED — do NOT set to null)\n"
-            "      initial_agent: ControllerAgent\n"
-            "      owned_paths: [\"services/integrations/{pack_id}_client.py\"]\n"
-            "      This thin adapter wraps calls to the hosted pack API.\n"
-            "      The capability_pack_id identifies which hosted pack template to copy.\n"
-            "   b) task_type: module_contract — surface_kind: module  (NOT external_integration)\n"
-            "      initial_agent: ConfigMiddlewareAgent\n"
-            "      capability_pack_id: {app_owned_facade_id}  (e.g. {pack_id}_dashboard)\n"
-            "      This is an app-owned facade module that uses the adapter above.\n"
-            "      depends_on: [the api_surface task id above]\n"
-            "   c) task_type: page_bundle — surface_kind: ui_only\n"
-            "      initial_agent: AppSchemaAgent\n"
-            "      owned_paths: UI page yaml files for this feature\n"
-            "      depends_on: [the module_contract task id above]\n"
-            "4. Page bundles must bind to the app-owned facade module route\n"
-            "   (e.g. /api/modules/{facade_id}/), never to /api/modules/{pack_id}/ directly.\n"
-            "5. If a hosted_pack supersedes another pack, do NOT include the superseded pack\n"
-            "   in capability_packs. Only include the superseding hosted_pack."
-        )
-        surfaces_block = _format_pack_surfaces(available_hosted_packs)
-        if surfaces_block is not None:
-            parts.append(surfaces_block)
+    domains_block = _format_pack_supported_domains(capability_packs)
+    if domains_block is not None:
+        parts.append(domains_block)
 
-        domains_block = _format_pack_supported_domains(available_hosted_packs)
-        if domains_block is not None:
-            parts.append(domains_block)
+    branding_block = _format_pack_branding(capability_packs)
+    if branding_block is not None:
+        parts.append(branding_block)
 
-        branding_block = _format_pack_branding(available_hosted_packs)
-        if branding_block is not None:
-            parts.append(branding_block)
-
-        generation_rules_block = _format_host_generation_rules(available_hosted_packs)
-        if generation_rules_block is not None:
-            parts.append(generation_rules_block)
-
-    if not _is_empty(pack_sources):
-        parts.append(_format_pack_sources(pack_sources))
+    contracts_block = _format_operator_contracts(operator_contracts or [])
+    if contracts_block is not None:
+        parts.append(contracts_block)
 
     return "\n\n".join(parts)
-
-
 
 
 def inject_hosted_capabilities_context(
@@ -396,12 +343,11 @@ def inject_hosted_capabilities_context(
     messages: List[Dict[str, Any]],
 ) -> None:
     """
-    update_agent_state hook for AppPlanAgent.
+    prompt middleware function for AppPlanAgent.
 
-    Reads runtime_capabilities, available_hosted_packs, pack_sources, and
-    hosted_capability_selection from context_variables. No-ops when all hosted
-    context values are null/empty (OSS mode).
-    Injects [HOSTED CAPABILITIES CONTEXT] when any value is present.
+    Reads ``capability_packs`` from context_variables. No-ops when the list is
+    null or empty (OSS mode). Injects [HOSTED CAPABILITIES CONTEXT] when packs
+    are present.
     """
     agent_name = getattr(agent, "name", "")
     if agent_name != "AppPlanAgent":
@@ -409,41 +355,24 @@ def inject_hosted_capabilities_context(
 
     try:
         context_variables: Dict[str, Any] = getattr(agent, "context_variables", {}) or {}
+        capability_packs = context_variables.get("capability_packs")
+        operator_contracts = context_variables.get("operator_contracts") or []
 
-        runtime_capabilities = context_variables.get("runtime_capabilities")
-        available_hosted_packs = context_variables.get("available_hosted_packs")
-        pack_sources = context_variables.get("pack_sources")
-        hosted_capability_selection = context_variables.get("hosted_capability_selection")
-
-        # No-op in OSS mode — all hosted context values are null or empty.
-        if (
-            _is_empty(runtime_capabilities)
-            and _is_empty(available_hosted_packs)
-            and _is_empty(pack_sources)
-            and _is_empty(hosted_capability_selection)
-        ):
+        # No-op in OSS mode — no capability packs provided by the operator.
+        if _is_empty(capability_packs):
             return
 
-        body = _build_hosted_context_body(
-            runtime_capabilities=runtime_capabilities,
-            available_hosted_packs=available_hosted_packs,
-            pack_sources=pack_sources,
-            hosted_capability_selection=hosted_capability_selection,
-        )
+        body = _build_hosted_context_body(capability_packs, operator_contracts)
         update_agent_section(agent, _HOSTED_CAP_HEADER, body)
 
-        hosted_pack_ids = []
-        if not _is_empty(available_hosted_packs):
-            for p in available_hosted_packs:
-                if isinstance(p, dict):
-                    hosted_pack_ids.append(p.get("id") or p.get("pack_id") or "?")
-                else:
-                    hosted_pack_ids.append(str(p))
-
+        pack_ids = [
+            (p.get("id") or p.get("pack_id") or "?") if isinstance(p, dict) else str(p)
+            for p in capability_packs
+        ]
         logger.info(
-            "[%s] Injected hosted capabilities context (hosted_packs: %s)",
+            "[%s] Injected hosted capabilities context (packs: %s)",
             agent_name,
-            ", ".join(hosted_pack_ids) if hosted_pack_ids else "none",
+            ", ".join(pack_ids),
         )
 
     except Exception as exc:
@@ -455,4 +384,5 @@ def inject_hosted_capabilities_context(
 
 
 __all__ = ["inject_hosted_capabilities_context"]
+
 

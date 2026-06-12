@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 
-from factory_app.workflows.AppGenerator.tools._hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import workflow_context_path
+from factory_app.workflows._shared.hook_utils import update_agent_section
 
 logger = logging.getLogger(__name__)
 
-_SHELL_PRESETS_PATH = Path(__file__).parent / "shell_presets.yaml"
+_SHELL_PRESETS_PATH = workflow_context_path("AppGenerator", "shell_presets.yaml")
 _HEADER = "[SHELL PRESET CONTEXT]"
 _EXPECTED_VERSION = 1
 _TARGET_AGENTS = {"AppPlanAgent", "AppSchemaAgent"}
@@ -154,3 +154,6 @@ def inject_shell_preset_context(agent: Any, messages: List[Dict[str, Any]]) -> N
 
 
 __all__ = ["inject_shell_preset_context"]
+
+
+

@@ -243,6 +243,12 @@ definitions:
     source:
       type: state
       default: "greenfield_app"
+  builder_options:
+    type: object
+    description: Optional app-agnostic builder UI option payload carried through workflow sequences.
+    source:
+      type: state
+      default: null
   concept_overview:
     type: string
     description: Project description and overview from the BuilderConcepts collection (produced
@@ -402,7 +408,7 @@ definitions:
     type: object
     description: >
       Canonical typed database ownership and migration contract persisted by DesignDocs.
-      AppGenerator uses this as the source of truth for staged `config/data.json`
+      AppGenerator uses this as the source of truth for staged `data/contract.json`
       and for deterministic backend collection ownership.
     source:
       type: data_reference
@@ -656,30 +662,85 @@ definitions:
     source:
       type: computed
       default: null
-  runtime_capabilities:
+  dev_pack_id:
+    type: string
+    description: >
+      Active domain dev pack identifier. Used by middleware hooks such as
+      hook_language_profile_context to load the correct language profile from
+      build_context/{dev_pack_id}/language_profile.yaml. Projected from the
+      active build context at launch time. Defaults to webapp_builder when not
+      set by the active build context or sequence.
+    source:
+      type: state
+      default: webapp_builder
+  build_task_model:
+    type: string
+    description: >
+      Qualified name of the domain task model used by the app_build_tasks
+      batch. Resolved at task batch launch time from this context variable.
+      Defaults to AppBuildTask for the webapp_builder domain. A future domain
+      pack overrides this to supply its own task model without changing the
+      harness contract.
+    source:
+      type: state
+      default: AppBuildTask
+  operator_capabilities:
     type: array
-    description: Hosted platform capabilities available at runtime (e.g. hosted_wallet). Null in OSS mode.
+    description: >
+      Capability identifiers enabled by the active workspace/operator build
+      context. Empty list in OSS mode. Projected from
+      build_context/{context_name}/context.yaml at launch time.
     source:
-      type: computed
-      default: null
-  available_hosted_packs:
+      type: build_context
+      default: []
+  capability_packs:
     type: array
-    description: Hosted capability packs available for this deployment. Null in OSS mode.
+    description: >
+      Prompt-safe capability pack descriptors discovered from the active
+      build_context/{context_name}/context.yaml when it declares pack:. Each
+      entry is a CapabilityPack dict with fields such as id, capabilities,
+      facades, pack_source_path, and capability_source.
+      Empty list in OSS mode.
     source:
-      type: computed
-      default: null
-  hosted_capability_selection:
+      type: build_context
+      default: []
+  capability_registry:
     type: object
-    description: Optional host-provided selected hosted capability intent and surfaces for this build session. Null in OSS mode.
+    description: >
+      Build-context deterministic capability routing rules. Maps capability
+      identifiers to their implementation strategy (capability_pack_id,
+      implementation_mode, surface_kind). AppPlanAgent consults this before
+      LLM reasoning to route known operator capabilities deterministically.
+      Empty dict in OSS mode. Projected from build_context/{context_name}/context.yaml
+      at launch time.
     source:
-      type: computed
-      default: null
-  pack_sources:
+      type: build_context
+      default: {}
+  operator_contracts:
+    type: array
+    description: >
+      Prompt-safe typed operator contract descriptors loaded from the selected
+      build_context/{context_name}/contract.yaml file and projected for this
+      workflow.
+    source:
+      type: build_context
+      default: []
+  provider_backed_capabilities:
+    type: array
+    description: >
+      Capabilities implemented by external, proprietary, or operator-managed
+      providers rather than generated app-local internals.
+    source:
+      type: build_context
+      default: []
+  operator_policies:
     type: object
-    description: Pack source metadata for hosted capability packs. Null in OSS mode.
+    description: >
+      Build-time operator policies such as entitlement mode, billing mode,
+      adapter boundaries, review requirements, or generation constraints.
     source:
-      type: computed
-      default: null
+      type: build_context
+      default: {}
   app_manifest:
     type: object
     description: App manifest metadata used by AppSchemaAgent to persist app.json startup and validate page routes.
@@ -811,7 +872,7 @@ definitions:
     description: >
       Migration document produced by DatabaseAgent during a refinement run.
       Null for greenfield generation runs. generate_and_download injects this
-      into the bundle as config/data_migrations/{migration_id}.json when present.
+      into the bundle as data/migrations/{migration_id}.json when present.
     source:
       type: computed
       default: null
@@ -913,6 +974,39 @@ definitions:
     source:
       type: computed
       default: null
+  app_ui_quality_status:
+    type: string
+    description: >
+      UI schema quality gate outcome set by validate_app_ui_quality. One of
+      passed | needs_revision | blocked. Drives AG2 transition routing after
+      AppUIQualityAgent.
+    source:
+      type: computed
+      default: null
+  app_ui_quality_warnings:
+    type: array
+    description: Deterministic warnings produced by the app UI quality gate.
+    source:
+      type: computed
+      default: []
+  app_ui_quality_revision_count:
+    type: integer
+    description: Number of automated AppSchemaAgent revision loops used by the UI quality gate.
+    source:
+      type: computed
+      default: 0
+  app_ui_quality_revision_request:
+    type: string
+    description: Focused revision instruction passed back to AppSchemaAgent when UI quality needs revision.
+    source:
+      type: computed
+      default: null
+  app_ui_quality_result:
+    type: object
+    description: Raw app UI quality gate result payload.
+    source:
+      type: computed
+      default: null
   module_contract_quality_status:
     type: string
     description: >
@@ -964,6 +1058,18 @@ definitions:
   module_runtime_quality_result:
     type: object
     description: Raw module runtime quality result payload persisted by review_module_runtime_quality.
+    source:
+      type: computed
+      default: null
+  generated_files:
+    type: object
+    description: Canonical generated app bundle file map assembled from schema and task-batch outputs.
+    source:
+      type: computed
+      default: {}
+  assembled_source:
+    type: string
+    description: Assembly source marker describing which canonical lanes produced generated_files.
     source:
       type: computed
       default: null
@@ -1044,10 +1150,7 @@ agents:
     - required_connector_services
     - ready_connector_services
     - missing_connector_services
-    - runtime_capabilities
-    - available_hosted_packs
-    - hosted_capability_selection
-    - pack_sources
+    - capability_packs
   AppSchemaAgent:
     variables:
     - concept_overview
@@ -1154,7 +1257,7 @@ agents:
   AdminRegistryAgent:
     variables:
     - app_build_plan
-    - available_hosted_packs
+    - capability_packs
     - admin_registry
   ModuleContractQualityAgent:
     variables:

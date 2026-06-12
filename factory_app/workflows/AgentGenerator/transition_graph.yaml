@@ -1,0 +1,63 @@
+transition_rules:
+- source_agent: user
+  target_agent: InterviewAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+- source_agent: InterviewAgent
+  target_agent: PatternAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: InterviewAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+- source_agent: PatternAgent
+  target_agent: ProjectOverviewAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+
+- source_agent: ProjectOverviewAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+- source_agent: user
+  target_agent: PackBuildCoordinator
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_review_approved
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: user
+  target_agent: PatternAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_review_revision_requested
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: PackBuildCoordinator
+  target_agent: PackMetadataAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+
+- source_agent: PackMetadataAgent
+  target_agent: DownloadAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+
+- source_agent: DownloadAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+

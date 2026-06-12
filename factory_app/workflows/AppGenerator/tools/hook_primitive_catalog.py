@@ -67,3 +67,4 @@ def inject_primitive_catalog(agent: Any, messages: List[Dict[str, Any]]) -> None
 
 
 __all__ = ["inject_primitive_catalog"]
+

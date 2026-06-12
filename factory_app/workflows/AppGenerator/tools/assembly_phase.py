@@ -76,3 +76,4 @@ async def assemble_features(
             "code_files": [],
             "message": f"Assembly failed: {exc}",
         }
+
