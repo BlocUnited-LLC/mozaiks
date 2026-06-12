@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import os
 import json
-from typing import Any, Dict, List, Optional
+import os
+from typing import Any
 
 import httpx
 
-from mozaiksai.core.workflow.llm_config import get_llm_config
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.workflow.llm_config import get_llm_config
 
 logger = get_workflow_logger("capabilities.simple_llm")
 
@@ -33,13 +33,13 @@ class SimpleLLMCapabilityService:
         self,
         *,
         prompt: str,
-        workflows: List[Dict[str, Any]],
-        app_id: Optional[str],
-        user_id: Optional[str],
-        ui_context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        workflows: list[dict[str, Any]],
+        app_id: str | None,
+        user_id: str | None,
+        ui_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Execute a single chat completion call and return content + usage."""
-        messages: List[Dict[str, str]] = [{"role": "user", "content": str(prompt or "")}]
+        messages: list[dict[str, str]] = [{"role": "user", "content": str(prompt or "")}]
         return await self.generate_chat_completion(
             messages=messages,
             temperature=0.3,
@@ -52,15 +52,15 @@ class SimpleLLMCapabilityService:
     async def generate_chat_completion(
         self,
         *,
-        messages: List[Dict[str, str]],
-        temperature: Optional[float] = 0.3,
-        llm_config: Optional[Dict[str, Any]] = None,
-        app_id: Optional[str],
-        user_id: Optional[str],
-        ui_context: Optional[Dict[str, Any]] = None,
-        workflows: Optional[List[Dict[str, Any]]] = None,
-        extra_payload: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        messages: list[dict[str, str]],
+        temperature: float | None = 0.3,
+        llm_config: dict[str, Any] | None = None,
+        app_id: str | None,
+        user_id: str | None,
+        ui_context: dict[str, Any] | None = None,
+        workflows: list[dict[str, Any]] | None = None,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Execute a raw chat completion call and return content + usage."""
         provider = await self._select_provider(llm_config)
         api_key = provider["api_key"]
@@ -83,7 +83,7 @@ class SimpleLLMCapabilityService:
                 ui_context=ui_context,
             )
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
         }
@@ -120,16 +120,16 @@ class SimpleLLMCapabilityService:
         self,
         *,
         api_base: str,
-        headers: Dict[str, str],
+        headers: dict[str, str],
         model: str,
-        messages: List[Dict[str, str]],
-        llm_config: Optional[Dict[str, Any]],
-        app_id: Optional[str],
-        user_id: Optional[str],
-        ui_context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        messages: list[dict[str, str]],
+        llm_config: dict[str, Any] | None,
+        app_id: str | None,
+        user_id: str | None,
+        ui_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         instructions, input_payload = self._messages_to_responses_payload(messages)
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model,
             "input": input_payload,
         }
@@ -160,15 +160,15 @@ class SimpleLLMCapabilityService:
         *,
         system_prompt: str,
         user_prompt: str,
-        llm_config: Optional[Dict[str, Any]] = None,
-        temperature: Optional[float] = None,
-        app_id: Optional[str],
-        user_id: Optional[str],
-        ui_context: Optional[Dict[str, Any]] = None,
-        extra_payload: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        llm_config: dict[str, Any] | None = None,
+        temperature: float | None = None,
+        app_id: str | None,
+        user_id: str | None,
+        ui_context: dict[str, Any] | None = None,
+        extra_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Execute a chat completion expected to return a JSON object."""
-        resolved_temperature: Optional[float] = None
+        resolved_temperature: float | None = None
         if temperature is not None:
             resolved_temperature = float(temperature)
         elif isinstance(llm_config, dict) and llm_config.get("temperature") is not None:
@@ -198,7 +198,7 @@ class SimpleLLMCapabilityService:
         }
 
     @staticmethod
-    def _should_use_responses_api(*, model: str, llm_config: Optional[Dict[str, Any]]) -> bool:
+    def _should_use_responses_api(*, model: str, llm_config: dict[str, Any] | None) -> bool:
         normalized_model = str(model or "").strip().lower()
         if normalized_model.endswith("-codex") or "-codex-" in normalized_model:
             return True
@@ -206,9 +206,9 @@ class SimpleLLMCapabilityService:
         return config_mode == "responses"
 
     @staticmethod
-    def _messages_to_responses_payload(messages: List[Dict[str, str]]) -> tuple[Optional[str], Any]:
-        instructions: Optional[str] = None
-        items: List[Dict[str, Any]] = []
+    def _messages_to_responses_payload(messages: list[dict[str, str]]) -> tuple[str | None, Any]:
+        instructions: str | None = None
+        items: list[dict[str, Any]] = []
         for message in messages:
             role = str(message.get("role") or "user").strip().lower() or "user"
             content = str(message.get("content") or "")
@@ -240,7 +240,7 @@ class SimpleLLMCapabilityService:
         if isinstance(output_text, str) and output_text.strip():
             return output_text.strip()
 
-        chunks: List[str] = []
+        chunks: list[str] = []
         for item in data.get("output", []) or []:
             if not isinstance(item, dict):
                 continue
@@ -253,7 +253,7 @@ class SimpleLLMCapabilityService:
         return "\n".join(chunk.strip() for chunk in chunks if chunk.strip()).strip()
 
     @staticmethod
-    def _parse_json_object(content: str) -> Dict[str, Any]:
+    def _parse_json_object(content: str) -> dict[str, Any]:
         text = str(content or "").strip()
         if text.startswith("```"):
             lines = text.splitlines()
@@ -277,7 +277,7 @@ class SimpleLLMCapabilityService:
             raise ValueError("LLM JSON response must be an object")
         return parsed
 
-    async def _select_provider(self, llm_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def _select_provider(self, llm_config: dict[str, Any] | None = None) -> dict[str, Any]:
         """Select a provider entry with a usable API key."""
         default_provider = await self._select_default_provider()
         if not llm_config:
@@ -297,7 +297,7 @@ class SimpleLLMCapabilityService:
                 override[key] = value
         return override
 
-    async def _select_default_provider(self) -> Dict[str, Any]:
+    async def _select_default_provider(self) -> dict[str, Any]:
         """Select the default provider entry with a usable API key."""
         _, llm_config = await get_llm_config(cache=True)
         config_list = llm_config.get("config_list", [])
@@ -307,7 +307,7 @@ class SimpleLLMCapabilityService:
         raise RuntimeError("No LLM provider available for non-AG2 capability execution")
 
 
-_service: Optional[SimpleLLMCapabilityService] = None
+_service: SimpleLLMCapabilityService | None = None
 
 
 def get_general_capability_service() -> SimpleLLMCapabilityService:

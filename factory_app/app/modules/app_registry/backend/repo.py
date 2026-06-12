@@ -1,19 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
+from typing import Any
 from uuid import uuid4
 
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
-
-IndexSpec = Tuple[Sequence[Tuple[str, int]], Dict[str, Any]]
+IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 APP_REGISTRY_COLLECTION = "AppRegistryRecords"
 
 
 class AppRegistryRepo:
-    def __init__(self, pm: Optional[AG2PersistenceManager] = None) -> None:
+    def __init__(self, pm: AG2PersistenceManager | None = None) -> None:
         self._pm = pm or AG2PersistenceManager()
 
     async def _client(self):
@@ -51,16 +51,16 @@ class AppRegistryRepo:
         *,
         owner_user_id: str,
         name: str,
-        description: Optional[str],
+        description: str | None,
         lifecycle_state: str,
         app_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         await self.ensure_indexes()
         coll = await self._collection()
         now = datetime.now(UTC)
         existing = await coll.find_one({"app_id": app_id})
         build_registry_id = str((existing or {}).get("_id") or f"appreg_{uuid4().hex}")
-        set_fields: Dict[str, Any] = {
+        set_fields: dict[str, Any] = {
             "app_id": app_id,
             "owner_user_id": owner_user_id,
             "name": name,
@@ -91,11 +91,11 @@ class AppRegistryRepo:
         *,
         build_registry_id: str,
         lifecycle_state: str,
-        bundle_path: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        bundle_path: str | None = None,
+    ) -> dict[str, Any] | None:
         await self.ensure_indexes()
         coll = await self._collection()
-        update_fields: Dict[str, Any] = {
+        update_fields: dict[str, Any] = {
             "lifecycle_state": lifecycle_state,
             "updated_at": datetime.now(UTC),
             "last_status_changed_at": datetime.now(UTC),
@@ -105,26 +105,26 @@ class AppRegistryRepo:
         await coll.update_one({"_id": build_registry_id}, {"$set": update_fields}, upsert=False)
         return await self.get_by_build_registry_id(build_registry_id=build_registry_id)
 
-    async def list_apps_for_user(self, *, owner_user_id: str) -> list[Dict[str, Any]]:
+    async def list_apps_for_user(self, *, owner_user_id: str) -> list[dict[str, Any]]:
         await self.ensure_indexes()
         coll = await self._collection()
         docs = await coll.find({"owner_user_id": owner_user_id}).sort("updated_at", -1).to_list(length=None)
         return [normalized for doc in docs if (normalized := self._normalize_doc(doc))]
 
-    async def get_by_app_id(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+    async def get_by_app_id(self, *, app_id: str) -> dict[str, Any] | None:
         await self.ensure_indexes()
         coll = await self._collection()
         doc = await coll.find_one({"app_id": app_id})
         return self._normalize_doc(doc)
 
-    async def get_by_build_registry_id(self, *, build_registry_id: str) -> Optional[Dict[str, Any]]:
+    async def get_by_build_registry_id(self, *, build_registry_id: str) -> dict[str, Any] | None:
         await self.ensure_indexes()
         coll = await self._collection()
         doc = await coll.find_one({"_id": build_registry_id})
         return self._normalize_doc(doc)
 
     @staticmethod
-    def _normalize_doc(doc: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _normalize_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(doc, dict):
             return None
         normalized = dict(doc)

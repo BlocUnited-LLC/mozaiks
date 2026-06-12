@@ -4,7 +4,7 @@
 # ==============================================================================
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 
 async def handle_client_resume(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:
@@ -26,8 +26,8 @@ async def handle_client_resume(
 
 
 async def handle_artifact_action(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:

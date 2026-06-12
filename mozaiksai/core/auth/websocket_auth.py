@@ -27,14 +27,13 @@ Usage:
 """
 
 import os
-from typing import Optional, List, Any
 from dataclasses import dataclass
 
-from fastapi import WebSocket, Query
+from fastapi import WebSocket
 
-from mozaiksai.core.auth.adapters import get_auth_adapter, UserClaims, AuthError
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters import AuthError, UserClaims, get_auth_adapter
+from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 
 logger = get_core_logger("auth.websocket")
 
@@ -54,16 +53,16 @@ class WebSocketUser:
     """Authenticated WebSocket user context."""
 
     user_id: str
-    email: Optional[str]
-    name: Optional[str]
-    roles: List[str]
-    scopes: List[str]
+    email: str | None
+    name: str | None
+    roles: list[str]
+    scopes: list[str]
     raw_claims: dict
     provider: str = "unknown"
     # Optional binding claims
-    app_id: Optional[str] = None
-    chat_id: Optional[str] = None
-    tenant_id: Optional[str] = None
+    app_id: str | None = None
+    chat_id: str | None = None
+    tenant_id: str | None = None
 
     def has_role(self, role: str) -> bool:
         return role in self.roles
@@ -102,8 +101,8 @@ class WebSocketUser:
 
 async def authenticate_websocket(
     websocket: WebSocket,
-    access_token: Optional[str] = None,
-) -> Optional[WebSocketUser]:
+    access_token: str | None = None,
+) -> WebSocketUser | None:
     """
     Authenticate a WebSocket connection using the configured auth adapter.
 
@@ -263,8 +262,8 @@ async def require_resource_ownership(
 async def authenticate_websocket_with_path_user(
     websocket: WebSocket,
     path_user_id: str,
-    access_token: Optional[str] = None,
-) -> Optional[WebSocketUser]:
+    access_token: str | None = None,
+) -> WebSocketUser | None:
     """
     Authenticate WebSocket AND validate that JWT user matches path user_id.
 
@@ -319,9 +318,9 @@ async def authenticate_websocket_with_path_binding(
     websocket: WebSocket,
     path_user_id: str,
     path_app_id: str,
-    path_chat_id: Optional[str] = None,
-    access_token: Optional[str] = None,
-) -> Optional[WebSocketUser]:
+    path_chat_id: str | None = None,
+    access_token: str | None = None,
+) -> WebSocketUser | None:
     """
     Authenticate WebSocket AND validate that JWT claims match path parameters.
 

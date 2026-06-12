@@ -16,6 +16,8 @@ from scripts.smoke_agentgenerator_live_pack import (
     validate_generated_workflow_bundle,
 )
 
+WORKSPACE = Path(__file__).resolve().parents[1]
+
 
 def _write_yaml(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -29,8 +31,22 @@ def _write_valid_workflow(
     startup_mode: str = "AgentDriven",
     visual_agents=None,
     include_task_batches: bool = False,
-) -> None:
+    ) -> None:
     workflow_dir.mkdir(parents=True, exist_ok=True)
+    context_definitions = {
+        "tenant_id": {"type": "string", "source": {"type": "state", "default": "tenant-1"}},
+        "app_id": {"type": "string", "source": {"type": "state", "default": "app-1"}},
+        "user_id": {"type": "string", "source": {"type": "state", "default": "user-1"}},
+    }
+    context_agent_variables = ["tenant_id", "app_id", "user_id"]
+    if include_task_batches:
+        context_definitions.update(
+            {
+                "triage_tasks_results": {"type": "array", "source": {"type": "state", "default": []}},
+                "triage_tasks_status": {"type": "object", "source": {"type": "state", "default": {}}},
+            }
+        )
+        context_agent_variables.extend(["triage_tasks_results", "triage_tasks_status"])
     _write_yaml(
         workflow_dir / "orchestrator.yaml",
         {
@@ -68,12 +84,8 @@ def _write_valid_workflow(
     _write_yaml(
         workflow_dir / "context_variables.yaml",
         {
-            "definitions": {
-                "tenant_id": {"type": "string", "source": {"type": "state", "default": "tenant-1"}},
-                "app_id": {"type": "string", "source": {"type": "state", "default": "app-1"}},
-                "user_id": {"type": "string", "source": {"type": "state", "default": "user-1"}},
-            },
-            "agents": {"PlannerAgent": {"variables": ["tenant_id", "app_id", "user_id"]}},
+            "definitions": context_definitions,
+            "agents": {"PlannerAgent": {"variables": context_agent_variables}},
         },
     )
     _write_yaml(
@@ -114,6 +126,33 @@ def test_build_seeded_pack_context_has_parallel_agentgenerator_work_items() -> N
     assert {item["initial_agent"] for item in specs} == {"WorkflowBundleBuilderAgent"}
     assert all(item["depends_on"] == [] for item in specs)
     assert any(item["context_variables"]["require_task_batches"] for item in specs)
+    routing_spec = next(item for item in specs if item["name"] == "SupportTicketRoutingWorkflow")
+    assert "ClassifierAgent, RoutingAgent" in routing_spec["initial_message"]
+    assert "ClassifierAgent -> RoutingAgent -> terminate" in routing_spec["initial_message"]
+    conveyor_spec = next(item for item in specs if item["name"] == "TicketBatchTriageWorkflow")
+    assert conveyor_spec["context_variables"]["expected_task_batch_id"] == "ticket_batch_triage_tasks"
+    assert "ticket_batch_triage_tasks_results" in conveyor_spec["initial_message"]
+    assert "ticket_batch_triage_tasks_status" in conveyor_spec["initial_message"]
+
+
+def test_workflow_bundle_builder_prompt_forbids_punctuated_yaml_scalars() -> None:
+    agents_yaml = yaml.safe_load(
+        (WORKSPACE / "factory_app" / "workflows" / "AgentGenerator" / "agents.yaml").read_text(encoding="utf-8")
+    )
+    agents = agents_yaml["agents"] if isinstance(agents_yaml, dict) else agents_yaml
+    builder = next(agent for agent in agents if agent["name"] == "WorkflowBundleBuilderAgent")
+    prompt = "\n".join(section["content"] for section in builder["prompt_sections"])
+
+    assert "YAML scalar values must be exact values" in prompt
+    assert "Write `prompt_sections` in block YAML style" in prompt
+    assert "Never emit inline prompt sections" in prompt
+    assert "ticket_triage_tasks_results" in prompt
+    assert "ticket_triage_tasks_status" in prompt
+    assert "Every agent referenced by transition_graph.yaml must be declared" in prompt
+    assert "HandlingLaneAgent" in prompt
+    assert "transition_type: after_turn." in prompt
+    assert "structured_outputs_required: true." in prompt
+    assert "require_owned_paths: false." in prompt
 
 
 def test_max_overlapping_task_runs_counts_concurrent_intervals() -> None:
@@ -155,6 +194,75 @@ def test_validate_generated_workflow_bundle_accepts_current_contract(tmp_path: P
             if path.is_file()
         }
     )
+
+
+def test_validate_generated_workflow_bundle_rejects_conveyor_context_key_drift(tmp_path: Path) -> None:
+    workflow_name = "TicketBatchTriageWorkflow"
+    bundle_root = tmp_path / "bundle"
+    _write_valid_workflow(
+        bundle_root / workflow_name,
+        workflow_name,
+        startup_mode="BackendOnly",
+        visual_agents=None,
+        include_task_batches=True,
+    )
+    context_path = bundle_root / workflow_name / "context_variables.yaml"
+    context_variables = yaml.safe_load(context_path.read_text(encoding="utf-8"))
+    context_variables["definitions"].pop("triage_tasks_results")
+    context_variables["definitions"].pop("triage_tasks_status")
+    _write_yaml(context_path, context_variables)
+
+    validation = validate_generated_workflow_bundle(
+        bundle_root=bundle_root,
+        expected_workflows=[
+            {
+                "name": workflow_name,
+                "context_variables": {
+                    "expected_workflow_startup_mode": "BackendOnly",
+                    "require_task_batches": True,
+                },
+            }
+        ],
+    )
+
+    assert validation["valid"] is False
+    joined = "\n".join(validation["errors"])
+    assert "task_batches 'triage_tasks' writes undeclared context variable 'triage_tasks_results'" in joined
+    assert "task_batches 'triage_tasks' writes undeclared context variable 'triage_tasks_status'" in joined
+
+
+def test_validate_generated_workflow_bundle_rejects_undeclared_transition_agent(tmp_path: Path) -> None:
+    workflow_name = "SupportTicketRoutingWorkflow"
+    bundle_root = tmp_path / "bundle"
+    _write_valid_workflow(bundle_root / workflow_name, workflow_name)
+    transition_graph_path = bundle_root / workflow_name / "transition_graph.yaml"
+    transition_graph = yaml.safe_load(transition_graph_path.read_text(encoding="utf-8"))
+    transition_graph["transition_rules"] = [
+        {
+            "source_agent": "PlannerAgent",
+            "target_agent": "GhostAgent",
+            "transition_type": "after_turn",
+        }
+    ]
+    _write_yaml(transition_graph_path, transition_graph)
+
+    validation = validate_generated_workflow_bundle(
+        bundle_root=bundle_root,
+        expected_workflows=[
+            {
+                "name": workflow_name,
+                "context_variables": {
+                    "expected_workflow_startup_mode": "AgentDriven",
+                    "require_task_batches": False,
+                },
+            }
+        ],
+    )
+
+    assert validation["valid"] is False
+    joined = "\n".join(validation["errors"])
+    assert "transition graph does not compile through AG2 adapter" in joined
+    assert "GhostAgent" in joined
 
 
 def test_validate_generated_workflow_bundle_rejects_removed_groupchat_fields(tmp_path: Path) -> None:

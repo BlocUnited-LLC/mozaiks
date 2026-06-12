@@ -74,21 +74,29 @@ class _Context:
 
 
 @pytest.mark.parametrize(
-    ("status", "integration_passed", "allow_export"),
+    ("status", "acceptance_status", "integration_passed", "allow_export"),
     [
-        ("passed", True, True),
-        ("skipped", True, True),
-        ("failed", True, False),
-        ("pending", True, False),
-        (None, True, False),
-        ("passed", False, False),
+        ("passed", "passed", True, True),
+        ("skipped", "passed", True, True),
+        ("passed", "failed", True, False),
+        ("passed", None, True, False),
+        ("failed", "passed", True, False),
+        ("pending", "passed", True, False),
+        (None, "passed", True, False),
+        ("passed", "passed", False, False),
     ],
 )
-def test_resolve_export_gate_uses_validation_status_and_integration(status, integration_passed, allow_export) -> None:
+def test_resolve_export_gate_uses_acceptance_validation_and_integration(
+    status,
+    acceptance_status,
+    integration_passed,
+    allow_export,
+) -> None:
     module = _import_workflow_module("workflows.AppGenerator.tools.export_app_code")
     context = _Context(
         {
             "app_validation_status": status,
+            "app_bundle_acceptance_status": acceptance_status,
             "app_validation_strategy_used": "local",
             "integration_tests_passed": integration_passed,
         }
@@ -98,12 +106,17 @@ def test_resolve_export_gate_uses_validation_status_and_integration(status, inte
 
     assert gate["allow_export"] is allow_export
     assert gate["app_validation_status"] == (status.lower() if isinstance(status, str) else status)
+    assert gate["app_bundle_acceptance_status"] == (
+        acceptance_status.lower() if isinstance(acceptance_status, str) else acceptance_status
+    )
     assert gate["app_validation_strategy_used"] == "local"
     assert gate["integration_tests_passed"] is integration_passed
 
 
 def test_validation_strategy_defaults_to_skip_when_e2b_local_and_docker_are_unavailable(monkeypatch) -> None:
-    from mozaiksai.core.workflow.generator_support import app_validation_strategy as app_validation_strategy_module
+    from mozaiksai.core.workflow.generator_support import (
+        app_validation_strategy as app_validation_strategy_module,
+    )
 
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
@@ -485,6 +498,43 @@ class TicketsPolicy:
     assert context.get("integration_tests_passed") is False
     assert context.get("module_runtime_quality_status") == "blocked"
     assert context.get("integration_test_result")["module_runtime_quality"]["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_validate_app_bundle_from_request_blocks_workflow_integration_failure(monkeypatch) -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    async def fake_validate_app_build(**kwargs):
+        return {"validation_status": "skipped", "validation_strategy": "skip"}
+
+    monkeypatch.setattr(module, "validate_app_build", fake_validate_app_build)
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    del files["modules/support_tickets/contracts/reactions.yaml"]
+    context = _Context(
+        {
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    result = await module.validate_app_bundle_from_request(
+        {"validation_strategy": "skip", "start_dev_server": False},
+        context_variables=context,
+    )
+
+    assert result["status"] == "failed"
+    assert result["integration_tests_passed"] is False
+    assert result["workflow_integration_validation_result"]["passed"] is False
+    assert context.get("workflow_integration_validation_passed") is False
+    assert context.get("integration_test_result")["workflow_integration"]["failed_tests"]
 
 
 def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:

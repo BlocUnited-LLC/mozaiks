@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 APP_BACKEND_ADMIN_SCHEMA_VERSION = "mozaiks.admin.app_backend.v1"
 APP_BACKEND_ADMIN_SECTION_IDS = (
@@ -31,19 +30,19 @@ def _required_text(value: Any, *, field_name: str) -> str:
     return text
 
 
-def _optional_text(value: Any) -> Optional[str]:
+def _optional_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-def _string_list(values: Any) -> List[str]:
+def _string_list(values: Any) -> list[str]:
     if values is None:
         return []
     if not isinstance(values, list):
         raise ValueError("value must be a list")
-    result: List[str] = []
+    result: list[str] = []
     seen: set[str] = set()
     for raw in values:
         text = str(raw or "").strip()
@@ -56,7 +55,7 @@ def _string_list(values: Any) -> List[str]:
 class AppBackendAdminPanel(AppBackendAdminContractModel):
     id: str
     label: str
-    description: Optional[str] = None
+    description: str | None = None
     section: Literal[
         "overview",
         "users",
@@ -69,11 +68,11 @@ class AppBackendAdminPanel(AppBackendAdminContractModel):
     ]
     order: int = 0
     renderer: Literal["builtin", "schema", "custom_component"]
-    builtin_panel: Optional[Literal["stats", "users", "subscriptions"]] = None
-    layout: Optional[Literal["grid", "sidebar", "full-width", "split"]] = None
-    sections: List[Dict[str, Any]] = Field(default_factory=list)
-    component: Optional[str] = None
-    permissions: List[str] = Field(default_factory=list)
+    builtin_panel: Literal["stats", "users", "subscriptions"] | None = None
+    layout: Literal["grid", "sidebar", "full-width", "split"] | None = None
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    component: str | None = None
+    permissions: list[str] = Field(default_factory=list)
 
     @field_validator("id", "label", mode="before")
     @classmethod
@@ -82,22 +81,22 @@ class AppBackendAdminPanel(AppBackendAdminContractModel):
 
     @field_validator("description", "component", mode="before")
     @classmethod
-    def _optional(cls, value: Any) -> Optional[str]:
+    def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("permissions", mode="before")
     @classmethod
-    def _permissions(cls, value: Any) -> List[str]:
+    def _permissions(cls, value: Any) -> list[str]:
         return _string_list(value)
 
     @field_validator("sections", mode="before")
     @classmethod
-    def _sections(cls, value: Any) -> List[Dict[str, Any]]:
+    def _sections(cls, value: Any) -> list[dict[str, Any]]:
         if value is None:
             return []
         if not isinstance(value, list):
             raise ValueError("sections must be a list")
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for item in value:
             if not isinstance(item, dict):
                 raise ValueError("sections entries must be objects")
@@ -105,7 +104,7 @@ class AppBackendAdminPanel(AppBackendAdminContractModel):
         return result
 
     @model_validator(mode="after")
-    def _validate_renderer_contract(self) -> "AppBackendAdminPanel":
+    def _validate_renderer_contract(self) -> AppBackendAdminPanel:
         if self.renderer == "builtin":
             if self.builtin_panel is None:
                 raise ValueError("builtin panels must declare builtin_panel")
@@ -141,10 +140,10 @@ class AppBackendAdminPanel(AppBackendAdminContractModel):
 
 class AppBackendAdminConfig(AppBackendAdminContractModel):
     schema_version: Literal["mozaiks.admin.app_backend.v1"]
-    panels: List[AppBackendAdminPanel] = Field(default_factory=list)
+    panels: list[AppBackendAdminPanel] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _unique_panel_ids(self) -> "AppBackendAdminConfig":
+    def _unique_panel_ids(self) -> AppBackendAdminConfig:
         panel_ids = [panel.id for panel in self.panels]
         if len(panel_ids) != len(set(panel_ids)):
             raise ValueError("app backend admin panels must have unique id values")

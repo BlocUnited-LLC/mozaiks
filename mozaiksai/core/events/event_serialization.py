@@ -11,7 +11,7 @@ runtime event builders to normalize and serialize AG2 event content.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 def normalize_text_content(raw: Any) -> str:
@@ -20,7 +20,7 @@ def normalize_text_content(raw: Any) -> str:
 		return ""
 	if isinstance(raw, str):
 		return raw
-	if hasattr(raw, 'model_dump') and callable(getattr(raw, 'model_dump')):
+	if hasattr(raw, 'model_dump') and callable(raw.model_dump):
 		try:
 			return normalize_text_content(raw.model_dump())  # type: ignore[attr-defined]
 		except Exception:
@@ -45,12 +45,12 @@ def serialize_event_content(raw: Any) -> Any:
 	if isinstance(raw, Enum):
 		return serialize_event_content(raw.value)
 	try:
-		if hasattr(raw, 'model_dump') and callable(getattr(raw, 'model_dump')):
+		if hasattr(raw, 'model_dump') and callable(raw.model_dump):
 			return serialize_event_content(raw.model_dump())  # type: ignore[attr-defined]
 	except Exception:
 		pass
 	try:
-		if hasattr(raw, 'dict') and callable(getattr(raw, 'dict')):
+		if hasattr(raw, 'dict') and callable(raw.dict):
 			return serialize_event_content(raw.dict())  # type: ignore[attr-defined]
 	except Exception:
 		pass
@@ -66,7 +66,7 @@ def serialize_event_content(raw: Any) -> Any:
 	return str(raw)
 
 
-def extract_agent_name(obj: Any) -> Optional[str]:
+def extract_agent_name(obj: Any) -> str | None:
 	"""Attempt to extract the logical agent/sender name from diverse AG2 objects."""
 	try:
 		if isinstance(obj, dict):

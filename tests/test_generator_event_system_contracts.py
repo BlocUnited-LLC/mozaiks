@@ -80,8 +80,12 @@ def test_agentgenerator_workflow_bundle_contract_uses_workflow_startup_mode() ->
 
 
 def test_agentgenerator_bundle_builder_prompt_uses_current_workflow_contract_terms() -> None:
+    import re
+
     source = _read("factory_app/workflows/AgentGenerator/agents.yaml")
-    builder_section = source.split("- name: WorkflowBundleBuilderAgent", 1)[1].split("- name:", 1)[0]
+    # Split on top-level agent entries only (line starts with "- name:") to avoid
+    # splitting on "- name:" that appears inside YAML code-block examples in prompts.
+    builder_section = re.split(r"(?m)^- name:", source.split("- name: WorkflowBundleBuilderAgent", 1)[1], maxsplit=1)[0]
 
     assert "`workflow_startup_mode`" in builder_section
     assert "`orchestrator.yaml` must use `workflow_startup_mode`" in builder_section

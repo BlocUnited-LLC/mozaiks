@@ -11,20 +11,19 @@ import hashlib
 import os
 import re
 from datetime import UTC, datetime, timedelta
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Protocol
 
 from logs.logging_config import get_core_logger
-
 
 logger = get_core_logger("connector_vault")
 
 _VALID_SECRET_CHARS = re.compile(r"[^a-z0-9-]+")
-_backend_singleton: "ConnectorVaultBackend | None" = None
+_backend_singleton: ConnectorVaultBackend | None = None
 _backend_signature: tuple[str, str, str] | None = None
 
 
 class ConnectorVaultBackend(Protocol):
-    async def describe(self) -> Dict[str, Any]:
+    async def describe(self) -> dict[str, Any]:
         ...
 
     async def store_secret(
@@ -33,15 +32,15 @@ class ConnectorVaultBackend(Protocol):
         app_id: str,
         service: str,
         secret_value: str,
-        display_name: Optional[str] = None,
+        display_name: str | None = None,
         ttl_days: int = 30,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         ...
 
-    async def get_secret(self, *, app_id: str, service: str) -> Dict[str, Any]:
+    async def get_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
         ...
 
-    async def delete_secret(self, *, app_id: str, service: str) -> Dict[str, Any]:
+    async def delete_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
         ...
 
 
@@ -67,7 +66,7 @@ def _slug(value: str, *, default: str) -> str:
     return candidate or default
 
 
-def _secret_name(app_id: str, service: str, *, prefix: Optional[str] = None) -> str:
+def _secret_name(app_id: str, service: str, *, prefix: str | None = None) -> str:
     base_prefix = _slug(prefix or _secret_prefix(), default="mozaiks-connector")
     service_slug = _slug(service, default="service")
     app_slug = _slug(app_id, default="app")
@@ -77,7 +76,7 @@ def _secret_name(app_id: str, service: str, *, prefix: Optional[str] = None) -> 
 
 
 class NoopConnectorVaultBackend:
-    async def describe(self) -> Dict[str, Any]:
+    async def describe(self) -> dict[str, Any]:
         return {
             "provider": "disabled",
             "configured": False,
@@ -92,9 +91,9 @@ class NoopConnectorVaultBackend:
         app_id: str,
         service: str,
         secret_value: str,
-        display_name: Optional[str] = None,
+        display_name: str | None = None,
         ttl_days: int = 30,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "success": False,
             "provider": "disabled",
@@ -103,7 +102,7 @@ class NoopConnectorVaultBackend:
             "error": "Connector secret backend is not configured.",
         }
 
-    async def get_secret(self, *, app_id: str, service: str) -> Dict[str, Any]:
+    async def get_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
         return {
             "success": False,
             "provider": "disabled",
@@ -112,7 +111,7 @@ class NoopConnectorVaultBackend:
             "error": "Connector secret backend is not configured.",
         }
 
-    async def delete_secret(self, *, app_id: str, service: str) -> Dict[str, Any]:
+    async def delete_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
         return {
             "success": False,
             "provider": "disabled",
@@ -124,9 +123,9 @@ class NoopConnectorVaultBackend:
 class AzureKeyVaultConnectorVaultBackend:
     def __init__(self) -> None:
         self._client = None
-        self._client_error: Optional[str] = None
+        self._client_error: str | None = None
 
-    def _get_vault_url(self) -> Optional[str]:
+    def _get_vault_url(self) -> str | None:
         name = _vault_name()
         if not name:
             return None
@@ -153,7 +152,7 @@ class AzureKeyVaultConnectorVaultBackend:
             self._client_error = str(exc)
             return None
 
-    async def describe(self) -> Dict[str, Any]:
+    async def describe(self) -> dict[str, Any]:
         client = self._get_client()
         return {
             "provider": "azure_key_vault",
@@ -170,9 +169,9 @@ class AzureKeyVaultConnectorVaultBackend:
         app_id: str,
         service: str,
         secret_value: str,
-        display_name: Optional[str] = None,
+        display_name: str | None = None,
         ttl_days: int = 30,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         client = self._get_client()
         secret_name = _secret_name(app_id, service)
         if client is None:
@@ -222,7 +221,7 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": str(exc),
             }
 
-    async def get_secret(self, *, app_id: str, service: str) -> Dict[str, Any]:
+    async def get_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
         client = self._get_client()
         secret_name = _secret_name(app_id, service)
         if client is None:
@@ -256,7 +255,7 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": str(exc),
             }
 
-    async def delete_secret(self, *, app_id: str, service: str) -> Dict[str, Any]:
+    async def delete_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
         client = self._get_client()
         secret_name = _secret_name(app_id, service)
         if client is None:
@@ -306,7 +305,7 @@ def get_connector_vault_backend() -> ConnectorVaultBackend:
     return backend
 
 
-async def describe_connector_vault_backend() -> Dict[str, Any]:
+async def describe_connector_vault_backend() -> dict[str, Any]:
     backend = get_connector_vault_backend()
     return await backend.describe()
 

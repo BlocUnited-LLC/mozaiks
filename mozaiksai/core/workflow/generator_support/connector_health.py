@@ -7,9 +7,10 @@ Checks run only when called explicitly by a server-side action.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Dict, Optional, Protocol, Sequence
+from typing import Any, Protocol
 
 from mozaiksai.core.data.persistence import AppConnectorStore
 from mozaiksai.core.secrets import get_connector_vault_backend
@@ -35,7 +36,7 @@ def redact_health_details(value: Any) -> Any:
     """Return a frontend-safe copy of health details."""
 
     if isinstance(value, dict):
-        redacted: Dict[str, Any] = {}
+        redacted: dict[str, Any] = {}
         for key, item in value.items():
             if _is_secret_detail_key(key):
                 continue
@@ -48,7 +49,7 @@ def redact_health_details(value: Any) -> Any:
     return str(value)
 
 
-def _configuration_health(record: Dict[str, Any], *, checked_by: str) -> Dict[str, Any]:
+def _configuration_health(record: dict[str, Any], *, checked_by: str) -> dict[str, Any]:
     fields = record.get("required_fields") if isinstance(record.get("required_fields"), list) else []
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
     missing_fields = []
@@ -93,12 +94,12 @@ def _configuration_health(record: Dict[str, Any], *, checked_by: str) -> Dict[st
 @dataclass(frozen=True)
 class ConnectorHealthResult:
     status: str
-    message: Optional[str] = None
-    checked_at: Optional[str] = None
-    safe_details: Optional[Dict[str, Any]] = None
-    error_code: Optional[str] = None
+    message: str | None = None
+    checked_at: str | None = None
+    safe_details: dict[str, Any] | None = None
+    error_code: str | None = None
 
-    def to_safe_dict(self) -> Dict[str, Any]:
+    def to_safe_dict(self) -> dict[str, Any]:
         status = _normalize_id(self.status)
         if status not in HEALTH_STATUSES:
             status = "unknown"
@@ -117,19 +118,19 @@ class ConnectorHealthContext:
     service_id: str
     integration_id: str
     checked_by: str = "manual"
-    safe_context: Dict[str, Any] = field(default_factory=dict)
+    safe_context: dict[str, Any] = field(default_factory=dict)
 
 
 class SecretHandle:
     """Non-serializable secret wrapper for server-side provider checks."""
 
-    def __init__(self, value: Optional[str], *, available: bool, provider: Optional[str] = None) -> None:
+    def __init__(self, value: str | None, *, available: bool, provider: str | None = None) -> None:
         self._value = value
         self.available = bool(available)
         self.provider = provider
 
     @property
-    def value(self) -> Optional[str]:
+    def value(self) -> str | None:
         return self._value
 
     def __repr__(self) -> str:  # pragma: no cover - defensive secret guard
@@ -164,15 +165,15 @@ class ConnectorHealthProvider(Protocol):
     async def check(
         self,
         *,
-        connector: Dict[str, Any],
+        connector: dict[str, Any],
         secret_reader: ConnectorSecretReader,
-        public_config: Dict[str, Any],
+        public_config: dict[str, Any],
         context: ConnectorHealthContext,
     ) -> ConnectorHealthResult:
         ...
 
 
-_PROVIDERS: Dict[str, ConnectorHealthProvider] = {}
+_PROVIDERS: dict[str, ConnectorHealthProvider] = {}
 
 
 def register_connector_health_provider(provider: ConnectorHealthProvider) -> None:
@@ -188,7 +189,7 @@ def register_connector_health_provider(provider: ConnectorHealthProvider) -> Non
         _PROVIDERS[normalized] = provider
 
 
-def get_connector_health_provider(integration_id: str) -> Optional[ConnectorHealthProvider]:
+def get_connector_health_provider(integration_id: str) -> ConnectorHealthProvider | None:
     return _PROVIDERS.get(_normalize_id(integration_id))
 
 
@@ -205,9 +206,9 @@ async def run_connector_health_check(
     app_id: str,
     service: str,
     checked_by: str = "manual",
-    safe_context: Optional[Dict[str, Any]] = None,
-    store: Optional[AppConnectorStore] = None,
-) -> Dict[str, Any]:
+    safe_context: dict[str, Any] | None = None,
+    store: AppConnectorStore | None = None,
+) -> dict[str, Any]:
     """Run an explicitly requested server-side provider health check."""
 
     connector_store = store or AppConnectorStore()

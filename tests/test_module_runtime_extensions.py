@@ -15,26 +15,25 @@ from __future__ import annotations
 import asyncio
 import sys
 from types import SimpleNamespace
-from typing import Any, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_ext(kind: str, entrypoint: str, prefix: Optional[str] = None) -> Any:
+def _make_ext(kind: str, entrypoint: str, prefix: str | None = None) -> Any:
     ext = SimpleNamespace(kind=kind, entrypoint=entrypoint, prefix=prefix)
     return ext
 
 
 def _make_loaded_module(
     name: str,
-    extensions: Optional[List[Any]] = None,
+    extensions: list[Any] | None = None,
 ) -> Any:
     """Build a minimal fake LoadedModule with the given runtime extensions."""
     rt_ext = None

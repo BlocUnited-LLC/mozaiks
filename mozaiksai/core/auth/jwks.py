@@ -7,13 +7,13 @@ Supports OIDC discovery-driven jwks_uri or explicit URL override.
 
 import asyncio
 import time
-from typing import Dict, Optional, Any
 from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 
-from mozaiksai.core.auth.config import get_auth_config
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.config import get_auth_config
 
 logger = get_core_logger("auth.jwks")
 
@@ -22,7 +22,7 @@ logger = get_core_logger("auth.jwks")
 class CachedJWKS:
     """Cached JWKS response with expiry."""
 
-    keys: Dict[str, Any]
+    keys: dict[str, Any]
     fetched_at: float
     ttl_seconds: int
     source_url: str  # Track which URL was used
@@ -44,8 +44,8 @@ class JWKSClient:
 
     def __init__(
         self,
-        jwks_url: Optional[str] = None,
-        cache_ttl: Optional[int] = None,
+        jwks_url: str | None = None,
+        cache_ttl: int | None = None,
         use_discovery: bool = True,
     ):
         """
@@ -60,10 +60,10 @@ class JWKSClient:
         self._explicit_jwks_url = jwks_url or config.jwks_url_override
         self._cache_ttl = cache_ttl or config.jwks_cache_ttl_seconds
         self._use_discovery = use_discovery and not self._explicit_jwks_url
-        self._cache: Optional[CachedJWKS] = None
+        self._cache: CachedJWKS | None = None
         self._lock = asyncio.Lock()
-        self._keys_by_kid: Dict[str, Dict[str, Any]] = {}
-        self._resolved_jwks_url: Optional[str] = None
+        self._keys_by_kid: dict[str, dict[str, Any]] = {}
+        self._resolved_jwks_url: str | None = None
 
     async def _get_jwks_url(self) -> str:
         """
@@ -87,7 +87,7 @@ class JWKSClient:
             "No JWKS URL configured. Set AUTH_JWKS_URL or enable OIDC discovery."
         )
 
-    async def get_signing_key(self, kid: str) -> Optional[Dict[str, Any]]:
+    async def get_signing_key(self, kid: str) -> dict[str, Any] | None:
         """
         Get signing key by key ID (kid).
 
@@ -105,7 +105,7 @@ class JWKSClient:
         await self._fetch_keys(force=True)
         return self._keys_by_kid.get(kid)
 
-    async def get_all_keys(self) -> Dict[str, Dict[str, Any]]:
+    async def get_all_keys(self) -> dict[str, dict[str, Any]]:
         """Get all signing keys (kid -> JWK)."""
         await self._ensure_keys_loaded()
         return self._keys_by_kid.copy()
@@ -155,7 +155,7 @@ class JWKSClient:
 
                 logger.info(f"Loaded {len(self._keys_by_kid)} signing keys from JWKS")
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error("JWKS fetch timed out")
                 raise RuntimeError("JWKS fetch timed out")
             except aiohttp.ClientError as e:
@@ -170,7 +170,7 @@ class JWKSClient:
 
 
 # Module-level singleton
-_jwks_client: Optional[JWKSClient] = None
+_jwks_client: JWKSClient | None = None
 
 
 def get_jwks_client() -> JWKSClient:

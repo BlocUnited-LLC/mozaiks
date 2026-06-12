@@ -13,9 +13,8 @@ Verifies that base OSS generator prompts are host-agnostic:
 from __future__ import annotations
 
 import importlib.util
-import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 import yaml
@@ -50,7 +49,7 @@ def _load_module(path: Path, module_name: str):
 
 
 class _FakeAgent:
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables or {}

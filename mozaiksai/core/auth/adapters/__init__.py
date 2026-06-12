@@ -20,13 +20,13 @@ Usage:
 
 from mozaiksai.core.auth.adapters.base import (
     AuthAdapter,
-    UserClaims,
     AuthError,
+    UserClaims,
 )
 from mozaiksai.core.auth.adapters.registry import (
     get_auth_adapter,
-    register_adapter,
     list_adapters,
+    register_adapter,
 )
 
 __all__ = [

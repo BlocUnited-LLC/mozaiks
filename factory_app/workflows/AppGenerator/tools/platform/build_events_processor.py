@@ -1,7 +1,7 @@
 
 import asyncio
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from logs.logging_config import get_core_logger
 
@@ -48,11 +48,11 @@ class BuildEventsProcessor:
     def __init__(
         self,
         *,
-        client: Optional[BuildEventsClient] = None,
-        enabled: Optional[bool] = None,
-        poll_interval_sec: Optional[float] = None,
-        batch_size: Optional[int] = None,
-        concurrency: Optional[int] = None,
+        client: BuildEventsClient | None = None,
+        enabled: bool | None = None,
+        poll_interval_sec: float | None = None,
+        batch_size: int | None = None,
+        concurrency: int | None = None,
     ) -> None:
         self._enabled = (
             _env_bool("MOZAIKS_PLATFORM_BUILD_EVENTS_RETRY_ENABLED", True)
@@ -76,11 +76,11 @@ class BuildEventsProcessor:
         )
         self._client = client or BuildEventsClient()
 
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._sem = asyncio.Semaphore(max(1, self._concurrency))
 
-    def start(self) -> Optional[asyncio.Task]:
+    def start(self) -> asyncio.Task | None:
         if not self._enabled:
             logger.info("BuildEventsProcessor disabled (MOZAIKS_PLATFORM_BUILD_EVENTS_RETRY_ENABLED=0)")
             return None
@@ -113,7 +113,7 @@ class BuildEventsProcessor:
                 if not due:
                     try:
                         await asyncio.wait_for(self._stop.wait(), timeout=max(0.5, self._poll_interval))
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         pass
                     continue
 
@@ -126,7 +126,7 @@ class BuildEventsProcessor:
                 logger.error("BuildEventsProcessor loop error: %s", exc, exc_info=True)
                 await asyncio.sleep(max(1.0, self._poll_interval))
 
-    async def _process_one(self, doc: Dict[str, Any]) -> None:
+    async def _process_one(self, doc: dict[str, Any]) -> None:
         outbox_id = str(doc.get("_id") or "").strip()
         app_id = str(doc.get("app_id") or "").strip()
         payload = doc.get("payload")

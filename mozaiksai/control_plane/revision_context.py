@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
+from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.artifacts import (
     ArtifactStore,
     ArtifactVersionDoc,
@@ -10,9 +13,6 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.session.persistence import SessionStateStore
-from mozaiksai.control_plane.contracts import ControlPlaneToolContext
-from mozaiksai.control_plane.loader import load_selected_control_plane_pack
-from mozaiksai.control_plane.schema import LoadedControlPlanePack
 
 
 def _load_pack(pack_loader: Any) -> LoadedControlPlanePack:
@@ -24,7 +24,7 @@ def _artifact_summary(
     artifact: ArtifactVersionDoc,
     *,
     source: str,
-    input_artifacts: Optional[dict[str, Any]] = None,
+    input_artifacts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary = {
         "present": True,
@@ -73,7 +73,7 @@ async def _resolve_current_artifact(
     artifact_store: ArtifactStore,
     app_id: str,
     context: ControlPlaneToolContext,
-) -> tuple[Optional[ArtifactVersionDoc], str]:
+) -> tuple[ArtifactVersionDoc | None, str]:
     if context.artifact_version_id:
         artifact = await artifact_store.get_artifact_version(
             app_id=app_id,
@@ -124,7 +124,7 @@ async def _resolve_input_artifacts(
     return resolved_inputs
 
 
-def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: Optional[str]) -> dict[str, Any]:
+def _routing_summary(pack: LoadedControlPlanePack, artifact_kind: str | None) -> dict[str, Any]:
     artifact = pack.routing_for_artifact(str(artifact_kind or "").strip().lower())
     current_routes: dict[str, Any] | None = None
     if artifact is not None:
@@ -190,8 +190,8 @@ def _session_summary(state: Any) -> dict[str, Any]:
 async def assemble_revision_context(
     *,
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
-    session_store: Optional[SessionStateStore] = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    session_store: SessionStateStore | None = None,
+    artifact_store: ArtifactStore | None = None,
     pack_loader: Any = load_selected_control_plane_pack,
 ) -> dict[str, Any]:
     tool_context = (
@@ -231,7 +231,7 @@ async def assemble_revision_context(
         if not artifact_kind or artifact_kind in tracked_artifact_kinds:
             continue
         tracked_artifact_kinds.add(artifact_kind)
-        resolved_artifact: Optional[ArtifactVersionDoc] = None
+        resolved_artifact: ArtifactVersionDoc | None = None
         source = "latest_for_kind"
         session_version_id = None
         if session_state is not None:

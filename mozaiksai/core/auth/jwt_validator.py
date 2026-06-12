@@ -11,16 +11,14 @@ Validates access tokens against JWKS, checking:
 Supports OIDC discovery-driven validation or explicit configuration.
 """
 
-from typing import Optional, List, Any, Dict
 from dataclasses import dataclass
-import time
+from typing import Any
 
 import jwt
-from jwt import PyJWKClient, InvalidTokenError
 
-from mozaiksai.core.auth.config import get_auth_config, AuthConfig
-from mozaiksai.core.auth.jwks import get_jwks_client
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.config import AuthConfig, get_auth_config
+from mozaiksai.core.auth.jwks import get_jwks_client
 
 logger = get_core_logger("auth.jwt_validator")
 
@@ -30,15 +28,15 @@ class TokenClaims:
     """Validated token claims."""
 
     user_id: str
-    email: Optional[str]
-    roles: List[str]
-    scopes: List[str]
-    raw_claims: Dict[str, Any]
+    email: str | None
+    roles: list[str]
+    scopes: list[str]
+    raw_claims: dict[str, Any]
     # Execution claims (optional, populated if present)
-    mozaiks_token_use: Optional[str] = None
-    mozaiks_app_id: Optional[str] = None
-    mozaiks_chat_id: Optional[str] = None
-    mozaiks_capability_id: Optional[str] = None
+    mozaiks_token_use: str | None = None
+    mozaiks_app_id: str | None = None
+    mozaiks_chat_id: str | None = None
+    mozaiks_capability_id: str | None = None
 
     @property
     def has_user_scope(self) -> bool:
@@ -83,9 +81,9 @@ class JWTValidator:
     Supports OIDC discovery-driven issuer validation or explicit override.
     """
 
-    def __init__(self, config: Optional[AuthConfig] = None):
+    def __init__(self, config: AuthConfig | None = None):
         self._config = config or get_auth_config()
-        self._cached_issuer: Optional[str] = None
+        self._cached_issuer: str | None = None
 
     async def _get_issuer(self) -> str:
         """
@@ -263,7 +261,7 @@ class JWTValidator:
 
 
 # Module-level singleton
-_jwt_validator: Optional[JWTValidator] = None
+_jwt_validator: JWTValidator | None = None
 
 
 def get_jwt_validator() -> JWTValidator:

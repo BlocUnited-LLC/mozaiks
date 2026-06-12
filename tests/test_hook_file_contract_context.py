@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 import yaml
-
 
 _APPGEN_DIR = (
     Path(__file__).parent.parent
@@ -27,11 +26,11 @@ _MODULE_ARCHETYPES_PATH = _APPGEN_CATALOG_DIR / "module_archetypes.yaml"
 
 
 class _FakeAgent:
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables or {}
-        self._update_calls: List[str] = []
+        self._update_calls: list[str] = []
 
     def update_system_message(self, message: str) -> None:
         self.system_message = message

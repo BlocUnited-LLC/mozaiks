@@ -2,8 +2,8 @@
 import asyncio
 import os
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from logs.logging_config import get_core_logger
 
@@ -11,7 +11,7 @@ logger = get_core_logger("platform_build_lifecycle")
 
 
 def _utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 async def mark_attempt(**kwargs: Any) -> None:
@@ -22,7 +22,7 @@ async def mark_attempt(**kwargs: Any) -> None:
     await _mark_attempt(**kwargs)
 
 
-async def get_outbox_event(**kwargs: Any) -> Optional[Dict[str, Any]]:
+async def get_outbox_event(**kwargs: Any) -> dict[str, Any] | None:
     from factory_app.workflows.AppGenerator.tools.platform.build_events_outbox import (
         get_outbox_event as _get_outbox_event,
     )
@@ -52,20 +52,22 @@ def get_mongo_client():
     return _get_mongo_client()
 
 
-def build_app_scope_filter(app_id: str) -> Dict[str, Any]:
+def build_app_scope_filter(app_id: str) -> dict[str, Any]:
     from mozaiksai.core.multitenant import build_app_scope_filter as _build_app_scope_filter
 
     return _build_app_scope_filter(app_id)
 
 
-def coalesce_app_id(*, app_id: Optional[str] = None) -> Optional[str]:
+def coalesce_app_id(*, app_id: str | None = None) -> str | None:
     from mozaiksai.core.multitenant import coalesce_app_id as _coalesce_app_id
 
     return _coalesce_app_id(app_id=app_id)
 
 
 def load_global_pack_graph():
-    from mozaiksai.core.workflow.pack.config import load_global_pack_graph as _load_global_pack_graph
+    from mozaiksai.core.workflow.pack.config import (
+        load_global_pack_graph as _load_global_pack_graph,
+    )
 
     return _load_global_pack_graph()
 
@@ -91,7 +93,7 @@ def _runtime_chat_sessions_collection():
     return SYSTEM_DATABASE, RuntimeCollections.CHAT_SESSIONS
 
 
-def _normalize_text(value: Any) -> Optional[str]:
+def _normalize_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value or "").strip()
@@ -137,7 +139,7 @@ def build_export_download_url(*, app_id: str, build_id: str) -> str:
     return f"{base}{path}" if base else path
 
 
-async def _get_chat_session_context(*, app_id: str, chat_id: str) -> Dict[str, Any]:
+async def _get_chat_session_context(*, app_id: str, chat_id: str) -> dict[str, Any]:
     resolved_app_id = coalesce_app_id(app_id=app_id)
     resolved_chat_id = _normalize_text(chat_id)
     if not resolved_app_id or not resolved_chat_id:
@@ -160,7 +162,7 @@ async def _get_chat_session_context(*, app_id: str, chat_id: str) -> Dict[str, A
     return dict(doc) if isinstance(doc, dict) else {}
 
 
-async def _get_last_artifact_payload(*, app_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
+async def _get_last_artifact_payload(*, app_id: str, chat_id: str) -> dict[str, Any] | None:
     doc = await _get_chat_session_context(app_id=app_id, chat_id=chat_id)
     last_artifact = doc.get("last_artifact")
     if not isinstance(last_artifact, dict):
@@ -169,7 +171,7 @@ async def _get_last_artifact_payload(*, app_id: str, chat_id: str) -> Optional[D
     return payload if isinstance(payload, dict) else None
 
 
-def _extract_preview_url(payload: Dict[str, Any]) -> Optional[str]:
+def _extract_preview_url(payload: dict[str, Any]) -> str | None:
     for key in ("previewUrl", "preview_url", "app_validation_preview_url"):
         raw = payload.get(key)
         if isinstance(raw, str) and raw.strip():
@@ -188,9 +190,9 @@ async def get_build_artifacts(
     *,
     app_id: str,
     build_id: str,
-    chat_id: Optional[str] = None,
-    export_build_id: Optional[str] = None,
-) -> Dict[str, Optional[str]]:
+    chat_id: str | None = None,
+    export_build_id: str | None = None,
+) -> dict[str, str | None]:
     payload = None
     try:
         artifact_chat_id = _normalize_text(chat_id) or str(build_id)
@@ -210,7 +212,7 @@ def _idempotency_key(*, app_id: str, build_id: str, event_type: str) -> str:
     return f"build:{app_id}:{build_id}:{event_type}"
 
 
-def _get_journey_workflow_groups(journey_id: Optional[str]) -> list[tuple[int, list[str]]]:
+def _get_journey_workflow_groups(journey_id: str | None) -> list[tuple[int, list[str]]]:
     normalized_journey_id = _normalize_text(journey_id)
     if not normalized_journey_id:
         return []
@@ -230,7 +232,7 @@ def _get_journey_workflow_groups(journey_id: Optional[str]) -> list[tuple[int, l
     ]
 
 
-def _should_emit_build_started(*, workflow_name: str, journey_key: Optional[str], journey_position: Optional[int]) -> bool:
+def _should_emit_build_started(*, workflow_name: str, journey_key: str | None, journey_position: int | None) -> bool:
     workflow = _normalize_text(workflow_name)
     if not workflow:
         return False
@@ -242,7 +244,7 @@ def _should_emit_build_started(*, workflow_name: str, journey_key: Optional[str]
     return is_build_workflow(workflow)
 
 
-def _should_emit_build_completed(*, workflow_name: str, journey_key: Optional[str], journey_position: Optional[int]) -> bool:
+def _should_emit_build_completed(*, workflow_name: str, journey_key: str | None, journey_position: int | None) -> bool:
     workflow = _normalize_text(workflow_name)
     if not workflow:
         return False
@@ -254,7 +256,7 @@ def _should_emit_build_completed(*, workflow_name: str, journey_key: Optional[st
     return is_build_workflow(workflow)
 
 
-def _should_emit_build_failed(*, workflow_name: str, journey_key: Optional[str]) -> bool:
+def _should_emit_build_failed(*, workflow_name: str, journey_key: str | None) -> bool:
     workflow = _normalize_text(workflow_name)
     if not workflow:
         return False
@@ -268,15 +270,15 @@ def _should_emit_build_failed(*, workflow_name: str, journey_key: Optional[str])
 async def _resolve_build_event_context(
     *,
     app_id: str,
-    execution_id: Optional[str],
-    chat_id: Optional[str],
-    build_id: Optional[str] = None,
-    build_registry_id: Optional[str] = None,
-    journey_instance_id: Optional[str] = None,
-    journey_key: Optional[str] = None,
-    journey_position: Optional[int] = None,
-    journey_total_steps: Optional[int] = None,
-) -> Dict[str, Any]:
+    execution_id: str | None,
+    chat_id: str | None,
+    build_id: str | None = None,
+    build_registry_id: str | None = None,
+    journey_instance_id: str | None = None,
+    journey_key: str | None = None,
+    journey_position: int | None = None,
+    journey_total_steps: int | None = None,
+) -> dict[str, Any]:
     resolved_app_id = _normalize_text(app_id)
     if not resolved_app_id:
         raise ValueError("app_id is required")
@@ -345,11 +347,11 @@ async def _resolve_build_event_context(
 
 def _base_payload(
     *,
-    context: Dict[str, Any],
+    context: dict[str, Any],
     workflow_name: str,
-    user_id: Optional[str],
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
+    user_id: str | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "appId": context["app_id"],
         "buildId": context["build_id"],
         "buildRegistryId": context["build_registry_id"],
@@ -404,18 +406,18 @@ def _spawn_delivery(*, outbox_event_id: str) -> None:
 async def emit_build_started(
     *,
     app_id: str,
-    execution_id: Optional[str] = None,
-    chat_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    execution_id: str | None = None,
+    chat_id: str | None = None,
+    user_id: str | None = None,
     workflow_name: str,
-    build_id: Optional[str] = None,
-    build_registry_id: Optional[str] = None,
-    journey_instance_id: Optional[str] = None,
-    journey_key: Optional[str] = None,
-    journey_position: Optional[int] = None,
-    journey_total_steps: Optional[int] = None,
+    build_id: str | None = None,
+    build_registry_id: str | None = None,
+    journey_instance_id: str | None = None,
+    journey_key: str | None = None,
+    journey_position: int | None = None,
+    journey_total_steps: int | None = None,
     **_: Any,
-) -> Optional[str]:
+) -> str | None:
     context = await _resolve_build_event_context(
         app_id=app_id,
         execution_id=execution_id,
@@ -456,18 +458,18 @@ async def emit_build_started(
 async def emit_build_completed(
     *,
     app_id: str,
-    execution_id: Optional[str] = None,
-    chat_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    execution_id: str | None = None,
+    chat_id: str | None = None,
+    user_id: str | None = None,
     workflow_name: str,
-    build_id: Optional[str] = None,
-    build_registry_id: Optional[str] = None,
-    journey_instance_id: Optional[str] = None,
-    journey_key: Optional[str] = None,
-    journey_position: Optional[int] = None,
-    journey_total_steps: Optional[int] = None,
+    build_id: str | None = None,
+    build_registry_id: str | None = None,
+    journey_instance_id: str | None = None,
+    journey_key: str | None = None,
+    journey_position: int | None = None,
+    journey_total_steps: int | None = None,
     **_: Any,
-) -> Optional[str]:
+) -> str | None:
     context = await _resolve_build_event_context(
         app_id=app_id,
         execution_id=execution_id,
@@ -527,19 +529,19 @@ async def emit_build_completed(
 async def emit_build_failed(
     *,
     app_id: str,
-    execution_id: Optional[str] = None,
-    chat_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    execution_id: str | None = None,
+    chat_id: str | None = None,
+    user_id: str | None = None,
     workflow_name: str,
-    error: Optional[str] = None,
-    build_id: Optional[str] = None,
-    build_registry_id: Optional[str] = None,
-    journey_instance_id: Optional[str] = None,
-    journey_key: Optional[str] = None,
-    journey_position: Optional[int] = None,
-    journey_total_steps: Optional[int] = None,
+    error: str | None = None,
+    build_id: str | None = None,
+    build_registry_id: str | None = None,
+    journey_instance_id: str | None = None,
+    journey_key: str | None = None,
+    journey_position: int | None = None,
+    journey_total_steps: int | None = None,
     **_: Any,
-) -> Optional[str]:
+) -> str | None:
     context = await _resolve_build_event_context(
         app_id=app_id,
         execution_id=execution_id,

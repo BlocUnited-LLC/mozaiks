@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Tuple
 
 
 @dataclass(frozen=True)
@@ -9,12 +9,12 @@ class UISurfaceContract:
     surface_id: str
     owner: str
     artifact_family: str
-    writes: Tuple[str, ...]
+    writes: tuple[str, ...]
     use_when: str
     avoid_when: str
 
 
-_UI_SURFACE_CONTRACTS: Tuple[UISurfaceContract, ...] = (
+_UI_SURFACE_CONTRACTS: tuple[UISurfaceContract, ...] = (
     UISurfaceContract(
         surface_id="declarative_page",
         owner="AppSchemaAgent",
@@ -77,11 +77,11 @@ _UI_SURFACE_CONTRACTS: Tuple[UISurfaceContract, ...] = (
 )
 
 
-def get_ui_surface_contracts() -> Tuple[UISurfaceContract, ...]:
+def get_ui_surface_contracts() -> tuple[UISurfaceContract, ...]:
     return _UI_SURFACE_CONTRACTS
 
 
-def get_ui_surface_ids() -> Tuple[str, ...]:
+def get_ui_surface_ids() -> tuple[str, ...]:
     return tuple(entry.surface_id for entry in _UI_SURFACE_CONTRACTS)
 
 
@@ -89,10 +89,10 @@ def validate_ui_surface_ids(
     values: Iterable[str] | None,
     *,
     context: str,
-) -> List[str]:
+) -> list[str]:
     allowed = set(get_ui_surface_ids())
-    normalized: List[str] = []
-    invalid: List[str] = []
+    normalized: list[str] = []
+    invalid: list[str] = []
 
     if values is None:
         return normalized
@@ -120,7 +120,7 @@ def validate_ui_surface_ids(
 
 
 def format_ui_surface_taxonomy_guidance() -> str:
-    lines: List[str] = ["Canonical UI surface taxonomy:"]
+    lines: list[str] = ["Canonical UI surface taxonomy:"]
 
     for entry in _UI_SURFACE_CONTRACTS:
         writes = ", ".join(f"`{path}`" for path in entry.writes)

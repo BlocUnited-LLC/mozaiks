@@ -9,8 +9,9 @@ provided later.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from mozaiksai.core.data.persistence import AppConnectorStore
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
@@ -21,7 +22,7 @@ from mozaiksai.core.workflow.generator_support.connector_health import (
 SECRET_FIELD_TYPES = {"secret", "password", "api_key", "token"}
 
 
-def _get_store(store: Optional[AppConnectorStore] = None) -> AppConnectorStore:
+def _get_store(store: AppConnectorStore | None = None) -> AppConnectorStore:
     return store or AppConnectorStore()
 
 
@@ -29,7 +30,7 @@ def _normalize_service(service: str) -> str:
     return str(service or "").strip().lower().replace(" ", "_")
 
 
-def _health_supported_for_record(record: Optional[Dict[str, Any]]) -> bool:
+def _health_supported_for_record(record: dict[str, Any] | None) -> bool:
     if not isinstance(record, dict):
         return False
     service = _normalize_service(str(record.get("service") or ""))
@@ -42,8 +43,8 @@ def _display_service(service: str) -> str:
     return normalized.replace("_", " ").title()
 
 
-def _normalize_required_fields(required_fields: Optional[Sequence[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    normalized: List[Dict[str, Any]] = []
+def _normalize_required_fields(required_fields: Sequence[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
     if not isinstance(required_fields, Sequence) or isinstance(required_fields, (str, bytes)):
         return normalized
     for field in required_fields:
@@ -67,11 +68,11 @@ def _normalize_required_fields(required_fields: Optional[Sequence[Dict[str, Any]
 
 
 def compute_connector_health(
-    record: Optional[Dict[str, Any]],
+    record: dict[str, Any] | None,
     *,
-    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
+    required_fields: Sequence[dict[str, Any]] | None = None,
     checked_by: str = "readiness",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute frontend-safe connector configuration health without network calls."""
 
     now = datetime.now(UTC).isoformat()
@@ -92,7 +93,7 @@ def compute_connector_health(
 
     fields = _normalize_required_fields(required_fields or record.get("required_fields"))
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
-    missing_fields: List[str] = []
+    missing_fields: list[str] = []
     has_secret = bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
 
     for field in fields:
@@ -137,11 +138,11 @@ def compute_connector_health(
 
 
 def _with_connector_health(
-    record: Optional[Dict[str, Any]],
+    record: dict[str, Any] | None,
     *,
-    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
+    required_fields: Sequence[dict[str, Any]] | None = None,
     checked_by: str = "readiness",
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
     enriched = dict(record)
@@ -156,7 +157,7 @@ def _with_connector_health(
     return enriched
 
 
-def _classify_connector_status(record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _classify_connector_status(record: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(record, dict):
         return {
             "exists": False,
@@ -201,21 +202,21 @@ def _classify_connector_status(record: Optional[Dict[str, Any]]) -> Dict[str, An
 
 
 def _summarize_connector_inventory(
-    connectors: Sequence[Dict[str, Any]],
+    connectors: Sequence[dict[str, Any]],
     *,
-    required_services: Optional[Sequence[str]] = None,
-) -> Dict[str, Any]:
+    required_services: Sequence[str] | None = None,
+) -> dict[str, Any]:
     normalized_required = [_normalize_service(service) for service in (required_services or []) if str(service or "").strip()]
     required_set = set(normalized_required)
 
-    by_status: Dict[str, List[str]] = {
+    by_status: dict[str, list[str]] = {
         "active": [],
         "expiring": [],
         "expired": [],
         "revoked": [],
         "metadata_only": [],
     }
-    display_names: Dict[str, str] = {}
+    display_names: dict[str, str] = {}
     ready_candidates: set[str] = set()
 
     for connector in connectors:
@@ -257,20 +258,20 @@ def _summarize_connector_inventory(
 async def record_connector_metadata(
     *,
     app_id: str,
-    user_id: Optional[str],
+    user_id: str | None,
     service: str,
-    display_name: Optional[str],
+    display_name: str | None,
     key_length: int,
-    workflow_name: Optional[str],
-    chat_id: Optional[str],
-    agent_message_id: Optional[str],
-    ui_event_id: Optional[str],
-    public_config: Optional[Dict[str, Any]] = None,
-    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
-    logger: Optional[Any] = None,
-    status_reason: Optional[str] = None,
-    store: Optional[AppConnectorStore] = None,
-) -> Dict[str, Any]:
+    workflow_name: str | None,
+    chat_id: str | None,
+    agent_message_id: str | None,
+    ui_event_id: str | None,
+    public_config: dict[str, Any] | None = None,
+    required_fields: Sequence[dict[str, Any]] | None = None,
+    logger: Any | None = None,
+    status_reason: str | None = None,
+    store: AppConnectorStore | None = None,
+) -> dict[str, Any]:
     normalized_service = _normalize_service(service)
     connector_store = _get_store(store)
     now = datetime.now(UTC).isoformat()
@@ -306,9 +307,9 @@ async def record_connector_metadata(
 async def get_connector_status(
     app_id: str,
     service: str,
-    logger: Optional[Any] = None,
-    store: Optional[AppConnectorStore] = None,
-) -> Dict[str, Any]:
+    logger: Any | None = None,
+    store: AppConnectorStore | None = None,
+) -> dict[str, Any]:
     connector_store = _get_store(store)
     record = await connector_store.get_connector(app_id=str(app_id), service=_normalize_service(service))
     record = _with_connector_health(record)
@@ -326,7 +327,7 @@ async def get_connector_status(
     return classified
 
 
-async def get_secret_for_e2b(app_id: str, service: str, logger: Optional[Any] = None) -> Dict[str, Any]:
+async def get_secret_for_e2b(app_id: str, service: str, logger: Any | None = None) -> dict[str, Any]:
     backend = get_connector_vault_backend()
     result = await backend.get_secret(app_id=str(app_id), service=_normalize_service(service))
     if logger:
@@ -356,13 +357,13 @@ async def store_connector(
     user_id: str,
     service: str,
     secret_value: str,
-    display_name: Optional[str] = None,
+    display_name: str | None = None,
     ttl_days: int = 30,
-    public_config: Optional[Dict[str, Any]] = None,
-    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
-    logger: Optional[Any] = None,
-    store: Optional[AppConnectorStore] = None,
-) -> Dict[str, Any]:
+    public_config: dict[str, Any] | None = None,
+    required_fields: Sequence[dict[str, Any]] | None = None,
+    logger: Any | None = None,
+    store: AppConnectorStore | None = None,
+) -> dict[str, Any]:
     connector_store = _get_store(store)
     normalized_service = _normalize_service(service)
     now = datetime.now(UTC)
@@ -432,7 +433,7 @@ async def store_connector(
     }
 
 
-async def list_connectors(app_id: str, store: Optional[AppConnectorStore] = None) -> List[Dict[str, Any]]:
+async def list_connectors(app_id: str, store: AppConnectorStore | None = None) -> list[dict[str, Any]]:
     connector_store = _get_store(store)
     connectors = await connector_store.list_connectors(app_id=str(app_id))
     return [_with_connector_health(connector) or connector for connector in connectors]
@@ -441,9 +442,9 @@ async def list_connectors(app_id: str, store: Optional[AppConnectorStore] = None
 async def get_connector_inventory(
     app_id: str,
     *,
-    required_services: Optional[Sequence[str]] = None,
-    store: Optional[AppConnectorStore] = None,
-) -> Dict[str, Any]:
+    required_services: Sequence[str] | None = None,
+    store: AppConnectorStore | None = None,
+) -> dict[str, Any]:
     connector_store = _get_store(store)
     connectors = await connector_store.list_connectors(app_id=str(app_id))
     return _summarize_connector_inventory(connectors, required_services=required_services)
@@ -453,15 +454,15 @@ async def update_connector_metadata(
     *,
     app_id: str,
     service: str,
-    user_id: Optional[str] = None,
-    display_name: Optional[str] = None,
-    notes: Optional[str] = None,
-    status: Optional[str] = None,
-    expires_at: Optional[str] = None,
-    public_config: Optional[Dict[str, Any]] = None,
-    required_fields: Optional[Sequence[Dict[str, Any]]] = None,
-    store: Optional[AppConnectorStore] = None,
-) -> Optional[Dict[str, Any]]:
+    user_id: str | None = None,
+    display_name: str | None = None,
+    notes: str | None = None,
+    status: str | None = None,
+    expires_at: str | None = None,
+    public_config: dict[str, Any] | None = None,
+    required_fields: Sequence[dict[str, Any]] | None = None,
+    store: AppConnectorStore | None = None,
+) -> dict[str, Any] | None:
     connector_store = _get_store(store)
     return await connector_store.patch_connector(
         app_id=str(app_id),
@@ -480,7 +481,7 @@ async def delete_connector_metadata(
     *,
     app_id: str,
     service: str,
-    store: Optional[AppConnectorStore] = None,
+    store: AppConnectorStore | None = None,
 ) -> bool:
     connector_store = _get_store(store)
     return await connector_store.delete_connector(app_id=str(app_id), service=_normalize_service(service))
@@ -490,14 +491,14 @@ async def delete_connector(
     *,
     app_id: str,
     service: str,
-    store: Optional[AppConnectorStore] = None,
-) -> Dict[str, Any]:
+    store: AppConnectorStore | None = None,
+) -> dict[str, Any]:
     connector_store = _get_store(store)
     normalized_service = _normalize_service(service)
     existing = await connector_store.get_connector(app_id=str(app_id), service=normalized_service)
 
     provider = str((existing or {}).get("secret_storage") or "")
-    secret_result: Optional[Dict[str, Any]] = None
+    secret_result: dict[str, Any] | None = None
     if existing and existing.get("secret_available"):
         secret_result = await get_connector_vault_backend().delete_secret(app_id=str(app_id), service=normalized_service)
         provider = str(secret_result.get("provider") or provider or "unknown")
@@ -512,7 +513,7 @@ async def delete_connector(
     }
 
 
-async def get_connector_backend_summary() -> Dict[str, Any]:
+async def get_connector_backend_summary() -> dict[str, Any]:
     return await describe_connector_vault_backend()
 
 

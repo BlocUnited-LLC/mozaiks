@@ -201,7 +201,7 @@ async def test_appgenerator_app_bundle_save_registers_greenfield_context(
     }
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
-    context = _Context({"app_validation_status": "passed"})
+    context = _Context({"app_bundle_acceptance_status": "passed"})
 
     app_bundle = await generate_and_download_module._register_app_bundle_artifact_version(
         app_id="field_service",
@@ -296,7 +296,7 @@ async def test_appgenerator_greenfield_context_registration_failure_is_nonfatal(
     written_paths = _write_generated_app(app_dir)
     zip_path = tmp_path / "GeneratedApp.zip"
     zip_path.write_bytes(b"fake bundle bytes")
-    context = _Context({"app_validation_status": "passed"})
+    context = _Context({"app_bundle_acceptance_status": "passed"})
 
     app_bundle = await generate_and_download_module._register_app_bundle_artifact_version(
         app_id="field_service",

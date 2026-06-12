@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,27 +27,27 @@ logger = logging.getLogger(__name__)
 # Public types
 # ---------------------------------------------------------------------------
 
-SchemaDiff = Dict[str, Any]   # structured diff output
-Migration  = Dict[str, Any]   # migration file written to generated bundle
+SchemaDiff = dict[str, Any]   # structured diff output
+Migration  = dict[str, Any]   # migration file written to generated bundle
 
 
 # ---------------------------------------------------------------------------
 # Schema diffing
 # ---------------------------------------------------------------------------
 
-def _collection_field_map(collection: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _collection_field_map(collection: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Return {field_name: field_def} for a collection definition."""
     return {col["name"]: col for col in collection.get("columns", [])}
 
 
-def _index_set(collection: Dict[str, Any], key: str) -> Set[str]:
+def _index_set(collection: dict[str, Any], key: str) -> set[str]:
     """Return a set of index/constraint names for comparison."""
     return {str(entry) for entry in collection.get(key, [])}
 
 
 def diff_schemas(
-    old_schema: Optional[Dict[str, Any]],
-    new_schema: Dict[str, Any],
+    old_schema: dict[str, Any] | None,
+    new_schema: dict[str, Any],
 ) -> SchemaDiff:
     """
     Diff two data contract/schema objects.
@@ -70,14 +70,14 @@ def diff_schemas(
             "destructive_warnings": [],
         }
 
-    old_cols: Dict[str, Dict] = {c["name"]: c for c in old_schema.get("collections", [])}
-    new_cols: Dict[str, Dict] = {c["name"]: c for c in new_schema.get("collections", [])}
+    old_cols: dict[str, dict] = {c["name"]: c for c in old_schema.get("collections", [])}
+    new_cols: dict[str, dict] = {c["name"]: c for c in new_schema.get("collections", [])}
 
     new_collection_names = [n for n in new_cols if n not in old_cols]
     removed_collection_names = [n for n in old_cols if n not in new_cols]
     shared_names = [n for n in new_cols if n in old_cols]
 
-    modified: List[Dict[str, Any]] = []
+    modified: list[dict[str, Any]] = []
     for name in shared_names:
         old_c = old_cols[name]
         new_c = new_cols[name]
@@ -113,7 +113,7 @@ def diff_schemas(
                 "removed_constraints":  removed_constraints,
             })
 
-    destructive_warnings: List[str] = []
+    destructive_warnings: list[str] = []
     for name in removed_collection_names:
         destructive_warnings.append(f"Collection '{name}' removed — existing data will be orphaned.")
     for col_diff in modified:
@@ -144,9 +144,9 @@ def generate_migration(
     diff: SchemaDiff,
     *,
     app_id: str,
-    change_class: Optional[str],
-    new_schema: Dict[str, Any],
-    old_schema: Optional[Dict[str, Any]] = None,
+    change_class: str | None,
+    new_schema: dict[str, Any],
+    old_schema: dict[str, Any] | None = None,
 ) -> Migration:
     """
     Generate a migration document from a schema diff.
@@ -162,7 +162,7 @@ def generate_migration(
     It is NOT applied here — call apply_migration_safe() or pass it to
     apply_schema_migration() in backend_tools.py.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     migration_id = f"m_{now.strftime('%Y%m%d_%H%M%S')}"
 
     migration: Migration = {
@@ -201,8 +201,8 @@ def generate_migration(
 
 def _build_ensure_collection_ops(
     diff: SchemaDiff,
-    new_schema: Dict[str, Any],
-) -> List[Dict[str, Any]]:
+    new_schema: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Return ensure_collection runtime operations for every new collection.
 
     Each operation uses the collection's own ``module_id`` and ``entity_name``
@@ -211,7 +211,7 @@ def _build_ensure_collection_ops(
     creates collections lazily) but must be present in the operations list.
     """
     new_names = set(diff["new_collections"])
-    ops: List[Dict[str, Any]] = []
+    ops: list[dict[str, Any]] = []
     for col in new_schema.get("collections", []):
         if col.get("name") not in new_names:
             continue
@@ -229,8 +229,8 @@ def _build_ensure_collection_ops(
 
 def _new_collection_definitions(
     diff: SchemaDiff,
-    new_schema: Dict[str, Any],
-) -> List[Dict[str, Any]]:
+    new_schema: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Return full collection definitions for collections being added (metadata only)."""
     new_names = set(diff["new_collections"])
     return [c for c in new_schema.get("collections", []) if c["name"] in new_names]
@@ -252,9 +252,9 @@ def migration_file_path(migration_id: str) -> str:
 def apply_migration_safe(
     diff: SchemaDiff,
     *,
-    change_class: Optional[str],
+    change_class: str | None,
     allow_destructive: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Determine what ops are safe to apply given the change class and diff.
 
@@ -285,7 +285,7 @@ def apply_migration_safe(
         }
 
     warnings = list(diff["destructive_warnings"])
-    blocked_ops: Dict[str, Any] = {}
+    blocked_ops: dict[str, Any] = {}
 
     if not diff["is_additive_only"] and not allow_destructive:
         blocked_ops["removed_collections"] = diff["removed_collections"]
@@ -347,7 +347,7 @@ def apply_migration_safe(
 # ---------------------------------------------------------------------------
 
 def inject_migration_into_bundle(
-    files_map: Dict[str, str],
+    files_map: dict[str, str],
     migration: Migration,
 ) -> None:
     """

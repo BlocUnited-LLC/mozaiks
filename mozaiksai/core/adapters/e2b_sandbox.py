@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import posixpath
-from typing import Any, Dict, Optional
+from typing import Any
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
@@ -22,8 +22,8 @@ class E2BSandboxAdapter:
     def __init__(
         self,
         *,
-        default_template: Optional[str] = None,
-        default_timeout_seconds: Optional[int] = None,
+        default_template: str | None = None,
+        default_timeout_seconds: int | None = None,
     ) -> None:
         self._default_template = default_template or os.getenv("E2B_TEMPLATE") or None
         raw_timeout = default_timeout_seconds if default_timeout_seconds is not None else os.getenv("E2B_TIMEOUT")
@@ -38,8 +38,8 @@ class E2BSandboxAdapter:
         self,
         sandbox: Any,
         *,
-        preview_url: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        preview_url: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> SandboxSessionInfo:
         info = dict(metadata or {})
         host = getattr(sandbox, "sandbox_domain", None)
@@ -52,13 +52,13 @@ class E2BSandboxAdapter:
             metadata=info,
         )
 
-    async def _connect_sandbox(self, session_id: str, timeout_seconds: Optional[int] = None):
+    async def _connect_sandbox(self, session_id: str, timeout_seconds: int | None = None):
         sandbox_cls = self._require_sdk()
         timeout = timeout_seconds if timeout_seconds is not None else self._default_timeout_seconds
         return await asyncio.to_thread(sandbox_cls.connect, session_id, timeout=timeout)
 
     @staticmethod
-    def _resolve_path(path: str, cwd: Optional[str]) -> str:
+    def _resolve_path(path: str, cwd: str | None) -> str:
         if not cwd:
             return path
         if path.startswith("/"):
@@ -68,10 +68,10 @@ class E2BSandboxAdapter:
     async def create_session(
         self,
         *,
-        template: Optional[str] = None,
-        timeout_seconds: Optional[int] = None,
-        metadata: Optional[Dict[str, str]] = None,
-        envs: Optional[Dict[str, str]] = None,
+        template: str | None = None,
+        timeout_seconds: int | None = None,
+        metadata: dict[str, str] | None = None,
+        envs: dict[str, str] | None = None,
     ) -> SandboxSessionInfo:
         sandbox_cls = self._require_sdk()
         timeout = timeout_seconds if timeout_seconds is not None else self._default_timeout_seconds
@@ -88,7 +88,7 @@ class E2BSandboxAdapter:
         self,
         *,
         session_id: str,
-        timeout_seconds: Optional[int] = None,
+        timeout_seconds: int | None = None,
     ) -> SandboxSessionInfo:
         sandbox = await self._connect_sandbox(session_id, timeout_seconds=timeout_seconds)
         return self._session_info(sandbox)
@@ -97,9 +97,9 @@ class E2BSandboxAdapter:
         self,
         *,
         session_id: str,
-        files: Dict[str, str | bytes],
-        cwd: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        files: dict[str, str | bytes],
+        cwd: str | None = None,
+    ) -> dict[str, Any]:
         sandbox = await self._connect_sandbox(session_id)
         written = []
         for path, content in files.items():
@@ -125,10 +125,10 @@ class E2BSandboxAdapter:
         *,
         session_id: str,
         command: str,
-        cwd: Optional[str] = None,
-        envs: Optional[Dict[str, str]] = None,
+        cwd: str | None = None,
+        envs: dict[str, str] | None = None,
         background: bool = False,
-        timeout_seconds: Optional[float] = 60.0,
+        timeout_seconds: float | None = 60.0,
     ) -> SandboxRunResult:
         sandbox = await self._connect_sandbox(session_id)
         try:
@@ -166,7 +166,7 @@ class E2BSandboxAdapter:
         *,
         session_id: str,
         port: int,
-    ) -> Optional[str]:
+    ) -> str | None:
         sandbox = await self._connect_sandbox(session_id)
         host = await asyncio.to_thread(sandbox.get_host, port)
         if not host:
@@ -189,7 +189,7 @@ class E2BSandboxAdapter:
         await asyncio.to_thread(sandbox.kill)
         return True
 
-    def capabilities(self) -> Dict[str, Any]:
+    def capabilities(self) -> dict[str, Any]:
         return {
             "provider": "e2b",
             "supports_preview": True,
@@ -199,7 +199,7 @@ class E2BSandboxAdapter:
         }
 
 
-_sandbox_adapter: Optional[E2BSandboxAdapter] = None
+_sandbox_adapter: E2BSandboxAdapter | None = None
 
 
 def get_e2b_sandbox() -> E2BSandboxAdapter:

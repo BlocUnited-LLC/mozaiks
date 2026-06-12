@@ -7,10 +7,9 @@ import os
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from dotenv import load_dotenv
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -36,7 +35,7 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-async def _run_metadata_mode(*, app_id: str, service: str, display_name: Optional[str]) -> Dict[str, Any]:
+async def _run_metadata_mode(*, app_id: str, service: str, display_name: str | None) -> dict[str, Any]:
     from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
     from mozaiksai.core.workflow.generator_support.connector_service import (
         delete_connector,
@@ -77,10 +76,10 @@ async def _run_secret_mode(
     *,
     app_id: str,
     service: str,
-    display_name: Optional[str],
+    display_name: str | None,
     secret_value: str,
     ttl_days: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
     from mozaiksai.core.workflow.generator_support.connector_service import (
         delete_connector,
@@ -136,7 +135,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_human_summary(result: Dict[str, Any]) -> None:
+def _print_human_summary(result: dict[str, Any]) -> None:
     mode = result.get("mode")
     print(f"[connector-smoke] mode: {mode}")
     print(f"[connector-smoke] app_id: {result.get('app_id')}")

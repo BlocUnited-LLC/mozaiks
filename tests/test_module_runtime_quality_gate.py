@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 
@@ -21,7 +21,7 @@ _CTX_YAML = _APPGEN_DIR / "context_variables.yaml"
 _STRUCTURED_OUTPUTS_YAML = _APPGEN_DIR / "structured_outputs.yaml"
 
 
-def _code_files(*pairs: tuple[str, str]) -> List[Dict[str, Any]]:
+def _code_files(*pairs: tuple[str, str]) -> list[dict[str, Any]]:
     return [{"filename": filename, "content": content} for filename, content in pairs]
 
 
@@ -61,7 +61,7 @@ class MarketplaceService:
 
 
 class _FakeAgent:
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables or {}
@@ -133,7 +133,7 @@ class TestReviewModuleRuntimeQuality:
             review_module_runtime_quality,
         )
 
-        ctx: Dict[str, Any] = {}
+        ctx: dict[str, Any] = {}
         if code_files is not None:
             ctx["code_files"] = code_files
         if prior_warnings is not None:

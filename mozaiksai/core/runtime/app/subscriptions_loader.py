@@ -256,7 +256,7 @@ class SubscriptionsConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_plan_catalog(self) -> "SubscriptionsConfig":
+    def _validate_plan_catalog(self) -> SubscriptionsConfig:
         if not self.plans:
             raise ValueError("plans must be non-empty")
         plan_ids = [p.plan_id for p in self.plans]

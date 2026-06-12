@@ -3,8 +3,8 @@ import asyncio
 import os
 import random
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import aiohttp
 
@@ -21,7 +21,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _default_platform_base_url() -> str:
@@ -43,8 +43,8 @@ def _default_platform_api_key() -> str:
 @dataclass(frozen=True)
 class BuildEventResult:
     ok: bool
-    status_code: Optional[int] = None
-    error: Optional[str] = None
+    status_code: int | None = None
+    error: str | None = None
 
 
 class BuildEventsClient:
@@ -59,9 +59,9 @@ class BuildEventsClient:
     def __init__(
         self,
         *,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        enabled: Optional[bool] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        enabled: bool | None = None,
         timeout_sec: float = 10.0,
         max_attempts: int = 5,
         backoff_base_sec: float = 0.5,
@@ -84,7 +84,7 @@ class BuildEventsClient:
     def configured(self) -> bool:
         return bool(self._base_url) and bool(self._api_key)
 
-    def _headers(self, *, event_id: Optional[str] = None, idempotency_key: Optional[str] = None) -> Dict[str, str]:
+    def _headers(self, *, event_id: str | None = None, idempotency_key: str | None = None) -> dict[str, str]:
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -96,7 +96,7 @@ class BuildEventsClient:
             headers["X-Idempotency-Key"] = str(idempotency_key)
         return headers
 
-    async def post_build_event(self, *, app_id: str, payload: Dict[str, Any]) -> BuildEventResult:
+    async def post_build_event(self, *, app_id: str, payload: dict[str, Any]) -> BuildEventResult:
         if not self._enabled:
             return BuildEventResult(ok=False, error="disabled")
         if not self.configured():
@@ -121,8 +121,8 @@ class BuildEventsClient:
         except Exception:
             pass
 
-        last_err: Optional[str] = None
-        last_status: Optional[int] = None
+        last_err: str | None = None
+        last_status: int | None = None
 
         for attempt in range(self._max_attempts):
             try:

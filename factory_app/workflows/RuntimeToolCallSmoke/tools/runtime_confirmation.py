@@ -1,10 +1,10 @@
-from typing import Any, Dict
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 
-def _extract_response_text(response: Dict[str, Any]) -> str:
+def _extract_response_text(response: dict[str, Any]) -> str:
     data = response.get("data")
     if isinstance(data, dict):
         for key in ("text", "user_input", "user_response", "value"):
@@ -22,7 +22,7 @@ async def collect_runtime_confirmation(
     prompt_text: str = "Type approved to confirm the runtime tool-call smoke path.",
     expected_text: str = "approved",
     context_variables: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     chat_id = None
     workflow_name = None
 

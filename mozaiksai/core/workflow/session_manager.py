@@ -5,11 +5,12 @@
 
 import time
 import uuid
-from typing import Optional, Dict, Any
+from typing import Any
+
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
 
-async def create_workflow_session(app_id: str, user_id: str, workflow_name: str) -> Dict[str, Any]:
+async def create_workflow_session(app_id: str, user_id: str, workflow_name: str) -> dict[str, Any]:
     """
     Create a new WorkflowSession document and return it.
     
@@ -67,8 +68,8 @@ async def create_artifact_instance(
     app_id: str,
     workflow_name: str,
     artifact_type: str,
-    initial_state: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    initial_state: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     Create a persistent ArtifactInstance storing artifact state (JSON blob).
     
@@ -124,7 +125,7 @@ async def attach_artifact_to_session(chat_id: str, artifact_id: str, app_id: str
 async def update_artifact_state(
     artifact_id: str,
     app_id: str,
-    state_updates: Dict[str, Any]
+    state_updates: dict[str, Any]
 ) -> None:
     """
     Update artifact state with partial updates (merges into existing state).
@@ -150,7 +151,7 @@ async def update_artifact_state(
     )
 
 
-async def get_artifact_instance(artifact_id: str, app_id: str) -> Optional[Dict[str, Any]]:
+async def get_artifact_instance(artifact_id: str, app_id: str) -> dict[str, Any] | None:
     """
     Retrieve an artifact instance by ID.
     
@@ -167,7 +168,7 @@ async def get_artifact_instance(artifact_id: str, app_id: str) -> Optional[Dict[
     return doc
 
 
-async def get_workflow_session(chat_id: str, app_id: str) -> Optional[Dict[str, Any]]:
+async def get_workflow_session(chat_id: str, app_id: str) -> dict[str, Any] | None:
     """
     Retrieve a workflow session by chat_id.
     

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .policy import normalize_optional_text, validate_lifecycle_state
 
@@ -8,10 +8,10 @@ from .policy import normalize_optional_text, validate_lifecycle_state
 def ensure_create_payload(
     *,
     name: str,
-    description: Optional[str] = None,
+    description: str | None = None,
     status: str = "draft",
-    app_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    app_id: str | None = None,
+) -> dict[str, Any]:
     normalized_name = normalize_optional_text(name)
     if not normalized_name:
         raise ValueError("name is required")
@@ -27,8 +27,8 @@ def ensure_status_payload(
     *,
     build_registry_id: str,
     status: str,
-    bundle_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    bundle_path: str | None = None,
+) -> dict[str, Any]:
     normalized_record_id = normalize_optional_text(build_registry_id)
     if not normalized_record_id:
         raise ValueError("build_registry_id is required")

@@ -4,12 +4,11 @@ import importlib
 import inspect
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from logs.logging_config import get_core_logger
-
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.pack.config import get_transition, load_global_pack_graph
 from mozaiksai.core.workflow.pack.schema import WorkflowTransition
@@ -26,12 +25,12 @@ class PreparedWorkflowLaunch:
     user_id: str
     trigger_source: str
     workflow_id: str
-    requested_workflow_id: Optional[str]
-    validated_context: Dict[str, Any]
-    trigger_meta: Dict[str, Any]
+    requested_workflow_id: str | None
+    validated_context: dict[str, Any]
+    trigger_meta: dict[str, Any]
     routing_decision: RoutingDecision
     session_router: Any
-    journey_id: Optional[str] = None
+    journey_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -40,14 +39,14 @@ class WorkflowLaunchResult:
     app_id: str
     user_id: str
     workflow_id: str
-    requested_workflow_id: Optional[str]
+    requested_workflow_id: str | None
     websocket_url: str
     trigger_source: str
     routing_explanation: str
     rerouted_by_dependency: bool
-    journey_id: Optional[str]
-    validated_context: Dict[str, Any]
-    trigger_meta: Dict[str, Any]
+    journey_id: str | None
+    validated_context: dict[str, Any]
+    trigger_meta: dict[str, Any]
     routing_decision: RoutingDecision
 
 
@@ -55,16 +54,16 @@ class WorkflowLaunchResult:
 class TransitionLaunchResult:
     resolution_type: str
     transition_id: str
-    option_id: Optional[str]
-    context_variables: Dict[str, Any]
-    journey_id: Optional[str] = None
-    next_transition_id: Optional[str] = None
-    transition: Optional[WorkflowTransition] = None
-    workflow_launch: Optional[WorkflowLaunchResult] = None
+    option_id: str | None
+    context_variables: dict[str, Any]
+    journey_id: str | None = None
+    next_transition_id: str | None = None
+    transition: WorkflowTransition | None = None
+    workflow_launch: WorkflowLaunchResult | None = None
 
 
-def validate_context_for_workflow(workflow_id: str, merged_context: Dict[str, Any]) -> Dict[str, Any]:
-    validated_context: Dict[str, Any] = {}
+def validate_context_for_workflow(workflow_id: str, merged_context: dict[str, Any]) -> dict[str, Any]:
+    validated_context: dict[str, Any] = {}
     if not merged_context:
         return validated_context
 
@@ -89,14 +88,14 @@ def validate_context_for_workflow(workflow_id: str, merged_context: Dict[str, An
 async def apply_launch_context_provider(
     *,
     workflow_id: str,
-    context_variables: Dict[str, Any],
+    context_variables: dict[str, Any],
     app_id: str,
     user_id: str,
     trigger_source: str,
-    trigger_payload: Optional[Dict[str, Any]] = None,
-    requested_workflow_id: Optional[str] = None,
-    journey_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    trigger_payload: dict[str, Any] | None = None,
+    requested_workflow_id: str | None = None,
+    journey_id: str | None = None,
+) -> dict[str, Any]:
     """Apply an optional launch context provider before workflow validation."""
     provider_spec = str(os.getenv("MOZAIKS_LAUNCH_CONTEXT_PROVIDER") or "").strip()
     if not provider_spec:
@@ -149,13 +148,13 @@ async def create_routed_chat_session(
     workflow_id: str,
     app_id: str,
     user_id: str,
-    context_variables: Dict[str, Any],
-    trigger_meta: Dict[str, Any],
-    session_router: Optional[Any] = None,
-    journey_id: Optional[str] = None,
+    context_variables: dict[str, Any],
+    trigger_meta: dict[str, Any],
+    session_router: Any | None = None,
+    journey_id: str | None = None,
 ) -> str:
     chat_id = str(uuid4())
-    extra_fields: Dict[str, Any] = {"trigger_meta": trigger_meta}
+    extra_fields: dict[str, Any] = {"trigger_meta": trigger_meta}
     extra_fields.update(context_variables)
 
     await _PERSISTENCE_MANAGER.create_chat_session(
@@ -184,9 +183,9 @@ def _build_trigger_meta(
     *,
     trigger_source: str,
     routing_decision: RoutingDecision,
-    extra_trigger_meta: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    trigger_meta: Dict[str, Any] = {
+    extra_trigger_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    trigger_meta: dict[str, Any] = {
         "trigger_source": trigger_source,
         "requested_workflow_id": routing_decision.requested_workflow_id,
         "resolved_workflow_id": routing_decision.workflow_id,
@@ -203,15 +202,15 @@ def _build_trigger_meta(
 
 async def prepare_routed_workflow_launch(
     *,
-    workflow_id: Optional[str],
+    workflow_id: str | None,
     app_id: str,
     user_id: str,
     trigger_source: str = "chat",
-    context_variables: Optional[Dict[str, Any]] = None,
-    trigger_payload: Optional[Dict[str, Any]] = None,
-    journey_id: Optional[str] = None,
-    session_router: Optional[Any] = None,
-    extra_trigger_meta: Optional[Dict[str, Any]] = None,
+    context_variables: dict[str, Any] | None = None,
+    trigger_payload: dict[str, Any] | None = None,
+    journey_id: str | None = None,
+    session_router: Any | None = None,
+    extra_trigger_meta: dict[str, Any] | None = None,
 ) -> PreparedWorkflowLaunch:
     from .router import get_session_router
 
@@ -288,15 +287,15 @@ async def launch_prepared_workflow(launch: PreparedWorkflowLaunch) -> WorkflowLa
 
 async def launch_routed_workflow(
     *,
-    workflow_id: Optional[str],
+    workflow_id: str | None,
     app_id: str,
     user_id: str,
     trigger_source: str = "chat",
-    context_variables: Optional[Dict[str, Any]] = None,
-    trigger_payload: Optional[Dict[str, Any]] = None,
-    journey_id: Optional[str] = None,
-    session_router: Optional[Any] = None,
-    extra_trigger_meta: Optional[Dict[str, Any]] = None,
+    context_variables: dict[str, Any] | None = None,
+    trigger_payload: dict[str, Any] | None = None,
+    journey_id: str | None = None,
+    session_router: Any | None = None,
+    extra_trigger_meta: dict[str, Any] | None = None,
 ) -> WorkflowLaunchResult:
     launch = await prepare_routed_workflow_launch(
         workflow_id=workflow_id,
@@ -317,11 +316,11 @@ async def launch_transition(
     app_id: str,
     user_id: str,
     transition_id: str,
-    option_id: Optional[str] = None,
-    context_variables: Optional[Dict[str, Any]] = None,
-    journey_id: Optional[str] = None,
-    session_router: Optional[Any] = None,
-    extra_trigger_meta: Optional[Dict[str, Any]] = None,
+    option_id: str | None = None,
+    context_variables: dict[str, Any] | None = None,
+    journey_id: str | None = None,
+    session_router: Any | None = None,
+    extra_trigger_meta: dict[str, Any] | None = None,
 ) -> TransitionLaunchResult:
     from .router import get_session_router
 
@@ -390,7 +389,7 @@ async def launch_transition(
 
 async def emit_workflow_launch_navigation(
     *,
-    source_chat_id: Optional[str],
+    source_chat_id: str | None,
     workflow_launch: WorkflowLaunchResult,
 ) -> bool:
     chat_id = str(source_chat_id or "").strip()
@@ -412,7 +411,7 @@ async def emit_workflow_launch_navigation(
                     "app_id": workflow_launch.app_id,
                     "websocket_url": workflow_launch.websocket_url,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
             chat_id,
         )

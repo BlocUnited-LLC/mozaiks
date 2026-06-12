@@ -37,7 +37,6 @@ no real MongoDB.
 from __future__ import annotations
 
 import importlib
-import inspect
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch

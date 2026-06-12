@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import ast
 import sys
-from typing import Dict
 
 # sys.stdlib_module_names is Python 3.10+; fall back to a curated set.
 try:
@@ -90,7 +89,7 @@ def _extract_top_level_imports(source: str) -> set[str]:
     return names
 
 
-def scan_requirements(files_map: Dict[str, str]) -> str:
+def scan_requirements(files_map: dict[str, str]) -> str:
     """
     Scan every .py file in files_map and return requirements.txt content.
 

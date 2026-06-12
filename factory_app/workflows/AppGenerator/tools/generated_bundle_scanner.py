@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import PurePosixPath
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 
@@ -84,8 +84,8 @@ def _normalized_path(raw_path: str) -> str:
     return str(raw_path or "").replace("\\", "/").strip()
 
 
-def _normalized_files_map(files_map: Dict[str, str]) -> Dict[str, str]:
-    normalized: Dict[str, str] = {}
+def _normalized_files_map(files_map: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
     for raw_path, content in files_map.items():
         path = _normalized_path(raw_path)
         if path:
@@ -93,8 +93,8 @@ def _normalized_files_map(files_map: Dict[str, str]) -> Dict[str, str]:
     return normalized
 
 
-def _iter_module_yaml_paths(files_map: Dict[str, str]) -> Dict[str, str]:
-    modules: Dict[str, str] = {}
+def _iter_module_yaml_paths(files_map: dict[str, str]) -> dict[str, str]:
+    modules: dict[str, str] = {}
     for raw_path in files_map:
         path = _normalized_path(raw_path)
         pure = PurePosixPath(path)
@@ -120,7 +120,7 @@ def _declared_module_id_from_yaml(path: str, content: str) -> str | None:
     return module_id or None
 
 
-def _load_data_contract(files_map: Dict[str, str]) -> tuple[dict[str, Any] | None, str | None]:
+def _load_data_contract(files_map: dict[str, str]) -> tuple[dict[str, Any] | None, str | None]:
     raw = files_map.get(APP_DATA_CONTRACT_PATH)
     if raw is None:
         return None, None
@@ -163,8 +163,8 @@ def _module_surface_ids(data_contract: dict[str, Any]) -> set[str]:
     return module_ids
 
 
-def _scan_data_contract_module_alignment(files_map: Dict[str, str]) -> List[str]:
-    errors: List[str] = []
+def _scan_data_contract_module_alignment(files_map: dict[str, str]) -> list[str]:
+    errors: list[str] = []
     normalized_files = _normalized_files_map(files_map)
     data_contract, load_error = _load_data_contract(normalized_files)
     if load_error:
@@ -198,8 +198,8 @@ def _scan_data_contract_module_alignment(files_map: Dict[str, str]) -> List[str]
     return errors
 
 
-def _scan_canonical_app_paths(files_map: Dict[str, str]) -> List[str]:
-    errors: List[str] = []
+def _scan_canonical_app_paths(files_map: dict[str, str]) -> list[str]:
+    errors: list[str] = []
     normalized_paths = sorted(_normalized_files_map(files_map))
     legacy_paths = disallowed_legacy_app_paths(normalized_paths)
     if legacy_paths:
@@ -247,7 +247,7 @@ def _find_raw_secret_fields(value: Any, path: tuple[str, ...] = ()) -> list[str]
     return findings
 
 
-def _scan_security_secret_contract(files_map: Dict[str, str]) -> List[str]:
+def _scan_security_secret_contract(files_map: dict[str, str]) -> list[str]:
     raw = _normalized_files_map(files_map).get(APP_SECURITY_SECRETS_PATH)
     if raw is None:
         return []
@@ -271,7 +271,7 @@ def _pack_id_from_descriptor(pack: Any) -> str:
     return str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
 
 
-def _selected_hosted_pack_ids(capability_packs: List[Dict[str, Any]] | None) -> set[str]:
+def _selected_hosted_pack_ids(capability_packs: list[dict[str, Any]] | None) -> set[str]:
     ids: set[str] = set()
     for pack in capability_packs or []:
         if not isinstance(pack, dict):
@@ -289,16 +289,16 @@ def _iter_api_endpoint_literals(content: str) -> list[str]:
 
 
 def _scan_selected_hosted_pack_boundaries(
-    files_map: Dict[str, str],
+    files_map: dict[str, str],
     *,
-    capability_packs: List[Dict[str, Any]] | None,
-) -> List[str]:
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
     hosted_pack_ids = _selected_hosted_pack_ids(capability_packs)
     if not hosted_pack_ids:
         return []
 
     normalized_files = _normalized_files_map(files_map)
-    errors: List[str] = []
+    errors: list[str] = []
     for pack_id in sorted(hosted_pack_ids):
         hosted_module_prefix = f"modules/{pack_id}/"
         hosted_module_paths = [
@@ -331,10 +331,10 @@ def _scan_selected_hosted_pack_boundaries(
 
 
 def scan_generated_bundle(
-    files_map: Dict[str, str],
+    files_map: dict[str, str],
     *,
-    capability_packs: List[Dict[str, Any]] | None = None,
-) -> List[str]:
+    capability_packs: list[dict[str, Any]] | None = None,
+) -> list[str]:
     """Scan files_map for forbidden patterns.
 
     Returns a list of human-readable error strings.
@@ -343,7 +343,7 @@ def scan_generated_bundle(
     Checks applied per file type:
     - All scannable files: raw provider secret key literals.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     errors.extend(_scan_canonical_app_paths(files_map))
     errors.extend(_scan_security_secret_contract(files_map))
     errors.extend(_scan_data_contract_module_alignment(files_map))

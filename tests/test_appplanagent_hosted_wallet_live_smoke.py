@@ -36,7 +36,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 
@@ -61,7 +61,7 @@ def _load_module(relative_path: str, module_name: str):
 
 class _Context:
     def __init__(self) -> None:
-        self.data: Dict[str, Any] = {}
+        self.data: dict[str, Any] = {}
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -73,7 +73,7 @@ class _Context:
         self.data[key] = value
 
 
-def _load_fixture() -> Dict[str, Any]:
+def _load_fixture() -> dict[str, Any]:
     raw = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
     # Fixture may be {"AppBuildPlan": {...}} or the plan directly
     if "AppBuildPlan" in raw:
@@ -81,18 +81,18 @@ def _load_fixture() -> Dict[str, Any]:
     return raw
 
 
-def _get_tasks_by_type(build_tasks: List[Dict[str, Any]], task_type: str) -> List[Dict[str, Any]]:
+def _get_tasks_by_type(build_tasks: list[dict[str, Any]], task_type: str) -> list[dict[str, Any]]:
     return [t for t in build_tasks if isinstance(t, dict) and t.get("task_type") == task_type]
 
 
-def _get_pack(capability_packs: List[Dict[str, Any]], pack_id: str) -> Optional[Dict[str, Any]]:
+def _get_pack(capability_packs: list[dict[str, Any]], pack_id: str) -> dict[str, Any] | None:
     return next(
         (p for p in capability_packs if isinstance(p, dict) and p.get("capability_pack_id") == pack_id),
         None,
     )
 
 
-def _find_adapter_task(build_tasks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _find_adapter_task(build_tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
     return next(
         (
             t for t in build_tasks
@@ -104,7 +104,7 @@ def _find_adapter_task(build_tasks: List[Dict[str, Any]]) -> Optional[Dict[str, 
     )
 
 
-def _find_facade_module_task(build_tasks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _find_facade_module_task(build_tasks: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Find the module_contract task for the app-owned facade (not wallet itself)."""
     return next(
         (

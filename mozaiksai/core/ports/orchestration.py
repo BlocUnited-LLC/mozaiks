@@ -30,10 +30,9 @@ runtime never imports AG2 types directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, runtime_checkable
-
+from typing import Any, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -58,10 +57,10 @@ class RunRequest:
     app_id: str
     chat_id: str
     user_id: str
-    initial_message: Optional[str] = None
-    initial_agent_name_override: Optional[str] = None
+    initial_message: str | None = None
+    initial_agent_name_override: str | None = None
     # Arbitrary engine-specific overrides (llm_config, max_rounds, etc.)
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -72,9 +71,9 @@ class ResumeRequest:
     app_id: str
     chat_id: str
     user_id: str
-    resume_agent: Optional[str] = None
-    injected_context: Optional[Dict[str, Any]] = None
-    extra: Dict[str, Any] = field(default_factory=dict)
+    resume_agent: str | None = None
+    injected_context: dict[str, Any] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -93,9 +92,9 @@ class DomainEvent:
     """
 
     kind: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     chat_id: str
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     source: str = "ag2"
 
 
@@ -107,10 +106,10 @@ class RunResult:
     chat_id: str
     workflow_name: str
     # Context injected by callers before resume.
-    merged_context: Optional[Dict[str, Any]] = None
+    merged_context: dict[str, Any] | None = None
     # Token / cost accounting.
-    usage: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    usage: dict[str, Any] | None = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +159,7 @@ class OrchestrationPort(Protocol):
         """
         ...
 
-    def capabilities(self) -> Dict[str, Any]:
+    def capabilities(self) -> dict[str, Any]:
         """Advertise what this adapter supports.
 
         Example return:

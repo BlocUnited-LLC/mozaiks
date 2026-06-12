@@ -21,24 +21,25 @@ async get_llm_config(response_format=None, extra_config=None, cache=True)
 """
 from __future__ import annotations
 
-import os
-import time
 import asyncio
-import logging
 import hashlib
 import json
+import logging
+import os
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Type, Set
+from typing import Any
+
 from pydantic import BaseModel
 
-from mozaiksai.core.core_config import get_secret, get_mongo_client
+from mozaiksai.core.core_config import get_mongo_client, get_secret
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderCollections
 
 logger = logging.getLogger(__name__)
 
 
-def _attach_autogen_cache(llm_config: Dict[str, Any]) -> None:
+def _attach_autogen_cache(llm_config: dict[str, Any]) -> None:
     """Attach an Autogen disk cache rooted in a writable location.
 
     Autogen's default cache behavior uses cache_root='.cache', which can fail on
@@ -88,14 +89,14 @@ def _attach_autogen_cache(llm_config: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 # Cache Structures
 # ---------------------------------------------------------------------------
-_RAW_CONFIG_CACHE: Dict[str, Any] = {"config_list": None, "loaded_at": 0}
-_LLM_CONFIG_CACHE: Dict[str, Dict[str, Any]] = {}
+_RAW_CONFIG_CACHE: dict[str, Any] = {"config_list": None, "loaded_at": 0}
+_LLM_CONFIG_CACHE: dict[str, dict[str, Any]] = {}
 _RAW_LOCK = asyncio.Lock()
 _LLM_LOCK = asyncio.Lock()
 
 # Change detection state (in-memory only)
-_LAST_PROVIDER_SIGNATURE: Optional[str] = None
-_LAST_API_KEYS: Set[str] = set()
+_LAST_PROVIDER_SIGNATURE: str | None = None
+_LAST_API_KEYS: set[str] = set()
 
 _CACHE_TTL = int(os.getenv("LLM_CONFIG_CACHE_TTL", "300"))
 
@@ -117,7 +118,7 @@ except Exception:
 logger.info(f"LLM_CONFIG_DEFAULT_CACHE_SEED_SELECTED seed={_DEFAULT_CACHE_SEED} randomized={_randomize} env_override={'yes' if _env_seed else 'no'}")
 
 # Static price map (prompt, completion) USD per 1K tokens (example values)
-PRICE_MAP: Dict[str, List[float]] = {
+PRICE_MAP: dict[str, list[float]] = {
     "o3-mini": [0.0011, 0.0044],
     "gpt-4.1-nano": [0.0001, 0.0004],
     "gpt-5-nano": [0.00015, 0.0006],
@@ -128,9 +129,9 @@ PRICE_MAP: Dict[str, List[float]] = {
 # Raw Provider Config Loader
 # ---------------------------------------------------------------------------
 # A provider entry may include 'price': List[float] -> [prompt_per_1k, completion_per_1k]
-ProviderConfig = Dict[str, Any]
+ProviderConfig = dict[str, Any]
 
-async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
+async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
     """Load provider entries: first attempt Mongo -> fallback to env-defined list.
 
     Returns list of dicts each containing at least: {"model": <name>, "api_key": <secret>}.
@@ -145,7 +146,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
         if not force and _RAW_CONFIG_CACHE["config_list"] and (now - _RAW_CONFIG_CACHE["loaded_at"] < _CACHE_TTL):
             return _RAW_CONFIG_CACHE["config_list"]  # type: ignore
 
-        config_list: List[ProviderConfig] = []
+        config_list: list[ProviderConfig] = []
 
         # Attempt DB fetch
         db_doc = None
@@ -171,9 +172,9 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
                     return "***"
                 return v[:4] + "***REDACTED***" + v[-4:]
 
-            def _redact_mapping(d: Dict[str, Any]) -> Dict[str, Any]:
+            def _redact_mapping(d: dict[str, Any]) -> dict[str, Any]:
                 sens_keys = {"api_key", "apikey", "authorization", "secret", "password", "token", "clientsecret", "accountkey"}
-                out: Dict[str, Any] = {}
+                out: dict[str, Any] = {}
                 for k, v in d.items():
                     if isinstance(v, dict):
                         out[k] = _redact_mapping(v)
@@ -233,7 +234,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
                 api_key = get_secret("OpenAIApiKey")
             except Exception:
                 api_key = os.getenv("OPENAI_API_KEY", "")
-            fallback_models: List[str] = []
+            fallback_models: list[str] = []
             if os.getenv("OPENAI_MODEL_FALLBACK"):
                 fallback_models = [m.strip() for m in os.getenv("OPENAI_MODEL_FALLBACK", "").split(",") if m.strip()]
             if not fallback_models:
@@ -256,8 +257,8 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
     global _LAST_PROVIDER_SIGNATURE, _LAST_API_KEYS
     try:
         # Build deterministic signature over provider entries (model, api_key hash, price)
-        sig_parts: List[str] = []
-        api_keys_now: Set[str] = set()
+        sig_parts: list[str] = []
+        api_keys_now: set[str] = set()
         for e in config_list:
             model = e.get("model", "")
             api_key_val = e.get("api_key", "") or ""
@@ -291,7 +292,7 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
 # ---------------------------------------------------------------------------
 # Key construction & Cache helpers
 # ---------------------------------------------------------------------------
-def _build_llm_cache_key(*, response_format: Optional[Type[BaseModel]], extra_config: Optional[Dict[str, Any]]) -> str:
+def _build_llm_cache_key(*, response_format: type[BaseModel] | None, extra_config: dict[str, Any] | None) -> str:
     parts = ["base"]
     if response_format:
         # Include schema hash so structural changes to model invalidate cache automatically
@@ -318,10 +319,10 @@ def _build_llm_cache_key(*, response_format: Optional[Type[BaseModel]], extra_co
 # ---------------------------------------------------------------------------
 async def get_llm_config(
     *,
-    response_format: Optional[Type[BaseModel]] = None,
-    extra_config: Optional[Dict[str, Any]] = None,
+    response_format: type[BaseModel] | None = None,
+    extra_config: dict[str, Any] | None = None,
     cache: bool = True,
-) -> Tuple[Optional[Any], Dict[str, Any]]:
+) -> tuple[Any | None, dict[str, Any]]:
     """Build (or retrieve from cache) an LLM runtime config.
 
     Returns a tuple (wrapper_placeholder, llm_config). The first element is
@@ -360,7 +361,7 @@ async def get_llm_config(
             extra={"seed": selected_seed, "cache_key_fragment": cache_key[:60]},
         )
 
-    llm_config: Dict[str, Any] = {
+    llm_config: dict[str, Any] = {
         "timeout": extra_config.get("timeout") if extra_config and "timeout" in extra_config else 600,
         "cache_seed": selected_seed,
         "config_list": config_list,

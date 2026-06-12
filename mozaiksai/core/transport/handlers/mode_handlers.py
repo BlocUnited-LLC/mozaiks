@@ -4,7 +4,7 @@
 # ==============================================================================
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 
 async def handle_enter_general_mode(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:
@@ -50,8 +50,8 @@ async def handle_enter_general_mode(
 
 
 async def handle_start_general_chat(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:

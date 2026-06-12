@@ -16,9 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-
 _MOZAIKS_ROOT = Path(__file__).resolve().parents[1]
 _MODULE_EVENT_ROUTER = _MOZAIKS_ROOT / "mozaiksai" / "core" / "runtime" / "composition" / "module_event_router.py"
 _PLATFORM_PY = _MOZAIKS_ROOT / "mozaiksai" / "hosts" / "platform.py"
@@ -327,6 +324,7 @@ class TestContextFieldsBehaviour:
 
     def _make_router_and_store(self, rule: dict):
         import asyncio
+
         from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 
         stored: list[dict] = []
@@ -505,6 +503,7 @@ class TestContextFieldsFlatEnvelope:
 
     def test_context_resolved_from_flat_envelope(self):
         import asyncio
+
         from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
 
         stored: list[dict] = []

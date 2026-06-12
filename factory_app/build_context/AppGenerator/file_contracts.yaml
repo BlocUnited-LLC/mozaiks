@@ -144,18 +144,17 @@ task_contracts:
     required_outputs: []
     optional_outputs:
       - services/config.py
-      - config/secrets.yaml
       - services/integrations/*.py
-      - services/security/*.py
       - services/routes/*.py
       - services/adapters/**/*.py
+      - security/secrets.yaml
       - task-owned service support files
     hard_constraints:
       - Stay within current_build_task.owned_paths.
       - Emit integration glue or provider adapter support only.
       - Do not generate a standalone platform or alternate host.
-      - App-owned support code belongs under app-bundle-relative services/integrations/ for external or hosted API clients, services/adapters/ for provider-specific implementation boundaries, services/security/ for provider-neutral auth/secret helpers, and services/routes/ for app-level routes only when needed; physical generated workspaces place these under app/services/.
-      - If app-owned runtime secrets are required, emit config/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
+      - App-owned support code belongs under app-bundle-relative services/integrations/ for external or hosted API clients, services/adapters/ for provider-specific implementation boundaries, and services/routes/ for app-level routes only when needed; physical generated workspaces place these under app/services/.
+      - If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
       - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is provider mechanics rather than product state.
       - services/adapters/ and services/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.
       - Deployment artifacts generated from this lane must follow the provider-neutral deployment contract.

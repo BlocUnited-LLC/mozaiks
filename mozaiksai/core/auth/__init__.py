@@ -77,26 +77,31 @@ Custom Adapter Registration:
 # Adapters (new pluggable system)
 from mozaiksai.core.auth.adapters import (
     AuthAdapter,
-    UserClaims,
     AuthError,
+    UserClaims,
     get_auth_adapter,
-    register_adapter,
     list_adapters,
+    register_adapter,
 )
 from mozaiksai.core.auth.adapters.registry import (
     is_auth_enabled,
     reset_auth_adapter,
 )
+from mozaiksai.core.auth.config import (
+    AuthConfig,
+    clear_auth_config_cache,
+    get_auth_config,
+)
 
 # HTTP dependencies
 from mozaiksai.core.auth.dependencies import (
     UserPrincipal,
+    optional_user,
+    require_any_auth,
+    require_any_role,
+    require_role,
     require_user,
     require_user_scope,
-    require_any_auth,
-    require_role,
-    require_any_role,
-    optional_user,
     validate_path_app_id,
     validate_path_chat_id,
     validate_user_id_against_principal,
@@ -104,22 +109,16 @@ from mozaiksai.core.auth.dependencies import (
 
 # WebSocket authentication
 from mozaiksai.core.auth.websocket_auth import (
+    WS_CLOSE_ACCESS_DENIED,
+    WS_CLOSE_AUTH_INVALID,
+    WS_CLOSE_AUTH_REQUIRED,
+    WS_CLOSE_POLICY_VIOLATION,
     WebSocketUser,
     authenticate_websocket,
-    authenticate_websocket_with_path_user,
     authenticate_websocket_with_path_binding,
-    verify_user_owns_resource,
+    authenticate_websocket_with_path_user,
     require_resource_ownership,
-    WS_CLOSE_POLICY_VIOLATION,
-    WS_CLOSE_AUTH_REQUIRED,
-    WS_CLOSE_AUTH_INVALID,
-    WS_CLOSE_ACCESS_DENIED,
-)
-
-from mozaiksai.core.auth.config import (
-    AuthConfig,
-    get_auth_config,
-    clear_auth_config_cache,
+    verify_user_owns_resource,
 )
 
 __all__ = [

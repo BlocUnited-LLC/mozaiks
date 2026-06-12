@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import importlib
 import asyncio
+import importlib
 from enum import Enum
 
 import pytest

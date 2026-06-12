@@ -14,7 +14,7 @@ Verifies:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
@@ -35,7 +35,7 @@ _WORKFLOW_ARCHETYPES_YAML = _APPGEN_CATALOG_DIR / "workflow_archetypes.yaml"
 
 
 class _FakeAgent:
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = "Base prompt."
         self.context_variables = context_variables or {}

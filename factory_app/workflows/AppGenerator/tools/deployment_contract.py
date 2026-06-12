@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 DEFAULT_RUNTIME_PORT = 8000
 DEFAULT_HEALTH_PATH = "/api/health"
@@ -55,7 +54,7 @@ def _bool(value: Any, default: bool = False) -> bool:
     return default
 
 
-def _list_of_str(value: Any) -> List[str]:
+def _list_of_str(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if isinstance(item, str) and str(item).strip()]
@@ -84,7 +83,7 @@ def _forbidden_secret_value(value: Any) -> bool:
     return any(marker in text for marker in _FORBIDDEN_SECRET_VALUE_MARKERS)
 
 
-def _first_forbidden_secret_path(payload: Any, *, path: str = "") -> Optional[str]:
+def _first_forbidden_secret_path(payload: Any, *, path: str = "") -> str | None:
     if isinstance(payload, dict):
         for raw_key, value in payload.items():
             key = str(raw_key)
@@ -107,11 +106,11 @@ def _first_forbidden_secret_path(payload: Any, *, path: str = "") -> Optional[st
     return None
 
 
-def _empty_ci_secret_requirements() -> Dict[str, List[Dict[str, Any]]]:
+def _empty_ci_secret_requirements() -> dict[str, list[dict[str, Any]]]:
     return {"required": [], "optional": [], "workflow_inputs": []}
 
 
-def _default_ci_secret_requirements(*, include_workflow: bool) -> Dict[str, List[Dict[str, Any]]]:
+def _default_ci_secret_requirements(*, include_workflow: bool) -> dict[str, list[dict[str, Any]]]:
     if not include_workflow:
         return _empty_ci_secret_requirements()
 
@@ -150,7 +149,7 @@ def _default_ci_secret_requirements(*, include_workflow: bool) -> Dict[str, List
     }
 
 
-def _normalize_ci_secret_requirements(value: Any) -> Dict[str, List[Dict[str, Any]]]:
+def _normalize_ci_secret_requirements(value: Any) -> dict[str, list[dict[str, Any]]]:
     normalized = _empty_ci_secret_requirements()
     if not isinstance(value, dict):
         return normalized
@@ -187,8 +186,8 @@ def _normalize_ci_secret_requirements(value: Any) -> Dict[str, List[Dict[str, An
     return normalized
 
 
-def validate_ci_secret_requirements(value: Any, *, path: str = "ci_secret_requirements") -> List[str]:
-    errors: List[str] = []
+def validate_ci_secret_requirements(value: Any, *, path: str = "ci_secret_requirements") -> list[str]:
+    errors: list[str] = []
     if value is None:
         return errors
     if not isinstance(value, dict):
@@ -310,9 +309,9 @@ def _workflow_input_refs(workflow_text: str) -> set[str]:
     return set(_WORKFLOW_INPUT_REF_RE.findall(str(workflow_text or "")))
 
 
-def validate_deployment_build_output(build_output: Dict[str, Any]) -> List[str]:
+def validate_deployment_build_output(build_output: dict[str, Any]) -> list[str]:
     """Return validation errors for a provider-neutral DeploymentBuildOutput payload."""
-    errors: List[str] = []
+    errors: list[str] = []
     if not isinstance(build_output, dict):
         return ["DeploymentBuildOutput must be an object"]
 
@@ -370,12 +369,12 @@ def build_deploy_target_spec(
     *,
     app_id: str,
     deployment_profile: str = DEFAULT_PROFILE,
-    target_id: Optional[str] = None,
+    target_id: str | None = None,
     target_kind: str = "container",
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
     include_compose: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a provider-neutral DeployTargetSpec dictionary."""
     resolved_target_id = str(target_id or deployment_profile or DEFAULT_PROFILE).strip() or DEFAULT_PROFILE
     resolved_kind = str(target_kind or "container").strip() or "container"
@@ -433,9 +432,9 @@ def build_deploy_target_spec(
     }
 
 
-def validate_deploy_target_spec(spec: Dict[str, Any]) -> List[str]:
+def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
     """Return validation errors for a DeployTargetSpec payload."""
-    errors: List[str] = []
+    errors: list[str] = []
     if not isinstance(spec, dict):
         return ["DeployTargetSpec must be an object"]
 
@@ -496,9 +495,9 @@ def build_deployment_template_manifest(
     *,
     app_id: str,
     deployment_profile: str,
-    deploy_target_spec: Dict[str, Any],
-    generated_files: Dict[str, str],
-) -> Dict[str, Any]:
+    deploy_target_spec: dict[str, Any],
+    generated_files: dict[str, str],
+) -> dict[str, Any]:
     """Build a deterministic DeploymentTemplateManifest dictionary."""
     file_paths = sorted([p for p in generated_files.keys() if isinstance(p, str)])
     runtime = deploy_target_spec.get("runtime") if isinstance(deploy_target_spec.get("runtime"), dict) else {}
@@ -537,9 +536,9 @@ def build_deployment_template_manifest(
     return manifest
 
 
-def validate_deployment_template_manifest(manifest: Dict[str, Any]) -> List[str]:
+def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]:
     """Return validation errors for a DeploymentTemplateManifest payload."""
-    errors: List[str] = []
+    errors: list[str] = []
     if not isinstance(manifest, dict):
         return ["DeploymentTemplateManifest must be an object"]
 
@@ -595,14 +594,14 @@ def validate_deployment_template_manifest(manifest: Dict[str, Any]) -> List[str]
     return errors
 
 
-def _render_env_example(spec: Dict[str, Any]) -> str:
+def _render_env_example(spec: dict[str, Any]) -> str:
     env = spec.get("environment") if isinstance(spec.get("environment"), dict) else {}
     required_env = _list_of_str(env.get("required_variables"))
     optional_env = _list_of_str(env.get("optional_variables"))
     secret_env = set(_list_of_str(env.get("secret_variables")))
     public_env = _list_of_str(env.get("public_variables"))
 
-    lines: List[str] = [
+    lines: list[str] = [
         "# Generated by Mozaiks deployment contract (provider-neutral)",
         "# Placeholder values only. Do not commit real secrets.",
         "",
@@ -630,7 +629,7 @@ def _render_env_example(spec: Dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_dockerfile(spec: Dict[str, Any]) -> str:
+def _render_dockerfile(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)
     return "\n".join(
@@ -647,7 +646,7 @@ def _render_dockerfile(spec: Dict[str, Any]) -> str:
     )
 
 
-def _render_compose(spec: Dict[str, Any]) -> str:
+def _render_compose(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)
     return "\n".join(
@@ -667,7 +666,7 @@ def _render_compose(spec: Dict[str, Any]) -> str:
     )
 
 
-def _render_workflow(spec: Dict[str, Any]) -> str:
+def _render_workflow(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)
     ci_secret_requirements = _normalize_ci_secret_requirements(spec.get("ci_secret_requirements"))
@@ -787,7 +786,7 @@ def generate_deployment_artifacts(
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
     include_compose: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate deterministic deployment artifacts and validated manifests."""
     spec = build_deploy_target_spec(
         app_id=app_id,
@@ -800,7 +799,7 @@ def generate_deployment_artifacts(
     )
     spec_errors = validate_deploy_target_spec(spec)
 
-    files: Dict[str, str] = {
+    files: dict[str, str] = {
         "env.example": _render_env_example(spec),
     }
     if _bool(include_dockerfiles, True):
@@ -834,13 +833,13 @@ def generate_deployment_artifacts(
 
 
 def validate_generated_deployment_bundle(
-    artifacts: Dict[str, str],
+    artifacts: dict[str, str],
     *,
     include_dockerfiles: bool,
     include_workflow: bool,
-) -> List[str]:
+) -> list[str]:
     """Validate artifact presence and verify forbidden secret/provider markers are absent."""
-    errors: List[str] = []
+    errors: list[str] = []
     if not isinstance(artifacts, dict):
         return ["artifacts must be a dictionary"]
 
@@ -874,7 +873,7 @@ def validate_generated_deployment_bundle(
                 break
 
     manifest_text = str(artifacts.get("deployment.manifest.json") or "")
-    manifest_payload: Dict[str, Any] | None = None
+    manifest_payload: dict[str, Any] | None = None
     if manifest_text:
         try:
             parsed_manifest = json.loads(manifest_text)

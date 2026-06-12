@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-import pytest
+import asyncio
+import json
 from types import SimpleNamespace
+
+import pytest
 
 from tests.import_utils import import_module_directly
 
@@ -163,6 +166,115 @@ async def test_emit_build_completed_emits_for_terminal_journey_workflow(monkeypa
     assert payload["buildId"] == "journey_1"
     assert payload["buildRegistryId"] == "build_reg_1"
     assert payload["artifacts"]["exportDownloadUrl"] == "/api/apps/app_1/builds/build_reg_1/export"
+
+
+@pytest.mark.asyncio
+async def test_emit_build_completed_schedules_anonymized_telemetry_for_terminal_journey_workflow(monkeypatch):
+    from mozaiksai.core import telemetry as telemetry_mod
+
+    events = []
+    telemetry_events = []
+
+    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
+        events.append(kwargs)
+        return "outbox_1"
+
+    async def fake_context(**kwargs):  # noqa: ANN003
+        return {
+            "app_id": kwargs["app_id"],
+            "build_id": "journey_1",
+            "build_registry_id": "build_reg_1",
+            "journey_instance_id": "journey_1",
+            "journey_key": "build",
+            "journey_position": 1,
+            "chat_id": kwargs["chat_id"],
+            "execution_id": kwargs["execution_id"],
+        }
+
+    async def fake_get_build_artifacts(**kwargs):  # noqa: ANN003
+        return {
+            "previewUrl": None,
+            "exportDownloadUrl": "/api/apps/app_1/builds/build_reg_1/export",
+        }
+
+    async def fake_emit_build_telemetry(payload):  # noqa: ANN001
+        telemetry_events.append(payload)
+
+    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
+    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
+    monkeypatch.setattr(_build_lifecycle, "get_build_artifacts", fake_get_build_artifacts)
+    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
+    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
+    monkeypatch.setattr(telemetry_mod, "emit_build_telemetry", fake_emit_build_telemetry)
+
+    await _build_lifecycle.emit_build_completed(
+        app_id="app_1",
+        execution_id="exec_2",
+        chat_id="chat_2",
+        user_id="user_1",
+        workflow_name="AppGenerator",
+    )
+    await asyncio.sleep(0)
+
+    assert len(events) == 1
+    assert len(telemetry_events) == 1
+    telemetry_payload = telemetry_events[0]
+    assert telemetry_payload["workflow_name"] == "AppGenerator"
+    assert telemetry_payload["final_status"] == "completed"
+    assert telemetry_payload["build_id_hash"]
+    assert "build_reg_1" not in json.dumps(telemetry_payload)
+
+
+@pytest.mark.asyncio
+async def test_emit_build_failed_schedules_anonymized_telemetry_for_journey_workflow(monkeypatch):
+    from mozaiksai.core import telemetry as telemetry_mod
+
+    events = []
+    telemetry_events = []
+
+    async def fake_upsert_outbox_event(**kwargs):  # noqa: ANN003
+        events.append(kwargs)
+        return "outbox_1"
+
+    async def fake_context(**kwargs):  # noqa: ANN003
+        return {
+            "app_id": kwargs["app_id"],
+            "build_id": "journey_1",
+            "build_registry_id": "build_reg_1",
+            "journey_instance_id": "journey_1",
+            "journey_key": "build",
+            "journey_position": 0,
+            "chat_id": kwargs["chat_id"],
+            "execution_id": kwargs["execution_id"],
+        }
+
+    async def fake_emit_build_telemetry(payload):  # noqa: ANN001
+        telemetry_events.append(payload)
+
+    monkeypatch.setattr(_build_lifecycle, "load_global_pack_graph", lambda: _make_build_pack())
+    monkeypatch.setattr(_build_lifecycle, "_resolve_build_event_context", fake_context)
+    monkeypatch.setattr(_build_lifecycle, "upsert_outbox_event", fake_upsert_outbox_event)
+    monkeypatch.setattr(_build_lifecycle, "_spawn_delivery", lambda *args, **kwargs: None)
+    monkeypatch.setattr(telemetry_mod, "emit_build_telemetry", fake_emit_build_telemetry)
+
+    await _build_lifecycle.emit_build_failed(
+        app_id="app_1",
+        execution_id="exec_3",
+        chat_id="chat_3",
+        user_id="user_1",
+        workflow_name="ValueEngine",
+        error="boom",
+    )
+    await asyncio.sleep(0)
+
+    assert len(events) == 1
+    assert events[0]["event_type"] == "build.failed"
+    assert len(telemetry_events) == 1
+    telemetry_payload = telemetry_events[0]
+    assert telemetry_payload["workflow_name"] == "ValueEngine"
+    assert telemetry_payload["final_status"] == "failed"
+    assert telemetry_payload["build_id_hash"]
+    assert "build_reg_1" not in json.dumps(telemetry_payload)
 
 
 @pytest.mark.asyncio

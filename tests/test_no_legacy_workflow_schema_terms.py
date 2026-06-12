@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 LEGACY_WORKFLOW_SCHEMA_TERMS = (
@@ -53,6 +52,9 @@ SKIP_PARTS = {
 
 SKIP_FILES = {
     "tests/test_no_legacy_workflow_schema_terms.py",
+    # Smoke scripts assert that generated output does NOT contain the
+    # prohibited schema files — the terms appear as negative-assertion strings.
+    "scripts/smoke_agentgenerator_live_pack.py",
 }
 
 TEXT_SUFFIXES = {

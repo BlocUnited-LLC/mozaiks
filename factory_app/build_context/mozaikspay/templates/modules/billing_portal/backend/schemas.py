@@ -16,7 +16,7 @@ class SubscriptionStatus:
     on_free_plan: bool = True
 
     @classmethod
-    def from_hosted(cls, raw: dict[str, Any]) -> "SubscriptionStatus":
+    def from_hosted(cls, raw: dict[str, Any]) -> SubscriptionStatus:
         return cls(
             success=bool(raw.get("success", True)),
             found=bool(raw.get("found", False)),

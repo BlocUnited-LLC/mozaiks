@@ -1,6 +1,8 @@
+from mozaiksai.core.events import unified_event_dispatcher as _dispatcher_mod
 from mozaiksai.core.transport import simple_transport as _transport_mod
 from mozaiksai.core.transport.simple_transport import SimpleTransport
-from mozaiksai.core.events import unified_event_dispatcher as _dispatcher_mod
+
+
 def test_pre_connection_buffer_overflow_logs_once_per_chat(monkeypatch):
     transport = SimpleTransport()
     transport._max_pre_connection_buffer = 2

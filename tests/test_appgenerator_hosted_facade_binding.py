@@ -16,12 +16,7 @@ Test fixtures use neutral names:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
-
-import pytest
-
 
 _WORKSPACE = Path(__file__).resolve().parents[1]
 

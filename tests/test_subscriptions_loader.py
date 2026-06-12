@@ -16,7 +16,6 @@ from mozaiksai.core.runtime.app.subscriptions_loader import (
     load_subscriptions_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

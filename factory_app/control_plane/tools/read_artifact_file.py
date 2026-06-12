@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
-from ._shared import normalize_context, text_excerpt
 from ._artifact_workspace import load_artifact_workspace, safe_relpath
+from ._shared import normalize_context
 
 _MAX_CONTENT_CHARS = 80_000
 
@@ -14,7 +14,7 @@ _MAX_CONTENT_CHARS = 80_000
 async def read_artifact_file(
     *,
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """
     Read a single file from the artifact workspace by path.

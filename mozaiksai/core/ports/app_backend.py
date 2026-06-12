@@ -10,9 +10,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
-
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -25,8 +24,8 @@ class BackendResponse:
 
     success: bool
     status_code: int = 0
-    data: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    data: dict[str, Any] | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -35,7 +34,7 @@ class BackendHealth:
 
     healthy: bool
     version: str = "unknown"
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -65,9 +64,9 @@ class AppBackendPort(Protocol):
         method: str,
         path: str,
         *,
-        json_body: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-        user_token: Optional[str] = None,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        user_token: str | None = None,
     ) -> BackendResponse:
         """Execute an HTTP request against the app backend.
 
@@ -83,7 +82,7 @@ class AppBackendPort(Protocol):
         """
         ...
 
-    async def emit(self, event_type: str, data: Dict[str, Any]) -> bool:
+    async def emit(self, event_type: str, data: dict[str, Any]) -> bool:
         """Emit a domain event to the runtime event system.
 
         Args:

@@ -53,7 +53,7 @@ Disallowed:
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
@@ -83,10 +83,10 @@ _ALLOWED_CONTRACT_FILES: frozenset[str] = frozenset({
 
 async def read_carry_forward_module_contract(
     module_id: str,
-    files: Optional[list[str]] = None,
+    files: list[str] | None = None,
     *,
-    context_variables: Optional[dict[str, Any]] = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    context_variables: dict[str, Any] | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """Return selected contract files from the previous app_bundle for one module.
 
@@ -218,7 +218,7 @@ async def read_carry_forward_module_contract(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _validate_module_id(raw: Any) -> Optional[str]:
+def _validate_module_id(raw: Any) -> str | None:
     """Return a sanitized module_id or None if invalid."""
     if not isinstance(raw, str):
         return None
@@ -232,8 +232,8 @@ def _validate_module_id(raw: Any) -> Optional[str]:
 
 
 def _validate_requested_files(
-    files: Optional[list[str]],
-) -> tuple[Optional[list[str]], list[str]]:
+    files: list[str] | None,
+) -> tuple[list[str] | None, list[str]]:
     """Return (validated_list_or_None, warnings).
 
     ``None`` means "all available" (files parameter was None).

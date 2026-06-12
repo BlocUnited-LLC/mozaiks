@@ -26,14 +26,12 @@ llm_profiles:
       temperature: 0.1
   codegen:
     purpose: Generate scoped code or artifact patches.
-    default_temperature: 0.1
     expected_behavior: deterministic code and artifact generation
     llm_config:
       model: gpt-5.2-codex
       temperature: 0.1
   reviewer_validator:
     purpose: Review generated changes and validate contract conformance.
-    default_temperature: 0.0
     expected_behavior: strict structured review and validation
     llm_config:
       model: gpt-5.2-codex
@@ -45,5 +43,8 @@ coding:
   enabled: true
   llm_profile: codegen
 contract_surface:
+  enabled: true
+  llm_profile: codegen
+scope:
   enabled: true
   llm_profile: codegen

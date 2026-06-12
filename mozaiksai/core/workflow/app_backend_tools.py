@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger("mozaiksai.app_backend_tools")
 
@@ -26,8 +26,8 @@ logger = logging.getLogger("mozaiksai.app_backend_tools")
 async def backend_request(
     method: str,
     path: str,
-    payload: Optional[Dict[str, Any]] = None,
-    context_variables: Optional[Dict[str, Any]] = None,
+    payload: dict[str, Any] | None = None,
+    context_variables: dict[str, Any] | None = None,
 ) -> str:
     """Make a generic HTTP request to the app backend.
 
@@ -55,8 +55,8 @@ async def backend_request(
 
 async def emit_event(
     event_type: str,
-    event_data: Optional[Dict[str, Any]] = None,
-    context_variables: Optional[Dict[str, Any]] = None,
+    event_data: dict[str, Any] | None = None,
+    context_variables: dict[str, Any] | None = None,
 ) -> str:
     """Emit a domain event from a workflow agent.
 
@@ -80,7 +80,7 @@ async def emit_event(
 
 
 async def check_backend_health(
-    context_variables: Optional[Dict[str, Any]] = None,
+    context_variables: dict[str, Any] | None = None,
 ) -> str:
     """Check whether the app backend is reachable.
 

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
 from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bundle_integrity
+from factory_app.workflows.AppGenerator.tools.save_admin_registry import save_admin_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

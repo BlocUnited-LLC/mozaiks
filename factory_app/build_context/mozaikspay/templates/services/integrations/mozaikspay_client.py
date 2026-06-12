@@ -14,7 +14,6 @@ from typing import Any
 
 import httpx
 
-
 _DEFAULT_TIMEOUT = 20.0
 _BILLING_MODULE_PATH = "/api/modules/hosted_billing"
 

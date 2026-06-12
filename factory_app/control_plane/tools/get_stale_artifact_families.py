@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts import ArtifactStore, get_artifact_store
@@ -11,7 +11,7 @@ from ._shared import normalize_context
 async def get_stale_artifact_families(
     *,
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """Return the artifact families that have stale versions for this app.
 

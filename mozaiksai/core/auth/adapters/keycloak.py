@@ -13,13 +13,13 @@ Keycloak JWTs have the following structure:
 """
 
 import os
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 import jwt
 from jwt import PyJWKClient
 
-from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims, AuthError
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
 
 logger = get_core_logger("auth.keycloak")
 
@@ -50,15 +50,15 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
 
     def __init__(
         self,
-        keycloak_url: Optional[str] = None,
-        realm: Optional[str] = None,
-        client_id: Optional[str] = None,
+        keycloak_url: str | None = None,
+        realm: str | None = None,
+        client_id: str | None = None,
     ):
         super().__init__()
         self._keycloak_url = keycloak_url or os.getenv("KEYCLOAK_URL", "")
         self._realm = realm or os.getenv("KEYCLOAK_REALM", "")
         self._client_id = client_id or os.getenv("KEYCLOAK_CLIENT_ID", "")
-        self._jwks_client: Optional[PyJWKClient] = None
+        self._jwks_client: PyJWKClient | None = None
 
         # Clean URL (remove trailing slash)
         if self._keycloak_url:
@@ -152,7 +152,7 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
 
         return self._extract_claims(claims)
 
-    def _extract_claims(self, raw_claims: Dict[str, Any]) -> UserClaims:
+    def _extract_claims(self, raw_claims: dict[str, Any]) -> UserClaims:
         """Extract standardized claims from Keycloak JWT."""
         # User ID from sub claim
         user_id = raw_claims.get("sub")
@@ -183,7 +183,7 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
             tenant_id=raw_claims.get("azp"),  # Authorized party
         )
 
-    def _extract_roles(self, claims: Dict[str, Any]) -> List[str]:
+    def _extract_roles(self, claims: dict[str, Any]) -> list[str]:
         """
         Extract roles from Keycloak's nested structure.
 

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import importlib
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 
 admin_router = importlib.import_module("mozaiksai.core.admin.router")
 
@@ -15,7 +14,7 @@ class _FakeAsyncCursor:
         self._iter = iter(())
 
     def sort(self, field: str, direction: int):
-        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        epoch = datetime(1970, 1, 1, tzinfo=UTC)
         self._docs.sort(key=lambda doc: doc.get(field) or epoch, reverse=direction < 0)
         return self
 
@@ -90,7 +89,7 @@ async def test_build_persisted_admin_stats_reads_chat_session_lifecycle(monkeypa
 async def test_build_persisted_admin_runs_maps_sessions_to_existing_ui_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    now = datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
     collection = _FakeChatSessionsCollection(
         find_docs=[
             {
@@ -156,7 +155,7 @@ async def test_build_persisted_admin_runs_maps_sessions_to_existing_ui_shape(
 async def test_build_persisted_admin_runs_respects_active_only_and_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    now = datetime(2026, 5, 8, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 8, 12, 0, tzinfo=UTC)
     collection = _FakeChatSessionsCollection(
         find_docs=[
             {

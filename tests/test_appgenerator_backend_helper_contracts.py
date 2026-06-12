@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 _APPGEN_DIR = (
@@ -251,7 +250,7 @@ class TestAppPlanAgentHelperGuidance:
 
     def test_app_plan_agent_mentions_usage_check_example(self):
         text = _agents_text()
-        assert "services/security/secrets.py" in text
+        assert "security/secrets.yaml" in text
 
     def test_app_plan_agent_helper_rule_is_own_numbered_item(self):
         text = _agents_text()
@@ -328,16 +327,15 @@ class TestFileContractsIntegrity:
         joined_constraints = " ".join(str(item) for item in constraints)
         assert any("services/integrations" in str(output) for output in outputs)
         assert any("services/adapters" in str(output) for output in outputs)
-        assert any("services/security" in str(output) for output in outputs)
         assert any("services/routes" in str(output) for output in outputs)
-        assert any("config/secrets.yaml" in str(output) for output in outputs)
+        assert any("security/secrets.yaml" in str(output) for output in outputs)
         assert "business" in joined_constraints
         assert "Modules own" in joined_constraints
         assert "auth" in joined_constraints
         assert "dns" in joined_constraints
         assert "registrar" in joined_constraints
         assert "secrets" in joined_constraints
-        assert "services/security" in joined_constraints
+        assert "services/security" not in joined_constraints
         assert "services/routes" in joined_constraints
         assert "raw secret values" in joined_constraints
 

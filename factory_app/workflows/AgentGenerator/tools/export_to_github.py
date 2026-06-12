@@ -13,21 +13,22 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
+from logs.logging_config import get_workflow_logger
 from mozaiksai.core.workflow.generator_support.app_code_versions import (
     build_snapshot_document,
     extract_files_from_zip_bundle,
 )
 from mozaiksai.core.workflow.generator_support.backend_client import BackendClient
-from logs.logging_config import get_workflow_logger
 
 try:
-    from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
+    from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
+    from logs.tools_logs import log_tool_event as _log_tool_event
 except Exception:  # pragma: no cover
     _get_tool_logger = None  # type: ignore
     _log_tool_event = None  # type: ignore
@@ -35,13 +36,13 @@ except Exception:  # pragma: no cover
 
 class ExportResult(BaseModel):
     success: bool
-    repo_url: Optional[str] = None
-    repo_full_name: Optional[str] = None
-    base_commit_sha: Optional[str] = None
-    job_id: Optional[str] = None  # GitHub Actions workflowRun.id (when available)
-    workflow_run_url: Optional[str] = None
-    deployment_url: Optional[str] = None
-    error: Optional[str] = None
+    repo_url: str | None = None
+    repo_full_name: str | None = None
+    base_commit_sha: str | None = None
+    job_id: str | None = None  # GitHub Actions workflowRun.id (when available)
+    workflow_run_url: str | None = None
+    deployment_url: str | None = None
+    error: str | None = None
 
 
 class ExportToGitHubTool:
@@ -77,13 +78,13 @@ class ExportToGitHubTool:
     async def execute(
         self,
         *,
-        app_id: Optional[str],
+        app_id: str | None,
         bundle_path: str,
-        repo_name: Optional[str] = None,
-        commit_message: Optional[str] = None,
-        user_id: Optional[str] = None,
-        workflow_type: Optional[str] = None,
-        context_variables: Optional[Any] = None,
+        repo_name: str | None = None,
+        commit_message: str | None = None,
+        user_id: str | None = None,
+        workflow_type: str | None = None,
+        context_variables: Any | None = None,
     ) -> ExportResult:
         """Export a code bundle ZIP to GitHub via Mozaiks Backend."""
 
@@ -171,7 +172,7 @@ class ExportToGitHubTool:
                 files=bundle_files,
                 structured_outputs=None,
             )
-            files_payload: List[Dict[str, Any]] = [
+            files_payload: list[dict[str, Any]] = [
                 {"path": f.get("path"), "operation": "add", "contentBase64": f.get("contentBase64")}
                 for f in (snapshot_doc.get("files") or [])
                 if isinstance(f, dict) and isinstance(f.get("path"), str) and isinstance(f.get("contentBase64"), str)
@@ -232,7 +233,7 @@ class ExportToGitHubTool:
                         _log_tool_event(tlog, action="repo_secrets", status="error", repo_full_name=repo_full_name, error=str(sec_exc))
 
             # 3) Poll deployment status (GitHub Actions).
-            deployment_status: Dict[str, Any] = {}
+            deployment_status: dict[str, Any] = {}
             if isinstance(repo_full_name, str) and repo_full_name.strip():
                 deployment_status = await self._poll_deployment_status(
                     app_id=str(app_id),
@@ -335,8 +336,8 @@ class ExportToGitHubTool:
         *,
         app_id: str,
         repo_url: str,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """Fetch repo file manifest (sha256 by path) for conflict detection.
 
         Expected backend response:
@@ -360,7 +361,7 @@ class ExportToGitHubTool:
             "/api/apps/{app_id}/deploy/repo/manifest",
         )
         endpoint = self._format_backend_path(path_template, app_id=str(app_id).strip())
-        payload: Dict[str, Any] = {"repoUrl": str(repo_url).strip(), "userId": str(user_id).strip() if user_id else None}
+        payload: dict[str, Any] = {"repoUrl": str(repo_url).strip(), "userId": str(user_id).strip() if user_id else None}
 
         data = await self.backend_client.post(endpoint, json=payload, error_msg="Failed to get repo manifest")
         return data if isinstance(data, dict) else {"_raw": data}
@@ -374,10 +375,10 @@ class ExportToGitHubTool:
         branch_name: str,
         title: str,
         body: str,
-        changes: List[Dict[str, Any]],
-        patch_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        changes: list[dict[str, Any]],
+        patch_id: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """Request backend to create a branch + PR for an update patchset.
 
         Backend owns GitHub credentials; MozaiksCore never pushes directly.
@@ -401,7 +402,7 @@ class ExportToGitHubTool:
         )
         endpoint = self._format_backend_path(path_template, app_id=str(app_id).strip())
 
-        backend_changes: List[Dict[str, Any]] = []
+        backend_changes: list[dict[str, Any]] = []
         for c in changes if isinstance(changes, list) else []:
             if not isinstance(c, dict):
                 continue
@@ -411,12 +412,12 @@ class ExportToGitHubTool:
                 continue
             if not isinstance(op, str) or not op.strip():
                 continue
-            item: Dict[str, Any] = {"path": path.strip(), "operation": op.strip()}
+            item: dict[str, Any] = {"path": path.strip(), "operation": op.strip()}
             if op.strip() in {"add", "modify"} and isinstance(c.get("contentBase64"), str):
                 item["contentBase64"] = c.get("contentBase64")
             backend_changes.append(item)
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "repoUrl": str(repo_url).strip(),
             "userId": str(user_id).strip() if user_id else None,
             "baseCommitSha": str(base_commit_sha).strip(),
@@ -435,19 +436,19 @@ class ExportToGitHubTool:
         self,
         *,
         app_id: str,
-        files: List[Dict[str, Any]],
+        files: list[dict[str, Any]],
         user_id: str,
-        repo_name: Optional[str] = None,
-        commit_message: Optional[str] = None,
+        repo_name: str | None = None,
+        commit_message: str | None = None,
         create_repo: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """POST /api/apps/{appId}/deploy/repo/initial-export"""
         path_template = os.getenv(
             "MOZAIKS_BACKEND_INITIAL_EXPORT_PATH",
             "/api/apps/{app_id}/deploy/repo/initial-export",
         )
         endpoint = self._format_backend_path(path_template, app_id=str(app_id).strip())
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "userId": str(user_id).strip(),
             "createRepo": bool(create_repo),
             "files": files if isinstance(files, list) else [],
@@ -467,14 +468,14 @@ class ExportToGitHubTool:
         user_id: str,
         include_database_uri: bool = True,
         include_app_api_key: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """POST /api/apps/{appId}/deploy/repo/secrets"""
         path_template = os.getenv(
             "MOZAIKS_BACKEND_REPO_SECRETS_PATH",
             "/api/apps/{app_id}/deploy/repo/secrets",
         )
         endpoint = self._format_backend_path(path_template, app_id=str(app_id).strip())
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "userId": str(user_id).strip(),
             "repoFullName": str(repo_full_name).strip(),
             "includeDatabaseUri": bool(include_database_uri),
@@ -483,7 +484,7 @@ class ExportToGitHubTool:
         data = await self.backend_client.post(endpoint, json=payload, error_msg="Failed to set repository secrets")
         return data if isinstance(data, dict) else {"_raw": data}
 
-    async def get_deploy_status(self, *, app_id: str, repo_full_name: str) -> Dict[str, Any]:
+    async def get_deploy_status(self, *, app_id: str, repo_full_name: str) -> dict[str, Any]:
         """GET /api/apps/{appId}/deploy/status?repoFullName=org/repo"""
         path_template = os.getenv(
             "MOZAIKS_BACKEND_DEPLOY_STATUS_PATH",
@@ -494,8 +495,8 @@ class ExportToGitHubTool:
         data = await self.backend_client.get(endpoint, params=params, error_msg="Failed to get deploy status")
         return data if isinstance(data, dict) else {"_raw": data}
 
-    async def _poll_deployment_status(self, *, app_id: str, repo_full_name: str, chat_id: Optional[str]) -> Dict[str, Any]:
-        last_status: Optional[str] = None
+    async def _poll_deployment_status(self, *, app_id: str, repo_full_name: str, chat_id: str | None) -> dict[str, Any]:
+        last_status: str | None = None
         for attempt in range(self.max_poll_attempts):
             status_data = await self.get_deploy_status(app_id=app_id, repo_full_name=repo_full_name)
             status = str(status_data.get("status") or "").lower()
@@ -531,12 +532,12 @@ export_to_github_tool = ExportToGitHubTool()
 
 async def export_to_github(
     bundle_path: str,
-    app_id: Optional[str] = None,
-    repo_name: Optional[str] = None,
-    commit_message: Optional[str] = None,
-    user_id: Optional[str] = None,
-    workflow_type: Optional[str] = None,
-    context_variables: Optional[Any] = None,
+    app_id: str | None = None,
+    repo_name: str | None = None,
+    commit_message: str | None = None,
+    user_id: str | None = None,
+    workflow_type: str | None = None,
+    context_variables: Any | None = None,
 ) -> dict:
     """Convenience wrapper returning a dict compatible with tool outputs."""
 
@@ -554,7 +555,7 @@ async def export_to_github(
 
 async def _emit_deployment_event(
     *,
-    chat_id: Optional[str],
+    chat_id: str | None,
     status: str,
     data: dict,
 ) -> None:
@@ -565,7 +566,7 @@ async def _emit_deployment_event(
 
         transport = await SimpleTransport.get_instance()
         await transport.send_event_to_ui(
-            {"type": f"chat.deployment_{status}", "data": {"timestamp": datetime.now(timezone.utc).isoformat(), **data}},
+            {"type": f"chat.deployment_{status}", "data": {"timestamp": datetime.now(UTC).isoformat(), **data}},
             chat_id,
         )
     except Exception:

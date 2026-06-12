@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable, Sequence
 from pathlib import PurePosixPath
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 try:
     import yaml
@@ -121,9 +122,9 @@ ADMIN_ROUTE_OWNERSHIP_KEYS = {
 }
 
 
-def dedupe(items: Iterable[str]) -> List[str]:
+def dedupe(items: Iterable[str]) -> list[str]:
     seen: set[str] = set()
-    ordered: List[str] = []
+    ordered: list[str] = []
     for item in items:
         if item in seen:
             continue
@@ -132,7 +133,7 @@ def dedupe(items: Iterable[str]) -> List[str]:
     return ordered
 
 
-def _page_primitive_names() -> Optional[set[str]]:
+def _page_primitive_names() -> set[str] | None:
     if get_page_ui_primitive_names is None:
         return None
     try:
@@ -141,8 +142,8 @@ def _page_primitive_names() -> Optional[set[str]]:
         return None
 
 
-def _parse_public_imports(content: str) -> List[str]:
-    imported: List[str] = []
+def _parse_public_imports(content: str) -> list[str]:
+    imported: list[str] = []
     for match in PUBLIC_IMPORT_RE.finditer(content):
         for raw in match.group("specifiers").split(","):
             token = raw.strip()
@@ -154,8 +155,8 @@ def _parse_public_imports(content: str) -> List[str]:
     return imported
 
 
-def _class_literals(content: str) -> List[str]:
-    literals: List[str] = []
+def _class_literals(content: str) -> list[str]:
+    literals: list[str] = []
     for match in CLASS_LITERAL_RE.finditer(content):
         for group_name in ("double", "single", "tick", "brace"):
             value = match.group(group_name)
@@ -176,12 +177,12 @@ def _looks_like_local_card_shell(class_names: str) -> bool:
     return has_rounded_panel and has_border and has_surface_background
 
 
-def _file_name(item: Dict[str, Any]) -> str:
+def _file_name(item: dict[str, Any]) -> str:
     return str(item.get("filename") or item.get("path") or "").strip()
 
 
-def _bundle_file_map(code_files: Sequence[Dict[str, Any]]) -> Dict[str, str]:
-    files: Dict[str, str] = {}
+def _bundle_file_map(code_files: Sequence[dict[str, Any]]) -> dict[str, str]:
+    files: dict[str, str] = {}
     for item in code_files:
         if not isinstance(item, dict):
             continue
@@ -198,11 +199,11 @@ def _bundle_file_map(code_files: Sequence[Dict[str, Any]]) -> Dict[str, str]:
 
 
 def _react_file_items(
-    code_files: Sequence[Dict[str, Any]],
+    code_files: Sequence[dict[str, Any]],
     *,
     include_ui_index: bool,
-) -> List[Tuple[str, str]]:
-    files: List[Tuple[str, str]] = []
+) -> list[tuple[str, str]]:
+    files: list[tuple[str, str]] = []
     for item in code_files:
         if not isinstance(item, dict):
             continue
@@ -224,7 +225,7 @@ def _react_file_items(
     return files
 
 
-def _route_manifest_pages_from_content(content: str, *, source_label: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+def _route_manifest_pages_from_content(content: str, *, source_label: str) -> tuple[list[dict[str, Any]], list[str]]:
     try:
         data = json.loads(content)
     except json.JSONDecodeError as exc:
@@ -249,9 +250,9 @@ def _parse_imports_and_local_definitions(
     source: str,
     *,
     filename: str,
-) -> Tuple[set[str], Dict[str, str]]:
+) -> tuple[set[str], dict[str, str]]:
     bindings: set[str] = set()
-    import_sources: Dict[str, str] = {}
+    import_sources: dict[str, str] = {}
     base_dir = PurePosixPath(filename).parent
     for match in IMPORT_BINDING_RE.finditer(source):
         default_name = match.group("default")
@@ -282,7 +283,7 @@ def _parse_imports_and_local_definitions(
 
 def _resolve_relative_import(base_dir: PurePosixPath, source_path: str) -> str:
     resolved = base_dir.joinpath(source_path)
-    parts: List[str] = []
+    parts: list[str] = []
     for part in resolved.parts:
         if part in ("", "."):
             continue
@@ -309,7 +310,7 @@ def _import_path_exists(import_path: str, file_names: set[str]) -> bool:
     return False
 
 
-def _parse_admin_registry(content: str, *, source_label: str) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+def _parse_admin_registry(content: str, *, source_label: str) -> tuple[dict[str, Any] | None, list[str]]:
     if yaml is None:
         return None, [f"{source_label} admin_registry.yaml could not be parsed because PyYAML is unavailable."]
     try:
@@ -322,15 +323,15 @@ def _parse_admin_registry(content: str, *, source_label: str) -> Tuple[Optional[
 
 
 def audit_generated_react_files(
-    code_files: Sequence[Dict[str, Any]],
+    code_files: Sequence[dict[str, Any]],
     *,
     source_label: str = "generated React",
     require_jsx: bool = False,
     include_ui_index: bool = False,
-) -> List[str]:
+) -> list[str]:
     """Return blocking quality warnings for generated/custom React files."""
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     for item in code_files:
         if not isinstance(item, dict):
             continue
@@ -490,8 +491,8 @@ def audit_generated_react_files(
     return dedupe(warnings)
 
 
-def _section_children(section: Dict[str, Any]) -> List[Dict[str, Any]]:
-    children: List[Dict[str, Any]] = []
+def _section_children(section: dict[str, Any]) -> list[dict[str, Any]]:
+    children: list[dict[str, Any]] = []
     config = section.get("config")
     if not isinstance(config, dict):
         return children
@@ -521,7 +522,7 @@ def _walk_sections(
     *,
     path: str,
     parent_surfaces: Sequence[str],
-) -> Iterable[Tuple[str, Dict[str, Any], Tuple[str, ...]]]:
+) -> Iterable[tuple[str, dict[str, Any], tuple[str, ...]]]:
     for index, item in enumerate(sections):
         if not isinstance(item, dict):
             continue
@@ -543,13 +544,13 @@ def _walk_sections(
 
 
 def audit_page_schemas(
-    pages: Sequence[Dict[str, Any]],
+    pages: Sequence[dict[str, Any]],
     *,
     source_label: str = "AppPageSchema",
-) -> List[str]:
+) -> list[str]:
     """Return blocking quality warnings for declarative YAML page schemas."""
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     allowed_primitives = _page_primitive_names()
 
     for page_index, page in enumerate(pages):
@@ -557,7 +558,7 @@ def audit_page_schemas(
             continue
         page_name = str(page.get("name") or page.get("title") or f"page[{page_index}]")
         page_path = f"{source_label} '{page_name}'"
-        primitive_counts: Dict[str, int] = {}
+        primitive_counts: dict[str, int] = {}
 
         page_type = page.get("page_type")
         if not page_type:
@@ -698,7 +699,7 @@ def audit_page_schemas(
     return dedupe(warnings)
 
 
-def custom_route_bundle_page_files(custom_route_bundle: Any) -> List[Dict[str, Any]]:
+def custom_route_bundle_page_files(custom_route_bundle: Any) -> list[dict[str, Any]]:
     if not isinstance(custom_route_bundle, dict):
         return []
     page_files = custom_route_bundle.get("page_files")
@@ -714,9 +715,9 @@ def _non_empty_string(value: Any) -> bool:
 def audit_custom_route_bundle_integrity(
     custom_route_bundle: Any,
     *,
-    app_manifest: Optional[Dict[str, Any]] = None,
+    app_manifest: dict[str, Any] | None = None,
     source_label: str = "custom_route_bundle",
-) -> List[str]:
+) -> list[str]:
     """Return route/component registry warnings for custom full-page routes.
 
     AppGenerator persists custom routes from two agent-authored lists:
@@ -731,7 +732,7 @@ def audit_custom_route_bundle_integrity(
     if not isinstance(custom_route_bundle, dict):
         return [f"{source_label} must be an object."]
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     route_manifest = custom_route_bundle.get("route_manifest")
     raw_page_files = custom_route_bundle.get("page_files")
 
@@ -742,7 +743,7 @@ def audit_custom_route_bundle_integrity(
         warnings.append(f"{source_label}.page_files must be a non-empty list.")
         raw_page_files = []
 
-    route_by_id: Dict[str, Dict[str, Any]] = {}
+    route_by_id: dict[str, dict[str, Any]] = {}
     route_ids: set[str] = set()
     route_paths: set[str] = set()
     route_components: set[str] = set()
@@ -794,7 +795,7 @@ def audit_custom_route_bundle_integrity(
         if not _non_empty_string(route.get("purpose")):
             warnings.append(f"{path}.purpose must explain why YAML primitives cannot own this route.")
 
-    files_by_route_id: Dict[str, List[Dict[str, Any]]] = {}
+    files_by_route_id: dict[str, list[dict[str, Any]]] = {}
     file_paths: set[str] = set()
     registry_keys: set[str] = set()
 
@@ -895,10 +896,10 @@ def audit_custom_route_bundle_integrity(
 
 
 def audit_app_ui_bundle_integrity(
-    code_files: Sequence[Dict[str, Any]],
+    code_files: Sequence[dict[str, Any]],
     *,
     source_label: str = "app UI bundle",
-) -> List[str]:
+) -> list[str]:
     """Return route/component/admin registry drift warnings for app UI files.
 
     This is a lightweight static audit over generated or staged app files. It
@@ -913,9 +914,9 @@ def audit_app_ui_bundle_integrity(
     if not files:
         return []
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     file_names = set(files)
-    route_pages: List[Dict[str, Any]] = []
+    route_pages: list[dict[str, Any]] = []
 
     route_manifest_content = files.get("ui/route_manifest.json")
     if route_manifest_content is not None:
@@ -930,9 +931,9 @@ def audit_app_ui_bundle_integrity(
         for filename, content in files.items()
         if filename.endswith("index.js") or filename.endswith("index.jsx")
     }
-    registered_components: Dict[str, List[str]] = {}
-    available_bindings: Dict[str, set[str]] = {}
-    import_sources: Dict[str, Dict[str, str]] = {}
+    registered_components: dict[str, list[str]] = {}
+    available_bindings: dict[str, set[str]] = {}
+    import_sources: dict[str, dict[str, str]] = {}
 
     for filename, source in registry_files.items():
         for component in _parse_registered_components(source):
@@ -941,7 +942,7 @@ def audit_app_ui_bundle_integrity(
         available_bindings[filename] = bindings
         import_sources[filename] = imports
 
-    route_components: Dict[str, set[str]] = {}
+    route_components: dict[str, set[str]] = {}
     for index, page in enumerate(route_pages):
         route_path = str(page.get("path") or page.get("route") or "").strip()
         component = str(page.get("component") or "").strip()

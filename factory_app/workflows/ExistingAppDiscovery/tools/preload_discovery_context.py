@@ -1057,7 +1057,9 @@ async def _preload_prior_context_graph_pack(
         )
 
     try:
-        from factory_app.workflows._shared.context_graph.prompt_pack import build_context_graph_prompt_pack
+        from factory_app.workflows._shared.context_graph.prompt_pack import (
+            build_context_graph_prompt_pack,
+        )
         from mozaiksai.control_plane.app_context import get_app_context_graph_for_version
         from mozaiksai.control_plane.context_graph import build_context_graph_catalog
     except Exception as exc:
@@ -1131,7 +1133,9 @@ def _set_context_graph_unavailable(
     source: str | None,
 ) -> dict[str, Any]:
     try:
-        from factory_app.workflows._shared.context_graph.prompt_pack import build_context_graph_unavailable_pack
+        from factory_app.workflows._shared.context_graph.prompt_pack import (
+            build_context_graph_unavailable_pack,
+        )
 
         pack = build_context_graph_unavailable_pack(reason=reason, warnings=warnings, source=source)
     except Exception:

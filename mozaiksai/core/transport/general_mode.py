@@ -3,8 +3,8 @@ from __future__ import annotations
 import importlib
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from mozaiksai.core.transport.session_registry import session_registry
 
@@ -40,8 +40,8 @@ class GeneralModeMixin:
         *,
         chat_id: str,
         force_new: bool = False,
-        requested_general_chat_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        requested_general_chat_id: str | None = None,
+    ) -> dict[str, Any]:
         """Return or create the general chat context for a websocket connection."""
 
         conn = self.connections.get(chat_id)
@@ -92,7 +92,7 @@ class GeneralModeMixin:
             "sequence": session_info.get("sequence"),
             "app_id": str(app_id),
             "user_id": str(user_id),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         conn["general_session"] = general_ctx
         return general_ctx
@@ -101,9 +101,9 @@ class GeneralModeMixin:
         self,
         *,
         chat_id: str,
-        ws_id: Optional[int],
+        ws_id: int | None,
         user_message: str,
-        ui_context: Optional[Dict[str, Any]] = None,
+        ui_context: dict[str, Any] | None = None,
     ) -> None:
         """Route a general-mode utterance to the configured capability executor."""
 
@@ -125,7 +125,7 @@ class GeneralModeMixin:
         if not general_chat_id:
             raise RuntimeError("Failed to resolve general chat identifier")
 
-        workflows_payload: List[Dict[str, Any]] = []
+        workflows_payload: list[dict[str, Any]] = []
         if ws_id:
             contexts = session_registry.get_all_workflows(ws_id)
             for ctx in contexts:
@@ -241,8 +241,8 @@ class GeneralModeMixin:
         app_id: str,
         role: str,
         content: str,
-        user_id: Optional[str],
-        metadata: Optional[Dict[str, Any]] = None,
+        user_id: str | None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         pm = self._get_or_create_persistence_manager()
         try:

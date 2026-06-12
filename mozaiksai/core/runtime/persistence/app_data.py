@@ -9,9 +9,9 @@ carry Python helper code under ``app/data``.
 
 import json
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.runtime.app.paths import APP_DATA_CONTRACT_PATH

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VALUE_ENGINE_DIR = REPO_ROOT / "factory_app" / "workflows" / "ValueEngine"
 

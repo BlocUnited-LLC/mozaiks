@@ -13,7 +13,7 @@ from typing import Any
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.core_config import get_mongo_client
-from mozaiksai.core.data.persistence.namespaces import RuntimeCollections, SYSTEM_DATABASE
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
 from mozaiksai.core.usage.pricing import estimate_token_cost
 

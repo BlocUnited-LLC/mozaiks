@@ -25,9 +25,9 @@ Example Flow:
 4. User clicks "Generator" tab → Generator resumes from paused state
 """
 
-from typing import Dict, Optional, List
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("session_registry")
@@ -40,7 +40,7 @@ class WorkflowContext:
     workflow_name: str
     app_id: str
     user_id: str
-    artifact_id: Optional[str] = None
+    artifact_id: str | None = None
     status: str = "active"  # "active", "paused", "completed"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_active: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -77,10 +77,10 @@ class SessionRegistry:
     
     def __init__(self):
         # ws_id -> list of WorkflowContext
-        self._workflows: Dict[str, List[WorkflowContext]] = {}
+        self._workflows: dict[str, list[WorkflowContext]] = {}
         
         # ws_id -> currently active chat_id (None = general mode)
-        self._active_chat: Dict[str, Optional[str]] = {}
+        self._active_chat: dict[str, str | None] = {}
         
         logger.info("SessionRegistry initialized")
     
@@ -91,7 +91,7 @@ class SessionRegistry:
         workflow_name: str,
         app_id: str,
         user_id: str,
-        artifact_id: Optional[str] = None,
+        artifact_id: str | None = None,
         auto_activate: bool = True
     ) -> WorkflowContext:
         """
@@ -145,7 +145,7 @@ class SessionRegistry:
         
         return context
     
-    def switch_workflow(self, ws_id: str, chat_id: str) -> Optional[WorkflowContext]:
+    def switch_workflow(self, ws_id: str, chat_id: str) -> WorkflowContext | None:
         """
         Switch to a different workflow context (pause current, resume target).
         
@@ -195,7 +195,7 @@ class SessionRegistry:
         self._active_chat[ws_id] = None
         logger.info(f"Session {ws_id} entered general mode (all workflows paused)")
     
-    def get_active_workflow(self, ws_id: str) -> Optional[WorkflowContext]:
+    def get_active_workflow(self, ws_id: str) -> WorkflowContext | None:
         """
         Get currently active workflow for this WebSocket.
         
@@ -211,7 +211,7 @@ class SessionRegistry:
         
         return None
     
-    def get_all_workflows(self, ws_id: str) -> List[WorkflowContext]:
+    def get_all_workflows(self, ws_id: str) -> list[WorkflowContext]:
         """
         Get all workflow contexts (active + paused + completed) for this session.
         
@@ -255,7 +255,7 @@ class SessionRegistry:
             del self._active_chat[ws_id]
             logger.info(f"Removed session {ws_id} ({workflow_count} workflows)")
     
-    def get_workflow_by_chat_id(self, ws_id: str, chat_id: str) -> Optional[WorkflowContext]:
+    def get_workflow_by_chat_id(self, ws_id: str, chat_id: str) -> WorkflowContext | None:
         """
         Get a specific workflow context by chat_id.
         

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 
+
 def resolve_admin_app_root() -> Path:
     """Resolve the active app root for admin config/module loading."""
     return resolve_active_app_root()

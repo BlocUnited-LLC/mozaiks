@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 
 from .service import AppRegistryService
 
 
 class AppRegistryModule:
-    def __init__(self, service: Optional[AppRegistryService] = None) -> None:
+    def __init__(self, service: AppRegistryService | None = None) -> None:
         self.service = service or AppRegistryService()
 
     async def create_app_record(
@@ -16,9 +14,9 @@ class AppRegistryModule:
         ctx: ModuleContext,
         *,
         name: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         status: str = "draft",
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
     ) -> dict:
         result = await self.service.create_app_record(
             owner_user_id=ctx.user_id or "anonymous",
@@ -44,7 +42,7 @@ class AppRegistryModule:
         *,
         build_registry_id: str,
         status: str,
-        bundle_path: Optional[str] = None,
+        bundle_path: str | None = None,
     ) -> dict:
         result = await self.service.update_build_status(
             build_registry_id=build_registry_id,
@@ -70,8 +68,8 @@ class AppRegistryModule:
         self,
         ctx: ModuleContext,
         *,
-        app_id: Optional[str] = None,
-        build_registry_id: Optional[str] = None,
+        app_id: str | None = None,
+        build_registry_id: str | None = None,
     ) -> dict:
         return await self.service.get_app_record(
             app_id=app_id or ctx.app_id,

@@ -4,7 +4,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 import yaml
@@ -28,7 +28,7 @@ from mozaiksai.core.workflow.ui_primitives import (
 
 _logger = logging.getLogger("tools.save_app_schema")
 
-PROMOTABLE_APP_ENTRIES = ("app.json", "ui", "brand", "config", "services")
+PROMOTABLE_APP_ENTRIES = ("app.json", "ui", "brand", "config", "data", "security", "services")
 
 
 def _repo_root() -> Path:
@@ -47,7 +47,7 @@ def _resolve_generated_artifacts_root() -> Path:
     return candidate.resolve()
 
 
-def _context_get(context_variables: Optional[Any], key: str) -> Optional[Any]:
+def _context_get(context_variables: Any | None, key: str) -> Any | None:
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
@@ -83,8 +83,8 @@ def _safe_action_segment(value: Any, *, fallback: str = "submit") -> str:
 
 def _resolve_artifact_ids(
     *,
-    context_variables: Optional[Any],
-    manifest_dict: Optional[Dict[str, Any]] = None,
+    context_variables: Any | None,
+    manifest_dict: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     manifest_dict = manifest_dict or {}
     app_id = (
@@ -106,7 +106,7 @@ def _resolve_artifact_ids(
     )
 
 
-def _normalize_list(value: Any) -> List[Any]:
+def _normalize_list(value: Any) -> list[Any]:
     if not isinstance(value, list):
         return []
     return list(value)
@@ -144,7 +144,7 @@ def _key_value_entries_to_dict(value: Any) -> Any:
     if value is None or isinstance(value, dict):
         return _strip_none(value)
     if isinstance(value, list):
-        normalized: Dict[str, Any] = {}
+        normalized: dict[str, Any] = {}
         for entry in value:
             if not isinstance(entry, dict):
                 continue
@@ -166,7 +166,7 @@ def _normalize_action_data(action: Any) -> Any:
     return _strip_none(action)
 
 
-def _normalize_config_actions(config: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_config_actions(config: dict[str, Any]) -> dict[str, Any]:
     for field in ("action", "submit_action", "cancel_action"):
         if field in config:
             config[field] = _normalize_action_data(config.get(field))
@@ -203,7 +203,7 @@ _OPTIONAL_STRING_KEYS = {
 
 def _normalize_blank_optional_strings(value: Any) -> Any:
     if isinstance(value, dict):
-        normalized: Dict[str, Any] = {}
+        normalized: dict[str, Any] = {}
         for key, item in value.items():
             if key in _OPTIONAL_STRING_KEYS and isinstance(item, str) and not item.strip():
                 normalized[key] = None
@@ -231,9 +231,9 @@ def _normalize_page_section(section: Any) -> Any:
 
 
 def _derive_module_id_for_page(
-    page: Dict[str, Any],
-    context_variables: Optional[Any],
-) -> Optional[str]:
+    page: dict[str, Any],
+    context_variables: Any | None,
+) -> str | None:
     app_build_plan = _context_get(context_variables, "app_build_plan")
     modules = []
     if isinstance(app_build_plan, dict):
@@ -257,10 +257,10 @@ def _derive_module_id_for_page(
 
 
 def _derive_submit_action_id(
-    section: Dict[str, Any],
-    page: Dict[str, Any],
-    context_variables: Optional[Any],
-) -> Optional[str]:
+    section: dict[str, Any],
+    page: dict[str, Any],
+    context_variables: Any | None,
+) -> str | None:
     config = section.get("config")
     if not isinstance(config, dict):
         return None
@@ -296,8 +296,8 @@ def _derive_submit_action_id(
 
 
 def _repair_missing_submit_hrefs(
-    page_list: List[Dict[str, Any]],
-    context_variables: Optional[Any],
+    page_list: list[dict[str, Any]],
+    context_variables: Any | None,
 ) -> None:
     for page in page_list:
         module_id = _derive_module_id_for_page(page, context_variables)
@@ -351,14 +351,14 @@ def _normalize_shell_config(shell_config: Any) -> Any:
     return _strip_none(_to_plain(shell_config))
 
 
-def _require_dict(value: Any, field: str) -> Dict[str, Any]:
+def _require_dict(value: Any, field: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"AppSchemaOutput.{field} must be a dict, got {type(value).__name__}")
     return value
 
 
-def _deep_merge_dicts(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
-    merged: Dict[str, Any] = dict(base)
+def _deep_merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(base)
     for key, value in overlay.items():
         if (
             isinstance(value, dict)
@@ -372,8 +372,8 @@ def _deep_merge_dicts(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str
 
 def _resolve_output_dir(
     *,
-    context_variables: Optional[Any] = None,
-    manifest_dict: Optional[Dict[str, Any]] = None,
+    context_variables: Any | None = None,
+    manifest_dict: dict[str, Any] | None = None,
 ) -> Path:
     """Resolve the generated app artifact directory.
 
@@ -591,7 +591,7 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
     route_ids: set[str] = set()
     route_paths: set[str] = set()
     registry_keys: set[str] = set()
-    route_by_id: Dict[str, Dict[str, Any]] = {}
+    route_by_id: dict[str, dict[str, Any]] = {}
     for index, entry in enumerate(route_manifest):
         path = f"custom_route_bundle.route_manifest[{index}]"
         if not isinstance(entry, dict):
@@ -678,18 +678,18 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
         file_paths.add(normalized)
 
 
-def _build_custom_route_manifest_json(custom_route_bundle: Dict[str, Any]) -> Dict[str, Any]:
+def _build_custom_route_manifest_json(custom_route_bundle: dict[str, Any]) -> dict[str, Any]:
     return {"pages": list(custom_route_bundle.get("route_manifest") or [])}
 
 
-def _build_custom_ui_index(custom_route_bundle: Dict[str, Any]) -> str:
+def _build_custom_ui_index(custom_route_bundle: dict[str, Any]) -> str:
     page_files = list(custom_route_bundle.get("page_files") or [])
     if not page_files:
         return "export function register() {}\n"
 
-    imports: List[str] = []
-    registrations: List[str] = []
-    registry_keys: List[str] = []
+    imports: list[str] = []
+    registrations: list[str] = []
+    registry_keys: list[str] = []
     for entry in page_files:
         file_path = str(entry["path"]).replace("\\", "/")
         rel_path = file_path[len("ui/") :]
@@ -720,10 +720,10 @@ def _build_custom_ui_index(custom_route_bundle: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _custom_route_bundle_code_files(custom_route_bundle: Any) -> List[Dict[str, str]]:
+def _custom_route_bundle_code_files(custom_route_bundle: Any) -> list[dict[str, str]]:
     if not isinstance(custom_route_bundle, dict):
         return []
-    files: List[Dict[str, str]] = [
+    files: list[dict[str, str]] = [
         {
             "filename": "ui/route_manifest.json",
             "content": json.dumps(
@@ -1044,7 +1044,7 @@ def _validate_section_config(primitive: str, config: Any, *, path: str) -> None:
         return
 
 
-def _validate_page_section(section: Dict[str, Any], *, path: str, require_id: bool = True) -> None:
+def _validate_page_section(section: dict[str, Any], *, path: str, require_id: bool = True) -> None:
     if not isinstance(section, dict):
         raise ValueError(f"{path} must be an object")
 
@@ -1069,9 +1069,9 @@ def _validate_page_section(section: Dict[str, Any], *, path: str, require_id: bo
 
 
 def _validate_manifest_against_pages(
-    manifest_dict: Dict[str, Any],
-    page_list: List[Dict[str, Any]],
-    custom_route_bundle: Optional[Dict[str, Any]],
+    manifest_dict: dict[str, Any],
+    page_list: list[dict[str, Any]],
+    custom_route_bundle: dict[str, Any] | None,
 ) -> None:
     page_names = [page["name"] for page in page_list]
     if len(page_names) != len(set(page_names)):
@@ -1106,9 +1106,9 @@ def _validate_manifest_against_pages(
 
 
 def _canonicalize_manifest_routes(
-    manifest_dict: Dict[str, Any],
-    page_list: List[Dict[str, Any]],
-    custom_route_bundle: Optional[Dict[str, Any]],
+    manifest_dict: dict[str, Any],
+    page_list: list[dict[str, Any]],
+    custom_route_bundle: dict[str, Any] | None,
 ) -> None:
     """Derive manifest route indexes from the emitted page/custom route objects.
 
@@ -1182,7 +1182,7 @@ def _validate_shell_action_variant(variant: Any, *, field: str) -> None:
         raise ValueError(f"{field}.href must be a non-empty string")
 
 
-def _validate_shell_header_actions(shell_config: Optional[Dict[str, Any]]) -> None:
+def _validate_shell_header_actions(shell_config: dict[str, Any] | None) -> None:
     if not shell_config:
         return
     if not isinstance(shell_config, dict):
@@ -1220,7 +1220,7 @@ def _validate_shell_header_actions(shell_config: Optional[Dict[str, Any]]) -> No
                 _validate_shell_action_variant(variant, field=f"{field}.variants[{variant_index}]")
 
 
-def _validate_shell_shortcuts(shell_config: Optional[Dict[str, Any]]) -> None:
+def _validate_shell_shortcuts(shell_config: dict[str, Any] | None) -> None:
     if not shell_config:
         return
     if not isinstance(shell_config, dict):
@@ -1253,7 +1253,7 @@ def _validate_shell_shortcuts(shell_config: Optional[Dict[str, Any]]) -> None:
         raise ValueError("shell_config.shortcuts.footerHideOnMobile must be a boolean")
 
 
-def _validate_shell_navigation(shell_config: Optional[Dict[str, Any]]) -> None:
+def _validate_shell_navigation(shell_config: dict[str, Any] | None) -> None:
     if not shell_config:
         return
     if not isinstance(shell_config, dict):
@@ -1312,7 +1312,7 @@ def _validate_shell_navigation(shell_config: Optional[Dict[str, Any]]) -> None:
             raise ValueError("shell_config.navigation.items[*].placement must be a string or object")
 
 
-def _validate_shell_chrome(shell_config: Optional[Dict[str, Any]]) -> None:
+def _validate_shell_chrome(shell_config: dict[str, Any] | None) -> None:
     if not shell_config:
         return
     if not isinstance(shell_config, dict):
@@ -1369,20 +1369,20 @@ def _validate_shell_chrome(shell_config: Optional[Dict[str, Any]]) -> None:
 
 def _persist_to_filesystem(
     output_dir: Path,
-    manifest_dict: Dict[str, Any],
-    page_list: List[Dict[str, Any]],
-    theme_config_patch: Optional[Dict[str, Any]],
-    shell_config: Optional[Dict[str, Any]],
-    asset_manifest: Optional[Dict[str, Any]],
-    data_contract: Optional[Dict[str, Any]],
-    custom_route_bundle: Optional[Dict[str, Any]],
-) -> List[str]:
+    manifest_dict: dict[str, Any],
+    page_list: list[dict[str, Any]],
+    theme_config_patch: dict[str, Any] | None,
+    shell_config: dict[str, Any] | None,
+    asset_manifest: dict[str, Any] | None,
+    data_contract: dict[str, Any] | None,
+    custom_route_bundle: dict[str, Any] | None,
+) -> list[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
 
     Returns a list of written file paths (relative to output_dir).
     Tools are dumb — no reasoning here, just serialize what AppSchemaAgent produced.
     """
-    written: List[str] = []
+    written: list[str] = []
 
     # app.json — app-level startup and product intent.
     default_route = manifest_dict.get("default_route") or "/"
@@ -1439,7 +1439,7 @@ def _persist_to_filesystem(
     # brand/theme_config.json — deep-merge theme_config_patch when provided
     if theme_config_patch and isinstance(theme_config_patch, dict):
         theme_path = output_dir / "brand" / "theme_config.json"
-        existing: Dict[str, Any] = {}
+        existing: dict[str, Any] = {}
         if theme_path.exists():
             try:
                 existing = json.loads(theme_path.read_text(encoding="utf-8"))
@@ -1453,7 +1453,7 @@ def _persist_to_filesystem(
     # config/shell.json — deep-merge shell_config when provided
     if shell_config and isinstance(shell_config, dict):
         shell_path = output_dir / "config" / "shell.json"
-        existing_shell: Dict[str, Any] = {}
+        existing_shell: dict[str, Any] = {}
         if shell_path.exists():
             try:
                 existing_shell = json.loads(shell_path.read_text(encoding="utf-8"))
@@ -1467,7 +1467,7 @@ def _persist_to_filesystem(
     # config/asset_manifest.json — deep-merge asset_manifest when provided
     if asset_manifest and isinstance(asset_manifest, dict):
         manifest_path = output_dir / "config" / "asset_manifest.json"
-        existing_manifest: Dict[str, Any] = {}
+        existing_manifest: dict[str, Any] = {}
         if manifest_path.exists():
             try:
                 existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1498,7 +1498,7 @@ def _copy_entry(source: Path, target: Path) -> None:
     shutil.copy2(source, target)
 
 
-def promote_generated_app(source_dir: str | Path, target_root: str | Path) -> Dict[str, Any]:
+def promote_generated_app(source_dir: str | Path, target_root: str | Path) -> dict[str, Any]:
     """Explicitly promote a generated app bundle into an active app root."""
     source = Path(source_dir).resolve()
     target = Path(target_root).resolve()
@@ -1508,7 +1508,7 @@ def promote_generated_app(source_dir: str | Path, target_root: str | Path) -> Di
     if source == target or source in target.parents:
         raise ValueError("target_root must not be the generated source_dir or inside it")
 
-    copied: List[str] = []
+    copied: list[str] = []
     target.mkdir(parents=True, exist_ok=True)
     for entry in PROMOTABLE_APP_ENTRIES:
         src = source / entry
@@ -1531,39 +1531,39 @@ def promote_generated_app(source_dir: str | Path, target_root: str | Path) -> Di
 def save_app_schema(
     *,
     agent_message: Annotated[
-        Optional[str],
+        str | None,
         Field(description="Short summary of the schema produced by AppSchemaAgent."),
     ] = None,
     manifest: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="AppManifest object used to persist app.json startup and validate page routes."),
     ] = None,
     pages: Annotated[
-        Optional[List[Dict[str, Any]]],
+        list[dict[str, Any]] | None,
         Field(description="List of AppPageSchema objects, each persisted as ui/pages/{name}.yaml."),
     ] = None,
     theme_config_patch: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="Partial theme_config.json patch to merge into brand/theme_config.json. None to skip."),
     ] = None,
     shell_config: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="Optional shell config to merge into config/shell.json. None to skip."),
     ] = None,
     asset_manifest: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="Optional asset manifest to merge into config/asset_manifest.json. None to skip."),
     ] = None,
     data_contract: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="Optional canonical data contract persisted to data/contract.json. None to skip."),
     ] = None,
     custom_route_bundle: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="Optional bounded custom full-page React route bundle persisted to ui/route_manifest.json and ui/pages/custom/*.jsx."),
     ] = None,
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> str:
@@ -1691,7 +1691,7 @@ def save_app_schema(
         _logger.warning("context_variables not available or missing 'set' method")
 
     # Persist to generated artifacts; promotion is explicit and separate.
-    written: List[str] = []
+    written: list[str] = []
     try:
         output_dir = _resolve_output_dir(
             context_variables=context_variables,

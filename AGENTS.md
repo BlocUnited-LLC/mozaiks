@@ -2,6 +2,11 @@
 
 Repository-level guidance for coding agents working in this repo.
 
+## Working Path Constraint
+
+**Always work on `C:\Repos\BlocUnitedRepo\mozaiks` (this repo) and `C:\Repos\BlocUnitedRepo\mozaiks-app`.**
+Never read from or write to OneDrive paths (`C:\Users\...\OneDrive\...`). Those are stale copies, not the working repos.
+
 Read [ARCHITECTURE.md](ARCHITECTURE.md) and [CLAUDE.md](CLAUDE.md) first.
 
 This repo uses layered FastAPI hosts as the canonical OSS server composition:
@@ -248,8 +253,7 @@ When working in or generating modules:
   │   ├── notifications.yaml          ← notification rules per event
   │   ├── settings.yaml               ← user/app settings schema
   │   ├── admin.yaml                  ← admin panels mounted into /admin/*
-  │   ├── profile.yaml                ← user profile page panels (optional)
-  │   └── entitlements.yaml           ← optional capability entitlements
+  │   └── profile.yaml                ← user profile page panels (optional)
   ├── runtime_extensions.yaml         ← optional: api_router / startup_service
   └── backend/
       ├── handler.py                  ← required: thin dispatch, one method per action
@@ -279,6 +283,55 @@ When working in or generating modules:
 - Factory workflows such as `AppGenerator` produce these files through
   structured output models, and contributors may author them directly. Keep the
   canonical shapes aligned with runtime loaders, docs, and tests.
+
+## Service Contract Rule
+
+When working in or generating app services:
+
+- `app/services/` is optional app-owned support code. It is not a module system,
+  product service layer, persistence plane, security plane, or entitlement
+  authority.
+- Canonical service shape:
+  ```
+  services/
+  ├── __init__.py                         ← optional Python package marker
+  ├── config.py                           ← optional app-owned support config, no secrets
+  ├── integrations/                       ← thin clients for external or hosted APIs
+  │   ├── __init__.py
+  │   └── {service}_client.py
+  ├── adapters/                           ← provider-specific implementation mechanics
+  │   ├── __init__.py
+  │   └── {area}/
+  │       ├── __init__.py
+  │       └── {provider}.py
+  └── routes/                             ← explicit app-level routes only when required
+      ├── __init__.py
+      └── {route}.py
+  ```
+- Common adapter areas are `auth/`, `source_control/`, `deployment/`, `dns/`,
+  `registrar/`, `cloud/`, `storage/`, `search/`, `email/`, `database/`,
+  `secrets/`, and `payments/`.
+- `services/integrations/{pack_id}_client.py` is the lane for hosted-pack API
+  clients. Pages and app actions should bind to app-owned facade modules, not
+  directly to hosted-pack internals.
+- `services/adapters/{area}/{provider}.py` owns provider mechanics such as SDK
+  calls, protocol translation, signing, retries, and response normalization.
+  It must not own durable app facts, lifecycle transitions, user-facing actions,
+  permissions, emitted events, or persistence authority.
+- `services/routes/` is only for app-level routes required by a host contract or
+  explicit integration boundary. Module-local callback routes should normally
+  be declared through that module's `runtime_extensions.yaml`.
+- Modules may call service files as implementation details. Service files should
+  not import `app.modules`, use `ctx.persistence`, emit events, or dispatch
+  module actions.
+- Do not generate `app/services/data/` or `app/services/security/`. Data
+  contracts live under `app/data/`; secret policy lives at
+  `app/security/secrets.yaml`; provider-neutral secret resolution belongs in the
+  OSS `mozaiksai.core.secrets` runtime primitive.
+- Do not create entitlement grant adapters under services. SaaS plans live in
+  `app/config/subscriptions.yaml`, assignment state lives in the configured app
+  data alias, and runtime enforcement is handled by the OSS
+  `ConfiguredEntitlementAdapter`.
 
 ## Generated Secret Contract
 

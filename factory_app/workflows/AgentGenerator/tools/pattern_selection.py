@@ -8,7 +8,7 @@ guidance into downstream agent prompts.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any
 
 _logger = logging.getLogger("tools.pattern_selection")
 
@@ -34,8 +34,8 @@ def _cache_context_value(context_variables: Any, key: str, value: Any) -> None:
 
 def pattern_selection(
     *,
-    PatternSelection: Annotated[Optional[Dict[str, Any]], "Pattern selection payload"],
-    context_variables: Annotated[Optional[Any], "Context variables provided by AG2"] = None,
+    PatternSelection: Annotated[dict[str, Any] | None, "Pattern selection payload"],
+    context_variables: Annotated[Any | None, "Context variables provided by AG2"] = None,
 ) -> str:
     """Persist pattern selection for downstream prompt injections."""
 

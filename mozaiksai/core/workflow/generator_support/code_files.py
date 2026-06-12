@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
-
 
 _MODULE_CONTRACT_FILENAMES = {
     "admin.yaml",
@@ -18,7 +17,7 @@ _MODULE_CONTRACT_FILENAMES = {
 }
 
 
-def safe_relpath(raw: str) -> Optional[str]:
+def safe_relpath(raw: str) -> str | None:
     if not isinstance(raw, str):
         return None
     path = raw.replace("\\", "/").strip()
@@ -53,7 +52,7 @@ def _canonical_generated_path(path: str) -> str:
     return str(pure_path)
 
 
-def _page_file_stem(page: Dict[str, Any]) -> str:
+def _page_file_stem(page: dict[str, Any]) -> str:
     route = str(page.get("route") or "").strip()
     if route and route != "/":
         candidate = route.strip("/").split("/")[-1]
@@ -63,13 +62,13 @@ def _page_file_stem(page: Dict[str, Any]) -> str:
     return normalized or "page"
 
 
-def _materialize_app_schema_file_map(payload: Dict[str, Any]) -> Dict[str, str]:
+def _materialize_app_schema_file_map(payload: dict[str, Any]) -> dict[str, str]:
     manifest = payload.get("manifest")
     pages = payload.get("pages")
     if not isinstance(manifest, dict) or not isinstance(pages, list):
         return {}
 
-    file_map: Dict[str, str] = {}
+    file_map: dict[str, str] = {}
     default_route = manifest.get("default_route") or "/"
     auth_strategy = manifest.get("auth_strategy")
     app_json = {
@@ -127,7 +126,7 @@ def _materialize_app_schema_file_map(payload: Dict[str, Any]) -> Dict[str, str]:
     return file_map
 
 
-def _materialize_module_contract_file_map(payload: Dict[str, Any]) -> Dict[str, str]:
+def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, str]:
     bundle = payload.get("module_contract")
     if not isinstance(bundle, dict):
         return {}
@@ -136,7 +135,7 @@ def _materialize_module_contract_file_map(payload: Dict[str, Any]) -> Dict[str, 
         return {}
 
     prefix = PurePosixPath("modules", module_id)
-    file_map: Dict[str, str] = {}
+    file_map: dict[str, str] = {}
     yaml_outputs = {
         "module_yaml": prefix / "module.yaml",
         "events_yaml": prefix / "contracts" / "events.yaml",
@@ -176,8 +175,8 @@ def _materialize_module_contract_file_map(payload: Dict[str, Any]) -> Dict[str, 
     return file_map
 
 
-def _normalize_code_file_entries(raw_entries: Any) -> Dict[str, str]:
-    file_map: Dict[str, str] = {}
+def _normalize_code_file_entries(raw_entries: Any) -> dict[str, str]:
+    file_map: dict[str, str] = {}
     if not isinstance(raw_entries, list):
         return file_map
 
@@ -195,7 +194,7 @@ def _normalize_code_file_entries(raw_entries: Any) -> Dict[str, str]:
     return file_map
 
 
-def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
+def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
     """Resolve deterministic code files from a structured agent payload.
 
     Handles the generic file lanes used across all generator workflows.
@@ -277,7 +276,7 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
     return file_map
 
 
-def extract_code_file_entries_from_payload(payload: Any) -> List[Dict[str, str]]:
+def extract_code_file_entries_from_payload(payload: Any) -> list[dict[str, str]]:
     file_map = extract_code_file_map_from_payload(payload)
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 

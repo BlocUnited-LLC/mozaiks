@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Union
 import re
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -20,10 +20,8 @@ class TransitionUIBinding(BaseModel):
 
     component: str
     mode: Literal["screen"] = "screen"
-    shell_mode: Optional[
-        Literal["standard", "workspace", "conversation", "focused", "immersive", "public"]
-    ] = None
-    props: Dict[str, Any] = Field(default_factory=dict)
+    shell_mode: Literal["standard", "workspace", "conversation", "focused", "immersive", "public"] | None = None
+    props: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("component")
     @classmethod
@@ -46,7 +44,7 @@ class TransitionUIBinding(BaseModel):
 
     @field_validator("props")
     @classmethod
-    def _validate_props(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_props(cls, value: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise ValueError("transition ui props must be an object")
         return value
@@ -58,10 +56,10 @@ class TransitionOption(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    route_to: Optional[str] = None  # workflow id OR transition id
+    route_to: str | None = None  # workflow id OR transition id
     route_type: Literal["transition", "workflow"] = "workflow"  # stamped at load time
-    sequence: Optional[str] = None
-    context_variables: Dict[str, Any] = Field(default_factory=dict)
+    sequence: str | None = None
+    context_variables: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("id")
     @classmethod
@@ -73,7 +71,7 @@ class TransitionOption(BaseModel):
 
     @field_validator("route_to")
     @classmethod
-    def _normalize_route_to(cls, value: Optional[str]) -> Optional[str]:
+    def _normalize_route_to(cls, value: str | None) -> str | None:
         if value is None:
             return None
         val = str(value or "").strip()
@@ -81,7 +79,7 @@ class TransitionOption(BaseModel):
 
     @field_validator("sequence")
     @classmethod
-    def _normalize_sequence(cls, value: Optional[str]) -> Optional[str]:
+    def _normalize_sequence(cls, value: str | None) -> str | None:
         if value is None:
             return None
         val = str(value or "").strip()
@@ -89,7 +87,7 @@ class TransitionOption(BaseModel):
 
     @field_validator("context_variables")
     @classmethod
-    def _validate_context_variables(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_context_variables(cls, value: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise ValueError("TransitionOption context_variables must be an object")
         for key in value:
@@ -106,11 +104,11 @@ class ConditionRoute(BaseModel):
     match: Any  # value to compare against context_key
     route_to: str  # workflow id OR transition id
     route_type: Literal["transition", "workflow"] = "workflow"  # stamped at load time
-    sequence: Optional[str] = None
+    sequence: str | None = None
 
     @field_validator("route_to", "sequence")
     @classmethod
-    def _normalize_optional_id(cls, value: Optional[str]) -> Optional[str]:
+    def _normalize_optional_id(cls, value: str | None) -> str | None:
         if value is None:
             return None
         val = str(value or "").strip()
@@ -165,24 +163,27 @@ class WorkflowTransition(BaseModel):
         "chat_session",
         "workflow_complete",
     ]
-    ui: Optional[TransitionUIBinding] = None
+    ui: TransitionUIBinding | None = None
 
     # user_choice / confirm routing data
-    options: List[TransitionOption] = Field(default_factory=list)
+    options: list[TransitionOption] = Field(default_factory=list)
 
     # single-route transition data
-    route_to: Optional[str] = None
-    route_type: Optional[Literal["transition", "workflow"]] = None
-    sequence: Optional[str] = None
+    route_to: str | None = None
+    route_type: Literal["transition", "workflow"] | None = None
+    sequence: str | None = None
 
     # condition transition data
-    context_key: Optional[str] = None  # context_variable key to evaluate
-    routes: List[ConditionRoute] = Field(default_factory=list)
-    default_route: Optional[str] = None  # fallback workflow/transition id
+    context_key: str | None = None  # context_variable key to evaluate
+    routes: list[ConditionRoute] = Field(default_factory=list)
+    default_route: str | None = None  # fallback workflow/transition id
 
     # confirm transition data
-    confirm_route: Optional[str] = None  # workflow/transition on confirm
-    cancel_route: Optional[str] = None  # workflow/transition on cancel (optional)
+    confirm_route: str | None = None  # workflow/transition on confirm
+    cancel_route: str | None = None  # workflow/transition on cancel (optional)
+
+    # optional transitions may be skipped by the shell without user interaction
+    optional: bool = False
 
     @field_validator("id")
     @classmethod
@@ -194,14 +195,14 @@ class WorkflowTransition(BaseModel):
 
     @field_validator("sequence")
     @classmethod
-    def _normalize_sequence(cls, value: Optional[str]) -> Optional[str]:
+    def _normalize_sequence(cls, value: str | None) -> str | None:
         if value is None:
             return None
         val = str(value or "").strip()
         return val or None
 
     @model_validator(mode="after")
-    def _validate_type_fields(self) -> "WorkflowTransition":
+    def _validate_type_fields(self) -> WorkflowTransition:
         if self.transition_type in {"user_choice", "user_choice_context", "user_choice_route"} and not self.options:
             raise ValueError(f"{self.transition_type} transition must have at least one option")
         if self.transition_type in {"user_choice", "user_choice_context", "user_choice_route", "confirm"} and self.ui is None:
@@ -253,7 +254,7 @@ class WorkflowDependency(BaseModel):
 
     id: str
     scope: Literal["app", "user"] = "app"
-    reason: Optional[str] = None
+    reason: str | None = None
     gating: Literal["required", "optional"] = "required"
 
     @field_validator("id")
@@ -271,9 +272,9 @@ class WorkflowEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    description: Optional[str] = None
-    startup_mode: Optional[Literal["UserDriven", "AgentDriven", "BackendOnly"]] = None
-    dependencies: List[Union[str, WorkflowDependency]] = Field(
+    description: str | None = None
+    startup_mode: Literal["UserDriven", "AgentDriven", "BackendOnly"] | None = None
+    dependencies: list[str | WorkflowDependency] = Field(
         default_factory=list,
         description=(
             "Workflow execution-gating dependencies. Declares which workflows must "
@@ -304,12 +305,12 @@ class WorkflowEntrypoint(BaseModel):
     id: str
     path: str
     label: str = ""
-    transition: Optional[str] = None
-    workflow: Optional[str] = None
-    sequence: Optional[str] = None
+    transition: str | None = None
+    workflow: str | None = None
+    sequence: str | None = None
     requiresAuth: bool = True
     order: int = 100
-    meta: Dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("id")
     @classmethod
@@ -329,7 +330,7 @@ class WorkflowEntrypoint(BaseModel):
 
     @field_validator("transition", "workflow", "sequence")
     @classmethod
-    def _normalize_optional_id(cls, value: Optional[str]) -> Optional[str]:
+    def _normalize_optional_id(cls, value: str | None) -> str | None:
         if value is None:
             return None
         val = str(value or "").strip()
@@ -337,13 +338,13 @@ class WorkflowEntrypoint(BaseModel):
 
     @field_validator("meta")
     @classmethod
-    def _validate_meta(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_meta(cls, value: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise ValueError("entrypoint meta must be an object")
         return value
 
     @model_validator(mode="after")
-    def _validate_target(self) -> "WorkflowEntrypoint":
+    def _validate_target(self) -> WorkflowEntrypoint:
         if bool(self.transition) == bool(self.workflow):
             raise ValueError("entrypoint must declare exactly one of transition or workflow")
         return self
@@ -354,15 +355,15 @@ class JourneyStepGroup(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    workflows: List[str] = Field(default_factory=list)
-    transition: Optional[str] = None
+    workflows: list[str] = Field(default_factory=list)
+    transition: str | None = None
 
     @field_validator("workflows")
     @classmethod
-    def _validate_workflows(cls, value: List[str]) -> List[str]:
+    def _validate_workflows(cls, value: list[str]) -> list[str]:
         if not isinstance(value, list):
             raise ValueError("journey step group workflows must be a list")
-        normalized: List[str] = []
+        normalized: list[str] = []
         for item in value:
             if not isinstance(item, str) or not item.strip():
                 raise ValueError("journey step group workflows must be non-empty strings")
@@ -371,14 +372,14 @@ class JourneyStepGroup(BaseModel):
 
     @field_validator("transition")
     @classmethod
-    def _validate_transition(cls, value: Optional[str]) -> Optional[str]:
+    def _validate_transition(cls, value: str | None) -> str | None:
         if value is None:
             return None
         transition = str(value or "").strip()
         return transition or None
 
     @model_validator(mode="after")
-    def _validate_step_shape(self) -> "JourneyStepGroup":
+    def _validate_step_shape(self) -> JourneyStepGroup:
         has_workflows = bool(self.workflows)
         has_transition = bool(self.transition)
         if has_workflows == has_transition:
@@ -392,9 +393,9 @@ class GlobalJourney(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    description: Optional[str] = None
-    affected_declarative_families: List[str] = Field(default_factory=list)
-    steps: List[JourneyStepGroup] = Field(default_factory=list)
+    description: str | None = None
+    affected_declarative_families: list[str] = Field(default_factory=list)
+    steps: list[JourneyStepGroup] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod
@@ -406,17 +407,17 @@ class GlobalJourney(BaseModel):
 
     @field_validator("steps")
     @classmethod
-    def _validate_steps(cls, value: List[JourneyStepGroup]) -> List[JourneyStepGroup]:
+    def _validate_steps(cls, value: list[JourneyStepGroup]) -> list[JourneyStepGroup]:
         if not isinstance(value, list) or not value:
             raise ValueError("journey steps must be a non-empty list")
         return value
 
     @field_validator("affected_declarative_families")
     @classmethod
-    def _validate_affected_declarative_families(cls, value: List[str]) -> List[str]:
+    def _validate_affected_declarative_families(cls, value: list[str]) -> list[str]:
         if not isinstance(value, list):
             raise ValueError("journey affected_declarative_families must be a list")
-        normalized: List[str] = []
+        normalized: list[str] = []
         for item in value:
             family = str(item or "").strip()
             if family:
@@ -439,13 +440,13 @@ class GlobalPackGraph(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[3]
-    pack_name: Optional[str] = None
-    description: Optional[str] = None
-    workflows: List[WorkflowEntry] = Field(default_factory=list)
-    entrypoints: List[WorkflowEntrypoint] = Field(default_factory=list)
-    journeys: List[GlobalJourney] = Field(default_factory=list)
-    transitions: List[WorkflowTransition] = Field(default_factory=list)
-    artifact_dependency_graph: Dict[str, List[str]] = Field(
+    pack_name: str | None = None
+    description: str | None = None
+    workflows: list[WorkflowEntry] = Field(default_factory=list)
+    entrypoints: list[WorkflowEntrypoint] = Field(default_factory=list)
+    journeys: list[GlobalJourney] = Field(default_factory=list)
+    transitions: list[WorkflowTransition] = Field(default_factory=list)
+    artifact_dependency_graph: dict[str, list[str]] = Field(
         default_factory=dict,
         description=(
             "Declarative artifact family dependency graph. Each key is an artifact family; "
@@ -456,10 +457,10 @@ class GlobalPackGraph(BaseModel):
 
     @field_validator("artifact_dependency_graph")
     @classmethod
-    def _validate_artifact_dependency_graph(cls, value: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    def _validate_artifact_dependency_graph(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
         if not isinstance(value, dict):
             raise ValueError("artifact_dependency_graph must be an object")
-        normalized: Dict[str, List[str]] = {}
+        normalized: dict[str, list[str]] = {}
         for raw_family, raw_dependencies in value.items():
             family = str(raw_family or "").strip()
             if not family:
@@ -468,7 +469,7 @@ class GlobalPackGraph(BaseModel):
                 raise ValueError(
                     f"artifact_dependency_graph family '{family}' dependencies must be a list"
                 )
-            dependencies: List[str] = []
+            dependencies: list[str] = []
             for raw_dependency in raw_dependencies:
                 dependency = str(raw_dependency or "").strip()
                 if not dependency:
@@ -481,20 +482,20 @@ class GlobalPackGraph(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _validate_uniqueness_and_refs(self) -> "GlobalPackGraph":
-        wf_ids: List[str] = [w.id for w in self.workflows]
+    def _validate_uniqueness_and_refs(self) -> GlobalPackGraph:
+        wf_ids: list[str] = [w.id for w in self.workflows]
         if len(wf_ids) != len(set(wf_ids)):
             raise ValueError("global pack graph contains duplicate workflow ids")
-        entrypoint_ids: List[str] = [e.id for e in self.entrypoints]
+        entrypoint_ids: list[str] = [e.id for e in self.entrypoints]
         if len(entrypoint_ids) != len(set(entrypoint_ids)):
             raise ValueError("global pack graph contains duplicate entrypoint ids")
-        entrypoint_paths: List[str] = [e.path for e in self.entrypoints]
+        entrypoint_paths: list[str] = [e.path for e in self.entrypoints]
         if len(entrypoint_paths) != len(set(entrypoint_paths)):
             raise ValueError("global pack graph contains duplicate entrypoint paths")
-        transition_ids: List[str] = [t.id for t in self.transitions]
+        transition_ids: list[str] = [t.id for t in self.transitions]
         if len(transition_ids) != len(set(transition_ids)):
             raise ValueError("global pack graph contains duplicate transition ids")
-        journey_ids: List[str] = [j.id for j in self.journeys]
+        journey_ids: list[str] = [j.id for j in self.journeys]
         if len(journey_ids) != len(set(journey_ids)):
             raise ValueError("global pack graph contains duplicate journey ids")
         artifact_families = set(self.artifact_dependency_graph.keys())
@@ -599,7 +600,7 @@ class GlobalPackGraph(BaseModel):
                 )
         workflow_entries = {workflow.id: workflow for workflow in self.workflows}
         for journey in self.journeys:
-            group_index_by_workflow: Dict[str, int] = {}
+            group_index_by_workflow: dict[str, int] = {}
             for index, group in enumerate(journey.steps):
                 if group.transition and group.transition not in transition_id_set:
                     raise ValueError(
@@ -654,7 +655,7 @@ class GlobalPackGraph(BaseModel):
         return self
 
 
-def normalize_step_groups(steps: List[JourneyStepGroup]) -> List[List[str]]:
+def normalize_step_groups(steps: list[JourneyStepGroup]) -> list[list[str]]:
     """Normalize GlobalJourney steps to grouped execution layers.
 
     Transition checkpoint steps are represented as empty groups so journey
@@ -663,8 +664,8 @@ def normalize_step_groups(steps: List[JourneyStepGroup]) -> List[List[str]]:
     return [list(step.workflows) for step in steps]
 
 
-def parse_global_pack_graph(raw: Dict[str, Any]) -> GlobalPackGraph:
-    normalized: Dict[str, Any] = dict(raw or {})
+def parse_global_pack_graph(raw: dict[str, Any]) -> GlobalPackGraph:
+    normalized: dict[str, Any] = dict(raw or {})
     if "journeys" in normalized:
         raise ValueError(
             "Invalid global pack graph: 'journeys' is no longer supported; use "

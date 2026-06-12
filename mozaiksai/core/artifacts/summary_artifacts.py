@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any
 
 from .models import ArtifactLifecycleStatus, ArtifactValidationStatus, ArtifactVersionDoc
 from .store import ArtifactStore, get_artifact_store
@@ -53,8 +54,8 @@ async def resolve_latest_artifact_version_refs(
     *,
     app_id: str,
     artifact_kinds: Iterable[str],
-    artifact_key_by_kind: Optional[Mapping[str, str]] = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    artifact_key_by_kind: Mapping[str, str] | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> dict[str, str]:
     resolved_app_id = str(app_id or "").strip()
     if not resolved_app_id:
@@ -103,16 +104,16 @@ async def persist_summary_artifact(
     app_id: str,
     artifact_kind: str,
     summary_payload: Any,
-    source_workflow: Optional[str] = None,
-    source_chat_id: Optional[str] = None,
-    author_user_id: Optional[str] = None,
-    artifact_key: Optional[str] = None,
-    message: Optional[str] = None,
+    source_workflow: str | None = None,
+    source_chat_id: str | None = None,
+    author_user_id: str | None = None,
+    artifact_key: str | None = None,
+    message: str | None = None,
     revision_mode: bool = False,
-    parent_version_id: Optional[str] = None,
-    canonical_inputs_version: Optional[Mapping[str, str]] = None,
-    input_artifact_kinds: Optional[Iterable[str]] = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    parent_version_id: str | None = None,
+    canonical_inputs_version: Mapping[str, str] | None = None,
+    input_artifact_kinds: Iterable[str] | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> ArtifactVersionDoc:
     resolved_app_id = str(app_id or "").strip()
     resolved_artifact_kind = str(artifact_kind or "").strip()

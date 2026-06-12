@@ -5,22 +5,21 @@
 
 from __future__ import annotations
 
-import os
 import json
+import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+from logs.logging_config import get_workflow_logger
 
 from .adapter import create_context_container
 from .data_entity import DataEntityManager
 from .db_adapters import get_db_adapter
 from .schema import (
-    ContextVariablesPlan,
     ContextVariableDefinition,
-    ContextVariableSource,
-    ContextAgentView,
+    ContextVariablesPlan,
     load_context_variables_config,
 )
-from logs.logging_config import get_workflow_logger
 
 business_logger = get_workflow_logger("context_variables")
 
@@ -66,7 +65,7 @@ def _is_within_root(candidate: Path, root: Path) -> bool:
 # Helper utilities
 # ---------------------------------------------------------------------------
 
-def _context_to_dict(container: Any) -> Dict[str, Any]:
+def _context_to_dict(container: Any) -> dict[str, Any]:
     try:
         if hasattr(container, "to_dict"):
             return dict(container.to_dict())  # type: ignore[arg-type]
@@ -80,7 +79,7 @@ def _context_to_dict(container: Any) -> Dict[str, Any]:
     return {}
 
 
-def _coerce_value(definition: Optional[ContextVariableDefinition], raw_value: Any) -> Any:
+def _coerce_value(definition: ContextVariableDefinition | None, raw_value: Any) -> Any:
     if definition is None:
         return raw_value
     if raw_value is None:
@@ -168,7 +167,7 @@ def _resolve_file_source(definition: ContextVariableDefinition) -> Any:
     return _coerce_value(definition, json.loads(raw))
 
 
-def _load_data_reference_fallbacks() -> Dict[str, Any]:
+def _load_data_reference_fallbacks() -> dict[str, Any]:
     """Load optional data_reference fallback values from a JSON file.
 
     File path is configured through MOZAIKS_CONTEXT_FALLBACKS_FILE.
@@ -225,7 +224,7 @@ def _load_data_reference_fallbacks() -> Dict[str, Any]:
 
 
 def _lookup_data_reference_fallback(
-    fallbacks: Dict[str, Any],
+    fallbacks: dict[str, Any],
     workflow_name: str,
     variable_name: str,
 ) -> Any:
@@ -234,7 +233,7 @@ def _lookup_data_reference_fallback(
     if not fallbacks or not variable_name:
         return None
 
-    def _find_workflow_scope(workflows: Any, wf_name: str) -> Dict[str, Any]:
+    def _find_workflow_scope(workflows: Any, wf_name: str) -> dict[str, Any]:
         if not isinstance(workflows, dict):
             return {}
         for key, value in workflows.items():
@@ -257,7 +256,7 @@ def _lookup_data_reference_fallback(
     return None
 
 
-def _create_minimal_context(workflow_name: str, app_id: Optional[str]):
+def _create_minimal_context(workflow_name: str, app_id: str | None):
     context = create_context_container()
     if app_id:
         context.set("app_id", app_id)
@@ -274,7 +273,7 @@ def _create_minimal_context(workflow_name: str, app_id: Optional[str]):
     return context
 
 
-def _database_defaults(raw_section: Dict[str, Any]) -> Optional[str]:
+def _database_defaults(raw_section: dict[str, Any]) -> str | None:
     defaults = None
     if isinstance(raw_section, dict):
         defaults = raw_section.get("default_database_name")
@@ -314,13 +313,13 @@ def _resolve_template_value(template: Any, context: Any, app_id: str) -> Any:
 
 
 def _materialize_query_template(
-    template: Optional[Dict[str, Any]],
+    template: dict[str, Any] | None,
     context: Any,
     app_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not template:
         return {"app_id": app_id}
-    resolved: Dict[str, Any] = {}
+    resolved: dict[str, Any] = {}
     for key, value in template.items():
         resolved[key] = _resolve_template_value(value, context, app_id)
     return resolved
@@ -330,7 +329,7 @@ async def _load_data_reference_value(
     name: str,
     definition: ContextVariableDefinition,
     *,
-    default_database_name: Optional[str],
+    default_database_name: str | None,
     app_id: str,
     context: Any,
 ) -> Any:
@@ -378,8 +377,8 @@ def _create_data_entity_manager(
     name: str,
     definition: ContextVariableDefinition,
     *,
-    default_database_name: Optional[str],
-) -> Optional[DataEntityManager]:
+    default_database_name: str | None,
+) -> DataEntityManager | None:
     source = definition.source
     db_name = source.database_name or default_database_name
     collection = source.collection
@@ -411,8 +410,8 @@ def _create_data_entity_manager(
 # Workflow config loading
 # ---------------------------------------------------------------------------
 
-def _load_workflow_plan(workflow_name: str) -> Tuple[ContextVariablesPlan, Dict[str, Any]]:
-    raw_section: Dict[str, Any] = {}
+def _load_workflow_plan(workflow_name: str) -> tuple[ContextVariablesPlan, dict[str, Any]]:
+    raw_section: dict[str, Any] = {}
     try:
         from ..workflow_manager import get_workflow_manager
 
@@ -432,10 +431,10 @@ def _load_workflow_plan(workflow_name: str) -> Tuple[ContextVariablesPlan, Dict[
 # Schema utilities shared by context loading and inspection paths
 # ---------------------------------------------------------------------------
 
-async def _get_all_collections_first_docs(database_name: str) -> Dict[str, Any]:
+async def _get_all_collections_first_docs(database_name: str) -> dict[str, Any]:
     from mozaiksai.core.core_config import get_mongo_client  # local import
 
-    result: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
     try:
         client = get_mongo_client()
         db = client[database_name]
@@ -459,8 +458,8 @@ async def _get_all_collections_first_docs(database_name: str) -> Dict[str, Any]:
     return result
 
 
-async def _get_database_schema_async(database_name: str) -> Dict[str, Any]:
-    schema_info: Dict[str, Any] = {}
+async def _get_database_schema_async(database_name: str) -> dict[str, Any]:
+    schema_info: dict[str, Any] = {}
 
     try:
         from mozaiksai.core.core_config import get_mongo_client
@@ -469,13 +468,13 @@ async def _get_database_schema_async(database_name: str) -> Dict[str, Any]:
         db = client[database_name]
         collection_names = await db.list_collection_names()
 
-        schema_lines: List[str] = []
+        schema_lines: list[str] = []
         schema_lines.append(f"DATABASE: {database_name}")
         schema_lines.append(f"TOTAL COLLECTIONS: {len(collection_names)}")
         schema_lines.append("")
 
-        app_collections: List[str] = []
-        collection_schemas: Dict[str, Dict[str, str]] = {}
+        app_collections: list[str] = []
+        collection_schemas: dict[str, dict[str, str]] = {}
 
         for collection_name in collection_names:
             try:
@@ -485,7 +484,7 @@ async def _get_database_schema_async(database_name: str) -> Dict[str, Any]:
                     collection_schemas[collection_name] = {"note": "No sample data available"}
                     continue
 
-                field_types: Dict[str, str] = {}
+                field_types: dict[str, str] = {}
                 for field_name, value in sample_doc.items():
                     if field_name == "_id":
                         continue
@@ -533,7 +532,7 @@ async def _get_database_schema_async(database_name: str) -> Dict[str, Any]:
 # Main loader
 # ---------------------------------------------------------------------------
 
-async def _load_context_async(workflow_name: str, app_id: Optional[str]):
+async def _load_context_async(workflow_name: str, app_id: str | None):
     business_logger.info(f"Loading context for workflow={workflow_name}")
     context = _create_minimal_context(workflow_name, app_id)
     internal_app_id = app_id or ""
@@ -542,7 +541,7 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
 
     # Optional schema overview (gated by env)
     schema_capability_enabled = False
-    schema_capability_db: Optional[str] = None
+    schema_capability_db: str | None = None
     if isinstance(raw_context_section, dict):
         try:
             include_schema = os.getenv("CONTEXT_INCLUDE_SCHEMA", "false").lower() in _TRUE_FLAG_VALUES
@@ -575,7 +574,7 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
     definitions = plan.definitions or {}
     default_db = _database_defaults(raw_context_section)
     fallbacks = _load_data_reference_fallbacks()
-    data_entity_managers: List[DataEntityManager] = []
+    data_entity_managers: list[DataEntityManager] = []
 
     for name, definition in definitions.items():
         source = definition.source
@@ -647,13 +646,13 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
             business_logger.debug("Unsupported source type for %s: %s", name, source_type)
 
     if data_entity_managers:
-        setattr(context, "_mozaiks_data_entity_managers", data_entity_managers)
+        context._mozaiks_data_entity_managers = data_entity_managers
 
     # Expose definitions and agent plan on the context container for downstream consumers
     if definitions:
-        setattr(context, "_mozaiks_context_definitions", definitions)
+        context._mozaiks_context_definitions = definitions
     if plan.agents:
-        setattr(context, "_mozaiks_context_agents", plan.agents)
+        context._mozaiks_context_agents = plan.agents
 
     # Log context summary
     try:

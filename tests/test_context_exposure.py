@@ -30,8 +30,8 @@ def test_apply_context_exposures_uses_agent_variable_fallback() -> None:
 
 @pytest.mark.asyncio
 async def test_create_agents_exposes_declared_context_variables_without_explicit_exposures(monkeypatch) -> None:
-    from mozaiksai.core.workflow.agents import factory
     from mozaiksai.core.workflow import llm_config
+    from mozaiksai.core.workflow.agents import factory
     from mozaiksai.core.workflow.agents import tools as agent_tools
     from mozaiksai.core.workflow.outputs import structured
 
@@ -83,7 +83,7 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
     agents = await factory.create_agents("AppGenerator", context_variables=_Context())
 
     assert "AppSchemaAgent" in agents
-    system_message = getattr(agents["AppSchemaAgent"], "_mozaiks_base_system_message")
+    system_message = agents["AppSchemaAgent"]._mozaiks_base_system_message
     assert "APP_BUILD_PLAN" in system_message
     assert "SUPPORT OPERATIONS" in system_message.upper()
 

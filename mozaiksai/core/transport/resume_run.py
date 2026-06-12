@@ -7,13 +7,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.workflow.startup_messages import resolve_hidden_initial_message
 
-SendEventFunc = Callable[[Dict[str, Any], Optional[str]], Awaitable[None]]
+SendEventFunc = Callable[[dict[str, Any], str | None], Awaitable[None]]
 
 
 class AgentRunResumer:
@@ -27,10 +28,10 @@ class AgentRunResumer:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str],
+        app_id: str | None,
         send_event: SendEventFunc,
-        workflow_startup_mode: Optional[str] = None,
-    ) -> Optional[int]:
+        workflow_startup_mode: str | None = None,
+    ) -> int | None:
         """Replay persisted messages for in-progress chats when a socket connects."""
         if not app_id:
             self.logger.debug("[AUTO_RESUME] Missing app_id for %s; skipping", chat_id)
@@ -67,7 +68,7 @@ class AgentRunResumer:
             return None
 
         pm = self._get_persistence_manager()
-        messages: List[Dict[str, Any]] = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
+        messages: list[dict[str, Any]] = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
         if not messages:
             self.logger.debug("[AUTO_RESUME] No messages to replay for %s", chat_id)
             return None
@@ -91,11 +92,11 @@ class AgentRunResumer:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str],
+        app_id: str | None,
         last_client_index: int,
         send_event: SendEventFunc,
-        workflow_startup_mode: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        workflow_startup_mode: str | None = None,
+    ) -> dict[str, Any]:
         """Process an explicit client.resume handshake request."""
         if not app_id:
             raise RuntimeError("Missing app_id for resume flow")
@@ -106,7 +107,7 @@ class AgentRunResumer:
             projection={"status": 1, "workflow_name": 1, "user_id": 1},
         )
         pm = self._get_persistence_manager()
-        messages: List[Dict[str, Any]] = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
+        messages: list[dict[str, Any]] = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
         status = doc.get("status", "unknown")
         workflow_name = doc.get("workflow_name")
         workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, workflow_name)
@@ -169,17 +170,17 @@ class AgentRunResumer:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str],
-        messages: List[Dict[str, Any]],
+        app_id: str | None,
+        messages: list[dict[str, Any]],
         send_event: SendEventFunc,
         mode: str,
         chat_status: str,
         start_index: int,
-        context: Optional[Dict[str, Any]],
-        workflow_startup_mode: Optional[str] = None,
-        hidden_initial_message: Optional[str] = None,
-        resume_state: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, int]:
+        context: dict[str, Any] | None,
+        workflow_startup_mode: str | None = None,
+        hidden_initial_message: str | None = None,
+        resume_state: dict[str, Any] | None = None,
+    ) -> dict[str, int]:
         slice_messages = messages[start_index:]
         if not slice_messages:
             await send_event(
@@ -204,7 +205,7 @@ class AgentRunResumer:
             chat_id=chat_id,
             app_id=app_id,
         )
-        replayed_messages: List[Dict[str, Any]] = []
+        replayed_messages: list[dict[str, Any]] = []
         last_index = start_index - 1
         for offset, message in enumerate(slice_messages):
             absolute_index = start_index + offset
@@ -325,9 +326,9 @@ class AgentRunResumer:
     def _resolve_hidden_initial_message(
         self,
         *,
-        workflow_name: Optional[str],
-        workflow_startup_mode: Optional[str],
-    ) -> Optional[str]:
+        workflow_name: str | None,
+        workflow_startup_mode: str | None,
+    ) -> str | None:
         try:
             return resolve_hidden_initial_message(
                 workflow_name,
@@ -341,7 +342,7 @@ class AgentRunResumer:
             )
             return None
 
-    def _resolve_startup_mode(self, workflow_startup_mode: Optional[str], workflow_name: Optional[str]) -> Optional[str]:
+    def _resolve_startup_mode(self, workflow_startup_mode: str | None, workflow_name: str | None) -> str | None:
         normalized = str(workflow_startup_mode or "").strip().lower()
         if normalized:
             return normalized
@@ -356,7 +357,7 @@ class AgentRunResumer:
         except Exception:
             return None
 
-    def _build_text_event(self, *, message: Dict[str, Any], index: int, chat_id: str) -> Dict[str, Any]:
+    def _build_text_event(self, *, message: dict[str, Any], index: int, chat_id: str) -> dict[str, Any]:
         timestamp = message.get("timestamp")
         if isinstance(timestamp, datetime):
             timestamp = timestamp.isoformat()
@@ -374,7 +375,7 @@ class AgentRunResumer:
             "index": index,
             "chat_id": chat_id,
             "replay": True,
-            "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp or datetime.now(UTC).isoformat(),
         }
         metadata = message.get("metadata")
         if metadata:
@@ -420,10 +421,10 @@ class AgentRunResumer:
         mode: str,
         chat_status: str,
         start_index: int,
-        events_slice: List[Dict[str, Any]],
-        context: Optional[Dict[str, Any]],
-        resume_state: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        events_slice: list[dict[str, Any]],
+        context: dict[str, Any] | None,
+        resume_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         ag2_resume = {
             "mode": mode,
             "start_index": start_index,
@@ -441,7 +442,7 @@ class AgentRunResumer:
             "replayed_messages": replayed,
             "last_message_index": last_index,
             "resume_mode": mode,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "ag2_resume": ag2_resume,
         }
         if context:
@@ -454,8 +455,8 @@ class AgentRunResumer:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str],
-    ) -> Dict[int, Dict[str, Any]]:
+        app_id: str | None,
+    ) -> dict[int, dict[str, Any]]:
         if not app_id:
             return {}
         try:
@@ -464,7 +465,7 @@ class AgentRunResumer:
             if loader is None:
                 return {}
             states = await loader(chat_id=chat_id, app_id=app_id)
-            indexed: Dict[int, Dict[str, Any]] = {}
+            indexed: dict[int, dict[str, Any]] = {}
             for state in states or []:
                 if not isinstance(state, dict):
                     continue
@@ -490,7 +491,7 @@ class AgentRunResumer:
             self.logger.debug("[AUTO_RESUME] Failed to load workflow UI state for %s: %s", chat_id, exc)
             return {}
 
-    def _normalize_tool_call_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_tool_call_state(self, state: dict[str, Any]) -> dict[str, Any]:
         normalized = self._json_safe(dict(state))
         normalized.pop("message_index", None)
         normalized.pop("updated_at", None)
@@ -499,10 +500,10 @@ class AgentRunResumer:
     def _decorate_message_with_tool_call_state(
         self,
         *,
-        message: Dict[str, Any],
+        message: dict[str, Any],
         index: int,
-        tool_call_state_by_index: Dict[int, Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        tool_call_state_by_index: dict[int, dict[str, Any]],
+    ) -> dict[str, Any]:
         tool_call_state = tool_call_state_by_index.get(index)
         if not tool_call_state:
             return message
@@ -514,7 +515,7 @@ class AgentRunResumer:
         decorated["metadata"] = next_metadata
         return decorated
 
-    def _sanitize_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_message(self, message: dict[str, Any]) -> dict[str, Any]:
         return {
             "role": message.get("role"),
             "name": message.get("name"),
@@ -529,7 +530,7 @@ class AgentRunResumer:
         if isinstance(value, datetime):
             return value.isoformat()
         if isinstance(value, dict):
-            out: Dict[str, Any] = {}
+            out: dict[str, Any] = {}
             for k, v in value.items():
                 if isinstance(k, str):
                     key = k
@@ -547,8 +548,8 @@ class AgentRunResumer:
         self,
         chat_id: str,
         app_id: str,
-        projection: Optional[Dict[str, int]] = None,
-    ) -> Dict[str, Any]:
+        projection: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
         try:
             pm = await self._ensure_persistence_manager()
             coll = await pm._coll()
@@ -571,7 +572,7 @@ class AgentRunResumer:
             self._persistence_manager = AG2PersistenceManager()
         return self._persistence_manager
 
-    async def _load_resume_state(self, *, app_id: Optional[str], user_id: Any) -> Optional[Dict[str, Any]]:
+    async def _load_resume_state(self, *, app_id: str | None, user_id: Any) -> dict[str, Any] | None:
         resolved_app_id = str(app_id or "").strip()
         resolved_user_id = str(user_id or "").strip()
         if not resolved_app_id or not resolved_user_id:
@@ -599,14 +600,14 @@ class AgentRunResumer:
         agent: str,
         prompt: str,
         chat_id: str,
-        component_type: Optional[str] = None,
-        workflow_name: Optional[str] = None,
-        tool_name: Optional[str] = None,
+        component_type: str | None = None,
+        workflow_name: str | None = None,
+        tool_name: str | None = None,
         display: str = "composer",
         interaction_type: str = "input_request",
         password: bool = False,
-        raw_payload: Optional[Dict[str, Any]] = None,
-        ) -> Dict[str, Any]:
+        raw_payload: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
         """Build a response-required tool_call payload for UI resume."""
         resolved_component = component_type or "UserInputRequest"
         resolved_tool_name = tool_name or component_type or resolved_component
@@ -638,7 +639,7 @@ class AgentRunResumer:
             "chat_id": chat_id,
             "payload": payload,
             "replay": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "metadata": {
                 "source": "resume_pending_input",
             },
@@ -650,8 +651,8 @@ class AgentRunResumer:
         agent: str,
         prompt: str,
         chat_id: str,
-        workflow_name: Optional[str],
-    ) -> Dict[str, Any]:
+        workflow_name: str | None,
+    ) -> dict[str, Any]:
         return {
             "kind": "awaiting_reply",
             "agent": agent or "Agent",
@@ -663,7 +664,7 @@ class AgentRunResumer:
             "prompt": prompt or "",
             "source_agent": agent or "Agent",
             "replay": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "metadata": {
                 "source": "resume_pending_input",
             },

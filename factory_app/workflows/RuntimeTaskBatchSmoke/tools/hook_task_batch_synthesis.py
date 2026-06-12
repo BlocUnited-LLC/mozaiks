@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-
 _HEADER = "[DETERMINISTIC TASK BATCH SYNTHESIS]"
 
 
@@ -133,8 +132,8 @@ def _update_section(agent: Any, body: str) -> None:
     if callable(updater):
         updater(new_message)
     else:
-        setattr(agent, "system_message", new_message)
-        setattr(agent, "_system_message", new_message)
+        agent.system_message = new_message
+        agent._system_message = new_message
 
 
 def inject_task_batch_synthesis_context(agent: Any, messages: list[dict[str, Any]]) -> None:

@@ -222,12 +222,11 @@ def _create_bundle_scaffold(
   app_root = target_dir / "app"
   config_dir = app_root / "config"
   control_plane_config_dir = target_dir / "control_plane" / "config"
+  security_dir = app_root / "security"
   services_dir = app_root / "services"
   service_integrations_dir = services_dir / "integrations"
   service_adapters_dir = services_dir / "adapters"
-  service_security_dir = services_dir / "security"
   service_routes_dir = services_dir / "routes"
-  service_data_dir = services_dir / "data"
   data_dir = app_root / "data"
   modules_dir = app_root / "modules"
   workflows_dir = target_dir / "workflows"
@@ -243,12 +242,11 @@ def _create_bundle_scaffold(
     app_root,
     config_dir,
     control_plane_config_dir,
+    security_dir,
     services_dir,
     service_integrations_dir,
     service_adapters_dir,
-    service_security_dir,
     service_routes_dir,
-    service_data_dir,
     data_dir,
     *(service_adapters_dir / area for area in (
       "auth",
@@ -273,7 +271,7 @@ def _create_bundle_scaffold(
   ):
     directory.mkdir(parents=True, exist_ok=True)
 
-  print("Created scaffold directories: app/config, control_plane/config, app/services, app/modules, workflows, app/ui, app/brand")
+  print("Created scaffold directories: app/config, app/security, control_plane/config, app/services, app/modules, workflows, app/ui, app/brand")
 
   features = TIER_PRESETS[preset]
   resolved_admin = admin_email.strip().lower() if isinstance(admin_email, str) and admin_email.strip() else None
@@ -306,17 +304,14 @@ def _create_bundle_scaffold(
   _write_json(config_dir / "shell.json", _build_shell_config(app_name))
   print("Created app/config/shell.json")
 
-  _write_text(config_dir / "secrets.yaml", _secrets_yaml_placeholder())
-  print("Created app/config/secrets.yaml")
+  _write_text(security_dir / "secrets.yaml", _secrets_yaml_placeholder())
+  print("Created app/security/secrets.yaml")
 
   _write_json(data_dir / "contract.json", _data_contract_placeholder())
   print("Created app/data/contract.json")
 
   _write_service_support_stubs(services_dir)
   print("Created app/services support stubs")
-
-  _write_text(service_data_dir / "__init__.py", '"""Data contract helpers declared by app/data/contract.json."""\n')
-  print("Created app/services/data/")
 
   _copy_default_brand_bundle(brand_dir, app_name)
   print("Created app/brand from factory_app default brand")
@@ -1008,7 +1003,7 @@ def _copy_default_brand_bundle(brand_dir: Path, app_name: str) -> None:
 
 def _secrets_yaml_placeholder() -> str:
     return """\
-# app/config/secrets.yaml — names-only secret management contract.
+# app/security/secrets.yaml - names-only secret management contract.
 # Declare secret names, env handles, and provider policy here.
 # NEVER store raw API keys, tokens, passwords, connection strings, or
 # private keys in this file. Use environment variables or a vault provider.
@@ -1045,9 +1040,7 @@ def _write_service_support_stubs(services_dir: Path) -> None:
     for package in (
         services_dir / "integrations",
         services_dir / "adapters",
-        services_dir / "security",
         services_dir / "routes",
-        services_dir / "data",
     ):
         _write_text(package / "__init__.py", "")
     for area in (

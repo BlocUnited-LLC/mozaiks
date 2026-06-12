@@ -14,7 +14,10 @@ from mozaiksai.core.app_context.models import (
     OwnershipClass,
     SourceRef,
 )
-from mozaiksai.core.app_context.store import get_app_context_version, get_current_app_context_version
+from mozaiksai.core.app_context.store import (
+    get_app_context_version,
+    get_current_app_context_version,
+)
 from mozaiksai.core.artifacts.store import ArtifactStore
 
 APP_CONTEXT_MISSING_WARNING = (

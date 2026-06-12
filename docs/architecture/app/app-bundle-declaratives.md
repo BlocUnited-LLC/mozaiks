@@ -22,7 +22,7 @@ hardcoded app-specific branches.
 
 Runtime-facing app configuration, including AI provider settings, shell config,
 admin config, and theme config. When an app needs durable runtime secrets,
-`app/config/secrets.yaml` declares the secret provider/vault policy, env
+`app/security/secrets.yaml` declares the secret provider/vault policy, env
 handles, and secret names only. It must never contain raw credential values.
 
 `app/config/subscriptions.yaml` is the canonical generated-app SaaS plan
@@ -98,7 +98,7 @@ frontend theme loader.
 - Keep shell/navigation/chrome behavior in `app/config/shell.json`; keep visual
   tokens, typography, radius, density, shadows, and brand assets in
   `app/brand/theme_config.json`.
-- Keep secret requirements and vault/provider policy in `app/config/secrets.yaml`
+- Keep secret requirements and vault/provider policy in `app/security/secrets.yaml`
   when needed; generated app bundles must carry names and handles only, never
   raw API keys, tokens, passwords, connection strings, private keys, or webhook
   secrets.

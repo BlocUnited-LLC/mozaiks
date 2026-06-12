@@ -409,6 +409,19 @@ mozaiksai/control_plane/
 
 `factory_app/app/modules/factory_control_plane/` contains a module identity plus a stub `backend/handler.py` only — no actions, capabilities, or runtime behavior. It surfaces the control plane as a named entity in the Studio module list only. Do not add logic there.
 
+### Runtime Capabilities
+
+`factory_app/control_plane/config/runtime.yaml` declares which control-plane capabilities are active and which LLM profile each uses. These are loaded into `ControlPlaneConfig` at startup.
+
+| Capability | Field | Purpose | Default profile |
+|------------|-------|---------|-----------------|
+| Classification | `classifier` | Assigns change class (patch/design/feature/core) to refinement requests | `classifier` (low-temp, deterministic) |
+| Code generation | `coding` | Generates scoped artifact patches and module code | `codegen` |
+| Contract surface | `contract_surface` | Validates and refines module/workflow contracts | `codegen` |
+| Scope proposal | `scope` | Proposes the narrowest safe file scope for a coding refinement | `codegen` (falls back to `coding` if not declared) |
+
+Each capability has `enabled: bool` and an `llm_profile` reference. Operator packs can override the LLM profile or disable individual capabilities without affecting others. The `scope` capability drives `ScopeProposer` — it resolves `scope` first, then falls back to `coding`, so existing `runtime.yaml` files that predate `scope` continue to work.
+
 ### Checkpoints
 
 Each checkpoint has a trigger condition, a context-loading step, a classifier prompt, and a routing policy.
@@ -649,9 +662,7 @@ workspace/
 │   └── services/
 │       ├── integrations/
 │       ├── adapters/
-│       ├── security/
-│       ├── routes/
-│       └── data/
+│       └── routes/
 └── workflows/
     └── {WorkflowName}/
         ├── orchestrator.yaml
@@ -676,10 +687,12 @@ page-local visual systems.
 contains thin clients for external or hosted APIs. `app/services/adapters/` contains
 provider-specific implementation boundaries such as auth/OIDC/OAuth,
 source-control, deployment, DNS, registrar, cloud, storage, search, email, or
-payment provider mechanics. These files are not modules: they must not own
-runtime actions, lifecycle state, emitted events, permissions, or persistence
-authority. Modules own business behavior and may call these support files.
-Generic runtime auth adapters remain framework code under `mozaiksai/core/auth/`.
+payment provider mechanics. `app/services/routes/` contains explicit app-level
+routes only when a host or module extension contract requires them. These files
+are not modules: they must not own runtime actions, lifecycle state, emitted
+events, permissions, or persistence authority. Modules own business behavior and
+may call these support files. Generic runtime auth adapters remain framework code
+under `mozaiksai/core/auth/`.
 
 Every bundle (module, workflow, page) declares a `visibility`: `public` (all users), `internal` (authenticated only), or `admin` (admin only).
 
@@ -816,7 +829,7 @@ These invariants guide every implementation decision in this repo.
 | AppBackendPort | generic contract in `mozaiksai` for AI runtime ↔ app backend communication |
 | app_backend_url | optional base URL for an external/generated app backend when a split topology is used |
 | module | self-contained deterministic capability unit under an app workspace `modules/` root or a generated app bundle |
-| module manifest system | `module.yaml` (required) + optional `contracts/` companion manifests: `events.yaml`, `reactions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`, `profile.yaml`, `entitlements.yaml` |
+| module manifest system | `module.yaml` (required) + optional `contracts/` companion manifests: `events.yaml`, `reactions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`, `profile.yaml` |
 | module.yaml | handler/action manifest — identity, capabilities, and action definitions; event declarations live in `events.yaml` |
 | admin.yaml (platform) | module admin panels rendered inside unified `/admin` |
 | profile.yaml (platform) | module-contributed panels on the user profile page (`/profile`) — kinds: `metrics`, `list`, `component`; hydrated via `GET /api/me/profile-panels` |

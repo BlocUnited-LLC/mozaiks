@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 
@@ -36,11 +36,11 @@ _AGENT_DEFAULT_CONTRACTS = {
 }
 
 
-def _load_yaml(path: Path) -> Dict[str, Any] | None:
+def _load_yaml(path: Path) -> dict[str, Any] | None:
     try:
         import yaml  # type: ignore
 
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
         return data if isinstance(data, dict) else None
     except Exception as exc:
@@ -91,10 +91,10 @@ def _update_section(agent: Any, header: str, body: str) -> None:
     elif hasattr(agent, "_system_message"):
         agent._system_message = new_message
     else:
-        setattr(agent, "_system_message", new_message)
+        agent._system_message = new_message
 
 
-def _format_list_block(title: str, items: List[str]) -> List[str]:
+def _format_list_block(title: str, items: list[str]) -> list[str]:
     if not items:
         return []
     lines = [title]
@@ -102,7 +102,7 @@ def _format_list_block(title: str, items: List[str]) -> List[str]:
     return lines
 
 
-def _build_contract_block(contract_name: str, contract: Dict[str, Any]) -> str:
+def _build_contract_block(contract_name: str, contract: dict[str, Any]) -> str:
     lines = [f"{contract_name}:"]
     owner_agent = str(contract.get("owner_agent") or "").strip()
     summary = str(contract.get("summary") or "").strip()
@@ -137,7 +137,7 @@ def _current_task_type(agent: Any) -> str:
     return str(_context_get(context_variables, "current_build_task_type", "") or "").strip()
 
 
-def _build_file_contracts_body(agent: Any, file_contracts: Dict[str, Any]) -> str:
+def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> str:
     task_contracts = file_contracts.get("task_contracts") if isinstance(file_contracts.get("task_contracts"), dict) else {}
     agent_name = getattr(agent, "name", "")
 
@@ -199,7 +199,7 @@ def _selected_module_archetype(agent: Any) -> str:
     return ""
 
 
-def _build_archetype_block(name: str, archetype: Dict[str, Any]) -> str:
+def _build_archetype_block(name: str, archetype: dict[str, Any]) -> str:
     lines = [f"{name}:"]
     summary = str(archetype.get("summary") or "").strip()
     if summary:
@@ -220,7 +220,7 @@ def _build_archetype_block(name: str, archetype: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _build_module_archetypes_body(agent: Any, module_archetypes: Dict[str, Any]) -> str:
+def _build_module_archetypes_body(agent: Any, module_archetypes: dict[str, Any]) -> str:
     agent_name = getattr(agent, "name", "")
     if agent_name not in {"ConfigMiddlewareAgent", "ServiceAgent"}:
         return ""
@@ -254,7 +254,7 @@ def _build_module_archetypes_body(agent: Any, module_archetypes: Dict[str, Any])
     return "\n\n".join(lines)
 
 
-def _build_workflow_archetypes_body(agent: Any, workflow_archetypes: Dict[str, Any]) -> str:
+def _build_workflow_archetypes_body(agent: Any, workflow_archetypes: dict[str, Any]) -> str:
     """Render workflow archetype guidance for injection into AppPlanAgent."""
     agent_name = getattr(agent, "name", "")
     if agent_name != "AppPlanAgent":
@@ -300,7 +300,7 @@ def _build_workflow_archetypes_body(agent: Any, workflow_archetypes: Dict[str, A
     return "\n".join(lines)
 
 
-def inject_cookie_cutter_contracts_context(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def inject_cookie_cutter_contracts_context(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Inject file contracts, module archetypes, and workflow archetypes into AppGenerator agents."""
     del messages
 

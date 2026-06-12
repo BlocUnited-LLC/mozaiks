@@ -10,9 +10,10 @@ in the agent prompt or UI if desired).
 """
 
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
+
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
 _logger = logging.getLogger("tools.attachments")
@@ -21,10 +22,10 @@ _logger = logging.getLogger("tools.attachments")
 async def list_attachments(
     *,
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List attachment metadata for the current chat.
 
     Returns attachment records as stored on the ChatSessions document.
@@ -52,7 +53,7 @@ async def list_attachments(
         attachments = []
 
     # Only return metadata; never return file bytes.
-    sanitized: List[Dict[str, Any]] = []
+    sanitized: list[dict[str, Any]] = []
     for att in attachments:
         if not isinstance(att, dict):
             continue
@@ -77,15 +78,15 @@ async def list_attachments(
 async def set_attachment_intent(
     *,
     AttachmentIntentUpdate: Annotated[
-        Dict[str, Any],
+        dict[str, Any],
         Field(description="Attachment update payload with attachment_id, intent, and optional bundle_path."),
     ],
     agent_message: Annotated[str, Field(description="Short audit message.")],
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Update an attachment's intent/bundle_path in ChatSessions.attachments.
 
     Hybrid gating:
@@ -138,7 +139,7 @@ async def set_attachment_intent(
     pm = AG2PersistenceManager()
     coll = await pm._coll()
 
-    update_doc: Dict[str, Any] = {
+    update_doc: dict[str, Any] = {
         "attachments.$.intent": intent,
     }
     if bundle_path is not None:

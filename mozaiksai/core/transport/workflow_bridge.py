@@ -20,8 +20,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from mozaiksai.core.runtime.composition.extensions import get_workflow_lifecycle_hooks
 from mozaiksai.core.transport.session_registry import session_registry
@@ -50,11 +50,11 @@ class WorkflowBridgeMixin:
     # API-DRIVEN WORKFLOW EXECUTION
     # ==================================================================================
 
-    def _ui_run_complete_registry(self) -> Dict[str, bool]:
+    def _ui_run_complete_registry(self) -> dict[str, bool]:
         registry = getattr(self, "_ui_run_complete_sent", None)
         if not isinstance(registry, dict):
             registry = {}
-            setattr(self, "_ui_run_complete_sent", registry)
+            self._ui_run_complete_sent = registry
         return registry
 
     def _has_ui_run_complete_sent(self, chat_id: str) -> bool:
@@ -120,10 +120,10 @@ class WorkflowBridgeMixin:
         self,
         *,
         chat_id: str,
-        workflow_name: Optional[str],
-        app_id: Optional[str],
-        user_input: Optional[str],
-    ) -> Dict[str, Any]:
+        workflow_name: str | None,
+        app_id: str | None,
+        user_input: str | None,
+    ) -> dict[str, Any]:
         """Apply declarative user_text triggers before resuming a paused workflow."""
 
         candidate = str(user_input or "").strip()
@@ -143,7 +143,7 @@ class WorkflowBridgeMixin:
                 from mozaiksai.core.workflow.context.adapter import create_context_container
                 from mozaiksai.core.workflow.context.derived import DerivedContextManager
 
-                persisted_context: Dict[str, Any] = {}
+                persisted_context: dict[str, Any] = {}
                 if persistence_manager is not None:
                     persisted_context = await persistence_manager.fetch_chat_session_extra_context(
                         chat_id=chat_id,
@@ -182,12 +182,12 @@ class WorkflowBridgeMixin:
     async def handle_user_input_from_api(
         self,
         chat_id: str,
-        user_id: Optional[str],
+        user_id: str | None,
         workflow_name: str,
-        message: Optional[str],
+        message: str | None,
         app_id: str,
-        initial_agent_name_override: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        initial_agent_name_override: str | None = None,
+    ) -> dict[str, Any]:
         """
         Handle user input from the POST API endpoint with smart routing.
 
@@ -252,7 +252,7 @@ class WorkflowBridgeMixin:
                                 logger.debug(f"User message persistence failed (non-fatal): {persist_err}")
                         return {"status": "success", "chat_id": chat_id, "message": "Input passed to existing AG2 session.", "route": route}
                     else:
-                        logger.warning(f"[SMART_ROUTING] Failed to submit input to existing session, falling back to new workflow")
+                        logger.warning("[SMART_ROUTING] Failed to submit input to existing session, falling back to new workflow")
 
             # No active session or callback failed - start new workflow
             logger.info(f"[SMART_ROUTING] Starting new workflow for chat {chat_id}")
@@ -424,9 +424,9 @@ class WorkflowBridgeMixin:
         workflow_name: str,
         app_id: str,
         user_id: str,
-        ws_id: Optional[int],
-        initial_message: Optional[str] = None,
-        initial_agent_name_override: Optional[str] = None,
+        ws_id: int | None,
+        initial_message: str | None = None,
+        initial_agent_name_override: str | None = None,
     ) -> None:
         """Run a workflow orchestration in the background.
 
@@ -449,7 +449,9 @@ class WorkflowBridgeMixin:
                     run_status_value = run_status
                     # Emit run_complete success asynchronously to dispatcher
                     try:
-                        from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+                        from mozaiksai.core.events.unified_event_dispatcher import (
+                            get_event_dispatcher,
+                        )
 
                         dispatcher = get_event_dispatcher()
                         asyncio.create_task(
@@ -470,7 +472,9 @@ class WorkflowBridgeMixin:
                 except Exception:
                     # Emit failed run_complete before re-raising so listeners can react
                     try:
-                        from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
+                        from mozaiksai.core.events.unified_event_dispatcher import (
+                            get_event_dispatcher,
+                        )
 
                         dispatcher = get_event_dispatcher()
                         asyncio.create_task(
@@ -578,9 +582,9 @@ class WorkflowBridgeMixin:
     async def send_chat_message(
         self,
         message: str,
-        agent_name: Optional[str] = None,
-        chat_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        agent_name: str | None = None,
+        chat_id: str | None = None,
+        metadata: dict[str, Any] | None = None
     ) -> None:
         """Send chat message to user interface."""
         # Create properly formatted event data with 'kind' field for envelope builder
@@ -589,7 +593,7 @@ class WorkflowBridgeMixin:
             "agent": agent_name or "Agent",
             "content": str(message),
             "chat_id": chat_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
         if metadata:
             event_data["metadata"] = metadata

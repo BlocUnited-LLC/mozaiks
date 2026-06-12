@@ -27,7 +27,7 @@ detected in design_surface_map.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def _inject_section(agent: Any, header: str, body: str) -> None:
         elif hasattr(agent, "_system_message"):
             agent._system_message = new_message
         else:
-            setattr(agent, "_system_message", new_message)
+            agent._system_message = new_message
     except Exception as exc:
         logger.error(
             "[%s] Failed to inject section %s: %s",
@@ -304,7 +304,7 @@ def _build_callback_body(ai_surfaces: list[dict]) -> str:
 
 def inject_ai_pack_archetype_context(
     agent: Any,
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> None:
     """
     prompt middleware function for PatternAgent and WorkflowBundleBuilderAgent.

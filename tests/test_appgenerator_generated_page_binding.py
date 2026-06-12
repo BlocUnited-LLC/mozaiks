@@ -12,18 +12,14 @@ This is AppGenerator/test-level validation, not runtime validation.
 """
 from __future__ import annotations
 
-from typing import Any, List, Set
-
-import pytest
-
 
 class AppBuildPlan:
     """Simulates an app build plan with declared modules."""
 
     def __init__(self):
-        self.modules: Set[str] = set()
-        self.hosted_packs: Set[str] = set()
-        self.facades: Set[str] = set()
+        self.modules: set[str] = set()
+        self.hosted_packs: set[str] = set()
+        self.facades: set[str] = set()
 
     def declare_module(self, module_id: str, is_hosted_pack: bool = False) -> None:
         """Declare a module in this build plan."""
@@ -33,15 +29,15 @@ class AppBuildPlan:
         else:
             self.facades.add(module_id)
 
-    def get_modules(self) -> Set[str]:
+    def get_modules(self) -> set[str]:
         """Get all declared modules."""
         return self.modules.copy()
 
-    def get_facade_modules(self) -> Set[str]:
+    def get_facade_modules(self) -> set[str]:
         """Get app-owned façade modules."""
         return self.facades.copy()
 
-    def get_hosted_packs(self) -> Set[str]:
+    def get_hosted_packs(self) -> set[str]:
         """Get hosted pack references."""
         return self.hosted_packs.copy()
 
@@ -56,20 +52,20 @@ class PageSchema:
     def __init__(self, name: str, route: str):
         self.name = name
         self.route = route
-        self.endpoints: List[str] = []
+        self.endpoints: list[str] = []
 
     def add_endpoint(self, module_id: str, action_id: str) -> None:
         """Add a module endpoint reference."""
         endpoint = f"/api/modules/{module_id}/{action_id}"
         self.endpoints.append(endpoint)
 
-    def get_endpoints(self) -> List[str]:
+    def get_endpoints(self) -> list[str]:
         """Get all endpoints."""
         return self.endpoints.copy()
 
-    def extract_module_ids(self) -> Set[str]:
+    def extract_module_ids(self) -> set[str]:
         """Extract module IDs from endpoints."""
-        module_ids: Set[str] = set()
+        module_ids: set[str] = set()
         for endpoint in self.endpoints:
             # Parse /api/modules/{module_id}/{action_id}
             parts = endpoint.split("/")
@@ -81,13 +77,13 @@ class PageSchema:
 class PageBindingValidator:
     """Validates page schema endpoint bindings."""
 
-    def validate(self, page: PageSchema, plan: AppBuildPlan) -> tuple[bool, List[str]]:
+    def validate(self, page: PageSchema, plan: AppBuildPlan) -> tuple[bool, list[str]]:
         """
         Validate page endpoints against build plan.
 
         Returns (is_valid, error_messages).
         """
-        errors: List[str] = []
+        errors: list[str] = []
         module_ids = page.extract_module_ids()
 
         for module_id in module_ids:

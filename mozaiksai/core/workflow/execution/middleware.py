@@ -7,19 +7,19 @@ middleware that mutates ``Context.prompt`` before the model call.
 
 from __future__ import annotations
 
-from pathlib import Path
-from collections.abc import Sequence
-from typing import Any, Callable, Dict, List, Optional
 import contextlib
 import importlib
 import importlib.util
 import logging
 import sys
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
 
+import yaml
 from autogen.beta import Context
 from autogen.beta.events import BaseEvent, ModelResponse
 from autogen.beta.middleware import BaseMiddleware, LLMCall, Middleware
-import yaml
 
 from ..declarative import parse_middleware_config
 
@@ -105,7 +105,7 @@ def _ensure_workflow_import_paths(workflow_path: Path) -> None:
         workflow_path,
         workflow_path / "tools",
     )
-    normalized: List[str] = []
+    normalized: list[str] = []
     for candidate in desired_order:
         try:
             value = str(candidate.resolve())
@@ -122,14 +122,14 @@ def _ensure_workflow_import_paths(workflow_path: Path) -> None:
 
 def _resolve_import(
     workflow_name: str,
-    file_value: Optional[str],
+    file_value: str | None,
     function_value: str,
     workflow_path: Path,
-) -> tuple[Optional[Callable], str]:
+) -> tuple[Callable | None, str]:
     """Resolve and import a prompt middleware function from a workflow bundle."""
 
-    module_name: Optional[str] = None
-    fn_name: Optional[str] = None
+    module_name: str | None = None
+    fn_name: str | None = None
 
     if file_value:
         file_path = Path(file_value)
@@ -215,7 +215,7 @@ def _resolve_import(
     return fn, f"{module_name}.{fn_name}" if fn_name else module_name or "<unknown>"
 
 
-def _read_middleware_config(workflow_path: Path) -> tuple[Dict[str, Any], str | None]:
+def _read_middleware_config(workflow_path: Path) -> tuple[dict[str, Any], str | None]:
     """Load and validate `middleware.yaml` from a workflow directory."""
 
     middleware_yaml = workflow_path / "middleware.yaml"
@@ -231,7 +231,7 @@ def _read_middleware_config(workflow_path: Path) -> tuple[Dict[str, Any], str | 
         return {}, None
 
 
-def load_prompt_middleware_entries(workflow_name: str, *, base_path: str = "workflows") -> List[Dict[str, Any]]:
+def load_prompt_middleware_entries(workflow_name: str, *, base_path: str = "workflows") -> list[dict[str, Any]]:
     """Load prompt middleware entries from `middleware.yaml`."""
 
     workflow_path = Path(base_path) / workflow_name

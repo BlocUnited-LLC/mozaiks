@@ -15,15 +15,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Optional
 
-from mozaiksai.core.admin.paths import resolve_admin_app_root
 from logs.logging_config import get_core_logger
+from mozaiksai.core.admin.paths import resolve_admin_app_root
 
 logger = get_core_logger("admin.email_promotion")
 
 
-def get_admin_emails() -> List[str]:
+def get_admin_emails() -> list[str]:
     """
     Return the normalised admin email list from app.json.
 
@@ -36,14 +35,14 @@ def get_admin_emails() -> List[str]:
         return []
     try:
         config = json.loads(path.read_text(encoding="utf-8"))
-        raw: List[str] = config.get("admins") or []
+        raw: list[str] = config.get("admins") or []
         return [e.lower().strip() for e in raw if isinstance(e, str) and e.strip()]
     except Exception as e:
         logger.warning(f"[admin] Could not read admins from app.json: {e}")
         return []
 
 
-def is_admin_by_email(email: Optional[str]) -> bool:
+def is_admin_by_email(email: str | None) -> bool:
     """Return True if email is in the app.json admins allowlist."""
     if not email:
         return False

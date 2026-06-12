@@ -250,6 +250,12 @@ lifecycle_tools:
     function: hydrate_app_build_plan_context
     description: Hydrate task-batch context from a preloaded AppBuildPlan before AppGenerator agents run.
     tool_type: Agent_Tool
+  - trigger: before_chat
+    agent: null
+    file: hydrate_workflow_integration_context.py
+    function: hydrate_workflow_integration_context
+    description: Hydrate generated_workflow_* context from the latest workflow_bundle artifact before AppGenerator agents run.
+    tool_type: Agent_Tool
   - trigger: on_start
     agent: null
     file: tools/platform/build_lifecycle.py

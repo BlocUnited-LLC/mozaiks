@@ -4,18 +4,23 @@
 # ==============================================================================
 
 import logging
-from pydantic import BaseModel, Field, create_model
-from typing import List, Dict, Any, Optional, Union, Tuple, Set, Literal, get_args, get_origin
+import types as _types
 from enum import Enum
+from typing import Any, Literal, Optional, Union, get_args, get_origin
+
+_UNION_ORIGINS = (Union, _types.UnionType) if hasattr(_types, "UnionType") else (Union,)
+
+from pydantic import BaseModel, Field, create_model
+
 from ..llm_config import get_llm_config
 from ..workflow_manager import workflow_manager
 
 # Workflow-specific model cache
-_workflow_models: Dict[str, Dict[str, type]] = {}
-_workflow_registries: Dict[str, Dict[str, type]] = {}
+_workflow_models: dict[str, dict[str, type]] = {}
+_workflow_registries: dict[str, dict[str, type]] = {}
 # Cache of workflow -> set(agent_names) that have structured output models
-_workflow_structured_agents: Dict[str, Set[str]] = {}
-_provider_response_model_cache: Dict[type[BaseModel], type[BaseModel]] = {}
+_workflow_structured_agents: dict[str, set[str]] = {}
+_provider_response_model_cache: dict[type[BaseModel], type[BaseModel]] = {}
 logger = logging.getLogger(__name__)
 
 # Type mapping for consistent field resolution
@@ -28,13 +33,13 @@ TYPE_MAP = {
     'Optional[str]': Optional[str],
     'list': list,
     'List': list,
-    'dict': Dict[str, Any],
-    'Dict': Dict[str, Any],
+    'dict': dict[str, Any],
+    'Dict': dict[str, Any],
     'float': float,
 }
 
 
-def _build_literal_enum(name: str, values: List[Any]) -> type[Enum]:
+def _build_literal_enum(name: str, values: list[Any]) -> type[Enum]:
     enum_name = f"{name}Enum_{abs(hash(tuple(values))) % 10000}"
     enum_members = {f"VALUE_{i}": value for i, value in enumerate(values)}
     return Enum(enum_name, enum_members)  # type: ignore[return-value]
@@ -42,10 +47,10 @@ def _build_literal_enum(name: str, values: List[Any]) -> type[Enum]:
 
 def _resolve_named_type(
     type_name: str,
-    available_models: Dict[str, type],
-    alias_defs: Dict[str, Dict[str, Any]],
-    alias_cache: Dict[str, Any],
-    stack: Optional[Set[str]] = None,
+    available_models: dict[str, type],
+    alias_defs: dict[str, dict[str, Any]],
+    alias_cache: dict[str, Any],
+    stack: set[str] | None = None,
 ) -> Any:
     normalized = str(type_name or "").strip()
     if not normalized:
@@ -110,7 +115,7 @@ def _resolve_named_type(
     return resolved
 
 
-def _inline_schema_refs(node: Any, defs: Dict[str, Any], stack: Optional[Set[str]] = None) -> Any:
+def _inline_schema_refs(node: Any, defs: dict[str, Any], stack: set[str] | None = None) -> Any:
     if stack is None:
         stack = set()
 
@@ -164,7 +169,7 @@ def _patch_model_schema(model_cls: type[BaseModel]) -> None:
     if getattr(model_cls, "__mozaiks_schema_patched", False):
         return
 
-    def _model_json_schema(cls, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    def _model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
         schema = BaseModel.model_json_schema.__func__(cls, *args, **kwargs)  # type: ignore[attr-defined]
         defs = schema.pop('$defs', None)
         if isinstance(defs, dict) and defs:
@@ -198,25 +203,25 @@ def _strictify_response_annotation(annotation: Any) -> Any:
     except Exception:
         pass
 
-    if origin in (list, List):
+    if origin in (list, list):
         args = get_args(annotation)
         if not args:
             return annotation
-        return List[_strictify_response_annotation(args[0])]  # type: ignore[valid-type]
+        return list[_strictify_response_annotation(args[0])]  # type: ignore[valid-type]
 
-    if origin in (set, Set):
+    if origin in (set, set):
         args = get_args(annotation)
         if not args:
             return annotation
-        return Set[_strictify_response_annotation(args[0])]  # type: ignore[valid-type]
+        return set[_strictify_response_annotation(args[0])]  # type: ignore[valid-type]
 
-    if origin in (tuple, Tuple):
+    if origin in (tuple, tuple):
         args = get_args(annotation)
         if not args:
             return annotation
-        return Tuple[tuple(_strictify_response_annotation(arg) for arg in args)]  # type: ignore[misc]
+        return tuple[tuple(_strictify_response_annotation(arg) for arg in args)]  # type: ignore[misc]
 
-    if origin is Union:
+    if origin in _UNION_ORIGINS:
         strict_args = tuple(_strictify_response_annotation(arg) for arg in get_args(annotation))
         return Union[strict_args]  # type: ignore[misc]
 
@@ -228,11 +233,11 @@ def get_provider_response_model(model_cls: type[BaseModel]) -> type[BaseModel]:
     if cached is not None:
         return cached
 
-    fields: Dict[str, Tuple[Any, Any]] = {}
+    fields: dict[str, tuple[Any, Any]] = {}
     for field_name, field_info in getattr(model_cls, "model_fields", {}).items():
         raw_annotation = getattr(field_info, "annotation", Any)
         field_annotation = _strictify_response_annotation(raw_annotation)
-        field_kwargs: Dict[str, Any] = {}
+        field_kwargs: dict[str, Any] = {}
         description = getattr(field_info, "description", None)
         if (
             isinstance(description, str)
@@ -252,16 +257,16 @@ def _find_open_ended_object_path(
     annotation: Any,
     *,
     path: str,
-    visited_models: Optional[Set[type[BaseModel]]] = None,
-) -> Optional[str]:
+    visited_models: set[type[BaseModel]] | None = None,
+) -> str | None:
     """Return the first path that contains a freeform object/dict annotation."""
     visited_models = visited_models or set()
 
     origin = get_origin(annotation)
-    if origin in (dict, Dict):
+    if origin in (dict, dict):
         return path
 
-    if origin in (list, List, set, tuple):
+    if origin in (list, list, set, tuple):
         for arg in get_args(annotation):
             found = _find_open_ended_object_path(
                 arg,
@@ -272,7 +277,7 @@ def _find_open_ended_object_path(
                 return found
         return None
 
-    if origin is Union:
+    if origin in _UNION_ORIGINS:
         for arg in get_args(annotation):
             if arg is type(None):
                 continue
@@ -308,7 +313,7 @@ def _find_open_ended_object_path(
     return None
 
 
-def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool, Optional[str]]:
+def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool, str | None]:
     """Return whether a model is safe for provider-enforced strict response_format.
 
     OpenAI strict structured outputs do not support open-ended object blobs like
@@ -321,7 +326,7 @@ def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool,
     return True, None
 
 
-def _build_field(field_kwargs: Dict[str, Any]) -> Any:
+def _build_field(field_kwargs: dict[str, Any]) -> Any:
     if 'default' in field_kwargs and field_kwargs["default"] is not None:
         default = field_kwargs.pop('default')
         return Field(default, **field_kwargs)
@@ -330,21 +335,21 @@ def _build_field(field_kwargs: Dict[str, Any]) -> Any:
 
 
 def resolve_field_type(
-    field_def: Dict[str, Any],
-    available_models: Dict[str, type],
-    alias_defs: Optional[Dict[str, Dict[str, Any]]] = None,
-    alias_cache: Optional[Dict[str, Any]] = None,
-) -> Tuple[Any, Any]:
+    field_def: dict[str, Any],
+    available_models: dict[str, type],
+    alias_defs: dict[str, dict[str, Any]] | None = None,
+    alias_cache: dict[str, Any] | None = None,
+) -> tuple[Any, Any]:
     alias_defs = alias_defs or {}
     alias_cache = alias_cache or {}
     field_type_str = str(field_def.get('type', '')).strip()
-    field_kwargs: Dict[str, Any] = {}
+    field_kwargs: dict[str, Any] = {}
     if 'description' in field_def:
         field_kwargs['description'] = field_def['description']
     if 'default' in field_def:
         field_kwargs['default'] = field_def['default']
     if field_type_str == 'optional_dict':
-        return Optional[Dict[str, Any]], _build_field(field_kwargs)  # type: ignore[return-value]
+        return Optional[dict[str, Any]], _build_field(field_kwargs)  # type: ignore[return-value]
     # Primitive
     if field_type_str in {'list', 'optional_list'}:
         items_type = field_def.get('items')
@@ -352,7 +357,7 @@ def resolve_field_type(
             raise ValueError("List type requires 'items'")
         if isinstance(items_type, str):
             item_type = _resolve_named_type(items_type, available_models, alias_defs, alias_cache)
-            base = List[item_type]  # type: ignore[valid-type]
+            base = list[item_type]  # type: ignore[valid-type]
         else:
             raise ValueError("Unsupported list items spec")
         if field_type_str == 'optional_list':
@@ -370,7 +375,7 @@ def resolve_field_type(
     # list type
     # dict primitive support (already mapped in TYPE_MAP earlier, but handle explicit 'dict' path if missed)
     if field_type_str == 'dict':
-        return Dict[str, Any], _build_field(field_kwargs)  # type: ignore
+        return dict[str, Any], _build_field(field_kwargs)  # type: ignore
     if field_type_str == 'union':
         variants = field_def.get('variants') or []
         if not isinstance(variants, list) or not variants:
@@ -405,25 +410,25 @@ def resolve_field_type(
     if field_type_str.startswith('list[') and field_type_str.endswith(']'):
         inner = field_type_str[5:-1].strip()
         inner_type = _resolve_named_type(inner, available_models, alias_defs, alias_cache)
-        return List[inner_type], _build_field(field_kwargs)  # type: ignore
+        return list[inner_type], _build_field(field_kwargs)  # type: ignore
     raise ValueError(f"Unknown field type: {field_type_str}")
 
-def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
+def build_models_from_config(models_config: dict[str, Any]) -> dict[str, type]:
     if not models_config:
         return {}
-    models: Dict[str, type] = {}
-    alias_defs: Dict[str, Dict[str, Any]] = {
+    models: dict[str, type] = {}
+    alias_defs: dict[str, dict[str, Any]] = {
         name: mdef
         for name, mdef in models_config.items()
         if isinstance(mdef, dict) and mdef.get("type") in {"literal", "union"}
     }
-    alias_cache: Dict[str, Any] = {}
-    pending: List[Tuple[str, Dict[str, Any]]] = []
+    alias_cache: dict[str, Any] = {}
+    pending: list[tuple[str, dict[str, Any]]] = []
     # first pass
     for name, mdef in models_config.items():
         if mdef.get('type') != 'model':
             continue
-        fields: Dict[str, Tuple[Any, Any]] = {}
+        fields: dict[str, tuple[Any, Any]] = {}
         unresolved = False
         for fname, fdef in (mdef.get('fields') or {}).items():
             try:
@@ -440,9 +445,9 @@ def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
             models[name] = model_cls
     # iterative resolution
     for _ in range(len(pending)):
-        remaining: List[Tuple[str, Dict[str, Any]]] = []
+        remaining: list[tuple[str, dict[str, Any]]] = []
         for name, mdef in pending:
-            fields: Dict[str, Tuple[Any, Any]] = {}
+            fields: dict[str, tuple[Any, Any]] = {}
             unresolved = False
             for fname, fdef in (mdef.get('fields') or {}).items():
                 try:
@@ -464,7 +469,7 @@ def build_models_from_config(models_config: Dict[str, Any]) -> Dict[str, type]:
         raise ValueError(f"Unresolved model dependencies: {[n for n,_ in pending]}")
     return models
 
-def load_workflow_structured_outputs(workflow_name: str) -> tuple[Dict[str, type], Dict[str, type]]:
+def load_workflow_structured_outputs(workflow_name: str) -> tuple[dict[str, type], dict[str, type]]:
     """Load structured outputs configuration for a workflow."""
     if workflow_name in _workflow_models:
         # Ensure structured agents cache is initialized before returning cached models.
@@ -508,7 +513,7 @@ def load_workflow_structured_outputs(workflow_name: str) -> tuple[Dict[str, type
     
     return models, registry
 
-def get_structured_outputs_for_workflow(workflow_name: str) -> Dict[str, type]:
+def get_structured_outputs_for_workflow(workflow_name: str) -> dict[str, type]:
     """Get structured outputs registry for a specific workflow."""
     _, registry = load_workflow_structured_outputs(workflow_name)
     return registry
@@ -516,7 +521,7 @@ def get_structured_outputs_for_workflow(workflow_name: str) -> Dict[str, type]:
 # ---------------------------------------------------------------------------
 # NEW HELPER TAG / INTROSPECTION FUNCTIONS
 # ---------------------------------------------------------------------------
-def get_structured_output_agents(workflow_name: str) -> List[str]:
+def get_structured_output_agents(workflow_name: str) -> list[str]:
     """Return list of agent names in a workflow that produce structured outputs.
 
     Provides a simple 'tag' list the rest of the system (or UI) can use to
@@ -530,7 +535,7 @@ def agent_has_structured_output(workflow_name: str, agent_name: str) -> bool:
     load_workflow_structured_outputs(workflow_name)
     return agent_name in _workflow_structured_agents.get(workflow_name, set())
 
-def get_structured_output_model_fields(workflow_name: str, agent_name: str) -> Dict[str, str]:
+def get_structured_output_model_fields(workflow_name: str, agent_name: str) -> dict[str, str]:
     """Return a mapping of field_name -> python_type_name for an agent's model.
 
     Useful for embedding lightweight schema hints in events or persistence so
@@ -550,7 +555,7 @@ def get_structured_output_model_fields(workflow_name: str, agent_name: str) -> D
         except Exception:
             return {}
 
-def build_dynamic_models(spec_models: List[Dict[str, Any]], existing_models: Dict[str, type]) -> Dict[str, type]:
+def build_dynamic_models(spec_models: list[dict[str, Any]], existing_models: dict[str, type]) -> dict[str, type]:
     """Build dynamic models from runtime specifications."""
     if not spec_models:
         return {}
@@ -576,7 +581,7 @@ def build_dynamic_models(spec_models: List[Dict[str, Any]], existing_models: Dic
             if not fname or not ftype:
                 continue
             fdesc = field_spec.get('description')
-            field_def: Dict[str, Any] = {'type': ftype}
+            field_def: dict[str, Any] = {'type': ftype}
             if fdesc:
                 field_def['description'] = fdesc
             if 'items' in field_spec:
@@ -596,7 +601,7 @@ def build_dynamic_models(spec_models: List[Dict[str, Any]], existing_models: Dic
     return new_models
 
 
-def create_pydantic_model_from_schema(schema: Dict[str, Any]) -> type:
+def create_pydantic_model_from_schema(schema: dict[str, Any]) -> type:
     """Create a Pydantic BaseModel class from a simple schema dict.
 
     Expected schema format::
@@ -612,10 +617,10 @@ def create_pydantic_model_from_schema(schema: Dict[str, Any]) -> type:
     Supported type strings: str, int, float, bool, list, dict.
     Unknown types fall back to Any.
     """
-    from pydantic import create_model as pydantic_create_model
-    from typing import Optional as Opt
 
-    _TYPE_MAP: Dict[str, Any] = {
+    from pydantic import create_model as pydantic_create_model
+
+    _TYPE_MAP: dict[str, Any] = {
         "str": str,
         "int": int,
         "float": float,
@@ -627,7 +632,7 @@ def create_pydantic_model_from_schema(schema: Dict[str, Any]) -> type:
     model_name: str = schema.get("name", "DynamicModel")
     fields_spec = schema.get("fields", [])
 
-    field_definitions: Dict[str, Any] = {}
+    field_definitions: dict[str, Any] = {}
     for field in fields_spec:
         fname = field.get("name")
         if not fname:
@@ -642,9 +647,9 @@ def create_pydantic_model_from_schema(schema: Dict[str, Any]) -> type:
 async def get_llm_for_workflow(
     workflow_name: str,
     flow: str = "base",
-    agent_name: Optional[str] = None,
+    agent_name: str | None = None,
     *,
-    extra_config: Optional[dict] = None,
+    extra_config: dict | None = None,
 ) -> tuple:
     """Create LLM config for an agent with optional structured response model."""
     

@@ -7,7 +7,7 @@ here to also call persist_summary_artifact() for its owned family.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from factory_app.workflows._shared.platform.build_lifecycle import (  # noqa: F401
     build_export_download_url,
@@ -19,14 +19,18 @@ from factory_app.workflows._shared.platform.build_lifecycle import (  # noqa: F4
 from factory_app.workflows._shared.platform.build_lifecycle import (
     emit_build_completed as _shared_emit_build_completed,
 )
+from factory_app.workflows._shared.workflow_integration import (
+    apply_workflow_integration_context,
+    normalize_workflow_integration_metadata,
+)
 
 
-async def _read_build_mode(*, app_id: str, chat_id: str) -> Optional[str]:
+async def _read_build_mode(*, app_id: str, chat_id: str) -> str | None:
     """Read build_mode from the persisted chat session context variables."""
     try:
         from mozaiksai.core.core_config import get_mongo_client
-        from mozaiksai.core.multitenant import build_app_scope_filter
         from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
+        from mozaiksai.core.multitenant import build_app_scope_filter
 
         client = get_mongo_client()
         coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
@@ -48,18 +52,73 @@ async def _read_build_mode(*, app_id: str, chat_id: str) -> Optional[str]:
     return None
 
 
+async def _read_workflow_integration_metadata(*, app_id: str, chat_id: str) -> dict[str, Any] | None:
+    """Read normalized workflow integration metadata from persisted chat context."""
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+        from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
+        from mozaiksai.core.multitenant import build_app_scope_filter
+
+        client = get_mongo_client()
+        coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
+        doc = await coll.find_one(
+            {"_id": str(chat_id), **build_app_scope_filter(str(app_id))},
+            {
+                "context_variables.workflow_integration_metadata": 1,
+                "context_variables.generated_workflow_name": 1,
+                "context_variables.generated_workflow_capability_id": 1,
+                "context_variables.generated_workflow_startup_mode": 1,
+                "context_variables.generated_workflow_trigger_events": 1,
+            },
+        )
+        if not isinstance(doc, dict):
+            return None
+        ctx = doc.get("context_variables")
+        if not isinstance(ctx, dict):
+            return None
+        metadata = normalize_workflow_integration_metadata(ctx.get("workflow_integration_metadata"))
+        if metadata:
+            return metadata
+        scratch: dict[str, Any] = {}
+        for key in (
+            "generated_workflow_name",
+            "generated_workflow_capability_id",
+            "generated_workflow_startup_mode",
+            "generated_workflow_trigger_events",
+        ):
+            if key in ctx:
+                scratch[key] = ctx[key]
+        if scratch:
+            apply_workflow_integration_context(scratch, {
+                "workflow_name": scratch.get("generated_workflow_name"),
+                "capability_id": scratch.get("generated_workflow_capability_id"),
+                "startup_mode": scratch.get("generated_workflow_startup_mode"),
+                "trigger_events": scratch.get("generated_workflow_trigger_events") or [],
+                "source": "chat_context",
+            })
+            return normalize_workflow_integration_metadata(scratch.get("workflow_integration_metadata"))
+    except Exception:
+        pass
+    return None
+
+
 async def _persist_workflow_bundle_artifact(
     *,
     app_id: str,
-    chat_id: Optional[str],
-    user_id: Optional[str],
+    chat_id: str | None,
+    user_id: str | None,
     workflow_name: str,
-    build_mode: Optional[str],
+    build_mode: str | None,
 ) -> None:
     """Persist a versioned workflow_bundle summary artifact after AgentGenerator completes."""
     from mozaiksai.core.artifacts.summary_artifacts import persist_summary_artifact
 
     resolved_chat_id = (chat_id or "").strip() or None
+    workflow_integration_metadata = (
+        await _read_workflow_integration_metadata(app_id=app_id, chat_id=resolved_chat_id)
+        if resolved_chat_id
+        else None
+    )
     await persist_summary_artifact(
         app_id=app_id,
         artifact_kind="workflow_bundle",
@@ -67,6 +126,7 @@ async def _persist_workflow_bundle_artifact(
         summary_payload={
             "source_workflow": workflow_name,
             "source_chat_id": resolved_chat_id,
+            "workflow_integration_metadata": workflow_integration_metadata,
         },
         source_workflow=workflow_name,
         source_chat_id=resolved_chat_id,
@@ -79,12 +139,12 @@ async def _persist_workflow_bundle_artifact(
 async def emit_build_completed(
     *,
     app_id: str,
-    execution_id: Optional[str] = None,
-    chat_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    execution_id: str | None = None,
+    chat_id: str | None = None,
+    user_id: str | None = None,
     workflow_name: str,
     **kwargs: Any,
-) -> Optional[str]:
+) -> str | None:
     """Emit build.completed and persist the workflow_bundle summary artifact."""
     outbox_event_id = await _shared_emit_build_completed(
         app_id=app_id,

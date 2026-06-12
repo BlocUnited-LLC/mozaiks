@@ -5,7 +5,6 @@ from pathlib import Path
 
 import yaml
 
-
 build_context_projection = importlib.import_module("mozaiksai.core.workflow.context.projection")
 
 

@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Optional, Set
+from typing import Any
 
 from logs.logging_config import get_core_logger
-
 from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.workflow.pack.config import (
     compute_required_dependencies,
-    get_workflow_sequence,
     get_transition,
     get_workflow_entry,
+    get_workflow_sequence,
     infer_auto_workflow_sequence_for_start,
     list_workflow_ids,
     load_global_pack_graph,
@@ -44,9 +43,9 @@ class SessionRouter:
     def __init__(
         self,
         *,
-        persistence: Optional[AG2PersistenceManager] = None,
-        trigger_route_resolver: Optional[TriggerRouteResolver] = None,
-        store: Optional[SessionStateStore] = None,
+        persistence: AG2PersistenceManager | None = None,
+        trigger_route_resolver: TriggerRouteResolver | None = None,
+        store: SessionStateStore | None = None,
     ) -> None:
         self._persistence = persistence or AG2PersistenceManager()
         self._trigger_route_resolver = trigger_route_resolver or NullTriggerRouteResolver()
@@ -85,7 +84,7 @@ class SessionRouter:
             raise ValueError(f"Unknown journey_id '{explicit_journey_id}'")
 
         resolved_workflow_id = requested_workflow_id
-        unmet_dependency: Optional[UnmetDependency] = None
+        unmet_dependency: UnmetDependency | None = None
         rerouted_by_dependency = False
 
         if pack is not None:
@@ -137,9 +136,9 @@ class SessionRouter:
         app_id: str,
         user_id: str,
         transition_id: str,
-        option_id: Optional[str] = None,
-        journey_id: Optional[str] = None,
-        context_seed: Optional[dict[str, Any]] = None,
+        option_id: str | None = None,
+        journey_id: str | None = None,
+        context_seed: dict[str, Any] | None = None,
     ) -> TransitionResolution:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
@@ -214,8 +213,8 @@ class SessionRouter:
         user_id: str,
         workflow_id: str,
         chat_id: str,
-        journey_id: Optional[str] = None,
-        journey_position: Optional[int] = None,
+        journey_id: str | None = None,
+        journey_position: int | None = None,
     ) -> None:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
@@ -257,8 +256,8 @@ class SessionRouter:
         user_id: str,
         workflow_id: str,
         chat_id: str,
-        journey_id: Optional[str] = None,
-        journey_position: Optional[int] = None,
+        journey_id: str | None = None,
+        journey_position: int | None = None,
     ) -> None:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
@@ -290,7 +289,7 @@ class SessionRouter:
         user_id: str,
         workflow_id: str,
         chat_id: str,
-    ) -> Optional[JourneyAdvanceDecision]:
+    ) -> JourneyAdvanceDecision | None:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
         workflow = str(workflow_id or "").strip()
@@ -435,8 +434,8 @@ class SessionRouter:
         *,
         app_id: str,
         user_id: str,
-        requested_workflow_id: Optional[str] = None,
-        requested_chat_id: Optional[str] = None,
+        requested_workflow_id: str | None = None,
+        requested_chat_id: str | None = None,
     ) -> dict[str, Any]:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
@@ -546,8 +545,8 @@ class SessionRouter:
         app_id: str,
         user_id: str,
         pending_decision: PendingHarnessDecision,
-        workflow_id: Optional[str] = None,
-        chat_id: Optional[str] = None,
+        workflow_id: str | None = None,
+        chat_id: str | None = None,
     ) -> dict[str, Any]:
         app = str(app_id or "").strip()
         user = str(user_id or "").strip()
@@ -576,7 +575,7 @@ class SessionRouter:
         app_id: str,
         user_id: str,
         decision_id: str,
-        action_id: Optional[str] = None,
+        action_id: str | None = None,
         accepted: bool = True,
     ) -> dict[str, Any]:
         app = str(app_id or "").strip()
@@ -612,7 +611,7 @@ class SessionRouter:
         *,
         trigger: TriggerInput,
         decision: RoutingDecision,
-        pending_harness_decision: Optional[PendingHarnessDecision] = None,
+        pending_harness_decision: PendingHarnessDecision | None = None,
     ) -> dict[str, Any]:
         """Persist revision lineage for a harness decision before launch."""
 
@@ -689,7 +688,7 @@ class SessionRouter:
         app_id: str,
         user_id: str,
         pending_transition_id: str,
-        journey_id: Optional[str] = None,
+        journey_id: str | None = None,
     ) -> None:
         state = await self._load_or_create_state(app_id=app_id, user_id=user_id)
         self._ensure_journey_state_for_transition(
@@ -723,7 +722,7 @@ class SessionRouter:
         state: SessionState,
         journey_id: str,
         *,
-        journey_position: Optional[int] = None,
+        journey_position: int | None = None,
         reset_instance: bool = False,
     ) -> None:
         pack = load_global_pack_graph()
@@ -746,8 +745,8 @@ class SessionRouter:
         state: SessionState,
         *,
         workflow_id: str,
-        journey_id: Optional[str],
-        journey_position: Optional[int],
+        journey_id: str | None,
+        journey_position: int | None,
     ) -> None:
         pack = load_global_pack_graph()
         if pack is None:
@@ -809,7 +808,7 @@ class SessionRouter:
         state: SessionState,
         *,
         transition_id: str,
-        journey_id: Optional[str],
+        journey_id: str | None,
     ) -> None:
         pack = load_global_pack_graph()
         if pack is None:
@@ -851,8 +850,8 @@ class SessionRouter:
         *,
         groups: list[list[str]],
         workflow_id: str,
-        preferred_index: Optional[int] = None,
-    ) -> Optional[int]:
+        preferred_index: int | None = None,
+    ) -> int | None:
         if preferred_index is not None:
             try:
                 index = int(preferred_index)
@@ -881,8 +880,8 @@ class SessionRouter:
         *,
         steps: list[Any],
         transition_id: str,
-        preferred_index: Optional[int] = None,
-    ) -> Optional[int]:
+        preferred_index: int | None = None,
+    ) -> int | None:
         if preferred_index is not None:
             try:
                 index = int(preferred_index)
@@ -1018,9 +1017,9 @@ class SessionRouter:
         coll,
         app_id: str,
         user_id: str,
-        chat_id: Optional[str],
-        workflow_id: Optional[str] = None,
-    ) -> Optional[dict[str, Any]]:
+        chat_id: str | None,
+        workflow_id: str | None = None,
+    ) -> dict[str, Any] | None:
         target_chat_id = str(chat_id or "").strip()
         if not target_chat_id:
             return None
@@ -1040,9 +1039,9 @@ class SessionRouter:
         coll,
         app_id: str,
         user_id: str,
-        workflow_id: Optional[str] = None,
+        workflow_id: str | None = None,
         in_progress_only: bool,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         query = {
             "user_id": str(user_id),
             **build_app_scope_filter(app_id),
@@ -1062,7 +1061,7 @@ class SessionRouter:
         state: SessionState,
         chat_doc: dict[str, Any],
         *,
-        requested_workflow: Optional[str] = None,
+        requested_workflow: str | None = None,
     ) -> None:
         workflow_id = str(chat_doc.get("workflow_name") or requested_workflow or "").strip() or None
         if workflow_id:
@@ -1138,9 +1137,9 @@ class SessionRouter:
         *,
         transition,
         option_id: str,
-        journey_id: Optional[str],
+        journey_id: str | None,
         context_seed: dict[str, Any],
-    ) -> tuple[str, dict[str, Any], Optional[str]]:
+    ) -> tuple[str, dict[str, Any], str | None]:
         selected_option_id = str(option_id or "").strip()
         if selected_option_id:
             return self._resolve_selected_option(
@@ -1172,9 +1171,9 @@ class SessionRouter:
         *,
         transition,
         option_id: str,
-        journey_id: Optional[str],
+        journey_id: str | None,
         context_seed: dict[str, Any],
-    ) -> tuple[str, dict[str, Any], Optional[str]]:
+    ) -> tuple[str, dict[str, Any], str | None]:
         selected = str(option_id or "").strip()
         for option in getattr(transition, "options", []) or []:
             if str(getattr(option, "id", "") or "").strip() != selected:
@@ -1210,9 +1209,9 @@ class SessionRouter:
     @staticmethod
     def _resolve_condition_transition(
         transition,
-        journey_id: Optional[str],
+        journey_id: str | None,
         context_seed: dict[str, Any],
-    ) -> tuple[str, dict[str, Any], Optional[str]]:
+    ) -> tuple[str, dict[str, Any], str | None]:
         context_key = str(getattr(transition, "context_key", "") or "").strip()
         if not context_key:
             raise ValueError(f"Condition transition '{transition.id}' is missing context_key")
@@ -1244,8 +1243,8 @@ class SessionRouter:
         app_id: str,
         user_id: str,
         coll,
-        visited: Set[str],
-    ) -> Optional[UnmetDependency]:
+        visited: set[str],
+    ) -> UnmetDependency | None:
         wf = str(workflow_id or "").strip()
         if not wf or wf in visited:
             return None
@@ -1450,13 +1449,13 @@ class SessionRouter:
         )
 
 
-_router: Optional[SessionRouter] = None
-_router_trigger_route_resolver: Optional[TriggerRouteResolver] = None
+_router: SessionRouter | None = None
+_router_trigger_route_resolver: TriggerRouteResolver | None = None
 
 
 def configure_session_router(
     *,
-    trigger_route_resolver: Optional[TriggerRouteResolver] = None,
+    trigger_route_resolver: TriggerRouteResolver | None = None,
 ) -> SessionRouter:
     global _router, _router_trigger_route_resolver
     _router_trigger_route_resolver = trigger_route_resolver

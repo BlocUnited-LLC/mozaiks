@@ -18,21 +18,24 @@
 #   NOTE: UI interaction handling logic lives in ui_tools.py.
 # ============================================================================
 from __future__ import annotations
+
 import contextlib
-import logging
 import importlib
 import importlib.machinery
 import importlib.util
-import sys
 import inspect
+import logging
+import sys
 import types
+from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
+
 import yaml
 
-from ..workflow_manager import workflow_manager
 from ..declarative import parse_tools_config
+from ..workflow_manager import workflow_manager
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +48,7 @@ def _ensure_workflow_import_paths(*, base_dir: Path, file_path: Path) -> None:
         base_dir,
         file_path.parent,
     )
-    normalized: List[str] = []
+    normalized: list[str] = []
     for candidate in desired_order:
         try:
             value = str(candidate.resolve())
@@ -110,9 +113,11 @@ def _wrap_with_validation(
     2. Validates structured outputs when enforce_schema=True
     3. Captures execution timing and parameters
     """
-    from logs.tools_logs import get_tool_logger, log_tool_event
-    from ..validation.tools import validate_tool_call
     import time
+
+    from logs.tools_logs import get_tool_logger, log_tool_event
+
+    from ..validation.tools import validate_tool_call
 
     if inspect.iscoroutinefunction(func):
 
@@ -270,7 +275,7 @@ def load_agent_tool_functions(
     workflow_name: str,
     *,
     include_auto_only: bool = False,
-) -> Dict[str, List[Callable]]:
+) -> dict[str, list[Callable]]:
     """Discover and import per-agent tool functions for a workflow.
 
     Reads workflows/<workflow_name>/tools.yaml and returns a mapping of
@@ -287,14 +292,14 @@ def load_agent_tool_functions(
     - Validation failures (when schema enforcement is enabled)
     - Logs to logs/logs/tools.log (workflow-agnostic)
     """
-    mapping: Dict[str, List[Callable]] = {}
+    mapping: dict[str, list[Callable]] = {}
     base_dir = workflow_manager.resolve_workflow_path(workflow_name)
     if base_dir is None:
         logger.debug(f"[TOOLS] Workflow path not found for '{workflow_name}'")
         return mapping
     tools_yaml_path = base_dir / 'tools.yaml'
 
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
     if tools_yaml_path.exists():
         try:
             raw = yaml.safe_load(tools_yaml_path.read_text(encoding='utf-8')) or {}
@@ -354,7 +359,7 @@ def load_agent_tool_functions(
         # Resolve file path (support both root and tools/ subdir)
         base_dir_tools = base_dir / 'tools'
         candidate_paths = [base_dir / file_name, base_dir_tools / file_name]
-        file_path: Optional[Path] = next((p for p in candidate_paths if p.exists()), None)
+        file_path: Path | None = next((p for p in candidate_paths if p.exists()), None)
         if not file_path:
             logger.warning(f"[TOOLS][TRACE] File not found for entry #{idx}: {file_name} (searched: {candidate_paths})")
             continue
@@ -439,7 +444,7 @@ def load_agent_tool_functions(
     logger.debug(f"[TOOLS][TRACE] Tool binding summary for '{workflow_name}': {summary}")
     return mapping
 
-def clear_tool_cache(workflow_name: Optional[str] = None) -> int:
+def clear_tool_cache(workflow_name: str | None = None) -> int:
     """Clear cached tool modules to force fresh reload.
     
     Args:

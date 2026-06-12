@@ -8,7 +8,7 @@ via the shipped DiagramViewer component for user review.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
@@ -18,10 +18,10 @@ _logger = logging.getLogger("tools.mermaid_sequence_diagram")
 async def mermaid_sequence_diagram(
     *,
     MermaidSequenceDiagram: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         "MermaidSequenceDiagram payload from the diagram agent",
     ] = None,
-    context_variables: Annotated[Optional[Any], "Context variables provided by AG2"] = None,
+    context_variables: Annotated[Any | None, "Context variables provided by AG2"] = None,
 ) -> str:
     """Emit the sequence diagram as a UI artifact for user review."""
 
@@ -48,8 +48,8 @@ async def mermaid_sequence_diagram(
 
     workflow_name: str = str(MermaidSequenceDiagram.get("workflow_name") or "").strip()
     diagram_text: str = str(MermaidSequenceDiagram.get("diagram") or "").strip()
-    legend: List[str] = MermaidSequenceDiagram.get("legend") or []
-    notes: Optional[str] = MermaidSequenceDiagram.get("notes") or None
+    legend: list[str] = MermaidSequenceDiagram.get("legend") or []
+    notes: str | None = MermaidSequenceDiagram.get("notes") or None
     agent_message: str = str(
         MermaidSequenceDiagram.get("agent_message") or "Review the sequence diagram below."
     ).strip()

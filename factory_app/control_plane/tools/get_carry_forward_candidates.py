@@ -35,7 +35,7 @@ Output (always a dict, never raises):
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 async def get_carry_forward_candidates(
     *,
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     """Return candidate modules from the previous app_bundle artifact.
 
@@ -137,7 +137,7 @@ async def get_carry_forward_candidates(
 def _empty(
     warning: str,
     *,
-    source_artifact_version_id: Optional[str] = None,
+    source_artifact_version_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "modules": [],

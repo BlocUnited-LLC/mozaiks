@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from mozaiksai.core.workflow.workflow_ui_catalog import (
     get_workflow_shipped_component_map,
@@ -36,7 +36,7 @@ def _resolve_generated_artifacts_root() -> Path:
     return candidate.resolve()
 
 
-def _context_get(context_variables: Optional[Any], key: str) -> Optional[Any]:
+def _context_get(context_variables: Any | None, key: str) -> Any | None:
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
@@ -64,8 +64,8 @@ def _safe_path_segment(value: Any, *, fallback: str) -> str:
 
 def _resolve_artifact_ids(
     *,
-    data: Optional[Dict[str, Any]] = None,
-    context_variables: Optional[Any] = None,
+    data: dict[str, Any] | None = None,
+    context_variables: Any | None = None,
 ) -> tuple[str, str]:
     data = data or {}
     app_id = (
@@ -91,15 +91,15 @@ def _resolve_artifact_ids(
 def _resolve_workflow_output_dir(
     workflow_name: str,
     *,
-    data: Optional[Dict[str, Any]] = None,
-    context_variables: Optional[Any] = None,
+    data: dict[str, Any] | None = None,
+    context_variables: Any | None = None,
 ) -> Path:
     app_id, build_id = _resolve_artifact_ids(data=data, context_variables=context_variables)
     workflow = _safe_path_segment(workflow_name, fallback="GeneratedWorkflow")
     return _resolve_generated_artifacts_root() / "workflows" / app_id / build_id / workflow
 
 
-def _normalize_workflow_extra_path(raw_path: Any) -> Optional[str]:
+def _normalize_workflow_extra_path(raw_path: Any) -> str | None:
     """Return a safe workflow-local relative path, or None if it escapes scope."""
 
     rel_path = str(raw_path or "").replace("\\", "/").strip().lstrip("/")
@@ -121,14 +121,14 @@ def _normalize_runtime_extensions(
     *,
     workflow_name: str,
     wf_logger: Any,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Keep runtime extension entrypoints inside the generated workflow package."""
 
     if not isinstance(extensions, list):
         return []
 
     workflow_prefix = f"workflows.{workflow_name}.tools."
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for ext in extensions:
         if not isinstance(ext, dict):
             continue
@@ -163,18 +163,18 @@ def _normalize_orchestrator_triggers(
     triggers: Any,
     *,
     wf_logger: Any,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Keep orchestrator triggers within the runtime's declared trigger schema."""
 
     if not isinstance(triggers, list):
         return []
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for trigger in triggers:
         if not isinstance(trigger, dict):
             continue
 
-        item: Dict[str, Any] = {}
+        item: dict[str, Any] = {}
         trigger_type = str(trigger.get("type") or "").strip().lower()
         if trigger_type:
             if trigger_type not in ORCHESTRATOR_TRIGGER_TYPES:
@@ -200,7 +200,7 @@ def _normalize_orchestrator_triggers(
     return normalized
 
 
-def promote_generated_workflow(source_dir: str | Path, target_root: str | Path) -> Dict[str, Any]:
+def promote_generated_workflow(source_dir: str | Path, target_root: str | Path) -> dict[str, Any]:
     """Explicitly promote a generated workflow into the active workflows root."""
     source = Path(source_dir).resolve()
     target_root_path = Path(target_root).resolve()
@@ -234,7 +234,7 @@ def promote_generated_workflow(source_dir: str | Path, target_root: str | Path) 
 # -----------------------------
 
 
-def _normalize_nullable_text(value: Any) -> Optional[str]:
+def _normalize_nullable_text(value: Any) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
@@ -247,14 +247,14 @@ def _normalize_nullable_text(value: Any) -> Optional[str]:
     return cleaned
 
 
-def _normalize_visual_agents(value: Any, *, workflow_startup_mode: Optional[str]) -> Optional[List[str]]:
+def _normalize_visual_agents(value: Any, *, workflow_startup_mode: str | None) -> list[str] | None:
     mode = str(workflow_startup_mode or "").strip().lower()
     backend_only = mode == "backendonly"
 
     if value is None:
         return None if backend_only else []
 
-    normalized: List[str] = []
+    normalized: list[str] = []
     if isinstance(value, str):
         cleaned = value.strip()
         if not cleaned or cleaned.lower() in {"null", "none", "[]"}:
@@ -272,7 +272,7 @@ def _normalize_visual_agents(value: Any, *, workflow_startup_mode: Optional[str]
     else:
         return None if backend_only else []
 
-    deduped: List[str] = []
+    deduped: list[str] = []
     seen = set()
     for agent_name in normalized:
         if agent_name not in seen:
@@ -284,11 +284,11 @@ def _normalize_visual_agents(value: Any, *, workflow_startup_mode: Optional[str]
     return None if backend_only else []
 
 
-def _normalize_transition_rules(raw_rules: Any) -> List[Dict[str, Any]]:
+def _normalize_transition_rules(raw_rules: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_rules, list):
         return []
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for rule in raw_rules:
         if not isinstance(rule, dict):
             continue
@@ -385,11 +385,11 @@ def _normalize_transition_rules(raw_rules: Any) -> List[Dict[str, Any]]:
     return normalized
 
 
-def _default_ui_payload_schema() -> Dict[str, Any]:
+def _default_ui_payload_schema() -> dict[str, Any]:
     return {"type": "object", "properties": {}, "additionalProperties": True}
 
 
-def _normalize_ui_contract(raw_contract: Any) -> Dict[str, Any]:
+def _normalize_ui_contract(raw_contract: Any) -> dict[str, Any]:
     contract = raw_contract if isinstance(raw_contract, dict) else {}
 
     surface_kind = str(contract.get("surface_kind") or "agent_tool").strip().lower()
@@ -400,7 +400,7 @@ def _normalize_ui_contract(raw_contract: Any) -> Dict[str, Any]:
     if not isinstance(payload_schema, dict) or not payload_schema:
         payload_schema = _default_ui_payload_schema()
 
-    actions_schema: List[Dict[str, Any]] = []
+    actions_schema: list[dict[str, Any]] = []
     raw_actions = contract.get("actions_schema")
     if isinstance(raw_actions, list):
         for action in raw_actions:
@@ -409,7 +409,7 @@ def _normalize_ui_contract(raw_contract: Any) -> Dict[str, Any]:
             action_id = _normalize_nullable_text(action.get("id"))
             if action_id is None:
                 continue
-            normalized_action: Dict[str, Any] = {"id": action_id}
+            normalized_action: dict[str, Any] = {"id": action_id}
             label = _normalize_nullable_text(action.get("label"))
             if label is not None:
                 normalized_action["label"] = label
@@ -444,14 +444,14 @@ def _normalize_tool_type(raw_tool_type: Any) -> str:
 
 
 def _normalize_tools_manifest(
-    tools_manager_output: Dict[str, Any],
+    tools_manager_output: dict[str, Any],
     wf_logger,
-) -> Dict[str, Any]:
-    normalized: Dict[str, Any] = {}
+) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
 
     raw_tools = tools_manager_output.get("tools")
     if isinstance(raw_tools, list):
-        normalized_tools: List[Dict[str, Any]] = []
+        normalized_tools: list[dict[str, Any]] = []
         for entry in raw_tools:
             if not isinstance(entry, dict):
                 continue
@@ -483,7 +483,7 @@ def _normalize_tools_manifest(
 
     raw_lifecycle_tools = tools_manager_output.get("lifecycle_tools")
     if isinstance(raw_lifecycle_tools, list):
-        normalized_lifecycle: List[Dict[str, Any]] = []
+        normalized_lifecycle: list[dict[str, Any]] = []
         for entry in raw_lifecycle_tools:
             if not isinstance(entry, dict):
                 continue
@@ -511,7 +511,7 @@ def _collect_code_files(
     list_key: str = "tools",
     source_name: str,
     wf_logger: Any,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Normalize CodeFile-style output objects into workflow extra files."""
 
     if not isinstance(output_payload, dict):
@@ -521,7 +521,7 @@ def _collect_code_files(
     if not isinstance(raw_files, list):
         return []
 
-    normalized_files: List[Dict[str, str]] = []
+    normalized_files: list[dict[str, str]] = []
     for index, entry in enumerate(raw_files):
         if not isinstance(entry, dict):
             wf_logger.warning(
@@ -556,14 +556,14 @@ def _collect_code_files(
     return normalized_files
 
 
-def _index_workflow_ui_targets(tools_config: Any) -> Dict[str, Dict[str, Any]]:
+def _index_workflow_ui_targets(tools_config: Any) -> dict[str, dict[str, Any]]:
     """Index declared workflow UI components by component name."""
 
     if not isinstance(tools_config, dict):
         return {}
 
     shipped_component_map = dict(get_workflow_shipped_component_map())
-    targets: Dict[str, Dict[str, Any]] = {}
+    targets: dict[str, dict[str, Any]] = {}
     for list_key in ("tools", "lifecycle_tools"):
         raw_entries = tools_config.get(list_key)
         if not isinstance(raw_entries, list):
@@ -589,7 +589,7 @@ def _index_workflow_ui_targets(tools_config: Any) -> Dict[str, Dict[str, Any]]:
     return targets
 
 
-def _build_workflow_ui_barrel(component_paths: Dict[str, str]) -> str:
+def _build_workflow_ui_barrel(component_paths: dict[str, str]) -> str:
     lines = [
         "/**",
         " * AUTO-GENERATED FILE - workflow UI barrel.",
@@ -612,7 +612,7 @@ def _collect_ui_code_files(
     *,
     tools_config: Any,
     wf_logger: Any,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Collect UIFileGenerator output while enforcing shipped-primitive rules."""
 
     files = _collect_code_files(
@@ -624,8 +624,8 @@ def _collect_ui_code_files(
         return []
 
     ui_targets = _index_workflow_ui_targets(tools_config)
-    workflow_component_paths: Dict[str, str] = {}
-    kept_files: List[Dict[str, str]] = []
+    workflow_component_paths: dict[str, str] = {}
+    kept_files: list[dict[str, str]] = []
     seen_paths: set[str] = set()
 
     for item in files:

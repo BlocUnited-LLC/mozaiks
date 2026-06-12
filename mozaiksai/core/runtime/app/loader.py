@@ -22,10 +22,11 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from pydantic import ValidationError
 
+from logs.logging_config import get_workflow_logger
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
 from mozaiksai.core.runtime.app.subscriptions_loader import (
@@ -39,7 +40,6 @@ from mozaiksai.core.runtime.persistence.intent_loader import (
     load_data_contract,
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
-from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("app_loader")
 
@@ -60,9 +60,9 @@ class AppLoadResult:
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
     """
     definition: AppDefinition
-    modules: List[LoadedModule] = field(default_factory=list)
-    data_contract: Dict[str, Any] | None = None
-    data_entities_by_key: Dict[tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
+    modules: list[LoadedModule] = field(default_factory=list)
+    data_contract: dict[str, Any] | None = None
+    data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     subscriptions_config: SubscriptionsConfig | None = None
 
 
@@ -108,7 +108,7 @@ class AppLoader:
         workflow_names = cls._discover_workflow_names(base_path)
         page_names = cls._discover_page_names(base_path)
 
-        app_def_raw: Dict[str, Any] = {
+        app_def_raw: dict[str, Any] = {
             "name": raw.get("appName") or raw.get("name") or base_path.name,
             "version": raw.get("version") or "1.0",
             "description": raw.get("description"),
@@ -148,7 +148,7 @@ class AppLoader:
             f"workflows={len(app_def.workflows)} modules={len(app_def.modules)}"
         )
 
-        loaded_modules: List[LoadedModule] = []
+        loaded_modules: list[LoadedModule] = []
         if module_names:
             loaded_modules = await module_loader.load_all(module_names)
             logger.info(
@@ -165,14 +165,14 @@ class AppLoader:
         )
 
     @classmethod
-    def _discover_workflow_names(cls, base_path: Path) -> List[str]:
+    def _discover_workflow_names(cls, base_path: Path) -> list[str]:
         workflows_dir = next(
             (root for root in candidate_app_workflows_roots(base_path) if root.exists()),
             candidate_app_workflows_roots(base_path)[0],
         )
         if not workflows_dir.exists():
             return []
-        names: List[str] = []
+        names: list[str] = []
         for child in sorted(workflows_dir.iterdir(), key=lambda item: item.name.lower()):
             if not child.is_dir() or child.name == "extended_orchestration":
                 continue
@@ -181,11 +181,11 @@ class AppLoader:
         return names
 
     @classmethod
-    def _discover_page_names(cls, base_path: Path) -> List[str]:
+    def _discover_page_names(cls, base_path: Path) -> list[str]:
         pages_dir = base_path / "ui" / "pages"
         if not pages_dir.exists():
             return []
-        names: List[str] = []
+        names: list[str] = []
         for child in sorted(pages_dir.iterdir(), key=lambda item: item.name.lower()):
             if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
                 names.append(child.stem)

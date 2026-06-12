@@ -5,8 +5,8 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, UTC
-from typing import Any, Dict, List, Optional, Set
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
@@ -36,7 +36,7 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
-def _compute_sync_hash(files: Dict[str, str], deleted: List[str]) -> str:
+def _compute_sync_hash(files: dict[str, str], deleted: list[str]) -> str:
     payload = {
         "files": [{"path": p, "sha": _sha256_text(c)} for p, c in sorted(files.items())],
         "deleted": sorted([str(p) for p in (deleted or []) if p]),
@@ -50,14 +50,14 @@ class SandboxState:
     artifact_id: str
     created_at: datetime
     status: str = "starting"  # starting|running|error
-    preview_url: Optional[str] = None
-    last_error: Optional[str] = None
-    last_sync_hash: Optional[str] = None
+    preview_url: str | None = None
+    last_error: str | None = None
+    last_sync_hash: str | None = None
     last_access_at: datetime = field(default_factory=_utcnow)
 
     # Provider handle + last synced file snapshot (used for runtime detection)
     sandbox: Any = None
-    last_files: Dict[str, str] = field(default_factory=dict)
+    last_files: dict[str, str] = field(default_factory=dict)
 
 
 class ArtifactSandboxManager:
@@ -73,9 +73,9 @@ class ArtifactSandboxManager:
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
-        self._artifact_to_sandbox: Dict[str, str] = {}
-        self._sandboxes: Dict[str, SandboxState] = {}
-        self._ws_clients: Dict[str, Set[Any]] = {}
+        self._artifact_to_sandbox: dict[str, str] = {}
+        self._sandboxes: dict[str, SandboxState] = {}
+        self._ws_clients: dict[str, set[Any]] = {}
         self._logger = get_workflow_logger("artifact_sandbox")
 
         try:
@@ -91,11 +91,11 @@ class ArtifactSandboxManager:
             return False
         return _utcnow() - st.last_access_at > timedelta(minutes=self._ttl_minutes)
 
-    async def _broadcast(self, sandbox_id: str, message: Dict[str, Any]) -> None:
+    async def _broadcast(self, sandbox_id: str, message: dict[str, Any]) -> None:
         clients = list(self._ws_clients.get(sandbox_id, set()))
         if not clients:
             return
-        dead: List[Any] = []
+        dead: list[Any] = []
         for ws in clients:
             try:
                 await ws.send_json(message)
@@ -179,7 +179,7 @@ class ArtifactSandboxManager:
         st.last_access_at = _utcnow()
         return st
 
-    async def sync(self, sandbox_id: str, files: List[Dict[str, str]], deleted: List[str]) -> None:
+    async def sync(self, sandbox_id: str, files: list[dict[str, str]], deleted: list[str]) -> None:
         st = await self._ensure_alive(sandbox_id)
         if not st.sandbox:
             raise RuntimeError("Sandbox provider handle missing")
@@ -190,7 +190,7 @@ class ArtifactSandboxManager:
         )
 
         # Normalize payload
-        next_files: Dict[str, str] = {}
+        next_files: dict[str, str] = {}
         for entry in files or []:
             if not isinstance(entry, dict):
                 continue

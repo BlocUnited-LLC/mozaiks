@@ -13,39 +13,40 @@ This tool:
 import json
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, Annotated, Dict, List, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
+
+from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    collect_generated_app_file_map,
+    extract_code_file_map_from_payload,
+)
+from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    generate_deployment_artifacts,
+)
+from factory_app.workflows.AppGenerator.tools.export_app_code import (
+    export_app_code_to_github,
+    resolve_export_gate,
+)
+from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
+from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
+from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
+from factory_app.workflows.AppGenerator.tools.update_app_record import update_build_status
+from logs.logging_config import get_workflow_logger
 from mozaiksai.core.app_context.store import register_greenfield_app_context_version
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
 )
-from factory_app.workflows.AppGenerator.tools.code_file_utils import (
-    collect_generated_app_file_map,
-    extract_code_file_map_from_payload,
-)
 from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
-from logs.logging_config import get_workflow_logger
-
-from factory_app.workflows.AppGenerator.tools.export_app_code import (
-    export_app_code_to_github,
-    resolve_export_gate,
-)
-from factory_app.workflows.AppGenerator.tools.requirements_scanner import scan_requirements
-from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
-from factory_app.workflows.AppGenerator.tools.module_api_template import get_module_api_template
-from factory_app.workflows.AppGenerator.tools.update_app_record import update_build_status
-from factory_app.workflows.AppGenerator.tools.schema_migration import inject_migration_into_bundle
-from factory_app.workflows.AppGenerator.tools.deployment_contract import (
-    generate_deployment_artifacts,
-)
 
 try:
-    from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
+    from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
+    from logs.tools_logs import log_tool_event as _log_tool_event
 except Exception:  # pragma: no cover
     _get_tool_logger = None  # type: ignore
     _log_tool_event = None  # type: ignore
@@ -76,7 +77,7 @@ def _ag2_persistence_manager():
     return AG2PersistenceManager()
 
 
-def _safe_relpath(raw: str) -> Optional[str]:
+def _safe_relpath(raw: str) -> str | None:
     if not isinstance(raw, str):
         return None
     path = raw.replace("\\", "/").strip()
@@ -90,8 +91,8 @@ def _safe_relpath(raw: str) -> Optional[str]:
     return str(p)
 
 
-def _discover_code_files(col: Dict[str, Any]) -> Dict[str, str]:
-    out: Dict[str, str] = {}
+def _discover_code_files(col: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
     for _agent_name, data in (col or {}).items():
         try:
             if isinstance(data, dict):
@@ -108,7 +109,7 @@ def _discover_code_files(col: Dict[str, Any]) -> Dict[str, str]:
     return out
 
 
-def _context_get(context_variables: Optional[Any], key: str) -> Optional[Any]:
+def _context_get(context_variables: Any | None, key: str) -> Any | None:
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
@@ -141,11 +142,11 @@ def _is_truthy(value: Any) -> bool:
     return bool(value)
 
 
-def _discover_context_files(context_variables: Optional[Any]) -> Dict[str, str]:
+def _discover_context_files(context_variables: Any | None) -> dict[str, str]:
     raw = _context_get(context_variables, "generated_files")
     if not isinstance(raw, dict):
         return {}
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     for rel_path, content in raw.items():
         safe = _safe_relpath(str(rel_path))
         if safe:
@@ -216,13 +217,13 @@ def _build_generated_files_manifest(
     return entries
 
 
-def _ensure_env_line(lines: List[str], key: str, value: str) -> List[str]:
+def _ensure_env_line(lines: list[str], key: str, value: str) -> list[str]:
     normalized_key = key.strip()
     if not normalized_key:
         return lines
     rendered = f"{normalized_key}={value or ''}"
 
-    out: List[str] = []
+    out: list[str] = []
     replaced = False
     for line in lines:
         if not isinstance(line, str):
@@ -245,7 +246,7 @@ def _ensure_env_line(lines: List[str], key: str, value: str) -> List[str]:
     return out
 
 
-async def _inject_agent_context_env(*, files_map: Dict[str, str], app_id: str, context_variables: Optional[Any]) -> None:
+async def _inject_agent_context_env(*, files_map: dict[str, str], app_id: str, context_variables: Any | None) -> None:
     """Best-effort: ensure bundle contains agent endpoint env placeholders."""
 
     agent_ws = None
@@ -290,7 +291,7 @@ async def _inject_agent_context_env(*, files_map: Dict[str, str], app_id: str, c
     files_map[".env.example"] = "\n".join(lines).rstrip() + "\n"
 
 
-async def _emit_deployment_event(*, chat_id: Optional[str], status: str, data: dict) -> None:
+async def _emit_deployment_event(*, chat_id: str | None, status: str, data: dict) -> None:
     if not chat_id:
         return
     try:
@@ -298,7 +299,7 @@ async def _emit_deployment_event(*, chat_id: Optional[str], status: str, data: d
 
         transport = await SimpleTransport.get_instance()
         await transport.send_event_to_ui(
-            {"type": f"chat.deployment_{status}", "data": {"timestamp": datetime.now(timezone.utc).isoformat(), **data}},
+            {"type": f"chat.deployment_{status}", "data": {"timestamp": datetime.now(UTC).isoformat(), **data}},
             chat_id,
         )
     except Exception:
@@ -307,14 +308,14 @@ async def _emit_deployment_event(*, chat_id: Optional[str], status: str, data: d
 
 async def _persist_pending_schema_migration(
     *,
-    pending_migration: Optional[Dict[str, Any]],
+    pending_migration: dict[str, Any] | None,
     app_id: str,
     build_id: str,
     workflow_name: str,
-    chat_id: Optional[str],
-    context_variables: Optional[Any],
+    chat_id: str | None,
+    context_variables: Any | None,
     generated_app_dir: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     if not isinstance(pending_migration, dict):
         return None
     migration_id = str(pending_migration.get("migration_id") or "").strip()
@@ -416,17 +417,18 @@ async def _register_greenfield_app_context_for_bundle(
 async def _register_app_bundle_artifact_version(
     *,
     app_id: str,
-    user_id: Optional[str],
+    user_id: str | None,
     workflow_name: str,
-    chat_id: Optional[str],
+    chat_id: str | None,
     bundle_name: str,
     zip_path: Path,
     app_dir: Path | None = None,
     written_paths: list[str] | None = None,
-    context_variables: Optional[Any],
+    context_variables: Any | None,
 ):
     try:
         import hashlib
+
         from mozaiksai.core.artifacts import (
             ArtifactLifecycleStatus,
             ArtifactValidationStatus,
@@ -443,7 +445,7 @@ async def _register_app_bundle_artifact_version(
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
             parent_version_id = context_variables.get("artifact_version_id")
-            validation_status_raw = context_variables.get("app_validation_status")
+            validation_status_raw = context_variables.get("app_bundle_acceptance_status")
         except Exception:
             parent_version_id = None
             validation_status_raw = None
@@ -460,8 +462,6 @@ async def _register_app_bundle_artifact_version(
         validation_status = ArtifactValidationStatus.PASSED
     elif normalized_status == "failed":
         validation_status = ArtifactValidationStatus.FAILED
-    elif normalized_status == "skipped":
-        validation_status = ArtifactValidationStatus.SKIPPED
 
     raw = zip_path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
@@ -486,7 +486,7 @@ async def _register_app_bundle_artifact_version(
 
     # Persist to content store if a non-local backend is configured.  The local
     # backend is skipped because artifact_path already covers that path.
-    bundle_content_metadata: Dict[str, Any] = {
+    bundle_content_metadata: dict[str, Any] = {
         "artifact_path": str(zip_path.resolve()),
         "bundle_name": bundle_name,
     }
@@ -499,6 +499,20 @@ async def _register_app_bundle_artifact_version(
             pass
     if isinstance(cf_report, dict):
         bundle_content_metadata["carry_forward_report"] = cf_report
+    acceptance_result = _context_get(context_variables, "app_bundle_acceptance_result")
+    validation_evidence = _context_get(context_variables, "app_bundle_validation_evidence")
+    if isinstance(acceptance_result, dict):
+        bundle_content_metadata["app_bundle_acceptance"] = acceptance_result
+    if isinstance(validation_evidence, dict):
+        bundle_content_metadata["validation_evidence"] = validation_evidence
+    app_validation_result = _context_get(context_variables, "app_validation_result")
+    if isinstance(app_validation_result, dict):
+        bundle_content_metadata["app_validation_result"] = app_validation_result
+    integration_test_result = _context_get(context_variables, "integration_test_result")
+    if isinstance(integration_test_result, dict):
+        bundle_content_metadata["integration_test_result"] = integration_test_result
+    if generated_files_manifest:
+        bundle_content_metadata["accepted_file_manifest"] = generated_files_manifest
     content_store = get_artifact_content_store()
     if content_store.backend_name != "local":
         try:
@@ -517,7 +531,7 @@ async def _register_app_bundle_artifact_version(
     artifact_store = get_artifact_store()
     canonical_inputs_version = await resolve_latest_artifact_version_refs(
         app_id=str(app_id),
-        artifact_kinds=("concept", "build_plan", "design_docs", "theme_capture"),
+        artifact_kinds=("concept", "build_plan", "design_docs", "workflow_bundle", "theme_capture"),
         artifact_store=artifact_store,
     )
     artifact_version = await artifact_store.create_artifact_version(
@@ -557,7 +571,7 @@ async def _register_app_bundle_artifact_version(
 
 async def generate_and_download(
     DownloadRequest: Annotated[
-        Dict[str, Any],
+        dict[str, Any],
         Field(description="Download configuration with confirmation_only and storage_backend options."),
     ],
     agent_message: Annotated[
@@ -565,10 +579,10 @@ async def generate_and_download(
         Field(description="Concise message, up to 140 chars, shown to the user in the download UI."),
     ],
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     confirmation_only = bool((DownloadRequest or {}).get("confirmation_only", False))
     storage_backend = (DownloadRequest or {}).get("storage_backend", "none")
     description = (DownloadRequest or {}).get("description")
@@ -577,11 +591,11 @@ async def generate_and_download(
     include_compose = _is_truthy((DownloadRequest or {}).get("include_compose"))
     deployment_profile = str((DownloadRequest or {}).get("deployment_profile") or "").strip() or None
 
-    chat_id: Optional[str] = None
-    app_id: Optional[str] = None
-    user_id: Optional[str] = None
-    build_registry_id: Optional[str] = None
-    build_id: Optional[str] = None
+    chat_id: str | None = None
+    app_id: str | None = None
+    user_id: str | None = None
+    build_registry_id: str | None = None
+    build_id: str | None = None
     workflow_name = "AppGenerator"
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
@@ -647,33 +661,8 @@ async def generate_and_download(
     if "ui/lib/moduleApi.js" not in files_map:
         files_map["ui/lib/moduleApi.js"] = get_module_api_template()
 
-    # Scan for forbidden patterns before the bundle is written to disk.
-    # Blocks delivery if the generated app contains noncanonical paths,
-    # contract drift, or embedded raw secret literals.
-    app_build_plan = _context_get(context_variables, "app_build_plan")
-    selected_capability_packs = []
-    if isinstance(app_build_plan, dict):
-        raw_packs = app_build_plan.get("capability_packs")
-        if isinstance(raw_packs, list):
-            selected_capability_packs = [pack for pack in raw_packs if isinstance(pack, dict)]
-    bundle_scan_errors = scan_generated_bundle(
-        files_map,
-        capability_packs=selected_capability_packs,
-    )
-    if bundle_scan_errors:
-        for _scan_err in bundle_scan_errors:
-            wf_logger.error("Generated bundle forbidden pattern: %s", _scan_err)
-        return {
-            "status": "error",
-            "message": (
-                "Generated bundle contains forbidden patterns. "
-                "Fix the errors below and regenerate."
-            ),
-            "bundle_errors": bundle_scan_errors,
-        }
-
     # Inject any pending migration file produced by DatabaseAgent during refinement.
-    pending_migration: Optional[Dict[str, Any]] = None
+    pending_migration: dict[str, Any] | None = None
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
             pending_migration = context_variables.get("pending_schema_migration")
@@ -712,6 +701,32 @@ async def generate_and_download(
             except Exception:
                 pass
 
+    app_build_plan = _context_get(context_variables, "app_build_plan")
+    selected_capability_packs: list[dict[str, Any]] = []
+    if isinstance(app_build_plan, dict):
+        raw_packs = app_build_plan.get("capability_packs")
+        if isinstance(raw_packs, list):
+            selected_capability_packs = [pack for pack in raw_packs if isinstance(pack, dict)]
+
+    acceptance_result = await run_app_bundle_acceptance_gate(
+        files=files_map,
+        context_variables=context_variables,
+        capability_packs=selected_capability_packs,
+    )
+    if not acceptance_result.get("passed"):
+        for failed_test in acceptance_result.get("failed_tests") or []:
+            wf_logger.error("App bundle acceptance failure: %s", failed_test)
+        return {
+            "status": "error",
+            "message": (
+                "Generated app bundle failed deterministic acceptance. "
+                "Fix the reported contract errors and regenerate."
+            ),
+            "app_bundle_acceptance_status": acceptance_result.get("status"),
+            "app_bundle_acceptance_result": acceptance_result,
+            "bundle_errors": acceptance_result.get("bundle_scan", {}).get("errors") or [],
+        }
+
     bundle_name = "GeneratedApp"
     try:
         # Best-effort: allow agent to provide a bundle name
@@ -734,7 +749,7 @@ async def generate_and_download(
     if tlog and _log_tool_event:
         _log_tool_event(tlog, action="write_files", status="start", file_count=len(files_map))
 
-    written_paths: List[str] = []
+    written_paths: list[str] = []
     for rel_path, content in files_map.items():
         safe = _safe_relpath(rel_path)
         if not safe:
@@ -846,6 +861,8 @@ async def generate_and_download(
             ui_payload["app_validation_result"] = context_variables.get("app_validation_result")
             ui_payload["integration_tests_passed"] = context_variables.get("integration_tests_passed")
             ui_payload["integration_test_result"] = context_variables.get("integration_test_result")
+            ui_payload["app_bundle_acceptance_status"] = context_variables.get("app_bundle_acceptance_status")
+            ui_payload["app_bundle_acceptance_result"] = context_variables.get("app_bundle_acceptance_result")
         except Exception:
             pass
 
@@ -860,7 +877,7 @@ async def generate_and_download(
         raise
     except Exception as e:
         wf_logger.error(f"UI interaction failed: {e}", exc_info=True)
-        raise UIToolError("Failed during file download UI interaction")
+        raise UIToolError("Failed during file download UI interaction") from e
 
     if response.get("status") == "cancelled":
         _context_set(context_variables, "download_status", "cancelled")
@@ -874,7 +891,7 @@ async def generate_and_download(
         }
 
     # Optional GitHub export (triggered by DownloadCenter action)
-    deployment_result: Optional[Dict[str, Any]] = None
+    deployment_result: dict[str, Any] | None = None
     try:
         action = None
         if isinstance(response, dict):
@@ -885,7 +902,7 @@ async def generate_and_download(
         if action == "export_to_github":
             gate = resolve_export_gate(context_variables)
             allow_export = bool(gate["allow_export"])
-            reasons: List[str] = list(gate["reasons"])
+            reasons: list[str] = list(gate["reasons"])
 
             if not allow_export:
                 error_msg = "Export blocked: " + " ".join(reasons) if reasons else "Export blocked."
@@ -907,6 +924,7 @@ async def generate_and_download(
                     "workflow_type": "app-generator",
                     "blocked": True,
                     "reasons": reasons,
+                    "app_bundle_acceptance_status": gate["app_bundle_acceptance_status"],
                     "app_validation_status": gate["app_validation_status"],
                     "app_validation_strategy_used": gate["app_validation_strategy_used"],
                     "integration_tests_passed": gate["integration_tests_passed"],

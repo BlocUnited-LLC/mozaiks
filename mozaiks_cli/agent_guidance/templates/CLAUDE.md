@@ -13,8 +13,9 @@ Keep app logic inside the canonical app workspace:
 app/
   app.json
   config/
+  security/
   brand/
-  services/  # optional integrations/adapters/security/routes/data support code
+  services/  # optional integrations/adapters/routes support code
   modules/
   ui/
 workflows/
@@ -29,14 +30,13 @@ and web shell behavior.
 |------|----------|
 | App identity/config | `app/app.json`, `app/config/` |
 | Shell, navigation, footer, mobile chrome | `app/config/shell.json` |
-| Secret management contract, names only | `app/config/secrets.yaml` |
+| Secret management contract, names only | `app/security/secrets.yaml` |
 | Branding/theme assets | `app/brand/` |
 | App-owned external clients | `app/services/integrations/<service>_client.py` |
 | App-owned provider adapters | `app/services/adapters/<area>/<provider>.py` |
 | App-specific auth provider mechanics | `app/services/adapters/auth/<provider>.py` |
-| Provider-neutral auth/secret helpers | `app/services/security/` |
 | App-level routes, only when needed | `app/services/routes/` |
-| Data contract and migration artifacts, only when `data/contract.json` is present | `app/data/contract.json`, `app/data/migrations/`, `app/services/data/` |
+| Data contract and migration artifacts, only when `data/contract.json` is present | `app/data/contract.json`, `app/data/migrations/` |
 | Deterministic app capabilities | `app/modules/<module_id>/` |
 | AI workflow behavior | `workflows/<WorkflowName>/` |
 | Declarative pages | `app/ui/pages/` |
@@ -52,7 +52,7 @@ and web shell behavior.
 - Do not put business logic directly in `backend/handler.py`.
 - Do not turn provider adapters into modules or put module business state in `app/services/`.
 - Do not copy framework runtime auth into the app; generic auth belongs in the installed `mozaiks` package.
-- Do not put raw secret values in `app/config/secrets.yaml`; it is a names-only contract.
+- Do not put raw secret values in `app/security/secrets.yaml`; it is a names-only contract.
 - Do not use custom React when a declarative page schema is sufficient.
 - Do not mutate generated artifacts without review/promotion.
 

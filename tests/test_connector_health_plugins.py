@@ -6,7 +6,6 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from mozaiksai.core.workflow.generator_support import connector_service
 from mozaiksai.core.workflow.generator_support import connector_health
 from mozaiksai.core.workflow.generator_support.connector_health import (
     ConnectorHealthResult,

@@ -10,7 +10,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -22,9 +22,9 @@ class ThemeValidationResult:
     """Result object returned by validation helpers."""
 
     mode: str
-    theme: Optional[ThemeConfig]
-    merged_data: Optional[Dict[str, Any]]
-    errors: Optional[List[Dict[str, Any]]]
+    theme: ThemeConfig | None
+    merged_data: dict[str, Any] | None
+    errors: list[dict[str, Any]] | None
 
     @property
     def ok(self) -> bool:
@@ -34,7 +34,7 @@ class ThemeValidationResult:
 class ThemeValidationError(Exception):
     """Raised when theme validation fails."""
 
-    def __init__(self, message: str, errors: Optional[List[Dict[str, Any]]] = None):
+    def __init__(self, message: str, errors: list[dict[str, Any]] | None = None):
         super().__init__(message)
         self.errors = errors or []
 
@@ -42,7 +42,7 @@ class ThemeValidationError(Exception):
         return ThemeValidationResult(mode=mode, theme=None, merged_data=None, errors=self.errors)
 
 
-def _deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(base)
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
@@ -52,8 +52,8 @@ def _deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, An
     return result
 
 
-def _format_validation_errors(exc: ValidationError) -> List[Dict[str, Any]]:
-    formatted: List[Dict[str, Any]] = []
+def _format_validation_errors(exc: ValidationError) -> list[dict[str, Any]]:
+    formatted: list[dict[str, Any]] = []
     for err in exc.errors():
         loc = ".".join(str(part) for part in err.get("loc", ()))
         formatted.append(
@@ -67,7 +67,7 @@ def _format_validation_errors(exc: ValidationError) -> List[Dict[str, Any]]:
     return formatted
 
 
-def validate_theme_update(payload: Dict[str, Any]) -> ThemeValidationResult:
+def validate_theme_update(payload: dict[str, Any]) -> ThemeValidationResult:
     """Validate a partial update payload and merge it with the default theme."""
 
     normalized = payload if "theme" in payload else {"theme": payload}
@@ -90,7 +90,7 @@ def validate_theme_update(payload: Dict[str, Any]) -> ThemeValidationResult:
     return ThemeValidationResult(mode="update", theme=theme, merged_data=merged, errors=None)
 
 
-def validate_full_theme(theme_data: Dict[str, Any]) -> ThemeValidationResult:
+def validate_full_theme(theme_data: dict[str, Any]) -> ThemeValidationResult:
     """Validate a full theme document (fonts/colors/shadows/branding)."""
 
     try:
@@ -102,7 +102,7 @@ def validate_full_theme(theme_data: Dict[str, Any]) -> ThemeValidationResult:
     return ThemeValidationResult(mode="full", theme=theme, merged_data=theme.dict(), errors=None)
 
 
-def auto_validate_theme(data: Dict[str, Any]) -> ThemeValidationResult:
+def auto_validate_theme(data: dict[str, Any]) -> ThemeValidationResult:
     """Attempt to validate a payload by inferring whether it's an update or full theme."""
 
     if not isinstance(data, dict):
@@ -114,7 +114,7 @@ def auto_validate_theme(data: Dict[str, Any]) -> ThemeValidationResult:
     return validate_theme_update(data)
 
 
-def validate_theme(data: Dict[str, Any], *, mode: str = "auto") -> ThemeValidationResult:
+def validate_theme(data: dict[str, Any], *, mode: str = "auto") -> ThemeValidationResult:
     """Validate a theme payload using the requested validation mode."""
 
     normalized_mode = (mode or "auto").lower()
@@ -127,7 +127,7 @@ def validate_theme(data: Dict[str, Any], *, mode: str = "auto") -> ThemeValidati
     raise ValueError(f"Unsupported validation mode: {mode}")
 
 
-def summarize_validation(result: ThemeValidationResult) -> Dict[str, Any]:
+def summarize_validation(result: ThemeValidationResult) -> dict[str, Any]:
     """Return a human-friendly summary dictionary for CLI/UX integration."""
 
     if not result.ok:
@@ -172,7 +172,7 @@ __all__ = [
 ]
 
 
-def _load_payload(path: str) -> Dict[str, Any]:
+def _load_payload(path: str) -> dict[str, Any]:
     if path == "-":
         raw = sys.stdin.read()
     else:
@@ -193,7 +193,7 @@ def _load_payload(path: str) -> Dict[str, Any]:
 
 def _resolve_validation(args: argparse.Namespace) -> ThemeValidationResult:
     if args.use_default:
-        payload: Dict[str, Any] = DEFAULT_THEME if args.mode != "update" else {}
+        payload: dict[str, Any] = DEFAULT_THEME if args.mode != "update" else {}
     else:
         payload = _load_payload(args.input)
 
@@ -232,7 +232,7 @@ def build_theme_validation_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def theme_validation_cli_main(argv: List[str] | None = None) -> int:
+def theme_validation_cli_main(argv: list[str] | None = None) -> int:
     parser = build_theme_validation_parser()
     args = parser.parse_args(argv)
 

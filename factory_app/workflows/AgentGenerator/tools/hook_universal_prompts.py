@@ -12,7 +12,7 @@ Separation of Concerns (with other hooks):
 """
 
 import logging
-from typing import Any, List, Dict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,8 @@ def _apply_system_message(agent: Any, message: str) -> None:
     elif hasattr(agent, "_system_message"):
         agent._system_message = message
     else:
-        setattr(agent, "_system_message", message)
-    setattr(agent, "_mozaiks_base_system_message", message)
+        agent._system_message = message
+    agent._mozaiks_base_system_message = message
 
 # =============================================================================
 # SECTION 1: UNIVERSAL - Apply to ALL agents
@@ -231,7 +231,7 @@ Generated frontend work must stay in the correct UI surface lane.
 # HOOK FUNCTION - Single entry point for all injections
 # =============================================================================
 
-def inject_universal_prompts(agent, messages: List[Dict[str, Any]], run_context: Any = None) -> str:
+def inject_universal_prompts(agent, messages: list[dict[str, Any]], run_context: Any = None) -> str:
     """
     Injects universal and conditional prompt sections into agent system message.
     

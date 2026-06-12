@@ -9,6 +9,10 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mozaiksai.core.adapters.ag2_task_batch_runner import (
+    AG2TaskBatchRunner,
+    AG2TaskBatchRunnerRequest,
+)
 from mozaiksai.core.ports.orchestration import RunStatus
 
 from .generator_support.code_files import (
@@ -356,6 +360,14 @@ async def execute_task_batches_for_trigger(
             if batch.source.kind == "structured_output"
             else context_variables
         )
+        if batch.source.kind == "structured_output" and not source_payload:
+            if wf_logger:
+                wf_logger.warning(
+                    "[TASK_BATCH] %s source.kind=structured_output but structured_output is "
+                    "empty or None — batch will produce no tasks. Verify the trigger agent "
+                    "emits a structured output before this batch runs.",
+                    batch.id,
+                )
         resolved_task_model = batch.source.resolve_task_model(context_variables)
         raw_tasks = resolve_path_value(source_payload, batch.source.path)
         task_items = _normalize_task_items(raw_tasks)
@@ -445,22 +457,46 @@ async def _execute_one_batch(
     failed: dict[str, dict[str, Any]] = {}
 
     while pending:
-        ready = [
-            item
-            for item in pending.values()
-            if all(
-                str(dep) in completed
-                for dep in _task_dependencies(item, batch.execution.dependency_field)
+        # A task is "resolved" when all its dependencies have settled (completed or failed).
+        # Split resolved tasks into runnable (all deps completed) vs blocked (some dep failed).
+        resolved: list[dict[str, Any]] = []
+        blocked_by_failed: list[dict[str, Any]] = []
+        for item in pending.values():
+            deps = _task_dependencies(item, batch.execution.dependency_field)
+            dep_strs = [str(d) for d in deps]
+            if all(d in completed or d in failed for d in dep_strs):
+                if any(d in failed for d in dep_strs):
+                    blocked_by_failed.append(item)
+                else:
+                    resolved.append(item)
+
+        # Drain tasks that can never run because a required dependency failed.
+        for item in blocked_by_failed:
+            task_id = str(item["task_id"])
+            pending.pop(task_id, None)
+            failed_dep = next(
+                d for d in _task_dependencies(item, batch.execution.dependency_field)
+                if str(d) in failed
             )
-        ]
-        if not ready:
-            unresolved = {
-                task_id: _task_dependencies(item, batch.execution.dependency_field)
-                for task_id, item in pending.items()
+            failed[task_id] = {
+                "task_id": task_id,
+                "status": "failed",
+                "error": f"dependency '{failed_dep}' failed",
+                "worker_agent": str(item.get(batch.worker.agent_field) or ""),
             }
-            raise ValueError(
-                f"task batch {batch.id!r} has unresolved or cyclic dependencies: {unresolved}"
-            )
+
+        ready = resolved
+        if not ready:
+            if pending:
+                # Nothing resolved and pending is still non-empty → genuine cycle.
+                unresolved = {
+                    task_id: _task_dependencies(item, batch.execution.dependency_field)
+                    for task_id, item in pending.items()
+                }
+                raise ValueError(
+                    f"task batch {batch.id!r} has unresolved or cyclic dependencies: {unresolved}"
+                )
+            break
 
         semaphore = asyncio.Semaphore(batch.execution.concurrency)
         current_batch_outputs = _build_batch_outputs(
@@ -596,15 +632,13 @@ async def _run_one_task(
         if agents_factory is None:
             from .agents import create_agents
 
-            async def _default_factory(**kwargs: Any) -> dict[str, Any]:
-                return await create_agents(**kwargs)
+            async def _default_factory(wf_name: str, ctx: Any, seed: Any) -> dict[str, Any]:
+                return await create_agents(wf_name, context_variables=ctx, cache_seed=seed)
 
             agents_factory = _default_factory
-        task_agents = await agents_factory(
-            workflow_name=workflow_name,
-            context_variables=task_context,
-            cache_seed=None,
-        )
+        # Call factory with positional args matching the convention in orchestration_patterns:
+        # agents_factory(workflow_name, context, cache_seed)
+        task_agents = await agents_factory(workflow_name, task_context, None)
         agent = task_agents.get(agent_name)
     else:
         agent = agents.get(agent_name)
@@ -613,11 +647,6 @@ async def _run_one_task(
         raise ValueError(f"task {task.get('task_id')!r} references unknown agent {agent_name!r}")
 
     async with semaphore:
-        from mozaiksai.core.adapters.ag2_task_batch_runner import (
-            AG2TaskBatchRunner,
-            AG2TaskBatchRunnerRequest,
-        )
-
         runner_result = None
         attempts = batch.execution.retry_limit + 1
         last_error: str | None = None

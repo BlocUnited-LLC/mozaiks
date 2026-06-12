@@ -5,23 +5,26 @@
 # ==============================================================================
 
 from __future__ import annotations
-from typing import Dict, Any, Optional, Annotated
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
+from typing import Annotated, Any
+
 from bson import ObjectId
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
+
 
 class DatabaseManagerError(Exception):
     """Custom exception for database manager errors."""
     pass
 
 async def save_to_database(
-    data: Annotated[Dict[str, Any], "The data to save to the database"],
-    database_name: Annotated[Optional[str], "Database name (defaults from workflow config)"] = None,
-    collection_name: Annotated[Optional[str], "Collection name (defaults from workflow config)"] = None,
+    data: Annotated[dict[str, Any], "The data to save to the database"],
+    database_name: Annotated[str | None, "Database name (defaults from workflow config)"] = None,
+    collection_name: Annotated[str | None, "Collection name (defaults from workflow config)"] = None,
     **runtime: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """AGENT CONTRACT: Save data to MongoDB database.
 
     Primary Objective:
@@ -66,7 +69,7 @@ async def save_to_database(
 
     # Prepare document with metadata
     document = dict(data)  # Copy to avoid mutation
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     
     # Add app context
     if app_id:
@@ -126,12 +129,12 @@ async def save_to_database(
         return {"status": "error", "message": f"Save failed: {e}"}
 
 async def load_from_database(
-    query: Annotated[Dict[str, Any], "MongoDB query to find documents"],
-    database_name: Annotated[Optional[str], "Database name (defaults from workflow config)"] = None,
-    collection_name: Annotated[Optional[str], "Collection name (defaults from workflow config)"] = None,
+    query: Annotated[dict[str, Any], "MongoDB query to find documents"],
+    database_name: Annotated[str | None, "Database name (defaults from workflow config)"] = None,
+    collection_name: Annotated[str | None, "Collection name (defaults from workflow config)"] = None,
     limit: Annotated[int, "Maximum number of documents to return"] = 10,
     **runtime: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """AGENT CONTRACT: Load data from MongoDB database.
 
     Primary Objective:
@@ -206,13 +209,13 @@ async def load_from_database(
         return {"status": "error", "message": f"Load failed: {e}"}
 
 async def update_in_database(
-    query: Annotated[Dict[str, Any], "MongoDB query to find documents to update"],
-    update_data: Annotated[Dict[str, Any], "Data to update in matching documents"],
-    database_name: Annotated[Optional[str], "Database name (defaults from workflow config)"] = None,
-    collection_name: Annotated[Optional[str], "Collection name (defaults from workflow config)"] = None,
+    query: Annotated[dict[str, Any], "MongoDB query to find documents to update"],
+    update_data: Annotated[dict[str, Any], "Data to update in matching documents"],
+    database_name: Annotated[str | None, "Database name (defaults from workflow config)"] = None,
+    collection_name: Annotated[str | None, "Collection name (defaults from workflow config)"] = None,
     update_many: Annotated[bool, "Whether to update multiple documents (default: False)"] = False,
     **runtime: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """AGENT CONTRACT: Update data in MongoDB database.
 
     Primary Objective:
@@ -255,7 +258,7 @@ async def update_in_database(
     update_doc = {
         "$set": {
             **update_data,
-            "updated_at": datetime.now(timezone.utc)
+            "updated_at": datetime.now(UTC)
         }
     }
 
@@ -285,12 +288,12 @@ async def update_in_database(
         return {"status": "error", "message": f"Update failed: {e}"}
 
 async def delete_from_database(
-    query: Annotated[Dict[str, Any], "MongoDB query to find documents to delete"],
-    database_name: Annotated[Optional[str], "Database name (defaults from workflow config)"] = None,
-    collection_name: Annotated[Optional[str], "Collection name (defaults from workflow config)"] = None,
+    query: Annotated[dict[str, Any], "MongoDB query to find documents to delete"],
+    database_name: Annotated[str | None, "Database name (defaults from workflow config)"] = None,
+    collection_name: Annotated[str | None, "Collection name (defaults from workflow config)"] = None,
     delete_many: Annotated[bool, "Whether to delete multiple documents (default: False)"] = False,
     **runtime: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """AGENT CONTRACT: Delete data from MongoDB database.
 
     Primary Objective:
@@ -352,7 +355,7 @@ async def delete_from_database(
         logger.error(f"❌ Database delete failed: {e}")
         return {"status": "error", "message": f"Delete failed: {e}"}
 
-def _get_database_config(workflow_name: Optional[str], database_name: Optional[str], collection_name: Optional[str]) -> Dict[str, str]:
+def _get_database_config(workflow_name: str | None, database_name: str | None, collection_name: str | None) -> dict[str, str]:
     """Helper to resolve database configuration from workflow or parameters."""
     
     # If both parameters provided, use them
@@ -397,7 +400,7 @@ def _get_database_config(workflow_name: Optional[str], database_name: Optional[s
     }
 
 
-def get_db_manager() -> Dict[str, Any]:
+def get_db_manager() -> dict[str, Any]:
     """Expose the async database helpers as a stable tool mapping."""
 
     return {

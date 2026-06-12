@@ -10,7 +10,6 @@ measurements are stored separately in RuntimeUsageEvents.
 
 from __future__ import annotations
 
-
 SYSTEM_DATABASE = "mozaiksai"
 
 

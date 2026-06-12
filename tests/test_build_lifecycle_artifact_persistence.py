@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def _make_shared_emit(return_value="outbox_1"):
@@ -126,6 +125,9 @@ class TestAppGeneratorEmitBuildCompleted:
         assert captured.get("revision_mode") is False
         input_kinds = captured.get("input_artifact_kinds") or []
         assert "design_docs" in input_kinds
+        assert "workflow_bundle" in input_kinds
+        assert "theme_capture" in input_kinds
+        assert "brand" not in input_kinds
         assert "app_bundle" not in input_kinds  # not a circular self-reference
 
 
@@ -204,4 +206,47 @@ class TestAgentGeneratorEmitBuildCompleted:
             )
 
         assert result == "outbox_ag_2"
+
+    @pytest.mark.asyncio
+    async def test_persist_workflow_bundle_artifact_includes_integration_metadata(self) -> None:
+        from factory_app.workflows.AgentGenerator.tools.platform import build_lifecycle as mod
+
+        captured: dict = {}
+        workflow_integration_metadata = {
+            "contract_version": "1.0",
+            "workflows": [
+                {
+                    "workflow_name": "TicketBatchTriageWorkflow",
+                    "capability_id": "ticket-batch-triage-workflow",
+                    "startup_mode": "BackendOnly",
+                    "trigger_events": [
+                        {
+                            "event_type": "domain.support_ticket.batch_requested",
+                            "source": "domain",
+                            "capability_id": "ticket-batch-triage-workflow",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        async def _fake_persist(**kwargs):
+            captured.update(kwargs)
+
+        with (
+            patch.object(mod, "_read_workflow_integration_metadata", AsyncMock(return_value=workflow_integration_metadata)),
+            patch("mozaiksai.core.artifacts.summary_artifacts.persist_summary_artifact", _fake_persist),
+        ):
+            await mod._persist_workflow_bundle_artifact(
+                app_id="app-1",
+                chat_id="chat-1",
+                user_id="user-1",
+                workflow_name="AgentGenerator",
+                build_mode=None,
+            )
+
+        assert captured["artifact_kind"] == "workflow_bundle"
+        assert captured["summary_payload"]["source_workflow"] == "AgentGenerator"
+        assert captured["summary_payload"]["source_chat_id"] == "chat-1"
+        assert captured["summary_payload"]["workflow_integration_metadata"] == workflow_integration_metadata
 

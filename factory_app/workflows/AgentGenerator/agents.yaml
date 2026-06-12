@@ -439,9 +439,32 @@ agents:
       - `agents.yaml` must use `prompt_sections` as a list of section objects:
         `[{id, heading, content}, ...]`. Never emit `prompt_sections` as a
         mapping keyed by role/objective/context.
-      - `structured_outputs_required` in agents.yaml must be a boolean (`true` or
-        `false`) only. Never put a model name there; model names belong only in
-        structured_outputs.yaml `registry`.
+      - Write `prompt_sections` in block YAML style, not inline flow-map style.
+        Every agent-level key must align under that same `- name:` entry.
+        ```yaml
+        agents:
+          - name: PlannerAgent
+            prompt_sections:
+              - id: role
+                heading: '[ROLE]'
+                content: You are the planning agent.
+              - id: objective
+                heading: '[OBJECTIVE]'
+                content: Produce the plan.
+              - id: instructions
+                heading: '[INSTRUCTIONS]'
+                content: Follow the workflow brief.
+              - id: output_format
+                heading: '[OUTPUT FORMAT]'
+                content: Return the expected output.
+            max_consecutive_auto_reply: 1
+            structured_outputs_required: true
+        ```
+        Never emit inline prompt sections such as
+        `{id: role, heading: Role, content: "..."}`.
+      - `structured_outputs_required` in agents.yaml must be a boolean scalar
+        exactly `true` or `false`. Never put a model name there; model names
+        belong only in structured_outputs.yaml `registry`.
       - `transition_graph.yaml` must use flat rule objects with `source_agent`,
         `target_agent`, and `transition_type`. Never emit nested keys such as
         `after_turn: {source_agent: ...}`.
@@ -485,6 +508,11 @@ agents:
       - **Redundant (7)**: Multiple agents attempt the same task independently; results are compared/merged.
 
       Name agents with PascalCase following the archetype. Keep the roster minimal — only agents the pattern requires.
+      Every agent referenced by transition_graph.yaml must be declared here.
+      `source_agent` must always match an agents.yaml `name`; `target_agent`
+      must match an agents.yaml `name` unless it is exactly `user` or
+      `terminate`. Do not invent placeholder routing targets such as
+      `HandlingLaneAgent` unless you also declare that exact agent in agents.yaml.
 
       ## STEP 3: Plan Tools and UI
 
@@ -503,6 +531,11 @@ agents:
       Add config variables for any env-var-backed settings.
       Add computed variables for business-logic outputs.
       If the workflow itself uses task_batches.yaml, add the conveyor result/status keys derived from the conveyor id: `${id}_results` and `${id}_status`.
+      The conveyor id is the single source of truth for these keys. If
+      task_batches.yaml declares `id: ticket_triage_tasks`, context_variables.yaml
+      must declare `ticket_triage_tasks_results` and `ticket_triage_tasks_status`
+      under `definitions`, and any agent that consumes completed batch state must
+      expose those variables in its `agents.<AgentName>.variables` list.
       context_variables.yaml must use exactly these top-level keys:
       - `definitions`: mapping of variable name to `{type, description, source}`
       - `agents`: mapping of agent name to `{variables: [...]}`
@@ -530,10 +563,24 @@ agents:
           source:
             type: state
             default: []
+        ticket_triage_tasks_results:
+          type: array
+          description: Completed conveyor task outputs.
+          source:
+            type: state
+            default: []
+        ticket_triage_tasks_status:
+          type: object
+          description: Conveyor execution status metadata.
+          source:
+            type: state
+            default: {}
       agents:
         PlannerAgent:
           variables:
             - tenant_id
+            - ticket_triage_tasks_results
+            - ticket_triage_tasks_status
       ```
 
       ## STEP 5: Plan Structured Outputs
@@ -602,6 +649,9 @@ agents:
       - These rules compile to AG2 beta `TransitionGraph` and are resolved through `WorkflowAdapter`.
       - Terminal agents route to `terminate` (background) or `user` (chat-facing).
       - Follow the pattern's `terminal_rule` exactly.
+      - Every `source_agent` and every non-terminal `target_agent` must match
+        an agent declared in agents.yaml. AG2 adapter compilation rejects
+        undeclared agent names.
       - Use this flat YAML shape:
         ```yaml
         transition_rules:
@@ -645,6 +695,22 @@ agents:
       `execution_agent`, includes `task_prompt`, and may include `depends_on`.
       `failure_policy` must be exactly one of `fail_batch`,
       `continue_with_available`, or `collect_errors`; never emit `retry`.
+
+      YAML scalar values must be exact values, not prose fragments. Never add
+      trailing punctuation to enum or boolean values. These are valid:
+      ```yaml
+      structured_outputs_required: true
+      transition_type: after_turn
+      require_owned_paths: false
+      failure_policy: fail_batch
+      ```
+      These are invalid:
+      ```yaml
+      structured_outputs_required: true.
+      transition_type: after_turn.
+      require_owned_paths: false.
+      failure_policy: fail_batch.
+      ```
 
       ## STEP 7: Assemble Output
 
@@ -718,14 +784,24 @@ agents:
         context_expression, or tool_called transitions
       - transition_graph.yaml transition rules are flat mappings, never nested
         under transition type names
+      - every transition source_agent and every target_agent except `user` or
+        `terminate` is present in agents.yaml
       - context_variables.yaml uses top-level definitions and agents, never variables
       - context_variables.yaml source.type values are valid contract values, never context
       - structured_outputs.yaml models use `type: model` and fields as a mapping
       - every structured output list field includes `items`
+      - every task_batches.yaml conveyor id has matching context variable
+        definitions for `${id}_results` and `${id}_status`
       - task_batches.yaml failure_policy is fail_batch, continue_with_available,
         or collect_errors
+      - enum and boolean YAML scalars are exact values with no trailing
+        punctuation, including transition_type, structured_outputs_required,
+        require_owned_paths, and failure_policy
       - middleware.yaml and ui_config.yaml are present even when they contain only
         empty/default declarations
+      - agents.yaml prompt_sections are block-style list items, never inline
+        `{id: ...}` mappings, and every agent-level key is aligned under the
+        same `- name:` item
       - middleware.yaml `prompt_middleware` is a list of objects or []; never a
         list of strings
       - tools.yaml entries have matching workflow-local tools/<name>.py files

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 
@@ -12,8 +12,8 @@ class BackendClient:
     def __init__(
         self,
         *,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
         timeout: float = 60.0,
     ) -> None:
         self.base_url = (
@@ -25,7 +25,7 @@ class BackendClient:
         self.api_key = api_key if api_key is not None else os.getenv("INTERNAL_API_KEY", "").strip()
         self._timeout = httpx.Timeout(timeout, connect=10.0)
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["X-Internal-API-Key"] = self.api_key
@@ -35,18 +35,18 @@ class BackendClient:
         self,
         path: str,
         *,
-        params: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
         error_msg: str = "Backend GET failed",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return await self._request("GET", path, params=params, error_msg=error_msg)
 
     async def post(
         self,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
+        json: dict[str, Any] | None = None,
         error_msg: str = "Backend POST failed",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return await self._request("POST", path, json=json, error_msg=error_msg)
 
     async def _request(
@@ -54,10 +54,10 @@ class BackendClient:
         method: str,
         path: str,
         *,
-        params: Optional[Dict[str, Any]] = None,
-        json: Optional[Dict[str, Any]] = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
         error_msg: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         normalized_path = path if path.startswith("/") else f"/{path}"
         url = f"{self.base_url}{normalized_path}"
         async with httpx.AsyncClient(timeout=self._timeout) as client:

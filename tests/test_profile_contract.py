@@ -31,8 +31,8 @@ class _Collection:
 
 @pytest.mark.asyncio
 async def test_platform_profile_contract_uses_host_defaults_for_local_dev(monkeypatch):
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
 
     profiles = _Collection()
 
@@ -60,8 +60,8 @@ async def test_platform_profile_contract_uses_host_defaults_for_local_dev(monkey
 
 @pytest.mark.asyncio
 async def test_platform_profile_contract_persists_display_name(monkeypatch):
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
 
     profiles = _Collection()
 
@@ -94,8 +94,8 @@ async def test_platform_profile_contract_persists_display_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_platform_profile_preferences_are_app_scoped(monkeypatch):
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
 
     preferences = _Collection()
 
@@ -274,7 +274,7 @@ def test_profile_panel_discovery_sorts_by_module_id_on_order_tie(tmp_path: Path)
         module_dir = tmp_path / "modules" / module_id
         (module_dir / "contracts").mkdir(parents=True)
         (module_dir / "contracts" / "profile.yaml").write_text(
-            f"""
+            """
 schema_version: mozaiks.profile.v1
 panels:
   - id: summary
@@ -282,7 +282,7 @@ panels:
     order: 50
     kind: metrics
     fields:
-      - {{ id: value, label: Value, type: string }}
+      - { id: value, label: Value, type: string }
 """.lstrip(),
             encoding="utf-8",
         )
@@ -327,6 +327,7 @@ panels:
 def test_module_profile_manifest_rejects_duplicate_panel_ids() -> None:
     import pytest
     from pydantic import ValidationError
+
     from mozaiksai.core.runtime.app.module_loader import ModuleProfileManifest
 
     with pytest.raises(ValidationError, match="unique id"):
@@ -344,6 +345,7 @@ def test_module_profile_manifest_rejects_duplicate_panel_ids() -> None:
 def test_module_profile_manifest_rejects_component_without_component_field() -> None:
     import pytest
     from pydantic import ValidationError
+
     from mozaiksai.core.runtime.app.module_loader import ModuleProfileManifest
 
     with pytest.raises(ValidationError, match="component"):
@@ -356,6 +358,7 @@ def test_module_profile_manifest_rejects_component_without_component_field() -> 
 def test_module_profile_manifest_rejects_metrics_without_fields() -> None:
     import pytest
     from pydantic import ValidationError
+
     from mozaiksai.core.runtime.app.module_loader import ModuleProfileManifest
 
     with pytest.raises(ValidationError, match="fields"):
@@ -368,6 +371,7 @@ def test_module_profile_manifest_rejects_metrics_without_fields() -> None:
 def test_module_profile_manifest_rejects_unknown_field_type() -> None:
     import pytest
     from pydantic import ValidationError
+
     from mozaiksai.core.runtime.app.module_loader import ModuleProfileManifest
 
     with pytest.raises(ValidationError):
@@ -383,6 +387,7 @@ def test_module_profile_manifest_rejects_unknown_field_type() -> None:
 def test_module_profile_manifest_rejects_wrong_schema_version() -> None:
     import pytest
     from pydantic import ValidationError
+
     from mozaiksai.core.runtime.app.module_loader import ModuleProfileManifest
 
     with pytest.raises(ValidationError):
@@ -395,6 +400,7 @@ def test_module_profile_manifest_rejects_wrong_schema_version() -> None:
 def test_module_profile_manifest_rejects_list_without_fields() -> None:
     import pytest
     from pydantic import ValidationError
+
     from mozaiksai.core.runtime.app.module_loader import ModuleProfileManifest
 
     with pytest.raises(ValidationError, match="fields"):
@@ -408,6 +414,7 @@ def test_module_profile_manifest_rejects_form_kind() -> None:
     """form kind is reserved and not yet implemented; validator must reject it."""
     import pytest
     from pydantic import ValidationError
+
     from mozaiksai.core.runtime.app.module_loader import ModuleProfileManifest
 
     with pytest.raises(ValidationError, match="kind"):
@@ -426,8 +433,8 @@ def test_module_profile_manifest_rejects_form_kind() -> None:
 
 @pytest.mark.asyncio
 async def test_profile_panels_endpoint_returns_empty_when_no_modules(monkeypatch, tmp_path: Path) -> None:
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
 
     (tmp_path / "app.json").write_text('{"appName": "Test"}', encoding="utf-8")
     monkeypatch.setenv("PLATFORM_PATH", str(tmp_path))
@@ -443,8 +450,8 @@ async def test_profile_panels_endpoint_returns_empty_when_no_modules(monkeypatch
 
 @pytest.mark.asyncio
 async def test_profile_panels_endpoint_hydrates_panel_without_action(monkeypatch, tmp_path: Path) -> None:
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
 
     module_dir = tmp_path / "modules" / "wallet"
     (module_dir / "contracts").mkdir(parents=True)
@@ -480,9 +487,9 @@ panels:
 
 @pytest.mark.asyncio
 async def test_profile_panels_endpoint_hydrates_action_on_success(monkeypatch, tmp_path: Path) -> None:
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
     from mozaiksai.core.runtime.composition.module_executor import ModuleResult
+    from mozaiksai.hosts import platform as platform_app
 
     module_dir = tmp_path / "modules" / "activity"
     (module_dir / "contracts").mkdir(parents=True)
@@ -529,9 +536,9 @@ panels:
 
 @pytest.mark.asyncio
 async def test_profile_panels_endpoint_action_failure_returns_safe_error(monkeypatch, tmp_path: Path) -> None:
-    from mozaiksai.hosts import platform as platform_app
     from mozaiksai.core.auth.dependencies import UserPrincipal
     from mozaiksai.core.runtime.composition.module_executor import ModuleResult
+    from mozaiksai.hosts import platform as platform_app
 
     module_dir = tmp_path / "modules" / "usage"
     (module_dir / "contracts").mkdir(parents=True)

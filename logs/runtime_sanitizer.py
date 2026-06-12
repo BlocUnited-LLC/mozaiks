@@ -6,10 +6,10 @@ Purpose:
 - Optionally sanitize in place or write to a separate .sanitized.log file.
 """
 from __future__ import annotations
-import re
-from pathlib import Path
-from typing import Iterable
 
+import re
+from collections.abc import Iterable
+from pathlib import Path
 
 _SECRET_PATTERNS: Iterable[tuple[re.Pattern[str], str]] = (
     # OpenAI keys

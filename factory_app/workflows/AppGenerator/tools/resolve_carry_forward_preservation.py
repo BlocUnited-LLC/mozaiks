@@ -7,7 +7,7 @@ the core implementation in
 """
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
 
@@ -19,10 +19,10 @@ from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
 async def resolve_carry_forward_preservation(
     *,
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Inject allowlisted declarative module contract files from the prior app bundle.
 
     Runs automatically after ``assemble_app_tasks`` completes.  Reads

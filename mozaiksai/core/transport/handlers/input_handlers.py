@@ -4,7 +4,7 @@
 # ==============================================================================
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 
 
 async def handle_user_input_submit(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:
@@ -140,8 +140,8 @@ async def handle_user_input_submit(
 
 
 async def handle_tool_call_response(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:

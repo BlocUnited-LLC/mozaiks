@@ -12,7 +12,7 @@ import zipfile
 from datetime import UTC, datetime
 from difflib import unified_diff
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException
@@ -30,7 +30,10 @@ from mozaiksai.control_plane import (
     get_orchestration_control_harness,
     register_workspace_snapshot,
 )
-from mozaiksai.control_plane.app_context import get_current_app_context_graph, get_current_app_context_summary
+from mozaiksai.control_plane.app_context import (
+    get_current_app_context_graph,
+    get_current_app_context_summary,
+)
 from mozaiksai.control_plane.app_context_override import (
     AppContextPolicyOverrideDecision,
     apply_app_context_policy_override,
@@ -50,6 +53,7 @@ from mozaiksai.control_plane.app_context_refresh_execution import (
     launch_context_refresh_plan,
 )
 from mozaiksai.control_plane.dry_run import RefinementDryRunPlan, RefinementExecutionPlan
+from mozaiksai.control_plane.review import load_refinement_review_record
 from mozaiksai.core.app_context.models import SourceRef
 from mozaiksai.core.app_context.refresh import ContextRefreshPlan, ContextRefreshScope
 from mozaiksai.core.artifacts import (
@@ -60,7 +64,6 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
-from mozaiksai.control_plane.review import load_refinement_review_record
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -129,7 +132,7 @@ def _get_app_registry_service() -> AppRegistryService:
     return AppRegistryService()
 
 
-def _normalize_bundle_entry_name(name: str) -> Optional[str]:
+def _normalize_bundle_entry_name(name: str) -> str | None:
     normalized = str(name or "").replace("\\", "/").strip("/")
     if not normalized or normalized.endswith("/"):
         return None
@@ -239,7 +242,7 @@ def _decode_text_bundle_entries(zip_path: Path) -> tuple[dict[str, str], list[st
     return files, skipped
 
 
-def _artifact_bundle_path_from_version(version) -> Optional[Path]:  # noqa: ANN001
+def _artifact_bundle_path_from_version(version) -> Path | None:  # noqa: ANN001
     artifact_path = (version.commit_metadata.metadata or {}).get("artifact_path")
     if not artifact_path:
         return None
@@ -259,7 +262,7 @@ def _version_metadata(version) -> dict[str, Any]:
     return {}
 
 
-def _refinement_metadata_from_version(version) -> Optional[dict[str, Any]]:  # noqa: ANN001
+def _refinement_metadata_from_version(version) -> dict[str, Any] | None:  # noqa: ANN001
     metadata = _version_metadata(version)
     refinement = metadata.get("refinement")
     if isinstance(refinement, dict):
@@ -354,7 +357,7 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path) -> dict[str, 
     return {"restored": sorted(restored), "skipped": sorted(skipped)}
 
 
-def _build_diff_preview(*, path: str, before: Optional[str], after: Optional[str]) -> str:
+def _build_diff_preview(*, path: str, before: str | None, after: str | None) -> str:
     before_lines = [] if before is None else before.splitlines(keepends=True)
     after_lines = [] if after is None else after.splitlines(keepends=True)
     diff_lines = list(
@@ -511,8 +514,8 @@ configure_session_router(
 def _resolve_studio_scope(
     principal: UserPrincipal,
     *,
-    app_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    app_id: str | None = None,
+    user_id: str | None = None,
 ) -> tuple[str, str]:
     """Resolve app/user scope for Studio endpoints in both auth modes."""
     return resolve_scope_from_principal(
@@ -530,7 +533,7 @@ async def get_studio_shell_config():
 
 @app.get("/api/studio/overview")
 async def get_app_overview(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -587,8 +590,8 @@ async def get_workspace_apps(
 
 class CreateWorkspaceAppRequest(BaseModel):
     name: str = Field(default="New App", min_length=1, max_length=120)
-    description: Optional[str] = Field(default=None, max_length=1000)
-    app_id: Optional[str] = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=1000)
+    app_id: str | None = Field(default=None, max_length=160)
 
 
 @app.post("/api/studio/apps")
@@ -613,7 +616,7 @@ async def create_workspace_app(
 
 @app.get("/api/studio/integrations")
 async def get_app_integrations(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -622,7 +625,7 @@ async def get_app_integrations(
 
 @app.get("/api/studio/integrations/connectors")
 async def get_integration_connectors(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -634,14 +637,14 @@ async def get_integration_connectors(
 
 
 class IntegrationConnectorPatchRequest(BaseModel):
-    display_name: Optional[str] = None
-    notes: Optional[str] = None
-    status: Optional[Literal["metadata_only", "active", "expiring", "expired", "revoked"]] = None
-    expires_at: Optional[str] = None
-    public_config: Optional[Dict[str, Any]] = None
-    required_fields: Optional[List[Dict[str, Any]]] = None
-    secret_value: Optional[str] = None
-    ttl_days: Optional[int] = Field(default=30, ge=1, le=3650)
+    display_name: str | None = None
+    notes: str | None = None
+    status: Literal["metadata_only", "active", "expiring", "expired", "revoked"] | None = None
+    expires_at: str | None = None
+    public_config: dict[str, Any] | None = None
+    required_fields: list[dict[str, Any]] | None = None
+    secret_value: str | None = None
+    ttl_days: int | None = Field(default=30, ge=1, le=3650)
 
 
 class IntegrationConnectorCreateRequest(IntegrationConnectorPatchRequest):
@@ -656,45 +659,45 @@ class AppContextRefreshPlanRequest(BaseModel):
     reason: str = Field(..., min_length=1)
     refresh_scope: ContextRefreshScope = ContextRefreshScope.DISCOVERY_INDEXING
     source_refs: list[SourceRef] | None = None
-    current_context_version_id: Optional[str] = None
-    requested_by: Optional[str] = None
+    current_context_version_id: str | None = None
+    requested_by: str | None = None
 
 
 class AppContextRefreshLaunchRequest(BaseModel):
     plan: ContextRefreshPlan
     confirm_launch: bool = False
-    reason: Optional[str] = None
+    reason: str | None = None
     refresh_scope: ContextRefreshScope = ContextRefreshScope.DISCOVERY_INDEXING
-    request_id: Optional[str] = None
+    request_id: str | None = None
 
 
 class AppContextRefreshCompleteRequest(BaseModel):
     plan: ContextRefreshPlan
-    previous_context_version_id: Optional[str] = None
-    launch_result: Optional[ContextRefreshLaunchResult] = None
-    workflow_context_variables: Dict[str, Any] = Field(default_factory=dict)
+    previous_context_version_id: str | None = None
+    launch_result: ContextRefreshLaunchResult | None = None
+    workflow_context_variables: dict[str, Any] = Field(default_factory=dict)
 
 
 class AppContextWorkspaceSnapshotRequest(BaseModel):
     workspace_root: str = Field(..., min_length=1)
     artifact_key: str = "workspace_snapshot"
     make_current: bool = True
-    scan_policy: Optional[Dict[str, Any]] = None
+    scan_policy: dict[str, Any] | None = None
 
 
 class AppContextPolicyOverrideRequest(BaseModel):
     request_id: str = Field(..., min_length=1)
-    context_version_id: Optional[str] = None
+    context_version_id: str | None = None
     original_policy_decision: AppContextPolicyDecision
     override_decision: AppContextPolicyOverrideDecision
     reason: str = Field(..., min_length=1)
     reviewer: str = Field(..., min_length=1)
     applies_to_paths: list[str] = Field(default_factory=list)
-    change_class: Optional[str] = None
-    refinement_lane: Optional[str] = None
-    policy_result: Optional[AppContextPolicyResult] = None
+    change_class: str | None = None
+    refinement_lane: str | None = None
+    policy_result: AppContextPolicyResult | None = None
     apply_to_plan: bool = False
-    plan: Optional[Dict[str, Any]] = None
+    plan: dict[str, Any] | None = None
 
 
 _SECRET_RESPONSE_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
@@ -702,7 +705,7 @@ _SECRET_RESPONSE_KEYS = {"secret_value", "secret", "api_key", "apikey", "token",
 
 def _redact_secret_fields(value: Any) -> Any:
     if isinstance(value, dict):
-        redacted: Dict[str, Any] = {}
+        redacted: dict[str, Any] = {}
         for key, item in value.items():
             if str(key).strip().lower() in _SECRET_RESPONSE_KEYS:
                 continue
@@ -713,7 +716,7 @@ def _redact_secret_fields(value: Any) -> Any:
     return value
 
 
-def _redact_connector_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _redact_connector_record(record: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(record, dict):
         return None
     enriched = dict(record)
@@ -722,7 +725,7 @@ def _redact_connector_record(record: Optional[Dict[str, Any]]) -> Optional[Dict[
     return _redact_secret_fields(enriched)
 
 
-def _redact_secret_result(result: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _redact_secret_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(result, dict):
         return None
     return _redact_secret_fields(result)
@@ -740,7 +743,7 @@ def _context_refresh_policy(reason: str, warnings: list[str] | None = None) -> A
     )
 
 
-def _plan_from_operator_payload(payload: Dict[str, Any]) -> RefinementExecutionPlan | RefinementDryRunPlan:
+def _plan_from_operator_payload(payload: dict[str, Any]) -> RefinementExecutionPlan | RefinementDryRunPlan:
     try:
         return RefinementExecutionPlan.model_validate(payload)
     except ValidationError:
@@ -969,12 +972,12 @@ async def create_studio_app_context_policy_override(
 @app.post("/api/studio/integrations/connectors")
 async def create_or_update_integration_connector(
     body: IntegrationConnectorCreateRequest,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     record = None
-    secret_result: Optional[Dict[str, Any]] = None
+    secret_result: dict[str, Any] | None = None
     if body.secret_value:
         secret_result = await store_connector(
             app_id=app_id,
@@ -1034,7 +1037,7 @@ async def create_or_update_integration_connector(
 async def patch_integration_connector(
     service: str,
     body: IntegrationConnectorPatchRequest,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     from mozaiksai.core.data.persistence import AppConnectorStore
@@ -1045,7 +1048,7 @@ async def patch_integration_connector(
     if not existing:
         raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
 
-    secret_result: Optional[Dict[str, Any]] = None
+    secret_result: dict[str, Any] | None = None
     if body.secret_value:
         secret_result = await store_connector(
             app_id=app_id,
@@ -1078,7 +1081,7 @@ async def patch_integration_connector(
 @app.post("/api/studio/integrations/connectors/{service}/health-check")
 async def check_integration_connector_health(
     service: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1105,7 +1108,7 @@ async def check_integration_connector_health(
 @app.delete("/api/studio/integrations/connectors/{service}")
 async def remove_integration_connector(
     service: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1121,10 +1124,10 @@ async def remove_integration_connector(
 @app.get("/api/studio/build/history")
 async def get_build_history(
     principal: UserPrincipal = Depends(require_user_scope),
-    app_id: Optional[str] = None,
-    artifact_kind: Optional[str] = None,
-    artifact_key: Optional[str] = None,
-    artifact_version_id: Optional[str] = None,
+    app_id: str | None = None,
+    artifact_kind: str | None = None,
+    artifact_key: str | None = None,
+    artifact_version_id: str | None = None,
     limit: int = 25,
 ):
     """Return recent artifact versions and change requests for the current workspace."""
@@ -1151,7 +1154,7 @@ async def get_build_history(
 @app.get("/api/studio/build/artifacts/{artifact_version_id}/bundle")
 async def get_build_artifact_bundle(
     artifact_version_id: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1209,7 +1212,7 @@ async def get_build_artifact_bundle(
 @app.get("/api/studio/build/artifacts/{artifact_version_id}/review")
 async def get_build_artifact_review(
     artifact_version_id: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1231,7 +1234,7 @@ async def get_build_artifact_review(
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/accept")
 async def accept_build_artifact_version(
     artifact_version_id: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1294,7 +1297,7 @@ async def accept_build_artifact_version(
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/reject")
 async def reject_build_artifact_version(
     artifact_version_id: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1337,7 +1340,7 @@ async def reject_build_artifact_version(
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
 async def promote_build_artifact_version(
     artifact_version_id: str,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1421,7 +1424,7 @@ class BuildRevertRequest(BaseModel):
 @app.post("/api/studio/build/revert")
 async def revert_to_artifact_version(
     body: BuildRevertRequest,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Restore a previously generated artifact version as the active app state.
@@ -1493,7 +1496,7 @@ async def revert_to_artifact_version(
 
 @app.get("/api/studio/build")
 async def get_build_surface(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
@@ -1529,11 +1532,11 @@ async def get_build_surface(
 
 class BuildSaveRequest(BaseModel):
     request_text: str = Field(..., description="Persisted build request text")
-    request_kind: Optional[Literal["greenfield_app", "brownfield_app", "refinement"]] = Field(
+    request_kind: Literal["greenfield_app", "brownfield_app", "refinement"] | None = Field(
         None,
         description="High-level request kind for the current build draft",
     )
-    change_class: Optional[Literal["patch", "design", "feature", "core"]] = Field(
+    change_class: Literal["patch", "design", "feature", "core"] | None = Field(
         None,
         description="Refinement change class when the current draft is a refinement request",
     )
@@ -1542,7 +1545,7 @@ class BuildSaveRequest(BaseModel):
 @app.put("/api/studio/build")
 async def save_build_surface(
     request: BuildSaveRequest,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
@@ -1591,15 +1594,15 @@ async def save_build_surface(
 
 
 class WorkflowTriggerRequest(BaseModel):
-    workflow_id: Optional[str] = None
+    workflow_id: str | None = None
     trigger_source: str = "chat"
-    journey_id: Optional[str] = None
-    context_variables: Dict[str, Any] = Field(default_factory=dict)
-    trigger_payload: Dict[str, Any] = Field(default_factory=dict)
-    action_id: Optional[str] = None
-    artifact_key: Optional[str] = None
-    app_id: Optional[str] = None
-    user_id: Optional[str] = None
+    journey_id: str | None = None
+    context_variables: dict[str, Any] = Field(default_factory=dict)
+    trigger_payload: dict[str, Any] = Field(default_factory=dict)
+    action_id: str | None = None
+    artifact_key: str | None = None
+    app_id: str | None = None
+    user_id: str | None = None
 
 
 @app.post("/api/workflows/trigger")

@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 from mozaiksai.core.transport.ui_events import UIDisplayMode, UIUpdateData
 
@@ -46,11 +46,11 @@ class UIToolsMixin:
     # UI TOOL STATE PERSISTENCE
     # ==================================================================================
 
-    def _get_resolved_tool_call_registry(self) -> Dict[str, None]:
+    def _get_resolved_tool_call_registry(self) -> dict[str, None]:
         registry = getattr(self, "_resolved_tool_call_ids", None)
         if not isinstance(registry, dict):
             registry = {}
-            setattr(self, "_resolved_tool_call_ids", registry)
+            self._resolved_tool_call_ids = registry
         return registry
 
     def _mark_tool_call_response_resolved(self, event_id: str) -> None:
@@ -72,11 +72,11 @@ class UIToolsMixin:
     async def _persist_ui_tool_state(
         self,
         *,
-        chat_id: Optional[str],
+        chat_id: str | None,
         tool_name: str,
         event_id: str,
         display_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
     ) -> None:
         """Persist latest artifact/inline UI payload for chat restoration."""
         if not chat_id or not isinstance(payload, dict):
@@ -146,13 +146,13 @@ class UIToolsMixin:
     async def send_tool_call_event(
         self,
         event_id: str,
-        chat_id: Optional[str],
+        chat_id: str | None,
         tool_name: str,
         component_name: str,
         display_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         awaiting_response: bool = True,
-        agent_name: Optional[str] = None
+        agent_name: str | None = None
     ) -> None:
         """Emit the canonical ``chat.tool_call`` workflow UI event to the frontend."""
         # Extract agent_name from payload if not explicitly provided
@@ -218,8 +218,8 @@ class UIToolsMixin:
     async def send_ui_update(
         self,
         event_id: str,
-        chat_id: Optional[str],
-        patch: Dict[str, Any],
+        chat_id: str | None,
+        patch: dict[str, Any],
     ) -> None:
         """Emit a ``ui.update`` event to patch a live component's payload.
 
@@ -238,7 +238,7 @@ class UIToolsMixin:
     # ==================================================================================
 
     @classmethod
-    async def wait_for_tool_call_response(cls, event_id: str, timeout: Optional[float] = 300.0) -> Dict[str, Any]:
+    async def wait_for_tool_call_response(cls, event_id: str, timeout: float | None = 300.0) -> dict[str, Any]:
         """Await a UI tool response with an optional timeout.
 
         Args:
@@ -259,15 +259,15 @@ class UIToolsMixin:
         try:
             response_data = await asyncio.wait_for(fut, timeout=timeout) if timeout else await fut
             return response_data
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if not fut.done():
-                fut.set_exception(asyncio.TimeoutError("UI tool response timed out"))
+                fut.set_exception(TimeoutError("UI tool response timed out"))
             logger.error(f"Tool call response timed out for event {event_id}")
             raise
         finally:
             instance.pending_tool_call_responses.pop(event_id, None)
 
-    def _resolve_tool_call_future(self, event_id: str) -> Optional[asyncio.Future]:
+    def _resolve_tool_call_future(self, event_id: str) -> asyncio.Future | None:
         future = self.pending_tool_call_responses.get(event_id)
         if future is None:
             return None
@@ -275,7 +275,7 @@ class UIToolsMixin:
             return None
         return future
 
-    def _complete_tool_call_future(self, future: asyncio.Future, response_data: Dict[str, Any]) -> None:
+    def _complete_tool_call_future(self, future: asyncio.Future, response_data: dict[str, Any]) -> None:
         if future.done():
             return
         future_loop = future.get_loop() if hasattr(future, "get_loop") else None
@@ -294,8 +294,8 @@ class UIToolsMixin:
         self,
         *,
         event_id: str,
-        response_data: Dict[str, Any],
-        metadata: Optional[Dict[str, Any]],
+        response_data: dict[str, Any],
+        metadata: dict[str, Any] | None,
     ) -> None:
         if not metadata:
             return
@@ -362,7 +362,7 @@ class UIToolsMixin:
             except Exception as dismiss_err:
                 logger.debug("[UI_TOOL] Failed to emit ui.dismiss event for %s: %s", event_id, dismiss_err)
 
-    async def submit_tool_call_response(self, event_id: str, response_data: Dict[str, Any]) -> bool:
+    async def submit_tool_call_response(self, event_id: str, response_data: dict[str, Any]) -> bool:
         """
         Submit response data for a pending UI tool event.
 

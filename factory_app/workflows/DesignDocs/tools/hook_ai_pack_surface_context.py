@@ -23,7 +23,7 @@ This hook is conditional — it no-ops when no AI-native packs are detected.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
 
@@ -188,7 +188,7 @@ def _build_body(detected_packs: list[str]) -> str:
 
 def inject_ai_pack_surface_context(
     agent: Any,
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> None:
     """
     prompt middleware function for DesignDocsAgent.

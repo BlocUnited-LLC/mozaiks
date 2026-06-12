@@ -5,9 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from mozaiksai.hosts import platform as platform_app
 from mozaiksai.core.auth.dependencies import UserPrincipal
-
+from mozaiksai.hosts import platform as platform_app
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 

@@ -114,7 +114,9 @@ def _make_context(
 
 
 async def _resolve(context: dict[str, Any], *, workspace_result: dict[str, Any] = _WORKSPACE_OK) -> dict[str, Any]:
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import resolve_carry_forward_preservation
+    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+        resolve_carry_forward_preservation,
+    )
     with (
         patch("factory_app.control_plane.tools.resolve_carry_forward_preservation.load_artifact_workspace", new=AsyncMock(return_value=workspace_result)),
         patch("factory_app.control_plane.tools.resolve_carry_forward_preservation.get_artifact_store", return_value=MagicMock()),
@@ -199,7 +201,9 @@ class TestLevelA_Inventory:
 
 class TestLevelB_ContextSeed:
     async def _call(self, *, extra=None, workspace_result=None):
-        from factory_app.control_plane.tools.get_carry_forward_candidates import get_carry_forward_candidates
+        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+            get_carry_forward_candidates,
+        )
         from mozaiksai.control_plane.contracts import ControlPlaneToolContext
         ws = workspace_result if workspace_result is not None else _WORKSPACE_OK
         ctx = ControlPlaneToolContext(app_id=_APP_ID, extra={"previous_app_bundle_ref": _PREV_REF, **(extra or {})})
@@ -225,7 +229,9 @@ class TestLevelB_ContextSeed:
 
     @pytest.mark.asyncio
     async def test_b04_missing_prev_ref_returns_empty(self):
-        from factory_app.control_plane.tools.get_carry_forward_candidates import get_carry_forward_candidates
+        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+            get_carry_forward_candidates,
+        )
         from mozaiksai.control_plane.contracts import ControlPlaneToolContext
         ctx = ControlPlaneToolContext(app_id=_APP_ID, extra={})
         result = await get_carry_forward_candidates(context=ctx)
@@ -439,7 +445,9 @@ class TestLevelF_Report:
 
     @pytest.mark.asyncio
     async def test_f08_preserved_paths_all_allowlisted(self):
-        from factory_app.control_plane.tools.resolve_carry_forward_preservation import _PHASE_7A_MODULE_ALLOWLIST
+        from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+            _PHASE_7A_MODULE_ALLOWLIST,
+        )
         ctx = _make_context(decisions=_CARRY_FORWARD_DECISIONS, generated_files=dict(_MARKETPLACE_FILES))
         result = await _resolve(ctx)
         for path in result["carry_forward_report"]["preserved_paths"]:
@@ -485,7 +493,9 @@ class TestLevelG_BundleSafety:
 
     @pytest.mark.asyncio
     async def test_g05_crm_preserved_paths_all_allowlisted(self):
-        from factory_app.control_plane.tools.resolve_carry_forward_preservation import _PHASE_7A_MODULE_ALLOWLIST
+        from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+            _PHASE_7A_MODULE_ALLOWLIST,
+        )
         crm_module_ids = {"settings", "notifications", "contacts", "pipeline"}
         ctx = _make_context(decisions=_CARRY_FORWARD_DECISIONS, generated_files=dict(_MARKETPLACE_FILES))
         await _resolve(ctx)

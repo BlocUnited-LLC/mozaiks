@@ -59,21 +59,21 @@ def test_generated_agent_guidance_declares_app_service_support_lane() -> None:
     assert "`app/services/` - optional app-owned support code" in agents
     assert "app/services/integrations/" in agents
     assert "app/services/adapters/" in agents
-    assert "app/services/security/" in agents
     assert "app/services/routes/" in agents
-    assert "app/config/secrets.yaml" in agents
+    assert "app/services/security/" not in agents
+    assert "app/security/secrets.yaml" in agents
     assert "Never store raw API keys" in agents
     assert "app/data/contract.json" in agents
     assert "workflows/" in agents
     assert "business actions, lifecycle state, emitted events, or persistence authority" in agents
     assert "auth/" in agents and "dns/" in agents and "registrar/" in agents and "secrets/" in agents
-    assert "services/  # optional integrations/adapters/security/routes/data support code" in claude
+    assert "services/  # optional integrations/adapters/routes support code" in claude
     assert "app/services/integrations/<service>_client.py" in claude
     assert "app/services/adapters/<area>/<provider>.py" in claude
     assert "app/services/adapters/auth/<provider>.py" in claude
-    assert "app/services/security/" in claude
     assert "Secret management contract, names only" in claude
-    assert "app/config/secrets.yaml" in claude
+    assert "app/services/security/" not in claude
+    assert "app/security/secrets.yaml" in claude
     assert "workflows/<WorkflowName>/" in claude
     assert Path(".claude/skills/add-branding/SKILL.md") in files
     assert "Studio/factory-generated modules and workflows" in claude

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from .definition import AppDefinition, AppFeatureFlags, ModuleRef, ExecutionMode, WorkflowRef, PageRef
+from .definition import (
+    AppDefinition,
+    AppFeatureFlags,
+    ExecutionMode,
+    ModuleRef,
+    PageRef,
+    WorkflowRef,
+)
 from .entitlements import ConfiguredEntitlementAdapter
 from .loader import AppLoader, AppLoadError, AppLoadResult
-from .module_loader import ModuleLoader, ModuleLoadError, LoadedModule, ModuleDefinition, ActionDef
+from .module_loader import ActionDef, LoadedModule, ModuleDefinition, ModuleLoader, ModuleLoadError
 
 _STUDIO_SUMMARY_EXPORTS = {
     "build_app_overview_summary",

@@ -99,6 +99,19 @@ def test_scan_generated_bundle_rejects_noncanonical_config_descriptor() -> None:
     assert any("config/app_zero_brownfield.json" in error for error in errors)
 
 
+def test_scan_generated_bundle_accepts_runtime_project_manifests() -> None:
+    errors = scan_generated_bundle(
+        {
+            "app.json": '{"name":"Demo"}',
+            "package.json": '{"scripts":{"build":"vite"}}',
+            "requirements.txt": "fastapi\n",
+            "vite.config.js": "export default {};\n",
+        }
+    )
+
+    assert errors == []
+
+
 def test_scan_generated_bundle_rejects_build_time_prompting_root() -> None:
     errors = scan_generated_bundle(
         {

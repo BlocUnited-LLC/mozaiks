@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working Path Constraint
+
+**Always work on `C:\Repos\BlocUnitedRepo\mozaiks` (this repo) and `C:\Repos\BlocUnitedRepo\mozaiks-app`.**
+Never read from or write to OneDrive paths (`C:\Users\...\OneDrive\...`). Those are stale copies, not the working repos.
+
 **Read [ARCHITECTURE.md](ARCHITECTURE.md) first.** That file is the source of truth for how the system works.
 
 This repo uses layered FastAPI hosts as the canonical OSS server composition:
@@ -207,7 +212,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | Secret manager provider support | OSS `mozaiksai.core.secrets`; app workspaces declare names in `app/security/secrets.yaml` |
 | Secret management contract, names only | `app/security/secrets.yaml` in an app workspace |
 | SaaS plan/tier catalog (subscriptions) | `app/config/subscriptions.yaml` in an app workspace |
-| Entitlement grant adapter (SaaS only) | `app/services/adapters/entitlements/grant_adapter.py` in an app workspace |
+| SaaS entitlement enforcement | OSS `ConfiguredEntitlementAdapter` wired from `app/config/subscriptions.yaml`; apps persist assignments through the configured data alias |
 | Data contract and migrations | `app/data/contract.json`, `app/data/migrations/` in an app workspace |
 | External database adapter | `app/services/adapters/database/{provider}.py` in an app workspace |
 | Multi-module page | `app/ui/pages/{name}.yaml` in an app workspace |
@@ -264,6 +269,43 @@ modules/{module_id}/
     ├── settings.py          ← optional: settings hooks
     └── admin.py             ← optional: admin panel hooks
 ```
+
+**Canonical service support lane used by AppGenerator and app contributors:**
+```text
+services/
+├── __init__.py              ← optional Python package marker
+├── config.py                ← optional app-owned support config, no secrets
+├── integrations/            ← thin clients for external or hosted APIs
+│   ├── __init__.py
+│   └── {service}_client.py
+├── adapters/                ← provider-specific implementation mechanics
+│   ├── __init__.py
+│   └── {area}/
+│       ├── __init__.py
+│       └── {provider}.py
+└── routes/                  ← explicit app-level routes only when required
+    ├── __init__.py
+    └── {route}.py
+```
+
+`app/services/` is not a module system, product service layer, persistence
+plane, security plane, or entitlement authority. It holds implementation support
+that modules, workflows, or host contracts call. Service files must not own
+durable app facts, lifecycle transitions, user-facing actions, permissions,
+emitted events, or persistence authority.
+
+Use `services/integrations/{pack_id}_client.py` for hosted-pack API clients and
+generate an app-owned facade module when pages or actions need that capability.
+Use `services/adapters/{area}/{provider}.py` for provider mechanics such as SDK
+calls, protocol translation, signing, retries, and response normalization.
+Common adapter areas include `auth/`, `source_control/`, `deployment/`, `dns/`,
+`registrar/`, `cloud/`, `storage/`, `search/`, `email/`, `database/`,
+`secrets/`, and `payments/`.
+
+Do not generate `app/services/data/`, `app/services/security/`, or entitlement
+grant adapters. Data contracts live under `app/data/`; secret policy lives at
+`app/security/secrets.yaml`; SaaS plans live in `app/config/subscriptions.yaml`;
+runtime entitlement enforcement is handled by the OSS `ConfiguredEntitlementAdapter`.
 
 ## Generated Persistence Contract
 
@@ -475,8 +517,8 @@ The tool receives already-reasoned data and just persists/emits it.
 | AppBackendPort | generic contract for runtime ↔ backend communication |
 | EntitlementPort | generic contract for capability entitlement checks at module action dispatch time; default is no-op (non-SaaS apps unaffected) |
 | entitlement_gate | optional `ActionDef` field — capability_id the executor checks via `EntitlementPort` before dispatching the action |
-| subscriptions.yaml | SaaS-only plan catalog at `app/config/subscriptions.yaml` — declares plan_ids and the capability_ids each plan grants; loaded at startup and passed to `EntitlementAdapter` |
-| EntitlementAdapter | app-owned `EntitlementPort` implementation at `app/services/adapters/entitlements/grant_adapter.py` — one canonical class name and constructor across all apps; internal grant strategy is app-owned |
+| subscriptions.yaml | SaaS-only plan catalog at `app/config/subscriptions.yaml` — declares plan_ids and the capability_ids each plan grants; loaded at startup and passed to `ConfiguredEntitlementAdapter` |
+| ConfiguredEntitlementAdapter | OSS `EntitlementPort` implementation that reads `app/config/subscriptions.yaml` and its assignment-store data alias; app payment providers create or update assignment records, but do not replace the runtime entitlement adapter |
 | app_backend_url | optional base URL of an external/generated backend for split deployments |
 | module | self-contained deterministic capability unit declared in an app workspace `modules/` root or a generated app bundle |
 | module.yaml | handler/action manifest — identity, capabilities, and action definitions; event declarations live in `events.yaml` |

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from pymongo import ReturnDocument
@@ -37,7 +38,7 @@ class ArtifactStore:
     """Canonical artifact persistence for versioned build/refinement state."""
 
     def __init__(self) -> None:
-        self.client: Optional[Any] = None
+        self.client: Any | None = None
         self._init_lock = asyncio.Lock()
 
     async def _ensure_client(self) -> None:
@@ -130,21 +131,21 @@ class ArtifactStore:
         app_id: str,
         artifact_kind: str,
         artifact_key: str,
-        files_manifest: Optional[Iterable[Dict[str, Any] | ArtifactFileManifestEntry]] = None,
-        source_workflow: Optional[str] = None,
-        source_chat_id: Optional[str] = None,
-        parent_version_id: Optional[str] = None,
-        canonical_inputs_version: Optional[Dict[str, str]] = None,
+        files_manifest: Iterable[dict[str, Any] | ArtifactFileManifestEntry] | None = None,
+        source_workflow: str | None = None,
+        source_chat_id: str | None = None,
+        parent_version_id: str | None = None,
+        canonical_inputs_version: dict[str, str] | None = None,
         lifecycle_status: ArtifactLifecycleStatus = ArtifactLifecycleStatus.CURRENT,
         validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PENDING,
-        commit_metadata: Optional[Dict[str, Any] | ArtifactCommitMetadata] = None,
+        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
     ) -> ArtifactVersionDoc:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
 
         versions = await self._coll("ArtifactVersions")
-        parent_doc: Optional[ArtifactVersionDoc] = None
+        parent_doc: ArtifactVersionDoc | None = None
         if parent_version_id:
             parent_raw = await versions.find_one(
                 {"_id": parent_version_id, **build_app_scope_filter(resolved_app_id)}
@@ -213,7 +214,7 @@ class ArtifactStore:
         *,
         app_id: str,
         artifact_version_id: str,
-    ) -> Optional[ArtifactVersionDoc]:
+    ) -> ArtifactVersionDoc | None:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -227,16 +228,16 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_kind: Optional[str] = None,
-        artifact_key: Optional[str] = None,
-        lineage_root_id: Optional[str] = None,
-        lifecycle_status: Optional[ArtifactLifecycleStatus] = None,
+        artifact_kind: str | None = None,
+        artifact_key: str | None = None,
+        lineage_root_id: str | None = None,
+        lifecycle_status: ArtifactLifecycleStatus | None = None,
         limit: int = 50,
-    ) -> List[ArtifactVersionDoc]:
+    ) -> list[ArtifactVersionDoc]:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        query: Dict[str, Any] = {"app_id": resolved_app_id}
+        query: dict[str, Any] = {"app_id": resolved_app_id}
         if artifact_kind:
             query["artifact_kind"] = artifact_kind
         if artifact_key:
@@ -256,7 +257,7 @@ class ArtifactStore:
         app_id: str,
         artifact_version_id: str,
         reason: str,
-        invalidated_by_version_id: Optional[str] = None,
+        invalidated_by_version_id: str | None = None,
     ) -> bool:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -288,13 +289,13 @@ class ArtifactStore:
         artifact_kind: str,
         artifact_key: str,
         reason: str,
-        invalidated_by_version_id: Optional[str] = None,
-        exclude_version_id: Optional[str] = None,
+        invalidated_by_version_id: str | None = None,
+        exclude_version_id: str | None = None,
     ) -> int:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        query: Dict[str, Any] = {
+        query: dict[str, Any] = {
             "app_id": resolved_app_id,
             "artifact_kind": artifact_kind,
             "artifact_key": artifact_key,
@@ -322,16 +323,16 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_version_refs: Dict[str, str],
-        affected_artifact_kinds: Optional[Iterable[str]] = None,
+        artifact_version_refs: dict[str, str],
+        affected_artifact_kinds: Iterable[str] | None = None,
         reason: str,
-        invalidated_by_version_id: Optional[str] = None,
+        invalidated_by_version_id: str | None = None,
     ) -> list[str]:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
 
-        normalized_refs: Dict[str, str] = {}
+        normalized_refs: dict[str, str] = {}
         for raw_kind, raw_version_id in dict(artifact_version_refs or {}).items():
             artifact_kind = str(raw_kind or "").strip()
             artifact_version_id = str(raw_version_id or "").strip()
@@ -367,13 +368,13 @@ class ArtifactStore:
         app_id: str,
         artifact_version_id: str,
         validation_status: ArtifactValidationStatus,
-        lifecycle_status: Optional[ArtifactLifecycleStatus] = None,
-        commit_metadata: Optional[Dict[str, Any] | ArtifactCommitMetadata] = None,
+        lifecycle_status: ArtifactLifecycleStatus | None = None,
+        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
     ) -> bool:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        updates: Dict[str, Any] = {
+        updates: dict[str, Any] = {
             "validation_status": validation_status.value,
             "updated_at": _utc_now(),
         }
@@ -400,14 +401,14 @@ class ArtifactStore:
         app_id: str,
         artifact_kind: str,
         artifact_key: str,
-        artifact_version_id: Optional[str],
+        artifact_version_id: str | None,
         raw_user_request: str,
         classification: ChangeClassification,
-        refinement_request: Dict[str, Any] | RefinementRequestPayload,
-        change_intent: Dict[str, Any] | ChangeIntentDoc,
-        impact_set: Dict[str, Any] | ImpactSetDoc,
-        router_decision: Optional[Dict[str, Any]] = None,
-        created_by_user_id: Optional[str] = None,
+        refinement_request: dict[str, Any] | RefinementRequestPayload,
+        change_intent: dict[str, Any] | ChangeIntentDoc,
+        impact_set: dict[str, Any] | ImpactSetDoc,
+        router_decision: dict[str, Any] | None = None,
+        created_by_user_id: str | None = None,
     ) -> ChangeRequestDoc:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -449,14 +450,14 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_version_id: Optional[str] = None,
-        classification: Optional[ChangeClassification] = None,
+        artifact_version_id: str | None = None,
+        classification: ChangeClassification | None = None,
         limit: int = 50,
-    ) -> List[ChangeRequestDoc]:
+    ) -> list[ChangeRequestDoc]:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        query: Dict[str, Any] = {"app_id": resolved_app_id}
+        query: dict[str, Any] = {"app_id": resolved_app_id}
         if artifact_version_id:
             query["artifact_version_id"] = artifact_version_id
         if classification:
@@ -471,7 +472,7 @@ class ArtifactStore:
         *,
         app_id: str,
         change_request_id: str,
-    ) -> Optional[ChangeRequestDoc]:
+    ) -> ChangeRequestDoc | None:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -486,7 +487,7 @@ class ArtifactStore:
         *,
         app_id: str,
         change_request_id: str,
-        router_decision: Dict[str, Any],
+        router_decision: dict[str, Any],
     ) -> bool:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -504,13 +505,13 @@ class ArtifactStore:
         app_id: str,
         artifact_version_id: str,
         lifecycle_status: ArtifactLifecycleStatus,
-        invalidation_reason: Optional[str] = None,
-        invalidated_by_version_id: Optional[str] = None,
+        invalidation_reason: str | None = None,
+        invalidated_by_version_id: str | None = None,
     ) -> bool:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        updates: Dict[str, Any] = {
+        updates: dict[str, Any] = {
             "lifecycle_status": lifecycle_status.value,
             "updated_at": _utc_now(),
         }
@@ -533,8 +534,8 @@ class ArtifactStore:
         *,
         app_id: str,
         artifact_version_id: str,
-        commit_metadata: Optional[Dict[str, Any] | ArtifactCommitMetadata] = None,
-    ) -> Optional[ArtifactVersionDoc]:
+        commit_metadata: dict[str, Any] | ArtifactCommitMetadata | None = None,
+    ) -> ArtifactVersionDoc | None:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -544,7 +545,7 @@ class ArtifactStore:
             return None
         target = ArtifactVersionDoc.model_validate(raw)
         now = _utc_now()
-        updates: Dict[str, Any] = {
+        updates: dict[str, Any] = {
             "lifecycle_status": ArtifactLifecycleStatus.CURRENT.value,
             "updated_at": now,
         }
@@ -598,12 +599,12 @@ class ArtifactStore:
         app_id: str,
         artifact_version_id: str,
         change_request_id: str,
-        result_artifact_version_id: Optional[str] = None,
+        result_artifact_version_id: str | None = None,
         provider: str = "e2b",
-        sandbox_id: Optional[str] = None,
+        sandbox_id: str | None = None,
         status: RefinementSessionStatus = RefinementSessionStatus.PROVISIONING,
-        preview_url: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        preview_url: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> RefinementSessionDoc:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -629,18 +630,18 @@ class ArtifactStore:
         *,
         app_id: str,
         session_id: str,
-        status: Optional[RefinementSessionStatus] = None,
-        sandbox_id: Optional[str] = None,
-        result_artifact_version_id: Optional[str] = None,
-        preview_url: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        ended_at: Optional[datetime] = None,
+        status: RefinementSessionStatus | None = None,
+        sandbox_id: str | None = None,
+        result_artifact_version_id: str | None = None,
+        preview_url: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        ended_at: datetime | None = None,
     ) -> bool:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        updates: Dict[str, Any] = {"started_at": {"$exists": True}}
-        set_doc: Dict[str, Any] = {"metadata": dict(metadata or {})} if metadata is not None else {}
+        updates: dict[str, Any] = {"started_at": {"$exists": True}}
+        set_doc: dict[str, Any] = {"metadata": dict(metadata or {})} if metadata is not None else {}
         if status is not None:
             set_doc["status"] = status.value
         if sandbox_id is not None:
@@ -665,15 +666,15 @@ class ArtifactStore:
         self,
         *,
         app_id: str,
-        artifact_version_id: Optional[str] = None,
-        result_artifact_version_id: Optional[str] = None,
-        change_request_id: Optional[str] = None,
+        artifact_version_id: str | None = None,
+        result_artifact_version_id: str | None = None,
+        change_request_id: str | None = None,
         limit: int = 20,
-    ) -> List[RefinementSessionDoc]:
+    ) -> list[RefinementSessionDoc]:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        query: Dict[str, Any] = {"app_id": resolved_app_id}
+        query: dict[str, Any] = {"app_id": resolved_app_id}
         if artifact_version_id:
             query["artifact_version_id"] = artifact_version_id
         if result_artifact_version_id:
@@ -718,7 +719,7 @@ class ArtifactStore:
             logger.warning("get_current_artifact_version_refs failed for app %s: %s", resolved_app_id, exc)
             return {}
 
-    async def get_stale_artifact_families(self, *, app_id: str) -> List[str]:
+    async def get_stale_artifact_families(self, *, app_id: str) -> list[str]:
         """Return artifact family names that are genuinely stale.
 
         A family is stale when it has at least one STALE version AND no CURRENT
@@ -756,7 +757,7 @@ class ArtifactStore:
             return []
 
 
-_artifact_store: Optional[ArtifactStore] = None
+_artifact_store: ArtifactStore | None = None
 
 
 def get_artifact_store() -> ArtifactStore:

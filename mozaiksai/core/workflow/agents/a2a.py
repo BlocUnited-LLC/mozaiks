@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class A2AAgentSpec:
     max_reconnects: int = 3
     polling_interval: float = 0.5
     silent: bool | None = None
-    client: Dict[str, Any] = field(default_factory=dict)
+    client: dict[str, Any] = field(default_factory=dict)
 
 
 def _as_bool(value: Any, *, default: bool) -> bool:
@@ -51,8 +52,8 @@ def _sanitize_string_list(value: Any) -> list[str]:
     return out
 
 
-def _build_client_config_kwargs(client_cfg: Mapping[str, Any]) -> Dict[str, Any]:
-    kwargs: Dict[str, Any] = {}
+def _build_client_config_kwargs(client_cfg: Mapping[str, Any]) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
 
     # Keep this list narrow and explicit so declarative config stays predictable.
     if "streaming" in client_cfg:
@@ -77,7 +78,7 @@ def _build_client_config_kwargs(client_cfg: Mapping[str, Any]) -> Dict[str, Any]
     return kwargs
 
 
-def load_a2a_agent_specs(workflow_config: Mapping[str, Any] | None) -> Dict[str, A2AAgentSpec]:
+def load_a2a_agent_specs(workflow_config: Mapping[str, Any] | None) -> dict[str, A2AAgentSpec]:
     """Return mapping of agent name -> A2AAgentSpec for declared remote agents."""
 
     if not isinstance(workflow_config, Mapping):
@@ -91,7 +92,7 @@ def load_a2a_agent_specs(workflow_config: Mapping[str, Any] | None) -> Dict[str,
     if not isinstance(entries, list):
         return {}
 
-    specs: Dict[str, A2AAgentSpec] = {}
+    specs: dict[str, A2AAgentSpec] = {}
     for entry in entries:
         if not isinstance(entry, Mapping):
             continue
@@ -151,7 +152,7 @@ def create_a2a_remote_agent(spec: A2AAgentSpec, *, context_variables: Any = None
     if context_variables is not None:
         agent.context_variables = context_variables
 
-    setattr(agent, "_mozaiks_a2a_url", spec.url)
+    agent._mozaiks_a2a_url = spec.url
     return agent
 
 

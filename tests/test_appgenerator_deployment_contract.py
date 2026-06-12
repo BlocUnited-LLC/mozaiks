@@ -8,8 +8,8 @@ from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     build_deployment_template_manifest,
     generate_deployment_artifacts,
     validate_ci_secret_requirements,
-    validate_deployment_build_output,
     validate_deploy_target_spec,
+    validate_deployment_build_output,
     validate_deployment_template_manifest,
     validate_generated_deployment_bundle,
 )

@@ -12,7 +12,6 @@ OIDC Discovery:
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional, List
 from functools import lru_cache
 
 
@@ -29,8 +28,8 @@ class AuthConfig:
     oidc_discovery_url: str = ""  # Optional explicit override
     
     # Override settings (if set, skip discovery for these)
-    issuer_override: Optional[str] = None
-    jwks_url_override: Optional[str] = None
+    issuer_override: str | None = None
+    jwks_url_override: str | None = None
     
     # Audience and scope
     audience: str = ""
@@ -46,7 +45,7 @@ class AuthConfig:
     discovery_cache_ttl_seconds: int = 86400  # 24 hours
 
     # Allowed algorithms
-    algorithms: List[str] = field(default_factory=lambda: ["RS256"])
+    algorithms: list[str] = field(default_factory=lambda: ["RS256"])
 
     # Clock skew tolerance (seconds)
     clock_skew_seconds: int = 120
@@ -64,7 +63,7 @@ def _parse_bool(value: str) -> bool:
     return value.lower() in ("true", "1", "yes", "on")
 
 
-def _none_if_empty(value: Optional[str]) -> Optional[str]:
+def _none_if_empty(value: str | None) -> str | None:
     """Return None if string is empty or whitespace."""
     if value is None:
         return None

@@ -5,27 +5,28 @@
 #        environment variables to keep local/dev robust.
 # ==============================================================================
 import os
-from dotenv import load_dotenv
-from typing import Optional, Dict, Any
-from logs.logging_config import get_core_logger
+from typing import Any
 
+from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
+
+from logs.logging_config import get_core_logger
 
 load_dotenv()
 logger = get_core_logger("core_config")
-_mongo_client: Optional[AsyncIOMotorClient] = None
-_mongo_client_conn_str: Optional[str] = None
+_mongo_client: AsyncIOMotorClient | None = None
+_mongo_client_conn_str: str | None = None
 
 # -----------------------------
 # Azure Key Vault utilities (lazy, optional)
 # -----------------------------
-def _get_kv_uri() -> Optional[str]:
+def _get_kv_uri() -> str | None:
     name = os.getenv("AZURE_KEY_VAULT_NAME")
     if name:
         return f"https://{name.strip()}.vault.azure.net/"
     return None
 
-def _build_secret_client() -> Optional[Any]:
+def _build_secret_client() -> Any | None:
     """Create a SecretClient lazily if Key Vault is configured; otherwise return None.
 
     Note: We import SecretClient inside the function to avoid module import failures
@@ -117,7 +118,7 @@ def close_mongo_client() -> None:
 # -----------------------------
 # App/App ID resolution (for UI tools and persistence)
 # -----------------------------
-def get_app_id_from_chat_or_context(chat_id: Optional[str] = None) -> Optional[str]:
+def get_app_id_from_chat_or_context(chat_id: str | None = None) -> str | None:
     """Best-effort app_id lookup for a chat_id.
 
     Used by UI-tool persistence helpers that do not have direct access to the

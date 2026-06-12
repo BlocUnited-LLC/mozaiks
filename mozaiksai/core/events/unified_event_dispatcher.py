@@ -15,28 +15,28 @@ AG2 runtime events should already arrive normalized into dicts with a `kind` fie
 (handled earlier by event serialization / orchestration).
 """
 
-import logging
-import uuid
 import asyncio
 import inspect
-from typing import Dict, Any, Optional, Union, List, Callable, Awaitable
-from datetime import datetime, UTC
-from enum import Enum
-from dataclasses import dataclass, field
+import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any, Union
 
-from mozaiksai.core.ports.orchestration import DomainEvent
+from logs.logging_config import get_core_logger, get_workflow_logger
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
+from mozaiksai.core.events.event_serialization import serialize_event_content
 from mozaiksai.core.events.runtime_events import (
     RUNTIME_AGENT_OUTPUT_VALIDATED,
     RUNTIME_PROCESS_COMPLETED,
 )
 from mozaiksai.core.events.usage_ingest import get_usage_ingest_client
+from mozaiksai.core.ports.orchestration import DomainEvent
 from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
 from mozaiksai.core.workflow.startup_messages import matches_hidden_initial_message
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
-from logs.logging_config import get_core_logger, get_workflow_logger
-from mozaiksai.core.events.event_serialization import serialize_event_content
 
 logger = get_core_logger("unified_event_dispatcher")
 wf_logger = get_workflow_logger("event_dispatcher")
@@ -72,7 +72,7 @@ class BusinessLogEvent:
     """
     log_event_type: str  # Event classification (e.g. "SERVER_STARTUP_COMPLETED")
     description: str
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     level: str = "INFO"
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
@@ -88,10 +88,10 @@ class ToolCallRequestEvent:
     Handler: ToolCallRequestHandler -> WebSocket transport to frontend
     """
     tool_name: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     workflow_name: str
     display: str = "inline"
-    chat_id: Optional[str] = None
+    chat_id: str | None = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     category: str = field(default="tool_call")
@@ -125,7 +125,7 @@ class ToolCallRequestHandler(EventHandler):
     async def handle(self, event: EventType) -> bool:
         if not isinstance(event, ToolCallRequestEvent):
             return False
-        logger.debug(f"[TOOL_CALL] tool=%s workflow=%s display=%s", event.tool_name, event.workflow_name, event.display)
+        logger.debug("[TOOL_CALL] tool=%s workflow=%s display=%s", event.tool_name, event.workflow_name, event.display)
         return True
 
 
@@ -158,15 +158,15 @@ class UnifiedEventDispatcher:
     Business/UI events flow: Code -> UnifiedEventDispatcher -> Handlers
     """
     def __init__(self):
-        self.handlers: List[EventHandler] = []
-        self._event_handlers: Dict[str, List[Callable[[Dict[str, Any]], Awaitable[Any] | Any]]] = {}
+        self.handlers: list[EventHandler] = []
+        self._event_handlers: dict[str, list[Callable[[dict[str, Any]], Awaitable[Any] | Any]]] = {}
         # Greeting echo dedup: tracks (chat_id, agent_name) pairs where
         # ws_protocol already sent the greeting before the workflow started.
         # The next text message from that agent is a run-history echo and
         # should be converted to a silent 'greeting_echo' event.
         self._greeting_echo_keys: set = set()
         self._hidden_initial_message_keys: set = set()
-        self.metrics: Dict[str, Any] = {
+        self.metrics: dict[str, Any] = {
             "events_processed": 0,
             "events_failed": 0,
             "events_by_category": {"business": 0, "tool_call": 0},
@@ -195,8 +195,8 @@ class UnifiedEventDispatcher:
 
     def register_handler(
         self,
-        handler_or_event_type: Union[EventHandler, str],
-        handler: Optional[Callable[[Dict[str, Any]], Awaitable[Any] | Any]] = None,
+        handler_or_event_type: EventHandler | str,
+        handler: Callable[[dict[str, Any]], Awaitable[Any] | Any] | None = None,
     ) -> None:
         if isinstance(handler_or_event_type, EventHandler):
             self.handlers.append(handler_or_event_type)
@@ -211,12 +211,12 @@ class UnifiedEventDispatcher:
     def register_runtime_handler(
         self,
         canonical_event_type: str,
-        handler: Callable[[Dict[str, Any]], Awaitable[Any] | Any],
+        handler: Callable[[dict[str, Any]], Awaitable[Any] | Any],
     ) -> None:
         """Register a handler for a canonical runtime event."""
         self.register_handler(canonical_event_type, handler)
 
-    async def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         listeners = list(self._event_handlers.get(event_type, []))
         if not listeners:
             logger.debug("No listeners registered for event_type=%s", event_type)
@@ -284,14 +284,14 @@ class UnifiedEventDispatcher:
         if chat_id and agent_name:
             self._greeting_echo_keys.add((chat_id, agent_name))
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         return {**self.metrics, "handler_count": len(self.handlers), "timestamp": datetime.now(UTC).isoformat()}
 
     async def emit_business_event(
         self,
         log_event_type: str,
         description: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
         level: str = "INFO",
     ) -> bool:
         event = BusinessLogEvent(log_event_type=log_event_type, description=description, context=context or {}, level=level)
@@ -300,10 +300,10 @@ class UnifiedEventDispatcher:
     async def emit_tool_call_request(
         self,
         tool_name: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         workflow_name: str,
         display: str = "inline",
-        chat_id: Optional[str] = None,
+        chat_id: str | None = None,
     ) -> bool:
         event = ToolCallRequestEvent(tool_name=tool_name, payload=payload, workflow_name=workflow_name, display=display, chat_id=chat_id)
         return await self.dispatch(event)
@@ -324,7 +324,7 @@ class UnifiedEventDispatcher:
         return success
 
     @staticmethod
-    def domain_event_to_envelope(event: DomainEvent) -> Dict[str, Any]:
+    def domain_event_to_envelope(event: DomainEvent) -> dict[str, Any]:
         """Convert a typed DomainEvent into a websocket-style envelope."""
         return {
             "type": event.kind,
@@ -343,10 +343,10 @@ class UnifiedEventDispatcher:
         self,
         *,
         raw_event: Any,
-        chat_id: Optional[str],
-        get_sequence_cb: Optional[Any] = None,
-        workflow_name: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        chat_id: str | None,
+        get_sequence_cb: Any | None = None,
+        workflow_name: str | None = None,
+    ) -> dict[str, Any] | None:
         """
         Transform AG2 runtime events for WebSocket transport.
         
@@ -361,7 +361,7 @@ class UnifiedEventDispatcher:
         if not (isinstance(raw_event, dict) and 'kind' in raw_event):
             return None
         timestamp = datetime.now(UTC).isoformat()
-        event_dict: Dict[str, Any] = raw_event  # type: ignore[assignment]
+        event_dict: dict[str, Any] = raw_event  # type: ignore[assignment]
         kind = str(event_dict.get('kind', 'unknown'))
         base_kind = kind.split('.', 1)[1] if kind.startswith('chat.') else kind
 
@@ -552,7 +552,7 @@ class UnifiedEventDispatcher:
         
         return {'type': mapped_type, 'data': event_dict, 'timestamp': timestamp}
 
-_global_dispatcher: Optional[UnifiedEventDispatcher] = None
+_global_dispatcher: UnifiedEventDispatcher | None = None
 
 def get_event_dispatcher() -> UnifiedEventDispatcher:
     global _global_dispatcher
@@ -563,7 +563,7 @@ def get_event_dispatcher() -> UnifiedEventDispatcher:
 async def emit_business_event(
     log_event_type: str,
     description: str,
-    context: Optional[Dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
     level: str = "INFO"
 ) -> bool:
     """
@@ -584,10 +584,10 @@ async def emit_business_event(
 
 async def emit_tool_call_request(
     tool_name: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     workflow_name: str,
     display: str = "inline",
-    chat_id: Optional[str] = None
+    chat_id: str | None = None
 ) -> bool:
     """
     Emit a UI TOOL event for agent-to-UI interactive communication.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class WorkflowUIPrimitive:
     description: str
 
 
-_WORKFLOW_UI_PRIMITIVES: Tuple[WorkflowUIPrimitive, ...] = (
+_WORKFLOW_UI_PRIMITIVES: tuple[WorkflowUIPrimitive, ...] = (
     WorkflowUIPrimitive(
         primitive_id="composer_reply",
         owner="shell",
@@ -229,7 +229,7 @@ _WORKFLOW_UI_PRIMITIVES: Tuple[WorkflowUIPrimitive, ...] = (
     ),
 )
 
-_WORKFLOW_UI_REALIZATION_IDS: Tuple[str, ...] = (
+_WORKFLOW_UI_REALIZATION_IDS: tuple[str, ...] = (
     "shell_builtin",
     "shipped_component",
     "workflow_wrapper",
@@ -237,24 +237,24 @@ _WORKFLOW_UI_REALIZATION_IDS: Tuple[str, ...] = (
 )
 
 
-def get_workflow_ui_primitives() -> Tuple[WorkflowUIPrimitive, ...]:
+def get_workflow_ui_primitives() -> tuple[WorkflowUIPrimitive, ...]:
     return _WORKFLOW_UI_PRIMITIVES
 
 
-def get_workflow_ui_realization_ids(*, include_shell_builtin: bool = True) -> Tuple[str, ...]:
+def get_workflow_ui_realization_ids(*, include_shell_builtin: bool = True) -> tuple[str, ...]:
     if include_shell_builtin:
         return _WORKFLOW_UI_REALIZATION_IDS
     return tuple(value for value in _WORKFLOW_UI_REALIZATION_IDS if value != "shell_builtin")
 
 
-def get_workflow_ui_primitive_ids(*, include_shell_status: bool = True) -> Tuple[str, ...]:
+def get_workflow_ui_primitive_ids(*, include_shell_status: bool = True) -> tuple[str, ...]:
     primitives = _WORKFLOW_UI_PRIMITIVES
     if not include_shell_status:
         primitives = tuple(entry for entry in primitives if entry.plannable)
     return tuple(entry.primitive_id for entry in primitives)
 
 
-def get_workflow_renderable_primitives() -> Tuple[WorkflowUIPrimitive, ...]:
+def get_workflow_renderable_primitives() -> tuple[WorkflowUIPrimitive, ...]:
     return tuple(
         entry
         for entry in _WORKFLOW_UI_PRIMITIVES
@@ -262,11 +262,11 @@ def get_workflow_renderable_primitives() -> Tuple[WorkflowUIPrimitive, ...]:
     )
 
 
-def get_workflow_renderable_primitive_ids() -> Tuple[str, ...]:
+def get_workflow_renderable_primitive_ids() -> tuple[str, ...]:
     return tuple(entry.primitive_id for entry in get_workflow_renderable_primitives())
 
 
-def get_workflow_shipped_component_primitives() -> Tuple[WorkflowUIPrimitive, ...]:
+def get_workflow_shipped_component_primitives() -> tuple[WorkflowUIPrimitive, ...]:
     return tuple(
         entry
         for entry in _WORKFLOW_UI_PRIMITIVES
@@ -274,11 +274,11 @@ def get_workflow_shipped_component_primitives() -> Tuple[WorkflowUIPrimitive, ..
     )
 
 
-def get_workflow_shipped_component_names() -> Tuple[str, ...]:
+def get_workflow_shipped_component_names() -> tuple[str, ...]:
     return tuple(entry.shipped_component for entry in get_workflow_shipped_component_primitives() if entry.shipped_component)
 
 
-def get_workflow_shipped_component_map() -> Tuple[Tuple[str, str], ...]:
+def get_workflow_shipped_component_map() -> tuple[tuple[str, str], ...]:
     return tuple(
         (entry.primitive_id, entry.shipped_component)
         for entry in get_workflow_shipped_component_primitives()
@@ -287,9 +287,9 @@ def get_workflow_shipped_component_map() -> Tuple[Tuple[str, str], ...]:
 
 
 def infer_workflow_ui_realization(
-    primitive_id: Optional[str],
-    component_name: Optional[str],
-) -> Optional[str]:
+    primitive_id: str | None,
+    component_name: str | None,
+) -> str | None:
     primitive_text = str(primitive_id or "").strip()
     if not primitive_text:
         return None
@@ -313,11 +313,11 @@ def validate_workflow_ui_realization_ids(
     *,
     context: str,
     include_shell_builtin: bool = True,
-) -> List[str]:
+) -> list[str]:
     allowed_names = get_workflow_ui_realization_ids(include_shell_builtin=include_shell_builtin)
     allowed = set(allowed_names)
-    normalized: List[str] = []
-    invalid: List[str] = []
+    normalized: list[str] = []
+    invalid: list[str] = []
 
     if values is None:
         return normalized
@@ -351,11 +351,11 @@ def validate_workflow_ui_primitive_ids(
     *,
     context: str,
     include_shell_status: bool = False,
-) -> List[str]:
+) -> list[str]:
     allowed_names = get_workflow_ui_primitive_ids(include_shell_status=include_shell_status)
     allowed = set(allowed_names)
-    normalized: List[str] = []
-    invalid: List[str] = []
+    normalized: list[str] = []
+    invalid: list[str] = []
 
     if values is None:
         return normalized
@@ -388,11 +388,11 @@ def validate_workflow_renderable_primitive_ids(
     values: Iterable[str] | None,
     *,
     context: str,
-) -> List[str]:
+) -> list[str]:
     allowed_names = get_workflow_renderable_primitive_ids()
     allowed = set(allowed_names)
-    normalized: List[str] = []
-    invalid: List[str] = []
+    normalized: list[str] = []
+    invalid: list[str] = []
 
     if values is None:
         return normalized
@@ -422,7 +422,7 @@ def validate_workflow_renderable_primitive_ids(
 
 
 def format_workflow_ui_catalog_guidance() -> str:
-    lines: List[str] = ["Canonical workflow UI primitive catalog:"]
+    lines: list[str] = ["Canonical workflow UI primitive catalog:"]
 
     lines.append("")
     lines.append("Plannable interaction/review primitives:")

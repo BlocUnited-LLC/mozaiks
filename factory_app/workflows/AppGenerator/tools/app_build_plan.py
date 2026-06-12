@@ -1,7 +1,8 @@
 import json
 import logging
+from collections.abc import Iterable
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Dict, Iterable, List, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
 
@@ -67,10 +68,10 @@ _WORKFLOW_SURFACE_KIND = "workflow"
 _MODULE_LOCAL_TASK_TYPES = frozenset({"module_contract", "data_models", "business_services"})
 
 
-def _normalize_string_list(value: Any) -> List[str]:
+def _normalize_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    items: List[str] = []
+    items: list[str] = []
     for entry in value:
         text = str(entry).strip()
         if text:
@@ -78,24 +79,24 @@ def _normalize_string_list(value: Any) -> List[str]:
     return items
 
 
-def _normalize_object_list(value: Any) -> List[Dict[str, Any]]:
+def _normalize_object_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for entry in value:
         if isinstance(entry, dict):
             items.append(dict(entry))
     return items
 
 
-def _normalize_context_variables(value: Any) -> Optional[Dict[str, Any]]:
+def _normalize_context_variables(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
     if isinstance(value, dict):
         return dict(value)
     if not isinstance(value, list):
         return None
-    normalized: Dict[str, Any] = {}
+    normalized: dict[str, Any] = {}
     for item in value:
         if not isinstance(item, dict):
             continue
@@ -128,7 +129,7 @@ def _normalize_context_variables(value: Any) -> Optional[Dict[str, Any]]:
     return normalized
 
 
-def _unwrap_app_build_plan_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _unwrap_app_build_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if "app_kind" in payload:
         return payload
     for key in ("AppBuildPlan", "app_build_plan"):
@@ -146,12 +147,12 @@ def _unwrap_app_build_plan_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _task_sort_key(task: Dict[str, Any]) -> tuple[int, str]:
+def _task_sort_key(task: dict[str, Any]) -> tuple[int, str]:
     task_id = str(task.get("task_id") or "")
     return (0 if task_id else 1, task_id)
 
 
-def _infer_pack_id_from_integration_path(path: str) -> Optional[str]:
+def _infer_pack_id_from_integration_path(path: str) -> str | None:
     """
     Extract the hosted pack id from an app-bundle-relative
     services/integrations/{pack_id}_client.py path.
@@ -168,7 +169,7 @@ def _infer_pack_id_from_integration_path(path: str) -> Optional[str]:
     return None
 
 
-def _raw_frontend_source_path(task: Dict[str, Any]) -> Optional[str]:
+def _raw_frontend_source_path(task: dict[str, Any]) -> str | None:
     for owned_path in _normalize_string_list(task.get("owned_paths")):
         normalized = owned_path.replace("\\", "/").strip().lower()
         suffix = PurePosixPath(normalized).suffix
@@ -182,8 +183,8 @@ def _raw_frontend_source_path(task: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _normalized_owned_paths(task: Dict[str, Any]) -> List[str]:
-    paths: List[str] = []
+def _normalized_owned_paths(task: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
     for owned_path in _normalize_string_list(task.get("owned_paths")):
         normalized = normalize_app_path(owned_path)
         if normalized:
@@ -191,8 +192,8 @@ def _normalized_owned_paths(task: Dict[str, Any]) -> List[str]:
     return paths
 
 
-def _noncanonical_service_paths(paths: List[str]) -> List[str]:
-    invalid: List[str] = []
+def _noncanonical_service_paths(paths: list[str]) -> list[str]:
+    invalid: list[str] = []
     for path in paths:
         normalized = normalize_app_path(path)
         if not normalized.startswith("services/"):
@@ -205,8 +206,8 @@ def _noncanonical_service_paths(paths: List[str]) -> List[str]:
     return sorted(set(invalid))
 
 
-def _invalid_service_foundation_paths(paths: List[str]) -> List[str]:
-    invalid: List[str] = []
+def _invalid_service_foundation_paths(paths: list[str]) -> list[str]:
+    invalid: list[str] = []
     for path in paths:
         normalized = normalize_app_path(path)
         if normalized in _SERVICE_FOUNDATION_ALLOWED_FILES:
@@ -217,7 +218,7 @@ def _invalid_service_foundation_paths(paths: List[str]) -> List[str]:
     return sorted(set(invalid))
 
 
-def _infer_module_id_from_owned_paths(task: Dict[str, Any]) -> Optional[str]:
+def _infer_module_id_from_owned_paths(task: dict[str, Any]) -> str | None:
     module_ids: set[str] = set()
     for path in _normalized_owned_paths(task):
         parts = PurePosixPath(path).parts
@@ -228,7 +229,7 @@ def _infer_module_id_from_owned_paths(task: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _normalize_build_task_identity(task: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_build_task_identity(task: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(task)
     task_type = str(normalized.get("task_type") or "").strip()
     if task_type in _MODULE_LOCAL_TASK_TYPES:
@@ -246,8 +247,8 @@ def _normalize_build_task_identity(task: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _dedupe_preserving_order(values: Iterable[Any]) -> List[str]:
-    result: List[str] = []
+def _dedupe_preserving_order(values: Iterable[Any]) -> list[str]:
+    result: list[str] = []
     seen: set[str] = set()
     for value in values:
         text = str(value or "").strip()
@@ -262,7 +263,7 @@ def _join_unique_text(parts: Iterable[Any], *, separator: str = " ") -> str:
     return separator.join(_dedupe_preserving_order(parts)).strip()
 
 
-def _merge_persistence_contract_tasks(build_tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _merge_persistence_contract_tasks(build_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     persistence_tasks = [
         task
         for task in build_tasks
@@ -301,7 +302,7 @@ def _merge_persistence_contract_tasks(build_tasks: List[Dict[str, Any]]) -> List
         for criterion in _normalize_string_list(task.get("acceptance_criteria"))
     )
 
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     inserted_primary = False
     for task in build_tasks:
         if not isinstance(task, dict):
@@ -326,7 +327,7 @@ def _merge_persistence_contract_tasks(build_tasks: List[Dict[str, Any]]) -> List
     return sorted(result, key=_task_sort_key)
 
 
-def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None or not hasattr(context_variables, "get"):
         return default
     try:
@@ -335,12 +336,12 @@ def _context_get(context_variables: Optional[Any], key: str, default: Any = None
         return default
 
 
-def _context_available_pack_map(context_variables: Optional[Any]) -> Dict[str, Dict[str, Any]]:
+def _context_available_pack_map(context_variables: Any | None) -> dict[str, dict[str, Any]]:
     raw_groups = [
         _context_get(context_variables, "capability_packs", []),
         _context_get(context_variables, "available_hosted_packs", []),
     ]
-    result: Dict[str, Dict[str, Any]] = {}
+    result: dict[str, dict[str, Any]] = {}
     for raw_packs in raw_groups:
         if not isinstance(raw_packs, list):
             continue
@@ -353,7 +354,7 @@ def _context_available_pack_map(context_variables: Optional[Any]) -> Dict[str, D
     return result
 
 
-def _context_hosted_pack_ids(context_variables: Optional[Any]) -> frozenset[str]:
+def _context_hosted_pack_ids(context_variables: Any | None) -> frozenset[str]:
     if context_variables is None or not hasattr(context_variables, "get"):
         return frozenset()
     pack_ids: set[str] = set()
@@ -371,13 +372,13 @@ def _context_hosted_pack_ids(context_variables: Optional[Any]) -> frozenset[str]
 
 
 def _normalize_capability_pack_sources(
-    capability_packs: List[Dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
     *,
-    context_variables: Optional[Any],
-) -> List[Dict[str, Any]]:
+    context_variables: Any | None,
+) -> list[dict[str, Any]]:
     available_packs = _context_available_pack_map(context_variables)
     context_hosted_pack_ids = _context_hosted_pack_ids(context_variables)
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for pack in capability_packs:
         item = dict(pack)
         pack_id = str(item.get("capability_pack_id") or item.get("id") or item.get("pack_id") or "").strip()
@@ -395,9 +396,9 @@ def _normalize_capability_pack_sources(
 
 
 def _infer_hosted_pack_ids_from_adapter_tasks(
-    build_tasks: List[Dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
     *,
-    context_variables: Optional[Any],
+    context_variables: Any | None,
 ) -> frozenset[str]:
     available_packs = _context_available_pack_map(context_variables)
     inferred: set[str] = set()
@@ -419,11 +420,11 @@ def _infer_hosted_pack_ids_from_adapter_tasks(
 
 
 def _ensure_hosted_pack_entries(
-    capability_packs: List[Dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
     *,
     hosted_pack_ids: frozenset[str],
-    context_variables: Optional[Any],
-) -> List[Dict[str, Any]]:
+    context_variables: Any | None,
+) -> list[dict[str, Any]]:
     if not hosted_pack_ids:
         return capability_packs
     available_packs = _context_available_pack_map(context_variables)
@@ -459,15 +460,15 @@ def _ensure_hosted_pack_entries(
     return result
 
 
-def _pack_id_from_descriptor(pack: Dict[str, Any]) -> str:
+def _pack_id_from_descriptor(pack: dict[str, Any]) -> str:
     return str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
 
 
 def _ensure_context_selected_capability_packs(
-    capability_packs: List[Dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
     *,
-    context_variables: Optional[Any],
-) -> List[Dict[str, Any]]:
+    context_variables: Any | None,
+) -> list[dict[str, Any]]:
     """Include packs projected by selected build_context even if the LLM omitted them."""
     available_packs = _context_available_pack_map(context_variables)
     if not available_packs:
@@ -497,7 +498,7 @@ def _ensure_context_selected_capability_packs(
     return result
 
 
-def _pack_facades(descriptor: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _pack_facades(descriptor: dict[str, Any]) -> list[dict[str, Any]]:
     facades = _normalize_object_list(descriptor.get("facades"))
     if facades:
         return facades
@@ -507,7 +508,7 @@ def _pack_facades(descriptor: Dict[str, Any]) -> List[Dict[str, Any]]:
     return []
 
 
-def _facade_pack_descriptor(facade: Dict[str, Any]) -> Dict[str, Any] | None:
+def _facade_pack_descriptor(facade: dict[str, Any]) -> dict[str, Any] | None:
     facade_id = str(facade.get("module_id") or facade.get("facade_id") or "").strip()
     if not facade_id:
         return None
@@ -543,11 +544,11 @@ def _facade_pack_descriptor(facade: Dict[str, Any]) -> Dict[str, Any] | None:
 
 def _apply_selected_pack_files(
     *,
-    capability_packs: List[Dict[str, Any]],
-    pages: List[Dict[str, Any]],
-    build_tasks: List[Dict[str, Any]],
-    context_variables: Optional[Any],
-) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    capability_packs: list[dict[str, Any]],
+    pages: list[dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
+    context_variables: Any | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Apply deterministic facade pages from selected packs."""
     available_packs = _context_available_pack_map(context_variables)
     if not available_packs:
@@ -608,12 +609,12 @@ def _apply_selected_pack_files(
 
 
 def _selected_hosted_pack_descriptors(
-    capability_packs: List[Dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
     *,
-    context_variables: Optional[Any],
-) -> Dict[str, Dict[str, Any]]:
+    context_variables: Any | None,
+) -> dict[str, dict[str, Any]]:
     available_packs = _context_available_pack_map(context_variables)
-    descriptors: Dict[str, Dict[str, Any]] = {}
+    descriptors: dict[str, dict[str, Any]] = {}
     for pack in capability_packs:
         if not isinstance(pack, dict) or str(pack.get("capability_source") or "").strip() != "hosted_pack":
             continue
@@ -626,9 +627,9 @@ def _selected_hosted_pack_descriptors(
 
 
 def _hosted_facade_route_rules(
-    capability_packs: List[Dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
     *,
-    context_variables: Optional[Any],
+    context_variables: Any | None,
 ) -> dict[tuple[str, str], str]:
     rules: dict[tuple[str, str], str] = {}
     for pack_id, descriptor in _selected_hosted_pack_descriptors(
@@ -666,7 +667,7 @@ def _route_page_api_endpoint_to_facade(endpoint: str, rules: dict[tuple[str, str
 
 def _route_page_api_endpoints_to_facades(value: Any, rules: dict[tuple[str, str], str]) -> Any:
     if isinstance(value, dict):
-        rewritten: Dict[str, Any] = {}
+        rewritten: dict[str, Any] = {}
         for key, nested in value.items():
             if key == "api_endpoint" and isinstance(nested, str):
                 rewritten[key] = _route_page_api_endpoint_to_facade(nested, rules)
@@ -679,11 +680,11 @@ def _route_page_api_endpoints_to_facades(value: Any, rules: dict[tuple[str, str]
 
 
 def _normalize_hosted_page_bindings(
-    pages: List[Dict[str, Any]],
+    pages: list[dict[str, Any]],
     *,
-    capability_packs: List[Dict[str, Any]],
-    context_variables: Optional[Any],
-) -> List[Dict[str, Any]]:
+    capability_packs: list[dict[str, Any]],
+    context_variables: Any | None,
+) -> list[dict[str, Any]]:
     rules = _hosted_facade_route_rules(
         capability_packs,
         context_variables=context_variables,
@@ -698,13 +699,13 @@ def _normalize_hosted_page_bindings(
 
 
 def _normalize_hosted_adapter_task_pack_ids(
-    build_tasks: List[Dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
     *,
     hosted_pack_ids: frozenset[str],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if not hosted_pack_ids:
         return build_tasks
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for task in build_tasks:
         item = dict(task)
         if (
@@ -729,11 +730,11 @@ def _normalize_hosted_adapter_task_pack_ids(
     return normalized
 
 
-def _normalize_page_task_dependencies(build_tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _normalize_page_task_dependencies(build_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Ensure page tasks explicitly depend on their app-owned module contract."""
-    module_contract_by_pack: Dict[str, str] = {}
-    module_contract_task_ids: List[str] = []
-    service_task_by_pack: Dict[str, str] = {}
+    module_contract_by_pack: dict[str, str] = {}
+    module_contract_task_ids: list[str] = []
+    service_task_by_pack: dict[str, str] = {}
     for task in build_tasks:
         if not isinstance(task, dict):
             continue
@@ -747,7 +748,7 @@ def _normalize_page_task_dependencies(build_tasks: List[Dict[str, Any]]) -> List
         if task_type == "business_services" and pack_id and task_id:
             service_task_by_pack.setdefault(pack_id, task_id)
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for task in build_tasks:
         if not isinstance(task, dict):
             continue
@@ -776,12 +777,12 @@ def _normalize_page_task_dependencies(build_tasks: List[Dict[str, Any]]) -> List
 
 
 def _normalize_facade_task_dependencies(
-    build_tasks: List[Dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
     *,
     hosted_pack_ids: frozenset[str],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Ensure generated facades depend on the hosted adapter task they call."""
-    adapter_task_by_pack: Dict[str, str] = {}
+    adapter_task_by_pack: dict[str, str] = {}
     for task in build_tasks:
         if not isinstance(task, dict):
             continue
@@ -796,7 +797,7 @@ def _normalize_facade_task_dependencies(
     if not adapter_task_by_pack:
         return build_tasks
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for task in build_tasks:
         if not isinstance(task, dict):
             continue
@@ -814,9 +815,9 @@ def _normalize_facade_task_dependencies(
 
 
 def _facade_adapter_dependency(
-    task: Dict[str, Any],
-    adapter_task_by_pack: Dict[str, str],
-) -> Optional[str]:
+    task: dict[str, Any],
+    adapter_task_by_pack: dict[str, str],
+) -> str | None:
     """Return the hosted adapter task a facade module explicitly references."""
     text_parts = [
         str(task.get("description") or ""),
@@ -847,9 +848,9 @@ def _facade_adapter_dependency(
 
 
 def _hosted_backing_module_ids(
-    capability_packs: List[Dict[str, Any]],
+    capability_packs: list[dict[str, Any]],
     *,
-    context_variables: Optional[Any],
+    context_variables: Any | None,
 ) -> frozenset[str]:
     available_packs = _context_available_pack_map(context_variables)
     module_ids: set[str] = set()
@@ -891,7 +892,7 @@ def _iter_page_api_endpoints(value: Any) -> Iterable[str]:
 
 
 def _validate_page_bindings(
-    pages: List[Dict[str, Any]],
+    pages: list[dict[str, Any]],
     *,
     hosted_pack_ids: frozenset[str],
     hosted_backing_module_ids: frozenset[str],
@@ -912,7 +913,7 @@ def _validate_page_bindings(
                     )
 
 
-def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: frozenset[str] | None = None) -> None:
+def _validate_build_tasks(build_tasks: list[dict[str, Any]], hosted_pack_ids: frozenset[str] | None = None) -> None:
     hosted_pack_ids = hosted_pack_ids or frozenset()
     for task in build_tasks:
         task_id = str(task.get("task_id") or "<unknown>")
@@ -1230,8 +1231,8 @@ def _validate_build_tasks(build_tasks: List[Dict[str, Any]], hosted_pack_ids: fr
             )
 
 
-def _validate_unique_owned_paths(build_tasks: List[Dict[str, Any]]) -> None:
-    owners_by_path: Dict[str, List[str]] = {}
+def _validate_unique_owned_paths(build_tasks: list[dict[str, Any]]) -> None:
+    owners_by_path: dict[str, list[str]] = {}
     for task in build_tasks:
         if not isinstance(task, dict):
             continue
@@ -1255,7 +1256,7 @@ def _validate_unique_owned_paths(build_tasks: List[Dict[str, Any]]) -> None:
 
 
 def _validate_carry_forward_decisions(
-    decisions: List[Dict[str, Any]],
+    decisions: list[dict[str, Any]],
     task_ids: frozenset[str],
 ) -> None:
     """Validate carry_forward_decisions entries.
@@ -1317,7 +1318,7 @@ def _validate_carry_forward_decisions(
 
 
 def _validate_task_dependencies(
-    build_tasks: List[Dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
     task_ids: frozenset[str],
 ) -> None:
     """Validate depends_on references on build tasks.
@@ -1355,11 +1356,11 @@ def _validate_task_dependencies(
 def app_build_plan(
     *,
     AppBuildPlan: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="Canonical app build plan emitted by AppPlanAgent."),
     ],
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> str:
@@ -1471,8 +1472,8 @@ def app_build_plan(
     if not pages:
         raise ValueError("AppBuildPlan.pages must contain at least one page")
 
-    task_batch_items: List[Dict[str, Any]] = []
-    normalized_build_tasks: List[Dict[str, Any]] = []
+    task_batch_items: list[dict[str, Any]] = []
+    normalized_build_tasks: list[dict[str, Any]] = []
     for task in build_tasks:
         normalized_task = dict(task)
         normalized_context = _normalize_context_variables(normalized_task.get("context_variables"))

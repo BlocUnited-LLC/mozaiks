@@ -16,7 +16,7 @@ must satisfy so the runtime's request dispatcher can treat them uniformly.
 """
 
 from enum import Enum
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from logs.logging_config import get_workflow_logger
 
@@ -51,7 +51,7 @@ class Executor(Protocol):
         """
         ...
 
-    async def health(self) -> Dict[str, Any]:
+    async def health(self) -> dict[str, Any]:
         """Return health status dict. Used by /health endpoint."""
         ...
 
@@ -73,14 +73,14 @@ class ExecutorRegistry:
     """
 
     def __init__(self) -> None:
-        self._executors: Dict[ExecutorType, Executor] = {}
+        self._executors: dict[ExecutorType, Executor] = {}
 
     def register(self, executor: Executor) -> None:
         """Register an executor. Overwrites any existing entry for the same type."""
         self._executors[executor.executor_type] = executor
         logger.debug(f"EXECUTOR_REGISTERED: type={executor.executor_type.value}")
 
-    def get(self, executor_type: ExecutorType) -> Optional[Executor]:
+    def get(self, executor_type: ExecutorType) -> Executor | None:
         """Return executor for the given type, or None if not registered."""
         return self._executors.get(executor_type)
 
@@ -88,15 +88,15 @@ class ExecutorRegistry:
         return executor_type in self._executors
 
     @property
-    def workflow_executor(self) -> Optional[Executor]:
+    def workflow_executor(self) -> Executor | None:
         return self._executors.get(ExecutorType.WORKFLOW)
 
     @property
-    def module_executor(self) -> Optional[Executor]:
+    def module_executor(self) -> Executor | None:
         return self._executors.get(ExecutorType.MODULE)
 
     def registered_types(self) -> list[ExecutorType]:
         return list(self._executors.keys())
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {t.value: type(e).__name__ for t, e in self._executors.items()}

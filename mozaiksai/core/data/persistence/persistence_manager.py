@@ -17,28 +17,31 @@ or in-memory performance counters here.
 
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
+import hashlib
 import json
 import os
-from datetime import datetime, UTC
-from typing import Dict, List, Any, Optional, Union
-import hashlib
 from copy import deepcopy
-import textwrap
-from pymongo import ReturnDocument, UpdateOne
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
+
+from pymongo import ReturnDocument, UpdateOne
+
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
-from .namespaces import SYSTEM_DATABASE, RuntimeCollections
+
 from ..models import WorkflowStatus, WorkflowUIState
+from .namespaces import SYSTEM_DATABASE, RuntimeCollections
+
 # Lazy import to avoid circular dependency - see _format_message_for_storage
 
 logger = get_workflow_logger("persistence")
 
 
-def _has_index_with_keys(existing_indexes: List[Dict[str, Any]], expected_keys: List[tuple[str, int]]) -> bool:
+def _has_index_with_keys(existing_indexes: list[dict[str, Any]], expected_keys: list[tuple[str, int]]) -> bool:
     """Return whether an equivalent index key pattern already exists."""
     expected = list(expected_keys)
     for idx in existing_indexes:
@@ -52,7 +55,7 @@ def _has_index_with_keys(existing_indexes: List[Dict[str, Any]], expected_keys: 
     return False
 
 
-def _resolve_agent_log_limit(env_key: str, default: Optional[int]) -> Optional[int]:
+def _resolve_agent_log_limit(env_key: str, default: int | None) -> int | None:
     """Resolve agent conversation log length limits from environment."""
     raw_value = os.getenv(env_key)
     if raw_value is None:
@@ -76,14 +79,14 @@ _GENERAL_CHAT_COUNTER_COLLECTION = RuntimeCollections.GENERAL_CHAT_COUNTERS
 
 # Canonical field names and defaults are derived directly from WorkflowUIState()
 # so the dict representation can never diverge from the Pydantic model.
-_WORKFLOW_UI_STATE_MODEL_DEFAULTS: Dict[str, Any] = WorkflowUIState().model_dump()
+_WORKFLOW_UI_STATE_MODEL_DEFAULTS: dict[str, Any] = WorkflowUIState().model_dump()
 
 
-def build_default_workflow_ui_state() -> Dict[str, Any]:
+def build_default_workflow_ui_state() -> dict[str, Any]:
     return deepcopy(_WORKFLOW_UI_STATE_MODEL_DEFAULTS)
 
 
-def extract_workflow_ui_state(chat_doc: Any) -> Dict[str, Any]:
+def extract_workflow_ui_state(chat_doc: Any) -> dict[str, Any]:
     normalized = build_default_workflow_ui_state()
     if not isinstance(chat_doc, dict):
         return normalized
@@ -113,12 +116,12 @@ def extract_workflow_ui_state(chat_doc: Any) -> Dict[str, Any]:
     return normalized
 
 
-def extract_last_artifact(chat_doc: Any) -> Optional[Dict[str, Any]]:
+def extract_last_artifact(chat_doc: Any) -> dict[str, Any] | None:
     artifact = extract_workflow_ui_state(chat_doc).get("last_artifact")
     return artifact if isinstance(artifact, dict) else None
 
 
-def extract_pending_input_request(chat_doc: Any) -> Optional[Dict[str, Any]]:
+def extract_pending_input_request(chat_doc: Any) -> dict[str, Any] | None:
     pending = extract_workflow_ui_state(chat_doc).get("pending_input_request")
     return pending if isinstance(pending, dict) else None
 
@@ -127,7 +130,7 @@ class PersistenceManager:
     """Mongo connection holder for runtime persistence."""
 
     def __init__(self):
-        self.client: Optional[Any] = None
+        self.client: Any | None = None
         self._init_lock = asyncio.Lock()
         logger.info("PersistenceManager created (lazy init)")
 
@@ -146,7 +149,7 @@ class PersistenceManager:
             "pending_input_request": 1,
         }
 
-        operations: List[UpdateOne] = []
+        operations: list[UpdateOne] = []
         migrated = 0
         async for doc in coll.find(query, projection):
             if not isinstance(doc, dict):
@@ -322,7 +325,7 @@ class AG2PersistenceManager:
     async def get_or_assign_cache_seed(
         self,
         chat_id: str,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
     ) -> int:
         """Return a stable per-chat cache seed, assigning one if missing.
 
@@ -378,11 +381,11 @@ class AG2PersistenceManager:
     async def create_chat_session(
         self,
         chat_id: str,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
         workflow_name: str = "",
         user_id: str = "",
         *,
-        extra_fields: Optional[Dict[str, Any]] = None,
+        extra_fields: dict[str, Any] | None = None,
     ) -> None:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
@@ -392,7 +395,7 @@ class AG2PersistenceManager:
             if await coll.find_one({"_id": chat_id}):
                 return
             now = datetime.now(UTC)
-            session_doc: Dict[str, Any] = {
+            session_doc: dict[str, Any] = {
                 "_id": chat_id,
                 "chat_id": chat_id,
                 "app_id": resolved_app_id,
@@ -439,8 +442,8 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        app_id: str | None = None,
+    ) -> dict[str, Any]:
         """Fetch non-canonical, non-message fields for a chat session.
 
         Purpose:
@@ -479,7 +482,7 @@ class AG2PersistenceManager:
                 "last_artifact",
                 "pending_input_request",
             }
-            extra: Dict[str, Any] = {}
+            extra: dict[str, Any] = {}
             for k, v in doc.items():
                 if not isinstance(k, str) or not k.strip():
                     continue
@@ -495,8 +498,8 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
-        variables: Optional[Dict[str, Any]] = None,
+        app_id: str | None = None,
+        variables: dict[str, Any] | None = None,
     ) -> None:
         """Persist runtime context variables as chat-session extra fields.
 
@@ -525,7 +528,7 @@ class AG2PersistenceManager:
             "last_artifact",
             "pending_input_request",
         }
-        safe_updates: Dict[str, Any] = {}
+        safe_updates: dict[str, Any] = {}
         for key, value in variables.items():
             if not isinstance(key, str) or not key.strip() or key in protected:
                 continue
@@ -548,9 +551,9 @@ class AG2PersistenceManager:
     async def create_general_chat_session(
         self,
         *,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
         user_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Allocate and persist a brand-new general (non-AG2) chat session."""
 
         resolved_app_id = coalesce_app_id(app_id=app_id)
@@ -609,7 +612,7 @@ class AG2PersistenceManager:
             logger.error(f"Failed to create general chat session for app_id={resolved_app_id}, user={user_id}: {e}")
             raise
 
-    async def mark_chat_completed(self, chat_id: str, app_id: Optional[str] = None) -> bool:
+    async def mark_chat_completed(self, chat_id: str, app_id: str | None = None) -> bool:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -644,7 +647,7 @@ class AG2PersistenceManager:
         *,
         chat_id: str,
         app_id: str,
-        artifact: Dict[str, Any],
+        artifact: dict[str, Any],
     ) -> None:
         """Persist latest artifact/tool panel context for multi-user resume.
 
@@ -700,6 +703,7 @@ class AG2PersistenceManager:
 
     def build_run_stream(self, *, chat_id: str, app_id: str):
         from autogen.beta import MemoryStream
+
         from mozaiksai.core.adapters.ag2_stream_storage import MongoAG2StreamStorage
 
         resolved_app_id = coalesce_app_id(app_id=app_id)
@@ -710,12 +714,12 @@ class AG2PersistenceManager:
             id=self._run_stream_id(chat_id=chat_id, app_id=resolved_app_id),
         )
 
-    async def load_run_events(self, *, chat_id: str, app_id: str) -> List[Any]:
+    async def load_run_events(self, *, chat_id: str, app_id: str) -> list[Any]:
         stream = self.build_run_stream(chat_id=chat_id, app_id=app_id)
         return list(await stream.history.get_events())
 
     @staticmethod
-    def _run_event_to_message(event: Any) -> Optional[Dict[str, Any]]:
+    def _run_event_to_message(event: Any) -> dict[str, Any] | None:
         from autogen.beta.events import ModelResponse
         from autogen.beta.events.input_events import TextInput
 
@@ -728,7 +732,7 @@ class AG2PersistenceManager:
 
         if isinstance(event, ModelResponse) and event.content:
             metadata = event.metadata if isinstance(event.metadata, dict) else {}
-            message: Dict[str, Any] = {
+            message: dict[str, Any] = {
                 "role": "assistant",
                 "name": str(metadata.get("agent_name") or metadata.get("agent") or "assistant"),
                 "content": str(event.content),
@@ -743,9 +747,9 @@ class AG2PersistenceManager:
 
         return None
 
-    async def load_run_history(self, *, chat_id: str, app_id: str) -> List[Dict[str, Any]]:
+    async def load_run_history(self, *, chat_id: str, app_id: str) -> list[dict[str, Any]]:
         events = await self.load_run_events(chat_id=chat_id, app_id=app_id)
-        history: List[Dict[str, Any]] = []
+        history: list[dict[str, Any]] = []
         for event in events:
             message = self._run_event_to_message(event)
             if isinstance(message, dict):
@@ -758,13 +762,14 @@ class AG2PersistenceManager:
         chat_id: str,
         app_id: str,
         content: str,
-        agent_name: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        agent_name: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         from types import SimpleNamespace
 
         from autogen.beta.events import ModelResponse
         from autogen.beta.events.types import ModelMessage
+
         from mozaiksai.core.adapters.ag2_stream_storage import MongoAG2StreamStorage
 
         resolved_app_id = coalesce_app_id(app_id=app_id)
@@ -797,9 +802,9 @@ class AG2PersistenceManager:
         app_id: str,
         role: str,
         content: str,
-        user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Persist general (non-AG2) capability exchanges inside the general chat collection."""
 
         normalized_role = role if role in {"user", "assistant"} else "assistant"
@@ -856,10 +861,10 @@ class AG2PersistenceManager:
     async def list_general_chats(
         self,
         *,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
         user_id: str,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         coll = await self._general_coll()
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
@@ -872,7 +877,7 @@ class AG2PersistenceManager:
             .limit(limit)
             .to_list(length=limit)
         )
-        sessions: List[Dict[str, Any]] = []
+        sessions: list[dict[str, Any]] = []
         for doc in docs:
             sessions.append(
                 {
@@ -887,7 +892,7 @@ class AG2PersistenceManager:
             )
         return sessions
 
-    async def get_user_workflow_statuses(self, *, app_id: Optional[str] = None, user_id: str) -> Dict[str, Dict[str, Any]]:
+    async def get_user_workflow_statuses(self, *, app_id: str | None = None, user_id: str) -> dict[str, dict[str, Any]]:
         """Return a mapping of workflow_name -> { chat_id, status } for a given user.
 
         - Queries `ChatSessions` for the app/user and returns a simple dict
@@ -910,7 +915,7 @@ class AG2PersistenceManager:
                 .sort("created_at", -1)
             )
             docs = await cursor.to_list(length=None)
-            result: Dict[str, Dict[str, Any]] = {}
+            result: dict[str, dict[str, Any]] = {}
             for d in docs:
                 wf = d.get("workflow_name") or d.get("workflow") or "unnamed_workflow"
                 if wf in result:
@@ -936,7 +941,7 @@ class AG2PersistenceManager:
             logger.warning(f"[GET_WORKFLOW_STATUSES] Failed to fetch workflows for app_id={resolved_app_id} user={user_id}: {e}")
             return {}
 
-    async def build_pattern_context_from_user(self, *, app_id: Optional[str] = None, user_id: str) -> Dict[str, Any]:
+    async def build_pattern_context_from_user(self, *, app_id: str | None = None, user_id: str) -> dict[str, Any]:
         """Build the minimal pattern-context payload (app_id, user_id, workflows)
 
         This helper wraps `get_user_workflow_statuses` and returns the small
@@ -995,7 +1000,7 @@ class AG2PersistenceManager:
             return text
 
     @staticmethod
-    def _extract_json_from_text(text: Any, agent_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _extract_json_from_text(text: Any, agent_name: str | None = None) -> dict[str, Any] | None:
         """
         Extract JSON from text, with cleaning to handle common agent output issues.
         
@@ -1089,7 +1094,7 @@ class AG2PersistenceManager:
             return None
 
     @staticmethod
-    def _normalize_structured_output(agent_name: Optional[str], payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_structured_output(agent_name: str | None, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict) or not agent_name:
             return payload
 
@@ -1107,10 +1112,10 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
-        agent_names: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = {}
+        app_id: str | None = None,
+        agent_names: list[str] | None = None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {}
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
@@ -1122,7 +1127,7 @@ class AG2PersistenceManager:
                 logger.debug(f"[GATHER_AGENT_JSONS] No AG2 run history for chat_id={chat_id}")
                 return result
             
-            def agent_name_from(m: Dict[str, Any]) -> str:
+            def agent_name_from(m: dict[str, Any]) -> str:
                 if m.get("role") == "assistant":
                     return str(m.get("agent_name") or "").strip()
                 return "user"
@@ -1206,8 +1211,8 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        app_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return persisted workflow UI tool state for resume/reconnect."""
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
@@ -1223,7 +1228,7 @@ class AG2PersistenceManager:
             if not isinstance(tool_calls, dict):
                 return []
 
-            states: List[Dict[str, Any]] = []
+            states: list[dict[str, Any]] = []
             for raw_state in tool_calls.values():
                 if isinstance(raw_state, dict) and raw_state.get("tool_call_id"):
                     states.append(deepcopy(raw_state))
@@ -1243,9 +1248,9 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
         event_id: str,
-        metadata: Dict[str, Any]
+        metadata: dict[str, Any]
     ) -> None:
         """Persist workflow UI tool state for resume without mutating chat messages."""
         resolved_app_id = coalesce_app_id(app_id=app_id)
@@ -1301,10 +1306,10 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
         event_id: str,
         status: str,
-        completed: Optional[bool] = None,
+        completed: bool | None = None,
     ) -> None:
         """Update persisted tool-call lifecycle state for reconnect/resume."""
         resolved_app_id = coalesce_app_id(app_id=app_id)
@@ -1314,7 +1319,7 @@ class AG2PersistenceManager:
             coll = await self._coll()
             now = datetime.now(UTC).isoformat()
             storage_key = self._workflow_tool_call_storage_key(event_id)
-            updates: Dict[str, Any] = {
+            updates: dict[str, Any] = {
                 f"workflow_ui_state.tool_calls.{storage_key}.tool_call_status": status,
                 f"workflow_ui_state.tool_calls.{storage_key}.updated_at": now,
                 "last_updated_at": datetime.now(UTC),
@@ -1355,17 +1360,17 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
         request_id: str,
         agent: str,
         prompt: str,
-        component_type: Optional[str] = None,
-        workflow_name: Optional[str] = None,
-        tool_name: Optional[str] = None,
+        component_type: str | None = None,
+        workflow_name: str | None = None,
+        tool_name: str | None = None,
         display: str = "composer",
         interaction_type: str = "input_request",
         password: bool = False,
-        raw_payload: Optional[Dict[str, Any]] = None,
+        raw_payload: dict[str, Any] | None = None,
     ) -> None:
         """Save pending input request state to the chat document.
 
@@ -1413,7 +1418,7 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
+        app_id: str | None = None,
     ) -> None:
         """Clear pending input request state from the chat document.
 
@@ -1441,8 +1446,8 @@ class AG2PersistenceManager:
         self,
         *,
         chat_id: str,
-        app_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        app_id: str | None = None,
+    ) -> dict[str, Any] | None:
         """Get pending input request state from the chat document.
 
         Returns:

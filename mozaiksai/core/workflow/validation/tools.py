@@ -7,12 +7,14 @@
 # ==============================================================================
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from logs.logging_config import get_workflow_logger
+
 from ..outputs.structured import get_structured_outputs_for_workflow
 
 # ---------------------------------------------------------------------------
@@ -36,17 +38,17 @@ class ValidationOutcome:
     """Structured representation of schema validation results."""
 
     is_valid: bool
-    normalized_payload: Optional[Dict[str, Any]] = None
-    error_payload: Optional[Dict[str, Any]] = None
+    normalized_payload: dict[str, Any] | None = None
+    error_payload: dict[str, Any] | None = None
 
 
-def _filter_payload(payload: Dict[str, Any], model_cls: type[BaseModel]) -> Dict[str, Any]:
+def _filter_payload(payload: dict[str, Any], model_cls: type[BaseModel]) -> dict[str, Any]:
     """Drop runtime/system keys before validation to avoid false positives."""
 
     if not hasattr(model_cls, "model_fields"):
         return {k: v for k, v in payload.items() if k not in RUNTIME_ARG_KEYS}
     field_names = set(model_cls.model_fields.keys())  # type: ignore[attr-defined]
-    filtered: Dict[str, Any] = {}
+    filtered: dict[str, Any] = {}
     for key, value in payload.items():
         if key in RUNTIME_ARG_KEYS:
             continue
@@ -62,10 +64,10 @@ def _build_error_payload(
     tool_name: str,
     model_cls: type[BaseModel],
     validation_error: ValidationError,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Normalize ValidationError into a deterministic sentinel payload."""
 
-    error_entries: Iterable[Dict[str, Any]] = validation_error.errors()
+    error_entries: Iterable[dict[str, Any]] = validation_error.errors()
     logger = get_workflow_logger(workflow_name="tool_validation")
     logger.warning(
         "[TOOL_VALIDATION] Schema validation failed",
@@ -96,7 +98,7 @@ def validate_tool_call(
     workflow_name: str,
     agent_name: str,
     tool_name: str,
-    raw_payload: Dict[str, Any],
+    raw_payload: dict[str, Any],
 ) -> ValidationOutcome:
     """Validate a tool call payload against the workflow's structured outputs."""
 

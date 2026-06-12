@@ -42,7 +42,7 @@ def _build_manager():
         }
     )
     context = _adapter_mod.create_context_container(initial={})
-    setattr(context, "_mozaiks_context_definitions", plan.definitions)
+    context._mozaiks_context_definitions = plan.definitions
     return _derived_mod.DerivedContextManager("FlowUserText", {}, context), context
 
 

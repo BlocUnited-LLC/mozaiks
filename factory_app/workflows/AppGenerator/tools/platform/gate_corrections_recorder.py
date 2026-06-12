@@ -11,7 +11,7 @@ build_registry_id is absent. It never raises or blocks the build.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _extract_issues(warnings: Any, gate_type: str) -> list[dict[str, Any]]:
 
 
 async def record_gate_corrections(
-    context_variables: Optional[dict[str, Any]] = None,
+    context_variables: dict[str, Any] | None = None,
     **_: Any,
 ) -> dict[str, Any]:
     """Fire-and-forget quality gate correction recorder. Never raises."""

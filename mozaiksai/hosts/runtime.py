@@ -6,14 +6,15 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 import hmac
 import json
 import logging
 import os
 import re
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any, AsyncIterator, Callable, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 import autogen
@@ -22,29 +23,29 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 
-from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
-
 from logs.logging_config import (
     get_workflow_logger,
     setup_development_logging,
     setup_production_logging,
 )
 from mozaiksai.core.auth import (
-    UserPrincipal,
     WS_CLOSE_POLICY_VIOLATION,
+    UserPrincipal,
     authenticate_websocket_with_path_binding,
-    optional_user,
     require_any_auth,
     require_user_scope,
 )
 from mozaiksai.core.auth.dependencies import (
     validate_path_app_id,
+)
+from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal as _validate_user_id_against_principal,
 )
 from mozaiksai.core.core_config import close_mongo_client, get_mongo_client
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_tools,
@@ -52,7 +53,6 @@ from mozaiksai.core.workflow.workflow_manager import (
     workflow_status_summary,
 )
 from mozaiksai.version import __version__
-
 
 env = os.getenv("ENVIRONMENT", "development").lower()
 
@@ -72,7 +72,7 @@ persistence_manager = AG2PersistenceManager()
 event_dispatcher = get_event_dispatcher()
 
 mongo_client = None
-simple_transport: Optional[SimpleTransport] = None
+simple_transport: SimpleTransport | None = None
 
 
 def _patch_autogen_file_logger() -> None:
@@ -130,7 +130,7 @@ def _patch_autogen_file_logger() -> None:
 
     file_logger_cls.log_new_wrapper = _patched_log_new_wrapper  # type: ignore[attr-defined]
     file_logger_cls.log_new_client = _patched_log_new_client  # type: ignore[attr-defined]
-    setattr(file_logger_cls, "_mozaiks_safe_json", True)
+    file_logger_cls._mozaiks_safe_json = True
 
 
 _patch_autogen_file_logger()
@@ -160,7 +160,7 @@ def register_app_lifespan(
     target_app.router.lifespan_context = _composed_lifespan
 
 
-def _parse_csv_origins(raw: Optional[str]) -> list[str]:
+def _parse_csv_origins(raw: str | None) -> list[str]:
     if not raw:
         return []
     return [origin.strip() for origin in raw.split(",") if origin and origin.strip()]
@@ -323,7 +323,7 @@ async def _ping_mongo(client) -> None:
 
 
 @app.get("/api/health/ready")
-async def health_readiness():
+async def health_readiness(request: Request):
     """Readiness probe — checks all critical dependencies before accepting traffic."""
     checks: dict[str, str] = {}
     degraded = False
@@ -346,6 +346,15 @@ async def health_readiness():
         degraded = True
     else:
         checks["transport"] = "ok"
+
+    # Platform startup degradation — set when module loading fails unexpectedly.
+    startup_degraded = getattr(request.app.state, "startup_degraded", False)
+    if startup_degraded:
+        reason = getattr(request.app.state, "startup_degraded_reason", "unknown")
+        checks["app_startup"] = f"degraded: {reason}"
+        degraded = True
+    else:
+        checks["app_startup"] = "ok"
 
     status_code = 503 if degraded else 200
     return JSONResponse(
@@ -401,7 +410,7 @@ async def health_active_runs(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _validate_context_for_workflow(workflow_name: str, context: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_context_for_workflow(workflow_name: str, context: dict[str, Any]) -> dict[str, Any]:
     """Filter caller-provided context to declared workflow context variables."""
     if not context:
         return {}
@@ -414,7 +423,7 @@ def _validate_context_for_workflow(workflow_name: str, context: Dict[str, Any]) 
     except Exception:
         declared_keys = set()
 
-    validated: Dict[str, Any] = {}
+    validated: dict[str, Any] = {}
     for key, value in context.items():
         if not isinstance(key, str) or not key.strip():
             continue
@@ -438,7 +447,7 @@ async def start_chat(
     """Create an idempotent runtime chat session for a workflow."""
     validate_path_app_id(principal, app_id)
 
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
     try:
         parsed = await request.json()
         if isinstance(parsed, dict):
@@ -498,7 +507,7 @@ async def start_chat(
             }
 
     chat_id = str(uuid4())
-    extra_fields: Dict[str, Any] = {}
+    extra_fields: dict[str, Any] = {}
     if client_request_id:
         extra_fields["client_request_id"] = client_request_id
     if transport_purpose == "ask_carrier":
@@ -534,10 +543,10 @@ class TriggerWorkflowRequest(BaseModel):
     """Request body for programmatic runtime workflow triggering."""
 
     user_id: str = Field(..., description="User ID to run workflow as")
-    app_id: Optional[str] = Field(None, description="Application ID")
-    journey_id: Optional[str] = Field(None, description="Optional workflow sequence to bind the run to")
-    context: Optional[Dict[str, Any]] = Field(None, description="Initial context variables")
-    webhook_url: Optional[str] = Field(None, description="Optional completion notification URL")
+    app_id: str | None = Field(None, description="Application ID")
+    journey_id: str | None = Field(None, description="Optional workflow sequence to bind the run to")
+    context: dict[str, Any] | None = Field(None, description="Initial context variables")
+    webhook_url: str | None = Field(None, description="Optional completion notification URL")
 
 
 @app.post("/api/workflows/{workflow_name}/trigger")
@@ -561,7 +570,7 @@ async def trigger_workflow(
     chat_id = str(uuid4())
     context = _validate_context_for_workflow(workflow_name, body.context or {})
 
-    extra_fields: Dict[str, Any] = {"trigger_mode": "api"}
+    extra_fields: dict[str, Any] = {"trigger_mode": "api"}
     if body.webhook_url:
         extra_fields["webhook_url"] = body.webhook_url
     extra_fields.update(context)

@@ -1,10 +1,10 @@
-from __future__ import annotations
-
 """Canonical app-bundle paths used by runtime, builders, and validators."""
 
+from __future__ import annotations
+
 import re
+from collections.abc import Iterable
 from pathlib import PurePosixPath
-from typing import Iterable
 
 APP_DATA_CONTRACT_PATH = "data/contract.json"
 APP_DATA_MIGRATIONS_DIR = "data/migrations"
@@ -31,6 +31,16 @@ CANONICAL_APP_ROOT_FILES = frozenset(
         "deployment.manifest.json",
         "docker-compose.yml",
         "env.example",
+        "index.html",
+        "package-lock.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pyproject.toml",
+        "requirements.txt",
+        "tsconfig.json",
+        "vite.config.js",
+        "vite.config.ts",
+        "yarn.lock",
     }
 )
 CANONICAL_APP_ROOT_DIRS = frozenset(

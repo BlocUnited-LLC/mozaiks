@@ -112,14 +112,37 @@ def _workflow_generation_prompt(
     human_in_the_loop: bool,
     trigger: str | None = None,
     require_task_batches: bool = False,
+    task_batch_id: str | None = None,
+    required_agent_names: list[str] | None = None,
+    transition_hint: str | None = None,
 ) -> str:
     root_files = ", ".join(sorted(REQUIRED_WORKFLOW_FILES))
+    conveyor_id = str(task_batch_id or f"{_pascal_to_snake(workflow_name)}_tasks").strip()
+    agent_names = [str(name).strip() for name in required_agent_names or [] if str(name).strip()]
+    agent_roster_clause = (
+        "Declare these agents exactly in agents.yaml: "
+        f"{', '.join(agent_names)}. Every transition_graph.yaml source_agent "
+        "and every target_agent except user/terminate must be one of those declared names."
+        if agent_names
+        else "Every transition_graph.yaml source_agent and every target_agent except user/terminate must match a declared agents.yaml name."
+    )
+    transition_clause = (
+        f"Transition topology requirement: {transition_hint}"
+        if transition_hint
+        else "Derive the transition topology from the assigned AG2 Network pattern."
+    )
     task_batch_clause = (
         "This workflow must decompose heavy intent into downstream task work. "
         "Emit extended_orchestration/task_batches.yaml using the canonical version: 1 "
         "conveyors[] shape, with a decomposition_agent, execution_agents[], and "
         "DecompositionPlan.tasks[] in structured_outputs.yaml. Include at least two "
-        "execution agents that can be selected by tasks."
+        "execution agents that can be selected by tasks. "
+        f"Use conveyor id exactly `{conveyor_id}`. Because that id materializes "
+        "runtime state, context_variables.yaml must declare "
+        f"`{conveyor_id}_results` with type array and source.state default [] plus "
+        f"`{conveyor_id}_status` with type object and source.state default {{}}. "
+        "Expose those two variables to any reviewer or synthesis agent that reads "
+        "completed downstream work."
         if require_task_batches
         else "Do not emit extended_orchestration/task_batches.yaml unless the pattern requires it."
     )
@@ -135,6 +158,8 @@ def _workflow_generation_prompt(
         f"Set orchestrator.yaml workflow_startup_mode to {startup_mode}; never emit startup_mode.\n"
         f"Set human_in_the_loop to {str(human_in_the_loop).lower()}.\n"
         f"Required root YAML files: {root_files}.\n"
+        f"{agent_roster_clause}\n"
+        f"{transition_clause}\n"
         "transition_graph.yaml must use transition_rules with transition_type=after_turn "
         "or condition_type in context_equals, context_expression, tool_called. Never emit a condition field.\n"
         "middleware.yaml must declare prompt middleware or an empty prompt_middleware list.\n"
@@ -169,6 +194,8 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
             "human_in_the_loop": False,
             "depends_on": [],
             "require_task_batches": False,
+            "required_agent_names": ["ClassifierAgent", "RoutingAgent"],
+            "transition_hint": "ClassifierAgent -> RoutingAgent -> terminate.",
         },
         {
             "name": "TicketBatchTriageWorkflow",
@@ -181,6 +208,7 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
             "trigger": "domain.support_ticket.batch_requested",
             "depends_on": [],
             "require_task_batches": True,
+            "task_batch_id": "ticket_batch_triage_tasks",
         },
     ]
 
@@ -204,6 +232,9 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
                 human_in_the_loop=bool(item["human_in_the_loop"]),
                 trigger=item.get("trigger"),
                 require_task_batches=bool(item.get("require_task_batches")),
+                task_batch_id=item.get("task_batch_id"),
+                required_agent_names=item.get("required_agent_names"),
+                transition_hint=item.get("transition_hint"),
             ),
             "depends_on": list(item.get("depends_on") or []),
             "context_variables": {
@@ -211,6 +242,7 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
                 "expected_human_in_the_loop": bool(item["human_in_the_loop"]),
                 "expected_event_trigger": item.get("trigger"),
                 "require_task_batches": bool(item.get("require_task_batches")),
+                "expected_task_batch_id": item.get("task_batch_id"),
             },
         }
         workflow_specs.append(spec)
@@ -486,6 +518,15 @@ def validate_generated_workflow_bundle(
         else:
             report["errors"].append("ui_config.yaml must contain a mapping")
 
+        context_variables = yaml_payloads.get("context_variables.yaml")
+        context_definitions = (
+            set(context_variables.get("definitions") or {})
+            if isinstance(context_variables, dict)
+            else set()
+        )
+        if not isinstance(context_variables, dict):
+            report["errors"].append("context_variables.yaml must contain a mapping")
+
         requires_task_batches = bool((spec.get("context_variables") or {}).get("require_task_batches"))
         task_batches_path = workflow_dir / "extended_orchestration" / "task_batches.yaml"
         if requires_task_batches:
@@ -498,6 +539,19 @@ def validate_generated_workflow_bundle(
                         report["errors"].append("task_batches.yaml must declare conveyors[]")
                     if not parsed.batches:
                         report["errors"].append("task_batches.yaml did not materialize executable batches")
+                    expected_task_batch_id = (spec.get("context_variables") or {}).get("expected_task_batch_id")
+                    if expected_task_batch_id:
+                        batch_ids = {batch.id for batch in parsed.batches}
+                        if expected_task_batch_id not in batch_ids:
+                            report["errors"].append(
+                                f"task_batches.yaml must declare expected conveyor id {expected_task_batch_id!r}"
+                            )
+                    for batch in parsed.batches:
+                        for key in (batch.result.context_key, batch.result.status_key):
+                            if key not in context_definitions:
+                                report["errors"].append(
+                                    f"task_batches {batch.id!r} writes undeclared context variable {key!r}"
+                                )
                 except Exception as exc:
                     report["errors"].append(f"task_batches.yaml is invalid: {exc}")
 

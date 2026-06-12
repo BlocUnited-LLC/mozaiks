@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
     return default
 
 
-def _format_connector_inventory_block(inventory: Dict[str, Any]) -> str:
+def _format_connector_inventory_block(inventory: dict[str, Any]) -> str:
     required = inventory.get("required_services") or []
     ready = inventory.get("ready_services") or []
     missing = inventory.get("missing_required_services") or []
@@ -93,7 +93,9 @@ def _format_connector_inventory_block(inventory: Dict[str, Any]) -> str:
 
 def _app_connector_inventory_summary(agent: Any) -> str:
     try:
-        from mozaiksai.core.workflow.generator_support.connector_service import get_connector_inventory
+        from mozaiksai.core.workflow.generator_support.connector_service import (
+            get_connector_inventory,
+        )
     except Exception:
         return ""
 
@@ -111,8 +113,8 @@ def _app_connector_inventory_summary(agent: Any) -> str:
             running_loop = None
 
         if running_loop and running_loop.is_running():
-            holder: Dict[str, Any] = {}
-            error_holder: Dict[str, Exception] = {}
+            holder: dict[str, Any] = {}
+            error_holder: dict[str, Exception] = {}
 
             def _runner() -> None:
                 try:
@@ -145,7 +147,7 @@ def _app_connector_inventory_summary(agent: Any) -> str:
     return _format_connector_inventory_block(inventory)
 
 
-def inject_contracts_context(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_contracts_context(agent, messages: list[dict[str, Any]]) -> None:
     """Inject config impacts contract + runtime connector summary into agent system message."""
     try:
         contract = _read_config_impacts_contract()

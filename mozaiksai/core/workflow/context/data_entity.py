@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
@@ -35,8 +35,8 @@ _TYPE_CHECKS = {
 @dataclass
 class _PendingWrite:
     operation: str
-    payload: Dict[str, Any]
-    search_value: Optional[Any] = None
+    payload: dict[str, Any]
+    search_value: Any | None = None
 
 
 class DataEntityManager:
@@ -47,10 +47,10 @@ class DataEntityManager:
         *,
         database_name: str,
         collection: str,
-        schema: Optional[Dict[str, Any]] = None,
-        indexes: Optional[List[Dict[str, Any]]] = None,
+        schema: dict[str, Any] | None = None,
+        indexes: list[dict[str, Any]] | None = None,
         write_strategy: str = "immediate",
-        search_by: Optional[str] = None,
+        search_by: str | None = None,
     ) -> None:
         if not database_name or not collection:
             raise ValueError("DataEntityManager requires database_name and collection")
@@ -64,7 +64,7 @@ class DataEntityManager:
         self._indexes = indexes or []
         self._write_strategy = write_strategy
         self._search_by = search_by
-        self._pending: List[_PendingWrite] = []
+        self._pending: list[_PendingWrite] = []
         self._client = get_mongo_client()
         self._init_lock = asyncio.Lock()
         self._initialized = False
@@ -73,7 +73,7 @@ class DataEntityManager:
     # Public API
     # ------------------------------------------------------------------
 
-    async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def create(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert a new document honoring schema validation and write strategy."""
 
         await self._ensure_ready()
@@ -84,7 +84,7 @@ class DataEntityManager:
             self._pending.append(_PendingWrite("insert", doc))
         return doc
 
-    async def update(self, search_value: Any, updates: Dict[str, Any]) -> None:
+    async def update(self, search_value: Any, updates: dict[str, Any]) -> None:
         """Update an existing document identified by the configured search key."""
 
         if not self._search_by:
@@ -138,14 +138,14 @@ class DataEntityManager:
                     err,
                 )
 
-    def _schema_fields(self) -> Dict[str, Dict[str, Any]]:
+    def _schema_fields(self) -> dict[str, dict[str, Any]]:
         schema = self._schema or {}
         if not isinstance(schema, dict):
             return {}
 
         raw_fields = schema.get("fields")
         if isinstance(raw_fields, list):
-            fields: Dict[str, Dict[str, Any]] = {}
+            fields: dict[str, dict[str, Any]] = {}
             for field in raw_fields:
                 if not isinstance(field, dict):
                     continue
@@ -161,14 +161,14 @@ class DataEntityManager:
                 fields[str(field_name)] = dict(spec)
         return fields
 
-    def _normalized_indexes(self) -> List[Dict[str, Any]]:
-        normalized: List[Dict[str, Any]] = []
+    def _normalized_indexes(self) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
         for index in self._indexes:
             if not isinstance(index, dict):
                 continue
 
             raw_keys = index.get("keys")
-            keys: List[tuple[str, int]] = []
+            keys: list[tuple[str, int]] = []
             if isinstance(raw_keys, list):
                 for entry in raw_keys:
                     if isinstance(entry, (list, tuple)) and len(entry) == 2:
@@ -195,7 +195,7 @@ class DataEntityManager:
             )
         return normalized
 
-    def _validate_payload(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_payload(self, data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(data, dict):
             raise ValueError("DataEntityManager.create expects a dict payload")
 
@@ -214,7 +214,7 @@ class DataEntityManager:
 
         return validated
 
-    def _validate_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_updates(self, updates: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(updates, dict):
             raise ValueError("DataEntityManager.update expects a dict payload")
 
@@ -227,7 +227,7 @@ class DataEntityManager:
             validated[field_name] = self._validate_field_value(field_name, value, spec)
         return validated
 
-    def _validate_field_value(self, field_name: str, value: Any, spec: Dict[str, Any]) -> Any:
+    def _validate_field_value(self, field_name: str, value: Any, spec: dict[str, Any]) -> Any:
         nullable = bool(spec.get("nullable"))
         if value is None:
             if bool(spec.get("required")) and not nullable:

@@ -13,7 +13,7 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 import yaml
@@ -173,12 +173,12 @@ class TestValidatePageUIPrimitives:
 # structured_outputs.yaml AppPageSection.primitive
 # ---------------------------------------------------------------------------
 
-def _load_so_yaml() -> Dict[str, Any]:
+def _load_so_yaml() -> dict[str, Any]:
     assert _STRUCTURED_OUTPUTS.exists(), f"Missing {_STRUCTURED_OUTPUTS}"
     return yaml.safe_load(_STRUCTURED_OUTPUTS.read_text(encoding="utf-8"))
 
 
-def _get_app_page_section_primitive_values() -> List[str]:
+def _get_app_page_section_primitive_values() -> list[str]:
     data = _load_so_yaml()
     models = data.get("models", {})
     app_page_section = models.get("AppPageSection", {})
@@ -191,19 +191,19 @@ def _get_app_page_section_primitive_values() -> List[str]:
 
 class TestStructuredOutputsYaml:
     @pytest.fixture(scope="class")
-    def primitive_values(self) -> List[str]:
+    def primitive_values(self) -> list[str]:
         return _get_app_page_section_primitive_values()
 
     @pytest.mark.parametrize("name", _NEW_PRIMITIVES)
     def test_new_primitive_in_structured_outputs(
-        self, name: str, primitive_values: List[str]
+        self, name: str, primitive_values: list[str]
     ) -> None:
         assert name in primitive_values, (
             f"'{name}' missing from AppPageSection.primitive.values in structured_outputs.yaml"
         )
 
     def test_all_shipped_primitives_in_structured_outputs(
-        self, primitive_values: List[str]
+        self, primitive_values: list[str]
     ) -> None:
         missing = [n for n in _ALL_SHIPPED if n not in primitive_values]
         assert not missing, (
@@ -211,7 +211,7 @@ class TestStructuredOutputsYaml:
         )
 
     def test_no_unknown_primitives_in_structured_outputs(
-        self, primitive_values: List[str]
+        self, primitive_values: list[str]
     ) -> None:
         catalog = set(ui_primitives.get_page_ui_primitive_names())
         unknown = [v for v in primitive_values if v not in catalog]

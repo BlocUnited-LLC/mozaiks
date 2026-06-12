@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 import yaml
 
@@ -7,7 +7,6 @@ from logs.logging_config import get_workflow_logger
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-
 
 logger = get_workflow_logger("design_docs")
 
@@ -33,13 +32,13 @@ async def _upsert_design_doc(
     *,
     store: BuilderArtifactStore,
     app_id: str,
-    user_id: Optional[str],
+    user_id: str | None,
     kind: str,
     stage: str,
     content: str,
     source_workflow: str,
-    source_chat_id: Optional[str],
-    extra_fields: Optional[Dict[str, Any]] = None,
+    source_chat_id: str | None,
+    extra_fields: dict[str, Any] | None = None,
 ) -> None:
     await store.upsert_design_doc(
         app_id=app_id,
@@ -57,10 +56,10 @@ async def _mark_design_docs_status(
     *,
     store: BuilderArtifactStore,
     app_id: str,
-    user_id: Optional[str],
+    user_id: str | None,
     stage: str,
     status: str,
-    error: Optional[str] = None,
+    error: str | None = None,
 ) -> None:
     await store.mark_design_doc_status(
         app_id=app_id,
@@ -72,7 +71,7 @@ async def _mark_design_docs_status(
     )
 
 
-def _cv_get(context_variables: Any, key: str) -> Optional[Any]:
+def _cv_get(context_variables: Any, key: str) -> Any | None:
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
@@ -101,7 +100,7 @@ def _cv_set(context_variables: Any, key: str, value: Any) -> None:
         data[key] = value
 
 
-def _normalize_kind(kind: str) -> Optional[str]:
+def _normalize_kind(kind: str) -> str | None:
     if not isinstance(kind, str):
         return None
     k = kind.strip().lower()
@@ -110,7 +109,7 @@ def _normalize_kind(kind: str) -> Optional[str]:
     return None
 
 
-def _extract_bundle(context_variables: Any) -> Optional[Dict[str, Any]]:
+def _extract_bundle(context_variables: Any) -> dict[str, Any] | None:
     if context_variables is None:
         return None
 
@@ -126,7 +125,7 @@ def _extract_bundle(context_variables: Any) -> Optional[Dict[str, Any]]:
     return raw
 
 
-def _canonical_surface_map(raw: Any) -> Dict[str, Any]:
+def _canonical_surface_map(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("surface_map must be an object")
     surfaces = raw.get("surfaces")
@@ -142,9 +141,9 @@ def _canonical_data_contract(
     raw: Any,
     *,
     app_id: str,
-    artifact_version_id: Optional[str],
-    surface_map: Dict[str, Any],
-) -> Dict[str, Any]:
+    artifact_version_id: str | None,
+    surface_map: dict[str, Any],
+) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError("data_contract must be an object")
 
@@ -215,7 +214,7 @@ def _canonical_data_contract(
     }
 
 
-def _surface_map_yaml_block(surface_map: Dict[str, Any]) -> str:
+def _surface_map_yaml_block(surface_map: dict[str, Any]) -> str:
     return yaml.safe_dump(
         {"surface_map": surface_map},
         sort_keys=False,
@@ -224,7 +223,7 @@ def _surface_map_yaml_block(surface_map: Dict[str, Any]) -> str:
     ).strip()
 
 
-def _inject_backend_surface_map(backend_markdown: str, surface_map: Dict[str, Any]) -> str:
+def _inject_backend_surface_map(backend_markdown: str, surface_map: dict[str, Any]) -> str:
     doc = str(backend_markdown or "").strip()
     if not doc:
         raise ValueError("backend_markdown must be a non-empty string")
@@ -239,7 +238,7 @@ def _inject_backend_surface_map(backend_markdown: str, surface_map: Dict[str, An
     return doc.rstrip() + "\n\n" + block
 
 
-def _canonical_experience_spec(raw: Any, *, surface_map: Dict[str, Any]) -> Dict[str, Any]:
+def _canonical_experience_spec(raw: Any, *, surface_map: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalise the typed ExperienceSpec from the bundle.
 
     Returns the canonical dict ready to be stored in the experience_spec extra_field
@@ -276,14 +275,14 @@ def _canonical_experience_spec(raw: Any, *, surface_map: Dict[str, Any]) -> Dict
     }
 
 
-def _experience_spec_to_yaml(experience_spec: Dict[str, Any], surface_map: Dict[str, Any]) -> str:
+def _experience_spec_to_yaml(experience_spec: dict[str, Any], surface_map: dict[str, Any]) -> str:
     """Generate a human-readable YAML representation of the typed ExperienceSpec.
 
     This is stored as the `content` field in DesignDocuments so that agents that
     read the ui_schema doc as a string (AgentGenerator, AppSchemaAgent) still get
     valid YAML.
     """
-    doc: Dict[str, Any] = {
+    doc: dict[str, Any] = {
         "experience": {
             "navigation_model": experience_spec.get("navigation_model", ""),
             "brand_direction": experience_spec.get("brand_direction", ""),
@@ -305,7 +304,7 @@ async def save_design_doc(
     stage: str,
     content: str,
     context_variables: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     app_id = _cv_get(context_variables, "app_id")
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")
@@ -373,7 +372,7 @@ async def save_design_doc(
 async def save_design_docs_bundle(
     *,
     context_variables: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     app_id = _cv_get(context_variables, "app_id")
     chat_id = _cv_get(context_variables, "chat_id")
     user_id = _cv_get(context_variables, "user_id")

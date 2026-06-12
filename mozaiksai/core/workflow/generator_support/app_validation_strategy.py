@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
+from typing import Any
 
 APP_VALIDATION_STRATEGIES: tuple[str, str, str, str] = ("e2b", "docker", "local", "skip")
 
@@ -22,7 +21,7 @@ _STRATEGY_DESCRIPTIONS = {
 }
 
 
-def normalize_app_validation_strategy(raw: Any) -> Optional[str]:
+def normalize_app_validation_strategy(raw: Any) -> str | None:
     if raw is None:
         return None
     value = str(raw).strip().lower()
@@ -45,10 +44,10 @@ def docker_app_validation_available() -> bool:
 
 def default_app_validation_strategy(
     *,
-    env: Optional[Dict[str, str]] = None,
-    local_available: Optional[bool] = None,
-    docker_available: Optional[bool] = None,
-) -> Tuple[str, str]:
+    env: dict[str, str] | None = None,
+    local_available: bool | None = None,
+    docker_available: bool | None = None,
+) -> tuple[str, str]:
     env_map = env or os.environ
     if str(env_map.get("E2B_API_KEY", "")).strip():
         return "e2b", "resolved from E2B availability"
@@ -67,10 +66,10 @@ def resolve_app_validation_strategy(
     *,
     requested: Any = None,
     context_value: Any = None,
-    env: Optional[Dict[str, str]] = None,
-    local_available: Optional[bool] = None,
-    docker_available: Optional[bool] = None,
-) -> Tuple[str, str]:
+    env: dict[str, str] | None = None,
+    local_available: bool | None = None,
+    docker_available: bool | None = None,
+) -> tuple[str, str]:
     env_map = env or os.environ
     env_strategy = normalize_app_validation_strategy(env_map.get("MOZAIKS_APP_VALIDATION_STRATEGY"))
 
@@ -98,16 +97,16 @@ def resolve_app_validation_strategy(
 
 def build_app_validation_strategy_summary(
     *,
-    env: Optional[Dict[str, str]] = None,
-    local_available: Optional[bool] = None,
-    docker_available: Optional[bool] = None,
-) -> Dict[str, Any]:
+    env: dict[str, str] | None = None,
+    local_available: bool | None = None,
+    docker_available: bool | None = None,
+) -> dict[str, Any]:
     default_value, default_reason = default_app_validation_strategy(
         env=env,
         local_available=local_available,
         docker_available=docker_available,
     )
-    options: List[Dict[str, str]] = []
+    options: list[dict[str, str]] = []
     for value in APP_VALIDATION_STRATEGIES:
         options.append(
             {

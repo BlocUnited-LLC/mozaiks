@@ -8,20 +8,21 @@ in MongoDB.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 from .namespaces import SYSTEM_DATABASE, PlatformCollections
 from .persistence_manager import AG2PersistenceManager
 
-IndexSpec = Tuple[Sequence[Tuple[str, int]], Dict[str, Any]]
+IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 SECRET_METADATA_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
 
 
-def _redact_public_config(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _redact_public_config(value: dict[str, Any] | None) -> dict[str, Any] | None:
     if value is None:
         return None
-    redacted: Dict[str, Any] = {}
+    redacted: dict[str, Any] = {}
     for key, item in dict(value).items():
         key_text = str(key)
         if key_text.strip().lower() in SECRET_METADATA_KEYS:
@@ -41,7 +42,7 @@ def _redact_public_config(value: Optional[Dict[str, Any]]) -> Optional[Dict[str,
 class AppConnectorStore:
     """Persistence wrapper for app-scoped connector metadata."""
 
-    def __init__(self, pm: Optional[AG2PersistenceManager] = None) -> None:
+    def __init__(self, pm: AG2PersistenceManager | None = None) -> None:
         self._pm = pm or AG2PersistenceManager()
 
     async def _client(self):
@@ -80,20 +81,20 @@ class AppConnectorStore:
         *,
         app_id: str,
         service: str,
-        display_name: Optional[str] = None,
-        user_id: Optional[str] = None,
+        display_name: str | None = None,
+        user_id: str | None = None,
         status: str,
         secret_storage: str,
         secret_available: bool,
-        key_length: Optional[int] = None,
-        expires_at: Optional[str] = None,
-        notes: Optional[str] = None,
-        public_config: Optional[Dict[str, Any]] = None,
-        required_fields: Optional[List[Dict[str, Any]]] = None,
-        source: Optional[Dict[str, Any]] = None,
-        status_reason: Optional[str] = None,
-        extra_fields: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        key_length: int | None = None,
+        expires_at: str | None = None,
+        notes: str | None = None,
+        public_config: dict[str, Any] | None = None,
+        required_fields: list[dict[str, Any]] | None = None,
+        source: dict[str, Any] | None = None,
+        status_reason: str | None = None,
+        extra_fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         await self.ensure_indexes()
         coll = await self._collection()
         now = datetime.now(UTC)
@@ -101,7 +102,7 @@ class AppConnectorStore:
         if not normalized_service:
             raise ValueError("service is required")
 
-        set_fields: Dict[str, Any] = {
+        set_fields: dict[str, Any] = {
             "app_id": str(app_id),
             "service": normalized_service,
             "display_name": display_name or normalized_service.replace("_", " ").title(),
@@ -145,13 +146,13 @@ class AppConnectorStore:
         doc = await coll.find_one({"app_id": str(app_id), "service": normalized_service})
         return self._normalize_doc(doc)
 
-    async def get_connector(self, *, app_id: str, service: str) -> Optional[Dict[str, Any]]:
+    async def get_connector(self, *, app_id: str, service: str) -> dict[str, Any] | None:
         await self.ensure_indexes()
         coll = await self._collection()
         doc = await coll.find_one({"app_id": str(app_id), "service": str(service).strip().lower().replace(" ", "_")})
         return self._normalize_doc(doc)
 
-    async def list_connectors(self, *, app_id: str) -> List[Dict[str, Any]]:
+    async def list_connectors(self, *, app_id: str) -> list[dict[str, Any]]:
         await self.ensure_indexes()
         coll = await self._collection()
         cursor = coll.find({"app_id": str(app_id)}).sort("updated_at", -1)
@@ -163,18 +164,18 @@ class AppConnectorStore:
         *,
         app_id: str,
         service: str,
-        user_id: Optional[str] = None,
-        display_name: Optional[str] = None,
-        notes: Optional[str] = None,
-        status: Optional[str] = None,
-        expires_at: Optional[str] = None,
-        public_config: Optional[Dict[str, Any]] = None,
-        required_fields: Optional[List[Dict[str, Any]]] = None,
-    ) -> Optional[Dict[str, Any]]:
+        user_id: str | None = None,
+        display_name: str | None = None,
+        notes: str | None = None,
+        status: str | None = None,
+        expires_at: str | None = None,
+        public_config: dict[str, Any] | None = None,
+        required_fields: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
         await self.ensure_indexes()
         coll = await self._collection()
         normalized_service = str(service or "").strip().lower().replace(" ", "_")
-        update_fields: Dict[str, Any] = {"updated_at": datetime.now(UTC)}
+        update_fields: dict[str, Any] = {"updated_at": datetime.now(UTC)}
         if user_id:
             update_fields["updated_by_user_id"] = str(user_id)
         if display_name is not None:
@@ -206,16 +207,16 @@ class AppConnectorStore:
         app_id: str,
         service: str,
         health_status: str,
-        health_message: Optional[str] = None,
-        last_checked_at: Optional[str] = None,
+        health_message: str | None = None,
+        last_checked_at: str | None = None,
         checked_by: str = "manual",
-        health_details: Optional[Dict[str, Any]] = None,
-        error_code: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        health_details: dict[str, Any] | None = None,
+        error_code: str | None = None,
+    ) -> dict[str, Any] | None:
         await self.ensure_indexes()
         coll = await self._collection()
         normalized_service = str(service or "").strip().lower().replace(" ", "_")
-        update_fields: Dict[str, Any] = {
+        update_fields: dict[str, Any] = {
             "updated_at": datetime.now(UTC),
             "health_status": str(health_status or "unknown"),
             "health_message": health_message,
@@ -241,7 +242,7 @@ class AppConnectorStore:
         return bool(getattr(result, "deleted_count", 0))
 
     @staticmethod
-    def _normalize_doc(doc: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _normalize_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(doc, dict):
             return None
         normalized = dict(doc)

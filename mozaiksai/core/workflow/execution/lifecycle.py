@@ -29,20 +29,22 @@ Runtime Contract:
 """
 
 from __future__ import annotations
+
 import asyncio
 import importlib.util
 import inspect
 import logging
-import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import yaml
 
 from logs.logging_config import get_workflow_logger
 from logs.tools_logs import get_tool_logger, log_tool_event
+
 from ..declarative import parse_tools_config
 from ..paths import primary_workflows_root as _primary_workflows_root
 
@@ -63,10 +65,10 @@ class LifecycleTrigger(Enum):
 class LifecycleTool:
     """Runtime representation of a lifecycle tool binding."""
     trigger: LifecycleTrigger
-    agent: Optional[str]  # None for chat-level hooks, agent_name for agent-level
+    agent: str | None  # None for chat-level hooks, agent_name for agent-level
     file: str
     function: str
-    description: Optional[str]
+    description: str | None
     callable: Callable[..., Any]
     accepts_context: bool
 
@@ -76,7 +78,7 @@ class LifecycleToolManager:
 
     def __init__(self, workflow_name: str):
         self.workflow_name = workflow_name
-        self.tools: Dict[LifecycleTrigger, List[LifecycleTool]] = {
+        self.tools: dict[LifecycleTrigger, list[LifecycleTool]] = {
             trigger: [] for trigger in LifecycleTrigger
         }
         self._loaded = False
@@ -189,12 +191,12 @@ class LifecycleToolManager:
 
     def _load_tool_function(
         self, base_dir: Path, file_name: str, func_name: str
-    ) -> Optional[Callable]:
+    ) -> Callable | None:
         """Load a single tool function from file."""
         # Support both root and tools/ subdir
         base_dir_tools = base_dir / 'tools'
         candidate_paths = [base_dir / file_name, base_dir_tools / file_name]
-        file_path: Optional[Path] = next((p for p in candidate_paths if p.exists()), None)
+        file_path: Path | None = next((p for p in candidate_paths if p.exists()), None)
 
         if not file_path:
             logger.warning(f"[LIFECYCLE] Tool file '{file_name}' not found in workflow '{self.workflow_name}'")
@@ -251,13 +253,13 @@ class LifecycleToolManager:
 
     async def execute_trigger(
         self,
-        trigger: "LifecycleTrigger | str",
+        trigger: LifecycleTrigger | str,
         **kwargs: Any,
     ) -> None:
         """Dispatch a lifecycle trigger through the public trigger entry point."""
 
         # Normalize trigger value to LifecycleTrigger enum where possible
-        resolved_trigger: Optional[LifecycleTrigger]
+        resolved_trigger: LifecycleTrigger | None
         if isinstance(trigger, LifecycleTrigger):
             resolved_trigger = trigger
         else:
@@ -314,9 +316,9 @@ class LifecycleToolManager:
     async def _execute_tools(
         self,
         trigger: LifecycleTrigger,
-        agent_name: Optional[str] = None,
+        agent_name: str | None = None,
         context_variables: Any = None,
-        call_kwargs: Optional[Dict[str, Any]] = None,
+        call_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Execute all tools for a given trigger point."""
         tools = self.tools.get(trigger, [])
@@ -355,7 +357,7 @@ class LifecycleToolManager:
         tool: LifecycleTool,
         context_variables: Any,
         wf_logger: logging.Logger,
-        call_kwargs: Optional[Dict[str, Any]] = None,
+        call_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Execute a single lifecycle tool with error handling."""
         start_time = asyncio.get_event_loop().time()
@@ -453,7 +455,7 @@ class LifecycleToolManager:
     async def _emit_lifecycle_event(
         self,
         event_type: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         wf_logger: logging.Logger,
     ) -> None:
         """Emit lifecycle event for observability (integrates with existing event system)."""

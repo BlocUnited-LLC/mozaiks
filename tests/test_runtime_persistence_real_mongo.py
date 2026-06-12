@@ -11,8 +11,8 @@ from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import (
     APP_DATA_MIGRATIONS_COLLECTION,
-    apply_database_indexes,
     apply_data_migrations,
+    apply_database_indexes,
     collection_name_for,
     migration_hash,
 )

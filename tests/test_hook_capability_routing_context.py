@@ -12,8 +12,7 @@ Verifies:
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import patch
 
 import yaml
@@ -43,7 +42,7 @@ _ROUTING_YAML = _APPGEN_CATALOG_DIR / "capability_routing.yaml"
 # ---------------------------------------------------------------------------
 
 class _FakeAgent:
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables or {}
@@ -52,7 +51,7 @@ class _FakeAgent:
         self.system_message = message
 
 
-def _run_hook(agent: _FakeAgent, messages: List[Dict] | None = None) -> None:
+def _run_hook(agent: _FakeAgent, messages: list[dict] | None = None) -> None:
     from factory_app.workflows.AppGenerator.tools.hook_capability_routing_context import (
         inject_capability_routing_context,
     )
@@ -203,7 +202,9 @@ class TestCapabilityRoutingHook:
         assert "other content" in agent.system_message
 
     def test_load_routing_is_cached(self) -> None:
-        from factory_app.workflows.AppGenerator.tools.hook_capability_routing_context import _load_routing
+        from factory_app.workflows.AppGenerator.tools.hook_capability_routing_context import (
+            _load_routing,
+        )
         _load_routing.cache_clear()
         result1 = _load_routing()
         result2 = _load_routing()

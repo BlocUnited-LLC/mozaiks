@@ -11,16 +11,16 @@ This is a read-only context tool. It does not write files or artifacts.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from factory_app.control_plane.tools._artifact_workspace import load_artifact_workspace
+from mozaiksai.control_plane.context_graph.query import build_context_graph_catalog
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.core.app_context.models import AppContextGraph
-from mozaiksai.control_plane.context_graph.query import build_context_graph_catalog
 
 
 async def get_contract_surface_context(
-    context: Optional[ControlPlaneToolContext] = None,
+    context: ControlPlaneToolContext | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
     """Return a compact context graph catalog for contract surface resolution.
@@ -64,7 +64,7 @@ async def get_contract_surface_context(
     try:
         from mozaiksai.core.app_context.context_graph import load_context_graph_for_artifact
 
-        graph: Optional[AppContextGraph] = await load_context_graph_for_artifact(
+        graph: AppContextGraph | None = await load_context_graph_for_artifact(
             app_id=app_id,
             artifact_version_id=artifact_version_id or None,
         )

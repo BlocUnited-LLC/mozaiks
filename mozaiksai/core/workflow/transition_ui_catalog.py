@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
 
 
 @dataclass(frozen=True)
@@ -14,7 +13,7 @@ class TransitionUIPrimitive:
     notes: str
 
 
-_TRANSITION_UI_PRIMITIVES: Tuple[TransitionUIPrimitive, ...] = (
+_TRANSITION_UI_PRIMITIVES: tuple[TransitionUIPrimitive, ...] = (
     TransitionUIPrimitive(
         primitive_id="LauncherScreen",
         owner="shell",
@@ -58,12 +57,12 @@ _TRANSITION_UI_PRIMITIVES: Tuple[TransitionUIPrimitive, ...] = (
 )
 
 
-def get_transition_ui_primitives() -> Tuple[TransitionUIPrimitive, ...]:
+def get_transition_ui_primitives() -> tuple[TransitionUIPrimitive, ...]:
     return _TRANSITION_UI_PRIMITIVES
 
 
 def format_transition_ui_catalog_guidance() -> str:
-    lines: List[str] = ["Canonical transition UI primitive catalog:"]
+    lines: list[str] = ["Canonical transition UI primitive catalog:"]
 
     lines.append("")
     for entry in _TRANSITION_UI_PRIMITIVES:

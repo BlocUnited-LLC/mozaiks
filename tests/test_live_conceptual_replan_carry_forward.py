@@ -91,10 +91,10 @@ _SAFETY_GENERATED = {
 
 
 def _run_preservation(tmp_path: Path) -> dict:
-    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, ArtifactVersionDoc
     from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
+    from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, ArtifactVersionDoc
 
     for rel_path, content in _SAFETY_CRM_FILES.items():
         dest = tmp_path / rel_path

@@ -4,9 +4,7 @@ import hashlib
 import io
 import os
 from pathlib import Path
-from typing import Any, Optional, runtime_checkable
-
-from typing import Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 class ContentNotFoundError(Exception):
@@ -65,7 +63,7 @@ class LocalArtifactContentStore:
 
     backend_name: str = "local"
 
-    def __init__(self, root: Optional[Path | str] = None) -> None:
+    def __init__(self, root: Path | str | None = None) -> None:
         self._root = Path(root) if root else Path("generated_artifacts")
 
     async def put_bundle(self, data: bytes, *, app_id: str, artifact_version_id: str) -> str:
@@ -118,13 +116,13 @@ class GridFSArtifactContentStore:
     def __init__(
         self,
         *,
-        mongo_uri: Optional[str] = None,
+        mongo_uri: str | None = None,
         database: str = "mozaiksai_artifacts",
     ) -> None:
         self._mongo_uri = mongo_uri or os.environ.get("MONGO_URI", "mongodb://localhost:27017")
         self._database = database
-        self._fs: Optional[Any] = None
-        self._client: Optional[Any] = None
+        self._fs: Any | None = None
+        self._client: Any | None = None
 
     async def _ensure_fs(self) -> Any:
         if self._fs is not None:
@@ -191,7 +189,7 @@ class GridFSArtifactContentStore:
 
 _CONTENT_BACKEND_ENV_VAR = "MOZAIKS_ARTIFACT_CONTENT_BACKEND"
 
-_content_store: Optional[ArtifactContentStore] = None
+_content_store: ArtifactContentStore | None = None
 
 
 def get_artifact_content_store() -> ArtifactContentStore:

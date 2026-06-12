@@ -1,5 +1,4 @@
 
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from pydantic import BaseModel, Field
@@ -25,7 +24,11 @@ def get_router() -> APIRouter:
             return _mgr, _is_valid_artifact_id, _is_valid_sandbox_id
 
         try:
-            from .sandbox_manager import ArtifactSandboxManager, is_valid_artifact_id, is_valid_sandbox_id
+            from .sandbox_manager import (
+                ArtifactSandboxManager,
+                is_valid_artifact_id,
+                is_valid_sandbox_id,
+            )
         except Exception as exc:
             raise RuntimeError(
                 "Artifact sandbox feature unavailable. Install e2b-code-interpreter and its dependencies to enable it."
@@ -44,21 +47,21 @@ def get_router() -> APIRouter:
         content: str
 
     class _SyncRequest(BaseModel):
-        files: List[_SyncFile] = Field(default_factory=list)
-        deleted: List[str] = Field(default_factory=list)
+        files: list[_SyncFile] = Field(default_factory=list)
+        deleted: list[str] = Field(default_factory=list)
 
     class _OkResponse(BaseModel):
         ok: bool = True
 
     class _StartResponse(BaseModel):
         status: str
-        previewUrl: Optional[str] = None
-        message: Optional[str] = None
+        previewUrl: str | None = None
+        message: str | None = None
 
     class _StatusResponse(BaseModel):
         status: str
-        previewUrl: Optional[str] = None
-        lastError: Optional[str] = None
+        previewUrl: str | None = None
+        lastError: str | None = None
 
     @router.post("/api/artifacts/{artifactId}/sandbox", response_model=_SandboxCreateResponse)
     async def artifacts_create_or_reuse_sandbox(

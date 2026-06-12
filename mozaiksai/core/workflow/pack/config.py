@@ -3,29 +3,29 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
+from ..paths import primary_workflows_root
 from .schema import (
     GlobalJourney,
     GlobalPackGraph,
     JourneyStepGroup,
-    WorkflowTransition,
     WorkflowDependency,
     WorkflowEntry,
     WorkflowEntrypoint,
+    WorkflowTransition,
     normalize_step_groups,
     parse_global_pack_graph,
 )
-from ..paths import primary_workflows_root, resolve_workflow_path
 
 
 @dataclass
 class _CacheEntry:
-    source: Tuple[Tuple[str, float], ...]
+    source: tuple[tuple[str, float], ...]
     payload: Any
 
 
-_GLOBAL_CACHE: Optional[_CacheEntry] = None
+_GLOBAL_CACHE: _CacheEntry | None = None
 
 def _workflows_root() -> Path:
     """Resolve canonical workflows root.
@@ -43,7 +43,7 @@ def get_global_pack_graph_path() -> Path:
     return (_workflows_root() / "extended_orchestration" / "extension_registry.json").resolve()
 
 
-def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
+def _load_json_file(path: Path) -> dict[str, Any] | None:
     try:
         if not path.exists():
             return None
@@ -55,7 +55,7 @@ def _load_json_file(path: Path) -> Optional[Dict[str, Any]]:
         raise ValueError(f"Failed loading pack graph {path}: {exc}") from exc
 
 
-def load_global_pack_graph() -> Optional[GlobalPackGraph]:
+def load_global_pack_graph() -> GlobalPackGraph | None:
     """Load and validate the canonical global pack graph.
     """
     global _GLOBAL_CACHE
@@ -80,11 +80,11 @@ def load_global_pack_graph() -> Optional[GlobalPackGraph]:
     return graph
 
 
-def list_workflow_ids(pack: GlobalPackGraph) -> List[str]:
+def list_workflow_ids(pack: GlobalPackGraph) -> list[str]:
     return [w.id for w in pack.workflows]
 
 
-def get_workflow_entry(pack: GlobalPackGraph, workflow_id: str) -> Optional[WorkflowEntry]:
+def get_workflow_entry(pack: GlobalPackGraph, workflow_id: str) -> WorkflowEntry | None:
     wf = str(workflow_id or "").strip()
     if not wf:
         return None
@@ -94,11 +94,11 @@ def get_workflow_entry(pack: GlobalPackGraph, workflow_id: str) -> Optional[Work
     return None
 
 
-def list_workflow_sequences(pack: GlobalPackGraph) -> List[GlobalJourney]:
+def list_workflow_sequences(pack: GlobalPackGraph) -> list[GlobalJourney]:
     return list(pack.journeys)
 
 
-def get_workflow_sequence(pack: GlobalPackGraph, sequence_id: str) -> Optional[GlobalJourney]:
+def get_workflow_sequence(pack: GlobalPackGraph, sequence_id: str) -> GlobalJourney | None:
     sid = str(sequence_id or "").strip()
     if not sid:
         return None
@@ -108,17 +108,17 @@ def get_workflow_sequence(pack: GlobalPackGraph, sequence_id: str) -> Optional[G
     return None
 
 
-def list_entrypoints(pack: GlobalPackGraph) -> List[WorkflowEntrypoint]:
+def list_entrypoints(pack: GlobalPackGraph) -> list[WorkflowEntrypoint]:
     """Return workflow-owned shell entrypoints."""
     return list(pack.entrypoints)
 
 
-def list_transitions(pack: GlobalPackGraph) -> List[WorkflowTransition]:
+def list_transitions(pack: GlobalPackGraph) -> list[WorkflowTransition]:
     """Return all transitions registered in the global pack graph."""
     return list(pack.transitions)
 
 
-def get_transition(pack: GlobalPackGraph, transition_id: str) -> Optional[WorkflowTransition]:
+def get_transition(pack: GlobalPackGraph, transition_id: str) -> WorkflowTransition | None:
     """Look up a transition by id. Returns None if not found."""
     tid = str(transition_id or "").strip()
     if not tid:
@@ -131,7 +131,7 @@ def get_transition(pack: GlobalPackGraph, transition_id: str) -> Optional[Workfl
 
 def infer_auto_workflow_sequence_for_start(
     pack: GlobalPackGraph, workflow_name: str
-) -> Optional[GlobalJourney]:
+) -> GlobalJourney | None:
     """Infer sequence whose first workflow step contains the requested workflow."""
     wf = str(workflow_name or "").strip()
     if not wf:
@@ -147,7 +147,7 @@ def infer_auto_workflow_sequence_for_start(
     return None
 
 
-def _normalize_dependency_spec(value: Union[str, WorkflowDependency]) -> Optional[WorkflowDependency]:
+def _normalize_dependency_spec(value: str | WorkflowDependency) -> WorkflowDependency | None:
     if isinstance(value, WorkflowDependency):
         return value
     if isinstance(value, str):
@@ -158,13 +158,13 @@ def _normalize_dependency_spec(value: Union[str, WorkflowDependency]) -> Optiona
     return None
 
 
-def compute_required_dependencies(pack: GlobalPackGraph, workflow_name: str) -> List[Dict[str, Any]]:
+def compute_required_dependencies(pack: GlobalPackGraph, workflow_name: str) -> list[dict[str, Any]]:
     """Build required prerequisite dependencies from explicit workflow declarations."""
     target = str(workflow_name or "").strip()
     if not target:
         return []
 
-    required: List[Dict[str, Any]] = []
+    required: list[dict[str, Any]] = []
 
     entry = get_workflow_entry(pack, target)
     if isinstance(entry, WorkflowEntry):
@@ -186,8 +186,8 @@ def compute_required_dependencies(pack: GlobalPackGraph, workflow_name: str) -> 
                 }
             )
 
-    seen: set[Tuple[str, str, str]] = set()
-    deduped: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[dict[str, Any]] = []
     for dependency in required:
         parent = str(dependency.get("from") or "").strip()
         child = str(dependency.get("to") or "").strip()
@@ -202,13 +202,13 @@ def compute_required_dependencies(pack: GlobalPackGraph, workflow_name: str) -> 
     return deduped
 
 
-def journey_next_step(journey: GlobalJourney, current_workflow: str) -> Optional[str]:
+def journey_next_step(journey: GlobalJourney, current_workflow: str) -> str | None:
     groups = normalize_step_groups(journey.steps)
     current = str(current_workflow or "").strip()
     if not current or not groups:
         return None
 
-    current_idx: Optional[int] = None
+    current_idx: int | None = None
     for idx, group in enumerate(groups):
         if current in group:
             current_idx = idx

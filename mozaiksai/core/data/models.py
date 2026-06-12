@@ -13,10 +13,12 @@ ChatSessions Stored Fields (superset; some optional):
     completed_at?, trace_id?, duration_sec (float), messages[], workflow_ui_state
 """
 
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
-from enum import IntEnum, Enum
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from datetime import datetime
+from enum import Enum, IntEnum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("chat_workflow_models")
@@ -50,18 +52,18 @@ class ChatMessage(BaseModel):
     event_type: str = Field("message.created")
     event_id: str
     is_user_proxy: bool = False
-    agent_name: Optional[str] = None
+    agent_name: str | None = None
 
 
 class WorkflowUIArtifactState(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    tool_name: Optional[str] = None
-    tool_call_id: Optional[str] = None
-    component_type: Optional[str] = None
-    display: Optional[str] = None
-    workflow_name: Optional[str] = None
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+    component_type: str | None = None
+    display: str | None = None
+    workflow_name: str | None = None
     payload: Any = None
-    updated_at: Optional[str] = None
+    updated_at: str | None = None
 
 
 class WorkflowUIPendingInputState(BaseModel):
@@ -69,40 +71,40 @@ class WorkflowUIPendingInputState(BaseModel):
     request_id: str
     agent: str
     prompt: str
-    component_type: Optional[str] = None
-    workflow_name: Optional[str] = None
-    tool_name: Optional[str] = None
+    component_type: str | None = None
+    workflow_name: str | None = None
+    tool_name: str | None = None
     display: str = "composer"
     interaction_type: str = "input_request"
     password: bool = False
-    raw_payload: Dict[str, Any] = Field(default_factory=dict)
-    created_at: Optional[str] = None
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
 
 
 class WorkflowUIToolCallState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tool_call_id: str
     message_index: int = Field(ge=0)
-    tool_name: Optional[str] = None
-    component_type: Optional[str] = None
-    display: Optional[str] = None
-    workflow_name: Optional[str] = None
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    tool_name: str | None = None
+    component_type: str | None = None
+    display: str | None = None
+    workflow_name: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
     awaiting_response: bool = False
     tool_call_completed: bool = False
-    tool_call_status: Optional[str] = None
-    timestamp: Optional[str] = None
-    updated_at: Optional[str] = None
-    responded_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    tool_call_status: str | None = None
+    timestamp: str | None = None
+    updated_at: str | None = None
+    responded_at: str | None = None
+    completed_at: str | None = None
 
 
 class WorkflowUIState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
-    last_artifact: Optional[WorkflowUIArtifactState] = None
-    pending_input_request: Optional[WorkflowUIPendingInputState] = None
-    tool_calls: Dict[str, WorkflowUIToolCallState] = Field(default_factory=dict)
+    last_artifact: WorkflowUIArtifactState | None = None
+    pending_input_request: WorkflowUIPendingInputState | None = None
+    tool_calls: dict[str, WorkflowUIToolCallState] = Field(default_factory=dict)
 
 
 class ChatSessionDoc(BaseModel):
@@ -119,13 +121,13 @@ class ChatSessionDoc(BaseModel):
     status: WorkflowStatus  # stored as int (0/1)
     created_at: datetime
     last_updated_at: datetime
-    completed_at: Optional[datetime] = None
-    trace_id: Optional[str] = None
+    completed_at: datetime | None = None
+    trace_id: str | None = None
     # Pause support: for low balance scenarios where chat stays resumable
     paused: bool = False
-    pause_reason: Optional[str] = None
-    paused_at: Optional[datetime] = None
-    messages: List[ChatMessage] = Field(default_factory=list)
+    pause_reason: str | None = None
+    paused_at: datetime | None = None
+    messages: list[ChatMessage] = Field(default_factory=list)
     workflow_ui_state: WorkflowUIState = Field(default_factory=WorkflowUIState)
 
     @model_validator(mode="before")

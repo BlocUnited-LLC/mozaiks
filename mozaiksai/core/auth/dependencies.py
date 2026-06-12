@@ -15,15 +15,15 @@ Usage:
         ...
 """
 
-from typing import Optional, List, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 
-from fastapi import Request, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from mozaiksai.core.auth.adapters import get_auth_adapter, UserClaims, AuthError
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters import AuthError, UserClaims, get_auth_adapter
+from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 
 logger = get_core_logger("auth.dependencies")
 
@@ -40,22 +40,22 @@ class UserPrincipal:
     """
 
     user_id: str
-    email: Optional[str]
-    name: Optional[str]
-    roles: List[str]
-    scopes: List[str]
+    email: str | None
+    name: str | None
+    roles: list[str]
+    scopes: list[str]
     raw_claims: dict
     provider: str = "unknown"
     # Optional binding claims
-    app_id: Optional[str] = None
-    chat_id: Optional[str] = None
-    tenant_id: Optional[str] = None
+    app_id: str | None = None
+    chat_id: str | None = None
+    tenant_id: str | None = None
 
     def has_role(self, role: str) -> bool:
         """Check if user has a specific role."""
         return role in self.roles
 
-    def has_any_role(self, roles: List[str]) -> bool:
+    def has_any_role(self, roles: list[str]) -> bool:
         """Check if user has any of the specified roles."""
         return any(r in self.roles for r in roles)
 
@@ -93,9 +93,9 @@ class UserPrincipal:
 
 
 def _extract_token(
-    authorization: Optional[HTTPAuthorizationCredentials],
+    authorization: HTTPAuthorizationCredentials | None,
     request: Request,
-) -> Optional[str]:
+) -> str | None:
     """
     Extract bearer token from Authorization header or query param.
 
@@ -135,7 +135,7 @@ async def _validate_and_attach(
 
 async def require_user(
     request: Request,
-    authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    authorization: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> UserPrincipal:
     """
     Dependency that requires a valid user token.
@@ -172,7 +172,7 @@ async def require_user(
 
 async def require_any_auth(
     request: Request,
-    authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    authorization: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> UserPrincipal:
     """
     Dependency that requires any valid token (no scope enforcement).
@@ -196,7 +196,7 @@ def require_role(role: str) -> Callable:
 
     async def role_checker(
         request: Request,
-        authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+        authorization: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     ) -> UserPrincipal:
         principal = await require_user(request, authorization)
         if not principal.has_role(role):
@@ -209,7 +209,7 @@ def require_role(role: str) -> Callable:
     return role_checker
 
 
-def require_any_role(roles: List[str]) -> Callable:
+def require_any_role(roles: list[str]) -> Callable:
     """
     Dependency factory that requires any of the specified roles.
 
@@ -221,7 +221,7 @@ def require_any_role(roles: List[str]) -> Callable:
 
     async def role_checker(
         request: Request,
-        authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+        authorization: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     ) -> UserPrincipal:
         principal = await require_user(request, authorization)
         if not principal.has_any_role(roles):
@@ -236,8 +236,8 @@ def require_any_role(roles: List[str]) -> Callable:
 
 async def optional_user(
     request: Request,
-    authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-) -> Optional[UserPrincipal]:
+    authorization: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> UserPrincipal | None:
     """
     Dependency that optionally validates a token if present.
 
@@ -321,8 +321,8 @@ def validate_path_chat_id(principal: UserPrincipal, path_chat_id: str) -> None:
 
 def validate_user_id_against_principal(
     principal: "UserPrincipal",
-    path_user_id: Optional[str] = None,
-    body_user_id: Optional[str] = None,
+    path_user_id: str | None = None,
+    body_user_id: str | None = None,
 ) -> str:
     """Validate that path/body user_id matches the authenticated principal.
 

@@ -27,9 +27,8 @@ ConfigMiddlewareAgent hook — inject_module_file_manifest_guard
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 
@@ -72,11 +71,11 @@ _MAX_MODULES_PER_DOMAIN = 5
 # Shared utilities
 # ---------------------------------------------------------------------------
 
-def _load_catalog() -> Dict[str, Any] | None:
+def _load_catalog() -> dict[str, Any] | None:
     """Load domain_catalogs.yaml. Returns None on any failure."""
     try:
         import yaml  # type: ignore
-        with open(_CATALOG_PATH, "r", encoding="utf-8") as fh:
+        with open(_CATALOG_PATH, encoding="utf-8") as fh:
             return yaml.safe_load(fh)
     except Exception as exc:
         logger.warning("domain_catalogs.yaml could not be loaded: %s", exc)
@@ -111,7 +110,7 @@ def _update_section(agent: Any, header: str, body: str) -> None:
         elif hasattr(agent, "_system_message"):
             agent._system_message = new_message
         else:
-            setattr(agent, "_system_message", new_message)
+            agent._system_message = new_message
 
     except Exception as exc:
         logger.error(
@@ -126,7 +125,7 @@ def _update_section(agent: Any, header: str, body: str) -> None:
 # Domain scoring
 # ---------------------------------------------------------------------------
 
-def _collect_concept_text(context_variables: Dict[str, Any], messages: List[Dict[str, Any]]) -> str:
+def _collect_concept_text(context_variables: dict[str, Any], messages: list[dict[str, Any]]) -> str:
     """Collect all available concept signal text for domain scoring."""
     parts: list[str] = []
 
@@ -149,7 +148,7 @@ def _collect_concept_text(context_variables: Dict[str, Any], messages: List[Dict
     return " ".join(parts).lower()
 
 
-def _score_domain(domain_key: str, domain_data: Dict[str, Any], concept_text: str) -> int:
+def _score_domain(domain_key: str, domain_data: dict[str, Any], concept_text: str) -> int:
     """Score a domain against concept text. Higher = better match."""
     score = 0
     domain_key_norm = domain_key.replace("_", " ")
@@ -179,11 +178,11 @@ def _score_domain(domain_key: str, domain_data: Dict[str, Any], concept_text: st
 
 
 def _select_top_domains(
-    catalog: Dict[str, Any],
+    catalog: dict[str, Any],
     concept_text: str,
-) -> List[tuple[str, Dict[str, Any]]]:
+) -> list[tuple[str, dict[str, Any]]]:
     """Return the top N domains sorted by score descending."""
-    domains: Dict[str, Any] = catalog.get("domains") or {}
+    domains: dict[str, Any] = catalog.get("domains") or {}
     scored = [
         (key, data, _score_domain(key, data, concept_text))
         for key, data in domains.items()
@@ -197,7 +196,7 @@ def _select_top_domains(
 # Content builders
 # ---------------------------------------------------------------------------
 
-def _format_global_base(catalog: Dict[str, Any]) -> str:
+def _format_global_base(catalog: dict[str, Any]) -> str:
     """Format the global_base module list as a compact bullet summary."""
     global_base = catalog.get("global_base") or {}
     modules = global_base.get("modules") or {}
@@ -211,10 +210,10 @@ def _format_global_base(catalog: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_domain_excerpt(domain_key: str, domain_data: Dict[str, Any]) -> str:
+def _format_domain_excerpt(domain_key: str, domain_data: dict[str, Any]) -> str:
     """Format a compact planning excerpt for one matched domain."""
     description = domain_data.get("description") or ""
-    modules: Dict[str, Any] = domain_data.get("modules") or {}
+    modules: dict[str, Any] = domain_data.get("modules") or {}
     common_app_types = [str(item) for item in domain_data.get("common_app_types") or [] if str(item).strip()]
     capability_packs = [str(p) for p in domain_data.get("capability_packs") or [] if str(p).strip()]
 
@@ -236,9 +235,9 @@ def _format_domain_excerpt(domain_key: str, domain_data: Dict[str, Any]) -> str:
 
 
 def _build_app_plan_body(
-    catalog: Dict[str, Any],
-    top_domains: List[tuple[str, Dict[str, Any]]],
-    all_domain_keys: List[str],
+    catalog: dict[str, Any],
+    top_domains: list[tuple[str, dict[str, Any]]],
+    all_domain_keys: list[str],
 ) -> str:
     """Build the full body text for the AppPlanAgent system message injection."""
     parts: list[str] = []
@@ -283,8 +282,8 @@ def _build_app_plan_body(
 
 def _build_manifest_guard_body(
     module_id: str,
-    declared_yaml_files: Set[str],
-    owned_paths: List[str],
+    declared_yaml_files: set[str],
+    owned_paths: list[str],
 ) -> str:
     """Build the ConfigMiddlewareAgent guard block body."""
     declared_sorted = sorted(declared_yaml_files)
@@ -292,7 +291,7 @@ def _build_manifest_guard_body(
 
     lines = [
         f"Module: {module_id}",
-        f"Declared YAML files for this module (generate ONLY these):",
+        "Declared YAML files for this module (generate ONLY these):",
     ]
     for f in declared_sorted:
         lines.append(f"  - modules/{module_id}/{f}")
@@ -322,7 +321,7 @@ def _build_manifest_guard_body(
 # Public hook functions
 # ---------------------------------------------------------------------------
 
-def inject_domain_catalog_context(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def inject_domain_catalog_context(agent: Any, messages: list[dict[str, Any]]) -> None:
     """
     prompt middleware function for AppPlanAgent.
 
@@ -339,7 +338,7 @@ def inject_domain_catalog_context(agent: Any, messages: List[Dict[str, Any]]) ->
         if not catalog:
             return
 
-        context_variables: Dict[str, Any] = getattr(agent, "context_variables", {}) or {}
+        context_variables: dict[str, Any] = getattr(agent, "context_variables", {}) or {}
         concept_text = _collect_concept_text(context_variables, messages)
 
         all_domain_keys = sorted((catalog.get("domains") or {}).keys())
@@ -358,7 +357,7 @@ def inject_domain_catalog_context(agent: Any, messages: List[Dict[str, Any]]) ->
         logger.error("[%s] Failed to inject domain catalog context: %s", agent_name, exc)
 
 
-def inject_module_file_manifest_guard(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def inject_module_file_manifest_guard(agent: Any, messages: list[dict[str, Any]]) -> None:
     """
     prompt middleware function for ConfigMiddlewareAgent.
 
@@ -374,9 +373,9 @@ def inject_module_file_manifest_guard(agent: Any, messages: List[Dict[str, Any]]
         return
 
     try:
-        context_variables: Dict[str, Any] = getattr(agent, "context_variables", {}) or {}
+        context_variables: dict[str, Any] = getattr(agent, "context_variables", {}) or {}
 
-        current_build_task: Dict[str, Any] = context_variables.get("current_build_task") or {}
+        current_build_task: dict[str, Any] = context_variables.get("current_build_task") or {}
         if not current_build_task:
             return
 
@@ -390,10 +389,10 @@ def inject_module_file_manifest_guard(agent: Any, messages: List[Dict[str, Any]]
             return
 
         module_id: str = current_build_task.get("capability_pack_id") or ""
-        owned_paths: List[str] = current_build_task.get("owned_paths") or []
+        owned_paths: list[str] = current_build_task.get("owned_paths") or []
 
         # Derive which YAML files are declared from owned_paths.
-        declared_yaml_files: Set[str] = set()
+        declared_yaml_files: set[str] = set()
         for path in owned_paths:
             filename = Path(path).name
             if filename in _ALL_MODULE_YAML_FILES:
@@ -403,7 +402,7 @@ def inject_module_file_manifest_guard(agent: Any, messages: List[Dict[str, Any]]
         declared_yaml_files.add("module.yaml")
 
         # If file_manifest is explicitly set on the task, honour it instead.
-        file_manifest: Dict[str, Any] = current_build_task.get("file_manifest") or {}
+        file_manifest: dict[str, Any] = current_build_task.get("file_manifest") or {}
         if file_manifest:
             manifest_yaml = set(file_manifest.get("yaml_files") or [])
             if manifest_yaml:

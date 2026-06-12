@@ -78,12 +78,150 @@ This project follows a practical pre-1.0 changelog format:
 
 - **`app/services/` adapter lane** — canonical location for app-owned service adapters.
   Structured as `adapters/deployment/`, `adapters/dns/`, `adapters/probes/`,
-  `adapters/registrar/`, and `adapters/entitlements/` sub-directories. Entitlement
-  `grant_adapter.py` lives here and is wired at platform startup.
+  and `adapters/registrar/` sub-directories. SaaS entitlement enforcement is
+  provider-neutral OSS runtime behavior wired from `app/config/subscriptions.yaml`,
+  not an app-owned service adapter.
 
 - **`app/security/secrets.yaml`** — names-only secret contract resolved at startup by
   `mozaiksai/core/secrets/app_secrets.py`. Replaces the previous `app/config/secrets.yaml`
   convention.
+
+- **`test_runtime_usage_layer.py`** — comprehensive OSS tests for the runtime
+  usage accounting layer: `summarize_usage_events` (totals, by_workflow
+  deduplication of chat IDs, by_run grouping and sorting), `estimate_token_cost`
+  (explicit cost, negative/None/invalid fall-through, rate-based calculation,
+  model-specific env var override, negative token clamping), ledger helper
+  functions (`_int_value`, `_float_value`, `_text` edge cases), and
+  `record_usage_delta` guard conditions (missing app_id/chat_id/workflow_name
+  skip writes; `input_tokens`/`output_tokens` alias accepted) (40 tests).
+
+- **`test_community_governance_module.py`** (mozaiks-app) — comprehensive
+  governance service tests covering proposal lifecycle (create/open/close),
+  member access control, admin bypass, snapshot building with delegation
+  weight transfer, vote casting (duplicate, eligibility, delegated-voter zero
+  power), outcome calculation (quorum thresholds, approved/rejected, idempotent
+  re-calculation), delegation management (self-delegation, outbound chain limit,
+  incoming delegation block, cycle detection via `_creates_cycle`), and
+  revocation (own, admin override, non-admin blocked) (63 tests).
+
+- **`test_mozaikspay_hosted_pack_contract.py`** — new OSS test file that the
+  production readiness gate requires. Covers context.yaml and contract.yaml
+  contract shapes, all `required_outputs` having matching template files, the
+  `forbidden_outputs` drift guard, `mozaikspay_client.py` provider-neutrality
+  (no `import stripe`, no raw secrets, env-var–only URL resolution), the
+  `billing_portal` facade module being app-owned (`owner: app`), page schemas
+  routing through the facade rather than hosted modules directly, and a
+  pack-wide drift guard (41 tests).
+
+- **`test_wallet_module.py`** (mozaiks-app) — comprehensive wallet service
+  tests covering balance calculation, payout request guards (no Stripe account,
+  amount exceeds available, zero amount, default-to-full-available), credit
+  reactions (`credit_app_earnings`, `credit_investment_return`), Stripe webhook
+  processing idempotency (`payout.paid`, `payout.failed`, already-terminal,
+  transaction-not-found, unhandled event), hosted wallet provisioning validation,
+  `get_hosted_wallet_provisioning_status` with secret stripping, and repo
+  collection aliases (61 tests).
+
+- **`test_module_executor_dispatch.py`** — comprehensive OSS tests for the
+  `ModuleExecutor` dispatch lifecycle: module/action resolution, sync and async
+  dispatch, `action_method_map` aliasing, `EXECUTION_ERROR` / `INVALID_PARAMS`
+  error codes, permission enforcement (trusted bypass, required present, missing,
+  empty), entitlement gate (granted/denied/trusted-bypass/no-gate), input/output
+  schema validation (output violations are warn-only), canonical event emitter
+  envelope structure (`source.layer`, `source.app_id`, `source.module_id`,
+  `actor.id`, no-actor when no user), and registry queries
+  (`registered_modules`, `can_handle`, `health`) (29 tests).
+
+- **`test_executor_registry.py`** — OSS unit tests for `ExecutorRegistry`:
+  register/get/has/overwrite semantics for WORKFLOW and MODULE types, property
+  shortcuts (`workflow_executor`, `module_executor`), `registered_types()` list
+  accuracy, `summary()` type-to-class-name mapping, `ExecutorType` str-enum
+  values, and `Executor` Protocol structural conformance (24 tests).
+
+- **`test_platform_hook_registry.py`** — OSS unit tests for
+  `PlatformHookRegistry`: empty no-op defaults, bundle registration from dict and
+  object, `call_chat_prereqs` first-denial-wins/exception-tolerance/async support,
+  `call_chat_session_fields` merge-and-tolerate, `call_workflow_ordering`
+  hook-chain/non-list-return-ignored, `call_workflow_name_resolver`
+  hook-override/case-insensitive-fallback/empty-string-falls-through,
+  `run_startup` sync+async+exception-tolerance, `summary()` hook counts, singleton
+  `reset()` (42 tests).
+
+- **`test_build_intelligence_module.py`** (mozaiks-app) — comprehensive service
+  tests for the new `build_intelligence` hosted module: `list_builds` owner
+  scoping and status filter, `get_build` ownership query, `list_corrections`
+  build-not-found guard, `get_domain_patterns` domain filter and limit clamping,
+  `list_all_builds` no-owner-scope, `get_intelligence_summary` six-metric
+  aggregation, `on_app_created` idempotency and ledger initialization,
+  `on_build_status_updated` not-found/terminal fields/refinement-cycle
+  increment/event emission, `module.yaml` contract (handler field, permissions,
+  actions), and `events.yaml` payload schema contract (56 tests). Also fixes
+  `module.yaml` missing `handler` field and registers `build_intelligence.builds`,
+  `.corrections`, `.patterns` data aliases in `persistence.py`.
+
+- **`test_messages_module.py`** (mozaiks-app) — comprehensive service tests for
+  the `messages` module: `list_threads` owner scoping/status/limit, `get_thread`
+  not-found/access-denied/unread-count/read-state-cursor, `create_thread`
+  empty-title/creator-deduplication/event, `send_message` empty-body/too-long/
+  not-found/non-participant/success (insert+preview+event+recipient-exclusion+
+  preview-truncation+required-fields), `mark_thread_read` not-found/success
+  (upsert+event+last-message-id), `list_notifications` user-scope/limit,
+  `create_announcement` validation/insert/default-audience/event (52 tests).
+
+- **`test_schema_migrations_module.py`** (mozaiks-app) — comprehensive service
+  tests for `SchemaMigrationsService`: `get_schema_version` (no migrations →
+  0.0.0, latest version, applied-status query), `list_migrations` (app scope,
+  status filter, `status="all"` no filter), `record_migration` (duplicate
+  rejected, pending status, recorded event, full field set), `run_migration` (not
+  found, already applied, success path with multi-index ensure + applied event +
+  update fields, failure path with exception → failed status + failed event)
+  (32 tests).
+
+- **`api-reference.md` and `token-management.md` expanded** — both docs
+  under `docs/architecture/mozaiksai/` grew from placeholder stubs to accurate
+  reference material: `api-reference.md` now lists every registered endpoint across
+  runtime, platform, and Studio hosts with method/path/purpose; `token-management.md`
+  documents `RuntimeUsageLedger`, `MozaiksUsageMiddleware`, `summarize_usage_events`,
+  cost estimation, and the `/api/me/usage` surface with the subscription-limits
+  contract.
+
+- **Platform startup degradation** — `mozaiksai/hosts/platform.py` now captures
+  module load errors at startup into `app.state.startup_degraded` and
+  `app.state.startup_degraded_reason`. The `/api/health/ready` endpoint returns
+  HTTP 503 with `app_startup: degraded: <reason>` when startup failed partially,
+  so load balancers and healthchecks can detect a broken startup without the
+  process crashing.
+
+- **`runtime_extensions.yaml` placement warning** — `ModuleLoader` now logs a
+  `WARNING` when `contracts/runtime_extensions.yaml` exists but
+  `runtime_extensions.yaml` at the module root does not, guiding contributors to
+  the correct placement.
+
+- **`scope` capability in control-plane config** — `ControlPlaneConfig` now declares a
+  dedicated `scope` capability block alongside `classifier`, `coding`, and
+  `contract_surface`. `ScopeProposer` resolves its LLM config from `scope` first,
+  falling back to `coding` when not declared. `runtime.yaml` wires `scope` to the
+  `codegen` profile by default, giving operators an independent knob to tune or
+  disable scope-proposal LLM usage without affecting code generation.
+
+- **`WorkflowTransition.optional` field** — `WorkflowTransition` schema now accepts
+  `optional: bool` (default `false`). Used by the `build_satisfaction_rating`
+  transition in `extension_registry.json`. Previously caused a Pydantic
+  `extra_forbidden` validation error when loading the global pack graph.
+
+- **Task batch dependency deadlock fix** — under `failure_policy: continue_with_available`,
+  tasks whose dependencies had already failed were left in `pending` forever, then
+  triggered a misleading "unresolved or cyclic dependencies" error. The batch executor
+  now drains dependency-blocked tasks immediately as `failed` (with reason
+  `dependency '<id>' failed`) without requiring them to run.
+
+- **Task batch silent empty-batch warning** — when `source.kind: structured_output` and
+  `structured_output` is `None` or empty, the executor now emits a `WARNING` log
+  identifying the batch ID, instead of silently producing zero task items.
+
+- **`AG2TaskBatchRunner` module-level import** — moved from a lazy local import inside
+  `_run_one_task` to a module-level import in `task_batches.py`, enabling standard
+  `patch("mozaiksai.core.workflow.task_batches.AG2TaskBatchRunner")` in tests.
 
 ### Changed
 
@@ -121,9 +259,10 @@ This project follows a practical pre-1.0 changelog format:
   that gives the platform a deterministic enforcement hook for SaaS feature gating.
   `ModuleExecutor` checks `ActionDef.entitlement_gate` before dispatching any action
   that declares one. `NoOpEntitlementAdapter` (the default) grants every capability —
-  non-SaaS apps are completely unaffected. SaaS apps wire an app-owned adapter
-  (`app/services/adapters/entitlements/grant_adapter.py`) that queries their plan/grant
-  store or hosted entitlements service.
+  non-SaaS apps are completely unaffected. SaaS apps declare
+  `app/config/subscriptions.yaml`; the platform wires the OSS
+  `ConfiguredEntitlementAdapter`, which reads assignment state from the configured
+  app data alias.
 
 - **`ActionDef.entitlement_gate`** — new optional field on module action declarations.
   Set to a `capability_id` string (e.g. `"wallet.view"`) to gate the action behind an
@@ -132,12 +271,11 @@ This project follows a practical pre-1.0 changelog format:
   `ENTITLEMENT_REQUIRED`. `ModuleDefinition.action_entitlement_map` exposes the full
   module→action→capability_id index.
 
-- **`factory_app/capability_packs/public/entitlements/manifest.yaml`** — closes the
-  broken reference in `capability_routing.yaml`. This manifest declares what AppGenerator
-  generates for SaaS apps: facade `entitlements` module (`get_status`,
-  `list_granted_capabilities`), billing event reactions, admin panel, and
-  `services/adapters/entitlements/grant_adapter.py`. For self-hosted (no hosted billing),
-  it also governs generation of app-owned `billing` and `entitlement_grants` modules.
+- **`app/config/subscriptions.yaml`** — canonical SaaS plan catalog for generated
+  apps. It declares plan IDs, labels, granted capability IDs, optional usage limits,
+  and optional assignment-store mapping used by `ConfiguredEntitlementAdapter`.
+  App-owned payment providers update assignment records; AppGenerator must not
+  generate a separate entitlement adapter.
 
 - **`pack_overlay` task contract** added to `file_contracts.yaml` — canonical file
   boundaries and hard constraints for AppGenerator's framework pack wiring tasks.

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional
-
-from mozaiksai.control_plane.contracts import ContractSurfacePlan, HarnessDecision, HarnessDecisionAction, ScopeProposal
+from mozaiksai.control_plane.contracts import (
+    ContractSurfacePlan,
+    HarnessDecision,
+    HarnessDecisionAction,
+    ScopeProposal,
+)
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 
 from .refinement_router import ChangeClass, RefinementRoutingDecision
@@ -98,7 +101,7 @@ class FirstPartyHarnessDecisionPolicy:
         self,
         *,
         routing_decision: RefinementRoutingDecision,
-        proposal: Optional[ScopeProposal],
+        proposal: ScopeProposal | None,
         selected_paths: list[str],
         explicit_scope: bool,
     ) -> HarnessDecision:
@@ -390,7 +393,7 @@ class FirstPartyHarnessDecisionPolicy:
         return actions
 
 
-_decision_policy: Optional[FirstPartyHarnessDecisionPolicy] = None
+_decision_policy: FirstPartyHarnessDecisionPolicy | None = None
 
 
 def get_harness_decision_policy() -> FirstPartyHarnessDecisionPolicy:

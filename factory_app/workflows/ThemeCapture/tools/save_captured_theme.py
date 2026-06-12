@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Annotated, Any, Dict, Optional
 import logging
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
@@ -20,7 +20,7 @@ except ImportError:
     BuilderArtifactStore = None
 
 
-def _set_context_value(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _set_context_value(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None or not key:
         return
     try:
@@ -36,8 +36,8 @@ def _set_context_value(context_variables: Optional[Any], key: str, value: Any) -
 
 
 async def save_captured_theme(
-    context_variables: Annotated[Optional[Any], "Runtime context"] = None,
-) -> Dict[str, Any]:
+    context_variables: Annotated[Any | None, "Runtime context"] = None,
+) -> dict[str, Any]:
     """Persist the canonical captured theme_config and emit a preview card."""
     if not context_variables:
         return {"success": False, "error": "No context provided"}

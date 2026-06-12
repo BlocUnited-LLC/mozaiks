@@ -4,7 +4,7 @@ Backend Tools for AppGenerator Workflow.
 Wraps AppGeneratorBackendClient methods as callable tools for agents.
 """
 
-from typing import Annotated, Dict, List, Optional, Any
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
 
@@ -15,9 +15,9 @@ logger = get_workflow_logger("backend_tools")
 
 async def generate_scaffold(
     app_id: Annotated[str, Field(description="Application ID.")],
-    dependencies: Annotated[Dict[str, List[str]], Field(description="Dependencies for frontend and backend.")],
+    dependencies: Annotated[dict[str, list[str]], Field(description="Dependencies for frontend and backend.")],
     tech_stack_override: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="Optional tech stack override."),
     ] = None,
     include_dockerfiles: Annotated[
@@ -33,11 +33,11 @@ async def generate_scaffold(
         Field(description="Whether scaffold output should include docker-compose artifact."),
     ] = False,
     deployment_profile: Annotated[
-        Optional[str],
+        str | None,
         Field(description="Optional provider-neutral deployment profile id."),
     ] = None,
-    user_id: Annotated[Optional[str], Field(description="User ID.")] = None
-) -> Dict[str, Any]:
+    user_id: Annotated[str | None, Field(description="User ID.")] = None
+) -> dict[str, Any]:
     """
     Generate app scaffold files (boilerplate, config, dockerfiles) via the backend.
     Returns a dictionary containing the generated files.
@@ -61,8 +61,8 @@ async def generate_scaffold(
 
 async def fetch_current_schema(
     app_id: Annotated[str, Field(description="Application ID.")],
-    artifact_version_id: Annotated[Optional[str], Field(description="Artifact version ID of the bundle being refined. If null, returns null.")] = None,
-) -> Dict[str, Any]:
+    artifact_version_id: Annotated[str | None, Field(description="Artifact version ID of the bundle being refined. If null, returns null.")] = None,
+) -> dict[str, Any]:
     """
     Fetch the prior data contract that was recorded for an existing app bundle
     artifact. Returns {"schema": <dict>} when prior intent exists, or
@@ -86,9 +86,9 @@ async def fetch_current_schema(
 
 async def apply_schema_migration(
     app_id: Annotated[str, Field(description="Application ID.")],
-    migration: Annotated[Dict[str, Any], Field(description="Migration document produced by schema_migration.generate_migration().")],
-    user_id: Annotated[Optional[str], Field(description="User ID.")] = None,
-) -> Dict[str, Any]:
+    migration: Annotated[dict[str, Any], Field(description="Migration document produced by schema_migration.generate_migration().")],
+    user_id: Annotated[str | None, Field(description="User ID.")] = None,
+) -> dict[str, Any]:
     """
     Apply safe migration ops (additive only) to the existing database.
     Destructive ops in the migration are logged and skipped unless explicitly

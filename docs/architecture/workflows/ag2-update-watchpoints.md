@@ -54,6 +54,7 @@ Mozaiks still owns deterministic product contracts around those primitives:
 | Structured-output validation after AG2 packets | `mozaiksai/core/workflow/outputs/runtime_validation.py`, `mozaiksai/core/workflow/outputs/runtime_events.py`, `AG2NetworkRunner._validate_wal_structured_outputs(...)` | AG2 owns model execution; Mozaiks owns canonical app/workflow/module artifact schemas and hard validation. | If AG2 Network supports per-agent `response_schema` on workflow channels, use it for model pressure, but keep Mozaiks validation as the artifact contract authority. |
 | Task-batch scheduling and result merge | `mozaiksai/core/workflow/task_batches.py`, `mozaiksai/core/adapters/ag2_task_batch_runner.py` | AG2 `Task` is lifecycle/observation; it does not assign, dependency-sort, enforce owned paths, or merge generated artifact outputs. | If AG2 adds a deterministic task graph/scheduler with dependency and observation semantics, move worker execution and lifecycle there while keeping Mozaiks artifact ownership validation. |
 | Phased task-batch workflow execution | `mozaiksai/core/workflow/orchestration_patterns.py` | A planning phase runs through AG2, Mozaiks executes deterministic task channels, then a continuation phase resumes with merged context. This keeps the DAG deterministic but splits one logical workflow across channels. | Replace with AG2-native parent/child workflow channels or task lineage when AG2 can preserve parent workflow context, WAL lineage, cancellation, and observation in one execution surface. |
+| Approved-generation smoke coordinator uses AG2 task primitive | `scripts/smoke_agentgenerator_live_pack.py` | Live AgentGenerator pack smoke found the single-agent AG2 Network coordinator/metadata path timing out before packet emission, while direct AG2 task calls completed reliably. The smoke keeps the production-critical parallel workflow generation path on the real AG2 task batch runner and keeps this one-shot approved-boundary coordinator outside Mozaiks runtime code. | If AG2 Network single-agent channels gain deterministic packet emission/close behavior for one-shot coordinator calls, move the smoke coordinator/metadata calls back through `AG2NetworkRunner` or an AG2-recommended one-shot network primitive. |
 | Control-plane LLM checkpoints | `mozaiksai/control_plane/implementations/*`, `mozaiksai/core/adapters/ag2_agent_runner.py` | The control plane is deterministic artifact-aware policy; AG2 should only own the LLM call used for classifier/proposer/coding-plan structured output. | If AG2 Harness gains a typed one-shot agent primitive that better fits this use, adapt `AG2StructuredAgentRunner`. Do not move artifact routing, promotion, invalidation, or scoped patch policy into AG2. |
 | Studio/platform event projection | `_project_ag2_wal_to_mozaiks_transport(...)` in `mozaiksai/core/adapters/ag2_network_runner.py` | The frontend consumes Mozaiks websocket events and app-scoped chat persistence, not raw AG2 envelopes. | Prefer AG2 Hub listeners or channel event subscriptions for live projection when they support app-scoped transport and chat persistence boundaries. |
 | Cancel/resume boundary | `AG2OrchestrationAdapter.cancel(...)`, `AG2OrchestrationAdapter.resume(...)` | Current cancel/resume is transport/session managed. Resume re-enters Mozaiks orchestration with persisted context rather than hydrating and continuing an AG2 channel. | Move toward AG2 channel cancellation/resume if AG2 exposes durable channel continuation with tenant-safe store boundaries. |
@@ -115,6 +116,22 @@ changes under `mozaiksai/core/workflow`, `mozaiksai/core/adapters`, or
 6. Update this file and any affected architecture docs in the same change.
 
 ## Current Decision Log
+
+### June 12, 2026
+
+- **Live AgentGenerator pack smoke passed with real AG2/model calls**:
+  `scripts/smoke_agentgenerator_live_pack.py --timeout-seconds 900` generated
+  two workflow bundles in parallel, confirmed task overlap through
+  `AG2TaskBatchRunner`, exported the bundle zip, promoted the generated
+  workflows into an isolated active root, and loaded both workflows through
+  `UnifiedWorkflowManager`.
+- **Coordinator/metadata one-shot calls use AG2 task primitive in the smoke**:
+  single-agent AG2 Network channel execution timed out before packet emission
+  during the approved-generation coordinator/metadata setup. Direct AG2 task
+  calls completed reliably, so the smoke uses the task primitive for those
+  one-shot setup calls while keeping the generated workflow workers on the real
+  task-batch path. This is a smoke-harness watchpoint, not a new runtime
+  orchestration abstraction.
 
 ### June 11, 2026 (update 2)
 

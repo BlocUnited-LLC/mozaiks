@@ -9,8 +9,8 @@ Orchestration Utilities
 Helper functions for workflow orchestration.
 """
 
-from typing import Dict, Any
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def _normalize_human_in_the_loop(value) -> bool:
     return False
 
 
-def _load_workflow_config(workflow_name: str) -> Dict[str, Any]:
+def _load_workflow_config(workflow_name: str) -> dict[str, Any]:
     """Load workflow configuration block."""
     from .workflow_manager import workflow_manager
     config = workflow_manager.get_config(workflow_name)

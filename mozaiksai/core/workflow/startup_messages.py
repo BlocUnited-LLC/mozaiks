@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
-
+from typing import Any
 
 _HIDDEN_INITIAL_MESSAGE_SENDERS = {
     "",
@@ -19,7 +18,7 @@ def normalize_comparable_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
-def resolve_workflow_startup_mode(workflow_name: Optional[str]) -> Optional[str]:
+def resolve_workflow_startup_mode(workflow_name: str | None) -> str | None:
     if not workflow_name:
         return None
     try:
@@ -33,10 +32,10 @@ def resolve_workflow_startup_mode(workflow_name: Optional[str]) -> Optional[str]
 
 
 def resolve_hidden_initial_message(
-    workflow_name: Optional[str],
+    workflow_name: str | None,
     *,
-    workflow_startup_mode: Optional[str] = None,
-) -> Optional[str]:
+    workflow_startup_mode: str | None = None,
+) -> str | None:
     normalized_startup_mode = str(
         workflow_startup_mode or resolve_workflow_startup_mode(workflow_name) or ""
     ).strip().lower()
@@ -56,11 +55,11 @@ def resolve_hidden_initial_message(
 
 def matches_hidden_initial_message(
     *,
-    workflow_name: Optional[str],
-    role: Optional[str],
+    workflow_name: str | None,
+    role: str | None,
     content: Any,
-    agent_name: Optional[str],
-    workflow_startup_mode: Optional[str] = None,
+    agent_name: str | None,
+    workflow_startup_mode: str | None = None,
 ) -> bool:
     hidden_initial_message = resolve_hidden_initial_message(
         workflow_name,

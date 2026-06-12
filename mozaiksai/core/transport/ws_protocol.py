@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -73,7 +73,7 @@ class WebSocketProtocolMixin:
             return True
         return False
 
-    async def _queue_message_with_backpressure(self, chat_id: str, message_data: Dict[str, Any]) -> bool:
+    async def _queue_message_with_backpressure(self, chat_id: str, message_data: dict[str, Any]) -> bool:
         """Queue message with backpressure control."""
         if await self._check_backpressure(chat_id):
             # Connection is under backpressure - message may have been dropped
@@ -169,7 +169,7 @@ class WebSocketProtocolMixin:
     # H2: HEARTBEAT / KEEPALIVE
     # ==================================================================================
 
-    async def _start_heartbeat(self, chat_id: str, websocket: "WebSocket") -> None:
+    async def _start_heartbeat(self, chat_id: str, websocket: WebSocket) -> None:
         """Start heartbeat task for a connection."""
         if chat_id in self._heartbeat_tasks:
             self._heartbeat_tasks[chat_id].cancel()
@@ -179,7 +179,7 @@ class WebSocketProtocolMixin:
         )
         logger.info(f"Started heartbeat for {chat_id}")
 
-    async def _heartbeat_loop(self, chat_id: str, websocket: "WebSocket") -> None:
+    async def _heartbeat_loop(self, chat_id: str, websocket: WebSocket) -> None:
         """Heartbeat loop for detecting silent disconnects."""
         try:
             while chat_id in self.connections:
@@ -188,7 +188,7 @@ class WebSocketProtocolMixin:
                 # Send ping
                 ping_data = {
                     "type": "ping",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
 
                 try:
@@ -215,7 +215,7 @@ class WebSocketProtocolMixin:
     # AUTO-RESUME ON RECONNECT
     # ==================================================================================
 
-    async def _auto_resume_if_needed(self, chat_id: str, websocket: "WebSocket", app_id: Optional[str]) -> None:
+    async def _auto_resume_if_needed(self, chat_id: str, websocket: WebSocket, app_id: str | None) -> None:
         """Automatically restore chat history for IN_PROGRESS chats on WebSocket connection."""
         _ = websocket
         try:
@@ -242,7 +242,7 @@ class WebSocketProtocolMixin:
 
             resumer = AgentRunResumer()
 
-            async def send_event_wrapper(event_dict: Dict[str, Any], target_chat_id: Optional[str]) -> None:
+            async def send_event_wrapper(event_dict: dict[str, Any], target_chat_id: str | None) -> None:
                 """Wrapper to convert resume events to transport format."""
                 _ = target_chat_id
                 if not isinstance(event_dict, dict):
@@ -304,11 +304,11 @@ class WebSocketProtocolMixin:
         self,
         chat_id: str,
         user_id: str,
-        workflow_name: Optional[str],
-        app_id: Optional[str],
+        workflow_name: str | None,
+        app_id: str | None,
         *,
         ignore_sent_guard: bool = False,
-        session_dedupe_token: Optional[str] = None,
+        session_dedupe_token: str | None = None,
     ) -> None:
         """Emit one pre-run prompt message for UserDriven workflows.
 
@@ -356,7 +356,7 @@ class WebSocketProtocolMixin:
                     return
 
             # One-time send per chat, only before any AG2 run history exists.
-            query: Dict[str, Any] = {
+            query: dict[str, Any] = {
                 "_id": chat_id,
                 "user_id": user_id,
             }
@@ -372,8 +372,8 @@ class WebSocketProtocolMixin:
                 {
                     "$set": {
                         "userdriven_bootstrap_sent": True,
-                        "userdriven_bootstrap_sent_at": datetime.now(timezone.utc),
-                        "last_updated_at": datetime.now(timezone.utc),
+                        "userdriven_bootstrap_sent_at": datetime.now(UTC),
+                        "last_updated_at": datetime.now(UTC),
                     }
                 },
                 return_document=ReturnDocument.AFTER,

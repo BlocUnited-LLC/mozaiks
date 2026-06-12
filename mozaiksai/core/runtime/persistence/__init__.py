@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from .adapter import ModulePersistenceContext, PersistenceCollection
 from .app_data import (
+    DATA_COLLECTIONS,
     AppData,
     AppDataAliasError,
-    DATA_COLLECTIONS,
     aliases_from_data_contract,
     app_data_from_context,
     collection_name_for_alias,
@@ -19,9 +19,9 @@ from .app_data import (
     load_app_data_contract,
 )
 from .indexes import (
+    DatabaseIndexApplyError,
     DataContractIndexPlanItem,
     DataContractIndexRunResult,
-    DatabaseIndexApplyError,
     apply_database_indexes,
     run_data_index_application,
 )

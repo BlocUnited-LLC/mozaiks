@@ -1,13 +1,13 @@
 
 import asyncio
 import os
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+from logs.logging_config import get_core_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, PlatformCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id
-from logs.logging_config import get_core_logger
 
 logger = get_core_logger("platform_build_events_outbox")
 
@@ -26,7 +26,7 @@ def _collection_name() -> str:
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _safe_token(value: str) -> str:
@@ -70,10 +70,10 @@ async def upsert_outbox_event(
     build_id: str,
     event_type: str,
     status: str,
-    payload: Dict[str, Any],
-    user_id: Optional[str] = None,
-    workflow_name: Optional[str] = None,
-    idempotency_key: Optional[str] = None,
+    payload: dict[str, Any],
+    user_id: str | None = None,
+    workflow_name: str | None = None,
+    idempotency_key: str | None = None,
 ) -> str:
     await ensure_indexes()
 
@@ -95,7 +95,7 @@ async def upsert_outbox_event(
     if isinstance(existing, dict) and existing.get("platform_notified") is True:
         return outbox_id
 
-    set_fields: Dict[str, Any] = {
+    set_fields: dict[str, Any] = {
         **build_app_scope_filter(str(resolved_app_id)),
         "build_id": bid,
         "event_type": evt,
@@ -125,7 +125,7 @@ async def upsert_outbox_event(
     return outbox_id
 
 
-def compute_next_retry_at(*, attempts: int, now: Optional[datetime] = None) -> datetime:
+def compute_next_retry_at(*, attempts: int, now: datetime | None = None) -> datetime:
     # Backoff for persistent retries (separate from per-request retry).
     base = 5.0  # seconds
     cap = 300.0  # 5 minutes
@@ -141,12 +141,12 @@ async def mark_attempt(
     *,
     outbox_id: str,
     ok: bool,
-    status_code: Optional[int] = None,
-    error: Optional[str] = None,
+    status_code: int | None = None,
+    error: str | None = None,
 ) -> None:
     coll = await _coll()
     now = _utc_now()
-    update: Dict[str, Any] = {"updated_at": now, "last_attempt_at": now}
+    update: dict[str, Any] = {"updated_at": now, "last_attempt_at": now}
     if ok:
         update["platform_notified"] = True
         update["notified_at"] = now
@@ -171,7 +171,7 @@ async def mark_attempt(
     await coll.update_one({"_id": outbox_id}, {"$set": update})
 
 
-async def get_outbox_event(*, outbox_id: str) -> Optional[Dict[str, Any]]:
+async def get_outbox_event(*, outbox_id: str) -> dict[str, Any] | None:
     event_id = str(outbox_id or "").strip()
     if not event_id:
         return None
@@ -180,7 +180,7 @@ async def get_outbox_event(*, outbox_id: str) -> Optional[Dict[str, Any]]:
     return doc if isinstance(doc, dict) else None
 
 
-async def list_due_events(*, limit: int = 25) -> List[Dict[str, Any]]:
+async def list_due_events(*, limit: int = 25) -> list[dict[str, Any]]:
     await ensure_indexes()
     coll = await _coll()
     now = _utc_now()

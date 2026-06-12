@@ -39,11 +39,11 @@ This repo owns app-specific behavior only:
 
 - `app/app.json` - app identity and runtime flags
 - `app/config/` - AI, shell, and app config
-- `app/config/secrets.yaml` - names-only secret management contract; never stores raw values
+- `app/security/secrets.yaml` - names-only secret management contract; never stores raw values
 - `app/brand/` - app branding assets and theme config
-- `app/services/` - optional app-owned support code such as thin integrations, provider adapters, security helpers, and app-level routes
+- `app/services/` - optional app-owned support code such as thin integrations, provider adapters, and app-level routes
 - `app/modules/` - deterministic app capabilities
-- `app/data/contract.json` and `app/data/migrations/` - canonical app data contract and additive migration artifacts; generic helper code lives in `app/services/data/` when needed
+- `app/data/contract.json` and `app/data/migrations/` - canonical app data contract and additive migration artifacts
 - `workflows/` - app-local AI workflows
 - `app/ui/` - app pages, route manifest, and custom UI registration
 - `generated/` - staged generator output awaiting review/promotion
@@ -56,9 +56,9 @@ not in this app workspace.
 
 - Keep modules deterministic and contract-declared.
 - Keep `backend/handler.py` thin; put business logic in `service.py` and data access in `repo.py`.
-- Put app-owned external API clients in `app/services/integrations/`, provider-specific implementation boundaries in `app/services/adapters/`, provider-neutral auth/secret helpers in `app/services/security/`, and app-level routes in `app/services/routes/` only when needed. Common adapter areas include `auth/`, `source_control/`, `deployment/`, `dns/`, `registrar/`, `cloud/`, `storage/`, `secrets/`, and `payments/`.
+- Put app-owned external API clients in `app/services/integrations/`, provider-specific implementation boundaries in `app/services/adapters/`, and app-level routes in `app/services/routes/` only when needed. Common adapter areas include `auth/`, `source_control/`, `deployment/`, `dns/`, `registrar/`, `cloud/`, `storage/`, `secrets/`, and `payments/`.
 - Do not put business actions, lifecycle state, emitted events, or persistence authority in app-level service support code; modules own those behaviors.
-- Use `app/config/secrets.yaml` only as a names-only contract for secret provider/vault policy, env handles, and secret names. Never store raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets in source.
+- Use `app/security/secrets.yaml` only as a names-only contract for secret provider/vault policy, env handles, and secret names. Never store raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets in source.
 - Prefer declarative page schemas before custom React.
 - Mount custom React only through `app/ui/route_manifest.json` and `app/ui/index.js`.
 - Keep shell/navigation changes in `app/config/shell.json`.

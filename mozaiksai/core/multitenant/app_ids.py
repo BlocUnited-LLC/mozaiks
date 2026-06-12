@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
-def normalize_app_id(value: Any) -> Optional[str]:
+def normalize_app_id(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
@@ -12,13 +12,13 @@ def normalize_app_id(value: Any) -> Optional[str]:
     return str(value) or None
 
 
-def coalesce_app_id(*, app_id: Any = None) -> Optional[str]:
+def coalesce_app_id(*, app_id: Any = None) -> str | None:
     """Normalize app_id value from mixed sources."""
 
     return normalize_app_id(app_id)
 
 
-def build_app_scope_filter(app_id: str) -> Dict[str, Any]:
+def build_app_scope_filter(app_id: str) -> dict[str, Any]:
     """Mongo filter matching canonical scope field."""
 
     normalized = normalize_app_id(app_id)
@@ -27,7 +27,7 @@ def build_app_scope_filter(app_id: str) -> Dict[str, Any]:
     return {"app_id": normalized}
 
 
-def dual_write_app_scope(doc: Dict[str, Any], app_id: str) -> Dict[str, Any]:
+def dual_write_app_scope(doc: dict[str, Any], app_id: str) -> dict[str, Any]:
     """Write canonical scope key."""
 
     normalized = normalize_app_id(app_id)

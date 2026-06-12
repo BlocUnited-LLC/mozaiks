@@ -10,19 +10,19 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
 import yaml
+from pydantic import ValidationError
 
-from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
-from mozaiksai.core.workflow.declarative import parse_tools_config
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.events.event_serialization import serialize_event_content
+from mozaiksai.core.workflow.agents.tools import load_agent_tool_functions
 from mozaiksai.core.workflow.context.adapter import create_context_container
+from mozaiksai.core.workflow.declarative import parse_tools_config
+from mozaiksai.core.workflow.outputs.structured import get_structured_outputs_for_workflow
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("auto_tool_handler")
 
 
-async def _get_simple_transport() -> Optional["SimpleTransport"]:
+async def _get_simple_transport() -> SimpleTransport | None:
     """Resolve SimpleTransport lazily to avoid transport<->events import cycles."""
     from mozaiksai.core.transport.simple_transport import SimpleTransport
 
@@ -48,7 +48,7 @@ class AutoToolBinding:
     function: Callable[..., Awaitable[Any] | Any]
     param_names: tuple[str, ...]
     accepts_context: bool
-    ui_config: Dict[str, Any]
+    ui_config: dict[str, Any]
     model_cls: Any
 
 
@@ -58,11 +58,11 @@ class AutoToolEventHandler:
     _CACHE_LIMIT = 512
 
     def __init__(self) -> None:
-        self._workflow_bindings: Dict[str, Dict[str, List[AutoToolBinding]]] = {}
+        self._workflow_bindings: dict[str, dict[str, list[AutoToolBinding]]] = {}
         self._processed_keys: set[str] = set()
         self._processed_order: asyncio.Queue[str] = asyncio.Queue()
 
-    async def handle_tool_dispatch(self, event: Dict[str, Any]) -> None:
+    async def handle_tool_dispatch(self, event: dict[str, Any]) -> None:
         """Process an agent_output_validated event and trigger the corresponding tool."""
 
         try:
@@ -154,12 +154,12 @@ class AutoToolEventHandler:
             if pattern_context_ref and container and hasattr(container, "data"):
                 try:
                     # Copy changes from tool's container back to the shared pattern context
-                    for key, value in getattr(container, "data").items():
+                    for key, value in container.data.items():
                         try:
                             pattern_context_ref.set(key, value)
                         except Exception:
                             pass
-                    logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(getattr(container, "data")), binding.tool_name)
+                    logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(container.data), binding.tool_name)
                 except Exception as wb_err:
                     logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
 
@@ -174,7 +174,7 @@ class AutoToolEventHandler:
 
     async def _resolve_bindings(
         self, workflow_name: str, model_name: str, agent_name: str
-    ) -> List[AutoToolBinding]:
+    ) -> list[AutoToolBinding]:
         bindings = await self._load_bindings_for_workflow(workflow_name)
         candidates = bindings.get(model_name) or []
         if not candidates:
@@ -183,13 +183,13 @@ class AutoToolEventHandler:
         matched = [binding for binding in candidates if binding.agent_name == agent_name]
         return matched
 
-    async def _load_bindings_for_workflow(self, workflow_name: str) -> Dict[str, List[AutoToolBinding]]:
+    async def _load_bindings_for_workflow(self, workflow_name: str) -> dict[str, list[AutoToolBinding]]:
         cached = self._workflow_bindings.get(workflow_name)
         if cached is not None:
             logger.debug("[AUTO_TOOL] Returning cached bindings for workflow=%s (count=%d)", workflow_name, len(cached))
             return cached
 
-        mapping: Dict[str, List[AutoToolBinding]] = {}
+        mapping: dict[str, list[AutoToolBinding]] = {}
         try:
             registry = get_structured_outputs_for_workflow(workflow_name)
             logger.debug("[AUTO_TOOL] Loaded structured outputs registry for workflow=%s: %s", workflow_name, list(registry.keys()))
@@ -208,7 +208,7 @@ class AutoToolEventHandler:
 
         tool_functions = load_agent_tool_functions(workflow_name, include_auto_only=True)
         logger.debug("[AUTO_TOOL] Loaded tool functions for workflow=%s: agents=%s", workflow_name, list(tool_functions.keys()))
-        agent_function_index: Dict[str, Dict[str, Callable[..., Any]]] = {}
+        agent_function_index: dict[str, dict[str, Callable[..., Any]]] = {}
         for agent, funcs in tool_functions.items():
             agent_function_index[agent] = {
                 getattr(fn, "__name__", f"fn_{idx}"): fn for idx, fn in enumerate(funcs)
@@ -221,7 +221,7 @@ class AutoToolEventHandler:
             self._workflow_bindings[workflow_name] = mapping
             return mapping
         tools_yaml_path = workflow_path / "tools.yaml"
-        tools_data: Dict[str, Any] = {}
+        tools_data: dict[str, Any] = {}
 
         if tools_yaml_path.exists():
             try:
@@ -315,10 +315,10 @@ class AutoToolEventHandler:
     def _build_tool_kwargs(
         self,
         binding: AutoToolBinding,
-        normalized_payload: Dict[str, Any],
-        context: Dict[str, Any],
+        normalized_payload: dict[str, Any],
+        context: dict[str, Any],
         pattern_context_ref: Any = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         def _normalize_key(raw: str | None) -> str:
             if not raw:
                 return ""
@@ -326,7 +326,7 @@ class AutoToolEventHandler:
             return "".join(ch.lower() for ch in raw if ch.isalnum())
 
         param_lookup = {_normalize_key(name): name for name in binding.param_names}
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
         for key, value in normalized_payload.items():
             matched = param_lookup.get(_normalize_key(str(key)))
             if matched:
@@ -370,7 +370,7 @@ class AutoToolEventHandler:
         return kwargs
 
     async def _invoke_tool(
-        self, binding: AutoToolBinding, kwargs: Dict[str, Any]
+        self, binding: AutoToolBinding, kwargs: dict[str, Any]
     ) -> tuple[Any, str]:
         try:
             result = binding.function(**kwargs)
@@ -388,14 +388,14 @@ class AutoToolEventHandler:
     async def _persist_context_variables(
         self,
         *,
-        chat_id: Optional[str],
-        app_id: Optional[str],
+        chat_id: str | None,
+        app_id: str | None,
         context_variables: Any,
     ) -> None:
         if not chat_id or not app_id or context_variables is None:
             return
 
-        snapshot: Optional[Dict[str, Any]] = None
+        snapshot: dict[str, Any] | None = None
         if isinstance(context_variables, dict):
             snapshot = context_variables
         else:
@@ -420,8 +420,8 @@ class AutoToolEventHandler:
         self,
         binding: AutoToolBinding,
         agent_name: str,
-        chat_id: Optional[str],
-        kwargs: Dict[str, Any],
+        chat_id: str | None,
+        kwargs: dict[str, Any],
         turn_key: str,
     ) -> None:
         if not chat_id:
@@ -481,7 +481,7 @@ class AutoToolEventHandler:
         self,
         binding: AutoToolBinding,
         agent_name: str,
-        chat_id: Optional[str],
+        chat_id: str | None,
         result: Any,
         status: str,
         turn_key: str,

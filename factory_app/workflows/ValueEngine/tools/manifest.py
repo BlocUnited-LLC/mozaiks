@@ -9,9 +9,9 @@ Reads the structured output from context and:
 Tools are dumb. LLMs reason. This tool just saves and emits.
 """
 
-from typing import Annotated, Any, Dict, List, Optional
-from datetime import datetime, UTC
 import logging
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 
-def _set_context_value(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _set_context_value(context_variables: Any | None, key: str, value: Any) -> None:
     """Set a context variable across supported container implementations."""
     if context_variables is None or not isinstance(key, str) or not key:
         return
@@ -48,15 +48,15 @@ def _build_concept_record(
     *,
     app_id: str,
     manifest_id: str,
-    structured_output: Dict[str, Any],
+    structured_output: dict[str, Any],
     app_name: str,
     concept_overview: str,
-    api_endpoints: List[Any],
-    capability_pack_hints: List[Any],
-    surface_candidate_hints: List[Any],
-    agentic_capabilities: List[Any],
+    api_endpoints: list[Any],
+    capability_pack_hints: list[Any],
+    surface_candidate_hints: list[Any],
+    agentic_capabilities: list[Any],
     now_iso: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the canonical persisted concept artifact used by downstream workflows."""
 
     return {
@@ -74,7 +74,7 @@ def _build_concept_record(
     }
 
 
-def _concept_record_to_manifest(doc: Dict[str, Any], app_id: str) -> Dict[str, Any]:
+def _concept_record_to_manifest(doc: dict[str, Any], app_id: str) -> dict[str, Any]:
     """Normalize the canonical Concepts record into the runtime manifest shape."""
 
     blueprint = doc.get("Blueprint")
@@ -103,8 +103,8 @@ def _concept_record_to_manifest(doc: Dict[str, Any], app_id: str) -> Dict[str, A
 
 
 async def save_value_manifest(
-    context_variables: Annotated[Optional[Any], "Runtime context with structured output"] = None,
-) -> Dict[str, Any]:
+    context_variables: Annotated[Any | None, "Runtime context with structured output"] = None,
+) -> dict[str, Any]:
     """
     Auto-invoked after GapAnalysisAgent outputs ConceptBlueprint.
 
@@ -284,8 +284,8 @@ async def save_value_manifest(
 
 async def get_value_manifest(
     app_id: Annotated[str, "Application ID"],
-    context_variables: Annotated[Optional[Any], "Runtime context"] = None,
-) -> Dict[str, Any]:
+    context_variables: Annotated[Any | None, "Runtime context"] = None,
+) -> dict[str, Any]:
     """
     Retrieve the Value Manifest for an app.
 

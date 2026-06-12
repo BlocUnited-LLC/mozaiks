@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
@@ -12,8 +12,8 @@ from mozaiksai.core.session.persistence import SessionStateStore
 async def get_revision_context(
     *,
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
-    session_store: Optional[SessionStateStore] = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    session_store: SessionStateStore | None = None,
+    artifact_store: ArtifactStore | None = None,
     pack_loader: Any = load_selected_control_plane_pack,
 ) -> dict[str, Any]:
     return await assemble_revision_context(

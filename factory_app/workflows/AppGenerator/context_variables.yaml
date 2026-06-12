@@ -538,6 +538,35 @@ definitions:
       fields:
       - available_tools
       default: []
+  workflow_integration_metadata:
+    type: object
+    description: >
+      Canonical normalized AgentGenerator-to-AppGenerator handoff metadata for the
+      latest workflow_bundle artifact. Contains contract_version, bundle_name,
+      workflows[], and primary_workflow. Hydrated before AppGenerator agents run
+      when a workflow_bundle artifact exists.
+    source:
+      type: computed
+      default: null
+  generated_workflow_integrations:
+    type: array
+    description: >
+      Normalized list of AgentGenerator-produced workflow integrations. Each item
+      carries workflow_name, capability_id, startup_mode, and trigger_events.
+      AppGenerator uses this list to wire module capabilities, emitted events, and
+      reactions deterministically.
+    source:
+      type: computed
+      default: []
+  workflow_bundle_artifact_version_id:
+    type: string
+    description: >
+      Source artifact version id for the workflow_bundle artifact that hydrated
+      workflow_integration_metadata. Null when AppGenerator is running without an
+      upstream workflow bundle.
+    source:
+      type: computed
+      default: null
   generated_workflow_name:
     type: string
     description: >
@@ -1140,6 +1169,9 @@ agents:
     - agent_api_url
     - available_agents
     - available_tools
+    - workflow_integration_metadata
+    - generated_workflow_integrations
+    - workflow_bundle_artifact_version_id
     - generated_workflow_name
     - generated_workflow_capability_id
     - generated_workflow_startup_mode
@@ -1252,6 +1284,8 @@ agents:
     - integration_needs
     - agent_api_url
     - agent_websocket_url
+    - workflow_integration_metadata
+    - generated_workflow_integrations
     - generated_workflow_capability_id
     - generated_workflow_trigger_events
   AdminRegistryAgent:

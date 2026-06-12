@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from importlib import import_module
-from typing import Any, Callable, Optional
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
 from .contracts import ControlPlaneToolCall, ControlPlaneToolContext, ControlPlaneToolResult
 from .loader import load_selected_control_plane_pack
 from .schema import LoadedControlPlanePack
-
 
 logger = get_workflow_logger("control_plane.executor")
 
@@ -89,7 +89,7 @@ class ControlPlaneToolExecutor:
     def _normalize_context(
         context: ControlPlaneToolContext | dict[str, Any] | None,
         *,
-        target: Optional[str],
+        target: str | None,
     ) -> ControlPlaneToolContext:
         if isinstance(context, ControlPlaneToolContext):
             if target and not context.checkpoint:

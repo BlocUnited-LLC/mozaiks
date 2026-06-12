@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
 import json
 import logging
 import re
+from collections import Counter
+from pathlib import Path
+from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -65,7 +65,7 @@ def _ctx_set(context_variables: Any, key: str, value: Any) -> None:
         setattr(store, key, value)
 
 
-def _coerce_mapping(value: Any) -> Dict[str, Any]:
+def _coerce_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     if isinstance(value, str):
@@ -88,7 +88,7 @@ def _coerce_mapping(value: Any) -> Dict[str, Any]:
     return {}
 
 
-def _coerce_path(value: Any) -> Optional[Path]:
+def _coerce_path(value: Any) -> Path | None:
     if not isinstance(value, str):
         return None
     text = value.strip()
@@ -100,7 +100,7 @@ def _coerce_path(value: Any) -> Optional[Path]:
     return None
 
 
-def _load_related_shell_config(theme_config_value: Any, parent_shell_value: Any = None) -> Dict[str, Any]:
+def _load_related_shell_config(theme_config_value: Any, parent_shell_value: Any = None) -> dict[str, Any]:
     explicit_shell = _coerce_mapping(parent_shell_value)
     if explicit_shell:
         return explicit_shell
@@ -125,9 +125,9 @@ def _load_related_shell_config(theme_config_value: Any, parent_shell_value: Any 
     return {}
 
 
-def _dedupe(items: List[str]) -> List[str]:
+def _dedupe(items: list[str]) -> list[str]:
     seen: set[str] = set()
-    ordered: List[str] = []
+    ordered: list[str] = []
     for item in items:
         normalized = str(item or "").strip()
         if not normalized or normalized in seen:
@@ -137,13 +137,13 @@ def _dedupe(items: List[str]) -> List[str]:
     return ordered
 
 
-def _top_items(items: List[str], limit: int = 8) -> List[str]:
+def _top_items(items: list[str], limit: int = 8) -> list[str]:
     counts = Counter(item.strip() for item in items if str(item).strip())
     return [item for item, _count in counts.most_common(limit)]
 
 
-def _normalize_font_names(raw_values: List[str]) -> List[str]:
-    normalized: List[str] = []
+def _normalize_font_names(raw_values: list[str]) -> list[str]:
+    normalized: list[str] = []
     generic_families = {
         "serif",
         "sans-serif",
@@ -168,7 +168,7 @@ def _normalize_font_names(raw_values: List[str]) -> List[str]:
     return _dedupe(normalized)
 
 
-def _hex_to_luminance(value: str) -> Optional[float]:
+def _hex_to_luminance(value: str) -> float | None:
     text = str(value or "").strip()
     if not text.startswith("#"):
         return None
@@ -190,7 +190,7 @@ def _hex_to_luminance(value: str) -> Optional[float]:
     return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
 
 
-def _infer_appearance(colors: List[str], css_variables: Dict[str, str]) -> Optional[str]:
+def _infer_appearance(colors: list[str], css_variables: dict[str, str]) -> str | None:
     candidates = [
         css_variables.get("--color-background"),
         css_variables.get("--background"),
@@ -203,9 +203,9 @@ def _infer_appearance(colors: List[str], css_variables: Dict[str, str]) -> Optio
     return "dark" if (sum(luminances) / len(luminances)) < 0.45 else "light"
 
 
-def _infer_layout_hints(html: str, css_text: str) -> List[str]:
+def _infer_layout_hints(html: str, css_text: str) -> list[str]:
     combined = f"{html}\n{css_text}".lower()
-    hints: List[str] = []
+    hints: list[str] = []
     if "sidebar" in combined or "<aside" in combined:
         hints.append("sidebar")
     if "<header" in combined or "top-nav" in combined or "navbar" in combined:
@@ -217,7 +217,7 @@ def _infer_layout_hints(html: str, css_text: str) -> List[str]:
     return _dedupe(hints)
 
 
-def _summarize_css_snapshot(css_text: str) -> Dict[str, Any]:
+def _summarize_css_snapshot(css_text: str) -> dict[str, Any]:
     colors = _top_items(_COLOR_RE.findall(css_text), limit=10)
     font_values = list(_FONT_RE.findall(css_text))
     for match in _GOOGLE_FONT_FAMILY_RE.findall(css_text):
@@ -255,7 +255,7 @@ def _summarize_css_snapshot(css_text: str) -> Dict[str, Any]:
     }
 
 
-def _summarize_theme_mapping(theme_config: Dict[str, Any], shell_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _summarize_theme_mapping(theme_config: dict[str, Any], shell_config: dict[str, Any] | None = None) -> dict[str, Any]:
     theme = theme_config.get("theme") or {}
     identity = theme_config.get("identity") or {}
     fonts = theme_config.get("fonts") or {}
@@ -295,7 +295,7 @@ def _summarize_theme_mapping(theme_config: Dict[str, Any], shell_config: Optiona
     }
 
 
-async def _fetch_text(url: str) -> Optional[str]:
+async def _fetch_text(url: str) -> str | None:
     async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=6.0), follow_redirects=True) as client:
         response = await client.get(url)
     if response.status_code >= 400:
@@ -303,7 +303,7 @@ async def _fetch_text(url: str) -> Optional[str]:
     return response.text
 
 
-async def _load_url_theme_snapshot(app_url: str) -> Dict[str, Any]:
+async def _load_url_theme_snapshot(app_url: str) -> dict[str, Any]:
     html = await _fetch_text(app_url)
     if not html:
         return {"success": False, "error": f"Failed to fetch {app_url}"}
@@ -328,7 +328,7 @@ async def _load_url_theme_snapshot(app_url: str) -> Dict[str, Any]:
     combined_css = "\n".join(css_chunks)
     colors = _top_items(_COLOR_RE.findall(f"{combined_css}\n{html}"), limit=10)
     fonts = _top_items(_FONT_RE.findall(combined_css), limit=6)
-    normalized_fonts: List[str] = []
+    normalized_fonts: list[str] = []
     for value in fonts:
         parts = [part.strip(" '\"") for part in value.split(",")]
         if parts:
@@ -370,7 +370,7 @@ async def _load_url_theme_snapshot(app_url: str) -> Dict[str, Any]:
     }
 
 
-async def collect_prechat_theme_context(context_variables: Optional[Any] = None) -> Dict[str, Any]:
+async def collect_prechat_theme_context(context_variables: Any | None = None) -> dict[str, Any]:
     """Populate ThemeCapture context with deterministic evidence before chat."""
     ctx = context_variables or {}
     app_url = _ctx_get(ctx, "app_url")
@@ -380,9 +380,9 @@ async def collect_prechat_theme_context(context_variables: Optional[Any] = None)
     parent_shell_config = _ctx_get(ctx, "parent_shell_config")
     frontend_repo_summary = _ctx_get(ctx, "frontend_repo_summary") or {}
 
-    evidence_sources: List[Dict[str, Any]] = []
-    evidence_snapshots: List[str] = []
-    structured_evidence: Dict[str, Any] = {
+    evidence_sources: list[dict[str, Any]] = []
+    evidence_snapshots: list[str] = []
+    structured_evidence: dict[str, Any] = {
         "sources": [],
         "colors": [],
         "fonts": [],

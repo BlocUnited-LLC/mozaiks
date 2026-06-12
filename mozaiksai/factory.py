@@ -12,14 +12,15 @@ Use ``create_mozaiks_app()`` when you explicitly want only the runtime substrate
 as a mountable FastAPI sub-application.
 """
 
-import os
 import logging
-from typing import Optional, Dict, Any
+import os
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, Depends
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
 from mozaiksai.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -28,15 +29,15 @@ logger = logging.getLogger(__name__)
 class MozaiksConfig(BaseModel):
     """Configuration for the runtime-substrate convenience factory."""
     workflow_dir: str = Field(default="./workflows", description="Path to workflows directory")
-    mongo_uri: Optional[str] = Field(default=None, description="MongoDB connection URI")
+    mongo_uri: str | None = Field(default=None, description="MongoDB connection URI")
     cors_origins: list = Field(default=["*"], description="Allowed CORS origins")
     debug: bool = Field(default=False, description="Enable debug mode")
 
 
 def create_mozaiks_app(
     workflow_dir: str = "./workflows",
-    mongo_uri: Optional[str] = None,
-    cors_origins: Optional[list] = None,
+    mongo_uri: str | None = None,
+    cors_origins: list | None = None,
     debug: bool = False,
     **kwargs: Any,
 ) -> FastAPI:
@@ -96,11 +97,11 @@ def create_mozaiks_app(
 
     # Import routes after env vars are set
     # This deferred import ensures the runtime picks up the configuration
-    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
     from mozaiksai.core.core_config import close_mongo_client
+    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+    from mozaiksai.core.multitenant import coalesce_app_id
     from mozaiksai.core.transport.simple_transport import SimpleTransport
     from mozaiksai.core.workflow.workflow_manager import workflow_status_summary
-    from mozaiksai.core.multitenant import coalesce_app_id
 
     # Initialize persistence
     persistence_manager = AG2PersistenceManager()
@@ -139,7 +140,7 @@ def create_mozaiks_app(
     # ----- Chat start endpoint -----
     class StartChatRequest(BaseModel):
         user_id: str
-        context: Optional[Dict[str, Any]] = None
+        context: dict[str, Any] | None = None
 
     @runtime_subapp.post("/chats/{app_id}/{workflow_name}/start")
     async def start_chat(
@@ -148,8 +149,8 @@ def create_mozaiks_app(
         body: StartChatRequest,
     ):
         """Start a new chat session for a workflow."""
+        from datetime import UTC, datetime
         from uuid import uuid4
-        from datetime import datetime, UTC
 
         chat_id = str(uuid4())
         resolved_app_id = coalesce_app_id(app_id)

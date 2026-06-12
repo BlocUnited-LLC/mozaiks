@@ -6,7 +6,6 @@ from pathlib import Path
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 STRUCTURED_OUTPUTS = ROOT / "factory_app" / "workflows" / "AppGenerator" / "structured_outputs.yaml"
 PLATFORM_SOURCE = ROOT / "mozaiksai" / "hosts" / "platform.py"

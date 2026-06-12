@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from mozaiksai.core.runtime.app.loader import AppLoader
-from mozaiksai.core.runtime.app.module_loader import ActionDef, ModuleLoadError, ModuleLoader
-from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+from mozaiksai.core.runtime.app.module_loader import ActionDef, ModuleLoader, ModuleLoadError
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 
 
 def _write_canonical_module(

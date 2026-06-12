@@ -7,7 +7,7 @@ here to also call persist_summary_artifact() for its owned family.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from factory_app.workflows._shared.platform.build_lifecycle import (  # noqa: F401
     build_export_download_url,
@@ -21,12 +21,15 @@ from factory_app.workflows._shared.platform.build_lifecycle import (
 )
 
 
-async def _read_build_mode(*, app_id: str, chat_id: str) -> Optional[str]:
+async def _read_build_mode(*, app_id: str, chat_id: str) -> str | None:
     """Read build_mode from the persisted chat session context variables."""
     try:
         from mozaiksai.core.core_config import get_mongo_client
+        from mozaiksai.core.data.persistence.namespaces import (
+            SYSTEM_DATABASE,
+            RuntimeCollections,
+        )
         from mozaiksai.core.multitenant import build_app_scope_filter
-        from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 
         client = get_mongo_client()
         coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
@@ -51,10 +54,10 @@ async def _read_build_mode(*, app_id: str, chat_id: str) -> Optional[str]:
 async def _persist_app_bundle_artifact(
     *,
     app_id: str,
-    chat_id: Optional[str],
-    user_id: Optional[str],
+    chat_id: str | None,
+    user_id: str | None,
     workflow_name: str,
-    build_mode: Optional[str],
+    build_mode: str | None,
 ) -> None:
     """Persist a versioned app_bundle summary artifact after AppGenerator completes."""
     from mozaiksai.core.artifacts.summary_artifacts import persist_summary_artifact
@@ -72,19 +75,19 @@ async def _persist_app_bundle_artifact(
         source_chat_id=resolved_chat_id,
         author_user_id=(user_id or "").strip() or None,
         revision_mode=build_mode == "revision",
-        input_artifact_kinds=("design_docs", "workflow_bundle", "brand"),
+        input_artifact_kinds=("design_docs", "workflow_bundle", "theme_capture"),
     )
 
 
 async def emit_build_completed(
     *,
     app_id: str,
-    execution_id: Optional[str] = None,
-    chat_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    execution_id: str | None = None,
+    chat_id: str | None = None,
+    user_id: str | None = None,
     workflow_name: str,
     **kwargs: Any,
-) -> Optional[str]:
+) -> str | None:
     """Emit build.completed and persist the app_bundle summary artifact."""
     outbox_event_id = await _shared_emit_build_completed(
         app_id=app_id,

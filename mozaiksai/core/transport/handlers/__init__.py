@@ -17,7 +17,8 @@ Usage:
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Coroutine, Dict
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Dict
 
 from fastapi import WebSocket
 
@@ -36,12 +37,12 @@ if TYPE_CHECKING:
 
 # Type alias for handler functions
 HandlerFunc = Callable[
-    ["SimpleTransport", Dict[str, Any], str, WebSocket],
+    ["SimpleTransport", dict[str, Any], str, WebSocket],
     Coroutine[Any, Any, None]
 ]
 
 # Message type to handler mapping
-MESSAGE_HANDLERS: Dict[str, HandlerFunc] = {
+MESSAGE_HANDLERS: dict[str, HandlerFunc] = {
     "user.input.submit": handle_user_input_submit,
     "user_input_submit": handle_user_input_submit,
     "tool_call_response": handle_tool_call_response,

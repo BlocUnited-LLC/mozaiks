@@ -20,7 +20,7 @@ The block is never injected and factory workflow behaviour is unchanged.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
 
@@ -58,7 +58,7 @@ def _is_empty(value: Any) -> bool:
     return False
 
 
-def _format_hosted_packs(packs: List[Any]) -> str:
+def _format_hosted_packs(packs: list[Any]) -> str:
     lines = ["Hosted capability packs available (do NOT regenerate internals):"]
     for pack in packs:
         if isinstance(pack, dict):
@@ -81,7 +81,7 @@ def _format_hosted_packs(packs: List[Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_pack_surfaces(packs: List[Any]) -> str | None:
+def _format_pack_surfaces(packs: list[Any]) -> str | None:
     """Render surface groupings. Returns None when no surfaces are declared."""
     surface_lines: list[str] = []
     for pack in packs:
@@ -117,7 +117,7 @@ def _format_pack_surfaces(packs: List[Any]) -> str | None:
     return "Pack surfaces:\n" + "\n".join(surface_lines)
 
 
-def _format_pack_supported_domains(packs: List[Any]) -> str | None:
+def _format_pack_supported_domains(packs: list[Any]) -> str | None:
     """Render domain fit hints. Returns None when no domains are declared."""
     domain_lines: list[str] = []
     for pack in packs:
@@ -147,7 +147,7 @@ def _format_pack_supported_domains(packs: List[Any]) -> str | None:
     return "Pack domain fit:\n" + "\n".join(domain_lines)
 
 
-def _format_pack_branding(packs: List[Any]) -> str | None:
+def _format_pack_branding(packs: list[Any]) -> str | None:
     """Render branding hints. Returns None when no packs declare branding."""
     branding_lines: list[str] = []
     for pack in packs:
@@ -234,7 +234,7 @@ def _format_facade_contracts(facades: Any) -> list[str]:
     return lines
 
 
-def _format_operator_contracts(contracts: List[Any]) -> str | None:
+def _format_operator_contracts(contracts: list[Any]) -> str | None:
     blocks: list[str] = []
     for contract in contracts:
         if not isinstance(contract, dict):
@@ -271,7 +271,7 @@ def _format_operator_contracts(contracts: List[Any]) -> str | None:
     return "Operator build-pack contracts:\n" + "\n".join(blocks)
 
 
-def _build_hosted_context_body(capability_packs: List[Any], operator_contracts: List[Any] | None = None) -> str:
+def _build_hosted_context_body(capability_packs: list[Any], operator_contracts: list[Any] | None = None) -> str:
     parts: list[str] = [_CAPABILITY_SOURCE_GUIDANCE]
 
     parts.append(_format_hosted_packs(capability_packs))
@@ -340,7 +340,7 @@ def _build_hosted_context_body(capability_packs: List[Any], operator_contracts: 
 
 def inject_hosted_capabilities_context(
     agent: Any,
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> None:
     """
     prompt middleware function for AppPlanAgent.
@@ -354,7 +354,7 @@ def inject_hosted_capabilities_context(
         return
 
     try:
-        context_variables: Dict[str, Any] = getattr(agent, "context_variables", {}) or {}
+        context_variables: dict[str, Any] = getattr(agent, "context_variables", {}) or {}
         capability_packs = context_variables.get("capability_packs")
         operator_contracts = context_variables.get("operator_contracts") or []
 

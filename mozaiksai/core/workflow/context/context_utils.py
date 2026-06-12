@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import string
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ __all__ = [
 # CONTEXT CONVERSION UTILITIES
 # ==============================================================================
 
-def context_to_dict(container: Any) -> Dict[str, Any]:
+def context_to_dict(container: Any) -> dict[str, Any]:
     """Convert context container to dictionary.
     
     Supports multiple container formats:
@@ -61,7 +61,7 @@ def context_to_dict(container: Any) -> Dict[str, Any]:
     return {}
 
 
-def stringify_context_value(value: Any, null_label: Optional[str]) -> str:
+def stringify_context_value(value: Any, null_label: str | None) -> str:
     """Convert context value to display string.
     
     Args:
@@ -78,7 +78,7 @@ def stringify_context_value(value: Any, null_label: Optional[str]) -> str:
     return str(value)
 
 
-def format_template(template: str, mapping: Dict[str, Any]) -> str:
+def format_template(template: str, mapping: dict[str, Any]) -> str:
     """Format template string with variable mapping.
     
     Args:
@@ -100,9 +100,9 @@ def format_template(template: str, mapping: Dict[str, Any]) -> str:
 # ==============================================================================
 
 def render_exposure_fragment(
-    exposure: Dict[str, Any],
-    context_dict: Dict[str, Any],
-    fallback_variables: List[str],
+    exposure: dict[str, Any],
+    context_dict: dict[str, Any],
+    fallback_variables: list[str],
 ) -> str:
     """Render a single exposure fragment with template and variables.
     
@@ -185,9 +185,9 @@ def merge_message_parts(existing: str, fragment: str, placement: str) -> str:
 
 def apply_context_exposures(
     base_message: str,
-    exposures: List[Dict[str, Any]],
-    context_dict: Dict[str, Any],
-    fallback_variables: List[str],
+    exposures: list[dict[str, Any]],
+    context_dict: dict[str, Any],
+    fallback_variables: list[str],
 ) -> str:
     """Apply all context exposures to base message.
     
@@ -200,7 +200,7 @@ def apply_context_exposures(
     Returns:
         Message with all exposures applied
     """
-    effective_exposures: List[Dict[str, Any]] = [
+    effective_exposures: list[dict[str, Any]] = [
         exposure for exposure in exposures if isinstance(exposure, dict)
     ]
     if not effective_exposures and fallback_variables:

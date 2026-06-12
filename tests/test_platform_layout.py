@@ -7,13 +7,12 @@ import yaml
 
 from tests.import_utils import active_app_root
 
-
 ROOT = Path(__file__).resolve().parents[1]
 FACTORY_APP_ROOT = ROOT / "factory_app" / "app"
 
 
 def _load_yaml(app_root: Path, relative_path: str) -> dict:
-    with open(app_root / relative_path, "r", encoding="utf-8") as handle:
+    with open(app_root / relative_path, encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
 
 

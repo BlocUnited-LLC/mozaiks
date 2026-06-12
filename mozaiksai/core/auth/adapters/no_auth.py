@@ -6,9 +6,8 @@ Use this when AUTH_ENABLED=false or AUTH_PROVIDER=none.
 """
 
 import os
-from typing import Optional
 
-from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims, AuthError
+from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims
 
 
 class NoAuthAdapter(BaseAuthAdapter):
@@ -35,9 +34,9 @@ class NoAuthAdapter(BaseAuthAdapter):
 
     def __init__(
         self,
-        default_user_id: Optional[str] = None,
-        default_email: Optional[str] = None,
-        default_roles: Optional[list] = None,
+        default_user_id: str | None = None,
+        default_email: str | None = None,
+        default_roles: list | None = None,
     ):
         super().__init__()
         self._default_user_id = default_user_id or os.getenv("AUTH_ANON_USER_ID", "anonymous")

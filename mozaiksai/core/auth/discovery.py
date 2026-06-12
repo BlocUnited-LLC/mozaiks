@@ -17,10 +17,10 @@ Hosted deployments may set MOZAIKS_OIDC_AUTHORITY to their own identity provider
 """
 
 import asyncio
-import time
 import os
-from typing import Dict, Optional, Any
+import time
 from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 
@@ -36,7 +36,7 @@ _DEFAULT_DISCOVERY_CACHE_TTL = 86400  # 24 hours (discovery rarely changes)
 class CachedDiscovery:
     """Cached OIDC discovery document with expiry."""
 
-    document: Dict[str, Any]
+    document: dict[str, Any]
     fetched_at: float
     ttl_seconds: int
 
@@ -44,11 +44,11 @@ class CachedDiscovery:
         return time.time() > (self.fetched_at + self.ttl_seconds)
 
     @property
-    def jwks_uri(self) -> Optional[str]:
+    def jwks_uri(self) -> str | None:
         return self.document.get("jwks_uri")
 
     @property
-    def issuer(self) -> Optional[str]:
+    def issuer(self) -> str | None:
         return self.document.get("issuer")
 
 
@@ -62,8 +62,8 @@ class OIDCDiscoveryClient:
 
     def __init__(
         self,
-        discovery_url: Optional[str] = None,
-        cache_ttl: Optional[int] = None,
+        discovery_url: str | None = None,
+        cache_ttl: int | None = None,
     ):
         """
         Initialize OIDC discovery client.
@@ -80,7 +80,7 @@ class OIDCDiscoveryClient:
         explicit_url = os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
 
         if explicit_url:
-            self._discovery_url: Optional[str] = explicit_url
+            self._discovery_url: str | None = explicit_url
         elif discovery_url:
             self._discovery_url = discovery_url
         else:
@@ -102,11 +102,11 @@ class OIDCDiscoveryClient:
         self._cache_ttl = cache_ttl or int(
             os.getenv("AUTH_DISCOVERY_CACHE_TTL", str(_DEFAULT_DISCOVERY_CACHE_TTL))
         )
-        self._cache: Optional[CachedDiscovery] = None
+        self._cache: CachedDiscovery | None = None
         self._lock = asyncio.Lock()
 
     @property
-    def discovery_url(self) -> Optional[str]:
+    def discovery_url(self) -> str | None:
         """Return the configured discovery URL, or None if not configured."""
         return self._discovery_url
 
@@ -206,7 +206,7 @@ class OIDCDiscoveryClient:
                 )
                 return self._cache
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error("OIDC discovery fetch timed out")
                 raise RuntimeError("OIDC discovery fetch timed out")
             except aiohttp.ClientError as e:
@@ -219,7 +219,7 @@ class OIDCDiscoveryClient:
 
 
 # Module-level singleton
-_discovery_client: Optional[OIDCDiscoveryClient] = None
+_discovery_client: OIDCDiscoveryClient | None = None
 
 
 def get_discovery_client() -> OIDCDiscoveryClient:

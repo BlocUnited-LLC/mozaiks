@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import re
 import sys
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence
+from typing import Any
 
 import yaml
-
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GLOB = "docs/pattern_examples/*.yaml"
@@ -49,7 +48,7 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8-sig")
 
 
-def _load_yaml_documents(path: Path) -> List[Any]:
+def _load_yaml_documents(path: Path) -> list[Any]:
     text = _read_text(path)
     try:
         docs = list(yaml.safe_load_all(text))
@@ -68,16 +67,16 @@ def _has_key(doc: Any, key: str) -> bool:
     return _is_mapping(doc) and key in doc
 
 
-def _expect_layer_markers(text: str, path: Path) -> List[ValidationIssue]:
-    issues: List[ValidationIssue] = []
+def _expect_layer_markers(text: str, path: Path) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
     for marker in REQUIRED_LAYER_MARKERS:
         if marker not in text:
             issues.append(ValidationIssue(path, f"Missing marker comment '{marker}'"))
     return issues
 
 
-def _expect_min_shapes(docs: Sequence[Any], path: Path) -> List[ValidationIssue]:
-    issues: List[ValidationIssue] = []
+def _expect_min_shapes(docs: Sequence[Any], path: Path) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
 
     def require_root_key(key: str) -> None:
         if not any(_has_key(d, key) for d in docs):
@@ -161,8 +160,8 @@ def _expect_min_shapes(docs: Sequence[Any], path: Path) -> List[ValidationIssue]
     return issues
 
 
-def validate_file(path: Path) -> List[ValidationIssue]:
-    issues: List[ValidationIssue] = []
+def validate_file(path: Path) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
 
     text = _read_text(path)
     issues.extend(_expect_layer_markers(text, path))
@@ -196,7 +195,7 @@ def main(argv: Sequence[str]) -> int:
         print(f"No files matched glob: {args.glob}")
         return 2
 
-    all_issues: List[ValidationIssue] = []
+    all_issues: list[ValidationIssue] = []
     for file_path in files:
         all_issues.extend(validate_file(file_path))
 

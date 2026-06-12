@@ -56,7 +56,9 @@ class ArtifactScopeProposer:
                 f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
         )
 
-        llm_config = self._load_config().resolve_capability_llm_config("coding")
+        config = self._load_config()
+        # Use dedicated scope capability config; fall back to coding profile if not declared.
+        llm_config = config.resolve_capability_llm_config("scope") or config.resolve_capability_llm_config("coding")
         control_plane_context = await self._load_control_plane_context(
             refinement_request=refinement_request,
             routing_decision=routing_decision,

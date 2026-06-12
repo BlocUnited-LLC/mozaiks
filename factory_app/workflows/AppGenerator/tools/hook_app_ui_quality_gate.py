@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.save_app_schema import save_app_schema
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 _HEADER = "[APP UI QUALITY GATE]"
 
 
-def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
@@ -31,7 +31,7 @@ def _context_get(context_variables: Optional[Any], key: str, default: Any = None
     return default
 
 
-def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     if hasattr(context_variables, "set"):
@@ -48,7 +48,7 @@ def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None
         context_variables[key] = value
 
 
-def _parse_json_object(content: Any) -> Optional[Dict[str, Any]]:
+def _parse_json_object(content: Any) -> dict[str, Any] | None:
     if isinstance(content, dict):
         return content
     if not isinstance(content, str) or not content.strip():
@@ -76,7 +76,7 @@ def _parse_json_object(content: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _latest_app_schema_output(messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _latest_app_schema_output(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     for message in reversed(messages or []):
         if not isinstance(message, dict):
             continue
@@ -92,14 +92,14 @@ def _latest_app_schema_output(messages: List[Dict[str, Any]]) -> Optional[Dict[s
     return None
 
 
-def _append_warning(context_variables: Optional[Any], warning: str) -> None:
+def _append_warning(context_variables: Any | None, warning: str) -> None:
     current = _context_get(context_variables, "app_ui_quality_warnings", [])
     warnings = list(current) if isinstance(current, list) else []
     warnings.append(warning)
     _context_set(context_variables, "app_ui_quality_warnings", warnings)
 
 
-def _persist_latest_schema_if_needed(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def _persist_latest_schema_if_needed(agent: Any, messages: list[dict[str, Any]]) -> None:
     context_variables = getattr(agent, "context_variables", None)
     if _context_get(context_variables, "app_schema_ready", False) is True:
         return
@@ -130,7 +130,7 @@ def _persist_latest_schema_if_needed(agent: Any, messages: List[Dict[str, Any]])
         )
 
 
-def run_app_ui_quality_gate(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def run_app_ui_quality_gate(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Run the AppGenerator UI quality gate before AppUIQualityAgent replies.
 
     AG2 evaluates handoff conditions immediately after the agent reply. Auto-tool

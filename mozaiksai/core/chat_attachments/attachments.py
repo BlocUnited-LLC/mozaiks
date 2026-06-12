@@ -12,27 +12,28 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 from uuid import uuid4
 
 
 @dataclass(frozen=True)
 class AttachmentUploadResult:
-    attachment: Dict[str, Any]
+    attachment: dict[str, Any]
     stored_path: str
     bytes_written: int
 
 
-def _parse_allowed_workflows(raw: str) -> Set[str]:
+def _parse_allowed_workflows(raw: str) -> set[str]:
     if raw is None:
         return set()
     return {w.strip() for w in raw.split(",") if w and w.strip()}
 
 
-def _normalize_intent(intent: Optional[str]) -> str:
+def _normalize_intent(intent: str | None) -> str:
     normalized = (intent or "context").strip().lower()
     if normalized not in {"context", "bundle", "deliverable"}:
         raise ValueError("intent must be one of: context, bundle, deliverable")
@@ -61,8 +62,8 @@ async def handle_chat_upload(
     app_id: str,
     user_id: str,
     chat_id: str,
-    intent: Optional[str] = None,
-    bundle_path: Optional[str] = None,
+    intent: str | None = None,
+    bundle_path: str | None = None,
     allowed_workflows_env: str = "",
 ) -> AttachmentUploadResult:
     """Store an uploaded file and append metadata to ChatSessions.attachments.
@@ -126,7 +127,7 @@ async def handle_chat_upload(
         except Exception:
             pass
 
-    attachment_doc: Dict[str, Any] = {
+    attachment_doc: dict[str, Any] = {
         "attachment_id": attachment_id,
         "filename": safe_name,
         "stored_path": str(stored_path),
@@ -158,7 +159,7 @@ async def iter_bundle_attachment_files(
     allowed_intents: Iterable[str] = ("bundle", "deliverable"),
     max_bytes_env: str = "UPLOAD_BUNDLE_MAX_BYTES",
     default_max_bytes: int = 10 * 1024 * 1024,
-) -> List[Tuple[str, bytes]]:
+) -> list[tuple[str, bytes]]:
     """Return list of (relative_path, bytes) for attachments tagged for bundling."""
 
     doc = await chat_coll.find_one(
@@ -172,7 +173,7 @@ async def iter_bundle_attachment_files(
     allowed = {a.strip().lower() for a in allowed_intents if a and str(a).strip()}
     max_bytes = _max_bytes_from_env(max_bytes_env, default_max_bytes)
 
-    out: List[Tuple[str, bytes]] = []
+    out: list[tuple[str, bytes]] = []
     for att in attachments:
         if not isinstance(att, dict):
             continue
@@ -209,7 +210,7 @@ async def iter_bundle_attachment_files(
 async def inject_bundle_attachments_into_payload(
     *,
     chat_coll: Any,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     chat_id: str,
     app_id: str,
 ) -> int:

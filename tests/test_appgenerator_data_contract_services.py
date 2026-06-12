@@ -146,11 +146,13 @@ def test_structured_outputs_expose_data_contract() -> None:
     assert "shared_collections" in structured_outputs
     assert "data/contract.json" in structured_outputs
     assert "data_contract_json" in structured_outputs
-    assert "services/data/" in structured_outputs
+    assert "Do not emit helper code under services/data/" in structured_outputs
 
 
 def test_config_is_the_promotable_data_contract_entry() -> None:
     assert "config" in save_app_schema_module.PROMOTABLE_APP_ENTRIES
+    assert "data" in save_app_schema_module.PROMOTABLE_APP_ENTRIES
+    assert "security" in save_app_schema_module.PROMOTABLE_APP_ENTRIES
     assert "services" in save_app_schema_module.PROMOTABLE_APP_ENTRIES
     assert "services/data" not in save_app_schema_module.PROMOTABLE_APP_ENTRIES
 

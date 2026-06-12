@@ -14,7 +14,7 @@ source. Does not modify any artifact or workspace.
 See full implementation at:
 ``factory_app/control_plane/tools/read_carry_forward_module_contract.py``
 """
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
 
@@ -35,7 +35,7 @@ async def read_carry_forward_module_contract(
         ),
     ],
     files: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         Field(
             description=(
                 "Optional list of contract filenames to read. "
@@ -50,10 +50,10 @@ async def read_carry_forward_module_contract(
     ] = None,
     *,
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return selected contract files from the previous app_bundle for a module.
 
     Read-only. Never raises. Returns empty files + warnings on any failure.

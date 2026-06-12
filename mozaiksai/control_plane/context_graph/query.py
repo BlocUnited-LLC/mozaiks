@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Any
 
-from mozaiksai.core.app_context.scan_policy import priority_for_source_path
 from mozaiksai.core.app_context.context_graph import build_semantic_annotation_request
 from mozaiksai.core.app_context.models import AppContextGraph, GraphEdgeType, GraphNodeType
+from mozaiksai.core.app_context.scan_policy import priority_for_source_path
 
 _STOPWORDS = {
     "the",

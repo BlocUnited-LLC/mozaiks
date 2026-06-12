@@ -11,21 +11,23 @@ needs full payload materialization including admin surface codegen.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from mozaiksai.core.workflow.generator_support.code_files import (
-    extract_code_file_map_from_payload as _base_extract,
-    safe_relpath,
-)
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     build_app_backend_admin_code_files,
 )
 from factory_app.workflows.AppGenerator.tools.control_plane_pack_codegen import (
     build_control_plane_pack_code_files,
 )
+from mozaiksai.core.workflow.generator_support.code_files import (
+    extract_code_file_map_from_payload as _base_extract,
+)
+from mozaiksai.core.workflow.generator_support.code_files import (
+    safe_relpath,
+)
 
 
-def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
+def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
     """Materialize all code files from an AppGenerator structured output payload.
 
     Calls the runtime's generic extraction, then layers in AppGenerator-specific
@@ -58,7 +60,7 @@ def extract_code_file_map_from_payload(payload: Any) -> Dict[str, str]:
     return file_map
 
 
-def extract_code_file_entries_from_payload(payload: Any) -> List[Dict[str, str]]:
+def extract_code_file_entries_from_payload(payload: Any) -> list[dict[str, str]]:
     file_map = extract_code_file_map_from_payload(payload)
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
@@ -67,7 +69,7 @@ def collect_generated_app_file_map(
     generated_app_dir: Any,
     *,
     allowed_roots: tuple[str, ...] = ("app.json", "ui", "brand", "config"),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Read persisted schema artifacts from generated/apps/{app_id}/{build_id}/app.
 
     This is the deterministic handoff from AppSchemaAgent/save_app_schema into
@@ -82,7 +84,7 @@ def collect_generated_app_file_map(
         return {}
 
     allowed = set(allowed_roots)
-    files: Dict[str, str] = {}
+    files: dict[str, str] = {}
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
@@ -103,7 +105,7 @@ def collect_generated_app_file_map(
     return files
 
 
-def collect_generated_app_file_entries(generated_app_dir: Any) -> List[Dict[str, str]]:
+def collect_generated_app_file_entries(generated_app_dir: Any) -> list[dict[str, str]]:
     file_map = collect_generated_app_file_map(generated_app_dir)
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 

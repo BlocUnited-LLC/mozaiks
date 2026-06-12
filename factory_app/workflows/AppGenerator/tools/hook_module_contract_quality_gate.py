@@ -13,7 +13,7 @@ Pattern mirrors hook_app_ui_quality_gate.py.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.review_module_contract_quality import (
@@ -27,7 +27,7 @@ _HEADER = "[MODULE CONTRACT QUALITY GATE]"
 
 def run_module_contract_quality_gate(
     agent: Any,
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> None:
     """Run the module contract quality gate before ModuleContractQualityAgent replies.
 

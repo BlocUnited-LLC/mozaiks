@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Set
+from typing import TYPE_CHECKING
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.artifacts import ArtifactStore, get_artifact_store
@@ -14,16 +14,16 @@ logger = get_core_logger("control_plane_invalidation")
 
 
 def _get_downstream_families(
-    written_families: Set[str],
-    dependency_graph: Dict[str, List[str]],
-) -> Set[str]:
+    written_families: set[str],
+    dependency_graph: dict[str, list[str]],
+) -> set[str]:
     """BFS: return all families that depend (directly or transitively) on written_families.
 
     The dependency_graph maps each family to its upstream dependencies.
     A family is downstream of a written family if written_family appears
     in that family's dependency list (or transitively via another downstream).
     """
-    downstream: Set[str] = set()
+    downstream: set[str] = set()
     queue = list(written_families)
     while queue:
         upstream = queue.pop()
@@ -48,8 +48,8 @@ class ArtifactInvalidationService:
     def __init__(
         self,
         *,
-        session_store: Optional[SessionStateStore] = None,
-        artifact_store: Optional[ArtifactStore] = None,
+        session_store: SessionStateStore | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self._session_store = session_store
         self._artifact_store = artifact_store
@@ -57,10 +57,10 @@ class ArtifactInvalidationService:
     async def invalidate_for_change_request(
         self,
         *,
-        refinement_request: "RefinementRequest",
-        routing_decision: "RefinementRoutingDecision",
-        change_request_id: Optional[str],
-        artifact_store: Optional[ArtifactStore] = None,
+        refinement_request: RefinementRequest,
+        routing_decision: RefinementRoutingDecision,
+        change_request_id: str | None,
+        artifact_store: ArtifactStore | None = None,
     ) -> dict[str, object]:
         resolved_change_request_id = str(change_request_id or "").strip() or None
         affected_artifact_kinds = [
@@ -132,7 +132,7 @@ class ArtifactInvalidationService:
         downstream_staled_families: list[str] = []
         try:
             pack = load_global_pack_graph()
-            dependency_graph: Dict[str, List[str]] = (
+            dependency_graph: dict[str, list[str]] = (
                 getattr(pack, "artifact_dependency_graph", None) or {}
                 if pack is not None
                 else {}
@@ -165,7 +165,7 @@ class ArtifactInvalidationService:
         }
 
 
-_invalidation_service: Optional[ArtifactInvalidationService] = None
+_invalidation_service: ArtifactInvalidationService | None = None
 
 
 def get_artifact_invalidation_service() -> ArtifactInvalidationService:

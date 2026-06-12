@@ -24,7 +24,7 @@ capability_packs nor module.yaml files can be found, the check is advisory
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
@@ -36,7 +36,7 @@ _logger = logging.getLogger("tools.validate_wiring")
 # Helpers — context access
 # ---------------------------------------------------------------------------
 
-def _context_get(context_variables: Optional[Dict[str, Any]], key: str) -> Optional[Any]:
+def _context_get(context_variables: dict[str, Any] | None, key: str) -> Any | None:
     if context_variables is None:
         return None
     if hasattr(context_variables, "get"):
@@ -54,11 +54,11 @@ def _context_get(context_variables: Optional[Dict[str, Any]], key: str) -> Optio
     return None
 
 
-def _generated_files_from_context(context_variables: Optional[Dict[str, Any]]) -> Dict[str, str]:
+def _generated_files_from_context(context_variables: dict[str, Any] | None) -> dict[str, str]:
     raw = _context_get(context_variables, "generated_files")
     if not isinstance(raw, dict):
         return {}
-    files: Dict[str, str] = {}
+    files: dict[str, str] = {}
     for path, content in raw.items():
         if not isinstance(path, str):
             continue
@@ -68,8 +68,8 @@ def _generated_files_from_context(context_variables: Optional[Dict[str, Any]]) -
     return files
 
 
-def _pages_from_generated_files(files: Dict[str, str]) -> List[Dict[str, Any]]:
-    pages: List[Dict[str, Any]] = []
+def _pages_from_generated_files(files: dict[str, str]) -> list[dict[str, Any]]:
+    pages: list[dict[str, Any]] = []
     for path, content in sorted(files.items()):
         if not path.startswith("ui/pages/") or not path.endswith((".yaml", ".yml")):
             continue
@@ -111,7 +111,7 @@ def _collect_endpoints_from_config(
     page_name: str,
     section_id: str,
     config: Any,
-    out: List[Tuple[str, str, str]],
+    out: list[tuple[str, str, str]],
 ) -> None:
     """Extract api_endpoint from config dict and recurse into children."""
     if not isinstance(config, dict):
@@ -135,12 +135,12 @@ def _collect_endpoints_from_config(
             _collect_endpoints_from_config(page_name, child_id, child.get("config"), out)
 
 
-def _extract_endpoint_refs(pages: List[Any]) -> List[Tuple[str, str, str]]:
+def _extract_endpoint_refs(pages: list[Any]) -> list[tuple[str, str, str]]:
     """
     Walk all pages and return (page_name, section_id, api_endpoint) triples
     for every api_endpoint found anywhere in the section tree.
     """
-    results: List[Tuple[str, str, str]] = []
+    results: list[tuple[str, str, str]] = []
     for page in pages or []:
         if not isinstance(page, dict):
             continue
@@ -153,7 +153,7 @@ def _extract_endpoint_refs(pages: List[Any]) -> List[Tuple[str, str, str]]:
     return results
 
 
-def _endpoint_to_action_key(endpoint: str) -> tuple[Optional[str], Optional[str]]:
+def _endpoint_to_action_key(endpoint: str) -> tuple[str | None, str | None]:
     """Normalize a page api_endpoint to the module action registry key.
 
     Canonical app pages call module actions at /api/modules/{module}/{action}.
@@ -180,7 +180,7 @@ def _endpoint_to_action_key(endpoint: str) -> tuple[Optional[str], Optional[str]
 # Module action registry — two sources
 # ---------------------------------------------------------------------------
 
-def _actions_from_capability_packs(capability_packs: List[Any]) -> Set[str]:
+def _actions_from_capability_packs(capability_packs: list[Any]) -> set[str]:
     """
     Build action registry from app_build_plan.capability_packs.
 
@@ -188,7 +188,7 @@ def _actions_from_capability_packs(capability_packs: List[Any]) -> Set[str]:
       { "id": "orders",    "actions": ["list_orders", ...] }
       { "module_id": "orders", "actions": [{"id": "list_orders"}, ...] }
     """
-    valid: Set[str] = set()
+    valid: set[str] = set()
     for pack in capability_packs or []:
         if not isinstance(pack, dict):
             continue
@@ -214,7 +214,7 @@ def _actions_from_capability_packs(capability_packs: List[Any]) -> Set[str]:
     return valid
 
 
-def _actions_from_module_yamls(app_dir: Path) -> Set[str]:
+def _actions_from_module_yamls(app_dir: Path) -> set[str]:
     """
     Scan app_dir/modules/*/module.yaml and build action registry.
 
@@ -222,7 +222,7 @@ def _actions_from_module_yamls(app_dir: Path) -> Set[str]:
       "{module_id}/{action_id}"  (canonical form)
       "{action_id}"              (bare form, for pages that omit the module prefix)
     """
-    valid: Set[str] = set()
+    valid: set[str] = set()
     modules_dir = app_dir / "modules"
     if not modules_dir.is_dir():
         return valid
@@ -251,8 +251,8 @@ def _actions_from_module_yamls(app_dir: Path) -> Set[str]:
     return valid
 
 
-def _actions_from_generated_module_files(files: Dict[str, str]) -> Set[str]:
-    valid: Set[str] = set()
+def _actions_from_generated_module_files(files: dict[str, str]) -> set[str]:
+    valid: set[str] = set()
     for path, content in sorted(files.items()):
         if not path.startswith("modules/") or not path.endswith("/module.yaml"):
             continue
@@ -288,8 +288,8 @@ def _actions_from_generated_module_files(files: Dict[str, str]) -> Set[str]:
 # ---------------------------------------------------------------------------
 
 async def validate_wiring(
-    context_variables: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    context_variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Cross-reference page api_endpoint references against known module actions.
 
@@ -307,18 +307,18 @@ async def validate_wiring(
     """
     # ── Read context ──────────────────────────────────────────────────────
     generated_files = _generated_files_from_context(context_variables)
-    app_pages: List[Any] = _context_get(context_variables, "app_pages") or []
+    app_pages: list[Any] = _context_get(context_variables, "app_pages") or []
     if not app_pages:
         app_pages = _pages_from_generated_files(generated_files)
-    app_build_plan: Dict[str, Any] = _context_get(context_variables, "app_build_plan") or {}
-    generated_app_dir_str: Optional[str] = _context_get(context_variables, "generated_app_dir")
+    app_build_plan: dict[str, Any] = _context_get(context_variables, "app_build_plan") or {}
+    generated_app_dir_str: str | None = _context_get(context_variables, "generated_app_dir")
 
     # ── 1. Collect endpoint references from pages ─────────────────────────
     endpoint_refs = _extract_endpoint_refs(app_pages)
-    referenced_set: Set[str] = set()
-    endpoint_keys: Dict[Tuple[str, str, str], Optional[str]] = {}
-    invalid_refs: Set[Tuple[str, str, str]] = set()
-    invalid_endpoints: List[Dict[str, str]] = []
+    referenced_set: set[str] = set()
+    endpoint_keys: dict[tuple[str, str, str], str | None] = {}
+    invalid_refs: set[tuple[str, str, str]] = set()
+    invalid_endpoints: list[dict[str, str]] = []
     for page_name, section_id, endpoint in endpoint_refs:
         action_key, error = _endpoint_to_action_key(endpoint)
         endpoint_keys[(page_name, section_id, endpoint)] = action_key
@@ -336,14 +336,14 @@ async def validate_wiring(
             })
 
     # ── 2. Build module action registry ──────────────────────────────────
-    known_actions: Set[str] = set()
+    known_actions: set[str] = set()
 
     # Source A: capability_packs
     capability_packs = app_build_plan.get("capability_packs") or []
     known_actions.update(_actions_from_capability_packs(capability_packs))
 
     # Source B: modules/*/module.yaml on disk
-    app_dir: Optional[Path] = None
+    app_dir: Path | None = None
     if generated_app_dir_str:
         app_dir = Path(generated_app_dir_str)
     else:
@@ -367,8 +367,8 @@ async def validate_wiring(
         known_actions.update(_actions_from_generated_module_files(generated_files))
 
     # ── 3. Cross-reference ────────────────────────────────────────────────
-    wired: List[Dict[str, str]] = []
-    orphaned_pages: List[Dict[str, str]] = []
+    wired: list[dict[str, str]] = []
+    orphaned_pages: list[dict[str, str]] = []
 
     for page_name, section_id, endpoint in endpoint_refs:
         action_key = endpoint_keys.get((page_name, section_id, endpoint))
@@ -381,8 +381,8 @@ async def validate_wiring(
 
     # Orphaned actions: defined but never referenced by any page
     # Only consider the canonical "module/action" form to avoid bare-id duplication noise.
-    canonical_actions: Set[str] = {a for a in known_actions if "/" in a}
-    orphaned_actions: List[str] = sorted(
+    canonical_actions: set[str] = {a for a in known_actions if "/" in a}
+    orphaned_actions: list[str] = sorted(
         a for a in canonical_actions
         if a not in referenced_set and a.split("/")[1] not in referenced_set
     )
@@ -397,8 +397,8 @@ async def validate_wiring(
     blocking_pass: bool = not has_invalid_endpoints and (not has_orphaned_pages or no_registry)
 
     # ── 5. Build human-readable output ───────────────────────────────────
-    warnings: List[str] = []
-    failed_tests: List[Dict[str, Any]] = []
+    warnings: list[str] = []
+    failed_tests: list[dict[str, Any]] = []
 
     for item in invalid_endpoints:
         failed_tests.append({
@@ -467,7 +467,7 @@ async def validate_wiring(
     else:
         message = "Wiring check passed (advisory — registry or endpoints unavailable)."
 
-    check: Dict[str, Any] = {
+    check: dict[str, Any] = {
         "id": "module_action_wiring",
         "passed": blocking_pass,
         "message": message,
@@ -491,7 +491,7 @@ async def validate_wiring(
         },
     }
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "contract_version": "1.0",
         "passed": blocking_pass,
         "wired": wired,

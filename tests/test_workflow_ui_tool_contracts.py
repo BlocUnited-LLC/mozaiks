@@ -5,8 +5,6 @@ import re
 from pathlib import Path
 
 import pytest
-
-import pytest
 import yaml
 
 from mozaiksai.core.workflow.workflow_ui_catalog import get_workflow_shipped_component_names

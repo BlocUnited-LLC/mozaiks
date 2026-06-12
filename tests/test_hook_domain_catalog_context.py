@@ -10,11 +10,9 @@ Verifies:
 """
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -46,11 +44,11 @@ _CATALOG_PATH = _APPGEN_CATALOG_DIR / "domain_catalogs.yaml"
 class _FakeAgent:
     """Minimal agent stub matching the interface the hooks expect."""
 
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables or {}
-        self._update_calls: List[str] = []
+        self._update_calls: list[str] = []
 
     def update_system_message(self, message: str) -> None:
         self.system_message = message

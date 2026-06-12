@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pprint import pformat
-from typing import Any, Dict, List
+from typing import Any
 
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_contract import (
     validate_app_backend_admin_config,
 )
-
 
 _ADMIN_CONFIG_PATH = "services/admin_config.py"
 _ADMIN_ROUTE_PATH = "services/routes/admin.py"
@@ -36,7 +35,7 @@ def _indent_block(text: str, spaces: int) -> str:
     return "\n".join(f"{prefix}{line}" if line else line for line in text.splitlines())
 
 
-def _render_admin_config_module(payload: Dict[str, Any]) -> str:
+def _render_admin_config_module(payload: dict[str, Any]) -> str:
     # Config is already validated at codegen time — emit as a plain dict literal.
     rendered_payload = pformat(payload, sort_dicts=False, width=100)
     return (
@@ -47,7 +46,7 @@ def _render_admin_config_module(payload: Dict[str, Any]) -> str:
     )
 
 
-def build_app_backend_admin_code_files(raw: Any) -> List[Dict[str, str]]:
+def build_app_backend_admin_code_files(raw: Any) -> list[dict[str, str]]:
     """Render the canonical split service admin surface from typed config."""
 
     config = validate_app_backend_admin_config(raw)

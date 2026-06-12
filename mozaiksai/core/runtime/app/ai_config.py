@@ -5,6 +5,7 @@ from pathlib import Path
 
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 
+
 def resolve_runtime_ai_config(ai_config: object, *, app_root: Path | None = None) -> dict[str, Any]:
     _ = app_root
     return dict(ai_config) if isinstance(ai_config, dict) else {}

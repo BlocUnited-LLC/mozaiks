@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
 from mozaiksai.core.events.event_serialization import serialize_event_content
-
 
 RUNTIME_AGENT_OUTPUT_VALIDATED = "runtime.agent_output_validated"
 RUNTIME_PROCESS_COMPLETED = "runtime.process_completed"
@@ -25,12 +24,12 @@ def build_runtime_context_payload(
     chat_id: str,
     app_id: str,
     workflow_name: str,
-    turn_sequence: Optional[int] = None,
-    user_id: Optional[str] = None,
+    turn_sequence: int | None = None,
+    user_id: str | None = None,
     context_variables: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a sanitized runtime context snapshot for downstream listeners."""
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "chat_id": chat_id,
         "app_id": app_id,
         "workflow_name": workflow_name,
@@ -40,11 +39,11 @@ def build_runtime_context_payload(
     if user_id:
         payload["user_id"] = user_id
 
-    raw_ctx: Optional[Dict[str, Any]] = None
+    raw_ctx: dict[str, Any] | None = None
     if context_variables is not None:
-        if hasattr(context_variables, "data") and isinstance(getattr(context_variables, "data"), dict):
-            raw_ctx = dict(getattr(context_variables, "data"))
-        elif hasattr(context_variables, "to_dict") and callable(getattr(context_variables, "to_dict")):
+        if hasattr(context_variables, "data") and isinstance(context_variables.data, dict):
+            raw_ctx = dict(context_variables.data)
+        elif hasattr(context_variables, "to_dict") and callable(context_variables.to_dict):
             raw_ctx = dict(context_variables.to_dict())
         elif isinstance(context_variables, dict):
             raw_ctx = dict(context_variables)
@@ -64,14 +63,14 @@ def build_runtime_agent_output_validated_event(
     model_name: str,
     structured_data: Any,
     auto_tool_call: bool,
-    context: Optional[Dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
     source: str = "runtime",
-    turn_idempotency_key: Optional[str] = None,
+    turn_idempotency_key: str | None = None,
     pattern_context_ref: Any = None,
-    validation_passed: Optional[bool] = None,
-) -> Dict[str, Any]:
+    validation_passed: bool | None = None,
+) -> dict[str, Any]:
     """Build the canonical runtime payload for validated structured output."""
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "kind": RUNTIME_AGENT_OUTPUT_VALIDATED,
         "runtime_event_type": RUNTIME_AGENT_OUTPUT_VALIDATED,
         "agent": agent,
@@ -98,12 +97,12 @@ def build_artifact_lifecycle_event(
     artifact_kind: str,
     chat_id: str,
     workflow_name: str,
-    app_id: Optional[str] = None,
-    artifact_version_id: Optional[str] = None,
-    files_manifest: Optional[Any] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    app_id: str | None = None,
+    artifact_version_id: str | None = None,
+    files_manifest: Any | None = None,
+    metadata: dict[str, Any] | None = None,
     source: str = "runtime",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if event_type not in {
         ARTIFACT_EVENT_CREATED,
         ARTIFACT_EVENT_UPDATED,
@@ -112,7 +111,7 @@ def build_artifact_lifecycle_event(
     }:
         raise ValueError(f"Unsupported artifact lifecycle event type: {event_type}")
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "kind": event_type,
         "runtime_event_type": event_type,
         "artifact_id": artifact_id,

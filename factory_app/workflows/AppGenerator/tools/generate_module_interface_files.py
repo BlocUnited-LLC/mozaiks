@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _SCHEMA_VERSION = "mozaiks.module_interface.v1"
 
 
-def _extract_cv(context_variables: Any, key: str) -> Optional[str]:
+def _extract_cv(context_variables: Any, key: str) -> str | None:
     """Extract a string value from a context_variables list or dict."""
     if isinstance(context_variables, dict):
         value = context_variables.get(key)
@@ -37,7 +37,7 @@ def _extract_cv(context_variables: Any, key: str) -> Optional[str]:
     return None
 
 
-def _parse_json_list(raw: Optional[str], field: str, task_id: str) -> List[Dict[str, Any]]:
+def _parse_json_list(raw: str | None, field: str, task_id: str) -> list[dict[str, Any]]:
     if not raw or not raw.strip():
         return []
     try:
@@ -52,8 +52,8 @@ def _parse_json_list(raw: Optional[str], field: str, task_id: str) -> List[Dict[
 
 
 def generate_module_interface_files(
-    build_plan: Optional[Dict[str, Any]],
-) -> List[Dict[str, str]]:
+    build_plan: dict[str, Any] | None,
+) -> list[dict[str, str]]:
     """
     Generate module_interface.yaml code_file entries from agent_backend_integration tasks.
 
@@ -70,7 +70,7 @@ def generate_module_interface_files(
     if not isinstance(build_tasks, list):
         return []
 
-    files: List[Dict[str, str]] = []
+    files: list[dict[str, str]] = []
 
     for task in build_tasks:
         if not isinstance(task, dict):
@@ -100,7 +100,7 @@ def generate_module_interface_files(
                 workflow_name,
             )
 
-        manifest: Dict[str, Any] = {
+        manifest: dict[str, Any] = {
             "schema_version": _SCHEMA_VERSION,
             "module_actions": [
                 {

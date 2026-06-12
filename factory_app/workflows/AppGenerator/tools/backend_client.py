@@ -9,13 +9,13 @@ Extends the core BackendClient with methods specific to the AppGenerator workflo
 - Database Provisioning
 """
 
-import os
 import base64
+import os
 import zipfile
-from typing import Any, Dict, Optional, List
+from typing import Any
 
-from mozaiksai.core.workflow.generator_support.backend_client import BackendClient
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.workflow.generator_support.backend_client import BackendClient
 
 logger = get_workflow_logger("app_gen_backend_client")
 
@@ -28,11 +28,11 @@ class AppGeneratorBackendClient(BackendClient):
     # App Generation & Specs
     # ------------------------------------------------------------------
 
-    async def get_app_spec(self, app_id: str) -> Dict[str, Any]:
+    async def get_app_spec(self, app_id: str) -> dict[str, Any]:
         """GET /api/apps/{appId}/appgen/spec"""
         return await self.get(f"/api/apps/{app_id}/appgen/spec", error_msg="Failed to get app spec")
 
-    async def get_supported_stacks(self) -> Dict[str, Any]:
+    async def get_supported_stacks(self) -> dict[str, Any]:
         """GET /api/appgen/supported-stacks"""
         return await self.get("/api/appgen/supported-stacks", error_msg="Failed to get supported stacks")
 
@@ -40,7 +40,7 @@ class AppGeneratorBackendClient(BackendClient):
     # Deployment & Repo Operations
     # ------------------------------------------------------------------
 
-    async def get_repo_manifest(self, app_id: str, repo_url: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_repo_manifest(self, app_id: str, repo_url: str, user_id: str | None = None) -> dict[str, Any]:
         """POST /api/apps/{appId}/deploy/repo/manifest"""
         payload = {
             "repoUrl": repo_url,
@@ -48,7 +48,7 @@ class AppGeneratorBackendClient(BackendClient):
         }
         return await self.post(f"/api/apps/{app_id}/deploy/repo/manifest", json=payload, error_msg="Failed to get repo manifest")
 
-    async def initial_export(self, app_id: str, bundle_path: str, repo_name: Optional[str], commit_message: Optional[str], user_id: Optional[str]) -> Dict[str, Any]:
+    async def initial_export(self, app_id: str, bundle_path: str, repo_name: str | None, commit_message: str | None, user_id: str | None) -> dict[str, Any]:
         """POST /api/apps/{appId}/deploy/repo/initial-export"""
         
         files_payload = []
@@ -82,7 +82,7 @@ class AppGeneratorBackendClient(BackendClient):
 
         return await self.post(f"/api/apps/{app_id}/deploy/repo/initial-export", json=payload, error_msg="Failed to export app")
 
-    async def create_pull_request(self, app_id: str, repo_url: str, base_commit_sha: str, branch_name: str, title: str, body: str, changes: List[Dict], conflicts: List[Dict], patch_id: Optional[str], user_id: Optional[str]) -> Dict[str, Any]:
+    async def create_pull_request(self, app_id: str, repo_url: str, base_commit_sha: str, branch_name: str, title: str, body: str, changes: list[dict], conflicts: list[dict], patch_id: str | None, user_id: str | None) -> dict[str, Any]:
         """POST /api/apps/{appId}/deploy/repo/pull-requests"""
         
         payload = {
@@ -100,12 +100,12 @@ class AppGeneratorBackendClient(BackendClient):
     async def generate_template(
         self,
         app_id: str,
-        tech_stack: Dict[str, Any],
+        tech_stack: dict[str, Any],
         include_workflow: bool = True,
         include_dockerfiles: bool = True,
-        deployment_profile: Optional[str] = None,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        deployment_profile: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """POST /api/apps/{appId}/deploy/templates/generate"""
         payload = {
             "userId": user_id,
@@ -120,14 +120,14 @@ class AppGeneratorBackendClient(BackendClient):
     async def generate_scaffold(
         self,
         app_id: str,
-        dependencies: Dict[str, List[str]],
-        tech_stack_override: Optional[Dict[str, Any]] = None,
+        dependencies: dict[str, list[str]],
+        tech_stack_override: dict[str, Any] | None = None,
         include_dockerfiles: bool = True,
         include_workflow: bool = True,
         include_compose: bool = False,
-        deployment_profile: Optional[str] = None,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        deployment_profile: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """POST /api/apps/{appId}/deploy/scaffold"""
         payload = {
             "userId": user_id,
@@ -142,12 +142,12 @@ class AppGeneratorBackendClient(BackendClient):
         }
         return await self.post(f"/api/apps/{app_id}/deploy/scaffold", json=payload, error_msg="Failed to generate scaffold")
 
-    async def get_database_status(self, app_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def get_database_status(self, app_id: str, user_id: str | None = None) -> dict[str, Any]:
         """GET /api/apps/{appId}/database/status"""
         params = {"userId": user_id or "mozaiksai"}
         return await self.get(f"/api/apps/{app_id}/database/status", params=params, error_msg="Failed to get database status")
 
-    async def get_artifact_schema(self, app_id: str, artifact_version_id: str) -> Dict[str, Any]:
+    async def get_artifact_schema(self, app_id: str, artifact_version_id: str) -> dict[str, Any]:
         """
         GET /api/apps/{appId}/database/schema/{artifactVersionId}
 
@@ -166,9 +166,9 @@ class AppGeneratorBackendClient(BackendClient):
     async def apply_schema_migration(
         self,
         app_id: str,
-        migration: Dict[str, Any],
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        migration: dict[str, Any],
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         POST /api/apps/{appId}/database/migrate
 

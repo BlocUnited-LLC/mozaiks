@@ -15,21 +15,25 @@ import builtins
 import json
 import os
 import re
-import shutil
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
 import yaml
+
+from factory_app.workflows._shared.workflow_integration import (
+    workflow_integration_metadata_from_context,
+)
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    collect_generated_app_file_map,
+    extract_code_file_map_from_payload,
+)
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     local_app_validation_available,
     resolve_app_validation_strategy,
-)
-from factory_app.workflows.AppGenerator.tools.code_file_utils import (
-    collect_generated_app_file_map,
-    extract_code_file_map_from_payload,
 )
 
 
@@ -37,7 +41,7 @@ def _local_validation_available() -> bool:
     return local_app_validation_available()
 
 
-def _base_result(*, strategy: str, status: str) -> Dict[str, Any]:
+def _base_result(*, strategy: str, status: str) -> dict[str, Any]:
     return {
         "success": status != "failed",
         "validation_strategy": strategy,
@@ -53,7 +57,7 @@ def _base_result(*, strategy: str, status: str) -> Dict[str, Any]:
     return None
 
 
-def _safe_relpath(raw: str) -> Optional[str]:
+def _safe_relpath(raw: str) -> str | None:
     if not isinstance(raw, str):
         return None
     path = raw.replace("\\", "/").strip()
@@ -75,8 +79,8 @@ def _is_truthy(value: Any) -> bool:
     return bool(value)
 
 
-def _extract_code_files(collected: Dict[str, Any]) -> Dict[str, str]:
-    out: Dict[str, str] = {}
+def _extract_code_files(collected: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
     for _agent_name, data in (collected or {}).items():
         if not isinstance(data, dict):
             continue
@@ -84,14 +88,14 @@ def _extract_code_files(collected: Dict[str, Any]) -> Dict[str, str]:
     return out
 
 
-def _append_command_output(result: Dict[str, Any], *, command: str, stdout: str, stderr: str) -> None:
+def _append_command_output(result: dict[str, Any], *, command: str, stdout: str, stderr: str) -> None:
     result["build_output"] += f"\n=== {command} ===\n"
     result["build_output"] += stdout or ""
     if stderr:
         result["build_output"] += "\n" + stderr
 
 
-def _read_package_scripts_from_text(package_text: str) -> Dict[str, Any]:
+def _read_package_scripts_from_text(package_text: str) -> dict[str, Any]:
     try:
         pkg = json.loads(package_text) if isinstance(package_text, str) else {}
     except Exception:
@@ -100,7 +104,7 @@ def _read_package_scripts_from_text(package_text: str) -> Dict[str, Any]:
     return scripts if isinstance(scripts, dict) else {}
 
 
-def _read_package_scripts_from_dir(root: Path) -> Dict[str, Any]:
+def _read_package_scripts_from_dir(root: Path) -> dict[str, Any]:
     package_path = root / "package.json"
     if not package_path.exists():
         return {}
@@ -115,8 +119,8 @@ async def _run_local_command(
     command: str,
     cwd: Path,
     timeout_seconds: int,
-    env: Optional[Dict[str, str]] = None,
-) -> Tuple[int, str, str]:
+    env: dict[str, str] | None = None,
+) -> tuple[int, str, str]:
     process = await asyncio.create_subprocess_shell(
         command,
         cwd=str(cwd),
@@ -126,21 +130,21 @@ async def _run_local_command(
     )
     try:
         stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError as exc:
         process.kill()
         await process.communicate()
-        raise RuntimeError(f"Command timed out after {timeout_seconds}s: {command}")
+        raise RuntimeError(f"Command timed out after {timeout_seconds}s: {command}") from exc
 
     stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
     stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
     return int(process.returncode or 0), stdout, stderr
 
 
-def parse_build_errors(build_output: str) -> List[Dict[str, Any]]:
+def parse_build_errors(build_output: str) -> list[dict[str, Any]]:
     if not isinstance(build_output, str) or not build_output:
         return []
 
-    errors: List[Dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
 
     ts_pattern = r"([^\s]+):(\d+):(\d+)\s*[-–]\s*error\s+\w+:\s*(.+)"
     for match in re.finditer(ts_pattern, build_output):
@@ -169,12 +173,12 @@ def parse_build_errors(build_output: str) -> List[Dict[str, Any]]:
 
 async def _resolve_files(
     *,
-    files: Optional[Dict[str, str]],
-    context_variables: Optional[Any],
+    files: dict[str, str] | None,
+    context_variables: Any | None,
     wf_logger,
-) -> Tuple[Dict[str, str], Optional[str], Optional[str]]:
+) -> tuple[dict[str, str], str | None, str | None]:
     if isinstance(files, dict) and files:
-        safe_files: Dict[str, str] = {}
+        safe_files: dict[str, str] = {}
         for raw_path, content in files.items():
             safe = _safe_relpath(str(raw_path))
             if not safe:
@@ -190,7 +194,7 @@ async def _resolve_files(
             app_id = context_variables.get("app_id")
             ctx_files = context_variables.get("generated_files")
             if isinstance(ctx_files, dict) and ctx_files:
-                safe_ctx: Dict[str, str] = {}
+                safe_ctx: dict[str, str] = {}
                 for raw_path, content in ctx_files.items():
                     safe = _safe_relpath(str(raw_path))
                     if not safe:
@@ -218,7 +222,7 @@ async def _resolve_files(
     return resolved, str(chat_id), str(app_id)
 
 
-def _write_files_to_dir(root: Path, files_map: Dict[str, str]) -> None:
+def _write_files_to_dir(root: Path, files_map: dict[str, str]) -> None:
     for rel_path, content in files_map.items():
         safe = _safe_relpath(rel_path)
         if not safe:
@@ -228,7 +232,7 @@ def _write_files_to_dir(root: Path, files_map: Dict[str, str]) -> None:
         out_path.write_text(str(content), encoding="utf-8")
 
 
-def _generated_files_from_context(context_variables: Optional[Any]) -> Dict[str, str]:
+def _generated_files_from_context(context_variables: Any | None) -> dict[str, str]:
     if context_variables is None or not hasattr(context_variables, "get"):
         return {}
     try:
@@ -238,7 +242,7 @@ def _generated_files_from_context(context_variables: Optional[Any]) -> Dict[str,
     if not isinstance(raw, dict):
         return {}
 
-    files: Dict[str, str] = {}
+    files: dict[str, str] = {}
     for raw_path, content in raw.items():
         safe = _safe_relpath(str(raw_path))
         if safe:
@@ -246,8 +250,8 @@ def _generated_files_from_context(context_variables: Optional[Any]) -> Dict[str,
     return files
 
 
-def _normalize_module_yaml(path: str, content: str) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
-    failed: List[Dict[str, Any]] = []
+def _normalize_module_yaml(path: str, content: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    failed: list[dict[str, Any]] = []
     try:
         parsed = yaml.safe_load(content) or {}
     except Exception as exc:
@@ -287,21 +291,21 @@ def _normalize_module_yaml(path: str, content: str) -> Tuple[Optional[Dict[str, 
     }, failed
 
 
-def _iter_module_yamls(files: Dict[str, str]) -> Iterable[Tuple[str, str]]:
+def _iter_module_yamls(files: dict[str, str]) -> Iterable[tuple[str, str]]:
     for path, content in sorted(files.items()):
         parts = PurePosixPath(path).parts
         if len(parts) == 3 and parts[0] == "modules" and parts[2] == "module.yaml":
             yield path, content
 
 
-def _iter_backend_python(files: Dict[str, str]) -> Iterable[Tuple[str, str]]:
+def _iter_backend_python(files: dict[str, str]) -> Iterable[tuple[str, str]]:
     for path, content in sorted(files.items()):
         parts = PurePosixPath(path).parts
         if len(parts) >= 4 and parts[0] == "modules" and parts[2] == "backend" and path.endswith(".py"):
             yield path, content
 
 
-def _parse_python(path: str, content: str) -> Tuple[Optional[ast.Module], Optional[Dict[str, Any]]]:
+def _parse_python(path: str, content: str) -> tuple[ast.Module | None, dict[str, Any] | None]:
     try:
         return ast.parse(content, filename=path), None
     except SyntaxError as exc:
@@ -313,8 +317,8 @@ def _parse_python(path: str, content: str) -> Tuple[Optional[ast.Module], Option
         }
 
 
-def _defined_module_names(tree: ast.Module) -> Set[str]:
-    names: Set[str] = set(dir(builtins))
+def _defined_module_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set(dir(builtins))
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names.add(node.name)
@@ -335,9 +339,9 @@ def _defined_module_names(tree: ast.Module) -> Set[str]:
     return names
 
 
-def _module_level_name_warnings(path: str, tree: ast.Module) -> List[Dict[str, Any]]:
+def _module_level_name_warnings(path: str, tree: ast.Module) -> list[dict[str, Any]]:
     defined = _defined_module_names(tree)
-    failed: List[Dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
     for node in tree.body:
         if not isinstance(node, ast.ClassDef):
             continue
@@ -360,9 +364,9 @@ def _module_level_name_warnings(path: str, tree: ast.Module) -> List[Dict[str, A
     return failed
 
 
-def _backend_pass_statement_failures(path: str, tree: ast.Module) -> List[Dict[str, Any]]:
-    failed: List[Dict[str, Any]] = []
-    parents: Dict[ast.AST, ast.AST] = {}
+def _backend_pass_statement_failures(path: str, tree: ast.Module) -> list[dict[str, Any]]:
+    failed: list[dict[str, Any]] = []
+    parents: dict[ast.AST, ast.AST] = {}
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
             parents[child] = parent
@@ -394,7 +398,7 @@ def _backend_pass_statement_failures(path: str, tree: ast.Module) -> List[Dict[s
 def _class_method_nodes(
     tree: ast.Module,
     class_name: str,
-) -> Optional[Dict[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None:
     for node in tree.body:
         if not isinstance(node, ast.ClassDef) or node.name != class_name:
             continue
@@ -406,8 +410,8 @@ def _class_method_nodes(
     return None
 
 
-def _all_method_nodes(tree: ast.Module) -> Dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
-    methods: Dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+def _all_method_nodes(tree: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    methods: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     for node in tree.body:
         if not isinstance(node, ast.ClassDef):
             continue
@@ -417,7 +421,7 @@ def _all_method_nodes(tree: ast.Module) -> Dict[str, ast.FunctionDef | ast.Async
     return methods
 
 
-def _input_schema_required_fields(action: Dict[str, Any]) -> Set[str]:
+def _input_schema_required_fields(action: dict[str, Any]) -> set[str]:
     input_schema = action.get("input_schema")
     if not isinstance(input_schema, dict):
         return set()
@@ -427,7 +431,7 @@ def _input_schema_required_fields(action: Dict[str, Any]) -> Set[str]:
     return {str(item).strip() for item in required if str(item).strip()}
 
 
-def _input_schema_declared_fields(action: Dict[str, Any]) -> Set[str]:
+def _input_schema_declared_fields(action: dict[str, Any]) -> set[str]:
     input_schema = action.get("input_schema")
     if not isinstance(input_schema, dict):
         return set()
@@ -445,12 +449,12 @@ def _input_schema_declared_fields(action: Dict[str, Any]) -> Set[str]:
 def _validate_handler_signature(
     *,
     method_node: ast.FunctionDef | ast.AsyncFunctionDef,
-    action: Dict[str, Any],
+    action: dict[str, Any],
     handler_path: str,
     class_name: str,
     action_id: str,
-) -> List[Dict[str, Any]]:
-    failed: List[Dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    failed: list[dict[str, Any]] = []
     positional = list(method_node.args.posonlyargs) + list(method_node.args.args)
     if positional and positional[0].arg in {"self", "cls"}:
         action_args = positional[1:]
@@ -539,8 +543,8 @@ def _method_reads_synthetic_payload(method_node: ast.FunctionDef | ast.AsyncFunc
     return False
 
 
-def _method_params_keys(method_node: ast.FunctionDef | ast.AsyncFunctionDef) -> Set[str]:
-    keys: Set[str] = set()
+def _method_params_keys(method_node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    keys: set[str] = set()
     for child in ast.walk(method_node):
         if isinstance(child, ast.Subscript):
             if isinstance(child.value, ast.Name) and child.value.id == "params":
@@ -562,7 +566,7 @@ def _method_params_keys(method_node: ast.FunctionDef | ast.AsyncFunctionDef) -> 
     return keys
 
 
-def validate_module_implementation_contract(files: Dict[str, str]) -> Dict[str, Any]:
+def validate_module_implementation_contract(files: dict[str, str]) -> dict[str, Any]:
     """Validate assembled module contracts against generated backend code.
 
     This is the final deterministic app validation boundary. Agent-local quality
@@ -570,10 +574,10 @@ def validate_module_implementation_contract(files: Dict[str, str]) -> Dict[str, 
     ``generated_files`` bundle that DownloadAgent would otherwise package.
     """
 
-    failed_tests: List[Dict[str, Any]] = []
-    warnings: List[str] = []
-    module_reports: List[Dict[str, Any]] = []
-    parsed_backend: Dict[str, ast.Module] = {}
+    failed_tests: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    module_reports: list[dict[str, Any]] = []
+    parsed_backend: dict[str, ast.Module] = {}
 
     for path, content in _iter_backend_python(files):
         tree, failure = _parse_python(path, content)
@@ -801,11 +805,11 @@ def validate_module_implementation_contract(files: Dict[str, str]) -> Dict[str, 
 async def _run_sandbox_validation(
     *,
     strategy: str,
-    resolved_files: Dict[str, str],
-    commands: List[str],
+    resolved_files: dict[str, str],
+    commands: list[str],
     start_dev_server: bool,
     timeout_seconds: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run build validation through a SandboxPort adapter (e2b or docker)."""
     from mozaiksai.core.adapters import get_sandbox_adapter
 
@@ -818,7 +822,7 @@ async def _run_sandbox_validation(
         }
 
     result = _base_result(strategy=strategy, status="passed")
-    session_id: Optional[str] = None
+    session_id: str | None = None
     try:
         session = await adapter.create_session(timeout_seconds=timeout_seconds)
         session_id = session.session_id
@@ -916,11 +920,11 @@ async def _run_sandbox_validation(
 
 async def _run_local_validation(
     *,
-    resolved_files: Dict[str, str],
-    commands: List[str],
+    resolved_files: dict[str, str],
+    commands: list[str],
     start_dev_server: bool,
     timeout_seconds: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not _local_validation_available():
         return {
             **_base_result(strategy="local", status="failed"),
@@ -983,7 +987,7 @@ async def _run_local_validation(
         }
 
 
-def _trim_validation_result(result: Dict[str, Any]) -> Dict[str, Any]:
+def _trim_validation_result(result: dict[str, Any]) -> dict[str, Any]:
     app_validation_result = dict(result)
     build_out = app_validation_result.get("build_output")
     try:
@@ -1001,7 +1005,7 @@ def _trim_validation_result(result: Dict[str, Any]) -> Dict[str, Any]:
     return app_validation_result
 
 
-def _persist_validation_context(*, context_variables: Optional[Any], result: Dict[str, Any]) -> None:
+def _persist_validation_context(*, context_variables: Any | None, result: dict[str, Any]) -> None:
     if context_variables is None or not hasattr(context_variables, "set"):
         return
     try:
@@ -1013,14 +1017,513 @@ def _persist_validation_context(*, context_variables: Optional[Any], result: Dic
         pass
 
 
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
+    if context_variables is None:
+        return
+    if isinstance(context_variables, dict):
+        context_variables[key] = value
+        return
+    if not hasattr(context_variables, "set"):
+        return
+    try:
+        context_variables.set(key, value)
+    except Exception:
+        pass
+
+
+def _capability_packs_from_context(context_variables: Any | None) -> list[dict[str, Any]]:
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return []
+    try:
+        app_build_plan = context_variables.get("app_build_plan")
+    except Exception:
+        app_build_plan = None
+    if not isinstance(app_build_plan, dict):
+        return []
+    packs = app_build_plan.get("capability_packs")
+    if not isinstance(packs, list):
+        return []
+    return [pack for pack in packs if isinstance(pack, dict)]
+
+
+def _safe_files_map(files: dict[str, str] | None) -> dict[str, str]:
+    if not isinstance(files, dict):
+        return {}
+    safe_files: dict[str, str] = {}
+    for raw_path, content in files.items():
+        safe = _safe_relpath(str(raw_path))
+        if safe:
+            safe_files[safe] = str(content)
+    return safe_files
+
+
+def _check_result(
+    *,
+    check_id: str,
+    passed: bool,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": check_id,
+        "passed": bool(passed),
+        "message": message,
+        "details": details or {},
+    }
+
+
+def _result_check(result: dict[str, Any], *, default_id: str, default_message: str) -> dict[str, Any]:
+    checks = result.get("checks")
+    if isinstance(checks, list) and checks and isinstance(checks[0], dict):
+        return dict(checks[0])
+    return _check_result(
+        check_id=default_id,
+        passed=bool(result.get("passed")),
+        message=default_message,
+    )
+
+
+def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
+    from .module_runtime_quality import audit_module_runtime_quality
+
+    runtime_quality_warnings = audit_module_runtime_quality(
+        [
+            {"filename": path, "content": content}
+            for path, content in sorted(generated_files.items())
+        ]
+    )
+    return {
+        "contract_version": "1.0",
+        "passed": not runtime_quality_warnings,
+        "warnings": runtime_quality_warnings,
+        "checks": [
+            {
+                "id": "module_runtime_quality",
+                "passed": not runtime_quality_warnings,
+                "message": (
+                    "Generated module runtime code contains no placeholder runtime logic."
+                    if not runtime_quality_warnings
+                    else f"{len(runtime_quality_warnings)} generated module runtime quality issue(s) found."
+                ),
+                "details": {
+                    "warning_count": len(runtime_quality_warnings),
+                },
+            }
+        ],
+    }
+
+
+async def _agent_backend_integration_result(context_variables: Any | None) -> dict[str, Any]:
+    if _context_has_agent_backend(context_variables):
+        from .integration_tests import run_integration_tests
+
+        return await run_integration_tests(
+            files={},
+            context_variables=context_variables,
+        )
+    return {
+        "contract_version": "1.0",
+        "passed": True,
+        "checks": [
+            {
+                "id": "agent_backend_integration_not_required",
+                "passed": True,
+                "message": "No agent backend context is present for this app build.",
+                "details": {"blocking": False, "severity": "info"},
+            }
+        ],
+        "warnings": [],
+        "failed_tests": [],
+    }
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _load_yaml_mapping_for_gate(path: str, content: str, failed_tests: list[dict[str, Any]]) -> dict[str, Any] | None:
+    try:
+        parsed = yaml.safe_load(content) or {}
+    except Exception as exc:
+        failed_tests.append(
+            {
+                "test": "workflow_integration_yaml_parse",
+                "path": path,
+                "error": f"{path} could not be parsed as YAML: {exc}",
+                "fix_suggestion": "Emit valid YAML for workflow integration module contracts.",
+            }
+        )
+        return None
+    if not isinstance(parsed, dict):
+        failed_tests.append(
+            {
+                "test": "workflow_integration_yaml_shape",
+                "path": path,
+                "error": f"{path} must contain a YAML object.",
+                "fix_suggestion": "Emit workflow integration contracts as mappings.",
+            }
+        )
+        return None
+    return parsed
+
+
+def _collect_workflow_integration_wiring(files: dict[str, str]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    failed_tests: list[dict[str, Any]] = []
+    wiring: dict[str, Any] = {
+        "workflow_capabilities": [],
+        "declared_events": set(),
+        "action_emits": set(),
+        "capability_reactions": set(),
+    }
+
+    for path, content in sorted(files.items()):
+        parts = PurePosixPath(path).parts
+        if len(parts) == 3 and parts[0] == "modules" and parts[2] == "module.yaml":
+            parsed = _load_yaml_mapping_for_gate(path, content, failed_tests)
+            if parsed is None:
+                continue
+            module_id = str((parsed.get("module") or {}).get("id") or parts[1]).strip()
+            for action in parsed.get("actions") or []:
+                if not isinstance(action, dict):
+                    continue
+                for event_type in _as_string_list(action.get("emits")):
+                    wiring["action_emits"].add(event_type)
+            for capability in parsed.get("capabilities") or []:
+                if not isinstance(capability, dict) or capability.get("kind") != "workflow":
+                    continue
+                capability_id = str(capability.get("capability_id") or "").strip()
+                target = str(capability.get("target") or "").strip()
+                if capability_id:
+                    wiring["workflow_capabilities"].append(
+                        {
+                            "module_id": module_id,
+                            "path": path,
+                            "capability_id": capability_id,
+                            "target": target,
+                        }
+                    )
+        elif len(parts) == 4 and parts[0] == "modules" and parts[2] == "contracts" and parts[3] == "events.yaml":
+            parsed = _load_yaml_mapping_for_gate(path, content, failed_tests)
+            if parsed is None:
+                continue
+            for event in parsed.get("events") or []:
+                if isinstance(event, dict) and str(event.get("type") or "").strip():
+                    wiring["declared_events"].add(str(event["type"]).strip())
+        elif len(parts) == 4 and parts[0] == "modules" and parts[2] == "contracts" and parts[3] == "reactions.yaml":
+            parsed = _load_yaml_mapping_for_gate(path, content, failed_tests)
+            if parsed is None:
+                continue
+            for reaction in parsed.get("reactions") or []:
+                if not isinstance(reaction, dict):
+                    continue
+                event_type = str(reaction.get("event_type") or "").strip()
+                target = reaction.get("target")
+                if not event_type or not isinstance(target, dict):
+                    continue
+                if target.get("kind") == "capability" and str(target.get("capability_id") or "").strip():
+                    wiring["capability_reactions"].add((event_type, str(target["capability_id"]).strip()))
+
+    return wiring, failed_tests
+
+
+def validate_workflow_integration_contract(
+    generated_files: dict[str, str],
+    context_variables: Any | None,
+) -> dict[str, Any]:
+    metadata = workflow_integration_metadata_from_context(context_variables)
+    if not metadata:
+        return {
+            "contract_version": "1.0",
+            "passed": True,
+            "checks": [
+                _check_result(
+                    check_id="workflow_integration_not_required",
+                    passed=True,
+                    message="No workflow_bundle integration metadata is present for this app build.",
+                    details={"blocking": False, "severity": "info"},
+                )
+            ],
+            "failed_tests": [],
+            "warnings": [],
+            "workflow_count": 0,
+        }
+
+    wiring, failed_tests = _collect_workflow_integration_wiring(generated_files)
+    workflow_capabilities = wiring["workflow_capabilities"]
+    declared_events = wiring["declared_events"]
+    action_emits = wiring["action_emits"]
+    capability_reactions = wiring["capability_reactions"]
+
+    for workflow in metadata.get("workflows") or []:
+        if not isinstance(workflow, dict):
+            continue
+        workflow_name = str(workflow.get("workflow_name") or "").strip()
+        capability_id = str(workflow.get("capability_id") or "").strip()
+        if not workflow_name or not capability_id:
+            continue
+        matching_capability = next(
+            (
+                capability
+                for capability in workflow_capabilities
+                if capability["capability_id"] == capability_id
+                and capability["target"] == workflow_name
+            ),
+            None,
+        )
+        if matching_capability is None:
+            failed_tests.append(
+                {
+                    "test": "workflow_capability_declared",
+                    "path": "modules/*/module.yaml",
+                    "error": (
+                        f"Workflow {workflow_name!r} must be declared as a module workflow capability "
+                        f"with capability_id {capability_id!r}."
+                    ),
+                    "fix_suggestion": (
+                        "Add a capabilities[] entry with kind: workflow, "
+                        f"capability_id: {capability_id}, and target: {workflow_name}."
+                    ),
+                }
+            )
+        for trigger_event in workflow.get("trigger_events") or []:
+            if not isinstance(trigger_event, dict):
+                continue
+            event_type = str(trigger_event.get("event_type") or "").strip()
+            if not event_type:
+                continue
+            if event_type not in declared_events:
+                failed_tests.append(
+                    {
+                        "test": "workflow_trigger_event_declared",
+                        "path": "modules/*/contracts/events.yaml",
+                        "error": (
+                            f"Workflow trigger event {event_type!r} is not declared in contracts/events.yaml."
+                        ),
+                        "fix_suggestion": (
+                            "Declare the domain/platform/hosted event in the owning module's "
+                            "contracts/events.yaml."
+                        ),
+                    }
+                )
+            if event_type not in action_emits:
+                failed_tests.append(
+                    {
+                        "test": "workflow_trigger_event_emitted",
+                        "path": "modules/*/module.yaml",
+                        "error": (
+                            f"Workflow trigger event {event_type!r} is not emitted by any module action."
+                        ),
+                        "fix_suggestion": (
+                            "Add the event type to the emits[] list on the action that commits "
+                            "the triggering domain fact."
+                        ),
+                    }
+                )
+            if (event_type, capability_id) not in capability_reactions:
+                failed_tests.append(
+                    {
+                        "test": "workflow_trigger_reaction_declared",
+                        "path": "modules/*/contracts/reactions.yaml",
+                        "error": (
+                            f"Workflow trigger event {event_type!r} is not routed to capability "
+                            f"{capability_id!r} by contracts/reactions.yaml."
+                        ),
+                        "fix_suggestion": (
+                            "Add a reactions[] entry with event_type, target.kind: capability, "
+                            f"and target.capability_id: {capability_id}."
+                        ),
+                    }
+                )
+
+    passed = not failed_tests
+    return {
+        "contract_version": "1.0",
+        "passed": passed,
+        "checks": [
+            _check_result(
+                check_id="workflow_integration_contract",
+                passed=passed,
+                message=(
+                    "Generated app bundle wires AgentGenerator workflow metadata through module capabilities, events, and reactions."
+                    if passed
+                    else f"{len(failed_tests)} workflow integration issue(s) found."
+                ),
+                details={
+                    "workflow_count": len(metadata.get("workflows") or []),
+                    "workflow_capability_count": len(workflow_capabilities),
+                    "failed_test_count": len(failed_tests),
+                },
+            )
+        ],
+        "failed_tests": failed_tests,
+        "warnings": [],
+        "metadata": metadata,
+    }
+
+
+async def run_app_bundle_acceptance_gate(
+    *,
+    files: dict[str, str] | None = None,
+    context_variables: Any | None = None,
+    capability_packs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run the deterministic app-bundle acceptance gate.
+
+    This is the no-live-call boundary before an app bundle can be exported,
+    registered as validated, or promoted.
+    """
+
+    generated_files = _safe_files_map(files) or _generated_files_from_context(context_variables)
+    selected_capability_packs = (
+        [pack for pack in capability_packs if isinstance(pack, dict)]
+        if isinstance(capability_packs, list)
+        else _capability_packs_from_context(context_variables)
+    )
+
+    if generated_files:
+        _context_set(context_variables, "generated_files", generated_files)
+
+    from .generated_bundle_scanner import scan_generated_bundle
+    from .validate_wiring import validate_wiring
+
+    required_bundle_errors: list[str] = []
+    if not generated_files:
+        required_bundle_errors.append("No generated files were available for app-bundle acceptance.")
+    if "app.json" not in generated_files:
+        required_bundle_errors.append("Generated app bundles must include app.json.")
+
+    scanner_errors = scan_generated_bundle(
+        generated_files,
+        capability_packs=selected_capability_packs,
+    )
+    all_scan_errors = [*required_bundle_errors, *scanner_errors]
+    bundle_scan_result = {
+        "contract_version": "1.0",
+        "passed": not all_scan_errors,
+        "errors": all_scan_errors,
+        "checks": [
+            _check_result(
+                check_id="generated_bundle_scan",
+                passed=not all_scan_errors,
+                message=(
+                    "Generated app bundle passed canonical path, data, secret, and hosted-boundary scanning."
+                    if not all_scan_errors
+                    else "Generated app bundle failed canonical scanner checks."
+                ),
+                details={
+                    "error_count": len(all_scan_errors),
+                    "errors": all_scan_errors,
+                },
+            )
+        ],
+    }
+
+    agent_integration_result = await _agent_backend_integration_result(context_variables)
+    wiring_result = await validate_wiring(context_variables=context_variables)
+    module_implementation_result = validate_module_implementation_contract(generated_files)
+    runtime_quality_result = _runtime_quality_result(generated_files)
+    workflow_integration_result = validate_workflow_integration_contract(
+        generated_files,
+        context_variables,
+    )
+
+    subresults = {
+        "bundle_scan": bundle_scan_result,
+        "agent_backend": agent_integration_result,
+        "module_wiring": wiring_result,
+        "module_implementation": module_implementation_result,
+        "module_runtime_quality": runtime_quality_result,
+        "workflow_integration": workflow_integration_result,
+    }
+    passed_by_check = {
+        name: bool(result.get("passed"))
+        for name, result in subresults.items()
+    }
+    failed = sorted(name for name, passed in passed_by_check.items() if not passed)
+    completed = sorted(name for name, passed in passed_by_check.items() if passed)
+    acceptance_passed = not failed
+
+    failed_tests: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for name, result in subresults.items():
+        for item in result.get("failed_tests") or []:
+            if isinstance(item, dict):
+                failed_tests.append({"gate": name, **item})
+        for warning in result.get("warnings") or []:
+            warnings.append(f"{name}: {warning}")
+        if name == "bundle_scan":
+            for error in result.get("errors") or []:
+                failed_tests.append(
+                    {
+                        "gate": name,
+                        "test": "generated_bundle_scan",
+                        "error": str(error),
+                        "fix_suggestion": (
+                            "Regenerate the app bundle using only canonical app files "
+                            "and declared module/page/data contracts."
+                        ),
+                    }
+                )
+
+    result = {
+        "contract_version": "1.0",
+        "status": "passed" if acceptance_passed else "failed",
+        "passed": acceptance_passed,
+        "checks": [
+            _result_check(bundle_scan_result, default_id="generated_bundle_scan", default_message="Generated bundle scan completed."),
+            _result_check(agent_integration_result, default_id="agent_backend", default_message="Agent backend integration check completed."),
+            _result_check(wiring_result, default_id="module_wiring", default_message="Module wiring check completed."),
+            _result_check(module_implementation_result, default_id="module_implementation", default_message="Module implementation check completed."),
+            _result_check(runtime_quality_result, default_id="module_runtime_quality", default_message="Module runtime quality check completed."),
+            _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
+        ],
+        "validation_evidence": {
+            "completed": completed,
+            "failed": failed,
+        },
+        "failed_tests": failed_tests,
+        "warnings": warnings,
+        **subresults,
+    }
+
+    _context_set(context_variables, "bundle_scan_passed", bundle_scan_result["passed"])
+    _context_set(context_variables, "bundle_scan_result", bundle_scan_result)
+    _context_set(context_variables, "wiring_validation_passed", wiring_result.get("passed"))
+    _context_set(context_variables, "wiring_validation_result", wiring_result)
+    _context_set(context_variables, "module_implementation_validation_passed", module_implementation_result.get("passed"))
+    _context_set(context_variables, "module_implementation_validation_result", module_implementation_result)
+    _context_set(context_variables, "module_runtime_quality_status", "passed" if runtime_quality_result["passed"] else "blocked")
+    _context_set(context_variables, "module_runtime_quality_warnings", runtime_quality_result.get("warnings") or [])
+    _context_set(context_variables, "module_runtime_quality_result", runtime_quality_result)
+    _context_set(context_variables, "workflow_integration_validation_passed", workflow_integration_result.get("passed"))
+    _context_set(context_variables, "workflow_integration_validation_result", workflow_integration_result)
+    _context_set(context_variables, "integration_tests_passed", acceptance_passed)
+    _context_set(context_variables, "integration_test_result", {
+        **subresults,
+        "passed": acceptance_passed,
+    })
+    _context_set(context_variables, "app_bundle_acceptance_status", result["status"])
+    _context_set(context_variables, "app_bundle_acceptance_result", result)
+    _context_set(context_variables, "app_bundle_validation_evidence", result["validation_evidence"])
+
+    return result
+
+
 async def validate_app_build(
-    files: Dict[str, str],
-    commands: Optional[List[str]] = None,
+    files: dict[str, str],
+    commands: list[str] | None = None,
     start_dev_server: bool = True,
     timeout_seconds: int = 120,
-    validation_strategy: Optional[str] = None,
-    context_variables: Optional[Any] = None,
-) -> Dict[str, Any]:
+    validation_strategy: str | None = None,
+    context_variables: Any | None = None,
+) -> dict[str, Any]:
     try:
         env_timeout = os.getenv("E2B_TIMEOUT")
         if env_timeout and timeout_seconds == 120:
@@ -1104,7 +1607,7 @@ async def validate_app_build(
     return result
 
 
-def _context_has_agent_backend(context_variables: Optional[Any]) -> bool:
+def _context_has_agent_backend(context_variables: Any | None) -> bool:
     if context_variables is None or not hasattr(context_variables, "get"):
         return False
     for key in (
@@ -1128,10 +1631,10 @@ def _context_has_agent_backend(context_variables: Optional[Any]) -> bool:
 
 
 async def validate_app_bundle_from_request(
-    AppValidationRequest: Dict[str, Any],
-    agent_message: Optional[str] = None,
-    context_variables: Optional[Any] = None,
-) -> Dict[str, Any]:
+    AppValidationRequest: dict[str, Any],
+    agent_message: str | None = None,
+    context_variables: Any | None = None,
+) -> dict[str, Any]:
     """Auto-run deterministic app validation from AppValidationAgent's request.
 
     AppValidationAgent should not call validation tools directly. It emits a strict
@@ -1153,129 +1656,48 @@ async def validate_app_bundle_from_request(
         context_variables=context_variables,
     )
 
-    agent_integration_result: Dict[str, Any]
-    if _context_has_agent_backend(context_variables):
-        from .integration_tests import run_integration_tests
-
-        agent_integration_result = await run_integration_tests(
-            files={},
-            context_variables=context_variables,
-        )
-        agent_integration_passed = bool(agent_integration_result.get("passed"))
-    else:
-        agent_integration_result = {
-            "contract_version": "1.0",
-            "passed": True,
-            "checks": [
-                {
-                    "id": "agent_backend_integration_not_required",
-                    "passed": True,
-                    "message": "No agent backend context is present for this app build.",
-                    "details": {"blocking": False, "severity": "info"},
-                }
-            ],
-            "warnings": [],
-            "failed_tests": [],
-        }
-        agent_integration_passed = True
-
-    from .validate_wiring import validate_wiring
-
-    wiring_result = await validate_wiring(context_variables=context_variables)
-    wiring_passed = bool(wiring_result.get("passed"))
-    module_implementation_result = validate_module_implementation_contract(
-        _generated_files_from_context(context_variables)
+    acceptance_result = await run_app_bundle_acceptance_gate(
+        context_variables=context_variables,
     )
-    module_implementation_passed = bool(module_implementation_result.get("passed"))
-    generated_files = _generated_files_from_context(context_variables)
-    from .module_runtime_quality import audit_module_runtime_quality
-
-    runtime_quality_warnings = audit_module_runtime_quality(
-        [
-            {"filename": path, "content": content}
-            for path, content in sorted(generated_files.items())
-        ]
-    )
-    runtime_quality_result = {
-        "contract_version": "1.0",
-        "passed": not runtime_quality_warnings,
-        "warnings": runtime_quality_warnings,
-        "checks": [
-            {
-                "id": "module_runtime_quality",
-                "passed": not runtime_quality_warnings,
-                "message": (
-                    "Generated module runtime code contains no placeholder runtime logic."
-                    if not runtime_quality_warnings
-                    else f"{len(runtime_quality_warnings)} generated module runtime quality issue(s) found."
-                ),
-                "details": {
-                    "warning_count": len(runtime_quality_warnings),
-                },
-            }
-        ],
-    }
-    runtime_quality_passed = bool(runtime_quality_result["passed"])
+    agent_integration_result = acceptance_result["agent_backend"]
+    wiring_result = acceptance_result["module_wiring"]
+    module_implementation_result = acceptance_result["module_implementation"]
+    runtime_quality_result = acceptance_result["module_runtime_quality"]
+    workflow_integration_result = acceptance_result["workflow_integration"]
     validation_passed = str(validation.get("validation_status") or "").strip().lower() != "failed"
-    combined_passed = bool(
-        validation_passed
-        and agent_integration_passed
-        and wiring_passed
-        and module_implementation_passed
-        and runtime_quality_passed
-    )
-
-    if context_variables is not None and hasattr(context_variables, "set"):
-        try:
-            context_variables.set(
-                "module_runtime_quality_status",
-                "passed" if runtime_quality_passed else "blocked",
-            )
-            context_variables.set(
-                "module_runtime_quality_warnings",
-                runtime_quality_warnings,
-            )
-            context_variables.set(
-                "module_runtime_quality_result",
-                runtime_quality_result,
-            )
-            context_variables.set(
-                "module_implementation_validation_passed",
-                module_implementation_passed,
-            )
-            context_variables.set(
-                "module_implementation_validation_result",
-                module_implementation_result,
-            )
-            context_variables.set("integration_tests_passed", combined_passed)
-            context_variables.set(
-                "integration_test_result",
-                {
-                    "agent_backend": agent_integration_result,
-                    "module_wiring": wiring_result,
-                    "module_implementation": module_implementation_result,
-                    "module_runtime_quality": runtime_quality_result,
-                    "passed": combined_passed,
-                },
-            )
-        except Exception:
-            pass
+    combined_passed = bool(validation_passed and acceptance_result.get("passed"))
+    _context_set(context_variables, "integration_tests_passed", combined_passed)
+    integration_test_result = {
+        "bundle_scan": acceptance_result["bundle_scan"],
+        "agent_backend": agent_integration_result,
+        "module_wiring": wiring_result,
+        "module_implementation": module_implementation_result,
+        "module_runtime_quality": runtime_quality_result,
+        "workflow_integration": workflow_integration_result,
+        "passed": combined_passed,
+    }
+    _context_set(context_variables, "integration_test_result", integration_test_result)
 
     return {
         "status": "success" if combined_passed else "failed",
         "message": agent_message or "App validation and integration gates completed.",
         "app_validation_result": validation,
+        "app_bundle_acceptance_result": acceptance_result,
+        "bundle_scan_result": acceptance_result["bundle_scan"],
         "agent_backend_integration_result": agent_integration_result,
         "wiring_validation_result": wiring_result,
         "module_implementation_validation_result": module_implementation_result,
         "module_runtime_quality_result": runtime_quality_result,
+        "workflow_integration_validation_result": workflow_integration_result,
         "integration_tests_passed": combined_passed,
     }
 
 
 __all__ = [
     "parse_build_errors",
+    "run_app_bundle_acceptance_gate",
     "validate_module_implementation_contract",
+    "validate_workflow_integration_contract",
     "validate_app_build",
     "validate_app_bundle_from_request",
 ]

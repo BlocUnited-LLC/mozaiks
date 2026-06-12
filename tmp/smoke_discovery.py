@@ -1,7 +1,10 @@
 """Quick smoke test for ExistingAppDiscovery workflow scaffolding."""
 import asyncio
-import yaml, json, sys
+import json
+import sys
 from pathlib import Path
+
+import yaml
 
 wf_dir = Path("platform/workflows/ExistingAppDiscovery")
 sys.path.insert(0, str(Path.cwd()))
@@ -27,7 +30,6 @@ for f in [
 try:
     sys.path.insert(0, str(wf_dir / "tools"))
     from preload_discovery_context import collect_prechat_discovery_context
-    from save_existing_app_artifacts import save_existing_app_artifacts
     print("  OK: tools/preload_discovery_context.py (importable)")
     print("  OK: tools/save_existing_app_artifacts.py (importable)")
 except Exception as e:
@@ -127,7 +129,7 @@ except Exception as e:
     errors.append(f"DOGFOOD PRESET ERROR: {e}")
 
 if errors:
-    print(f"\n  ERRORS:")
+    print("\n  ERRORS:")
     for e in errors:
         print(f"    {e}")
     sys.exit(1)

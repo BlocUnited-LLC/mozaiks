@@ -24,14 +24,19 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any
+
+from factory_app.workflows._shared.workflow_integration import (
+    apply_workflow_integration_context,
+    workflow_integration_metadata_from_context,
+)
 
 logger = logging.getLogger(__name__)
 
 SECTION_HEADER = "[WORKFLOW INTEGRATION CONTRACT]"
 
 
-def inject_workflow_integration_contract(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_workflow_integration_contract(agent, messages: list[dict[str, Any]]) -> None:
     """
     prompt middleware function: inject the AgentGenerator workflow integration contract.
 
@@ -44,6 +49,9 @@ def inject_workflow_integration_contract(agent, messages: List[Dict[str, Any]]) 
     """
     try:
         context_variables = getattr(agent, "context_variables", {})
+        metadata = workflow_integration_metadata_from_context(context_variables)
+        if metadata:
+            apply_workflow_integration_context(context_variables, metadata)
 
         capability_id: str | None = context_variables.get("generated_workflow_capability_id")
         if not capability_id:
@@ -171,8 +179,8 @@ def _build_config_middleware_block(capability_id: str, trigger_events: list) -> 
             lines += [
                 f"    - id: {reaction_id}",
                 f"    - event_type: {event_type}",
-                f"      target:",
-                f"        kind: capability",
+                "      target:",
+                "        kind: capability",
                 f"        capability_id: {capability_id}",
             ]
     else:

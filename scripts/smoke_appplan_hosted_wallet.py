@@ -33,7 +33,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
@@ -84,7 +84,7 @@ _USER_REQUEST = (
 class _FakeAgent:
     """Minimal agent stub for applying hooks without the full AG2 stack."""
 
-    def __init__(self, name: str, context_variables: Dict[str, Any]) -> None:
+    def __init__(self, name: str, context_variables: dict[str, Any]) -> None:
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables
@@ -119,7 +119,7 @@ def _build_agent_system_prompt(agent_name: str) -> str:
         if not isinstance(agent, dict) or agent.get("name") != agent_name:
             continue
         sections = agent.get("prompt_sections") or []
-        parts: List[str] = []
+        parts: list[str] = []
         for section in sections:
             if not isinstance(section, dict):
                 continue
@@ -155,7 +155,7 @@ def _apply_hooks(agent: _FakeAgent) -> None:
     hc_hook.inject_hosted_capabilities_context(agent, [])
 
 
-def _extract_json(text: str) -> Dict[str, Any]:
+def _extract_json(text: str) -> dict[str, Any]:
     """Extract JSON from a string that may be wrapped in markdown code blocks."""
     stripped = text.strip()
 
@@ -213,7 +213,7 @@ def _load_validation_tool():
 
 class _Context:
     def __init__(self) -> None:
-        self.data: Dict[str, Any] = {}
+        self.data: dict[str, Any] = {}
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
@@ -225,15 +225,15 @@ class _Context:
         self.data[key] = value
 
 
-def _validate_plan(plan: Dict[str, Any], validation_mod) -> Tuple[Dict[str, Any], str]:
+def _validate_plan(plan: dict[str, Any], validation_mod) -> tuple[dict[str, Any], str]:
     ctx = _Context()
     result = validation_mod.app_build_plan(AppBuildPlan=plan, context_variables=ctx)
     return ctx.data, str(result)
 
 
-def _check_plan_shape(plan: Dict[str, Any]) -> List[str]:
+def _check_plan_shape(plan: dict[str, Any]) -> list[str]:
     """Return list of drift/shape violations. Empty means clean."""
-    violations: List[str] = []
+    violations: list[str] = []
     capability_packs = plan.get("capability_packs") or []
     build_tasks = plan.get("build_tasks") or []
 
@@ -261,7 +261,7 @@ def _check_plan_shape(plan: Dict[str, Any]) -> List[str]:
             violations.append(f"DRIFT: module_contract task exists for wallet (hosted_pack): {t.get('task_id')}")
 
     # 3. Must have api_surface adapter task targeting wallet_client.py
-    adapter_task: Optional[Dict[str, Any]] = next(
+    adapter_task: dict[str, Any] | None = next(
         (
             t for t in build_tasks
             if isinstance(t, dict)

@@ -25,7 +25,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 import yaml
@@ -90,7 +90,7 @@ def _read_yaml(relative_path: str) -> Any:
 
 
 class _FakeAgent:
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables or {}
@@ -215,7 +215,7 @@ class TestHostedWalletContextInjection:
 # Level B: Creator dashboard AppBuildPlan fixture
 # ---------------------------------------------------------------------------
 
-_CREATOR_DASHBOARD_HOSTED_PACK: Dict[str, Any] = {
+_CREATOR_DASHBOARD_HOSTED_PACK: dict[str, Any] = {
     "capability_pack_id": "wallet",
     "surface_id": "wallet_surface",
     "surface_kind": "external_integration",
@@ -226,7 +226,7 @@ _CREATOR_DASHBOARD_HOSTED_PACK: Dict[str, Any] = {
     "capability_source": "hosted_pack",
 }
 
-_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK: Dict[str, Any] = {
+_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK: dict[str, Any] = {
     "task_id": "creator_dashboard.wallet_adapter",
     "task_type": "api_surface",
     "capability_pack_id": "wallet",
@@ -254,7 +254,7 @@ _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK: Dict[str, Any] = {
     ],
 }
 
-_CREATOR_DASHBOARD_FACADE_TASK: Dict[str, Any] = {
+_CREATOR_DASHBOARD_FACADE_TASK: dict[str, Any] = {
     "task_id": "creator_dashboard.wallet_dashboard_module",
     "task_type": "module_contract",
     "capability_pack_id": "wallet_dashboard",
@@ -281,7 +281,7 @@ _CREATOR_DASHBOARD_FACADE_TASK: Dict[str, Any] = {
     ],
 }
 
-_CREATOR_DASHBOARD_MODELS_TASK: Dict[str, Any] = {
+_CREATOR_DASHBOARD_MODELS_TASK: dict[str, Any] = {
     "task_id": "creator_dashboard.wallet_dashboard_models",
     "task_type": "data_models",
     "capability_pack_id": "wallet_dashboard",
@@ -300,7 +300,7 @@ _CREATOR_DASHBOARD_MODELS_TASK: Dict[str, Any] = {
     ],
 }
 
-_CREATOR_DASHBOARD_SERVICES_TASK: Dict[str, Any] = {
+_CREATOR_DASHBOARD_SERVICES_TASK: dict[str, Any] = {
     "task_id": "creator_dashboard.wallet_dashboard_services",
     "task_type": "business_services",
     "capability_pack_id": "wallet_dashboard",
@@ -325,7 +325,7 @@ _CREATOR_DASHBOARD_SERVICES_TASK: Dict[str, Any] = {
     ],
 }
 
-_CREATOR_DASHBOARD_PAGE_TASK: Dict[str, Any] = {
+_CREATOR_DASHBOARD_PAGE_TASK: dict[str, Any] = {
     "task_id": "creator_dashboard.pages",
     "task_type": "page_bundle",
     "capability_pack_id": None,
@@ -357,7 +357,7 @@ _CREATOR_DASHBOARD_BUILD_TASKS = [
     _CREATOR_DASHBOARD_PAGE_TASK,
 ]
 
-_MINIMAL_PLAN_BASE: Dict[str, Any] = {
+_MINIMAL_PLAN_BASE: dict[str, Any] = {
     "agent_message": "Creator dashboard with hosted wallet capability.",
     "app_kind": "saas",
     "pages": [
@@ -437,7 +437,7 @@ class TestCreatorDashboardBuildPlan:
 
         class _Ctx:
             def __init__(self):
-                self.data: Dict[str, Any] = {}
+                self.data: dict[str, Any] = {}
 
             def get(self, key, default=None):
                 return self.data.get(key, default)
@@ -470,7 +470,7 @@ class TestCreatorDashboardBuildPlan:
 
         class _Ctx:
             def __init__(self):
-                self.data: Dict[str, Any] = {}
+                self.data: dict[str, Any] = {}
 
             def get(self, key, default=None):
                 return self.data.get(key, default)
@@ -545,7 +545,7 @@ def wallet_pack_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def pack_sources(wallet_pack_root: Path) -> List[Dict[str, Any]]:
+def pack_sources(wallet_pack_root: Path) -> list[dict[str, Any]]:
     return [
         {
             "id": "wallet",
@@ -555,7 +555,7 @@ def pack_sources(wallet_pack_root: Path) -> List[Dict[str, Any]]:
     ]
 
 
-def _simulate_creator_dashboard_feature_outputs() -> List[Dict[str, Any]]:
+def _simulate_creator_dashboard_feature_outputs() -> list[dict[str, Any]]:
     """Simulate agent-generated code_files for the creator dashboard app."""
     return [
         {
@@ -574,7 +574,7 @@ class TestCreatorDashboardAssembly:
     """Level C — Assembly with template expansion produces canonical artifact tree."""
 
     def test_wallet_adapter_appears_at_correct_path(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
         template_files = resolver.resolve_hosted_pack_templates(pack_sources)
@@ -582,7 +582,7 @@ class TestCreatorDashboardAssembly:
         assert template_files[0]["filename"] == "services/integrations/wallet_client.py"
 
     def test_assembly_includes_wallet_adapter_and_pages(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         from factory_app.workflows.AppGenerator.tools.assembly_phase import assemble_features
 
@@ -602,7 +602,7 @@ class TestCreatorDashboardAssembly:
         assert "app.json" in final_filenames
 
     def test_no_modules_wallet_in_assembled_output(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
         template_files = resolver.resolve_hosted_pack_templates(pack_sources)
@@ -613,7 +613,7 @@ class TestCreatorDashboardAssembly:
             assert "app/modules/wallet" not in entry["filename"]
 
     def test_no_capability_packs_path_in_assembled_output(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
         template_files = resolver.resolve_hosted_pack_templates(pack_sources)
@@ -621,7 +621,7 @@ class TestCreatorDashboardAssembly:
             assert "capability_packs" not in entry["filename"]
 
     def test_wallet_adapter_content_has_no_stripe_import(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
         template_files = resolver.resolve_hosted_pack_templates(pack_sources)
@@ -635,7 +635,7 @@ class TestCreatorDashboardAssembly:
             )
 
     def test_wallet_adapter_content_has_no_stripe_secret_key(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
         template_files = resolver.resolve_hosted_pack_templates(pack_sources)
@@ -645,7 +645,7 @@ class TestCreatorDashboardAssembly:
             )
 
     def test_wallet_adapter_content_has_no_hosted_module_import(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
         template_files = resolver.resolve_hosted_pack_templates(pack_sources)
@@ -668,7 +668,7 @@ class TestCreatorDashboardAssembly:
         assert result == []
 
     def test_hosted_template_wins_over_llm_generated_adapter(
-        self, pack_sources: List[Dict[str, Any]]
+        self, pack_sources: list[dict[str, Any]]
     ) -> None:
         """Template overlay takes priority over any LLM-generated content for adapter paths."""
         from factory_app.workflows.AppGenerator.tools.assembly_phase import assemble_features

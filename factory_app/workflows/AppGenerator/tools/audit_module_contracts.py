@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
-_EXPECTED_SCHEMA_VERSIONS: Dict[str, str] = {
+_EXPECTED_SCHEMA_VERSIONS: dict[str, str] = {
     "module.yaml": "mozaiks.module.v1",
     "events.yaml": "mozaiks.events.v1",
     "reactions.yaml": "mozaiks.reactions.v1",
@@ -28,7 +28,7 @@ _EXPECTED_SCHEMA_VERSIONS: Dict[str, str] = {
 _VALID_MODULE_TYPES = frozenset({"standard", "messaging", "workflow", "transactional"})
 
 
-def _parse_yaml_content(content: str) -> Optional[Dict[str, Any]]:
+def _parse_yaml_content(content: str) -> dict[str, Any] | None:
     try:
         parsed = yaml.safe_load(content)
         return parsed if isinstance(parsed, dict) else None
@@ -36,8 +36,8 @@ def _parse_yaml_content(content: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _audit_module_yaml(filename: str, data: Dict[str, Any]) -> List[str]:
-    warnings: List[str] = []
+def _audit_module_yaml(filename: str, data: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
 
     expected_sv = _EXPECTED_SCHEMA_VERSIONS["module.yaml"]
     sv = data.get("schema_version")
@@ -84,9 +84,9 @@ def _audit_module_yaml(filename: str, data: Dict[str, Any]) -> List[str]:
     return warnings
 
 
-def _audit_contract_yaml(filename: str, data: Dict[str, Any]) -> List[str]:
+def _audit_contract_yaml(filename: str, data: dict[str, Any]) -> list[str]:
     """Check schema_version for companion contract files (events, reactions, etc.)."""
-    warnings: List[str] = []
+    warnings: list[str] = []
     basename = PurePosixPath(filename).name
     expected_sv = _EXPECTED_SCHEMA_VERSIONS.get(basename)
     if expected_sv is not None:
@@ -111,9 +111,9 @@ def _module_dir_of(filename: str) -> str:
 
 
 def audit_admin_panel_page_refs(
-    code_files: List[Dict[str, Any]],
+    code_files: list[dict[str, Any]],
     valid_page_ids: set,
-) -> List[str]:
+) -> list[str]:
     """Check that every admin.yaml panel ``page`` field references a declared registry id.
 
     Args:
@@ -126,7 +126,7 @@ def audit_admin_panel_page_refs(
     if not valid_page_ids or not code_files:
         return []
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     for file_entry in code_files:
         if not isinstance(file_entry, dict):
             continue
@@ -159,7 +159,7 @@ def audit_admin_panel_page_refs(
     return warnings
 
 
-def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
+def audit_module_contracts(code_files: list[dict[str, Any]]) -> list[str]:
     """Audit module contract YAML files in code_files.
 
     Args:
@@ -168,15 +168,15 @@ def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
     Returns:
         List of warning strings. Empty list means no issues found.
     """
-    warnings: List[str] = []
+    warnings: list[str] = []
 
     if not code_files:
         return warnings
 
-    module_yamls: Dict[str, Dict[str, Any]] = {}        # filename → parsed data
-    events_by_module: Dict[str, str] = {}               # module_dir → filename
-    events_type_sets: Dict[str, set] = {}               # module_dir → declared event type strings
-    events_producers: Dict[str, Dict[str, str]] = {}    # module_dir → {event_type → producer}
+    module_yamls: dict[str, dict[str, Any]] = {}        # filename → parsed data
+    events_by_module: dict[str, str] = {}               # module_dir → filename
+    events_type_sets: dict[str, set] = {}               # module_dir → declared event type strings
+    events_producers: dict[str, dict[str, str]] = {}    # module_dir → {event_type → producer}
 
     for file_entry in code_files:
         if not isinstance(file_entry, dict):
@@ -204,7 +204,7 @@ def audit_module_contracts(code_files: List[Dict[str, Any]]) -> List[str]:
             events_by_module[mod_dir] = filename
             warnings.extend(_audit_contract_yaml(filename, data))
             declared: set = set()
-            producers: Dict[str, str] = {}
+            producers: dict[str, str] = {}
             for ev in (data.get("events") or []):
                 if isinstance(ev, dict):
                     ev_type = str(ev.get("type") or "").strip()

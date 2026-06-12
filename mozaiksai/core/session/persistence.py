@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
@@ -30,10 +30,10 @@ def _coerce_datetime(value: Any, *, fallback: datetime) -> datetime:
     return fallback
 
 
-def _coerce_string_map(value: Any) -> Dict[str, str]:
+def _coerce_string_map(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
-    normalized: Dict[str, str] = {}
+    normalized: dict[str, str] = {}
     for raw_key, raw_value in value.items():
         key = str(raw_key or "").strip()
         val = str(raw_value or "").strip()
@@ -42,7 +42,7 @@ def _coerce_string_map(value: Any) -> Dict[str, str]:
     return normalized
 
 
-def _coerce_dict(value: Any) -> Dict[str, Any]:
+def _coerce_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
@@ -117,7 +117,7 @@ def _coerce_pending_harness_decision(
     value: Any,
     *,
     fallback: datetime,
-) -> Optional[PendingHarnessDecision]:
+) -> PendingHarnessDecision | None:
     if not isinstance(value, dict):
         return None
     decision_id = str(value.get("decision_id") or "").strip()
@@ -152,7 +152,7 @@ def _coerce_pending_harness_decision(
 class SessionStateStore:
     """Persistence layer for SessionRouter state."""
 
-    def __init__(self, persistence: Optional[AG2PersistenceManager] = None) -> None:
+    def __init__(self, persistence: AG2PersistenceManager | None = None) -> None:
         self._persistence = persistence or AG2PersistenceManager()
 
     @staticmethod
@@ -177,7 +177,7 @@ class SessionStateStore:
         assert persistence_root.client is not None, "Mongo client not initialized"
         return persistence_root.client["mozaiksai"]["SessionRouterState"]
 
-    async def load(self, *, app_id: str, user_id: str) -> Optional[SessionState]:
+    async def load(self, *, app_id: str, user_id: str) -> SessionState | None:
         coll = await self._coll()
         session_id = self.session_id_for_scope(app_id, user_id)
         doc = await coll.find_one({"_id": session_id})
@@ -239,7 +239,7 @@ class SessionStateStore:
 
     async def upsert(self, state: SessionState) -> None:
         coll = await self._coll()
-        payload: Dict[str, Any] = asdict(state)
+        payload: dict[str, Any] = asdict(state)
         payload["_id"] = state.session_id
         payload["lifecycle_state"] = state.lifecycle_state.value
         payload["sequence_status"] = state.sequence_status.value

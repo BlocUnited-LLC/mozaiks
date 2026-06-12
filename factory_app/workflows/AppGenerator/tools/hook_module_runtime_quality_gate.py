@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
 from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 _HEADER = "[MODULE RUNTIME QUALITY GATE]"
 
 
-def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
@@ -44,7 +44,7 @@ def _context_get(context_variables: Optional[Any], key: str, default: Any = None
     return default
 
 
-def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     if hasattr(context_variables, "set"):
@@ -61,7 +61,7 @@ def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None
         context_variables[key] = value
 
 
-def _parse_json_object(content: Any) -> Optional[Dict[str, Any]]:
+def _parse_json_object(content: Any) -> dict[str, Any] | None:
     if isinstance(content, dict):
         return content
     if not isinstance(content, str) or not content.strip():
@@ -89,7 +89,7 @@ def _parse_json_object(content: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _latest_service_output(messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _latest_service_output(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
     for message in reversed(messages or []):
         if not isinstance(message, dict):
             continue
@@ -107,11 +107,11 @@ def _latest_service_output(messages: List[Dict[str, Any]]) -> Optional[Dict[str,
     return None
 
 
-def _merge_code_files(context_variables: Optional[Any], incoming: List[Dict[str, str]]) -> None:
+def _merge_code_files(context_variables: Any | None, incoming: list[dict[str, str]]) -> None:
     if not incoming:
         return
     existing = _context_get(context_variables, "code_files", []) or []
-    merged: Dict[str, Dict[str, str]] = {}
+    merged: dict[str, dict[str, str]] = {}
     if isinstance(existing, list):
         for item in existing:
             if not isinstance(item, dict):
@@ -128,7 +128,7 @@ def _merge_code_files(context_variables: Optional[Any], incoming: List[Dict[str,
     _context_set(context_variables, "code_files", [merged[key] for key in sorted(merged)])
 
 
-def _persist_latest_service_output(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def _persist_latest_service_output(agent: Any, messages: list[dict[str, Any]]) -> None:
     payload = _latest_service_output(messages)
     if not payload:
         return
@@ -136,7 +136,7 @@ def _persist_latest_service_output(agent: Any, messages: List[Dict[str, Any]]) -
     _merge_code_files(getattr(agent, "context_variables", None), code_files)
 
 
-def run_module_runtime_quality_gate(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def run_module_runtime_quality_gate(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Run the runtime quality gate before ModuleRuntimeQualityAgent replies."""
 
     if getattr(agent, "name", "") != "ModuleRuntimeQualityAgent":

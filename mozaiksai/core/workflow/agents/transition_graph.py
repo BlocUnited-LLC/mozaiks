@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
+
+from logs.logging_config import get_workflow_logger
 
 from ..execution.network_graph import (
     WorkflowGraphCompileError,
     compile_transition_rules_to_graph,
 )
 from ..workflow_manager import workflow_manager
-from logs.logging_config import get_workflow_logger
 
 log = get_workflow_logger("transition_graph")
 
 
-def wire_transition_graph(workflow_name: str, agents: Dict[str, Any]) -> None:
+def wire_transition_graph(workflow_name: str, agents: dict[str, Any]) -> None:
     """Pre-validate transition rules for the workflow.
 
     Routing is compiled to an AG2 beta Network TransitionGraph. This function
@@ -33,18 +34,18 @@ def wire_transition_graph(workflow_name: str, agents: Dict[str, Any]) -> None:
             log.warning("[TRANSITION_GRAPH] Validation issue: %s", err)
 
 
-def wire_transition_graph_with_debugging(workflow_name: str, agents: Dict[str, Any]) -> Dict[str, Any]:
+def wire_transition_graph_with_debugging(workflow_name: str, agents: dict[str, Any]) -> dict[str, Any]:
     """Validate transition rules and return a summary dict."""
     return _validate_transition_rules(workflow_name, agents)
 
 
-def _validate_transition_rules(workflow_name: str, agents: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_transition_rules(workflow_name: str, agents: dict[str, Any]) -> dict[str, Any]:
     """Scan transition_graph.yaml for this workflow and verify all referenced agents exist."""
     config = workflow_manager.get_config(workflow_name) or {}
     transition_block = config.get("transition_graph", {})
     rules = transition_block.get("transition_rules", []) or []
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "workflow": workflow_name,
         "rules_total": len(rules),
         "agents_with_rules": set(),
@@ -88,7 +89,7 @@ def _validate_transition_rules(workflow_name: str, agents: Dict[str, Any]) -> Di
     return summary
 
 
-def _initial_agent_for_workflow(workflow_name: str, agents: Dict[str, Any]) -> str:
+def _initial_agent_for_workflow(workflow_name: str, agents: dict[str, Any]) -> str:
     config = workflow_manager.get_config(workflow_name) or {}
     initial = str(config.get("initial_agent") or "").strip()
     if initial:

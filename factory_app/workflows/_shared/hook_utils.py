@@ -62,7 +62,7 @@ def update_agent_section(agent: Any, header: str, body: str) -> None:
         elif hasattr(agent, "_system_message"):
             agent._system_message = new_message
         else:
-            setattr(agent, "_system_message", new_message)
+            agent._system_message = new_message
 
     except Exception as exc:
         logger.error(

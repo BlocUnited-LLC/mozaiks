@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict
-
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -39,8 +37,8 @@ def clear_runtime_artifacts(
     *,
     clear_agent_outputs: bool = True,
     clear_workflow_converter: bool = True,
-) -> Dict[str, int]:
-    cleared: Dict[str, int] = {
+) -> dict[str, int]:
+    cleared: dict[str, int] = {
         "agent_outputs": 0,
         "workflow_converter": 0,
     }

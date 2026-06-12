@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
-from collections.abc import Mapping, Sequence
 
-from .app_data import AppData, app_data_from_context, collection_name_for_alias, load_app_data_contract
+from .app_data import (
+    AppData,
+    app_data_from_context,
+    collection_name_for_alias,
+    load_app_data_contract,
+)
 from .intent_loader import DataContract
 from .mongo import MongoPersistenceContext
 

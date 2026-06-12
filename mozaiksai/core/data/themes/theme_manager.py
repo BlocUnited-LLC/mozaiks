@@ -8,12 +8,12 @@ from __future__ import annotations
 import asyncio
 import copy
 import re
-from datetime import datetime, UTC
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from logs.logging_config import get_workflow_logger
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, ConfigDict
-
 from mozaiksai.core.data.persistence.persistence_manager import PersistenceManager
 
 logger = get_workflow_logger("theme_manager")
@@ -23,10 +23,10 @@ HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
 
 class FontConfig(BaseModel):
     family: str
-    fallbacks: Optional[str] = None
-    googleFont: Optional[str] = None
-    localFont: Optional[bool] = False
-    tailwindClass: Optional[str] = None
+    fallbacks: str | None = None
+    googleFont: str | None = None
+    localFont: bool | None = False
+    tailwindClass: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -41,13 +41,13 @@ class ThemeFonts(BaseModel):
 
 class ColorScale(BaseModel):
     main: str
-    light: Optional[str] = None
-    dark: Optional[str] = None
-    name: Optional[str] = None
+    light: str | None = None
+    dark: str | None = None
+    name: str | None = None
 
     @field_validator("main", "light", "dark", mode="before")
     @classmethod
-    def validate_hex(cls, value: Optional[str], info: ValidationInfo) -> Optional[str]:
+    def validate_hex(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is None:
             return value
         value = value.strip()
@@ -113,9 +113,9 @@ class ThemeShadows(BaseModel):
 
 
 class ThemeBranding(BaseModel):
-    name: Optional[str] = None
-    logo: Optional[str] = None
-    favicon: Optional[str] = None
+    name: str | None = None
+    logo: str | None = None
+    favicon: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -130,10 +130,10 @@ class ThemeConfig(BaseModel):
 
 
 class ThemeUpdatePayload(BaseModel):
-    fonts: Optional[Dict[str, Any]] = None
-    colors: Optional[Dict[str, Any]] = None
-    shadows: Optional[Dict[str, Any]] = None
-    branding: Optional[Dict[str, Any]] = None
+    fonts: dict[str, Any] | None = None
+    colors: dict[str, Any] | None = None
+    shadows: dict[str, Any] | None = None
+    branding: dict[str, Any] | None = None
 
     @field_validator("fonts", "colors", "shadows", "branding", mode="before")
     @classmethod
@@ -149,7 +149,7 @@ class ThemeUpdatePayload(BaseModel):
 
 class ThemeUpdateRequest(BaseModel):
     theme: ThemeUpdatePayload
-    updated_by: Optional[str] = Field(default=None, alias="updatedBy")
+    updated_by: str | None = Field(default=None, alias="updatedBy")
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -158,13 +158,13 @@ class ThemeResponse(BaseModel):
     app_id: str
     theme: ThemeConfig
     source: str = Field(pattern=r"^(default|custom)$")
-    updated_at: Optional[datetime] = Field(default=None, alias="updatedAt")
-    updated_by: Optional[str] = Field(default=None, alias="updatedBy")
+    updated_at: datetime | None = Field(default=None, alias="updatedAt")
+    updated_by: str | None = Field(default=None, alias="updatedBy")
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 
-DEFAULT_THEME: Dict[str, Any] = {
+DEFAULT_THEME: dict[str, Any] = {
     "fonts": {
         "body": {
             "family": "Rajdhani",
@@ -231,7 +231,7 @@ DEFAULT_THEME: Dict[str, Any] = {
 }
 
 
-def _deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(base)
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):

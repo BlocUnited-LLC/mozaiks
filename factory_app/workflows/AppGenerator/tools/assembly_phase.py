@@ -13,7 +13,7 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_entries_from_payload,
@@ -22,9 +22,9 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
 logger = logging.getLogger(__name__)
 
 
-def _merge_code_files(feature_outputs: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+def _merge_code_files(feature_outputs: list[dict[str, Any]]) -> list[dict[str, str]]:
     """Merge code_files from feature outputs, deduping by filename."""
-    file_map: Dict[str, str] = {}
+    file_map: dict[str, str] = {}
     for output in feature_outputs:
         for item in extract_code_file_entries_from_payload(output):
             filename = item.get("filename")
@@ -37,10 +37,10 @@ def _merge_code_files(feature_outputs: List[Dict[str, Any]]) -> List[Dict[str, s
 
 async def assemble_features(
     app_id: str,
-    feature_outputs: List[Dict[str, Any]],
-    app_name: Optional[str] = None,
-    primary_color: Optional[str] = None,
-) -> Dict[str, Any]:
+    feature_outputs: list[dict[str, Any]],
+    app_name: str | None = None,
+    primary_color: str | None = None,
+) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
 
 async def handle_switch_workflow(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:
@@ -149,7 +149,7 @@ async def handle_switch_workflow(
 
             resumer = AgentRunResumer()
 
-            async def send_event_wrapper(event_dict: Dict[str, Any], _target_chat_id: str | None) -> None:
+            async def send_event_wrapper(event_dict: dict[str, Any], _target_chat_id: str | None) -> None:
                 if not isinstance(event_dict, dict):
                     return
 
@@ -211,8 +211,8 @@ async def handle_switch_workflow(
 
 
 async def handle_start_workflow(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:
@@ -331,8 +331,8 @@ async def handle_start_workflow(
 
 
 async def handle_start_workflow_batch(
-    transport: "SimpleTransport",
-    data: Dict[str, Any],
+    transport: SimpleTransport,
+    data: dict[str, Any],
     chat_id: str,
     websocket: WebSocket,
 ) -> None:
@@ -355,8 +355,8 @@ async def handle_start_workflow_batch(
     from mozaiksai.core.session import TriggerInput, get_session_router
     session_router = get_session_router()
 
-    started: List[Dict[str, Any]] = []
-    blocked: List[Dict[str, Any]] = []
+    started: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
 
     for i, run in enumerate(runs):
         if not isinstance(run, dict):

@@ -7,15 +7,17 @@
 # ==============================================================================
 
 from __future__ import annotations
+
 import asyncio
-import uuid
-import logging
-from copy import deepcopy
-from typing import Dict, Any, Optional
 import datetime as _dt
+import logging
+import uuid
+from copy import deepcopy
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ class InputTimeoutEvent(BaseModel):
     input_request_id: str
     timeout_seconds: float
     chat_id: str
-    occurred_at: str = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    occurred_at: str = _dt.datetime.now(_dt.UTC).isoformat()
     reason: str = "input_timeout"
 
     def dict(self, *a, **kw):  # pragma: no cover
@@ -67,13 +69,13 @@ def _format_action_label(action_id: str) -> str:
     return " ".join(part.capitalize() for part in parts)
 
 
-def _normalize_manifest_action(action: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _normalize_manifest_action(action: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(action, dict):
         return None
     action_id = str(action.get("id") or "").strip()
     if not action_id:
         return None
-    normalized: Dict[str, Any] = {
+    normalized: dict[str, Any] = {
         "id": action_id,
         "label": str(action.get("label") or _format_action_label(action_id)).strip(),
     }
@@ -96,9 +98,9 @@ def _normalize_manifest_action(action: Dict[str, Any]) -> Optional[Dict[str, Any
 
 def _enrich_payload_with_ui_contract(
     tool_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     wf_logger,
-) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     enriched_payload = dict(payload if isinstance(payload, dict) else {})
     tool_record = workflow_manager.get_ui_tool_record(tool_id)
     if not tool_record:
@@ -141,13 +143,13 @@ def _enrich_payload_with_ui_contract(
 
 async def _emit_tool_call_core(
     tool_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     display: str = "inline",
-    chat_id: Optional[str] = None,
+    chat_id: str | None = None,
     workflow_name: str = "unknown",
-    agent_name: Optional[str] = None,
+    agent_name: str | None = None,
     awaiting_response: bool = True,
-    component_name: Optional[str] = None,
+    component_name: str | None = None,
 ) -> str:
     """
     Core function to emit a response-aware tool_call to the frontend.
@@ -211,7 +213,7 @@ async def _emit_tool_call_core(
         )
         raise UIToolError(f"Failed to emit UI tool event: {e}")
 
-async def _wait_for_tool_call_response_internal(event_id: str, timeout: Optional[float] = None) -> Dict[str, Any]:
+async def _wait_for_tool_call_response_internal(event_id: str, timeout: float | None = None) -> dict[str, Any]:
     from mozaiksai.core.transport.simple_transport import SimpleTransport  # local import
     transport = await SimpleTransport.get_instance()
     try:
@@ -225,9 +227,9 @@ async def _wait_for_tool_call_response_internal(event_id: str, timeout: Optional
 
 def _resolve_ui_tool_owner(
     tool_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     wf_logger,
-) -> Optional[str]:
+) -> str | None:
     agent_name = None
     try:
         tool_record = workflow_manager.get_ui_tool_record(tool_id)
@@ -244,7 +246,7 @@ def _resolve_ui_tool_owner(
 
 def _resolve_ui_display(
     tool_id: str,
-    display: Optional[str],
+    display: str | None,
     wf_logger,
 ) -> str:
     resolved_display = display
@@ -277,13 +279,13 @@ async def _await_on_transport_loop(transport: Any, coro: Any) -> Any:
 
 async def use_ui_tool(
     tool_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     *,
-    chat_id: Optional[str],
+    chat_id: str | None,
     workflow_name: str,
-    display: Optional[str] = None,
+    display: str | None = None,
     timeout: float | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Single-call convenience: emit then wait for a UI tool response.
 
     Returns the UI response dict augmented with ui_event_id.
@@ -293,7 +295,7 @@ async def use_ui_tool(
     and tool function implementations.
     """
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id)
-    start = _dt.datetime.now(_dt.timezone.utc)
+    start = _dt.datetime.now(_dt.UTC)
     enriched_payload, tool_record = _enrich_payload_with_ui_contract(tool_id, payload, wf_logger)
     component_name = str((tool_record or {}).get("component") or tool_id).strip() or tool_id
     agent_name = _resolve_ui_tool_owner(tool_id, enriched_payload, wf_logger)
@@ -344,7 +346,7 @@ async def use_ui_tool(
                             "tool_call_status": "pending",
                             "awaiting_response": True,
                             "payload": enriched_payload,
-                            "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                            "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
                         },
                     ),
                 )
@@ -354,7 +356,8 @@ async def use_ui_tool(
 
     try:
         # Try to log via tools logger (optional import)
-        from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
+        from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
+        from logs.tools_logs import log_tool_event as _log_tool_event
         _tlog = _get_tool_logger(tool_name=tool_id, chat_id=chat_id, workflow_name=workflow_name, ui_event_id=event_id)
         _log_tool_event(_tlog, action="emit_ui", status="done", event_id=event_id, display=resolved_display)
     except Exception:
@@ -362,7 +365,7 @@ async def use_ui_tool(
     try:
         # Ignore the timeout parameter to prevent user feedback from timing out; wait until the UI responds
         resp = await _wait_for_tool_call_response_internal(event_id, timeout=None)
-        duration_ms = (_dt.datetime.now(_dt.timezone.utc) - start).total_seconds() * 1000.0
+        duration_ms = (_dt.datetime.now(_dt.UTC) - start).total_seconds() * 1000.0
         # Assemble log message to keep line length under linter limits
         round_trip_msg = (
             f"⏱️ [UI_TOOLS] Round-trip tool_id={tool_id} "
@@ -372,7 +375,8 @@ async def use_ui_tool(
         if isinstance(resp, dict) and 'ui_event_id' not in resp:
             resp['ui_event_id'] = event_id
         try:
-            from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
+            from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
+            from logs.tools_logs import log_tool_event as _log_tool_event
             _tlog = _get_tool_logger(tool_name=tool_id, chat_id=chat_id, workflow_name=workflow_name, ui_event_id=event_id)
             _log_tool_event(_tlog, action="ui_response", status=str(resp.get('status', 'unknown')), event_id=event_id)
         except Exception:
@@ -393,7 +397,7 @@ async def use_ui_tool(
                         "status": resp.get("status", "completed"),
                         "summary": f"{tool_id} completed",
                     },
-                    "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
                 }
                 await transport.send_event_to_ui(completion_event, chat_id=chat_id)
                 wf_logger.debug(f"🧹 Sent completion event for inline tool: {event_id}")
@@ -428,7 +432,7 @@ async def use_ui_tool(
 
         return resp
     except Exception as e:
-        duration_ms = (_dt.datetime.now(_dt.timezone.utc) - start).total_seconds() * 1000.0
+        duration_ms = (_dt.datetime.now(_dt.UTC) - start).total_seconds() * 1000.0
         fail_msg = (
             f"❌ [UI_TOOLS] Round-trip failed tool_id={tool_id} "
             f"event={event_id} duration_ms={duration_ms:.2f} err={e}"
@@ -439,12 +443,12 @@ async def use_ui_tool(
 
 async def emit_ui_surface(
     tool_id: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     *,
-    chat_id: Optional[str],
+    chat_id: str | None,
     workflow_name: str,
-    display: Optional[str] = None,
-    agent_name: Optional[str] = None,
+    display: str | None = None,
+    agent_name: str | None = None,
 ) -> str:
     """Emit a one-way UI surface without awaiting a response.
 
@@ -469,7 +473,8 @@ async def emit_ui_surface(
     )
 
     try:
-        from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
+        from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
+        from logs.tools_logs import log_tool_event as _log_tool_event
 
         _tlog = _get_tool_logger(
             tool_name=tool_id,
@@ -493,8 +498,8 @@ async def emit_tool_progress_event(
     tool_name: str,
     progress_percent: float,
     status_message: str,
-    chat_id: Optional[str] = None,
-    correlation_id: Optional[str] = None
+    chat_id: str | None = None,
+    correlation_id: str | None = None
 ) -> None:
     """
     X1: Emit a chat.tool_progress event for long-running tools.
@@ -523,7 +528,7 @@ async def emit_tool_progress_event(
         "tool_name": tool_name,
         "progress_percent": progress_percent,
         "status_message": status_message,
-        "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat()
+        "timestamp": _dt.datetime.now(_dt.UTC).isoformat()
     }
     if correlation_id:
         normalized["corr"] = correlation_id
@@ -534,7 +539,7 @@ async def emit_tool_progress_event(
     except Exception as e:
         wf_logger.error(f"❌ [TOOL_PROGRESS] Failed to emit progress event: {e}")
 
-async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str) -> Optional[Dict[str, Any]]:
+async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str) -> dict[str, Any] | None:
     """
     Handle AG2 tool call events that require UI interaction.
     

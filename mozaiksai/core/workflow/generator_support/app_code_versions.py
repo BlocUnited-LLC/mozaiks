@@ -7,7 +7,7 @@ import hashlib
 import zipfile
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
@@ -17,7 +17,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _safe_zip_path(path: str) -> Optional[str]:
+def _safe_zip_path(path: str) -> str | None:
     normalized = str(path or "").replace("\\", "/").strip().lstrip("/")
     if not normalized:
         return None
@@ -27,8 +27,8 @@ def _safe_zip_path(path: str) -> Optional[str]:
     return str(parsed)
 
 
-def extract_files_from_zip_bundle(bundle_path: str) -> List[Dict[str, Any]]:
-    files: List[Dict[str, Any]] = []
+def extract_files_from_zip_bundle(bundle_path: str) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
     with zipfile.ZipFile(bundle_path, "r") as zf:
         for info in zf.infolist():
             if info.is_dir():
@@ -48,7 +48,7 @@ def extract_files_from_zip_bundle(bundle_path: str) -> List[Dict[str, Any]]:
     return files
 
 
-def _normalize_file(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _normalize_file(entry: dict[str, Any]) -> dict[str, Any] | None:
     path = _safe_zip_path(str(entry.get("path") or ""))
     if not path:
         return None
@@ -73,14 +73,14 @@ def _normalize_file(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def build_snapshot_document(
     *,
     app_id: str,
-    session_id: Optional[str],
+    session_id: str | None,
     workflow_type: str,
     source: str,
-    files: List[Dict[str, Any]],
-    structured_outputs: Optional[Dict[str, Any]],
-    repo_url: Optional[str] = None,
-    base_commit_sha: Optional[str] = None,
-) -> Dict[str, Any]:
+    files: list[dict[str, Any]],
+    structured_outputs: dict[str, Any] | None,
+    repo_url: str | None = None,
+    base_commit_sha: str | None = None,
+) -> dict[str, Any]:
     now = _now()
     normalized = [item for item in (_normalize_file(f) for f in files if isinstance(f, dict)) if item]
     snapshot_id = f"snap_{uuid4().hex}"
@@ -109,15 +109,15 @@ def build_snapshot_document(
 def build_snapshot_document_from_hashes(
     *,
     app_id: str,
-    session_id: Optional[str],
+    session_id: str | None,
     workflow_type: str,
     source: str,
-    files: List[Dict[str, Any]],
-    structured_outputs: Optional[Dict[str, Any]],
-    repo_url: Optional[str] = None,
-    base_commit_sha: Optional[str] = None,
-) -> Dict[str, Any]:
-    normalized: List[Dict[str, Any]] = []
+    files: list[dict[str, Any]],
+    structured_outputs: dict[str, Any] | None,
+    repo_url: str | None = None,
+    base_commit_sha: str | None = None,
+) -> dict[str, Any]:
+    normalized: list[dict[str, Any]] = []
     for entry in files if isinstance(files, list) else []:
         if not isinstance(entry, dict):
             continue
@@ -137,8 +137,8 @@ def build_snapshot_document_from_hashes(
     )
 
 
-def _file_map(snapshot: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    out: Dict[str, Dict[str, Any]] = {}
+def _file_map(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
     for item in snapshot.get("files") if isinstance(snapshot.get("files"), list) else []:
         if isinstance(item, dict) and isinstance(item.get("path"), str):
             out[item["path"]] = item
@@ -148,17 +148,17 @@ def _file_map(snapshot: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 def compute_patchset_document(
     *,
     app_id: str,
-    base_snapshot: Dict[str, Any],
-    target_snapshot: Dict[str, Any],
-    repo_file_shas: Dict[str, str],
+    base_snapshot: dict[str, Any],
+    target_snapshot: dict[str, Any],
+    repo_file_shas: dict[str, str],
     base_commit_sha: str,
     repo_url: str,
     workflow_type: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     base_files = _file_map(base_snapshot)
     target_files = _file_map(target_snapshot)
-    changes: List[Dict[str, Any]] = []
-    conflicts: List[Dict[str, Any]] = []
+    changes: list[dict[str, Any]] = []
+    conflicts: list[dict[str, Any]] = []
 
     all_paths = sorted(set(base_files.keys()) | set(target_files.keys()))
     for path in all_paths:
@@ -170,7 +170,7 @@ def compute_patchset_document(
             continue
 
         operation = "add" if base is None else "delete" if target is None else "modify"
-        change: Dict[str, Any] = {"path": path, "operation": operation}
+        change: dict[str, Any] = {"path": path, "operation": operation}
         if target and isinstance(target.get("contentBase64"), str):
             change["contentBase64"] = target["contentBase64"]
         changes.append(change)
@@ -206,25 +206,25 @@ async def _collection(name: str):
     return pm.persistence.client["mozaiksai"][name]
 
 
-async def persist_snapshot(*, snapshot_doc: Dict[str, Any]) -> str:
+async def persist_snapshot(*, snapshot_doc: dict[str, Any]) -> str:
     coll = await _collection("CodeSnapshots")
     await coll.insert_one(snapshot_doc)
     return str(snapshot_doc.get("snapshotId") or snapshot_doc.get("snapshot_id") or "")
 
 
-async def get_snapshot(*, app_id: str, snapshot_id: str) -> Optional[Dict[str, Any]]:
+async def get_snapshot(*, app_id: str, snapshot_id: str) -> dict[str, Any] | None:
     coll = await _collection("CodeSnapshots")
     return await coll.find_one({"app_id": app_id, "snapshotId": snapshot_id})
 
 
-async def get_latest_snapshot(*, app_id: str, workflow_type: str) -> Optional[Dict[str, Any]]:
+async def get_latest_snapshot(*, app_id: str, workflow_type: str) -> dict[str, Any] | None:
     coll = await _collection("CodeSnapshots")
     cursor = coll.find({"app_id": app_id, "workflow_type": workflow_type}).sort("_id", -1).limit(1)
     docs = await cursor.to_list(length=1)
     return docs[0] if docs else None
 
 
-async def persist_patchset(*, patchset_doc: Dict[str, Any]) -> str:
+async def persist_patchset(*, patchset_doc: dict[str, Any]) -> str:
     coll = await _collection("CodePatchsets")
     await coll.insert_one(patchset_doc)
     return str(patchset_doc.get("patchId") or patchset_doc.get("patch_id") or "")

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 
 
-def _context_data(context_variables: Any) -> Dict[str, Any]:
+def _context_data(context_variables: Any) -> dict[str, Any]:
     if context_variables is None:
         return {}
     if isinstance(context_variables, dict):

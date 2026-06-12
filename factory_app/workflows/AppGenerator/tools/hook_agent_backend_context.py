@@ -9,12 +9,12 @@ explicitly naming agents in the conversation.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def inject_agent_backend_context(agent, messages: List[Dict[str, Any]]) -> None:
+def inject_agent_backend_context(agent, messages: list[dict[str, Any]]) -> None:
     """
     Update agent state hook to inject agent backend context.
     

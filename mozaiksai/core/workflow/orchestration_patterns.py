@@ -566,6 +566,7 @@ async def run_workflow_orchestration(
                     transport=transport,
                     wf_logger=wf_logger,
                     fresh_agents_per_task=True,
+                    agents_factory=agents_factory,
                 )
                 continuation_agent = _next_agent_after_trigger(
                     transition_rules=transition_rules,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
@@ -34,7 +34,7 @@ def _run_async_fire_and_forget(coro: Any) -> None:
         new_loop.close()
 
 
-def emit_handoff_event(event_kind: str, payload: Dict[str, Any]) -> None:
+def emit_handoff_event(event_kind: str, payload: dict[str, Any]) -> None:
     """Emit a runtime handoff event through the unified dispatcher.
 
     Args:
@@ -49,7 +49,7 @@ def emit_handoff_event(event_kind: str, payload: Dict[str, Any]) -> None:
         log.warning("⚠️ [HANDOFF_EVENTS] Unexpected failure scheduling event: %s", exc)
 
 
-def sanitize_identifier(value: Any) -> Optional[str]:
+def sanitize_identifier(value: Any) -> str | None:
     """Best-effort string suitable for logs and event consumers."""
     try:
         if isinstance(value, str):

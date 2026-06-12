@@ -61,9 +61,11 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     assert (target_dir / "app" / "modules" / "README.md").exists()
     assert (target_dir / "workflows" / "README.md").exists()
     assert (target_dir / "app" / "services" / "config.py").exists()
-    assert (target_dir / "app" / "services" / "security" / "__init__.py").exists()
+    assert (target_dir / "app" / "security" / "secrets.yaml").exists()
     assert (target_dir / "app" / "services" / "adapters" / "secrets" / "__init__.py").exists()
     assert (target_dir / "app" / "services" / "routes" / "__init__.py").exists()
+    assert not (target_dir / "app" / "services" / "security").exists()
+    assert not (target_dir / "app" / "services" / "data").exists()
     modules_readme = (target_dir / "app" / "modules" / "README.md").read_text(encoding="utf-8")
     assert "backend/handler.py" in modules_readme
     assert "events.yaml" in modules_readme
@@ -144,8 +146,8 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "app/modules/" in agents_md
     assert "app/services/" in agents_md
     assert "app/services/adapters/" in agents_md
-    assert "app/services/security/" in agents_md
-    assert "app/config/secrets.yaml" in agents_md
+    assert "app/services/security/" not in agents_md
+    assert "app/security/secrets.yaml" in agents_md
     assert "Never store raw API keys" in agents_md
     assert "app/data/contract.json" in agents_md
     assert "workflows/" in agents_md
@@ -156,10 +158,10 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "app/services/integrations/<service>_client.py" in claude_md
     assert "app/services/adapters/<area>/<provider>.py" in claude_md
     assert "app/services/adapters/auth/<provider>.py" in claude_md
-    assert "app/services/security/" in claude_md
     assert "Secret management contract, names only" in claude_md
-    assert "app/config/secrets.yaml" in claude_md
-    assert "app/services/data/" in claude_md
+    assert "app/services/security/" not in claude_md
+    assert "app/security/secrets.yaml" in claude_md
+    assert "app/services/data/" not in claude_md
     assert "workflows/<WorkflowName>/" in claude_md
 
     expected_rules = {

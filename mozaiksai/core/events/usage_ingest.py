@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
-from typing import Any, Dict, Optional
+from typing import Any
 
 import aiohttp
 
@@ -25,8 +25,8 @@ class UsageIngestClient:
     def __init__(
         self,
         *,
-        url: Optional[str] = None,
-        enabled: Optional[bool] = None,
+        url: str | None = None,
+        enabled: bool | None = None,
         timeout_sec: float = 5.0,
         max_attempts: int = 3,
         backoff_base_sec: float = 0.5,
@@ -46,7 +46,7 @@ class UsageIngestClient:
     def enabled(self) -> bool:
         return bool(self._enabled) and bool(self._url)
 
-    async def handle_usage_summary(self, payload: Dict[str, Any]) -> None:
+    async def handle_usage_summary(self, payload: dict[str, Any]) -> None:
         if not self.enabled():
             return
         if not isinstance(payload, dict):
@@ -57,8 +57,8 @@ class UsageIngestClient:
             "Content-Type": "application/json",
         }
 
-        last_err: Optional[str] = None
-        last_status: Optional[int] = None
+        last_err: str | None = None
+        last_status: int | None = None
 
         for attempt in range(self._max_attempts):
             try:
@@ -98,7 +98,7 @@ class UsageIngestClient:
         )
 
 
-_global_client: Optional[UsageIngestClient] = None
+_global_client: UsageIngestClient | None = None
 
 
 def get_usage_ingest_client() -> UsageIngestClient:

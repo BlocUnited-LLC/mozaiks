@@ -47,7 +47,8 @@ Bundle keys (all optional):
 import importlib
 import inspect
 import os
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
@@ -81,14 +82,14 @@ class PlatformHookRegistry:
     ``RUNTIME_PLATFORM_EXTENSIONS`` environment variable.
     """
 
-    _instance: Optional["PlatformHookRegistry"] = None
+    _instance: PlatformHookRegistry | None = None
 
     def __init__(self) -> None:
-        self._startup_hooks: List[Callable] = []
-        self._chat_prereqs_hooks: List[Callable] = []
-        self._chat_session_fields_hooks: List[Callable] = []
-        self._workflow_ordering_hooks: List[Callable] = []
-        self._workflow_name_resolver_hooks: List[Callable] = []
+        self._startup_hooks: list[Callable] = []
+        self._chat_prereqs_hooks: list[Callable] = []
+        self._chat_session_fields_hooks: list[Callable] = []
+        self._workflow_ordering_hooks: list[Callable] = []
+        self._workflow_name_resolver_hooks: list[Callable] = []
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -96,7 +97,7 @@ class PlatformHookRegistry:
     # ------------------------------------------------------------------
 
     @classmethod
-    def get_instance(cls) -> "PlatformHookRegistry":
+    def get_instance(cls) -> PlatformHookRegistry:
         if cls._instance is None:
             cls._instance = cls()
             cls._instance._load()
@@ -178,7 +179,7 @@ class PlatformHookRegistry:
         user_id: str,
         workflow_name: str,
         persistence: Any,
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Gate check before creating/resuming a chat session."""
         for hook in self._chat_prereqs_hooks:
             try:
@@ -204,9 +205,9 @@ class PlatformHookRegistry:
         user_id: str,
         workflow_name: str,
         chat_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Collect extra fields to inject into the chat session document."""
-        extra: Dict[str, Any] = {}
+        extra: dict[str, Any] = {}
         for hook in self._chat_session_fields_hooks:
             try:
                 res = hook(
@@ -223,7 +224,7 @@ class PlatformHookRegistry:
                 logger.warning(f"PLATFORM_HOOKS_SESSION_FIELDS_ERROR: {exc}")
         return extra
 
-    def call_workflow_ordering(self, workflow_names: List[str]) -> List[str]:
+    def call_workflow_ordering(self, workflow_names: list[str]) -> list[str]:
         """Reorder the workflow list for frontend display."""
         result = list(workflow_names)
         for hook in self._workflow_ordering_hooks:
@@ -238,8 +239,8 @@ class PlatformHookRegistry:
     def call_workflow_name_resolver(
         self,
         requested_workflow_name: str,
-        workflow_names: List[str],
-    ) -> Optional[str]:
+        workflow_names: list[str],
+    ) -> str | None:
         """Resolve a requested workflow name against loaded workflow names."""
         names = list(workflow_names or [])
         for hook in self._workflow_name_resolver_hooks:
@@ -274,7 +275,7 @@ class PlatformHookRegistry:
     def has_startup(self) -> bool:
         return bool(self._startup_hooks)
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         return {
             "startup_hooks": len(self._startup_hooks),
             "chat_prereqs_hooks": len(self._chat_prereqs_hooks),

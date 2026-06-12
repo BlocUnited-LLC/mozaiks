@@ -19,12 +19,11 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
-from factory_app.workflows._shared.hook_utils import workflow_context_path
-from factory_app.workflows._shared.hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +33,11 @@ _EXPECTED_VERSION = 1
 
 
 @lru_cache(maxsize=1)
-def _load_routing() -> Optional[Dict[str, Any]]:
+def _load_routing() -> dict[str, Any] | None:
     """Load and cache capability_routing.yaml.  Cache is process-scoped (fine for production).
     Call ``_load_routing.cache_clear()`` in tests that need a fresh load."""
     try:
-        with open(_ROUTING_PATH, "r", encoding="utf-8") as fh:
+        with open(_ROUTING_PATH, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
         if not isinstance(data, dict):
             logger.warning("capability_routing.yaml did not parse as a dict — ignoring")
@@ -58,7 +57,7 @@ def _load_routing() -> Optional[Dict[str, Any]]:
 
 
 
-def _format_layer(layer_key: str, layer_data: Dict[str, Any]) -> str:
+def _format_layer(layer_key: str, layer_data: dict[str, Any]) -> str:
     description = str(layer_data.get("description") or "").strip()
     rule = str(layer_data.get("rule") or "").strip()
     lines = [f"Layer: {layer_key}"]
@@ -70,7 +69,7 @@ def _format_layer(layer_key: str, layer_data: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _format_packs(packs: List[Dict[str, Any]]) -> str:
+def _format_packs(packs: list[dict[str, Any]]) -> str:
     if not packs:
         return ""
     lines = ["Known capability packs (select; do not regenerate internals):"]
@@ -94,8 +93,8 @@ def _format_packs(packs: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _build_routing_body(routing: Dict[str, Any]) -> str:
-    layers: Dict[str, Any] = routing.get("layers") or {}
+def _build_routing_body(routing: dict[str, Any]) -> str:
+    layers: dict[str, Any] = routing.get("layers") or {}
     parts: list[str] = []
 
     # Always show all four layers in a compact form
@@ -134,7 +133,7 @@ def _build_routing_body(routing: Dict[str, Any]) -> str:
 
 def inject_capability_routing_context(
     agent: Any,
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> None:
     """
     prompt middleware function for AppPlanAgent.

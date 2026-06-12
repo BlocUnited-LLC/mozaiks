@@ -23,8 +23,7 @@ hardcoding Python/React/MongoDB assumptions in their prompts.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
 
@@ -47,12 +46,12 @@ _EXECUTION_AGENTS = {
 # Utilities
 # ---------------------------------------------------------------------------
 
-def _load_language_profile(pack_id: str) -> Dict[str, Any] | None:
+def _load_language_profile(pack_id: str) -> dict[str, Any] | None:
     try:
         import yaml  # type: ignore
 
         path = workflow_context_path(pack_id, "language_profile.yaml")
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
         return data if isinstance(data, dict) else None
     except FileNotFoundError:
@@ -106,7 +105,7 @@ def _update_section(agent: Any, header: str, body: str) -> None:
         elif hasattr(agent, "_system_message"):
             agent._system_message = new_message
         else:
-            setattr(agent, "_system_message", new_message)
+            agent._system_message = new_message
 
     except Exception as exc:
         logger.error(
@@ -117,7 +116,7 @@ def _update_section(agent: Any, header: str, body: str) -> None:
         )
 
 
-def _fmt_list(label: str, items: List[str], indent: int = 2) -> List[str]:
+def _fmt_list(label: str, items: list[str], indent: int = 2) -> list[str]:
     if not items:
         return []
     pad = " " * indent
@@ -130,7 +129,7 @@ def _fmt_list(label: str, items: List[str], indent: int = 2) -> List[str]:
 # Content builders — scoped to each agent's needs
 # ---------------------------------------------------------------------------
 
-def _build_backend_block(backend: Dict[str, Any]) -> str:
+def _build_backend_block(backend: dict[str, Any]) -> str:
     language = str(backend.get("language") or "").strip()
     framework = str(backend.get("framework") or "").strip()
     stub_files = [str(f) for f in (backend.get("stub_files") or []) if str(f).strip()]
@@ -152,7 +151,7 @@ def _build_backend_block(backend: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _build_database_block(database: Dict[str, Any]) -> str:
+def _build_database_block(database: dict[str, Any]) -> str:
     db_type = str(database.get("type") or "").strip()
     schema_format = str(database.get("schema_format") or "").strip()
     collection_api = str(database.get("collection_api") or "").strip()
@@ -169,7 +168,7 @@ def _build_database_block(database: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _build_frontend_block(frontend: Dict[str, Any]) -> str:
+def _build_frontend_block(frontend: dict[str, Any]) -> str:
     language = str(frontend.get("language") or "").strip()
     framework = str(frontend.get("framework") or "").strip()
     ext = str(frontend.get("component_extension") or "").strip()
@@ -192,7 +191,7 @@ def _build_frontend_block(frontend: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _build_services_block(services: Dict[str, Any]) -> str:
+def _build_services_block(services: dict[str, Any]) -> str:
     lines = ["Services:"]
     for key, val in services.items():
         if isinstance(val, str):
@@ -210,7 +209,7 @@ _NEEDS_FRONTEND = {"FrontendStubAgent"}
 _NEEDS_SERVICES = {"ConfigMiddlewareAgent", "ControllerAgent"}
 
 
-def _build_body(agent_name: str, profile: Dict[str, Any]) -> str:
+def _build_body(agent_name: str, profile: dict[str, Any]) -> str:
     pack_id = str(profile.get("pack_id") or _DEFAULT_PACK_ID)
     label = str(profile.get("label") or pack_id)
     parts = [f"pack: {pack_id} — {label}"]
@@ -248,7 +247,7 @@ def _build_body(agent_name: str, profile: Dict[str, Any]) -> str:
 # Public hook
 # ---------------------------------------------------------------------------
 
-def inject_language_profile_context(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def inject_language_profile_context(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Inject the active dev pack's language profile into execution agent prompts.
 
     Reads build_context/{pack_id}/language_profile.yaml and injects a scoped

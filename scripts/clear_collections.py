@@ -15,13 +15,12 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.uri_parser import parse_uri
-
 
 _ALLOWED_LOCAL_HOSTS = {
     "localhost",
@@ -49,13 +48,13 @@ def _load_env() -> None:
         load_dotenv()
 
 
-def _get_mongo_uri() -> Optional[str]:
+def _get_mongo_uri() -> str | None:
     return os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or os.getenv("MONGO_URL")
 
 
-def _extract_hosts(mongo_uri: str) -> List[str]:
+def _extract_hosts(mongo_uri: str) -> list[str]:
     parsed = parse_uri(mongo_uri)
-    hosts: List[str] = []
+    hosts: list[str] = []
     for host, _port in parsed.get("nodelist", []):
         hosts.append(str(host).strip().lower())
     return hosts
@@ -70,7 +69,7 @@ def _is_local_host(hostname: str) -> bool:
     return False
 
 
-def _resolve_database_name(mongo_uri: str, override: Optional[str]) -> Optional[str]:
+def _resolve_database_name(mongo_uri: str, override: str | None) -> str | None:
     if override:
         return override.strip()
     parsed = parse_uri(mongo_uri)
@@ -94,7 +93,7 @@ def _iter_target_collections(db) -> Iterable[str]:
         yield name
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Clear MongoDB documents for local dev.")
     parser.add_argument("--action", choices=["delete", "drop", "list"], default="delete")
     parser.add_argument("--database", default=None, help="Database name override (defaults to DB in URI)")

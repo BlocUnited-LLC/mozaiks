@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
 from ._shared import normalize_context
 
@@ -11,7 +11,7 @@ from ._shared import normalize_context
 async def get_artifact_summary(
     *,
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     tool_context = normalize_context(context)
     app_id = str(tool_context.app_id or "").strip()

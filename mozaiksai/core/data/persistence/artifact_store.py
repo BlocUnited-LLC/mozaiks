@@ -7,20 +7,20 @@ under the framework system database.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any
 
 from .namespaces import SYSTEM_DATABASE, BuilderCollections
 from .persistence_manager import AG2PersistenceManager
 
-
-IndexSpec = Tuple[Sequence[Tuple[str, int]], Dict[str, Any]]
+IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 
 
 class BuilderArtifactStore:
     """Artifact-centric persistence wrapper for factory_app and related runtime flows."""
 
-    def __init__(self, pm: Optional[AG2PersistenceManager] = None) -> None:
+    def __init__(self, pm: AG2PersistenceManager | None = None) -> None:
         self._pm = pm or AG2PersistenceManager()
 
     async def _client(self):
@@ -51,8 +51,8 @@ class BuilderArtifactStore:
         self,
         *,
         app_id: str,
-        concept_record: Dict[str, Any],
-        created_at: Optional[str] = None,
+        concept_record: dict[str, Any],
+        created_at: str | None = None,
     ) -> None:
         coll = await self._collection(BuilderCollections.CONCEPTS)
         await coll.update_one(
@@ -61,7 +61,7 @@ class BuilderArtifactStore:
             upsert=True,
         )
 
-    async def get_concept(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+    async def get_concept(self, *, app_id: str) -> dict[str, Any] | None:
         coll = await self._collection(BuilderCollections.CONCEPTS)
         doc = await coll.find_one({"app_id": str(app_id)})
         if not isinstance(doc, dict):
@@ -69,7 +69,7 @@ class BuilderArtifactStore:
         doc.pop("_id", None)
         return doc
 
-    async def save_build_plan(self, *, app_id: str, build_plan: Dict[str, Any]) -> None:
+    async def save_build_plan(self, *, app_id: str, build_plan: dict[str, Any]) -> None:
         coll = await self._collection(BuilderCollections.BUILD_PLANS)
         await coll.update_one(
             {"app_id": str(app_id)},
@@ -77,7 +77,7 @@ class BuilderArtifactStore:
             upsert=True,
         )
 
-    async def get_build_plan(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+    async def get_build_plan(self, *, app_id: str) -> dict[str, Any] | None:
         coll = await self._collection(BuilderCollections.BUILD_PLANS)
         doc = await coll.find_one({"app_id": str(app_id)})
         if not isinstance(doc, dict):
@@ -85,7 +85,7 @@ class BuilderArtifactStore:
         doc.pop("_id", None)
         return doc
 
-    async def get_theme_capture(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+    async def get_theme_capture(self, *, app_id: str) -> dict[str, Any] | None:
         coll = await self._collection(BuilderCollections.THEME_CAPTURES)
         doc = await coll.find_one({"app_id": str(app_id)})
         if not isinstance(doc, dict):
@@ -132,18 +132,18 @@ class BuilderArtifactStore:
         self,
         *,
         app_id: str,
-        user_id: Optional[str],
+        user_id: str | None,
         kind: str,
         stage: str,
         content: str,
         source_workflow: str,
-        source_chat_id: Optional[str],
-        extra_fields: Optional[Dict[str, Any]] = None,
+        source_chat_id: str | None,
+        extra_fields: dict[str, Any] | None = None,
     ) -> None:
         await self.ensure_design_doc_indexes()
         coll = await self._collection(BuilderCollections.DESIGN_DOCUMENTS)
         now = datetime.now(UTC)
-        set_fields: Dict[str, Any] = {
+        set_fields: dict[str, Any] = {
             "app_id": app_id,
             "user_id": user_id,
             "kind": kind,
@@ -179,7 +179,7 @@ class BuilderArtifactStore:
             upsert=True,
         )
 
-    async def get_design_doc(self, *, app_id: str, kind: str) -> Optional[Dict[str, Any]]:
+    async def get_design_doc(self, *, app_id: str, kind: str) -> dict[str, Any] | None:
         coll = await self._collection(BuilderCollections.DESIGN_DOCUMENTS)
         doc = await coll.find_one({"app_id": str(app_id), "kind": str(kind)})
         if not isinstance(doc, dict):
@@ -187,11 +187,11 @@ class BuilderArtifactStore:
         doc.pop("_id", None)
         return doc
 
-    async def list_design_docs(self, *, app_id: str) -> List[Dict[str, Any]]:
+    async def list_design_docs(self, *, app_id: str) -> list[dict[str, Any]]:
         coll = await self._collection(BuilderCollections.DESIGN_DOCUMENTS)
         cursor = coll.find({"app_id": str(app_id)})
         rows = await cursor.to_list(length=None)
-        docs: List[Dict[str, Any]] = []
+        docs: list[dict[str, Any]] = []
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -204,17 +204,17 @@ class BuilderArtifactStore:
         self,
         *,
         app_id: str,
-        user_id: Optional[str],
+        user_id: str | None,
         stage: str,
         status: str,
         kinds: Sequence[str],
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> None:
         await self.ensure_design_doc_indexes()
         coll = await self._collection(BuilderCollections.DESIGN_DOCUMENTS)
         now = datetime.now(UTC)
         for kind in kinds:
-            update: Dict[str, Any] = {
+            update: dict[str, Any] = {
                 "$set": {
                     "app_id": app_id,
                     "user_id": user_id,
@@ -234,12 +234,12 @@ class BuilderArtifactStore:
         *,
         app_id: str,
         build_id: str,
-        artifact_version_id: Optional[str],
-        change_class: Optional[str],
-        data_contract: Dict[str, Any],
-        user_id: Optional[str],
+        artifact_version_id: str | None,
+        change_class: str | None,
+        data_contract: dict[str, Any],
+        user_id: str | None,
         source_workflow: str,
-        source_chat_id: Optional[str],
+        source_chat_id: str | None,
     ) -> None:
         await self.ensure_data_contract_indexes()
         coll = await self._collection(BuilderCollections.DATA_CONTRACTS)
@@ -263,7 +263,7 @@ class BuilderArtifactStore:
             upsert=True,
         )
 
-    async def get_latest_data_contract(self, *, app_id: str) -> Optional[Dict[str, Any]]:
+    async def get_latest_data_contract(self, *, app_id: str) -> dict[str, Any] | None:
         coll = await self._collection(BuilderCollections.DATA_CONTRACTS)
         cursor = coll.find({"app_id": str(app_id)}).sort("updated_at", -1).limit(1)
         docs = await cursor.to_list(length=1)
@@ -277,10 +277,10 @@ class BuilderArtifactStore:
         self,
         *,
         app_id: str,
-        chat_id: Optional[str],
-        app_url: Optional[str],
-        identity: Dict[str, Any],
-        theme_config: Dict[str, Any],
+        chat_id: str | None,
+        app_url: str | None,
+        identity: dict[str, Any],
+        theme_config: dict[str, Any],
     ) -> None:
         coll = await self._collection(BuilderCollections.THEME_CAPTURES)
         now = datetime.now(UTC).isoformat()
@@ -304,16 +304,16 @@ class BuilderArtifactStore:
         self,
         *,
         app_id: str,
-        user_id: Optional[str],
+        user_id: str | None,
         workflow_type: str,
-        repo_url: Optional[str],
-        job_id: Optional[str],
-        meta: Optional[Dict[str, Any]] = None,
-        extra_fields: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        repo_url: str | None,
+        job_id: str | None,
+        meta: dict[str, Any] | None = None,
+        extra_fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         await self.ensure_workflow_export_indexes()
         now = datetime.now(UTC).isoformat()
-        doc: Dict[str, Any] = {
+        doc: dict[str, Any] = {
             "app_id": app_id,
             "appId": app_id,
             "user_id": user_id,
@@ -336,7 +336,7 @@ class BuilderArtifactStore:
         await coll.insert_one(doc)
         return doc
 
-    async def get_latest_workflow_export(self, *, app_id: str, workflow_type: str) -> Optional[Dict[str, Any]]:
+    async def get_latest_workflow_export(self, *, app_id: str, workflow_type: str) -> dict[str, Any] | None:
         await self.ensure_workflow_export_indexes()
         coll = await self._collection(BuilderCollections.WORKFLOW_EXPORTS)
         cursor = coll.find({"app_id": app_id, "workflow_type": workflow_type}).sort("_id", -1).limit(1)
@@ -348,15 +348,15 @@ class BuilderArtifactStore:
         *,
         app_id: str,
         build_id: str,
-        artifact_version_id: Optional[str],
-        change_class: Optional[str],
-        migration: Dict[str, Any],
+        artifact_version_id: str | None,
+        change_class: str | None,
+        migration: dict[str, Any],
         status: str,
         source_workflow: str,
-        source_chat_id: Optional[str],
-        generated_app_dir: Optional[str] = None,
-        bundle_relative_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        source_chat_id: str | None,
+        generated_app_dir: str | None = None,
+        bundle_relative_path: str | None = None,
+    ) -> dict[str, Any]:
         await self.ensure_database_migration_indexes()
         coll = await self._collection(BuilderCollections.DATABASE_MIGRATIONS)
         now = datetime.now(UTC)
@@ -364,7 +364,7 @@ class BuilderArtifactStore:
         if not migration_id:
             raise ValueError("migration.migration_id is required")
         relative_path = bundle_relative_path or f"data/migrations/{migration_id}.json"
-        doc: Dict[str, Any] = {
+        doc: dict[str, Any] = {
             "app_id": app_id,
             "build_id": build_id,
             "migration_id": migration_id,

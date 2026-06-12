@@ -71,6 +71,7 @@ dist/
 *.local
 
 # Runtime outputs
+.tmp/
 logs/logs/
 logs/agent_outputs/
 logs/workflow_converter/

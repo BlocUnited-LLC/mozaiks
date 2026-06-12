@@ -11,7 +11,7 @@ Schema version: mozaiks.admin.registry.v1
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Literal, Optional
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -27,11 +27,11 @@ class AdminRegistryPage(BaseModel):
     id: str
     label: str
     path: str
-    icon: Optional[str] = None
+    icon: str | None = None
     order: int = 0
     enabled: bool = True
     scope: Literal["workspace", "app"] = "app"
-    surfaces: Optional[List[Literal["platform", "studio"]]] = None
+    surfaces: list[Literal["platform", "studio"]] | None = None
 
     @field_validator("id", "label", "path", mode="before")
     @classmethod
@@ -72,9 +72,9 @@ class AdminRegistry(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     schema_version: str = ADMIN_REGISTRY_SCHEMA_VERSION
-    pages: List[AdminRegistryPage] = Field(default_factory=list)
+    pages: list[AdminRegistryPage] = Field(default_factory=list)
 
-    def enabled_pages(self, scope: Optional[str] = None) -> List[AdminRegistryPage]:
+    def enabled_pages(self, scope: str | None = None) -> list[AdminRegistryPage]:
         pages = [p for p in self.pages if p.enabled]
         if scope:
             pages = [p for p in pages if p.scope == scope]

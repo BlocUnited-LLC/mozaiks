@@ -18,11 +18,10 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 import yaml
-
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -413,7 +412,7 @@ class TestStaticContractChecks:
 # Level B: AppBuildPlan fixture validation
 # ---------------------------------------------------------------------------
 
-_TASK_TRACKER_BUILD_TASKS: List[Dict[str, Any]] = [
+_TASK_TRACKER_BUILD_TASKS: list[dict[str, Any]] = [
     {
         "task_id": "task_tracker.projects.module_contract",
         "task_type": "module_contract",
@@ -611,7 +610,7 @@ class TestAppBuildPlanFixture:
 
 def _canonical_feature_output(
     module_id: str, module_yaml: str, events_yaml: str
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Simulate ConfigMiddlewareAgent + ServiceAgent canonical output for a module."""
     cap = module_id.capitalize()
     return {
@@ -632,7 +631,7 @@ def _canonical_feature_output(
     }
 
 
-def _drifted_feature_output(module_id: str) -> Dict[str, Any]:
+def _drifted_feature_output(module_id: str) -> dict[str, Any]:
     """Simulate a drifted generator output with flat manifests and removed paths."""
     return {
         "code_files": [

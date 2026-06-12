@@ -22,7 +22,6 @@ import yaml
 
 from mozaiksai.core.session.build_context import merge_build_context
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENTS_YAML = REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
 TOOLS_DIR = REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools"

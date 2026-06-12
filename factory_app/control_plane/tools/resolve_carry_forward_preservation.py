@@ -18,7 +18,7 @@ Rules:
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Any, Optional
+from typing import Any
 
 from factory_app.control_plane.tools._artifact_workspace import load_artifact_workspace
 from mozaiksai.core.artifacts.content_store import ArtifactContentStore, get_artifact_content_store
@@ -172,9 +172,9 @@ def _cv_set(context_variables: Any, key: str, value: Any) -> None:
 
 async def resolve_carry_forward_preservation(
     *,
-    context_variables: Optional[dict[str, Any]] = None,
-    artifact_store: Optional[ArtifactStore] = None,
-    content_store: Optional[ArtifactContentStore] = None,
+    context_variables: dict[str, Any] | None = None,
+    artifact_store: ArtifactStore | None = None,
+    content_store: ArtifactContentStore | None = None,
 ) -> dict[str, Any]:
     """Inject allowlisted declarative module contract files from the prior app bundle.
 
@@ -194,7 +194,7 @@ async def resolve_carry_forward_preservation(
     Returns ``{"carry_forward_report": {...}}``.  Never raises.
     """
     prev_ref_raw = _cv_get(context_variables, "previous_app_bundle_ref")
-    prev_ref: Optional[str] = str(prev_ref_raw).strip() if prev_ref_raw else None
+    prev_ref: str | None = str(prev_ref_raw).strip() if prev_ref_raw else None
 
     report: dict[str, Any] = {
         "previous_app_bundle_ref": prev_ref,

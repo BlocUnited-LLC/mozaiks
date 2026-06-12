@@ -9,7 +9,6 @@ from autogen.beta.events.types import ModelMessage
 
 from tests.import_utils import import_module_directly
 
-
 _persistence_mod = import_module_directly("mozaiksai.core.data.persistence.persistence_manager")
 _stream_storage_mod = import_module_directly("mozaiksai.core.adapters.ag2_stream_storage")
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from mozaiksai.core.data.models import WorkflowStatus
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
@@ -18,8 +18,8 @@ async def validate_pack_prereqs(
     app_id: str,
     user_id: str,
     workflow_name: str,
-    persistence: Optional[AG2PersistenceManager] = None,
-) -> Tuple[bool, Optional[str]]:
+    persistence: AG2PersistenceManager | None = None,
+) -> tuple[bool, str | None]:
     """Validate workflow prerequisites from canonical global pack graph."""
     try:
         wf = str(workflow_name or "").strip()
@@ -43,7 +43,7 @@ async def validate_pack_prereqs(
         pm = persistence or AG2PersistenceManager()
         coll = await pm._coll()
 
-        missing_msgs: List[str] = []
+        missing_msgs: list[str] = []
         for dependency in required_dependencies:
             if not isinstance(dependency, dict):
                 continue
@@ -53,7 +53,7 @@ async def validate_pack_prereqs(
             reason = str(dependency.get("reason") or "").strip()
             scope = str(dependency.get("scope") or "app").strip().lower()
 
-            query: Dict[str, Any] = {
+            query: dict[str, Any] = {
                 "workflow_name": parent,
                 "status": int(WorkflowStatus.COMPLETED),
                 **build_app_scope_filter(scope_id),
@@ -73,7 +73,7 @@ async def validate_pack_prereqs(
             return True, None
 
         seen = set()
-        uniq: List[str] = []
+        uniq: list[str] = []
         for msg in missing_msgs:
             if msg in seen:
                 continue
@@ -88,8 +88,8 @@ async def list_workflow_availability(
     *,
     app_id: str,
     user_id: str,
-    persistence: Optional[AG2PersistenceManager] = None,
-) -> List[Dict[str, Any]]:
+    persistence: AG2PersistenceManager | None = None,
+) -> list[dict[str, Any]]:
     """List workflows declared in global pack graph with availability status."""
     scope_id = str(app_id or "").strip()
     uid = str(user_id or "").strip()
@@ -100,7 +100,7 @@ async def list_workflow_availability(
     if pack is None:
         return []
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for wf in list_workflow_ids(pack):
         ok, reason = await validate_pack_prereqs(
             app_id=scope_id,

@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from logs.logging_config import get_core_logger
 
@@ -28,11 +29,11 @@ class WebSocketSessionManager:
     ) -> None:
         self.logger = logger or get_core_logger("websocket_session_manager")
         self._stringify_unknown = stringify_unknown
-        self.connections: Dict[str, Dict[str, Any]] = {}
-        self._message_queues: Dict[str, List[Any]] = {}
-        self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
-        self._scheduled_flush_tasks: Dict[str, asyncio.Task] = {}
-        self._pre_connection_buffers: Dict[str, List[Any]] = {}
+        self.connections: dict[str, dict[str, Any]] = {}
+        self._message_queues: dict[str, list[Any]] = {}
+        self._heartbeat_tasks: dict[str, asyncio.Task] = {}
+        self._scheduled_flush_tasks: dict[str, asyncio.Task] = {}
+        self._pre_connection_buffers: dict[str, list[Any]] = {}
         self._max_queue_size = max_queue_size
         self._heartbeat_interval = heartbeat_interval
         self._max_pre_connection_buffer = max_pre_connection_buffer
@@ -43,16 +44,16 @@ class WebSocketSessionManager:
     def has_connection(self, chat_id: str) -> bool:
         return chat_id in self.connections
 
-    def get_connection(self, chat_id: str) -> Optional[Dict[str, Any]]:
+    def get_connection(self, chat_id: str) -> dict[str, Any] | None:
         return self.connections.get(chat_id)
 
-    async def register(self, chat_id: str, websocket, metadata: Dict[str, Any]) -> None:
+    async def register(self, chat_id: str, websocket, metadata: dict[str, Any]) -> None:
         """Register a newly accepted WebSocket connection."""
         connection_meta = dict(metadata)
         connection_meta.update({
             "websocket": websocket,
             "active": True,
-            "connected_at": datetime.now(timezone.utc).isoformat(),
+            "connected_at": datetime.now(UTC).isoformat(),
         })
         self.connections[chat_id] = connection_meta
         self._message_queues.setdefault(chat_id, [])
@@ -80,7 +81,7 @@ class WebSocketSessionManager:
     # ---------------------------------------------------------------------
     # Message queuing + delivery
     # ---------------------------------------------------------------------
-    async def broadcast(self, event_data: Dict[str, Any], target_chat_id: Optional[str] = None) -> None:
+    async def broadcast(self, event_data: dict[str, Any], target_chat_id: str | None = None) -> None:
         """Broadcast an event to a specific chat or all active chats."""
         if target_chat_id:
             if self.has_connection(target_chat_id):
@@ -163,7 +164,7 @@ class WebSocketSessionManager:
             return True
         return False
 
-    def _buffer_pre_connection(self, chat_id: str, event_data: Dict[str, Any]) -> None:
+    def _buffer_pre_connection(self, chat_id: str, event_data: dict[str, Any]) -> None:
         buffer_ref = self._pre_connection_buffers.setdefault(chat_id, [])
         buffer_ref.append(event_data)
         if len(buffer_ref) > self._max_pre_connection_buffer:
@@ -219,7 +220,7 @@ class WebSocketSessionManager:
                 await asyncio.sleep(self._heartbeat_interval)
                 ping_data = {
                     "type": "ping",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
                 try:
                     await websocket.send_json(ping_data)

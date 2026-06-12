@@ -55,6 +55,7 @@ class ControlPlaneConfig(BaseModel):
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     contract_surface: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
+    scope: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
 
     @field_validator("llm_profiles", mode="before")
     @classmethod

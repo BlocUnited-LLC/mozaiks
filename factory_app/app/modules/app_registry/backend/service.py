@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from .policy import normalize_optional_text, validate_lifecycle_state
@@ -21,7 +21,7 @@ def _create_app_id(name: str) -> str:
 
 
 class AppRegistryService:
-    def __init__(self, repo: Optional["AppRegistryRepo"] = None) -> None:
+    def __init__(self, repo: AppRegistryRepo | None = None) -> None:
         if repo is None:
             from .repo import AppRegistryRepo
 
@@ -33,10 +33,10 @@ class AppRegistryService:
         *,
         owner_user_id: str,
         name: str,
-        description: Optional[str] = None,
+        description: str | None = None,
         status: str = "draft",
-        app_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        app_id: str | None = None,
+    ) -> dict[str, Any]:
         payload = ensure_create_payload(
             name=name,
             description=description,
@@ -58,8 +58,8 @@ class AppRegistryService:
         *,
         build_registry_id: str,
         status: str,
-        bundle_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        bundle_path: str | None = None,
+    ) -> dict[str, Any]:
         payload = ensure_status_payload(
             build_registry_id=build_registry_id,
             status=status,
@@ -72,16 +72,16 @@ class AppRegistryService:
         )
         return {"success": app is not None, "app": app}
 
-    async def list_apps(self, *, owner_user_id: str) -> Dict[str, Any]:
+    async def list_apps(self, *, owner_user_id: str) -> dict[str, Any]:
         apps = await self.repo.list_apps_for_user(owner_user_id=owner_user_id)
         return {"apps": apps}
 
     async def get_app_record(
         self,
         *,
-        app_id: Optional[str] = None,
-        build_registry_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        app_id: str | None = None,
+        build_registry_id: str | None = None,
+    ) -> dict[str, Any]:
         normalized_app_id = normalize_optional_text(app_id)
         normalized_record_id = normalize_optional_text(build_registry_id)
         app = None
@@ -96,7 +96,7 @@ class AppRegistryService:
         *,
         build_registry_id: str,
         promoted_by: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         normalized_record_id = normalize_optional_text(build_registry_id)
         if not normalized_record_id:
             raise ValueError("build_registry_id is required")
@@ -121,8 +121,8 @@ class AppRegistryService:
         app_id: str,
         owner_user_id: str,
         status: str,
-        default_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        default_name: str | None = None,
+    ) -> dict[str, Any]:
         existing = await self.repo.get_by_app_id(app_id=app_id)
         validated_status = validate_lifecycle_state(status)
         if existing:

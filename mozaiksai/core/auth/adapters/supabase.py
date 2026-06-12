@@ -13,13 +13,13 @@ Supabase JWTs have the following structure:
 """
 
 import os
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 import jwt
 from jwt import PyJWKClient
 
-from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims, AuthError
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
 
 logger = get_core_logger("auth.supabase")
 
@@ -47,13 +47,13 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
 
     def __init__(
         self,
-        supabase_url: Optional[str] = None,
-        jwt_secret: Optional[str] = None,
+        supabase_url: str | None = None,
+        jwt_secret: str | None = None,
     ):
         super().__init__()
         self._supabase_url = supabase_url or os.getenv("SUPABASE_URL", "")
         self._jwt_secret = jwt_secret or os.getenv("SUPABASE_JWT_SECRET", "")
-        self._jwks_client: Optional[PyJWKClient] = None
+        self._jwks_client: PyJWKClient | None = None
 
         # Clean URL (remove trailing slash)
         if self._supabase_url:
@@ -109,7 +109,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
 
         return self._extract_claims(claims)
 
-    async def _validate_with_secret(self, token: str) -> Dict[str, Any]:
+    async def _validate_with_secret(self, token: str) -> dict[str, Any]:
         """Validate using JWT secret (HS256)."""
         try:
             claims = jwt.decode(
@@ -137,7 +137,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
             logger.error(f"Token validation error: {e}")
             raise AuthError("Token validation failed", 401, self.name)
 
-    async def _validate_with_jwks(self, token: str) -> Dict[str, Any]:
+    async def _validate_with_jwks(self, token: str) -> dict[str, Any]:
         """Validate using JWKS (RS256)."""
         try:
             jwks_client = self._get_jwks_client()
@@ -176,7 +176,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
             logger.error(f"Token validation error: {e}")
             raise AuthError("Token validation failed", 401, self.name)
 
-    def _extract_claims(self, raw_claims: Dict[str, Any]) -> UserClaims:
+    def _extract_claims(self, raw_claims: dict[str, Any]) -> UserClaims:
         """Extract standardized claims from Supabase JWT."""
         # User ID from sub claim
         user_id = raw_claims.get("sub")

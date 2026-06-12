@@ -7,10 +7,10 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     build_app_backend_admin_code_files,
 )
+from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_files
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )

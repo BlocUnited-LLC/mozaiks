@@ -98,10 +98,11 @@ class TestToolExists:
         assert callable(get_carry_forward_candidates)
 
     def test_all_exported(self) -> None:
-        from factory_app.control_plane.tools import get_carry_forward_candidates as mod_  # noqa: F401
+        from factory_app.control_plane.tools import (
+            get_carry_forward_candidates as mod_,  # noqa: F401
+        )
         from factory_app.control_plane.tools.get_carry_forward_candidates import (
             __all__,
-            get_carry_forward_candidates,
         )
         assert "get_carry_forward_candidates" in __all__
 

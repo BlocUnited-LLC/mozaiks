@@ -51,6 +51,23 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
     zip_path = tmp_path / "GeneratedWorkflow.zip"
     zip_path.write_bytes(b"fake workflow bytes")
     context = _Context({"artifact_version_id": "av_parent_1"})
+    workflow_integration_metadata = {
+        "contract_version": "1.0",
+        "workflows": [
+            {
+                "workflow_name": "LeadWorkflow",
+                "capability_id": "lead-workflow",
+                "startup_mode": "BackendOnly",
+                "trigger_events": [
+                    {
+                        "event_type": "domain.leads.batch_requested",
+                        "source": "domain",
+                        "capability_id": "lead-workflow",
+                    }
+                ],
+            }
+        ],
+    }
 
     artifact_version = asyncio.run(
         generate_and_download_module._register_workflow_bundle_artifact_version(
@@ -61,6 +78,7 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
             bundle_name="LeadWorkflow",
             zip_path=zip_path,
             context_variables=context,
+            workflow_integration_metadata=workflow_integration_metadata,
         )
     )
 
@@ -75,5 +93,9 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
     }
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"
     assert fake_artifact_store.calls[0]["validation_status"].value == "pending"
+    assert (
+        fake_artifact_store.calls[0]["commit_metadata"]["metadata"]["workflow_integration_metadata"]
+        == workflow_integration_metadata
+    )
     assert context.data["artifact_version_id"] == "av_workflow_bundle_1"
 

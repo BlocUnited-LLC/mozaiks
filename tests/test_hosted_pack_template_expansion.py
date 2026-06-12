@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 import yaml
 
-
 WORKSPACE = Path(__file__).resolve().parents[1]
 
 

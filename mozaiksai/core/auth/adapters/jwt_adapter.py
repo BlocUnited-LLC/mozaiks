@@ -5,14 +5,14 @@ Supports configurable claim mappings to work with any JWT-based auth provider.
 """
 
 import os
-from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
+from typing import Any
 
 import jwt
 from jwt import PyJWKClient
 
-from mozaiksai.core.auth.adapters.base import BaseAuthAdapter, UserClaims, AuthError
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
 
 logger = get_core_logger("auth.jwt_adapter")
 
@@ -41,7 +41,7 @@ class JWTAdapterConfig:
     scopes_format: str = "space"
 
     # Algorithms to accept
-    algorithms: List[str] = None
+    algorithms: list[str] = None
 
     # Clock skew tolerance in seconds
     clock_skew_seconds: int = 120
@@ -102,10 +102,10 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
     name = "jwt"
 
-    def __init__(self, config: Optional[JWTAdapterConfig] = None):
+    def __init__(self, config: JWTAdapterConfig | None = None):
         super().__init__()
         self._config = config or JWTAdapterConfig.from_env()
-        self._jwks_client: Optional[PyJWKClient] = None
+        self._jwks_client: PyJWKClient | None = None
 
     def _get_jwks_client(self) -> PyJWKClient:
         """Get or create JWKS client."""
@@ -204,7 +204,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
         return user_claims
 
-    def _extract_claims(self, raw_claims: Dict[str, Any]) -> UserClaims:
+    def _extract_claims(self, raw_claims: dict[str, Any]) -> UserClaims:
         """Extract standardized claims from raw JWT claims."""
         # User ID (required)
         user_id = raw_claims.get(self._config.user_id_claim)
@@ -244,7 +244,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
             tenant_id=raw_claims.get("tid"),
         )
 
-    def _extract_scopes(self, claims: Dict[str, Any]) -> List[str]:
+    def _extract_scopes(self, claims: dict[str, Any]) -> list[str]:
         """
         Extract scopes from claims based on configured format.
 

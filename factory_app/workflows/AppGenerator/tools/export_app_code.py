@@ -1,16 +1,15 @@
 """Workflow-specific GitHub export wrapper for AppGenerator outputs."""
 
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
+from factory_app.workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
 from logs.logging_config import get_workflow_logger
-
 from mozaiksai.core.workflow.generator_support.app_code_versions import (
     build_snapshot_document,
     build_snapshot_document_from_hashes,
     compute_patchset_document,
     extract_files_from_zip_bundle,
-    get_latest_snapshot,
     get_snapshot,
     persist_patchset,
     persist_snapshot,
@@ -19,13 +18,11 @@ from mozaiksai.core.workflow.generator_support.workflow_exports import (
     get_latest_workflow_export,
     record_workflow_export,
 )
-from factory_app.workflows.AgentGenerator.tools.export_to_github import export_to_github_tool
-
 
 ALLOWED_EXPORT_VALIDATION_STATUSES = {"passed", "skipped"}
 
 
-def _read_ctx(context_variables: Optional[Any], key: str) -> Any:
+def _read_ctx(context_variables: Any | None, key: str) -> Any:
     if context_variables is None or not hasattr(context_variables, "get"):
         return None
     try:
@@ -34,7 +31,7 @@ def _read_ctx(context_variables: Optional[Any], key: str) -> Any:
         return None
 
 
-def _normalize_validation_status(raw: Any) -> Optional[str]:
+def _normalize_validation_status(raw: Any) -> str | None:
     if raw is None:
         return None
     value = str(raw).strip().lower()
@@ -43,11 +40,20 @@ def _normalize_validation_status(raw: Any) -> Optional[str]:
     return value
 
 
-def resolve_export_gate(context_variables: Optional[Any]) -> Dict[str, Any]:
-    reasons: List[str] = []
+def resolve_export_gate(context_variables: Any | None) -> dict[str, Any]:
+    reasons: list[str] = []
     validation_status = _normalize_validation_status(_read_ctx(context_variables, "app_validation_status"))
+    acceptance_status = _normalize_validation_status(_read_ctx(context_variables, "app_bundle_acceptance_status"))
     validation_strategy = _read_ctx(context_variables, "app_validation_strategy_used")
     integration_passed = _read_ctx(context_variables, "integration_tests_passed")
+
+    if acceptance_status != "passed":
+        if acceptance_status == "failed":
+            reasons.append("App bundle acceptance failed.")
+        elif acceptance_status == "pending":
+            reasons.append("App bundle acceptance has not completed yet.")
+        else:
+            reasons.append("App bundle acceptance did not complete with a pass.")
 
     if validation_status not in ALLOWED_EXPORT_VALIDATION_STATUSES:
         if validation_status == "failed":
@@ -63,15 +69,16 @@ def resolve_export_gate(context_variables: Optional[Any]) -> Dict[str, Any]:
     return {
         "allow_export": len(reasons) == 0,
         "reasons": reasons,
+        "app_bundle_acceptance_status": acceptance_status,
         "app_validation_status": validation_status,
         "app_validation_strategy_used": validation_strategy,
         "integration_tests_passed": integration_passed,
     }
 
 
-def _get_ctx_meta(context_variables: Optional[Any]) -> Tuple[Optional[str], Dict[str, Any]]:
+def _get_ctx_meta(context_variables: Any | None) -> tuple[str | None, dict[str, Any]]:
     chat_id = None
-    meta: Dict[str, Any] = {}
+    meta: dict[str, Any] = {}
     if context_variables is not None and hasattr(context_variables, "get"):
         try:
             chat_id = context_variables.get("chat_id")
@@ -79,6 +86,8 @@ def _get_ctx_meta(context_variables: Optional[Any]) -> Tuple[Optional[str], Dict
             meta["app_validation_status"] = context_variables.get("app_validation_status")
             meta["app_validation_strategy_used"] = context_variables.get("app_validation_strategy_used")
             meta["integration_tests_passed"] = context_variables.get("integration_tests_passed")
+            meta["app_bundle_acceptance_status"] = context_variables.get("app_bundle_acceptance_status")
+            meta["app_bundle_acceptance_result"] = context_variables.get("app_bundle_acceptance_result")
             meta["app_validation_result"] = context_variables.get("app_validation_result")
             meta["integration_test_result"] = context_variables.get("integration_test_result")
         except Exception:
@@ -86,7 +95,7 @@ def _get_ctx_meta(context_variables: Optional[Any]) -> Tuple[Optional[str], Dict
     return (str(chat_id) if chat_id else None), meta
 
 
-def _repo_url_from_export(rec: Optional[Dict[str, Any]]) -> Optional[str]:
+def _repo_url_from_export(rec: dict[str, Any] | None) -> str | None:
     if not isinstance(rec, dict):
         return None
     repo_url = rec.get("repo_url") or rec.get("repoUrl")
@@ -95,7 +104,7 @@ def _repo_url_from_export(rec: Optional[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
-def _snapshot_id_from_export(rec: Optional[Dict[str, Any]]) -> Optional[str]:
+def _snapshot_id_from_export(rec: dict[str, Any] | None) -> str | None:
     if not isinstance(rec, dict):
         return None
     for key in ("snapshotId", "snapshot_id", "targetSnapshotId", "target_snapshot_id"):
@@ -109,11 +118,11 @@ async def export_app_code_to_github(
     *,
     app_id: str,
     bundle_path: str,
-    repo_name: Optional[str] = None,
-    commit_message: Optional[str] = None,
-    user_id: Optional[str] = None,
-    context_variables: Optional[Any] = None,
-) -> Dict[str, Any]:
+    repo_name: str | None = None,
+    commit_message: str | None = None,
+    user_id: str | None = None,
+    context_variables: Any | None = None,
+) -> dict[str, Any]:
     wf_logger = get_workflow_logger(workflow_name="AppGenerator", chat_id=None, app_id=app_id)
     session_id, structured_outputs = _get_ctx_meta(context_variables)
 
@@ -130,6 +139,7 @@ async def export_app_code_to_github(
             "workflow_type": "app-generator",
             "error": error_msg,
             "reasons": reasons,
+            "app_bundle_acceptance_status": gate["app_bundle_acceptance_status"],
             "app_validation_status": gate["app_validation_status"],
             "app_validation_strategy_used": gate["app_validation_strategy_used"],
             "integration_tests_passed": gate["integration_tests_passed"],
@@ -138,7 +148,7 @@ async def export_app_code_to_github(
         }
 
     # Determine if this app already has an exported repo (update path -> PR).
-    prior_export: Optional[Dict[str, Any]] = None
+    prior_export: dict[str, Any] | None = None
     try:
         prior_export = await get_latest_workflow_export(app_id=app_id, workflow_type="app-generator")
     except Exception:
@@ -161,7 +171,7 @@ async def export_app_code_to_github(
             if not isinstance(base_commit_sha, str) or not base_commit_sha.strip():
                 raise ValueError("Backend repo manifest missing baseCommitSha")
 
-            repo_files: Dict[str, str] = {}
+            repo_files: dict[str, str] = {}
             raw_files = manifest.get("files")
             if isinstance(raw_files, list):
                 for entry in raw_files:
@@ -173,7 +183,7 @@ async def export_app_code_to_github(
                         repo_files[p.strip()] = s.strip()
 
             # 2) Resolve baseline snapshot (prefer last export snapshotId; fallback to repo manifest snapshot).
-            base_snapshot: Optional[Dict[str, Any]] = None
+            base_snapshot: dict[str, Any] | None = None
             base_snapshot_id = _snapshot_id_from_export(prior_export)
             if base_snapshot_id:
                 try:

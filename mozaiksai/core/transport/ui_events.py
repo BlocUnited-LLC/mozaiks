@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -43,9 +43,9 @@ class UIRenderData(BaseModel):
     component: str
     display_mode: UIDisplayMode
     awaiting_response: bool = True
-    workflow: Optional[str] = None
-    agent: Optional[str] = None
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    workflow: str | None = None
+    agent: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
     interaction_type: str = "ui_tool"
 
     model_config = {"populate_by_name": True}
@@ -60,7 +60,7 @@ class UIUpdateData(BaseModel):
     """
 
     tool_call_id: str
-    patch: Dict[str, Any] = Field(default_factory=dict)
+    patch: dict[str, Any] = Field(default_factory=dict)
 
 
 class UIDismissData(BaseModel):

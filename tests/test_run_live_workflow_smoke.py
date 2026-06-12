@@ -1,25 +1,25 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 import json
-from datetime import datetime, timezone
+from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from scripts.run_live_workflow_smoke import (
     SmokeResult,
-    _build_workflow_user_reply_message,
-    _build_uvicorn_config,
-    _build_tool_call_response_payload,
     _await_workflow_with_pending_input_fallback,
+    _build_tool_call_response_payload,
+    _build_uvicorn_config,
+    _build_workflow_user_reply_message,
     _collect_events,
     _configure_event_loop_policy,
+    _extract_final_context,
     _extract_latest_structured_output,
     _is_generic_feedback_pending_input,
     _is_input_request_tool_call,
-    _extract_final_context,
     _load_context_file,
     _load_prompt_file,
     _load_tool_response_file,
@@ -37,8 +37,8 @@ def test_smoke_result_as_dict_serializes_nested_datetimes() -> None:
         prompt="prompt",
         assistant_message="done",
         structured_output={
-            "ended_at": datetime(2026, 3, 31, 23, 30, tzinfo=timezone.utc),
-            "nested": {"when": datetime(2026, 3, 31, 23, 31, tzinfo=timezone.utc)},
+            "ended_at": datetime(2026, 3, 31, 23, 30, tzinfo=UTC),
+            "nested": {"when": datetime(2026, 3, 31, 23, 31, tzinfo=UTC)},
         },
         final_context={},
         app_connectors=[{"service": "stripe", "status": "active"}],

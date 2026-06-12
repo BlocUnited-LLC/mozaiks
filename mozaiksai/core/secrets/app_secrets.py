@@ -3,9 +3,10 @@ from __future__ import annotations
 """Names-first app secret resolution from ``app/security/secrets.yaml``."""
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from mozaiksai.core.runtime.app.paths import APP_SECURITY_SECRETS_PATH
 from mozaiksai.core.workflow.paths import resolve_active_app_root

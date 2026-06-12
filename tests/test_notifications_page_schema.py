@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
-import json
 
 
 def _workspace() -> Path:

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import sys
+import types
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-import types
-import sys
 
 import pytest
 

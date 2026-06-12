@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-from typing import Any, Optional
+from typing import Any
 
-from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
+from mozaiksai.core.artifacts.store import ArtifactStore, get_artifact_store
 
-from ._shared import list_head, normalize_context, text_excerpt
 from ._artifact_workspace import (
     load_artifact_workspace,
     resolve_related_imports,
     safe_relpath,
     siblings_for,
 )
+from ._shared import list_head, normalize_context, text_excerpt
 
 _MAX_FILE_COUNT = 120
 _MAX_PREVIEW_FILES = 4
@@ -21,7 +20,7 @@ _MAX_PREVIEW_FILES = 4
 async def get_artifact_workspace_scope(
     *,
     context: ControlPlaneToolContext | dict[str, Any] | None = None,
-    artifact_store: Optional[ArtifactStore] = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
     tool_context = normalize_context(context)
     app_id = str(tool_context.app_id or "").strip()

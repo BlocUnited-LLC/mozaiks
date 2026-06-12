@@ -12,9 +12,7 @@ import pytest
 from mozaiksai.core.runtime.composition.module_executor import (
     ModuleExecutor,
     ModuleRequest,
-    ModuleResult,
 )
-
 
 # ── minimal handler ────────────────────────────────────────────────────────────
 

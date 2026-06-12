@@ -6,13 +6,12 @@ client-side code to connect to the generated agent's WebSocket endpoints.
 
 from __future__ import annotations
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
 
-def _generate_python_ws_client(config: Dict[str, Any]) -> str:
+def _generate_python_ws_client(config: dict[str, Any]) -> str:
     """Generate Python WebSocket client code."""
     workflow_id = config.get("workflow_id", "workflow")
     endpoints = config.get("endpoints", {})
@@ -129,7 +128,7 @@ class {workflow_id.title().replace("-", "")}WebSocketClient:
     return code
 
 
-def _generate_typescript_ws_client(config: Dict[str, Any]) -> str:
+def _generate_typescript_ws_client(config: dict[str, Any]) -> str:
     """Generate TypeScript/JavaScript WebSocket client code."""
     workflow_id = config.get("workflow_id", "workflow")
     endpoints = config.get("endpoints", {})
@@ -275,9 +274,9 @@ async def generate_websocket_client(
     *,
     app_id: str,
     language: str = "python",
-    websocket_config: Optional[Dict[str, Any]] = None,
-    context_variables: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    websocket_config: dict[str, Any] | None = None,
+    context_variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Generate WebSocket client code from websocket_config.
     
     Args:

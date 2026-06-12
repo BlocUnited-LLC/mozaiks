@@ -27,11 +27,8 @@ No MozaiksPay, Stripe, wallet, billing, or proprietary hosted-product names in O
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from typing import Any, Dict, List
-
-import yaml
+from typing import Any
 
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _AGENTS_YAML_PATH = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
@@ -228,7 +225,7 @@ class TestDeclarativeCheckoutPageFixtures:
     No proprietary product names.
     """
 
-    def _make_checkout_page(self) -> Dict[str, Any]:
+    def _make_checkout_page(self) -> dict[str, Any]:
         """Checkout initiation page: wizard + focused + Form."""
         return {
             "name": "Checkout",
@@ -260,7 +257,7 @@ class TestDeclarativeCheckoutPageFixtures:
             ],
         }
 
-    def _make_cancelled_page(self) -> Dict[str, Any]:
+    def _make_cancelled_page(self) -> dict[str, Any]:
         """Cancellation/return page: landing + focused + no api_endpoint."""
         return {
             "name": "CheckoutCancelled",
@@ -289,7 +286,7 @@ class TestDeclarativeCheckoutPageFixtures:
             ],
         }
 
-    def _make_order_history_page(self) -> Dict[str, Any]:
+    def _make_order_history_page(self) -> dict[str, Any]:
         """Order history page: record_list + workspace + DataTable."""
         return {
             "name": "OrderHistory",
@@ -417,7 +414,7 @@ class TestPostRedirectConfirmationCustomRoute:
     Uses neutral name 'PaymentConfirmationPage'.
     """
 
-    def _make_custom_route_bundle(self) -> Dict[str, Any]:
+    def _make_custom_route_bundle(self) -> dict[str, Any]:
         """Minimal custom_route_bundle for a post-redirect confirmation page."""
         page_source = (
             "import { LoadingState, Panel, ErrorState } from '@mozaiks/chat-ui/ui';\n"
@@ -516,7 +513,7 @@ class TestPostRedirectConfirmationCustomRoute:
                 f"Custom route page file {page_file['filename']!r} must use .jsx extension"
             )
             assert "ui/pages/custom/" in page_file["filename"], (
-                f"Custom route page file must live under ui/pages/custom/"
+                "Custom route page file must live under ui/pages/custom/"
             )
 
     def test_page_reads_session_id_from_url_params(self):
@@ -601,7 +598,7 @@ class TestPostRedirectConfirmationCustomRoute:
 class TestNoDirectProviderEndpointBinding:
     """Declarative pages must bind only to app-owned module endpoints."""
 
-    def _validate_no_hosted_endpoint(self, page: Dict[str, Any]) -> List[str]:
+    def _validate_no_hosted_endpoint(self, page: dict[str, Any]) -> list[str]:
         """
         Return a list of violations where a section api_endpoint bypasses an
         app-owned module and goes directly to an external payment provider path.

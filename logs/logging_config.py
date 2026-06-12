@@ -6,13 +6,18 @@
 # ======================================================================
 from __future__ import annotations
 
-import logging, logging.handlers, json, traceback, re
-from time import perf_counter
-from pathlib import Path
+import json
+import logging
+import logging.handlers
 import os
-from typing import Sequence, Optional, Dict, Any
-from datetime import datetime, timezone
+import re
+import traceback
+from collections.abc import Sequence
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from time import perf_counter
+from typing import Any
 
 from logs.runtime_artifacts import clear_runtime_artifacts, should_clear_runtime_artifacts_on_start
 
@@ -92,13 +97,13 @@ def _redact(value: Any) -> Any:
         return value[:4] + "***" + value[-4:]
     return value
 
-def _filter_reserved_log_keys(data: Dict[str, Any]) -> Dict[str, Any]:
+def _filter_reserved_log_keys(data: dict[str, Any]) -> dict[str, Any]:
     if not data:
         return {}
     return {k: v for k, v in data.items() if k not in RESERVED_LOG_RECORD_KEYS}
 
 
-def _maybe_redact_mapping(data: Dict[str, Any]) -> Dict[str, Any]:
+def _maybe_redact_mapping(data: dict[str, Any]) -> dict[str, Any]:
     if not data:
         return data
     redacted = {}
@@ -124,7 +129,7 @@ class ProductionJSONFormatter(logging.Formatter):
         # Sanitize highly specific secrets / tenant GUIDs from noisy third-party libs (msal)
         raw_msg = _sanitize_log_message(raw_msg)
         base = {
-            "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "msg": raw_msg,
@@ -143,7 +148,7 @@ class ProductionJSONFormatter(logging.Formatter):
                 "trace": traceback.format_exception(*record.exc_info)
             }
         # Harvest extras
-        extras: Dict[str, Any] = {}
+        extras: dict[str, Any] = {}
         for k, v in record.__dict__.items():
             if k not in RESERVED_LOG_RECORD_KEYS:
                 extras[k] = v
@@ -229,7 +234,7 @@ class PrettyConsoleFormatter(logging.Formatter):
     Format:  HH:MM:SS.mmm [LEVEL] EMOJI logger  msg  (file.py:123 func)
     Includes select extras (chat_id, workflow_name, app_id) inline.
     """
-    def __init__(self, no_color: Optional[bool] = None, *, max_length: int | None = None):
+    def __init__(self, no_color: bool | None = None, *, max_length: int | None = None):
         super().__init__(datefmt="%H:%M:%S")
         env_no_color = os.getenv("NO_COLOR", "0").lower() in ("1", "true", "yes")
         self.no_color = env_no_color if no_color is None else bool(no_color)
@@ -324,7 +329,7 @@ def _make_handler(
     level: int,
     formatter: logging.Formatter,
     *,
-    log_filter: Optional[logging.Filter],
+    log_filter: logging.Filter | None,
     max_bytes: int,
     backup_count: int,
 ) -> logging.Handler:
@@ -385,7 +390,7 @@ def setup_logging(
     # Optional clearing of existing log files
     cleared_files: list[str] = []
     clear_flag = os.getenv("CLEAR_LOGS_ON_START", "0").lower() in ("1","true","yes","on")
-    cleared_runtime_artifacts: Dict[str, int] = {"agent_outputs": 0, "workflow_converter": 0}
+    cleared_runtime_artifacts: dict[str, int] = {"agent_outputs": 0, "workflow_converter": 0}
     if clear_flag:
         # Build a list of known log artifacts to clear on startup in development
         to_clear: list[Path] = []
@@ -530,7 +535,7 @@ get_core_config_logger = lambda: logging.getLogger("core.core_config")
 
 # Context logger -----------------------------------------------------
 class ContextLogger:
-    def __init__(self, base: logging.Logger, ctx: Dict[str, Any]):
+    def __init__(self, base: logging.Logger, ctx: dict[str, Any]):
         self._base = base
         self._ctx = _filter_reserved_log_keys(ctx)
 
@@ -539,7 +544,7 @@ class ContextLogger:
         stack_info = extra.pop("stack_info", None)
         stacklevel = extra.pop("stacklevel", None)
         merged = _filter_reserved_log_keys({**self._ctx, **extra})
-        log_kwargs: Dict[str, Any] = {"extra": _maybe_redact_mapping(merged)}
+        log_kwargs: dict[str, Any] = {"extra": _maybe_redact_mapping(merged)}
         if exc_info is not None:
             log_kwargs["exc_info"] = exc_info
         if stack_info is not None:
@@ -740,7 +745,8 @@ def summarize_autogen_runtime_file(  # pragma: no cover - utility
     emit_log: if True, writes a one-line summary via provided logger (or root).
     logger: optional logger (defaults to root if None).
     """
-    import json, os
+    import json
+    import os
     path = filename or os.getenv("AG2_RUNTIME_LOG_FILE", "runtime.log")
     stats = {
         "file": path,
@@ -757,7 +763,7 @@ def summarize_autogen_runtime_file(  # pragma: no cover - utility
             lg.warning(f"Runtime log file not found: {path}")
         return stats
     try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(path, encoding="utf-8", errors="ignore") as f:
             for i, line in enumerate(f):
                 if limit and i >= limit:
                     break

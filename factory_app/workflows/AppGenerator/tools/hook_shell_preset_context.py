@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
-from factory_app.workflows._shared.hook_utils import workflow_context_path
-from factory_app.workflows._shared.hook_utils import update_agent_section
+from factory_app.workflows._shared.hook_utils import update_agent_section, workflow_context_path
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +19,9 @@ _TARGET_AGENTS = {"AppPlanAgent", "AppSchemaAgent"}
 
 
 @lru_cache(maxsize=1)
-def _load_shell_presets() -> Optional[Dict[str, Any]]:
+def _load_shell_presets() -> dict[str, Any] | None:
     try:
-        with open(_SHELL_PRESETS_PATH, "r", encoding="utf-8") as fh:
+        with open(_SHELL_PRESETS_PATH, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
         if not isinstance(data, dict):
             logger.warning("shell_presets.yaml did not parse as a dict")
@@ -44,7 +43,7 @@ def _first_sentence(value: Any) -> str:
     return text.split("\n", 1)[0].strip()
 
 
-def _format_preset(preset_id: str, preset: Dict[str, Any]) -> str:
+def _format_preset(preset_id: str, preset: dict[str, Any]) -> str:
     lines = [f"{preset_id}:"]
     description = _first_sentence(preset.get("description"))
     if description:
@@ -94,7 +93,7 @@ def _format_preset(preset_id: str, preset: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _build_shell_preset_body(presets_config: Dict[str, Any]) -> str:
+def _build_shell_preset_body(presets_config: dict[str, Any]) -> str:
     presets = presets_config.get("presets")
     if not isinstance(presets, dict) or not presets:
         return (
@@ -130,7 +129,7 @@ def _build_shell_preset_body(presets_config: Dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
-def inject_shell_preset_context(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def inject_shell_preset_context(agent: Any, messages: list[dict[str, Any]]) -> None:
     """Inject shell preset context into AppGenerator planning/schema agents."""
     del messages
 

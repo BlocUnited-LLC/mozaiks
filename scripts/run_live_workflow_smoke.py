@@ -3,23 +3,23 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-from collections import deque
 import json
 import os
 import re
 import socket
 import sys
 import uuid
+from collections import deque
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
+from typing import Any
 
 import uvicorn
 import websockets
 from dotenv import load_dotenv
 from websockets.exceptions import ConnectionClosed
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -85,14 +85,14 @@ class SmokeResult:
     chat_id: str
     workflow_name: str
     prompt: str
-    assistant_message: Optional[str]
-    structured_output: Dict[str, Any]
-    final_context: Dict[str, Any]
-    app_connectors: List[Dict[str, Any]]
+    assistant_message: str | None
+    structured_output: dict[str, Any]
+    final_context: dict[str, Any]
+    app_connectors: list[dict[str, Any]]
     event_count: int
-    observed_event_types: List[str]
+    observed_event_types: list[str]
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return _json_safe(
             {
                 "success": self.success,
@@ -161,7 +161,7 @@ async def _wait_for_server(server: uvicorn.Server, timeout_seconds: float = 20.0
         await asyncio.sleep(0.1)
 
 
-def _extract_json_object_from_text(value: Any) -> Dict[str, Any]:
+def _extract_json_object_from_text(value: Any) -> dict[str, Any]:
     if not isinstance(value, str) or not value.strip():
         return {}
     stripped = value.strip()
@@ -179,7 +179,7 @@ def _extract_json_object_from_text(value: Any) -> Dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _extract_latest_structured_output(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _extract_latest_structured_output(doc: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(doc, dict):
         return {}
     messages = doc.get("messages")
@@ -197,7 +197,7 @@ def _extract_latest_structured_output(doc: Optional[Dict[str, Any]]) -> Dict[str
     return {}
 
 
-def _extract_assistant_message(events: List[Dict[str, Any]]) -> Optional[str]:
+def _extract_assistant_message(events: list[dict[str, Any]]) -> str | None:
     for event in reversed(events):
         event_type = str(event.get("type") or "")
         if event_type not in {"chat.text", "chat.stream_end"}:
@@ -212,7 +212,7 @@ def _extract_assistant_message(events: List[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
-def _resolve_assistant_message(events: List[Dict[str, Any]], structured_output: Dict[str, Any]) -> Optional[str]:
+def _resolve_assistant_message(events: list[dict[str, Any]], structured_output: dict[str, Any]) -> str | None:
     message = _extract_assistant_message(events)
     if isinstance(message, str) and message.strip():
         return message.strip()
@@ -223,7 +223,7 @@ def _resolve_assistant_message(events: List[Dict[str, Any]], structured_output: 
     return None
 
 
-def _build_tool_call_response_payload(response_text: str) -> Dict[str, Any]:
+def _build_tool_call_response_payload(response_text: str) -> dict[str, Any]:
     normalized = str(response_text or "")
     return {
         "status": "submitted",
@@ -233,7 +233,7 @@ def _build_tool_call_response_payload(response_text: str) -> Dict[str, Any]:
     }
 
 
-def _build_workflow_user_reply_message(chat_id: str, response_text: str) -> Dict[str, Any]:
+def _build_workflow_user_reply_message(chat_id: str, response_text: str) -> dict[str, Any]:
     normalized = str(response_text or "")
     return {
         "type": "user.input.submit",
@@ -246,7 +246,7 @@ def _build_workflow_user_reply_message(chat_id: str, response_text: str) -> Dict
     }
 
 
-def _is_terminal_completion_event(event: Dict[str, Any]) -> bool:
+def _is_terminal_completion_event(event: dict[str, Any]) -> bool:
     event_type = str(event.get("type") or "")
     if event_type not in {"chat.run_complete", "chat.workflow_complete", "chat.workflow_completed", "chat.completed"}:
         return False
@@ -258,7 +258,7 @@ def _is_terminal_completion_event(event: Dict[str, Any]) -> bool:
     return normalized_status in {"completed", "complete", "success", "succeeded", "done", "ok"}
 
 
-def _normalize_tool_response_payload(raw_payload: Any) -> Dict[str, Any]:
+def _normalize_tool_response_payload(raw_payload: Any) -> dict[str, Any]:
     if isinstance(raw_payload, dict):
         normalized = dict(raw_payload)
         normalized.setdefault("status", "submitted")
@@ -266,7 +266,7 @@ def _normalize_tool_response_payload(raw_payload: Any) -> Dict[str, Any]:
     return _build_tool_call_response_payload(str(raw_payload or ""))
 
 
-def _load_tool_response_file(path: Path) -> Dict[str, Any]:
+def _load_tool_response_file(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("tool response file must contain a top-level JSON object")
@@ -286,7 +286,7 @@ def _load_tool_response_file(path: Path) -> Dict[str, Any]:
     assistant_reply_rules = payload.get("assistant_reply_rules") or []
     if not isinstance(assistant_reply_rules, list):
         raise ValueError("tool response file assistant_reply_rules must be a list")
-    normalized_assistant_reply_rules: List[Dict[str, str]] = []
+    normalized_assistant_reply_rules: list[dict[str, str]] = []
     for raw_rule in assistant_reply_rules:
         if not isinstance(raw_rule, dict):
             raise ValueError("assistant_reply_rules entries must be objects")
@@ -298,7 +298,7 @@ def _load_tool_response_file(path: Path) -> Dict[str, Any]:
             raise ValueError("assistant_reply_rules entries must declare a non-empty reply")
         if not (equals or contains or regex):
             raise ValueError("assistant_reply_rules entries must declare equals, contains, or regex")
-        normalized_rule: Dict[str, str] = {"reply": reply}
+        normalized_rule: dict[str, str] = {"reply": reply}
         if equals:
             normalized_rule["equals"] = equals
         if contains:
@@ -322,14 +322,14 @@ def _load_prompt_file(path: Path) -> str:
     return prompt
 
 
-def _load_context_file(path: Path) -> Dict[str, Any]:
+def _load_context_file(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("context file must contain a top-level JSON object")
     return payload
 
 
-def _extract_final_context(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _extract_final_context(doc: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(doc, dict):
         return {}
     protected = {
@@ -352,7 +352,7 @@ def _extract_final_context(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _has_terminal_context_output(final_context: Dict[str, Any]) -> bool:
+def _has_terminal_context_output(final_context: dict[str, Any]) -> bool:
     """Return true when a workflow completed through persisted context state."""
 
     if not isinstance(final_context, dict):
@@ -368,8 +368,8 @@ def _has_terminal_context_output(final_context: Dict[str, Any]) -> bool:
     return False
 
 
-def _build_tool_response_queues(tool_responses: Optional[Dict[str, Any]]) -> Dict[str, Deque[Any]]:
-    queues: Dict[str, Deque[Any]] = {}
+def _build_tool_response_queues(tool_responses: dict[str, Any] | None) -> dict[str, deque[Any]]:
+    queues: dict[str, deque[Any]] = {}
     if not isinstance(tool_responses, dict):
         return queues
 
@@ -378,7 +378,7 @@ def _build_tool_response_queues(tool_responses: Optional[Dict[str, Any]]) -> Dic
         if not key:
             continue
         values = raw_value if isinstance(raw_value, list) else [raw_value]
-        queue: Deque[Any] = deque()
+        queue: deque[Any] = deque()
         for value in values:
             queue.append(value)
         if queue:
@@ -386,7 +386,7 @@ def _build_tool_response_queues(tool_responses: Optional[Dict[str, Any]]) -> Dic
     return queues
 
 
-def _tool_response_candidates(data: Dict[str, Any]) -> List[str]:
+def _tool_response_candidates(data: dict[str, Any]) -> list[str]:
     payload = data.get("payload") or {}
     candidates = [
         data.get("tool_name"),
@@ -400,7 +400,7 @@ def _tool_response_candidates(data: Dict[str, Any]) -> List[str]:
                 payload.get("workflow_primitive"),
             ]
         )
-    normalized: List[str] = []
+    normalized: list[str] = []
     for candidate in candidates:
         text = str(candidate or "").strip().lower()
         if text and text not in normalized:
@@ -410,9 +410,9 @@ def _tool_response_candidates(data: Dict[str, Any]) -> List[str]:
 
 
 def _pop_tool_response_payload(
-    response_queues: Dict[str, Deque[Any]],
-    data: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
+    response_queues: dict[str, deque[Any]],
+    data: dict[str, Any],
+) -> dict[str, Any] | None:
     for candidate in _tool_response_candidates(data):
         queue = response_queues.get(candidate)
         if not queue:
@@ -421,7 +421,7 @@ def _pop_tool_response_payload(
     return None
 
 
-def _is_input_request_tool_call(data: Dict[str, Any]) -> bool:
+def _is_input_request_tool_call(data: dict[str, Any]) -> bool:
     interaction_type = str(data.get("interaction_type") or "").strip().lower()
     component_type = str(data.get("component_type") or "").strip().lower()
     tool_name = str(data.get("tool_name") or "").strip().lower()
@@ -440,7 +440,7 @@ def _is_input_request_tool_call(data: Dict[str, Any]) -> bool:
     )
 
 
-def _is_generic_feedback_pending_input(pending_input: Optional[Dict[str, Any]]) -> bool:
+def _is_generic_feedback_pending_input(pending_input: dict[str, Any] | None) -> bool:
     if not isinstance(pending_input, dict):
         return False
     raw_payload = pending_input.get("raw_payload")
@@ -452,7 +452,7 @@ def _is_generic_feedback_pending_input(pending_input: Optional[Dict[str, Any]]) 
     return candidate.lower().startswith("please give feedback to ")
 
 
-def _assistant_reply_matches(rule: Dict[str, str], message: str) -> bool:
+def _assistant_reply_matches(rule: dict[str, str], message: str) -> bool:
     candidate = str(message or "").strip()
     if not candidate:
         return False
@@ -471,7 +471,7 @@ def _assistant_reply_matches(rule: Dict[str, str], message: str) -> bool:
     return False
 
 
-def _pop_assistant_reply(events: List[Dict[str, Any]], reply_rules: List[Dict[str, str]]) -> Optional[str]:
+def _pop_assistant_reply(events: list[dict[str, Any]], reply_rules: list[dict[str, str]]) -> str | None:
     if not reply_rules:
         return None
     assistant_message = _extract_assistant_message(events)
@@ -485,9 +485,9 @@ def _pop_assistant_reply(events: List[Dict[str, Any]], reply_rules: List[Dict[st
 
 
 def _pop_reply_for_assistant_message(
-    assistant_message: Optional[str],
-    reply_rules: List[Dict[str, str]],
-) -> Optional[str]:
+    assistant_message: str | None,
+    reply_rules: list[dict[str, str]],
+) -> str | None:
     candidate = str(assistant_message or "").strip()
     if not candidate or not reply_rules:
         return None
@@ -500,12 +500,12 @@ def _pop_reply_for_assistant_message(
 
 def _peek_input_reply(
     *,
-    events: List[Dict[str, Any]],
-    reply_rules: List[Dict[str, str]],
-    reply_queue: Deque[str],
-    default_input_reply: Optional[str],
-    assistant_message: Optional[str] = None,
-) -> tuple[Optional[str], bool]:
+    events: list[dict[str, Any]],
+    reply_rules: list[dict[str, str]],
+    reply_queue: deque[str],
+    default_input_reply: str | None,
+    assistant_message: str | None = None,
+) -> tuple[str | None, bool]:
     reply_text = _pop_reply_for_assistant_message(assistant_message, reply_rules)
     if reply_text is None:
         reply_text = _pop_assistant_reply(events, reply_rules)
@@ -524,7 +524,7 @@ async def _wait_for_completed_document(
     chat_id: str,
     app_id: str,
     timeout_seconds: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while True:
         doc = await coll.find_one({"_id": chat_id, "app_id": app_id})
@@ -541,15 +541,15 @@ async def _collect_events(
     *,
     chat_id: str,
     timeout_seconds: float,
-    tool_response_text: Optional[str] = None,
-    user_replies: Optional[List[str]] = None,
-    tool_response_payloads: Optional[Dict[str, Any]] = None,
-    default_input_reply: Optional[str] = None,
-    assistant_reply_rules: Optional[List[Dict[str, str]]] = None,
-    pending_input_provider: Optional[Callable[[], Awaitable[Optional[Dict[str, Any]]]]] = None,
-    reply_state: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    events: List[Dict[str, Any]] = []
+    tool_response_text: str | None = None,
+    user_replies: list[str] | None = None,
+    tool_response_payloads: dict[str, Any] | None = None,
+    default_input_reply: str | None = None,
+    assistant_reply_rules: list[dict[str, str]] | None = None,
+    pending_input_provider: Callable[[], Awaitable[dict[str, Any] | None]] | None = None,
+    reply_state: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
     responded_tool_calls: set[str] = set()
     responded_pending_requests: set[str] = set()
     reply_queue = deque(str(reply).strip() for reply in (user_replies or []) if str(reply).strip())
@@ -563,7 +563,7 @@ async def _collect_events(
         reply_state["assistant_reply_rules"] = contextual_reply_rules
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
-    completion_grace_deadline: Optional[float] = None
+    completion_grace_deadline: float | None = None
 
     while True:
         now = asyncio.get_running_loop().time()
@@ -589,7 +589,7 @@ async def _collect_events(
                 if isinstance(pending_input, dict):
                     request_id = str(pending_input.get("request_id") or "").strip()
                     if request_id and request_id not in responded_pending_requests:
-                        response_payload: Optional[Dict[str, Any]] = None
+                        response_payload: dict[str, Any] | None = None
                         reply_text, used_queue = _peek_input_reply(
                             events=events,
                             reply_rules=contextual_reply_rules,
@@ -639,7 +639,7 @@ async def _collect_events(
         if event_type == "chat.tool_call" and isinstance(data, dict):
             tool_call_id = str(data.get("tool_call_id") or "").strip()
             awaiting_response = bool(data.get("awaiting_response"))
-            response_payload: Optional[Dict[str, Any]] = None
+            response_payload: dict[str, Any] | None = None
             used_queue = False
             if _is_input_request_tool_call(data):
                 reply_text, used_queue = _peek_input_reply(
@@ -726,13 +726,13 @@ async def _collect_events(
 
 async def _await_workflow_with_pending_input_fallback(
     *,
-    workflow_wait_task: "asyncio.Task[Dict[str, Any]]",
+    workflow_wait_task: asyncio.Task[dict[str, Any]],
     transport: Any,
-    pending_input_provider: Optional[Callable[[], Awaitable[Optional[Dict[str, Any]]]]],
-    events: List[Dict[str, Any]],
-    reply_state: Dict[str, Any],
-    default_input_reply: Optional[str],
-) -> Dict[str, Any]:
+    pending_input_provider: Callable[[], Awaitable[dict[str, Any] | None]] | None,
+    events: list[dict[str, Any]],
+    reply_state: dict[str, Any],
+    default_input_reply: str | None,
+) -> dict[str, Any]:
     responded_pending_requests = reply_state.setdefault("responded_pending_requests", set())
     responded_tool_calls = reply_state.setdefault("responded_tool_calls", set())
 
@@ -785,14 +785,14 @@ async def run_live_workflow_smoke(
     *,
     timeout_seconds: float = 180.0,
     workflow_name: str = DEFAULT_ACTIVE_WORKFLOW,
-    workflows_root: Optional[Path] = None,
-    initial_context: Optional[Dict[str, Any]] = None,
-    initial_agent: Optional[str] = None,
-    tool_response_text: Optional[str] = None,
-    user_replies: Optional[List[str]] = None,
-    tool_response_payloads: Optional[Dict[str, Any]] = None,
-    default_input_reply: Optional[str] = None,
-    assistant_reply_rules: Optional[List[Dict[str, str]]] = None,
+    workflows_root: Path | None = None,
+    initial_context: dict[str, Any] | None = None,
+    initial_agent: str | None = None,
+    tool_response_text: str | None = None,
+    user_replies: list[str] | None = None,
+    tool_response_payloads: dict[str, Any] | None = None,
+    default_input_reply: str | None = None,
+    assistant_reply_rules: list[dict[str, str]] | None = None,
 ) -> SmokeResult:
     load_dotenv(REPO_ROOT / ".env")
     _require_env()
@@ -828,9 +828,9 @@ async def run_live_workflow_smoke(
     app_id = f"live-smoke-{uuid.uuid4().hex[:8]}"
     user_id = "smoke-user"
     chat_id = f"chat_{workflow_name.lower()}_{uuid.uuid4().hex[:8]}"
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     completed_successfully = False
-    workflow_result: Optional[Dict[str, Any]] = None
+    workflow_result: dict[str, Any] | None = None
 
     try:
         await _wait_for_server(server)
@@ -843,7 +843,7 @@ async def run_live_workflow_smoke(
         )
 
         ws_url = f"ws://127.0.0.1:{port}/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}"
-        run_task: Optional[asyncio.Task] = None
+        run_task: asyncio.Task | None = None
         async with websockets.connect(
             ws_url,
             open_timeout=20,
@@ -851,9 +851,9 @@ async def run_live_workflow_smoke(
             max_size=2**20,
             ping_interval=None,
         ) as websocket:
-            reply_state: Dict[str, Any] = {}
+            reply_state: dict[str, Any] = {}
 
-            async def _pending_input_provider() -> Optional[Dict[str, Any]]:
+            async def _pending_input_provider() -> dict[str, Any] | None:
                 coll = await pm._coll()
                 doc = await coll.find_one(
                     {"_id": chat_id, "app_id": app_id},
@@ -939,10 +939,10 @@ async def run_live_workflow_smoke(
                     default_input_reply=default_input_reply,
                 )
 
-        final_doc: Optional[Dict[str, Any]] = None
-        structured_output: Dict[str, Any] = {}
-        final_context: Dict[str, Any] = {}
-        app_connectors: List[Dict[str, Any]] = []
+        final_doc: dict[str, Any] | None = None
+        structured_output: dict[str, Any] = {}
+        final_context: dict[str, Any] = {}
+        app_connectors: list[dict[str, Any]] = []
         try:
             coll = await pm._coll()
             run_status_value = str((workflow_result or {}).get("run_status") or "").strip().lower()
@@ -978,7 +978,9 @@ async def run_live_workflow_smoke(
             structured_output = _extract_latest_structured_output(final_doc)
             final_context = _extract_final_context(final_doc)
             try:
-                from mozaiksai.core.workflow.generator_support.connector_service import list_connectors
+                from mozaiksai.core.workflow.generator_support.connector_service import (
+                    list_connectors,
+                )
 
                 app_connectors = await list_connectors(app_id)
             except Exception:
@@ -1128,7 +1130,7 @@ def main() -> int:
     args = parser.parse_args()
 
     scripted_responses = None
-    scripted_replies: List[str] = list(args.user_reply or [])
+    scripted_replies: list[str] = list(args.user_reply or [])
     default_input_reply = None
     assistant_reply_rules = None
     initial_context = None
@@ -1159,7 +1161,7 @@ def main() -> int:
         )
     )
     result_payload = result.as_dict()
-    validation_errors: List[str] = []
+    validation_errors: list[str] = []
     output_text = json.dumps(result_payload, ensure_ascii=False)
     for expected in args.expect_output_contains or []:
         expected_text = str(expected or "")

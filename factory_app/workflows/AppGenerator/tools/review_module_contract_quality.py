@@ -19,7 +19,7 @@ block the pipeline.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
 
@@ -40,7 +40,7 @@ _BLOCKING_KEYWORDS = (
 )
 
 
-def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
@@ -57,7 +57,7 @@ def _context_get(context_variables: Optional[Any], key: str, default: Any = None
     return default
 
 
-def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     if hasattr(context_variables, "set"):
@@ -74,14 +74,14 @@ def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None
         context_variables[key] = value
 
 
-def _normalize_warnings(value: Any) -> List[str]:
+def _normalize_warnings(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
         stripped = value.strip()
         return [stripped] if stripped else []
     if isinstance(value, list):
-        out: List[str] = []
+        out: list[str] = []
         for item in value:
             text = item.strip() if isinstance(item, str) else str(item).strip()
             if text:
@@ -90,9 +90,9 @@ def _normalize_warnings(value: Any) -> List[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
-def _dedupe(warnings: List[str]) -> List[str]:
+def _dedupe(warnings: list[str]) -> list[str]:
     seen: set = set()
-    out: List[str] = []
+    out: list[str] = []
     for w in warnings:
         if w not in seen:
             seen.add(w)
@@ -117,10 +117,10 @@ def review_module_contract_quality(
         Field(description="Concise message from ModuleContractQualityAgent (ignored by the tool)."),
     ] = "",
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Audit module contract files in context and set module_contract_quality_status.
 
     Returns a deterministic status payload:
@@ -175,7 +175,7 @@ def review_module_contract_quality(
             + "\n- ".join(all_warnings)
         )
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "status": status,
         "warnings": all_warnings,
         "module_contract_count": module_contract_count,

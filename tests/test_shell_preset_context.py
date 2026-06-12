@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import patch
 
 import yaml
@@ -10,7 +10,6 @@ from factory_app.workflows.AppGenerator.tools.hook_shell_preset_context import (
     _load_shell_presets,
     inject_shell_preset_context,
 )
-
 
 _APPGEN_DIR = (
     Path(__file__).parent.parent
@@ -37,7 +36,7 @@ class _FakeAgent:
         self.system_message = message
 
 
-def _run_hook(agent: _FakeAgent, messages: List[Dict[str, Any]] | None = None) -> None:
+def _run_hook(agent: _FakeAgent, messages: list[dict[str, Any]] | None = None) -> None:
     inject_shell_preset_context(agent, messages or [])
 
 

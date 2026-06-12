@@ -10,22 +10,23 @@ It intentionally does not implement business logic beyond metadata extraction.
 
 from __future__ import annotations
 
-import yaml
 import zipfile
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+import yaml
 
 from logs.logging_config import get_workflow_logger
-
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
 )
 from mozaiksai.core.workflow.generator_support.workflow_exports import record_workflow_export
+
 from .export_to_github import export_to_github_tool
 
 
-def _find_zip_entry(names: List[str], suffix: str) -> Optional[str]:
+def _find_zip_entry(names: list[str], suffix: str) -> str | None:
     for name in names:
         if not isinstance(name, str):
             continue
@@ -34,7 +35,7 @@ def _find_zip_entry(names: List[str], suffix: str) -> Optional[str]:
     return None
 
 
-def _read_zip_yaml(zf: zipfile.ZipFile, member: str) -> Optional[Dict[str, Any]]:
+def _read_zip_yaml(zf: zipfile.ZipFile, member: str) -> dict[str, Any] | None:
     """Read and parse a YAML file from inside a zip."""
     try:
         raw = zf.read(member)
@@ -46,7 +47,7 @@ def _read_zip_yaml(zf: zipfile.ZipFile, member: str) -> Optional[Dict[str, Any]]
 
 
 
-def _extract_agent_names(agents_payload: Any) -> List[str]:
+def _extract_agent_names(agents_payload: Any) -> list[str]:
     if isinstance(agents_payload, dict):
         # common format: {"agents": {"AgentName": {...}}}
         inner = agents_payload.get("agents")
@@ -55,7 +56,7 @@ def _extract_agent_names(agents_payload: Any) -> List[str]:
         # alternative: {"AgentName": {...}}
         return sorted([k for k in agents_payload.keys() if isinstance(k, str) and k.strip()])
     if isinstance(agents_payload, list):
-        names: List[str] = []
+        names: list[str] = []
         for item in agents_payload:
             if isinstance(item, dict):
                 nm = item.get("name")
@@ -65,13 +66,13 @@ def _extract_agent_names(agents_payload: Any) -> List[str]:
     return []
 
 
-def _extract_tool_names(tools_payload: Any) -> List[str]:
+def _extract_tool_names(tools_payload: Any) -> list[str]:
     if not isinstance(tools_payload, dict):
         return []
     entries = tools_payload.get("tools")
     if not isinstance(entries, list):
         return []
-    names: List[str] = []
+    names: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -80,7 +81,7 @@ def _extract_tool_names(tools_payload: Any) -> List[str]:
             names.append(nm.strip())
     return sorted(list(dict.fromkeys(names)))
 
-def _extract_websocket_config(zf: zipfile.ZipFile, names: List[str]) -> Optional[Dict[str, Any]]:
+def _extract_websocket_config(zf: zipfile.ZipFile, names: list[str]) -> dict[str, Any] | None:
     """Extract websocket_config.yaml from bundle if present."""
     ws_entry = _find_zip_entry(names, "/websocket_config.yaml")
     if ws_entry:
@@ -89,7 +90,7 @@ def _extract_websocket_config(zf: zipfile.ZipFile, names: List[str]) -> Optional
 
 
 
-def _extract_bundle_metadata(bundle_path: str) -> Tuple[Optional[str], List[str], List[str], Optional[Dict[str, Any]]]:
+def _extract_bundle_metadata(bundle_path: str) -> tuple[str | None, list[str], list[str], dict[str, Any] | None]:
     """Return (workflow_name_in_bundle, agent_names, tool_names, websocket_config)."""
 
     zpath = PurePosixPath(bundle_path.replace("\\", "/"))
@@ -108,8 +109,8 @@ def _extract_bundle_metadata(bundle_path: str) -> Tuple[Optional[str], List[str]
             elif tools_entry:
                 wf_name = tools_entry.split("/", 1)[0]
 
-            agent_names: List[str] = []
-            tool_names: List[str] = []
+            agent_names: list[str] = []
+            tool_names: list[str] = []
             if agents_entry:
                 agents_yaml = _read_zip_yaml(zf, agents_entry)
                 if agents_yaml is not None:
@@ -129,11 +130,11 @@ async def export_agent_workflow_to_github(
     *,
     app_id: str,
     bundle_path: str,
-    repo_name: Optional[str] = None,
-    commit_message: Optional[str] = None,
-    user_id: Optional[str] = None,
-    context_variables: Optional[Any] = None,
-) -> Dict[str, Any]:
+    repo_name: str | None = None,
+    commit_message: str | None = None,
+    user_id: str | None = None,
+    context_variables: Any | None = None,
+) -> dict[str, Any]:
     wf_logger = get_workflow_logger(workflow_name="AgentGenerator", chat_id=None, app_id=app_id)
     wf_name_in_bundle, agent_names, tool_names, websocket_config = _extract_bundle_metadata(bundle_path)
     websocket_url = resolve_agent_websocket_url(app_id)

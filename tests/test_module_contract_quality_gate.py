@@ -13,9 +13,7 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, Dict, List
-from unittest.mock import patch
+from typing import Any
 
 import yaml
 
@@ -65,13 +63,13 @@ events:
 """
 
 
-def _code_files(*pairs: tuple) -> List[Dict[str, Any]]:
+def _code_files(*pairs: tuple) -> list[dict[str, Any]]:
     """Build a code_files list from (filename, content) pairs."""
     return [{"filename": fn, "content": c} for fn, c in pairs]
 
 
 class _FakeAgent:
-    def __init__(self, name: str, context_variables: Dict[str, Any] | None = None):
+    def __init__(self, name: str, context_variables: dict[str, Any] | None = None):
         self.name = name
         self.system_message = ""
         self.context_variables = context_variables or {}
@@ -295,7 +293,7 @@ class TestReviewModuleContractQuality:
         from factory_app.workflows.AppGenerator.tools.review_module_contract_quality import (
             review_module_contract_quality,
         )
-        ctx: Dict[str, Any] = {}
+        ctx: dict[str, Any] = {}
         if code_files is not None:
             ctx["code_files"] = code_files
         if prior_warnings is not None:

@@ -800,6 +800,20 @@ class ModuleLoader:
                 raise ModuleLoadError(f"Invalid {filename} for {definition.name!r}: {exc}") from exc
 
         ext_yaml = module_dir / "runtime_extensions.yaml"
+        # Warn loudly when runtime_extensions.yaml is accidentally placed inside
+        # contracts/ (matching the pattern of other companion manifests but wrong
+        # for runtime_extensions). It must live at the module root.
+        misplaced_ext_yaml = module_dir / "contracts" / "runtime_extensions.yaml"
+        if misplaced_ext_yaml.exists() and not ext_yaml.exists():
+            import warnings as _warnings
+
+            _warnings.warn(
+                f"Module {definition.name!r}: runtime_extensions.yaml found at "
+                f"contracts/runtime_extensions.yaml but it must be at the module "
+                f"root (not inside contracts/). Extensions will NOT be loaded until "
+                f"the file is moved.",
+                stacklevel=2,
+            )
         if ext_yaml.exists():
             try:
                 parsed["runtime_extensions"] = ModuleRuntimeExtensionsManifest.model_validate(

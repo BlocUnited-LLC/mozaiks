@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 
@@ -11,11 +11,11 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 async def record_workflow_artifacts(
     *,
     app_id: str,
-    user_id: Optional[str],
+    user_id: str | None,
     workflow_type: str,
     workflow_name: str,
-    artifacts: Dict[str, Any],
-) -> Dict[str, Any]:
+    artifacts: dict[str, Any],
+) -> dict[str, Any]:
     pm = AG2PersistenceManager()
     await pm.persistence._ensure_client()
     assert pm.persistence.client is not None, "Mongo client not initialized"

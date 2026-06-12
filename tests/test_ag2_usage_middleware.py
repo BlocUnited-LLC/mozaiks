@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 usage_mod = importlib.import_module("mozaiksai.core.usage.middleware")
 
 

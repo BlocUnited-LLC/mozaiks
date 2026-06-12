@@ -2,11 +2,10 @@ from __future__ import annotations
 
 # IMPORTANT: This module is a neutral usage-only collector (measurement + emission).
 # It must NEVER contain enforcement logic (no pricing, gating, entitlements, balance checks, or billing decisions).
-
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 
@@ -36,15 +35,15 @@ class TokenManager:
         app_id: str,
         user_id: str,
         workflow_name: str,
-        agent_name: Optional[str] = None,
-        model_name: Optional[str] = None,
+        agent_name: str | None = None,
+        model_name: str | None = None,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
-        total_tokens: Optional[int] = None,
+        total_tokens: int | None = None,
         cached: bool = False,
         duration_sec: float = 0.0,
-        invocation_id: Optional[str] = None,
-        event_ts: Optional[datetime] = None,
+        invocation_id: str | None = None,
+        event_ts: datetime | None = None,
     ) -> None:
         # Advisory measurement only. Do not add enforcement or billing logic here.
         if not _usage_events_enabled():
@@ -66,7 +65,7 @@ class TokenManager:
         completion = max(0, int(completion_tokens or 0))
         total = max(0, int(total_tokens if total_tokens is not None else (prompt + completion)))
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "event_id": uuid.uuid4().hex[:12],
             "event_ts": (event_ts or datetime.now(UTC)).isoformat(),
             "chat_id": chat_id,
@@ -100,8 +99,8 @@ class TokenManager:
         workflow_name: str,
         prompt_tokens: int,
         completion_tokens: int,
-        total_tokens: Optional[int] = None,
-        event_ts: Optional[datetime] = None,
+        total_tokens: int | None = None,
+        event_ts: datetime | None = None,
     ) -> None:
         # Advisory measurement only. Do not add enforcement or billing logic here.
         if not _usage_events_enabled():
@@ -111,7 +110,7 @@ class TokenManager:
         completion = max(0, int(completion_tokens or 0))
         total = max(0, int(total_tokens if total_tokens is not None else (prompt + completion)))
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "event_id": uuid.uuid4().hex[:12],
             "event_ts": (event_ts or datetime.now(UTC)).isoformat(),
             "chat_id": chat_id,

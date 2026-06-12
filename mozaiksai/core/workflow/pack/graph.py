@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from ..task_batches import workflow_has_task_batches
 
 
 def workflow_declares_task_batches(
     workflow_name: str,
-    workflows_root: Optional[Path] = None,
+    workflows_root: Path | None = None,
 ) -> bool:
     """Return true when a workflow declares AG2 task batch execution."""
 

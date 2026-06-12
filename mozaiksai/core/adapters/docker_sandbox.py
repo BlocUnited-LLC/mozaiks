@@ -17,9 +17,8 @@ import asyncio
 import os
 import shutil
 import tempfile
-import uuid
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Optional
+from typing import Any
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.ports.sandbox import SandboxRunResult, SandboxSessionInfo
@@ -54,8 +53,8 @@ class DockerSandboxAdapter:
     def __init__(
         self,
         *,
-        image: Optional[str] = None,
-        default_timeout_seconds: Optional[int] = None,
+        image: str | None = None,
+        default_timeout_seconds: int | None = None,
     ) -> None:
         self._image = image or _DEFAULT_IMAGE
         self._timeout = default_timeout_seconds or _DEFAULT_TIMEOUT_SECONDS
@@ -73,7 +72,7 @@ class DockerSandboxAdapter:
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.communicate()
             raise RuntimeError(f"Docker command timed out after {timeout}s: {' '.join(args)}")
@@ -87,10 +86,10 @@ class DockerSandboxAdapter:
     async def create_session(
         self,
         *,
-        template: Optional[str] = None,
-        timeout_seconds: Optional[int] = None,
-        metadata: Optional[Dict[str, str]] = None,
-        envs: Optional[Dict[str, str]] = None,
+        template: str | None = None,
+        timeout_seconds: int | None = None,
+        metadata: dict[str, str] | None = None,
+        envs: dict[str, str] | None = None,
     ) -> SandboxSessionInfo:
         image = template or self._image
         env_args: list[str] = []
@@ -119,7 +118,7 @@ class DockerSandboxAdapter:
         self,
         *,
         session_id: str,
-        timeout_seconds: Optional[int] = None,
+        timeout_seconds: int | None = None,
     ) -> SandboxSessionInfo:
         rc, stdout, _ = await self._run(
             ["docker", "inspect", "--format", "{{.Config.Image}}", session_id]
@@ -135,9 +134,9 @@ class DockerSandboxAdapter:
         self,
         *,
         session_id: str,
-        files: Dict[str, str | bytes],
-        cwd: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        files: dict[str, str | bytes],
+        cwd: str | None = None,
+    ) -> dict[str, Any]:
         base = cwd or _DEFAULT_WORKDIR
         written: list[str] = []
 
@@ -192,10 +191,10 @@ class DockerSandboxAdapter:
         *,
         session_id: str,
         command: str,
-        cwd: Optional[str] = None,
-        envs: Optional[Dict[str, str]] = None,
+        cwd: str | None = None,
+        envs: dict[str, str] | None = None,
         background: bool = False,
-        timeout_seconds: Optional[float] = 60.0,
+        timeout_seconds: float | None = 60.0,
     ) -> SandboxRunResult:
         workdir = cwd or _DEFAULT_WORKDIR
         env_args: list[str] = []
@@ -245,7 +244,7 @@ class DockerSandboxAdapter:
         *,
         session_id: str,
         port: int,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Return the mapped host URL for the given container port.
 
         The container must have been started with a port binding.  If no
@@ -282,7 +281,7 @@ class DockerSandboxAdapter:
         )
         return rc == 0
 
-    def capabilities(self) -> Dict[str, Any]:
+    def capabilities(self) -> dict[str, Any]:
         return {
             "provider": "docker",
             "supports_preview": True,
@@ -292,7 +291,7 @@ class DockerSandboxAdapter:
         }
 
 
-def _safe_relpath(raw: str) -> Optional[str]:
+def _safe_relpath(raw: str) -> str | None:
     path = raw.replace("\\", "/").strip()
     if not path or path.startswith("/"):
         return None
@@ -302,7 +301,7 @@ def _safe_relpath(raw: str) -> Optional[str]:
     return str(p)
 
 
-_docker_adapter: Optional[DockerSandboxAdapter] = None
+_docker_adapter: DockerSandboxAdapter | None = None
 
 
 def get_docker_sandbox() -> DockerSandboxAdapter:

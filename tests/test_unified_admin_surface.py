@@ -123,7 +123,10 @@ def test_runtime_admin_config_uses_flat_panel_collections() -> None:
 
 def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
     import importlib
-    from mozaiksai.hosts import runtime as runtime_app  # noqa: F401 - initializes persistence dependencies before admin imports
+
+    from mozaiksai.hosts import (
+        runtime as runtime_app,  # noqa: F401 - initializes persistence dependencies before admin imports
+    )
 
     app_root = tmp_path / "platform"
     module_root = app_root / "modules" / "crm"

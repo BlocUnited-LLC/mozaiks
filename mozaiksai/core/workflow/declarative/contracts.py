@@ -7,7 +7,7 @@ fail fast when invalid declarations are encountered.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -25,16 +25,16 @@ def _required_text(value: Any, *, field_name: str) -> str:
     return text
 
 
-def _optional_text(value: Any) -> Optional[str]:
+def _optional_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-def _normalize_string_list(values: List[str]) -> List[str]:
+def _normalize_string_list(values: list[str]) -> list[str]:
     seen: set[str] = set()
-    out: List[str] = []
+    out: list[str] = []
     for raw in values:
         text = str(raw or "").strip()
         if not text or text in seen:
@@ -49,20 +49,20 @@ class DeclarativeModel(BaseModel):
 
 
 class OrchestratorTriggerSpec(DeclarativeModel):
-    type: Optional[str] = None
-    event: Optional[str] = None
-    endpoint: Optional[str] = None
-    method: Optional[str] = None
-    description: Optional[str] = None
-    capability_id: Optional[str] = None
+    type: str | None = None
+    event: str | None = None
+    endpoint: str | None = None
+    method: str | None = None
+    description: str | None = None
+    capability_id: str | None = None
 
     @field_validator("type", "event", "endpoint", "method", "description", "capability_id", mode="before")
     @classmethod
-    def _normalize_optional_fields(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_fields(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @model_validator(mode="after")
-    def _validate_trigger(self) -> "OrchestratorTriggerSpec":
+    def _validate_trigger(self) -> OrchestratorTriggerSpec:
         if not (self.type or self.event or self.endpoint):
             raise ValueError("trigger entry must declare at least one of: type, event, endpoint")
         return self
@@ -74,10 +74,10 @@ class OrchestratorConfig(DeclarativeModel):
     human_in_the_loop: bool = False
     workflow_startup_mode: Literal["AgentDriven", "UserDriven", "BackendOnly"]
     orchestration_pattern: str = "ag2_network"
-    initial_message_to_user: Optional[str] = None
-    initial_message: Optional[str] = None
-    initial_agent: Optional[str] = None
-    triggers: List[OrchestratorTriggerSpec] = Field(default_factory=list)
+    initial_message_to_user: str | None = None
+    initial_message: str | None = None
+    initial_agent: str | None = None
+    triggers: list[OrchestratorTriggerSpec] = Field(default_factory=list)
     @field_validator("workflow_name", "orchestration_pattern")
     @classmethod
     def _required_text_fields(cls, value: Any, info):  # type: ignore[no-untyped-def]
@@ -85,7 +85,7 @@ class OrchestratorConfig(DeclarativeModel):
 
     @field_validator("initial_message_to_user", "initial_message", "initial_agent", mode="before")
     @classmethod
-    def _optional_text_fields(cls, value: Any) -> Optional[str]:
+    def _optional_text_fields(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("max_turns")
@@ -99,13 +99,13 @@ class OrchestratorConfig(DeclarativeModel):
 
 
 class PromptSectionSpec(DeclarativeModel):
-    id: Optional[str] = None
+    id: str | None = None
     heading: str
     content: str
 
     @field_validator("id", mode="before")
     @classmethod
-    def _normalize_id(cls, value: Any) -> Optional[str]:
+    def _normalize_id(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("heading", "content")
@@ -116,11 +116,11 @@ class PromptSectionSpec(DeclarativeModel):
 
 class AgentSpec(DeclarativeModel):
     name: str
-    prompt_sections: List[PromptSectionSpec] = Field(default_factory=list)
-    prompt_sections_custom: List[PromptSectionSpec] = Field(default_factory=list)
-    system_message: Optional[str] = None
-    description: Optional[str] = None
-    human_input_mode: Optional[str] = None
+    prompt_sections: list[PromptSectionSpec] = Field(default_factory=list)
+    prompt_sections_custom: list[PromptSectionSpec] = Field(default_factory=list)
+    system_message: str | None = None
+    description: str | None = None
+    human_input_mode: str | None = None
     max_consecutive_auto_reply: int = 2
     structured_outputs_required: bool = False
     image_generation_enabled: bool = False
@@ -133,7 +133,7 @@ class AgentSpec(DeclarativeModel):
 
     @field_validator("system_message", "description", "human_input_mode", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("max_consecutive_auto_reply")
@@ -144,7 +144,7 @@ class AgentSpec(DeclarativeModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_prompt_shape(self) -> "AgentSpec":
+    def _validate_prompt_shape(self) -> AgentSpec:
         has_prompt_sections = bool(self.prompt_sections or self.prompt_sections_custom)
         has_system_message = bool(self.system_message)
         if not has_prompt_sections and not has_system_message:
@@ -155,10 +155,10 @@ class AgentSpec(DeclarativeModel):
 
 
 class AgentsConfig(DeclarativeModel):
-    agents: List[AgentSpec] = Field(default_factory=list)
+    agents: list[AgentSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_unique_names(self) -> "AgentsConfig":
+    def _validate_unique_names(self) -> AgentsConfig:
         names = [agent.name for agent in self.agents]
         if len(names) != len(set(names)):
             raise ValueError("agents contains duplicate agent names")
@@ -169,12 +169,12 @@ class TransitionRuleSpec(DeclarativeModel):
     source_agent: str
     target_agent: str
     transition_type: Literal["after_turn", "condition"]
-    condition_type: Optional[Literal["context_equals", "context_expression", "tool_called"]] = None
-    condition_key: Optional[str] = None
-    condition_value: Optional[Any] = None
-    context_expression: Optional[str] = None
-    tool_name: Optional[str] = None
-    transition_target: Optional[str] = None
+    condition_type: Literal["context_equals", "context_expression", "tool_called"] | None = None
+    condition_key: str | None = None
+    condition_value: Any | None = None
+    context_expression: str | None = None
+    tool_name: str | None = None
+    transition_target: str | None = None
 
     @field_validator("source_agent", "target_agent")
     @classmethod
@@ -183,17 +183,17 @@ class TransitionRuleSpec(DeclarativeModel):
 
     @field_validator("condition_type", mode="before")
     @classmethod
-    def _normalize_condition_type(cls, value: Any) -> Optional[str]:
+    def _normalize_condition_type(cls, value: Any) -> str | None:
         text = _optional_text(value)
         return text.lower() if text else None
 
     @field_validator("condition_key", "context_expression", "tool_name", "transition_target", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @model_validator(mode="after")
-    def _validate_condition_shape(self) -> "TransitionRuleSpec":
+    def _validate_condition_shape(self) -> TransitionRuleSpec:
         if self.transition_type == "after_turn":
             if (
                 self.condition_type
@@ -246,35 +246,35 @@ class TransitionRuleSpec(DeclarativeModel):
 
 
 class TransitionGraphConfig(DeclarativeModel):
-    transition_rules: List[TransitionRuleSpec] = Field(default_factory=list)
+    transition_rules: list[TransitionRuleSpec] = Field(default_factory=list)
 
 
 class ContextTriggerMatchSpec(DeclarativeModel):
-    equals: Optional[str] = None
-    contains: Optional[str] = None
-    regex: Optional[str] = None
+    equals: str | None = None
+    contains: str | None = None
+    regex: str | None = None
 
     @field_validator("equals", "contains", "regex", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
 
 class ContextTriggerSpec(DeclarativeModel):
     type: Literal["agent_text", "ui_response", "user_text"]
-    agent: Optional[str] = None
-    match: Optional[ContextTriggerMatchSpec] = None
-    tool: Optional[str] = None
-    response_key: Optional[str] = None
-    ui_hidden: Optional[bool] = None
+    agent: str | None = None
+    match: ContextTriggerMatchSpec | None = None
+    tool: str | None = None
+    response_key: str | None = None
+    ui_hidden: bool | None = None
 
     @field_validator("agent", "tool", "response_key", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @model_validator(mode="after")
-    def _validate_trigger(self) -> "ContextTriggerSpec":
+    def _validate_trigger(self) -> ContextTriggerSpec:
         if self.type == "agent_text":
             if not self.agent:
                 raise ValueError("agent_text trigger requires 'agent'")
@@ -291,33 +291,33 @@ class ContextTriggerSpec(DeclarativeModel):
 
 class ContextVariableSourceSpec(DeclarativeModel):
     type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context"]
-    env_var: Optional[str] = None
-    default: Optional[Any] = None
-    required: Optional[bool] = None
-    database_name: Optional[str] = None
-    collection: Optional[str] = None
-    query_template: Optional[Dict[str, Any]] = None
-    fields: Optional[List[str]] = None
-    refresh_strategy: Optional[Literal["once", "per_phase", "on_demand"]] = None
-    entity_schema: Optional[Dict[str, Any]] = Field(default=None, alias="schema", serialization_alias="schema")
-    indexes: Optional[List[Dict[str, Any]]] = None
-    write_strategy: Optional[Literal["immediate", "on_phase_transition", "on_workflow_end"]] = None
-    search_by: Optional[str] = None
-    computation: Optional[str] = None
-    inputs: Optional[List[str]] = None
-    output_type: Optional[str] = None
-    persist_to: Optional[Dict[str, Any]] = None
-    triggers: List[ContextTriggerSpec] = Field(default_factory=list)
-    persist: Optional[bool] = None
-    service: Optional[str] = None
-    operation: Optional[str] = None
-    params: Optional[Dict[str, Any]] = None
-    auth: Optional[Dict[str, Any]] = None
-    cache: Optional[Dict[str, Any]] = None
-    retry: Optional[Dict[str, Any]] = None
-    path: Optional[str] = None
-    format: Optional[Literal["json", "yaml", "text"]] = None
-    encoding: Optional[str] = None
+    env_var: str | None = None
+    default: Any | None = None
+    required: bool | None = None
+    database_name: str | None = None
+    collection: str | None = None
+    query_template: dict[str, Any] | None = None
+    fields: list[str] | None = None
+    refresh_strategy: Literal["once", "per_phase", "on_demand"] | None = None
+    entity_schema: dict[str, Any] | None = Field(default=None, alias="schema", serialization_alias="schema")
+    indexes: list[dict[str, Any]] | None = None
+    write_strategy: Literal["immediate", "on_phase_transition", "on_workflow_end"] | None = None
+    search_by: str | None = None
+    computation: str | None = None
+    inputs: list[str] | None = None
+    output_type: str | None = None
+    persist_to: dict[str, Any] | None = None
+    triggers: list[ContextTriggerSpec] = Field(default_factory=list)
+    persist: bool | None = None
+    service: str | None = None
+    operation: str | None = None
+    params: dict[str, Any] | None = None
+    auth: dict[str, Any] | None = None
+    cache: dict[str, Any] | None = None
+    retry: dict[str, Any] | None = None
+    path: str | None = None
+    format: Literal["json", "yaml", "text"] | None = None
+    encoding: str | None = None
 
     @field_validator(
         "env_var",
@@ -333,12 +333,12 @@ class ContextVariableSourceSpec(DeclarativeModel):
         mode="before",
     )
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("fields", "inputs")
     @classmethod
-    def _normalize_string_lists(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+    def _normalize_string_lists(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
         normalized = _normalize_string_list(value)
@@ -346,53 +346,53 @@ class ContextVariableSourceSpec(DeclarativeModel):
 
 
 class ContextVariableDefinitionSpec(DeclarativeModel):
-    type: Optional[str] = None
-    description: Optional[str] = None
+    type: str | None = None
+    description: str | None = None
     source: ContextVariableSourceSpec
 
     @field_validator("type", "description", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
 
 class ContextAgentViewSpec(DeclarativeModel):
-    variables: List[str] = Field(default_factory=list)
+    variables: list[str] = Field(default_factory=list)
 
     @field_validator("variables")
     @classmethod
-    def _normalize_variables(cls, value: List[str]) -> List[str]:
+    def _normalize_variables(cls, value: list[str]) -> list[str]:
         return _normalize_string_list(value)
 
 
 class ContextVariablesConfig(DeclarativeModel):
-    definitions: Dict[str, ContextVariableDefinitionSpec] = Field(default_factory=dict)
-    agents: Dict[str, ContextAgentViewSpec] = Field(default_factory=dict)
+    definitions: dict[str, ContextVariableDefinitionSpec] = Field(default_factory=dict)
+    agents: dict[str, ContextAgentViewSpec] = Field(default_factory=dict)
 
     @field_validator("definitions")
     @classmethod
     def _validate_definition_keys(
-        cls, value: Dict[str, ContextVariableDefinitionSpec]
-    ) -> Dict[str, ContextVariableDefinitionSpec]:
+        cls, value: dict[str, ContextVariableDefinitionSpec]
+    ) -> dict[str, ContextVariableDefinitionSpec]:
         for key in value.keys():
             _required_text(key, field_name="context variable name")
         return value
 
 
 class ToolUIConfig(DeclarativeModel):
-    component: Optional[str] = None
-    mode: Optional[str] = None
-    workflow_primitive: Optional[str] = None
-    realization: Optional[str] = None
+    component: str | None = None
+    mode: str | None = None
+    workflow_primitive: str | None = None
+    realization: str | None = None
 
     @field_validator("component", "mode", "workflow_primitive", "realization", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("workflow_primitive")
     @classmethod
-    def _validate_workflow_primitive(cls, value: Optional[str]) -> Optional[str]:
+    def _validate_workflow_primitive(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return validate_workflow_renderable_primitive_ids(
@@ -402,7 +402,7 @@ class ToolUIConfig(DeclarativeModel):
 
     @field_validator("realization")
     @classmethod
-    def _validate_realization(cls, value: Optional[str]) -> Optional[str]:
+    def _validate_realization(cls, value: str | None) -> str | None:
         if value is None:
             return None
         return validate_workflow_ui_realization_ids(
@@ -412,7 +412,7 @@ class ToolUIConfig(DeclarativeModel):
         )[0]
 
     @model_validator(mode="after")
-    def _normalize_realization(self) -> "ToolUIConfig":
+    def _normalize_realization(self) -> ToolUIConfig:
         if self.workflow_primitive is None:
             if self.realization is not None:
                 raise ValueError("ui.realization requires ui.workflow_primitive")
@@ -433,17 +433,17 @@ class ToolUIConfig(DeclarativeModel):
         return self
 
 
-def _default_ui_payload_schema() -> Dict[str, Any]:
+def _default_ui_payload_schema() -> dict[str, Any]:
     return {"type": "object", "properties": {}, "additionalProperties": True}
 
 
 class UIToolActionSpec(DeclarativeModel):
     id: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    variant: Optional[str] = None
-    approved: Optional[bool] = None
-    payload_schema: Dict[str, Any] = Field(default_factory=_default_ui_payload_schema)
+    label: str | None = None
+    description: str | None = None
+    variant: str | None = None
+    approved: bool | None = None
+    payload_schema: dict[str, Any] = Field(default_factory=_default_ui_payload_schema)
 
     @field_validator("id")
     @classmethod
@@ -452,12 +452,12 @@ class UIToolActionSpec(DeclarativeModel):
 
     @field_validator("label", "description", "variant", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("payload_schema", mode="before")
     @classmethod
-    def _normalize_payload_schema(cls, value: Any) -> Dict[str, Any]:
+    def _normalize_payload_schema(cls, value: Any) -> dict[str, Any]:
         if not isinstance(value, dict) or not value:
             return _default_ui_payload_schema()
         return value
@@ -465,31 +465,31 @@ class UIToolActionSpec(DeclarativeModel):
 
 class UIToolContractSpec(DeclarativeModel):
     surface_kind: Literal["agent_tool"] = "agent_tool"
-    payload_schema: Dict[str, Any] = Field(default_factory=_default_ui_payload_schema)
-    actions_schema: List[UIToolActionSpec] = Field(default_factory=list)
+    payload_schema: dict[str, Any] = Field(default_factory=_default_ui_payload_schema)
+    actions_schema: list[UIToolActionSpec] = Field(default_factory=list)
 
     @field_validator("payload_schema", mode="before")
     @classmethod
-    def _normalize_payload_schema(cls, value: Any) -> Dict[str, Any]:
+    def _normalize_payload_schema(cls, value: Any) -> dict[str, Any]:
         if not isinstance(value, dict) or not value:
             return _default_ui_payload_schema()
         return value
 
 
 class ToolSpec(DeclarativeModel):
-    agent: str | List[str]
+    agent: str | list[str]
     file: str
     function: str
-    description: Optional[str] = None
+    description: str | None = None
     tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"]
     auto_tool_call: bool = False
     bind_to_agent: bool = True
-    ui: Optional[ToolUIConfig] = None
-    ui_contract: Optional[UIToolContractSpec] = None
+    ui: ToolUIConfig | None = None
+    ui_contract: UIToolContractSpec | None = None
 
     @field_validator("agent", mode="before")
     @classmethod
-    def _normalize_agent(cls, value: Any) -> str | List[str]:
+    def _normalize_agent(cls, value: Any) -> str | list[str]:
         if isinstance(value, str):
             return _required_text(value, field_name="agent")
         if isinstance(value, list):
@@ -506,7 +506,7 @@ class ToolSpec(DeclarativeModel):
 
     @field_validator("description", mode="before")
     @classmethod
-    def _normalize_description(cls, value: Any) -> Optional[str]:
+    def _normalize_description(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("tool_type", mode="before")
@@ -523,7 +523,7 @@ class ToolSpec(DeclarativeModel):
         raise ValueError("tool_type must be 'Agent_Tool', 'UI_Tool', or 'UI_Surface'")
 
     @model_validator(mode="after")
-    def _validate_ui_requirements(self) -> "ToolSpec":
+    def _validate_ui_requirements(self) -> ToolSpec:
         if self.tool_type in {"UI_Tool", "UI_Surface"}:
             if not self.ui:
                 raise ValueError(
@@ -558,17 +558,17 @@ class LifecycleToolSpec(DeclarativeModel):
         "before_chat", "after_chat", "before_agent", "after_agent",
         "on_start", "on_complete", "on_fail",
     ]
-    agent: Optional[str] = None
+    agent: str | None = None
     file: str
     function: str
-    description: Optional[str] = None
+    description: str | None = None
     tool_type: Literal["Agent_Tool", "UI_Tool", "UI_Surface"] = "Agent_Tool"
-    ui: Optional[ToolUIConfig] = None
-    ui_contract: Optional[UIToolContractSpec] = None
+    ui: ToolUIConfig | None = None
+    ui_contract: UIToolContractSpec | None = None
 
     @field_validator("agent", "description", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("file", "function")
@@ -592,7 +592,7 @@ class LifecycleToolSpec(DeclarativeModel):
         raise ValueError("tool_type must be 'Agent_Tool', 'UI_Tool', or 'UI_Surface'")
 
     @model_validator(mode="after")
-    def _validate_run_level_triggers(self) -> "LifecycleToolSpec":
+    def _validate_run_level_triggers(self) -> LifecycleToolSpec:
         if self.trigger in {"on_start", "on_complete", "on_fail"} and self.agent is not None:
             raise ValueError(
                 f"Run-level lifecycle trigger '{self.trigger}' must have agent=null "
@@ -601,7 +601,7 @@ class LifecycleToolSpec(DeclarativeModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_lifecycle_ui_requirements(self) -> "LifecycleToolSpec":
+    def _validate_lifecycle_ui_requirements(self) -> LifecycleToolSpec:
         if self.tool_type in {"UI_Tool", "UI_Surface"}:
             if not self.ui:
                 raise ValueError(
@@ -631,13 +631,13 @@ class LifecycleToolSpec(DeclarativeModel):
 
 
 class ToolsConfig(DeclarativeModel):
-    tools: List[ToolSpec] = Field(default_factory=list)
-    lifecycle_tools: List[LifecycleToolSpec] = Field(default_factory=list)
+    tools: list[ToolSpec] = Field(default_factory=list)
+    lifecycle_tools: list[LifecycleToolSpec] = Field(default_factory=list)
 
 
 class PromptMiddlewareSpec(DeclarativeModel):
     agent: str
-    filename: Optional[str] = None
+    filename: str | None = None
     function: str
 
     @field_validator("agent", "function")
@@ -654,16 +654,16 @@ class PromptMiddlewareSpec(DeclarativeModel):
 
 
 class MiddlewareConfig(DeclarativeModel):
-    prompt_middleware: List[PromptMiddlewareSpec] = Field(default_factory=list)
+    prompt_middleware: list[PromptMiddlewareSpec] = Field(default_factory=list)
 
 
 class UIConfig(DeclarativeModel):
     # null means "hide all agents"; [] means "no filtering".
-    visual_agents: Optional[List[str]] = None
+    visual_agents: list[str] | None = None
 
     @field_validator("visual_agents")
     @classmethod
-    def _normalize_lists(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+    def _normalize_lists(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
         return _normalize_string_list(value)
@@ -673,14 +673,14 @@ class A2AClientConfig(DeclarativeModel):
     streaming: bool = True
     polling: bool = False
     use_client_preference: bool = False
-    accepted_output_modes: List[str] = Field(default_factory=list)
-    extensions: List[str] = Field(default_factory=list)
-    supported_transports: List[str] = Field(default_factory=list)
-    push_notification_configs: List[Dict[str, Any]] = Field(default_factory=list)
+    accepted_output_modes: list[str] = Field(default_factory=list)
+    extensions: list[str] = Field(default_factory=list)
+    supported_transports: list[str] = Field(default_factory=list)
+    push_notification_configs: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("accepted_output_modes", "extensions", "supported_transports")
     @classmethod
-    def _normalize_string_lists(cls, value: List[str]) -> List[str]:
+    def _normalize_string_lists(cls, value: list[str]) -> list[str]:
         return _normalize_string_list(value)
 
 
@@ -690,7 +690,7 @@ class A2AAgentSpec(DeclarativeModel):
     enabled: bool = True
     max_reconnects: int = 3
     polling_interval: float = 0.5
-    silent: Optional[bool] = None
+    silent: bool | None = None
     client: A2AClientConfig = Field(default_factory=A2AClientConfig)
 
     @field_validator("name", "url")
@@ -714,10 +714,10 @@ class A2AAgentSpec(DeclarativeModel):
 
 
 class A2AConfig(DeclarativeModel):
-    agents: List[A2AAgentSpec] = Field(default_factory=list)
+    agents: list[A2AAgentSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_unique_names(self) -> "A2AConfig":
+    def _validate_unique_names(self) -> A2AConfig:
         names = [agent.name for agent in self.agents]
         if len(names) != len(set(names)):
             raise ValueError("a2a.agents contains duplicate agent names")
@@ -726,11 +726,11 @@ class A2AConfig(DeclarativeModel):
 
 class StructuredOutputFieldSpec(DeclarativeModel):
     type: str
-    description: Optional[str] = None
-    default: Optional[Any] = None
-    items: Optional[str] = None
-    values: Optional[List[Any]] = None
-    variants: Optional[List[str]] = None
+    description: str | None = None
+    default: Any | None = None
+    items: str | None = None
+    values: list[Any] | None = None
+    variants: list[str] | None = None
 
     @field_validator("type")
     @classmethod
@@ -739,19 +739,19 @@ class StructuredOutputFieldSpec(DeclarativeModel):
 
     @field_validator("description", "items", mode="before")
     @classmethod
-    def _normalize_optional_text(cls, value: Any) -> Optional[str]:
+    def _normalize_optional_text(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("variants")
     @classmethod
-    def _normalize_variants(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+    def _normalize_variants(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
         normalized = _normalize_string_list(value)
         return normalized or None
 
     @model_validator(mode="after")
-    def _validate_shape(self) -> "StructuredOutputFieldSpec":
+    def _validate_shape(self) -> StructuredOutputFieldSpec:
         field_type = self.type
         if field_type in {"list", "optional_list"} and not self.items:
             raise ValueError(f"field type '{field_type}' requires 'items'")
@@ -764,17 +764,17 @@ class StructuredOutputFieldSpec(DeclarativeModel):
 
 class StructuredOutputModelSpec(DeclarativeModel):
     type: Literal["model"]
-    description: Optional[str] = None
-    fields: Dict[str, StructuredOutputFieldSpec] = Field(default_factory=dict)
+    description: str | None = None
+    fields: dict[str, StructuredOutputFieldSpec] = Field(default_factory=dict)
 
     @field_validator("description", mode="before")
     @classmethod
-    def _normalize_description(cls, value: Any) -> Optional[str]:
+    def _normalize_description(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("fields")
     @classmethod
-    def _validate_fields(cls, value: Dict[str, StructuredOutputFieldSpec]) -> Dict[str, StructuredOutputFieldSpec]:
+    def _validate_fields(cls, value: dict[str, StructuredOutputFieldSpec]) -> dict[str, StructuredOutputFieldSpec]:
         if not value:
             raise ValueError("model.fields must not be empty")
         for field_name in value.keys():
@@ -784,17 +784,17 @@ class StructuredOutputModelSpec(DeclarativeModel):
 
 class StructuredOutputLiteralSpec(DeclarativeModel):
     type: Literal["literal"]
-    description: Optional[str] = None
-    values: List[Any] = Field(default_factory=list)
+    description: str | None = None
+    values: list[Any] = Field(default_factory=list)
 
     @field_validator("description", mode="before")
     @classmethod
-    def _normalize_description(cls, value: Any) -> Optional[str]:
+    def _normalize_description(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("values")
     @classmethod
-    def _validate_values(cls, value: List[Any]) -> List[Any]:
+    def _validate_values(cls, value: list[Any]) -> list[Any]:
         if not value:
             raise ValueError("literal.values must not be empty")
         return value
@@ -802,17 +802,17 @@ class StructuredOutputLiteralSpec(DeclarativeModel):
 
 class StructuredOutputUnionSpec(DeclarativeModel):
     type: Literal["union"]
-    description: Optional[str] = None
-    variants: List[str] = Field(default_factory=list)
+    description: str | None = None
+    variants: list[str] = Field(default_factory=list)
 
     @field_validator("description", mode="before")
     @classmethod
-    def _normalize_description(cls, value: Any) -> Optional[str]:
+    def _normalize_description(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("variants")
     @classmethod
-    def _validate_variants(cls, value: List[str]) -> List[str]:
+    def _validate_variants(cls, value: list[str]) -> list[str]:
         normalized = _normalize_string_list(value)
         if not normalized:
             raise ValueError("union.variants must not be empty")
@@ -820,8 +820,8 @@ class StructuredOutputUnionSpec(DeclarativeModel):
 
 
 class StructuredOutputsConfig(DeclarativeModel):
-    registry: Dict[str, Optional[str]] = Field(default_factory=dict)
-    models: Dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec] = (
+    registry: dict[str, str | None] = Field(default_factory=dict)
+    models: dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec] = (
         Field(default_factory=dict)
     )
 
@@ -829,14 +829,14 @@ class StructuredOutputsConfig(DeclarativeModel):
     @classmethod
     def _validate_model_keys(
         cls,
-        value: Dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec],
-    ) -> Dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec]:
+        value: dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec],
+    ) -> dict[str, StructuredOutputModelSpec | StructuredOutputLiteralSpec | StructuredOutputUnionSpec]:
         for key in value.keys():
             _required_text(key, field_name="structured output definition name")
         return value
 
     @model_validator(mode="after")
-    def _validate_registry_refs(self) -> "StructuredOutputsConfig":
+    def _validate_registry_refs(self) -> StructuredOutputsConfig:
         for agent_name, model_name in self.registry.items():
             _required_text(agent_name, field_name="registry agent name")
             if model_name is None:
@@ -854,7 +854,7 @@ class StructuredOutputsConfig(DeclarativeModel):
         return self
 
 
-def _validate_config(model_cls: type[BaseModel], raw: Dict[str, Any], file_name: str) -> Dict[str, Any]:
+def _validate_config(model_cls: type[BaseModel], raw: dict[str, Any], file_name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError(f"Invalid {file_name} configuration: root must be an object")
     try:
@@ -864,14 +864,14 @@ def _validate_config(model_cls: type[BaseModel], raw: Dict[str, Any], file_name:
     return validated.model_dump(by_alias=True)
 
 
-def parse_orchestrator_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_orchestrator_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(OrchestratorConfig, raw, "orchestrator.yaml")
 
 
-def parse_agents_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_agents_config(raw: dict[str, Any]) -> dict[str, Any]:
     parsed = _validate_config(AgentsConfig, raw, "agents.yaml")
     agents_list = parsed.get("agents", [])
-    agents_map: Dict[str, Any] = {}
+    agents_map: dict[str, Any] = {}
     for entry in agents_list:
         if not isinstance(entry, dict):
             continue
@@ -881,31 +881,31 @@ def parse_agents_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     return {"agents": agents_map}
 
 
-def parse_transition_graph_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_transition_graph_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(TransitionGraphConfig, raw, "transition_graph.yaml")
 
 
-def parse_tools_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_tools_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(ToolsConfig, raw, "tools.yaml")
 
 
-def parse_middleware_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_middleware_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(MiddlewareConfig, raw, "middleware.yaml")
 
 
-def parse_ui_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_ui_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(UIConfig, raw, "ui_config.yaml")
 
 
-def parse_a2a_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_a2a_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(A2AConfig, raw, "a2a.yaml")
 
 
-def parse_structured_outputs_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_structured_outputs_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(StructuredOutputsConfig, raw, "structured_outputs.yaml")
 
 
-def parse_context_variables_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+def parse_context_variables_config(raw: dict[str, Any]) -> dict[str, Any]:
     return _validate_config(ContextVariablesConfig, raw, "context_variables.yaml")
 
 

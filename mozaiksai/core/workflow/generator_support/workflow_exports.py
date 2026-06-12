@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 
@@ -10,13 +10,13 @@ from mozaiksai.core.data.persistence.artifact_store import BuilderArtifactStore
 async def record_workflow_export(
     *,
     app_id: str,
-    user_id: Optional[str],
+    user_id: str | None,
     workflow_type: str,
-    repo_url: Optional[str],
-    job_id: Optional[str],
-    meta: Optional[Dict[str, Any]] = None,
-    extra_fields: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    repo_url: str | None,
+    job_id: str | None,
+    meta: dict[str, Any] | None = None,
+    extra_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     store = BuilderArtifactStore()
     return await store.record_workflow_export(
         app_id=app_id,
@@ -29,7 +29,7 @@ async def record_workflow_export(
     )
 
 
-async def get_latest_workflow_export(*, app_id: str, workflow_type: str) -> Optional[Dict[str, Any]]:
+async def get_latest_workflow_export(*, app_id: str, workflow_type: str) -> dict[str, Any] | None:
     store = BuilderArtifactStore()
     return await store.get_latest_workflow_export(app_id=app_id, workflow_type=workflow_type)
 

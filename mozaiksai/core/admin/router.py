@@ -5,26 +5,25 @@
 # ==============================================================================
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
-from fastapi import APIRouter, Depends, Query, HTTPException, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from logs.logging_config import get_core_logger
 from mozaiksai.core.admin.contract import (
     DEFAULT_RUNTIME_PANELS,
     build_default_admin_config,
 )
-from mozaiksai.core.admin.registry import load_admin_registry
-from mozaiksai.core.auth.dependencies import require_user, UserPrincipal
-from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.admin.email_promotion import is_admin_by_email
+from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
+from mozaiksai.core.admin.registry import load_admin_registry
+from mozaiksai.core.auth.adapters.registry import is_auth_enabled
+from mozaiksai.core.auth.dependencies import UserPrincipal, require_user
 from mozaiksai.core.data.models import WorkflowStatus
-from logs.logging_config import get_core_logger
 
 logger = get_core_logger("admin.router")
 
@@ -38,7 +37,7 @@ DEFAULT_ADMIN_CONFIG = build_default_admin_config()
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _get_chat_sessions_collection():
@@ -48,7 +47,7 @@ def _get_chat_sessions_collection():
     return client["mozaiksai"]["ChatSessions"]
 
 
-def _serialize_datetime(value: Any) -> Optional[str]:
+def _serialize_datetime(value: Any) -> str | None:
     if hasattr(value, "isoformat"):
         try:
             return value.isoformat()
@@ -69,9 +68,9 @@ def _compute_session_runtime_sec(doc: dict[str, Any], *, now: datetime) -> float
     completed_at = doc.get("completed_at")
 
     if hasattr(created_at, "tzinfo") and created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
+        created_at = created_at.replace(tzinfo=UTC)
     if hasattr(completed_at, "tzinfo") and completed_at.tzinfo is None:
-        completed_at = completed_at.replace(tzinfo=timezone.utc)
+        completed_at = completed_at.replace(tzinfo=UTC)
 
     try:
         if created_at and completed_at:
@@ -83,7 +82,7 @@ def _compute_session_runtime_sec(doc: dict[str, Any], *, now: datetime) -> float
     return stored_duration
 
 
-async def _build_persisted_admin_stats(*, app_id: Optional[str] = None) -> dict[str, Any]:
+async def _build_persisted_admin_stats(*, app_id: str | None = None) -> dict[str, Any]:
     coll = _get_chat_sessions_collection()
     pipeline: list[dict[str, Any]] = []
     if app_id:
@@ -123,7 +122,7 @@ async def _build_persisted_admin_stats(*, app_id: Optional[str] = None) -> dict[
 
 async def _build_persisted_admin_runs(
     *,
-    app_id: Optional[str],
+    app_id: str | None,
     active_only: bool,
     limit: int,
 ) -> dict[str, Any]:
@@ -172,7 +171,7 @@ async def _build_persisted_admin_runs(
 
 async def _require_admin(
     request: Request,
-    authorization: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    authorization: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> UserPrincipal:
     """
     Admin gate with three escalating checks:
@@ -209,7 +208,7 @@ async def _require_admin(
 
 @router.get("/stats")
 async def get_admin_stats(
-    app_id: Optional[str] = Query(None, description="Filter stats to a specific app"),
+    app_id: str | None = Query(None, description="Filter stats to a specific app"),
     user: UserPrincipal = Depends(_require_admin),
 ):
     """Aggregate lifecycle stats. Token metering is served by /api/admin/usage."""
@@ -226,7 +225,7 @@ async def get_admin_stats(
 
 @router.get("/runs")
 async def get_admin_runs(
-    app_id: Optional[str] = Query(None, description="Filter by app_id"),
+    app_id: str | None = Query(None, description="Filter by app_id"),
     active_only: bool = Query(False, description="Only return runs still in progress"),
     limit: int = Query(100, ge=1, le=500, description="Max runs to return"),
     user: UserPrincipal = Depends(_require_admin),
@@ -245,8 +244,8 @@ async def get_admin_runs(
 
 @router.get("/usage")
 async def get_admin_usage(
-    app_id: Optional[str] = Query(None, description="Filter usage to a specific app"),
-    user_id: Optional[str] = Query(None, description="Filter usage to a specific end user"),
+    app_id: str | None = Query(None, description="Filter usage to a specific app"),
+    user_id: str | None = Query(None, description="Filter usage to a specific end user"),
     limit: int = Query(500, ge=1, le=1000, description="Max usage events to aggregate"),
     user: UserPrincipal = Depends(_require_admin),
 ):
@@ -267,8 +266,8 @@ async def get_admin_usage(
 
 @router.get("/sessions")
 async def get_admin_sessions(
-    app_id: Optional[str] = Query(None, description="Filter by app_id"),
-    workflow: Optional[str] = Query(None, description="Filter by workflow name"),
+    app_id: str | None = Query(None, description="Filter by app_id"),
+    workflow: str | None = Query(None, description="Filter by workflow name"),
     limit: int = Query(50, ge=1, le=200),
     user: UserPrincipal = Depends(_require_admin),
 ):

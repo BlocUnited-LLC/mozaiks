@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -14,7 +13,6 @@ from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
     load_task_batches_config,
 )
-
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = WORKSPACE / "factory_app" / "workflows"

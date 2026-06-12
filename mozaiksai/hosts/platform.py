@@ -38,11 +38,12 @@ from mozaiksai.core.auth.dependencies import (
 )
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.ports.entitlement import EntitlementPort
 from mozaiksai.core.profile.discovery import load_profile_panels
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
-from mozaiksai.core.ports.entitlement import EntitlementPort
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
+from mozaiksai.core.runtime.app.module_loader import ModuleLoadError
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
     mount_module_routers,
@@ -76,6 +77,8 @@ logger = get_workflow_logger("platform_app")
 executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
 app.state.subscriptions_config = None
+app.state.startup_degraded = False
+app.state.startup_degraded_reason: str | None = None
 _runtime_services: list[Any] = []
 
 
@@ -109,6 +112,13 @@ except Exception as exc:  # pragma: no cover
 
 def resolve_app_root() -> Path:
     return resolve_active_app_root()
+
+
+def _load_entitlement_adapter(config: Any) -> EntitlementPort:
+    """Return the configured subscription entitlement adapter."""
+    adapter = ConfiguredEntitlementAdapter(config=config)
+    logger.info("ENTITLEMENT_ADAPTER_READY: configured subscriptions adapter wired")
+    return adapter  # type: ignore[return-value]
 
 
 def _resolve_default_brand_root() -> Path:
@@ -273,10 +283,9 @@ async def _platform_startup() -> None:
 
             entitlement_checker: EntitlementPort | None = None
             if load_result.subscriptions_config is not None:
-                entitlement_checker = ConfiguredEntitlementAdapter(
+                entitlement_checker = _load_entitlement_adapter(
                     config=load_result.subscriptions_config,
                 )
-                logger.info("ENTITLEMENT_ADAPTER_READY: configured subscriptions adapter wired")
 
             module_executor = ModuleExecutor(
                 event_emitter=dispatcher.emit,
@@ -320,8 +329,20 @@ async def _platform_startup() -> None:
         raise
     except AppLoadError:
         logger.debug("APP_LOAD_SKIPPED: app.json not found for platform host")
+    except ModuleLoadError as exc:
+        # A module contract is invalid — platform starts in degraded state so
+        # health checks can surface this rather than hiding it as a warning.
+        reason = f"ModuleLoadError: {exc}"
+        logger.error("APP_LOAD_FAILED_DEGRADED: %s", reason)
+        app.state.startup_degraded = True
+        app.state.startup_degraded_reason = reason
     except Exception as exc:
-        logger.warning("APP_LOAD_FAILED: %s", exc)
+        # Unexpected error during app/module setup. Mark degraded so health
+        # checks report the problem; do not swallow silently.
+        reason = f"{type(exc).__name__}: {exc}"
+        logger.error("APP_LOAD_FAILED_DEGRADED: %s", reason)
+        app.state.startup_degraded = True
+        app.state.startup_degraded_reason = reason
 
     try:
         await get_platform_hooks().run_startup(app)

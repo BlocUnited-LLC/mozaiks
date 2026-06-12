@@ -5,19 +5,18 @@ Manages registration and selection of auth adapters based on configuration.
 """
 
 import os
-from typing import Dict, Type, Optional, List
 
-from mozaiksai.core.auth.adapters.base import AuthAdapter, BaseAuthAdapter, AuthError
 from logs.logging_config import get_core_logger
+from mozaiksai.core.auth.adapters.base import AuthAdapter, AuthError, BaseAuthAdapter
 
 logger = get_core_logger("auth.registry")
 
 # Global adapter registry
-_adapter_registry: Dict[str, Type[BaseAuthAdapter]] = {}
-_adapter_instance: Optional[AuthAdapter] = None
+_adapter_registry: dict[str, type[BaseAuthAdapter]] = {}
+_adapter_instance: AuthAdapter | None = None
 
 
-def register_adapter(name: str, adapter_class: Type[BaseAuthAdapter]) -> None:
+def register_adapter(name: str, adapter_class: type[BaseAuthAdapter]) -> None:
     """
     Register an auth adapter.
 
@@ -32,7 +31,7 @@ def register_adapter(name: str, adapter_class: Type[BaseAuthAdapter]) -> None:
     logger.debug(f"Registered auth adapter: {name}")
 
 
-def list_adapters() -> List[str]:
+def list_adapters() -> list[str]:
     """List all registered adapter names."""
     return list(_adapter_registry.keys())
 
@@ -40,10 +39,10 @@ def list_adapters() -> List[str]:
 def _register_builtin_adapters() -> None:
     """Register built-in adapters."""
     # Import here to avoid circular imports
-    from mozaiksai.core.auth.adapters.no_auth import NoAuthAdapter
     from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter
-    from mozaiksai.core.auth.adapters.supabase import SupabaseAuthAdapter
     from mozaiksai.core.auth.adapters.keycloak import KeycloakAuthAdapter
+    from mozaiksai.core.auth.adapters.no_auth import NoAuthAdapter
+    from mozaiksai.core.auth.adapters.supabase import SupabaseAuthAdapter
 
     register_adapter("none", NoAuthAdapter)
     register_adapter("jwt", GenericJWTAdapter)
@@ -91,7 +90,7 @@ def _auto_detect_provider() -> str:
     return "none"
 
 
-def get_auth_adapter(force_provider: Optional[str] = None) -> AuthAdapter:
+def get_auth_adapter(force_provider: str | None = None) -> AuthAdapter:
     """
     Get the configured auth adapter.
 

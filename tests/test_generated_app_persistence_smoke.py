@@ -13,8 +13,8 @@ import mozaiksai.core.runtime.composition.module_executor as module_executor_mod
 from mozaiksai.core.runtime.app.loader import AppLoader
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.persistence import (
-    apply_database_indexes,
     apply_data_migrations,
+    apply_database_indexes,
     load_data_migrations,
 )
 

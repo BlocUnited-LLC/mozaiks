@@ -6,9 +6,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
+
 from .schema import ContextVariableSource
 
 logger = get_workflow_logger("db_adapters")
@@ -21,9 +22,9 @@ class DatabaseAdapter(ABC):
     async def fetch_one(
         self,
         source: ContextVariableSource,
-        query: Dict[str, Any],
-        projection: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        query: dict[str, Any],
+        projection: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         """
         Fetch a single document from the data source.
 
@@ -44,9 +45,9 @@ class MongoAdapter(DatabaseAdapter):
     async def fetch_one(
         self,
         source: ContextVariableSource,
-        query: Dict[str, Any],
-        projection: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        query: dict[str, Any],
+        projection: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         """Fetches a single document from MongoDB."""
         db_name = source.database_name
         collection = source.collection
@@ -81,12 +82,12 @@ class MongoAdapter(DatabaseAdapter):
             return None
 
 
-_ADAPTER_REGISTRY: Dict[str, DatabaseAdapter] = {
+_ADAPTER_REGISTRY: dict[str, DatabaseAdapter] = {
     "mongodb": MongoAdapter(),
 }
 
 
-def get_db_adapter(source: ContextVariableSource) -> Optional[DatabaseAdapter]:
+def get_db_adapter(source: ContextVariableSource) -> DatabaseAdapter | None:
     """
     Factory function to get a database adapter based on the source definition.
     Defaults to MongoDB when db_type is not specified.

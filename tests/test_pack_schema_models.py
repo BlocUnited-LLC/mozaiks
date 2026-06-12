@@ -67,6 +67,44 @@ def test_parse_global_pack_graph_valid() -> None:
     assert [w.id for w in graph.workflows] == ["A", "B"]
 
 
+def test_parse_global_pack_graph_accepts_optional_transition() -> None:
+    graph = parse_global_pack_graph(
+        {
+            "version": 3,
+            "workflows": [{"id": "AppGenerator"}],
+            "transitions": [
+                {
+                    "id": "build_satisfaction_rating",
+                    "transition_type": "user_choice_context",
+                    "optional": True,
+                    "ui": {"component": "BuildSatisfactionRating", "mode": "screen"},
+                    "options": [
+                        {"id": "rated", "route_to": "workflow_complete", "context_variables": {}},
+                        {"id": "skip", "route_to": "workflow_complete", "context_variables": {}},
+                    ],
+                },
+                {
+                    "id": "workflow_complete",
+                    "transition_type": "workflow_complete",
+                    "ui": {"component": "WorkflowCompletion", "mode": "screen"},
+                }
+            ],
+            "workflow_sequences": [
+                {
+                    "id": "build",
+                    "steps": [
+                        {"workflows": ["AppGenerator"]},
+                        {"transition": "build_satisfaction_rating"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert graph.transitions[0].id == "build_satisfaction_rating"
+    assert graph.transitions[0].optional is True
+
+
 def test_parse_global_pack_graph_allows_workflow_entrypoints() -> None:
     graph = parse_global_pack_graph(
         {

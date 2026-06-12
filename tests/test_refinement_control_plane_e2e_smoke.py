@@ -12,7 +12,6 @@ from mozaiksai.control_plane import (
     load_control_plane_pack,
 )
 
-
 APP_ROOT = Path(__file__).resolve().parents[1] / "factory_app" / "app"
 
 

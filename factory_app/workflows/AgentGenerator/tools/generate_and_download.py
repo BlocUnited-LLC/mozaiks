@@ -6,8 +6,6 @@ Replaces the old persistence-gather + converter approach with a direct read from
 the task batch output stored in context_variables["workflow_bundle_results"].
 """
 
-from typing import Any, Dict, List, Optional, Annotated
-import json
 import logging
 import os
 import shutil
@@ -15,20 +13,27 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Annotated, Any
 
+from factory_app.workflows._shared.workflow_integration import (
+    apply_workflow_integration_context,
+    extract_workflow_integration_metadata_from_bundle_entries,
+)
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 from mozaiksai.core.workflow.generator_support.agent_endpoints import (
     resolve_agent_api_url,
     resolve_agent_websocket_url,
 )
 from mozaiksai.core.workflow.generator_support.workflow_artifacts import record_workflow_artifacts
 from mozaiksai.core.workflow.generator_support.workflow_exports import record_workflow_export
+from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
+
 from .export_agent_workflow import export_agent_workflow_to_github
 from .workflow_converter import promote_generated_workflow
 
 try:
-    from logs.tools_logs import get_tool_logger as _get_tool_logger, log_tool_event as _log_tool_event  # type: ignore
+    from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
+    from logs.tools_logs import log_tool_event as _log_tool_event
 except Exception:
     _get_tool_logger = None  # type: ignore
     _log_tool_event = None  # type: ignore
@@ -65,9 +70,9 @@ def _format_bytes(num: int) -> str:
 
 def _write_bundle_to_disk(
     workflow_name: str,
-    files: List[Dict[str, Any]],
+    files: list[dict[str, Any]],
     base_dir: Path,
-) -> tuple[Path, List[str]]:
+) -> tuple[Path, list[str]]:
     """Write WorkflowBundleBuilderOutput files to disk under base_dir/workflow_name/.
 
     Returns (workflow_dir, list_of_relative_filenames_written).
@@ -75,7 +80,7 @@ def _write_bundle_to_disk(
     workflow_dir = base_dir / workflow_name
     workflow_dir.mkdir(parents=True, exist_ok=True)
 
-    created: List[str] = []
+    created: list[str] = []
     for file_entry in files:
         filename = (file_entry.get("filename") or "").strip()
         content = file_entry.get("content") or ""
@@ -91,7 +96,7 @@ def _write_bundle_to_disk(
 
 def _build_pack_zip(
     *,
-    bundle_dirs: List[tuple],  # list of (wf_name: str, wf_dir: Path)
+    bundle_dirs: list[tuple],  # list of (wf_name: str, wf_dir: Path)
     output_path: Path,
 ) -> Path:
     """Zip one or more workflow bundle directories into a single archive."""
@@ -125,15 +130,17 @@ def _promote_workflow_to_app_workspace(workflow_dir: Path, wf_name: str) -> None
 async def _register_workflow_bundle_artifact_version(
     *,
     app_id: str,
-    user_id: Optional[str],
+    user_id: str | None,
     workflow_name: str,
-    chat_id: Optional[str],
+    chat_id: str | None,
     bundle_name: str,
-    zip_path: Optional[Path],
-    context_variables: Optional[Any],
+    zip_path: Path | None,
+    context_variables: Any | None,
+    workflow_integration_metadata: dict[str, Any] | None = None,
 ) -> Any:
     try:
         import hashlib
+
         from mozaiksai.core.artifacts import (
             ArtifactLifecycleStatus,
             ArtifactValidationStatus,
@@ -190,6 +197,7 @@ async def _register_workflow_bundle_artifact_version(
             "metadata": {
                 "artifact_path": str(zip_path) if zip_path else None,
                 "workflow_name": bundle_name,
+                "workflow_integration_metadata": workflow_integration_metadata,
             },
         },
     )
@@ -203,13 +211,13 @@ async def _register_workflow_bundle_artifact_version(
 
 async def _record_context_and_artifacts(
     *,
-    app_id: Optional[str],
-    user_id: Optional[str],
-    chat_id: Optional[str],
+    app_id: str | None,
+    user_id: str | None,
+    chat_id: str | None,
     pack_name: str,
-    bundle_entries: List[Dict[str, Any]],
-    zip_path: Optional[Path],
-    context_variables: Optional[Any],
+    bundle_entries: list[dict[str, Any]],
+    zip_path: Path | None,
+    context_variables: Any | None,
 ) -> None:
     """Record workflow export context and artifacts for downstream chaining."""
     try:
@@ -218,10 +226,40 @@ async def _record_context_and_artifacts(
 
         # Synthesize minimal workflow config from bundle entries
         workflow_names = [e.get("workflow_name", "") for e in bundle_entries if e.get("workflow_name")]
+        workflow_integration_metadata = extract_workflow_integration_metadata_from_bundle_entries(
+            bundle_entries,
+            bundle_name=pack_name,
+        )
+        primary_workflow = (
+            workflow_integration_metadata.get("primary_workflow")
+            if isinstance(workflow_integration_metadata, dict)
+            else None
+        )
 
         websocket_url = resolve_agent_websocket_url(str(app_id))
         api_url = resolve_agent_api_url(str(app_id))
-        capability_id = pack_name.lower().replace("_", "-").replace(" ", "-") if pack_name else None
+        capability_id = (
+            str(primary_workflow.get("capability_id"))
+            if isinstance(primary_workflow, dict) and primary_workflow.get("capability_id")
+            else (pack_name.lower().replace("_", "-").replace(" ", "-") if pack_name else None)
+        )
+        generated_workflow_name = (
+            str(primary_workflow.get("workflow_name"))
+            if isinstance(primary_workflow, dict) and primary_workflow.get("workflow_name")
+            else pack_name
+        )
+        generated_workflow_startup_mode = (
+            primary_workflow.get("startup_mode")
+            if isinstance(primary_workflow, dict)
+            else None
+        )
+        generated_workflow_trigger_events = (
+            primary_workflow.get("trigger_events") or []
+            if isinstance(primary_workflow, dict)
+            else []
+        )
+        if workflow_integration_metadata:
+            apply_workflow_integration_context(context_variables, workflow_integration_metadata)
 
         await record_workflow_export(
             app_id=str(app_id),
@@ -231,15 +269,19 @@ async def _record_context_and_artifacts(
             job_id=None,
             meta={
                 "bundle_workflow_name": pack_name,
-                "workflow_name": pack_name,
+                "workflow_name": generated_workflow_name,
                 "capability_id": capability_id,
                 "workflow_names": workflow_names,
+                "workflow_integration_metadata": workflow_integration_metadata,
             },
             extra_fields={
                 "bundle_workflow_name": pack_name,
-                "workflow_name": pack_name,
+                "workflow_name": generated_workflow_name,
                 "capability_id": capability_id,
                 "workflow_names": workflow_names,
+                "workflow_startup_mode": generated_workflow_startup_mode,
+                "workflow_trigger_events": generated_workflow_trigger_events,
+                "workflow_integration_metadata": workflow_integration_metadata,
                 "agent_websocket_url": websocket_url,
                 "agent_api_url": api_url,
             },
@@ -254,6 +296,7 @@ async def _record_context_and_artifacts(
                 "bundle_name": pack_name,
                 "workflow_names": workflow_names,
                 "bundle_entries": bundle_entries,
+                "workflow_integration_metadata": workflow_integration_metadata,
             },
         )
 
@@ -266,6 +309,7 @@ async def _record_context_and_artifacts(
                 bundle_name=pack_name,
                 zip_path=zip_path,
                 context_variables=context_variables,
+                workflow_integration_metadata=workflow_integration_metadata,
             )
         except Exception as av_err:
             _logger.warning("[ArtifactStore] Failed to register artifact version: %s", av_err)
@@ -274,8 +318,10 @@ async def _record_context_and_artifacts(
             try:
                 context_variables.set("agent_websocket_url", websocket_url)
                 context_variables.set("agent_api_url", api_url)
-                context_variables.set("generated_workflow_name", pack_name)
+                context_variables.set("generated_workflow_name", generated_workflow_name)
                 context_variables.set("generated_workflow_capability_id", capability_id)
+                context_variables.set("generated_workflow_startup_mode", generated_workflow_startup_mode)
+                context_variables.set("generated_workflow_trigger_events", generated_workflow_trigger_events)
             except Exception:
                 pass
 
@@ -289,10 +335,10 @@ async def _record_context_and_artifacts(
 
 
 async def generate_and_download(
-    DownloadRequest: Annotated[Dict[str, Any], "Download configuration"],
+    DownloadRequest: Annotated[dict[str, Any], "Download configuration"],
     agent_message: Annotated[str, "Concise message (≤140 chars) shown to user in download UI"],
-    context_variables: Annotated[Optional[Any], "Injected runtime context."] = None,
-) -> Dict[str, Any]:
+    context_variables: Annotated[Any | None, "Injected runtime context."] = None,
+) -> dict[str, Any]:
     """
     Assemble all workflow bundle files from workflow_bundle_results, zip them,
     and present the inline download UI.
@@ -304,10 +350,10 @@ async def generate_and_download(
     confirmation_only = DownloadRequest.get("confirmation_only", True)
     storage_backend = DownloadRequest.get("storage_backend", "none")
 
-    chat_id: Optional[str] = None
-    app_id: Optional[str] = None
-    workflow_name: Optional[str] = None
-    user_id: Optional[str] = None
+    chat_id: str | None = None
+    app_id: str | None = None
+    workflow_name: str | None = None
+    user_id: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
         chat_id = context_variables.get("chat_id")
@@ -338,14 +384,12 @@ async def generate_and_download(
     # ------------------------------------------------------------------
     # Read workflow_bundle_results from task batch output
     # ------------------------------------------------------------------
-    workflow_bundle_results: Optional[Dict[str, Any]] = None
-    pack_name: Optional[str] = None
-    is_multi_workflow: bool = False
+    workflow_bundle_results: dict[str, Any] | None = None
+    pack_name: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
         workflow_bundle_results = context_variables.get("workflow_bundle_results")
         pack_name = context_variables.get("pack_name")
-        is_multi_workflow = bool(context_variables.get("is_multi_workflow", False))
 
     if not isinstance(workflow_bundle_results, dict) or not workflow_bundle_results:
         return {
@@ -354,7 +398,7 @@ async def generate_and_download(
         }
 
     # Collect per-workflow entries (skip internal _meta key)
-    bundle_entries: List[Dict[str, Any]] = [
+    bundle_entries: list[dict[str, Any]] = [
         v for k, v in workflow_bundle_results.items()
         if not k.startswith("_") and isinstance(v, dict)
     ]
@@ -388,12 +432,12 @@ async def generate_and_download(
     base_generated = Path(generated_root) / "workflows" / str(app_id)
     base_generated.mkdir(parents=True, exist_ok=True)
 
-    ui_files: List[Dict[str, Any]] = []
-    zip_path_obj: Optional[Path] = None
+    ui_files: list[dict[str, Any]] = []
+    zip_path_obj: Path | None = None
 
-    def _create_bundle_files() -> tuple[Optional[Path], List[Dict[str, Any]]]:
+    def _create_bundle_files() -> tuple[Path | None, list[dict[str, Any]]]:
         """Write all bundle files to disk and create the zip. Returns (zip_path, ui_files)."""
-        bundle_dirs: List[tuple] = []
+        bundle_dirs: list[tuple] = []
         for entry in bundle_entries:
             wf_name = entry.get("workflow_name") or ""
             files = entry.get("files") or []
@@ -476,7 +520,7 @@ async def generate_and_download(
         raise
     except Exception as e:
         wf_logger.error("❌ UI interaction failed: %s", e, exc_info=True)
-        raise UIToolError("Failed during file download UI interaction")
+        raise UIToolError("Failed during file download UI interaction") from e
 
     if response.get("status") == "cancelled":
         wf_logger.info("❌ User declined download")
@@ -544,7 +588,7 @@ async def generate_and_download(
             wf_logger.warning("⚠️ Storage action failed: %s", se)
 
     # Optional GitHub export
-    deployment_result: Optional[Dict[str, Any]] = None
+    deployment_result: dict[str, Any] | None = None
     try:
         action = None
         if isinstance(response, dict):
@@ -611,11 +655,11 @@ async def generate_and_download(
 
 async def _handle_storage_action(
     storage_backend: str,
-    response: Dict[str, Any],
-    zip_path: Optional[Path],
-    context_variables: Optional[Any] = None,
-    workflow_name: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
+    response: dict[str, Any],
+    zip_path: Path | None,
+    context_variables: Any | None = None,
+    workflow_name: str | None = None,
+) -> dict[str, Any] | None:
     if storage_backend == "local":
         return await _store_files_local(
             response=response,
@@ -629,11 +673,11 @@ async def _handle_storage_action(
 
 
 async def _store_files_local(
-    response: Dict[str, Any],
-    zip_path: Optional[Path],
-    context_variables: Optional[Any] = None,
-    workflow_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    response: dict[str, Any],
+    zip_path: Path | None,
+    context_variables: Any | None = None,
+    workflow_name: str | None = None,
+) -> dict[str, Any]:
     selected_path = None
     if isinstance(response, dict):
         selected_path = response.get("selectedPath") or (

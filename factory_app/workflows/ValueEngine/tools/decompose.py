@@ -6,8 +6,8 @@ planning step or orchestration layer. This tool only persists the already
 reasoned plan - NO inference or heuristic logic.
 """
 
-from typing import Annotated, Any, Dict, List, Optional
 import logging
+from typing import Annotated, Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +22,10 @@ except ImportError:
     BuilderArtifactStore = None
 
 
-def _normalize_object_list(value: Any) -> List[Dict[str, Any]]:
+def _normalize_object_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for entry in value:
         if isinstance(entry, dict):
             items.append(dict(entry))
@@ -43,14 +43,14 @@ def _set_context_value(context_variables: Any, key: str, value: Any) -> None:
 
 
 async def save_build_plan(
-    tasks: Annotated[List[Dict[str, Any]], "List of BuildTaskSpec objects from LLM"],
+    tasks: Annotated[list[dict[str, Any]], "List of BuildTaskSpec objects from LLM"],
     capability_packs: Annotated[
-        Optional[List[Dict[str, Any]]],
+        list[dict[str, Any]] | None,
         "Optional list of CapabilityPackSpec objects already selected for the app",
     ] = None,
-    required_inputs: Annotated[Optional[List[str]], "User inputs needed before build"] = None,
-    context_variables: Annotated[Optional[Any], "Runtime context"] = None,
-) -> Dict[str, Any]:
+    required_inputs: Annotated[list[str] | None, "User inputs needed before build"] = None,
+    context_variables: Annotated[Any | None, "Runtime context"] = None,
+) -> dict[str, Any]:
     """
     Save the BuildPlan produced after concept approval.
 
@@ -153,8 +153,8 @@ async def save_build_plan(
 
 async def get_build_plan(
     app_id: Annotated[str, "Application ID"],
-    context_variables: Annotated[Optional[Any], "Runtime context"] = None,
-) -> Dict[str, Any]:
+    context_variables: Annotated[Any | None, "Runtime context"] = None,
+) -> dict[str, Any]:
     """
     Retrieve the BuildPlan for an app.
 
@@ -181,8 +181,8 @@ async def get_build_plan(
 
 async def get_feature_context(
     feature_name: Annotated[str, "Feature to get context for"],
-    context_variables: Annotated[Optional[Any], "Runtime context"] = None,
-) -> Dict[str, Any]:
+    context_variables: Annotated[Any | None, "Runtime context"] = None,
+) -> dict[str, Any]:
     """
     Get context for a specific feature from the manifest.
 

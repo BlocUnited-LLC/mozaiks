@@ -3,15 +3,14 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import inspect
-from pathlib import Path
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 import yaml
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
 
 from logs.logging_config import get_workflow_logger
-
 
 logger = get_workflow_logger("runtime_extensions")
 
@@ -204,7 +203,7 @@ def _iter_declared_extensions() -> Iterable[dict[str, Any]]:
             continue
 
         try:
-            with open(ext_yaml, "r", encoding="utf-8") as fh:
+            with open(ext_yaml, encoding="utf-8") as fh:
                 raw = yaml.safe_load(fh) or {}
         except Exception as exc:
             logger.warning(f"RUNTIME_EXTENSIONS_PARSE_FAILED: {ext_yaml} error={exc}")

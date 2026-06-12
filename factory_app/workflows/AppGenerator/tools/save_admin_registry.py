@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
 
@@ -23,7 +23,7 @@ from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bun
 logger = logging.getLogger(__name__)
 
 
-def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
@@ -40,7 +40,7 @@ def _context_get(context_variables: Optional[Any], key: str, default: Any = None
     return default
 
 
-def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     if hasattr(context_variables, "set"):
@@ -60,11 +60,11 @@ def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None
 def save_admin_registry(
     *,
     admin_registry: Annotated[
-        Optional[Dict[str, Any]],
+        dict[str, Any] | None,
         Field(description="AdminRegistry object produced by AdminRegistryAgent."),
     ] = None,
     code_files: Annotated[
-        Optional[List[Dict[str, Any]]],
+        list[dict[str, Any]] | None,
         Field(
             description=(
                 "Serialized code files emitted by AdminRegistryAgent, "
@@ -73,11 +73,11 @@ def save_admin_registry(
         ),
     ] = None,
     agent_message: Annotated[
-        Optional[str],
+        str | None,
         Field(description="Short summary from AdminRegistryAgent."),
     ] = None,
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
 ) -> str:

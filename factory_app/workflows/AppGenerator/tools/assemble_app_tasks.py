@@ -1,21 +1,20 @@
 import ast
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
 import yaml
+from autogen.tools.dependency_injection import Field
+
+from mozaiksai.core.workflow.generator_support.page_plan_utils import (
+    _page_from_plan,
+    _page_stem_from_path,
+    _page_stems,
+)
 
 from .assembly_phase import assemble_features
 from .code_file_utils import collect_generated_app_file_entries
 from .generate_module_interface_files import generate_module_interface_files
 from .resolve_hosted_pack_templates import resolve_hosted_pack_templates
-from mozaiksai.core.workflow.generator_support.page_plan_utils import (
-    _decode_config_hint,
-    _page_from_plan,
-    _page_stem_from_path,
-    _page_stems,
-    _slug,
-)
 
 
 def _is_truthy(value: Any) -> bool:
@@ -27,9 +26,9 @@ def _is_truthy(value: Any) -> bool:
 
 
 def _apply_planned_page_contracts(
-    code_files: List[Dict[str, Any]],
+    code_files: list[dict[str, Any]],
     app_build_plan: Any,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
     pages = [page for page in app_build_plan.get("pages") or [] if isinstance(page, dict)]
@@ -37,7 +36,7 @@ def _apply_planned_page_contracts(
     if not pages or not tasks:
         return [{"filename": str(f["filename"]), "content": str(f["content"])} for f in code_files]
 
-    planned_by_stem: Dict[str, Dict[str, Any]] = {}
+    planned_by_stem: dict[str, dict[str, Any]] = {}
     for page in pages:
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
@@ -77,8 +76,8 @@ def _handler_methods(content: str, class_name: str) -> set[str]:
 
 
 def _apply_module_handler_method_alignment(
-    code_files: List[Dict[str, str]],
-) -> List[Dict[str, str]]:
+    code_files: list[dict[str, str]],
+) -> list[dict[str, str]]:
     file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
     for path, content in list(file_map.items()):
         pure = PurePosixPath(path)
@@ -131,11 +130,11 @@ def _apply_module_handler_method_alignment(
 
 
 def _apply_hosted_pack_templates(
-    code_files: List[Dict[str, str]],
+    code_files: list[dict[str, str]],
     *,
     app_build_plan: Any,
     context_variables: Any,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     if not isinstance(app_build_plan, dict):
         return code_files
 
@@ -160,13 +159,13 @@ def _apply_hosted_pack_templates(
 async def assemble_app_tasks(
     *,
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     app_id = None
-    feature_outputs: List[Dict[str, Any]] = []
-    inject_key: Optional[str] = None
+    feature_outputs: list[dict[str, Any]] = []
+    inject_key: str | None = None
 
     if context_variables and hasattr(context_variables, "get"):
         schema_ready = _is_truthy(context_variables.get("app_schema_ready"))

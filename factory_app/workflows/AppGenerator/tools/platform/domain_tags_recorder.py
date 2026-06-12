@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def _build_endpoint(app_backend_url: str) -> str:
 
 
 async def record_domain_tags(
-    context_variables: Optional[dict[str, Any]] = None,
+    context_variables: dict[str, Any] | None = None,
     **_: Any,
 ) -> dict[str, Any]:
     """Fire-and-forget domain tag recorder. Never raises."""

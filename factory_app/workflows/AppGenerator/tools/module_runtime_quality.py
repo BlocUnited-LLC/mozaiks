@@ -11,8 +11,9 @@ from __future__ import annotations
 import ast
 import logging
 import re
+from collections.abc import Iterable
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
 
@@ -23,7 +24,7 @@ _SUMMARY_FUNCTION = re.compile(r"(summary|stats|metrics|metric|count|dashboard|o
 _TREND_KEY = re.compile(r"(trend|change|growth|delta|rate)", re.I)
 _PERCENT_TEXT = re.compile(r"[+-]?\d+(?:\.\d+)?\s*%")
 
-_BANNED_TEXT_PATTERNS: Tuple[Tuple[re.Pattern[str], str], ...] = (
+_BANNED_TEXT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bmock(?:ed|ing)?\b", re.I), "mock runtime data"),
     (re.compile(r"\bfake\b", re.I), "fake runtime data"),
     (re.compile(r"\bsample(?:s)?\b", re.I), "sample runtime data"),
@@ -66,7 +67,7 @@ _DATA_ACCESS_ATTRS = {
 }
 
 
-def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
@@ -83,7 +84,7 @@ def _context_get(context_variables: Optional[Any], key: str, default: Any = None
     return default
 
 
-def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     if hasattr(context_variables, "set"):
@@ -107,9 +108,9 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
-def _dedupe(warnings: Iterable[str]) -> List[str]:
+def _dedupe(warnings: Iterable[str]) -> list[str]:
     seen: set[str] = set()
-    out: List[str] = []
+    out: list[str] = []
     for warning in warnings:
         if warning not in seen:
             seen.add(warning)
@@ -130,7 +131,7 @@ def _safe_path(raw: Any) -> str:
     return str(path)
 
 
-def _iter_backend_python_files(code_files: Any) -> Iterable[Tuple[str, str]]:
+def _iter_backend_python_files(code_files: Any) -> Iterable[tuple[str, str]]:
     if not isinstance(code_files, list):
         return
     for item in code_files:
@@ -197,8 +198,8 @@ def _static_trend_value(node: ast.AST) -> bool:
     return False
 
 
-def _audit_ast(filename: str, content: str) -> List[str]:
-    warnings: List[str] = []
+def _audit_ast(filename: str, content: str) -> list[str]:
+    warnings: list[str] = []
     try:
         tree = ast.parse(content)
     except SyntaxError:
@@ -218,7 +219,7 @@ def _audit_ast(filename: str, content: str) -> List[str]:
                 )
 
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets: List[ast.AST]
+            targets: list[ast.AST]
             if isinstance(node, ast.Assign):
                 targets = list(node.targets)
             else:
@@ -249,10 +250,10 @@ def _audit_ast(filename: str, content: str) -> List[str]:
     return warnings
 
 
-def audit_module_runtime_quality(code_files: List[Dict[str, Any]]) -> List[str]:
+def audit_module_runtime_quality(code_files: list[dict[str, Any]]) -> list[str]:
     """Return deterministic warnings for generated module backend code."""
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     for filename, content in _iter_backend_python_files(code_files):
         for pattern, label in _BANNED_TEXT_PATTERNS:
             match = pattern.search(content)
@@ -283,10 +284,10 @@ def review_module_runtime_quality(
         Field(description="Concise message from ModuleRuntimeQualityAgent (ignored by the tool)."),
     ] = "",
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Audit generated module runtime code and set AG2 handoff routing state."""
 
     code_files = _context_get(context_variables, "code_files", []) or []
@@ -326,7 +327,7 @@ def review_module_runtime_quality(
             + "\n- ".join(warnings)
         )
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "status": status,
         "warnings": warnings,
         "module_backend_file_count": backend_file_count,

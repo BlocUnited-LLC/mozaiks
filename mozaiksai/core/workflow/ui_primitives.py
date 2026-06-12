@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
 
 from mozaiksai.resources import resolve_chat_ui_src_root
 
@@ -31,8 +31,8 @@ def _chat_ui_src_root() -> Path:
     return root
 
 
-def _split_identifiers(raw_specifiers: str) -> List[str]:
-    identifiers: List[str] = []
+def _split_identifiers(raw_specifiers: str) -> list[str]:
+    identifiers: list[str] = []
     for part in raw_specifiers.split(","):
         token = part.strip()
         if not token:
@@ -44,9 +44,9 @@ def _split_identifiers(raw_specifiers: str) -> List[str]:
     return identifiers
 
 
-def _parse_exports(file_path: Path, pattern: re.Pattern[str]) -> Tuple[UIPrimitiveExport, ...]:
+def _parse_exports(file_path: Path, pattern: re.Pattern[str]) -> tuple[UIPrimitiveExport, ...]:
     text = file_path.read_text(encoding="utf-8")
-    entries: List[UIPrimitiveExport] = []
+    entries: list[UIPrimitiveExport] = []
     for match in pattern.finditer(text):
         source_file = str(match.group("source")).replace("./", "")
         for name in _split_identifiers(match.group(1)):
@@ -55,38 +55,38 @@ def _parse_exports(file_path: Path, pattern: re.Pattern[str]) -> Tuple[UIPrimiti
 
 
 @lru_cache(maxsize=1)
-def get_component_ui_primitive_exports() -> Tuple[UIPrimitiveExport, ...]:
+def get_component_ui_primitive_exports() -> tuple[UIPrimitiveExport, ...]:
     exports_path = _chat_ui_src_root() / "ui" / "primitives" / "index.js"
     return _parse_exports(exports_path, _EXPORT_RE)
 
 
 @lru_cache(maxsize=1)
-def get_page_ui_primitive_exports() -> Tuple[UIPrimitiveExport, ...]:
+def get_page_ui_primitive_exports() -> tuple[UIPrimitiveExport, ...]:
     registry_path = _chat_ui_src_root() / "ui" / "page-renderer" / "PrimitiveRegistry.js"
     return _parse_exports(registry_path, _IMPORT_RE)
 
 
-def _names(exports: Tuple[UIPrimitiveExport, ...]) -> Tuple[str, ...]:
+def _names(exports: tuple[UIPrimitiveExport, ...]) -> tuple[str, ...]:
     return tuple(sorted({entry.name for entry in exports}))
 
 
-def get_component_ui_primitive_names() -> Tuple[str, ...]:
+def get_component_ui_primitive_names() -> tuple[str, ...]:
     return _names(get_component_ui_primitive_exports())
 
 
-def get_page_ui_primitive_names() -> Tuple[str, ...]:
+def get_page_ui_primitive_names() -> tuple[str, ...]:
     return _names(get_page_ui_primitive_exports())
 
 
 def _validate_primitive_names(
     values: Iterable[str] | None,
     *,
-    allowed_names: Tuple[str, ...],
+    allowed_names: tuple[str, ...],
     context: str,
-) -> List[str]:
+) -> list[str]:
     allowed = set(allowed_names)
-    normalized: List[str] = []
-    invalid: List[str] = []
+    normalized: list[str] = []
+    invalid: list[str] = []
 
     if values is None:
         return normalized
@@ -119,7 +119,7 @@ def validate_component_ui_primitives(
     values: Iterable[str] | None,
     *,
     context: str,
-) -> List[str]:
+) -> list[str]:
     return _validate_primitive_names(
         values,
         allowed_names=get_component_ui_primitive_names(),
@@ -131,7 +131,7 @@ def validate_page_ui_primitives(
     values: Iterable[str] | None,
     *,
     context: str,
-) -> List[str]:
+) -> list[str]:
     return _validate_primitive_names(
         values,
         allowed_names=get_page_ui_primitive_names(),
@@ -158,7 +158,7 @@ def format_generated_component_ui_primitive_guidance() -> str:
 
 
 @lru_cache(maxsize=1)
-def _load_primitive_schemas() -> Optional[Dict[str, Dict]]:
+def _load_primitive_schemas() -> dict[str, dict] | None:
     """Load primitive_schemas.json from the page-renderer directory."""
     try:
         schema_path = (
@@ -173,7 +173,7 @@ def _load_primitive_schemas() -> Optional[Dict[str, Dict]]:
         return None
 
 
-def load_primitive_schemas() -> Optional[Dict[str, Dict]]:
+def load_primitive_schemas() -> dict[str, dict] | None:
     return _load_primitive_schemas()
 
 
@@ -190,7 +190,7 @@ def format_page_ui_primitive_guidance() -> str:
     schemas = _load_primitive_schemas()
     schema_block = ""
     if schemas:
-        lines: List[str] = []
+        lines: list[str] = []
         for name, defn in schemas.items():
             required = defn.get("required", [])
             props = defn.get("properties", {})

@@ -9,9 +9,9 @@ Purpose:
 Extracted from orchestration_patterns.py to reduce complexity and improve maintainability.
 """
 
-from typing import Any, Dict, List, Optional
-import re
 import logging
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +24,10 @@ __all__ = [
 
 
 def normalize_to_strict_ag2(
-    raw_msgs: Optional[List[Any]],
+    raw_msgs: list[Any] | None,
     *,
     default_user_name: str = "user",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Ensure every message is in strict AG2 shape:
       {"role": "user"|"assistant", "name": "<exact agent name>", "content": <str|dict|list>}
@@ -35,7 +35,7 @@ def normalize_to_strict_ag2(
     """
     if not raw_msgs:
         return []
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for m in raw_msgs:
         if not isinstance(m, dict):
             # ignore non-dicts
@@ -71,7 +71,7 @@ def normalize_text_content(raw: Any) -> str:
         return ""
     if isinstance(raw, str):
         return raw
-    if hasattr(raw, 'model_dump') and callable(getattr(raw, 'model_dump')):
+    if hasattr(raw, 'model_dump') and callable(raw.model_dump):
         try:
             return normalize_text_content(raw.model_dump())
         except Exception:
@@ -94,12 +94,12 @@ def serialize_event_content(raw: Any) -> Any:
     if raw is None or isinstance(raw, (str, int, float, bool)):
         return raw
     try:
-        if hasattr(raw, 'model_dump') and callable(getattr(raw, 'model_dump')):
+        if hasattr(raw, 'model_dump') and callable(raw.model_dump):
             return serialize_event_content(raw.model_dump())
     except Exception:
         pass
     try:
-        if hasattr(raw, 'dict') and callable(getattr(raw, 'dict')):
+        if hasattr(raw, 'dict') and callable(raw.dict):
             return serialize_event_content(raw.dict())
     except Exception:
         pass
@@ -115,14 +115,14 @@ def serialize_event_content(raw: Any) -> Any:
     return str(raw)
 
 
-def extract_agent_name(obj: Any) -> Optional[str]:
+def extract_agent_name(obj: Any) -> str | None:
     """Best-effort extraction of an agent/sender name from AG2 event/message objects.
 
     Traverses nested structures (dicts, lists, dataclasses) and falls back to string pattern
     matching so that tool and agent messages surface their logical speaker in the UI.
     """
 
-    def _scan(candidate: Any) -> Optional[str]:
+    def _scan(candidate: Any) -> str | None:
         if candidate is None:
             return None
         if isinstance(candidate, str):

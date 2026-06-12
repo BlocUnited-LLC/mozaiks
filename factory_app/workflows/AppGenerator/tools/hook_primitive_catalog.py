@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 from mozaiksai.core.workflow.ui_primitives import format_generated_page_ui_primitive_guidance
 from mozaiksai.core.workflow.ui_surface_taxonomy import format_ui_surface_taxonomy_guidance
@@ -19,8 +19,8 @@ def _apply_system_message(agent: Any, message: str) -> None:
     elif hasattr(agent, "_system_message"):
         agent._system_message = message
     else:
-        setattr(agent, "_system_message", message)
-    setattr(agent, "_mozaiks_base_system_message", message)
+        agent._system_message = message
+    agent._mozaiks_base_system_message = message
 
 
 def _update_section(agent: Any, header: str, body: str) -> None:
@@ -40,7 +40,7 @@ def _update_section(agent: Any, header: str, body: str) -> None:
     _apply_system_message(agent, new_message)
 
 
-def inject_primitive_catalog(agent: Any, messages: List[Dict[str, Any]]) -> None:
+def inject_primitive_catalog(agent: Any, messages: list[dict[str, Any]]) -> None:
     agent_name = getattr(agent, "name", "")
     if agent_name != "AppSchemaAgent":
         return

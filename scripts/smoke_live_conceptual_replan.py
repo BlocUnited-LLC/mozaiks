@@ -63,7 +63,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import yaml
 
@@ -449,7 +449,7 @@ def _build_benchmark_system_message() -> str:
 
 def _run_appplan_agent(model: str) -> dict[str, Any]:
     """Call AppPlanAgent live via OpenAI with conceptual_replan context."""
-    print(f"  [2a] Building focused system message (key agents.yaml sections + carry-forward schema)...")
+    print("  [2a] Building focused system message (key agents.yaml sections + carry-forward schema)...")
     system_message = _build_benchmark_system_message()
     print(f"       System message: {len(system_message):,} chars")
 
@@ -485,7 +485,7 @@ def _run_appplan_agent(model: str) -> dict[str, Any]:
     response_text = _call_openai(system_message, user_message, model)
     print(f"       Response: {len(response_text):,} chars")
 
-    print(f"  [2c] Parsing AppBuildPlan JSON...")
+    print("  [2c] Parsing AppBuildPlan JSON...")
     raw = _extract_json(response_text)
     plan = raw.get("AppBuildPlan") or raw
     if not isinstance(plan, dict):
@@ -695,7 +695,7 @@ async def run_benchmark(*, save_fixture: bool = False, model: str = "gpt-5-nano"
     print("Live LLM Conceptual Replan Benchmark: CRM -> Marketplace")
     print("=" * 72)
     print(f"Model: {model}")
-    print(f"Scenario: CRM -> Marketplace pivot")
+    print("Scenario: CRM -> Marketplace pivot")
     print()
 
     # Phase 1: Deterministic routing

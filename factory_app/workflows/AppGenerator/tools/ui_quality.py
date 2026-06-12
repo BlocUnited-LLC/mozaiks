@@ -5,9 +5,10 @@ in workflow context. This tool turns those warnings into deterministic routing
 state so AG2 handoffs can send noisy UI back to AppSchemaAgent before assembly.
 """
 
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any
 
 from autogen.tools.dependency_injection import Field
+
 from factory_app.workflows._shared.generated_ui_contract import (
     audit_custom_route_bundle_integrity,
     audit_generated_react_files,
@@ -17,7 +18,7 @@ from factory_app.workflows._shared.generated_ui_contract import (
 )
 
 
-def _context_get(context_variables: Optional[Any], key: str, default: Any = None) -> Any:
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
     if context_variables is None:
         return default
     if hasattr(context_variables, "get"):
@@ -34,7 +35,7 @@ def _context_get(context_variables: Optional[Any], key: str, default: Any = None
     return default
 
 
-def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None:
+def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None:
         return
     if hasattr(context_variables, "set"):
@@ -51,14 +52,14 @@ def _context_set(context_variables: Optional[Any], key: str, value: Any) -> None
         context_variables[key] = value
 
 
-def _normalize_warnings(value: Any) -> List[str]:
+def _normalize_warnings(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
         stripped = value.strip()
         return [stripped] if stripped else []
     if isinstance(value, list):
-        warnings: List[str] = []
+        warnings: list[str] = []
         for item in value:
             if isinstance(item, str):
                 text = item.strip()
@@ -88,10 +89,10 @@ def review_ui_quality(
         ),
     ] = 2,
     context_variables: Annotated[
-        Optional[Any],
+        Any | None,
         Field(description="AG2-injected workflow context variables."),
     ] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Convert UI audit warnings into handoff-routing state.
 
     Returns:

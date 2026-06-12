@@ -25,7 +25,6 @@ If the version was NOT bumped, the script exits 1.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -52,7 +51,7 @@ def _git(*args: str) -> str:
 
 
 def _load_json(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 

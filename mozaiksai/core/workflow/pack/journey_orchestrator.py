@@ -3,10 +3,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from logs.logging_config import get_core_logger
-
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.persistence import SessionStateStore
@@ -62,10 +61,10 @@ def _is_successful_completion(payload: Any) -> bool:
     return _is_completed_status(payload.get("status"))
 
 
-def _extract_launch_context_from_chat_doc(chat_doc: Any) -> Dict[str, Any]:
+def _extract_launch_context_from_chat_doc(chat_doc: Any) -> dict[str, Any]:
     if not isinstance(chat_doc, dict):
         return {}
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
     for key, value in chat_doc.items():
         if not isinstance(key, str) or not key.strip():
             continue
@@ -79,9 +78,9 @@ class JourneyOrchestrator:
     """Auto-advance orchestrator for global pack journeys."""
 
     def __init__(self) -> None:
-        self._inflight: Dict[str, asyncio.Lock] = {}
+        self._inflight: dict[str, asyncio.Lock] = {}
 
-    async def handle_run_complete(self, payload: Dict[str, Any]) -> None:
+    async def handle_run_complete(self, payload: dict[str, Any]) -> None:
         chat_id = str(payload.get("chat_id") or "").strip()
         if not chat_id:
             return
@@ -95,7 +94,7 @@ class JourneyOrchestrator:
             except Exception as exc:  # pragma: no cover
                 logger.error("[JOURNEY] handle_run_complete failed: %s", exc, exc_info=True)
 
-    async def _handle_run_complete_inner(self, payload: Dict[str, Any], chat_id: str) -> None:
+    async def _handle_run_complete_inner(self, payload: dict[str, Any], chat_id: str) -> None:
         workflow_name = str(payload.get("workflow_name") or payload.get("workflow") or "").strip()
         app_id = str(payload.get("app_id") or payload.get("app") or "").strip()
         user_id = str(payload.get("user_id") or payload.get("user") or "").strip()
@@ -159,7 +158,7 @@ class JourneyOrchestrator:
         except Exception:
             pass
 
-        spawned: List[Tuple[str, str, bool]] = []  # (workflow_name, chat_id, created_new)
+        spawned: list[tuple[str, str, bool]] = []  # (workflow_name, chat_id, created_new)
         session_scope_id = SessionStateStore.session_id_for_scope(app_id, user_id)
         next_group_index = int(advance.next_group_index or 0)
         for wf in advance.next_workflows:
@@ -334,7 +333,7 @@ class JourneyOrchestrator:
                 )
             )
 
-    async def _get_transport_conn(self, chat_id: str) -> Tuple[Optional[Dict[str, Any]], Any]:
+    async def _get_transport_conn(self, chat_id: str) -> tuple[dict[str, Any] | None, Any]:
         try:
             from mozaiksai.core.transport.simple_transport import SimpleTransport
 
@@ -350,7 +349,7 @@ class JourneyOrchestrator:
         self,
         *,
         transport: Any,
-        source_conn: Dict[str, Any],
+        source_conn: dict[str, Any],
         target_chat_id: str,
         workflow_name: str,
         app_id: str,

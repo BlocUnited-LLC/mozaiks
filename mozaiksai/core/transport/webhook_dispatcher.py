@@ -10,8 +10,8 @@
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -31,10 +31,10 @@ class WebhookPayload:
     status: str  # "completed", "failed", "cancelled"
     completed_at: str
     executed_agents: list = field(default_factory=list)
-    final_context: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    final_context: dict[str, Any] | None = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_type": self.event_type,
             "chat_id": self.chat_id,
@@ -82,9 +82,9 @@ class WebhookDispatcher:
         app_id: str,
         user_id: str,
         status: str = "completed",
-        executed_agents: Optional[list] = None,
-        final_context: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
+        executed_agents: list | None = None,
+        final_context: dict[str, Any] | None = None,
+        error: str | None = None,
     ) -> bool:
         """
         Send completion notification to webhook URL.
@@ -174,7 +174,7 @@ class WebhookDispatcher:
 
 
 # Singleton instance
-_dispatcher: Optional[WebhookDispatcher] = None
+_dispatcher: WebhookDispatcher | None = None
 
 
 def get_webhook_dispatcher() -> WebhookDispatcher:
@@ -190,11 +190,11 @@ async def dispatch_completion_webhook(
     workflow_name: str,
     app_id: str,
     user_id: str,
-    webhook_url: Optional[str] = None,
+    webhook_url: str | None = None,
     status: str = "completed",
-    executed_agents: Optional[list] = None,
-    final_context: Optional[Dict[str, Any]] = None,
-    error: Optional[str] = None,
+    executed_agents: list | None = None,
+    final_context: dict[str, Any] | None = None,
+    error: str | None = None,
 ) -> bool:
     """
     Convenience function to dispatch a completion webhook.

@@ -8,24 +8,23 @@ This tool is intentionally best-effort and offline:
 """
 
 
-import json
 from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from mozaiksai.core.workflow.generator_support.agent_endpoints import (
-    resolve_agent_api_url,
-    resolve_agent_websocket_url,
-)
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     collect_generated_app_file_map,
     extract_code_file_map_from_payload,
 )
-from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.workflow.generator_support.agent_endpoints import (
+    resolve_agent_api_url,
+    resolve_agent_websocket_url,
+)
+from mozaiksai.core.workflow.generator_support.workflow_exports import get_latest_workflow_export
 
 
-def _safe_relpath(raw: str) -> Optional[str]:
+def _safe_relpath(raw: str) -> str | None:
     if not isinstance(raw, str):
         return None
     path = raw.replace("\\", "/").strip()
@@ -47,8 +46,8 @@ def _is_truthy(value: Any) -> bool:
     return bool(value)
 
 
-def _extract_code_files(collected: Dict[str, Any]) -> Dict[str, str]:
-    out: Dict[str, str] = {}
+def _extract_code_files(collected: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
     for _agent_name, data in (collected or {}).items():
         if not isinstance(data, dict):
             continue
@@ -58,11 +57,11 @@ def _extract_code_files(collected: Dict[str, Any]) -> Dict[str, str]:
 
 async def _resolve_files(
     *,
-    files: Optional[Dict[str, str]],
-    context_variables: Optional[Dict[str, Any]],
-) -> Tuple[Dict[str, str], Optional[str], Optional[str]]:
+    files: dict[str, str] | None,
+    context_variables: dict[str, Any] | None,
+) -> tuple[dict[str, str], str | None, str | None]:
     if isinstance(files, dict) and files:
-        safe_files: Dict[str, str] = {}
+        safe_files: dict[str, str] = {}
         for raw_path, content in files.items():
             safe = _safe_relpath(str(raw_path))
             if not safe:
@@ -78,7 +77,7 @@ async def _resolve_files(
             app_id = context_variables.get("app_id")
             ctx_files = context_variables.get("generated_files")
             if isinstance(ctx_files, dict) and ctx_files:
-                safe_ctx: Dict[str, str] = {}
+                safe_ctx: dict[str, str] = {}
                 for raw_path, content in ctx_files.items():
                     safe = _safe_relpath(str(raw_path))
                     if not safe:
@@ -103,7 +102,7 @@ async def _resolve_files(
     return _extract_code_files(collected), str(chat_id), str(app_id)
 
 
-def _content_contains(files_map: Dict[str, str], needle: str) -> bool:
+def _content_contains(files_map: dict[str, str], needle: str) -> bool:
     if not needle:
         return False
     for content in files_map.values():
@@ -115,7 +114,7 @@ def _content_contains(files_map: Dict[str, str], needle: str) -> bool:
     return False
 
 
-def _parse_env_value(env_text: str, key: str) -> Optional[str]:
+def _parse_env_value(env_text: str, key: str) -> str | None:
     if not isinstance(env_text, str) or not env_text:
         return None
     target = key.strip()
@@ -132,10 +131,10 @@ def _parse_env_value(env_text: str, key: str) -> Optional[str]:
 
 
 async def run_integration_tests(
-    files: Dict[str, str],
-    agent_context: Optional[Dict[str, Any]] = None,
-    context_variables: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    files: dict[str, str],
+    agent_context: dict[str, Any] | None = None,
+    context_variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     workflow_name = "AppGenerator"
     chat_id = None
     app_id = None
@@ -150,9 +149,9 @@ async def run_integration_tests(
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
     resolved_files, chat_id, app_id = await _resolve_files(files=files, context_variables=context_variables)
 
-    checks: List[Dict[str, Any]] = []
-    warnings: List[str] = []
-    failed_tests: List[Dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    failed_tests: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     # Test: code references agent env vars (required for runtime wiring)
@@ -276,7 +275,7 @@ async def run_integration_tests(
     passed_tests = sum(1 for c in checks if c.get("passed") is True)
     blocking_passed = all(c.get("passed") is True for c in checks if c.get("details", {}).get("blocking") is True)
 
-    results: Dict[str, Any] = {
+    results: dict[str, Any] = {
         "contract_version": "1.0",
         "offline": True,
         "passed": bool(blocking_passed),

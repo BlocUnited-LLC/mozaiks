@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from mozaiksai.core.usage.ledger import summarize_usage_events
 
@@ -16,7 +16,7 @@ def test_summarize_usage_events_groups_by_workflow_and_run():
             "completion_tokens": 5,
             "total_tokens": 15,
             "estimated_cost_usd": 0.03,
-            "event_ts": datetime(2026, 6, 1, tzinfo=timezone.utc),
+            "event_ts": datetime(2026, 6, 1, tzinfo=UTC),
         },
         {
             "app_id": "app-1",
@@ -27,7 +27,7 @@ def test_summarize_usage_events_groups_by_workflow_and_run():
             "completion_tokens": 3,
             "total_tokens": 10,
             "estimated_cost_usd": 0.02,
-            "event_ts": datetime(2026, 6, 1, tzinfo=timezone.utc),
+            "event_ts": datetime(2026, 6, 1, tzinfo=UTC),
         },
         {
             "app_id": "app-1",
@@ -38,7 +38,7 @@ def test_summarize_usage_events_groups_by_workflow_and_run():
             "completion_tokens": 10,
             "total_tokens": 30,
             "estimated_cost_usd": 0.06,
-            "event_ts": datetime(2026, 6, 2, tzinfo=timezone.utc),
+            "event_ts": datetime(2026, 6, 2, tzinfo=UTC),
         },
     ]
 

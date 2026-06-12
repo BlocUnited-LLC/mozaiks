@@ -88,12 +88,12 @@ def _patch_runtime_websocket_harness(
     workflow_startup_mode: str,
     workflow_names: list[str] | None = None,
 ):
-    from mozaiksai.hosts import runtime as runtime_app
-    from mozaiksai.core.workflow.pack import graph as workflow_graph_module
     from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
     from mozaiksai.core.session import router as session_router_module
     from mozaiksai.core.transport import session_registry as session_registry_module
+    from mozaiksai.core.workflow.pack import graph as workflow_graph_module
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
+    from mozaiksai.hosts import runtime as runtime_app
 
     collection = _MemoryCollection(chat_docs)
     loaded_workflow_names = list(workflow_names or ["AgentGenerator"])

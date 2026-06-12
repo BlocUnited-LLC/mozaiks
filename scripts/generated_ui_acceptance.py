@@ -12,8 +12,9 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 
 def _string(value: Any) -> str:
@@ -24,11 +25,11 @@ def _finding(
     *,
     message: str,
     severity: str = "error",
-    route: Optional[str] = None,
+    route: str | None = None,
     category: str = "render",
     source: str = "playwright",
-    suggested_fix: Optional[str] = None,
-) -> Dict[str, str]:
+    suggested_fix: str | None = None,
+) -> dict[str, str]:
     out = {
         "severity": severity,
         "route": route or "",
@@ -41,7 +42,7 @@ def _finding(
     return {key: value for key, value in out.items() if value}
 
 
-def normalize_ui_acceptance_findings(value: Any) -> List[Dict[str, str]]:
+def normalize_ui_acceptance_findings(value: Any) -> list[dict[str, str]]:
     """Normalize arbitrary finding payloads into structured dictionaries."""
 
     if value is None:
@@ -64,17 +65,17 @@ def normalize_ui_acceptance_findings(value: Any) -> List[Dict[str, str]]:
             )
         ]
     if isinstance(value, Iterable):
-        findings: List[Dict[str, str]] = []
+        findings: list[dict[str, str]] = []
         for item in value:
             findings.extend(normalize_ui_acceptance_findings(item))
         return findings
     return [_finding(message=str(value))]
 
 
-def parse_playwright_json_report(report: Dict[str, Any]) -> List[Dict[str, str]]:
+def parse_playwright_json_report(report: dict[str, Any]) -> list[dict[str, str]]:
     """Convert Playwright JSON reporter output into UI acceptance findings."""
 
-    findings: List[Dict[str, str]] = []
+    findings: list[dict[str, str]] = []
 
     for error in report.get("errors") or []:
         if not isinstance(error, dict):
@@ -91,7 +92,7 @@ def parse_playwright_json_report(report: Dict[str, Any]) -> List[Dict[str, str]]
             )
         )
 
-    def walk_suite(suite: Dict[str, Any]) -> None:
+    def walk_suite(suite: dict[str, Any]) -> None:
         for child in suite.get("suites") or []:
             if isinstance(child, dict):
                 walk_suite(child)
@@ -151,7 +152,7 @@ def review_ui_acceptance_findings(
     require_acceptance_run: bool = False,
     prior_revision_count: int = 0,
     max_revision_attempts: int = 1,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return a bounded production-readiness status for browser findings."""
 
     normalized = normalize_ui_acceptance_findings(findings)
@@ -190,8 +191,8 @@ def review_ui_acceptance_findings(
     }
 
 
-def _format_findings(findings: List[Dict[str, str]]) -> str:
-    lines: List[str] = []
+def _format_findings(findings: list[dict[str, str]]) -> str:
+    lines: list[str] = []
     for finding in findings:
         route = f" route={finding['route']}" if finding.get("route") else ""
         suggestion = finding.get("suggested_fix") or "Revise the generated UI."
@@ -202,7 +203,7 @@ def _format_findings(findings: List[Dict[str, str]]) -> str:
     return "\n- ".join(lines)
 
 
-def _format_revision_request(findings: List[Dict[str, str]]) -> str:
+def _format_revision_request(findings: list[dict[str, str]]) -> str:
     return (
         "Revise the generated UI based on browser acceptance findings. "
         "Do not add new decorative sections; fix the concrete rendered issue:\n- "
@@ -210,7 +211,7 @@ def _format_revision_request(findings: List[Dict[str, str]]) -> str:
     )
 
 
-def _extract_json_report(stdout: str) -> Dict[str, Any]:
+def _extract_json_report(stdout: str) -> dict[str, Any]:
     text = stdout.strip()
     if not text:
         return {}
@@ -241,7 +242,7 @@ def run_playwright_acceptance(
     app_root: Path,
     repo_root: Path,
     timeout_seconds: int = 180,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     web_shell = repo_root / "web_shell"
     env = os.environ.copy()
     env["MOZAIKS_GENERATED_UI_APP_ROOT"] = str(app_root.resolve())
@@ -296,7 +297,7 @@ def _repo_root() -> Path:
     return here.parents[1]
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run generated UI browser acceptance.")
     parser.add_argument("--app-root", required=True, help="Generated app root containing app.json and ui/pages/*.yaml.")
     parser.add_argument("--output", default="", help="Optional JSON output path for structured findings.")

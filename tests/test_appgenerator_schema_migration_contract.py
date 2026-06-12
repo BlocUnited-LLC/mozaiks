@@ -8,11 +8,8 @@ runtime migration loader without raising DatabaseMigrationError.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Dict
-
-import pytest
+from typing import Any
 
 from factory_app.workflows.AppGenerator.tools.schema_migration import (
     diff_schemas,
@@ -20,22 +17,20 @@ from factory_app.workflows.AppGenerator.tools.schema_migration import (
     inject_migration_into_bundle,
 )
 from mozaiksai.core.runtime.persistence.migrations import (
-    DatabaseMigrationError,
     _validate_migration,
     load_data_migrations,
 )
 
-
 # ── fixtures ───────────────────────────────────────────────────────────────────
 
 
-def _schema(collections: list[Dict[str, Any]]) -> Dict[str, Any]:
+def _schema(collections: list[dict[str, Any]]) -> dict[str, Any]:
     """Minimal schema wrapper consumed by diff_schemas."""
     return {"collections": collections}
 
 
-def _col(name: str, *, module_id: str | None = None, entity_name: str | None = None) -> Dict[str, Any]:
-    c: Dict[str, Any] = {"name": name, "columns": []}
+def _col(name: str, *, module_id: str | None = None, entity_name: str | None = None) -> dict[str, Any]:
+    c: dict[str, Any] = {"name": name, "columns": []}
     if module_id:
         c["module_id"] = module_id
     if entity_name:
@@ -138,7 +133,7 @@ def test_generated_migration_survives_roundtrip_through_runtime_loader(tmp_path:
     diff = diff_schemas(None, schema)
     migration = generate_migration(diff, app_id="app_1", change_class="feature", new_schema=schema)
 
-    files_map: Dict[str, str] = {}
+    files_map: dict[str, str] = {}
     inject_migration_into_bundle(files_map, migration)
 
     # Write the file to disk as the runtime loader expects.

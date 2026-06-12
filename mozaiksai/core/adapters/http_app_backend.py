@@ -5,16 +5,15 @@
 # ==============================================================================
 from __future__ import annotations
 
-import os
 import logging
-from typing import Any, Dict, Optional
+import os
+from typing import Any
 
 import httpx
 
 from mozaiksai.core.ports.app_backend import (
-    AppBackendPort,
-    BackendResponse,
     BackendHealth,
+    BackendResponse,
 )
 
 logger = logging.getLogger("mozaiksai.adapters.http_app_backend")
@@ -32,8 +31,8 @@ class HttpAppBackendAdapter:
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
-        internal_api_key: Optional[str] = None,
+        base_url: str | None = None,
+        internal_api_key: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         self._base_url = (
@@ -50,10 +49,10 @@ class HttpAppBackendAdapter:
     def _build_headers(
         self,
         *,
-        user_token: Optional[str] = None,
-        extra: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, str]:
-        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        user_token: str | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._internal_key:
             headers["X-Internal-API-Key"] = self._internal_key
         if user_token:
@@ -71,9 +70,9 @@ class HttpAppBackendAdapter:
         method: str,
         path: str,
         *,
-        json_body: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-        user_token: Optional[str] = None,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        user_token: str | None = None,
     ) -> BackendResponse:
         url = f"{self._base_url}{path}"
         merged_headers = self._build_headers(user_token=user_token, extra=headers)
@@ -104,7 +103,7 @@ class HttpAppBackendAdapter:
     # AppBackendPort.emit
     # ------------------------------------------------------------------
 
-    async def emit(self, event_type: str, data: Dict[str, Any]) -> bool:
+    async def emit(self, event_type: str, data: dict[str, Any]) -> bool:
         try:
             from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
             dispatcher = get_event_dispatcher()
@@ -138,7 +137,7 @@ class HttpAppBackendAdapter:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_adapter: Optional[HttpAppBackendAdapter] = None
+_adapter: HttpAppBackendAdapter | None = None
 
 
 def get_app_backend() -> HttpAppBackendAdapter:

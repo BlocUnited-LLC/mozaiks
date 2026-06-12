@@ -4,8 +4,8 @@ Base auth adapter protocol and types.
 All auth adapters must implement the AuthAdapter protocol.
 """
 
-from typing import Optional, List, Dict, Any, Protocol, runtime_checkable
 from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -18,25 +18,25 @@ class UserClaims:
     """
 
     user_id: str
-    email: Optional[str] = None
-    name: Optional[str] = None
-    roles: List[str] = field(default_factory=list)
-    scopes: List[str] = field(default_factory=list)
-    raw_claims: Dict[str, Any] = field(default_factory=dict)
+    email: str | None = None
+    name: str | None = None
+    roles: list[str] = field(default_factory=list)
+    scopes: list[str] = field(default_factory=list)
+    raw_claims: dict[str, Any] = field(default_factory=dict)
 
     # Provider metadata
     provider: str = "unknown"
 
     # Optional app/session binding (for multi-tenant scenarios)
-    app_id: Optional[str] = None
-    chat_id: Optional[str] = None
-    tenant_id: Optional[str] = None
+    app_id: str | None = None
+    chat_id: str | None = None
+    tenant_id: str | None = None
 
     def has_role(self, role: str) -> bool:
         """Check if user has a specific role."""
         return role in self.roles
 
-    def has_any_role(self, roles: List[str]) -> bool:
+    def has_any_role(self, roles: list[str]) -> bool:
         """Check if user has any of the specified roles."""
         return any(r in self.roles for r in roles)
 

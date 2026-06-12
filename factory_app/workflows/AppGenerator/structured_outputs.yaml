@@ -636,8 +636,9 @@ models:
           start at ServiceAgent and must not own schemas.py in task-batch execution.
           `service_foundation` emits app-level support code at app-bundle-relative
           services/integrations/ clients, services/adapters/ provider boundaries,
-          services/security/ helpers, and services/routes/ route files. These
-          assemble under physical app/services/ in generated workspaces.
+          services/routes/ route files, and security/secrets.yaml when a names-only
+          secret contract is required. Service files assemble under physical
+          app/services/ in generated workspaces.
           These files are not runtime modules and must not own business actions,
           events, lifecycle state, or persistence authority.
           `control_plane_pack` is required for surface_kind=control_plane tasks and
@@ -646,7 +647,7 @@ models:
           module_contract for control_plane surfaces.
           surface_kind=external_integration may use `api_surface` for thin
           clients, `service_foundation` for provider adapters under
-          services/adapters/, services/security/, or services/routes/, or
+          services/adapters/, explicit services/routes/, or security/secrets.yaml, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
       capability_pack_id:
@@ -1564,7 +1565,7 @@ models:
     fields:
       path:
         type: str
-        description: Concrete app-bundle-relative service foundation file path such as services/config.py, config/secrets.yaml, services/integrations/provider_client.py, services/security/secrets.py, services/routes/webhooks.py, or services/adapters/secrets/vault_provider.py. Physical generated workspaces place services/* under app/services/*.
+        description: Concrete app-bundle-relative service foundation file path such as services/config.py, security/secrets.yaml, services/integrations/provider_client.py, services/routes/webhooks.py, or services/adapters/secrets/vault_provider.py. Physical generated workspaces place services/* under app/services/*.
       kind:
         type: literal
         values:
@@ -5119,7 +5120,7 @@ models:
           Optional data contract persisted as data/contract.json. Leave null only
           for apps with no durable app-owned persistence. Use it for module
           collections, cross-module aggregate ownership, or an explicit existing
-          database contract, and keep helper naming generic under services/data/.
+          database contract. Do not emit helper code under services/data/.
           Do not emit ad hoc shared folders or non-canonical app/backend helper names.
 
   DataContractAlias:

@@ -3,42 +3,41 @@
 # DESCRIPTION: Lean transport system for real-time UI communication
 # ==============================================================================
 import asyncio
-import re
 import json
-import uuid
-import traceback
 import os
-from typing import Dict, Any, Optional, Union, Tuple, List
-from fastapi import WebSocket
-from pydantic import BaseModel
-from pymongo import ReturnDocument
-from starlette.websockets import WebSocketDisconnect, WebSocketState
-from datetime import datetime, timezone
-from websockets.exceptions import ConnectionClosed
+import re
+import traceback
+import uuid
+from datetime import UTC, datetime
+from typing import Any
 
 # AG2 imports for event type checking
 from autogen.events import BaseEvent
-
-# Import workflow configuration for agent visibility filtering
-from mozaiksai.core.workflow.workflow_manager import workflow_manager
-from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
-from mozaiksai.core.events.runtime_events import RUNTIME_PROCESS_COMPLETED
+from fastapi import WebSocket
+from pydantic import BaseModel
+from starlette.websockets import WebSocketDisconnect, WebSocketState
+from websockets.exceptions import ConnectionClosed
 
 # Enhanced logging setup
 from logs.logging_config import get_core_logger
-
-# Session manager for multi-workflow navigation
-from mozaiksai.core.workflow import session_manager
-from mozaiksai.core.transport.session_registry import session_registry
-
-# Message handlers (extracted for maintainability)
-from mozaiksai.core.transport.handlers import MESSAGE_HANDLERS, ERROR_CODES
+from mozaiksai.core.events.runtime_events import RUNTIME_PROCESS_COMPLETED
 
 # Extracted mixins for separation of concerns
 from mozaiksai.core.transport.general_mode import GeneralModeMixin
-from mozaiksai.core.transport.ws_protocol import WebSocketProtocolMixin
-from mozaiksai.core.transport.workflow_bridge import WorkflowBridgeMixin
+
+# Message handlers (extracted for maintainability)
+from mozaiksai.core.transport.handlers import ERROR_CODES, MESSAGE_HANDLERS
+from mozaiksai.core.transport.session_registry import session_registry
 from mozaiksai.core.transport.ui_tools import UIToolsMixin
+from mozaiksai.core.transport.workflow_bridge import WorkflowBridgeMixin
+from mozaiksai.core.transport.ws_protocol import WebSocketProtocolMixin
+
+# Session manager for multi-workflow navigation
+from mozaiksai.core.workflow import session_manager
+from mozaiksai.core.workflow.runtime_signals import SYSTEM_RESUME_SIGNAL
+
+# Import workflow configuration for agent visibility filtering
+from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 # Get our enhanced loggers
 logger = get_core_logger("simple_transport")
@@ -61,10 +60,10 @@ async def handle_user_input_api(
 # Module-level helpers for transport operations
 def _utc_timestamp() -> str:
     """Return current UTC timestamp in ISO format for WebSocket messages."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def _extract_clean_content(message: Union[str, Dict[str, Any], Any]) -> str:
+def _extract_clean_content(message: str | dict[str, Any] | Any) -> str:
     """Extract clean content from AG2 UUID-formatted messages or other formats.
 
     This is the same logic previously implemented as an instance method; moving it
@@ -131,40 +130,40 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             return
 
         # Core structures
-        self.connections: Dict[str, Dict[str, Any]] = {}
+        self.connections: dict[str, dict[str, Any]] = {}
 
         # AG2-aligned input request callback registry
-        self._input_request_registries: Dict[str, Dict[str, Any]] = {}
+        self._input_request_registries: dict[str, dict[str, Any]] = {}
         self._recent_input_submit_chats: set[str] = set()
 
     # T-series: WebSocket protocol support structures
-        self._sequence_counters: Dict[str, int] = {}          # T3
+        self._sequence_counters: dict[str, int] = {}          # T3
 
         # H1-H2: Hardening features
-        self._message_queues: Dict[str, List[Dict[str, Any]]] = {}  # H1
-        self._heartbeat_tasks: Dict[str, asyncio.Task] = {}         # H2
+        self._message_queues: dict[str, list[dict[str, Any]]] = {}  # H1
+        self._heartbeat_tasks: dict[str, asyncio.Task] = {}         # H2
         self._max_queue_size = 100
         self._heartbeat_interval = 120
 
         # H4: Pre-connection buffering (delivery reliability)
-        self._pre_connection_buffers: Dict[str, List[Dict[str, Any]]] = {}
+        self._pre_connection_buffers: dict[str, list[dict[str, Any]]] = {}
         self._max_pre_connection_buffer = 200
-        self._scheduled_flush_tasks: Dict[str, asyncio.Task] = {}
-        self._pre_connection_buffer_overflow_counts: Dict[str, int] = {}
+        self._scheduled_flush_tasks: dict[str, asyncio.Task] = {}
+        self._pre_connection_buffer_overflow_counts: dict[str, int] = {}
 
         # UI tool response correlation
-        self.pending_tool_call_responses: Dict[str, asyncio.Future] = {}
-        self._buffered_tool_call_responses: Dict[str, Dict[str, Any]] = {}
-        self._ui_tool_metadata: Dict[str, Dict[str, Any]] = {}
-        self._resolved_tool_call_ids: Dict[str, None] = {}
+        self.pending_tool_call_responses: dict[str, asyncio.Future] = {}
+        self._buffered_tool_call_responses: dict[str, dict[str, Any]] = {}
+        self._ui_tool_metadata: dict[str, dict[str, Any]] = {}
+        self._resolved_tool_call_ids: dict[str, None] = {}
         self._owner_loop = None
 
         # Runtime context trigger managers (per chat)
         # Used to apply declarative ui_response triggers without bespoke agents.
-        self._derived_context_managers: Dict[str, Any] = {}
+        self._derived_context_managers: dict[str, Any] = {}
 
         # Background workflow execution for workflow sequence runs.
-        self._background_tasks: Dict[str, asyncio.Task] = {}
+        self._background_tasks: dict[str, asyncio.Task] = {}
         try:
             max_parallel = int(os.environ.get("MOZAIKS_MAX_PARALLEL_WORKFLOWS", "4"))
         except Exception:
@@ -184,7 +183,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._initialized = True
         logger.info("🚀 SimpleTransport singleton initialized")
         
-    async def _handle_usage_delta_event(self, payload: Dict[str, Any]) -> None:
+    async def _handle_usage_delta_event(self, payload: dict[str, Any]) -> None:
         chat_id = payload.get("chat_id")
         if not chat_id:
             return
@@ -193,7 +192,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         except Exception:
             logger.debug("Failed to forward usage_delta to UI", exc_info=True)
 
-    async def _handle_usage_summary_event(self, payload: Dict[str, Any]) -> None:
+    async def _handle_usage_summary_event(self, payload: dict[str, Any]) -> None:
         chat_id = payload.get("chat_id")
         if not chat_id:
             return
@@ -206,7 +205,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # CONNECTION HELPERS
     # ==================================================================================
 
-    def _get_conn_meta(self, chat_id: str) -> Dict[str, Any]:
+    def _get_conn_meta(self, chat_id: str) -> dict[str, Any]:
         """Get connection metadata for a chat_id with safe defaults."""
         conn = self.connections.get(chat_id, {})
         if conn and not conn.get("ws_id"):
@@ -325,7 +324,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # ------------------------------------------------------------------
     # Orchestration registry integration
     # ------------------------------------------------------------------
-    def register_orchestration_input_registry(self, chat_id: str, registry: Dict[str, Any]) -> None:
+    def register_orchestration_input_registry(self, chat_id: str, registry: dict[str, Any]) -> None:
         self._input_request_registries[chat_id] = registry
 
     def register_input_request(self, chat_id: str, request_id: str, respond_cb: Any) -> str:
@@ -356,9 +355,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         """
         return SYSTEM_RESUME_SIGNAL
 
-    def get_background_run_summary(self) -> Dict[str, Any]:
+    def get_background_run_summary(self) -> dict[str, Any]:
         """Return the current in-memory background workflow task snapshot."""
-        runs: List[Dict[str, Any]] = []
+        runs: list[dict[str, Any]] = []
         for chat_id, task in sorted(self._background_tasks.items()):
             conn = self.connections.get(chat_id) or {}
             task_name = task.get_name() if hasattr(task, "get_name") else None
@@ -374,7 +373,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         return {"active_count": len(runs), "runs": runs}
     
     
-    def should_show_to_user(self, agent_name: Optional[str], chat_id: Optional[str] = None) -> bool:
+    def should_show_to_user(self, agent_name: str | None, chat_id: str | None = None) -> bool:
         """Check if a message should be shown to the user interface"""
         if not agent_name:
             return True  # Show system messages
@@ -431,7 +430,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         
         return True
 
-    def _sanitize_trace_content(self, content: str, *, limit: int = 800) -> Tuple[str, bool, bool]:
+    def _sanitize_trace_content(self, content: str, *, limit: int = 800) -> tuple[str, bool, bool]:
         """Redact likely secrets and truncate trace content before sending to UI."""
         if not isinstance(content, str):
             return str(content), False, False
@@ -439,7 +438,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         redacted = False
         value = content
 
-        rules: List[Tuple[re.Pattern, str]] = [
+        rules: list[tuple[re.Pattern, str]] = [
             (re.compile(r"\bBearer\s+[A-Za-z0-9\-_\.=]+\b"), "Bearer [REDACTED]"),
             (re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"), "sk-[REDACTED]"),
             (re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"), "ghp_[REDACTED]"),
@@ -465,7 +464,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # ==================================================================================
     # UNIFIED USER MESSAGE INGESTION
     # ==================================================================================
-    async def process_incoming_user_message(self, *, chat_id: str, user_id: Optional[str], content: str, source: str = 'ws') -> None:
+    async def process_incoming_user_message(self, *, chat_id: str, user_id: str | None, content: str, source: str = 'ws') -> None:
         """Forward a free-form user message into the active workflow orchestration.
 
         This is used by both WebSocket (user.input.submit without request_id) and
@@ -487,14 +486,14 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         except Exception as emit_err:
             logger.error(f"Failed to emit user message event for {chat_id}: {emit_err}")
 
-    async def process_component_action(self, *, chat_id: str, app_id: str, component_id: str, action_type: str, action_data: dict) -> Dict[str, Any]:
+    async def process_component_action(self, *, chat_id: str, app_id: str, component_id: str, action_type: str, action_data: dict) -> dict[str, Any]:
         """Apply a component action to context variables and emit acknowledgement.
 
         Returns a structured result indicating applied changes.
         """
         conn = self.connections.get(chat_id) or {}
         context = conn.get('context')
-        applied: Dict[str, Any] = {}
+        applied: dict[str, Any] = {}
         try:
             # Basic pattern: if action_data has 'set': {k: v} apply to context
             sets = action_data.get('set') if isinstance(action_data, dict) else None
@@ -522,7 +521,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # AG2 EVENT SENDING (Production)
     # ==================================================================================
     
-    async def send_event_to_ui(self, event: Any, chat_id: Optional[str] = None) -> None:
+    async def send_event_to_ui(self, event: Any, chat_id: str | None = None) -> None:
         """
         Serializes and sends a raw AG2 event to the UI.
         This is the primary method for forwarding AG2 native events.
@@ -553,7 +552,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     )
                     return
 
-            from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher  # local import to avoid cycle
+            from mozaiksai.core.events.unified_event_dispatcher import (
+                get_event_dispatcher,  # local import to avoid cycle
+            )
             dispatcher = get_event_dispatcher()
             workflow_name = None
             if chat_id and chat_id in self.connections:
@@ -725,7 +726,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     registry = getattr(self, "_ui_run_complete_sent", None)
                     if not isinstance(registry, dict):
                         registry = {}
-                        setattr(self, "_ui_run_complete_sent", registry)
+                        self._ui_run_complete_sent = registry
                     registry[chat_id] = True
                     conn = self.connections.get(chat_id)
                     if isinstance(conn, dict):
@@ -759,7 +760,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         except Exception as e:
             logger.error(f"❌ Failed to serialize or send UI event: {e}\n{traceback.format_exc()}")
 
-    def _extract_clean_content(self, message: Union[str, Dict[str, Any], Any]) -> str:
+    def _extract_clean_content(self, message: str | dict[str, Any] | Any) -> str:
         """Instance wrapper around the module-level cleaner."""
         return _extract_clean_content(message)
 
@@ -798,7 +799,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if seq < len(chunks) - 1:  # No delay after the last chunk
                 await asyncio.sleep(0.015)  # 15ms between chunks
 
-    def _chunk_text_for_stream(self, content: str) -> List[str]:
+    def _chunk_text_for_stream(self, content: str) -> list[str]:
         """Return adaptive websocket chunks for a visible assistant message.
 
         The chunker stays workflow-agnostic: it looks only at text length and
@@ -823,7 +824,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             target_chars = 52
             hard_max = 88
 
-        chunks: List[str] = []
+        chunks: list[str] = []
         current = ""
         punctuation_endings = (".", "!", "?", ";", ":", "\n")
 
@@ -848,7 +849,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         return chunks
 
-    async def _broadcast_to_websockets(self, event_data: Dict[str, Any], target_chat_id: Optional[str] = None) -> None:
+    async def _broadcast_to_websockets(self, event_data: dict[str, Any], target_chat_id: str | None = None) -> None:
         """Broadcast event data to relevant WebSocket connections."""
         active_connections = list(self.connections.items())
         
@@ -924,7 +925,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             object_id = "unknown"
         return f"<unserializable {type_name} {object_id}>"
 
-    def _serialize_ag2_events(self, obj: Any, _seen: Optional[set[int]] = None, _depth: int = 0) -> Any:
+    def _serialize_ag2_events(self, obj: Any, _seen: set[int] | None = None, _depth: int = 0) -> Any:
         """Convert AG2 event objects to JSON-serializable format."""
         if _seen is None:
             _seen = set()
@@ -1003,7 +1004,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 s = getattr(o, "sender", None)
                 try:
                     if s is not None and hasattr(s, "name"):
-                        return getattr(s, "name")
+                        return s.name
                 except Exception:
                     pass
                 return self._stringify_unknown(s)
@@ -1012,7 +1013,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 r = getattr(o, "recipient", None)
                 try:
                     if r is not None and hasattr(r, "name"):
-                        return getattr(r, "name")
+                        return r.name
                 except Exception:
                     pass
                 return self._stringify_unknown(r)
@@ -1086,7 +1087,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             # Final safety fallback
             return self._stringify_unknown(obj)
 
-    async def _handle_artifact_action(self, event: Dict[str, Any], chat_id: str, websocket) -> None:
+    async def _handle_artifact_action(self, event: dict[str, Any], chat_id: str, websocket) -> None:
         """
         Handle artifact action events from frontend (launch_workflow, update_state, etc.).
         
@@ -1112,7 +1113,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if action == "launch_workflow":
             target_workflow = payload.get("workflow_name")
             if not target_workflow:
-                logger.warning(f"⚠️ Missing workflow_name in launch_workflow action")
+                logger.warning("⚠️ Missing workflow_name in launch_workflow action")
                 return
             
             logger.info(f"🚀 Launching workflow {target_workflow} from chat {chat_id}")
@@ -1140,7 +1141,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         "blocked_workflow_name": route_decision.unmet_dependency.blocked_workflow_id,
                     },
                     "chat_id": chat_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(UTC).isoformat()
                 })
             
             # Create new session and artifact (old session stays IN_PROGRESS)
@@ -1169,7 +1170,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     "app_id": app_id
                 },
                 "correlation_id": event.get("correlation_id"),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             })
             return
         
@@ -1177,7 +1178,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if action == "update_state" and artifact_id:
             state_updates = payload.get("state_updates", {})
             if not state_updates:
-                logger.warning(f"⚠️ Empty state_updates in update_state action")
+                logger.warning("⚠️ Empty state_updates in update_state action")
                 return
             
             await session_manager.update_artifact_state(
@@ -1194,7 +1195,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     "state_delta": state_updates
                 },
                 "chat_id": chat_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             })
             return
         
@@ -1208,7 +1209,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 "status": "received"
             },
             "chat_id": chat_id,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         })
 
     async def _handle_resume_request(self, chat_id: str, last_client_index: int, websocket) -> None:
@@ -1324,7 +1325,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self,
         error_message: str,
         error_code: str = "GENERAL_ERROR",
-        chat_id: Optional[str] = None
+        chat_id: str | None = None
     ) -> None:
         """Send error message to UI via WebSocket"""
         event_data = {
@@ -1334,7 +1335,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 "error_code": error_code,
                 "chat_id": chat_id
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
         
         await self._broadcast_to_websockets(event_data, chat_id)
@@ -1357,8 +1358,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         chat_id: str,
         user_id: str,
         workflow_name: str,
-        app_id: Optional[str] = None,
-        ws_id: Optional[int] = None
+        app_id: str | None = None,
+        ws_id: int | None = None
     ) -> None:
         """Handle WebSocket connection for real-time communication with multi-workflow session support"""
         if self._owner_loop is None:
@@ -1487,17 +1488,17 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
     async def _resolve_chat_context(
         self,
-        chat_id: Optional[str],
+        chat_id: str | None,
         *,
         pm,
-        payload_workflow: Optional[str] = None,
-    ) -> Tuple[Optional[str], Optional[str]]:
+        payload_workflow: str | None = None,
+    ) -> tuple[str | None, str | None]:
         """Resolve app/workflow for a chat regardless of live connection."""
         if not chat_id:
             return None, payload_workflow
 
-        app_id: Optional[str] = None
-        workflow_name: Optional[str] = payload_workflow
+        app_id: str | None = None
+        workflow_name: str | None = payload_workflow
 
         conn = self.connections.get(chat_id)
         if conn:

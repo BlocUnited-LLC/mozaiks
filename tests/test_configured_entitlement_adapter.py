@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 import pytest
@@ -50,6 +51,18 @@ def _config() -> SubscriptionsConfig:
             ],
         }
     )
+
+
+def test_platform_loader_uses_configured_entitlement_adapter_only() -> None:
+    from mozaiksai.hosts import platform
+
+    source = inspect.getsource(platform._load_entitlement_adapter)
+    assert "app.services.adapters.entitlements" not in source
+    assert "grant_adapter" not in source
+
+    adapter = platform._load_entitlement_adapter(config=_config())
+
+    assert isinstance(adapter, ConfiguredEntitlementAdapter)
 
 
 @pytest.mark.asyncio

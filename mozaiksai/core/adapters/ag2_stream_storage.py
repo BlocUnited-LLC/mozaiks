@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from importlib import import_module
-from typing import Any, Iterable, Optional
+from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from autogen.beta.events import UnknownEvent
@@ -13,7 +14,7 @@ from pymongo import ReturnDocument
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
-from mozaiksai.core.data.persistence.namespaces import RuntimeCollections, SYSTEM_DATABASE
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 
 logger = get_workflow_logger("ag2_stream_storage")
@@ -41,8 +42,8 @@ class MongoAG2StreamStorage(Storage):
         self,
         *,
         app_id: str,
-        events_collection: Optional[Any] = None,
-        heads_collection: Optional[Any] = None,
+        events_collection: Any | None = None,
+        heads_collection: Any | None = None,
     ) -> None:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
@@ -50,7 +51,7 @@ class MongoAG2StreamStorage(Storage):
         self._app_id = resolved_app_id
         self._events_collection = events_collection
         self._heads_collection = heads_collection
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._client_lock = asyncio.Lock()
         self._indexes_ready = False
 
