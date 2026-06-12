@@ -1,0 +1,102 @@
+# ExistingAppDiscovery Handoff Rules
+#
+# Pipeline:
+#   Host -> Mapper -> Planner -> (ecosystem/gradual_modernization) ModuleDecomposer -> Assembler -> user
+#                         -> (embed/bridge) Assembler -> user
+
+transition_rules:
+# ---------------------------------------------------------------------------
+# DiscoveryHostAgent
+# ---------------------------------------------------------------------------
+- source_agent: DiscoveryHostAgent
+  target_agent: CapabilityMapperAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: identity_complete
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: DiscoveryHostAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+# ---------------------------------------------------------------------------
+# CapabilityMapperAgent
+# ---------------------------------------------------------------------------
+- source_agent: CapabilityMapperAgent
+  target_agent: IntegrationPlannerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: capabilities_complete
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: CapabilityMapperAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+# ---------------------------------------------------------------------------
+# IntegrationPlannerAgent
+# ---------------------------------------------------------------------------
+- source_agent: IntegrationPlannerAgent
+  target_agent: ModuleDecomposerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: adoption_level
+  condition_value: ecosystem
+  transition_target: AgentTarget
+
+- source_agent: IntegrationPlannerAgent
+  target_agent: ModuleDecomposerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: adoption_level
+  condition_value: gradual_modernization
+  transition_target: AgentTarget
+
+- source_agent: IntegrationPlannerAgent
+  target_agent: DiscoveryArtifactAssemblerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: adoption_level
+  condition_value: embed
+  transition_target: AgentTarget
+
+- source_agent: IntegrationPlannerAgent
+  target_agent: DiscoveryArtifactAssemblerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: adoption_level
+  condition_value: bridge
+  transition_target: AgentTarget
+
+- source_agent: IntegrationPlannerAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+# ---------------------------------------------------------------------------
+# ModuleDecomposerAgent
+# ---------------------------------------------------------------------------
+- source_agent: ModuleDecomposerAgent
+  target_agent: DiscoveryArtifactAssemblerAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: decomposition_complete
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: ModuleDecomposerAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+# ---------------------------------------------------------------------------
+# DiscoveryArtifactAssemblerAgent
+# ---------------------------------------------------------------------------
+- source_agent: DiscoveryArtifactAssemblerAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget

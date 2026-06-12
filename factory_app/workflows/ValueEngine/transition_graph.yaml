@@ -1,0 +1,41 @@
+# ValueEngine handoffs.
+
+transition_rules:
+- source_agent: user
+  target_agent: ValueInterviewAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: false
+  transition_target: AgentTarget
+
+- source_agent: ValueInterviewAgent
+  target_agent: ResearchAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: interview_complete
+  condition_value: true
+  transition_target: AgentTarget
+
+- source_agent: ValueInterviewAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+- source_agent: ResearchAgent
+  target_agent: GapAnalysisAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+
+- source_agent: GapAnalysisAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+- source_agent: user
+  target_agent: GapAnalysisAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: concept_presented
+  condition_value: true
+  transition_target: AgentTarget

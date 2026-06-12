@@ -1,0 +1,141 @@
+registry:
+  TaskPlannerAgent: RuntimeTaskBatchPlanOutput
+  ModuleTaskWorkerAgent: RuntimeTaskBatchWorkerOutput
+  PageTaskWorkerAgent: RuntimeTaskBatchWorkerOutput
+  IntegrationTaskWorkerAgent: RuntimeTaskBatchWorkerOutput
+  SynthesisAgent: RuntimeTaskBatchSmokeResult
+
+models:
+  DecomposedTask:
+    type: model
+    fields:
+      task_id:
+        type: str
+        description: Stable identifier for one conveyor task.
+      kind:
+        type: str
+        description: Canonical task kind.
+      name:
+        type: str
+        description: Human-readable name for the task.
+      objective:
+        type: str
+        description: One-sentence objective for the worker.
+      execution_agent:
+        type: str
+        description: Execution agent that should execute this task. Use one of ModuleTaskWorkerAgent, PageTaskWorkerAgent, or IntegrationTaskWorkerAgent.
+      task_prompt:
+        type: str
+        description: Scoped instruction passed to the worker agent.
+      owned_paths:
+        type: optional_list
+        items: str
+        description: Canonical app or workflow paths this task primarily owns.
+      depends_on:
+        type: optional_list
+        items: str
+        description: Optional upstream task ids that must complete first.
+  DecompositionPlan:
+    type: model
+    fields:
+      user_intent:
+        type: str
+        description: Normalized product request being planned.
+      decomposition_reason:
+        type: str
+        description: Why decomposition is warranted.
+      requires_decomposition:
+        type: bool
+        description: Whether the request genuinely needs multiple independent work units.
+      max_parallelism:
+        type: int
+        description: Recommended maximum number of concurrent worker asks.
+      tasks:
+        type: list
+        items: DecomposedTask
+        description: Independent tasks to execute through the runtime conveyor.
+  RuntimeTaskBatchPlanOutput:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short confirmation message.
+      DecompositionPlan:
+        type: DecompositionPlan
+  RuntimeTaskBatchWorkerOutput:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short worker completion message.
+      task_id:
+        type: str
+        description: Task id this worker completed.
+      kind:
+        type: str
+        description: Work-unit kind this worker handled.
+      summary:
+        type: str
+        description: One-sentence summary of the worker output.
+      deliverables:
+        type: list
+        items: str
+        description: Concrete deliverables produced for this task.
+      owned_paths:
+        type: optional_list
+        items: str
+        description: Canonical paths covered by this task.
+      code_files:
+        type: optional_list
+        items: CodeFile
+        description: Optional code files emitted by the worker.
+  CodeFile:
+    type: model
+    fields:
+      filename:
+        type: str
+        description: App- or workflow-relative file path.
+      content:
+        type: str
+        description: File content.
+  RuntimeTaskBatchSmokeResult:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: User-facing completion message.
+      result:
+        type: str
+        description: One-sentence summary of whether task batch execution succeeded.
+      user_intent:
+        type: str
+        description: Normalized user intent from the planner.
+      work_unit_count:
+        type: int
+        description: Number of work units executed.
+      task_batch_execution_used:
+        type: bool
+        description: Whether the workflow used the task batch executor.
+      max_parallelism:
+        type: int
+        description: Maximum concurrency declared by task_batches.yaml.
+      executed_task_ids:
+        type: list
+        items: str
+        description: Ordered task ids executed by the task batch executor.
+      executed_kinds:
+        type: list
+        items: str
+        description: Unique work-unit kinds covered by execution.
+      result_context_key:
+        type: str
+        description: Context key containing persisted worker results.
+      all_units_succeeded:
+        type: bool
+        description: Whether every worker completed successfully.
+      failure_count:
+        type: int
+        description: Number of worker failures captured by the executor.
+      sample_summary:
+        type: str
+        description: One worker summary captured from the execution.

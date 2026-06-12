@@ -1,0 +1,11 @@
+transition_rules:
+- source_agent: TaskPlannerAgent
+  target_agent: SynthesisAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: task_batch_route_ready
+  condition_value: true
+- source_agent: SynthesisAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget

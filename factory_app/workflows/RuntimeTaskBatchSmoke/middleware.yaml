@@ -1,0 +1,8 @@
+prompt_middleware:
+- agent: SynthesisAgent
+  filename: hook_task_batch_synthesis.py
+  function: inject_task_batch_synthesis_context
+- agent: TaskPlannerAgent
+  filename: hook_task_batch_route_context.py
+  function: inject_task_batch_route_context
+

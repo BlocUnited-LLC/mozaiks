@@ -1,0 +1,13 @@
+version: 1
+conveyors:
+  - id: runtime_smoke_tasks
+    decomposition_agent: TaskPlannerAgent
+    execution_agents:
+      - ModuleTaskWorkerAgent
+      - PageTaskWorkerAgent
+      - IntegrationTaskWorkerAgent
+    concurrency: 3
+    failure_policy: fail_batch
+    retry_limit: 1
+    timeout_seconds: 180
+    require_owned_paths: false

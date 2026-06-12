@@ -1,0 +1,8 @@
+transition_rules:
+- source_agent: RuntimeToolCallSmokeAgent
+  target_agent: terminate
+  transition_type: after_turn
+- source_agent: RuntimeConnectorSmokeAgent
+  target_agent: terminate
+  transition_type: after_turn
+
