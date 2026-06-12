@@ -74,6 +74,15 @@ def _template_roots(context_root: Path, context: dict[str, Any]) -> list[Path]:
     return roots
 
 
+def _is_materializable_template_file(path: Path, templates_root: Path) -> bool:
+    relative = path.relative_to(templates_root)
+    if any(part == "__pycache__" or part.startswith(".") for part in relative.parts):
+        return False
+    if path.suffix in {".pyc", ".pyo"}:
+        return False
+    return True
+
+
 def resolve_templates_for_pack(
     pack_source_path: Path,
     pack_id: str,
@@ -99,7 +108,11 @@ def resolve_templates_for_pack(
     files: list[dict[str, str]] = []
     by_filename: dict[str, str] = {}
     for templates_root in template_roots:
-        for path in sorted(item for item in templates_root.rglob("*") if item.is_file()):
+        for path in sorted(
+            item
+            for item in templates_root.rglob("*")
+            if item.is_file() and _is_materializable_template_file(item, templates_root)
+        ):
             output_path = _template_output_path(path, templates_root)
             content = path.read_text(encoding="utf-8")
             existing = by_filename.get(output_path)

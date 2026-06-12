@@ -95,6 +95,34 @@ def test_selected_pack_materializes_all_templates(resolver, tmp_path: Path) -> N
     }
 
 
+def test_selected_pack_ignores_cache_and_bytecode_files(resolver, tmp_path: Path) -> None:
+    pack_root = _write_pack(
+        tmp_path,
+        "mozaikspay",
+        {"services/integrations/mozaikspay_client.py": "# client\n"},
+    )
+    cache_file = (
+        pack_root
+        / "templates"
+        / "services"
+        / "integrations"
+        / "__pycache__"
+        / "mozaikspay_client.cpython-313.pyc"
+    )
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_bytes(b"\xf3\r\r\n\x00\x00\x00\x00compiled")
+    hidden_file = pack_root / "templates" / ".DS_Store"
+    hidden_file.write_text("not a template", encoding="utf-8")
+
+    result = resolver.resolve_hosted_pack_templates(
+        [{"id": "mozaikspay", "capability_source": "hosted_pack", "pack_source_path": str(pack_root)}]
+    )
+
+    assert result == [
+        {"filename": "services/integrations/mozaikspay_client.py", "content": "# client\n"}
+    ]
+
+
 @pytest.mark.asyncio
 async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path) -> None:
     pack_root = _write_pack(

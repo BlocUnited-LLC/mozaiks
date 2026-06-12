@@ -419,6 +419,20 @@ agents:
       **Python tool stubs** (under `tools/`):
       - One `.py` file per declared tool function
       - Each stub is `async def function_name(...)` with correct parameter types, docstring, and a `raise NotImplementedError` body
+      - `tools.yaml` entries must use the runtime schema:
+        ```yaml
+        tools:
+          - agent: PlannerAgent
+            file: tools/save_plan.py
+            function: save_plan
+            description: Persist the generated plan.
+            tool_type: Agent_Tool
+            auto_tool_call: true
+        lifecycle_tools: []
+        ```
+      - Never emit name-only tool entries such as `{name: save_plan}`.
+      - Never emit `lifecycle_tools` as a list of strings; use `[]` unless a
+        real lifecycle tool object is required.
 
       **UI components** (under `ui/<WorkflowName>/`, optional):
       - Only when the workflow needs a custom React UI surface beyond the shipped workflow primitives
@@ -490,6 +504,13 @@ agents:
       - `definitions`: mapping of variable name to `{type, description, source}`
       - `agents`: mapping of agent name to `{variables: [...]}`
       Never emit a top-level `variables` key.
+      Every entry under `definitions` must include `source`.
+      `source.type` must be one of: `config`, `data_reference`, `data_entity`,
+      `computed`, `state`, `external`, `file`, or `build_context`. Use `state`
+      for runtime/session values. Never emit `source.type: context`.
+      Do not put `items` under context variable definitions. If a context variable
+      stores a list, use `type: array` and a `source` default; item models belong
+      in structured_outputs.yaml only.
 
       Example:
       ```yaml
@@ -500,6 +521,12 @@ agents:
           source:
             type: state
             default: null
+        task_plan:
+          type: array
+          description: Planned conveyor tasks.
+          source:
+            type: state
+            default: []
       agents:
         PlannerAgent:
           variables:
@@ -512,6 +539,54 @@ agents:
       - Define a model in `models:` with all required fields (no optional fields unless genuinely optional).
       - Register the agent → model in `registry:`.
       - Every model field must have `type` and `description`. No `default: null` on required fields.
+      - `models.<ModelName>.fields` must be a mapping keyed by field name, not a
+        list of `{name, type}` objects.
+      - Every field with `type: list` or `type: optional_list` must include
+        `items: <ModelName or scalar type>`.
+      - Conveyor workflows must define `DecompositionPlan.tasks` as
+        `type: list` with `items: DecomposedTask`, and must define the
+        `DecomposedTask` model with at least `task_id`, `execution_agent`,
+        `task_prompt`, and `depends_on`.
+
+      Example:
+      ```yaml
+      models:
+        DecomposedTask:
+          type: model
+          fields:
+            task_id:
+              type: str
+              description: Stable task id.
+            execution_agent:
+              type: str
+              description: Agent selected to execute this task.
+            task_prompt:
+              type: str
+              description: Scoped prompt for the execution agent.
+            depends_on:
+              type: optional_list
+              items: str
+              description: Prior task ids required before this task can run.
+        DecompositionPlan:
+          type: model
+          fields:
+            tasks:
+              type: list
+              items: DecomposedTask
+              description: Tasks emitted for the conveyor executor.
+        ClassificationModel:
+          type: model
+          fields:
+            ticket_category:
+              type: str
+              description: Classified support ticket category.
+            confidence:
+              type: float
+              description: Classification confidence score.
+      registry:
+        ClassificationAgent: ClassificationModel
+        RoutingAgent: null
+      ```
 
       ## STEP 6: Write AG2 Network Transitions
 
@@ -641,11 +716,16 @@ agents:
       - transition_graph.yaml transition rules are flat mappings, never nested
         under transition type names
       - context_variables.yaml uses top-level definitions and agents, never variables
+      - context_variables.yaml source.type values are valid contract values, never context
+      - structured_outputs.yaml models use `type: model` and fields as a mapping
+      - every structured output list field includes `items`
       - task_batches.yaml failure_policy is fail_batch, continue_with_available,
         or collect_errors
       - middleware.yaml and ui_config.yaml are present even when they contain only
         empty/default declarations
       - tools.yaml entries have matching workflow-local tools/<name>.py files
+      - tools.yaml entries use agent, file, function, description, tool_type, and
+        optional auto_tool_call; never name-only entries
       - task_batches.yaml is emitted only when the workflow requires a conveyor
 
   - id: output_format
