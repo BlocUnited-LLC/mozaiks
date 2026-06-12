@@ -12,6 +12,91 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **OSS build telemetry** (`mozaiksai/core/telemetry.py`) — opt-in HMAC-SHA256
+  signed, anonymized build telemetry. `build_registry_id` is one-way SHA-256 hashed
+  before transmission. Controlled by `MOZAIKS_TELEMETRY_ENDPOINT`,
+  `MOZAIKS_TELEMETRY_ENABLED`, and `MOZAIKS_TELEMETRY_SECRET` env vars. The
+  `emit_build_completed` and `emit_build_failed` lifecycle tools fire-and-forget
+  telemetry payloads; `record_build_satisfaction` includes the user rating. No-op
+  when `MOZAIKS_TELEMETRY_ENDPOINT` is unset.
+
+- **`BuildSatisfactionRating` transition screen** — `user_choice_context` transition
+  added as the final step of the `build` workflow sequence. Presents a 1–5 star rating
+  UI after `app_review`; fire-and-forget POSTs to `build_intelligence.record_build_satisfaction`.
+  Both `rated` and `skip` options route to `workflow_complete`.
+
+- **Module cooccurrence pattern recording** (`tools/platform/module_pattern_recorder.py`)
+  — AppGenerator `on_complete` lifecycle tool that extracts generated module IDs from
+  the assembled bundle and POSTs to `build_intelligence.record_module_cooccurrence`.
+  Pairwise cooccurrence patterns accumulate into a ranked module popularity index.
+  Capped at 20 modules (190 pairs maximum); no-op in OSS runs.
+
+- **Quality gate corrections recording** (`tools/platform/gate_corrections_recorder.py`)
+  — AppGenerator `on_complete` and `on_fail` lifecycle tool that reads the final status
+  of all three quality gates (UI, module contract, module runtime) from context. For
+  any gate in "blocked" status, POSTs a correction record to
+  `build_intelligence.record_quality_gate_block`. Fires on both `on_complete` and
+  `on_fail` so corrections are captured even when the build exits via failure.
+
+- **Domain tags population** (`tools/platform/domain_tags_recorder.py`) — AppGenerator
+  `on_complete` lifecycle tool that derives domain tags from selected capability pack IDs
+  and POSTs to `build_intelligence.set_build_domain_tags`. Ensures `gate_failure` and
+  `refinement_hotspot` patterns are domain-specific rather than always landing in
+  domain `"global"`.
+
+- **AG2 adapter layer** — concrete implementations for the AG2 beta execution model:
+  `ag2_agent_runner.py` (single agent via `agent.ask()`), `ag2_network_runner.py`
+  (multi-agent networks), `ag2_stream_storage.py` (token stream buffering),
+  `ag2_task_batch_runner.py` (parallel task batches), `ag2_transition_conditions.py`
+  (transition condition evaluators), and `docker_sandbox.py` (Docker sandbox adapter).
+
+- **Workflow runtime modules** — `core/usage/` (token accounting and usage ledger),
+  `workflow/agents/transition_graph.py` (declarative transition graph evaluator),
+  `workflow/artifacts/` (artifact packaging), `workflow/context/projection.py`
+  (scoped context projection), `workflow/contract_validation.py` (YAML contract
+  validation), `workflow/execution/middleware.py` (lifecycle middleware hooks),
+  `workflow/execution/resume.py` (run resume/checkpoint), `workflow/outputs/`
+  (runtime events and output validation).
+
+- **`factory_app/build_context/`** — canonical location for named OSS build context
+  packs. Each context directory holds `context.yaml` with explicit `assets[]` entries.
+  Migrated from inline tool YAML: `AppGenerator` context (capability routing, domain
+  catalogs, shell presets, module and workflow archetypes), `AgentGenerator` context
+  (AG2 network patterns), `mozaikspay` context (contract + templates), and
+  `webapp_builder` context (language profile).
+
+- **`transition_graph.yaml` and `middleware.yaml`** added to all factory workflows
+  (ExistingAppDiscovery, RuntimeSmoke, RuntimeTaskBatchSmoke, RuntimeToolCallSmoke,
+  RuntimeUIPrimitiveSmoke, ThemeCapture, ValueEngine, DesignDocs, AppReview, plus the
+  already-present AgentGenerator and AppGenerator). Every workflow now has complete
+  explicit declarative routing and lifecycle hook config.
+
+- **`RuntimeContextExpressionTaskBatchSmoke`** — new factory workflow that smoke-tests
+  context expression evaluation in task batch runs.
+
+- **`app/services/` adapter lane** — canonical location for app-owned service adapters.
+  Structured as `adapters/deployment/`, `adapters/dns/`, `adapters/probes/`,
+  `adapters/registrar/`, and `adapters/entitlements/` sub-directories. Entitlement
+  `grant_adapter.py` lives here and is wired at platform startup.
+
+- **`app/security/secrets.yaml`** — names-only secret contract resolved at startup by
+  `mozaiksai/core/secrets/app_secrets.py`. Replaces the previous `app/config/secrets.yaml`
+  convention.
+
+### Changed
+
+- `AgentGenerator` and `AppGenerator` workflow contracts overhauled: removed
+  `handoffs.yaml` and `hooks.yaml` (replaced by `transition_graph.yaml` and
+  `middleware.yaml`). Static YAML catalogs (`module_archetypes.yaml`,
+  `shell_presets.yaml`, `workflow_archetypes.yaml`, `capability_routing.yaml`,
+  `file_contracts.yaml`, `domain_catalogs.yaml`) moved from inline tool files into
+  `factory_app/build_context/AppGenerator/`. AgentGenerator `patternbook/` module
+  moved to `tools/ag2_patterns.py` under `factory_app/build_context/AgentGenerator/`.
+
+- `setup.py` removed; `pyproject.toml` is the sole package definition.
+
 ### Removed
 
 - Deleted `mozaiksai/core/workflow/stream/` and `mozaiksai/core/workflow/streaming/` —
