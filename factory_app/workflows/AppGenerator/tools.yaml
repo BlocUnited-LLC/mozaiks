@@ -271,9 +271,38 @@ lifecycle_tools:
       hosted build_intelligence module so pairwise cooccurrence patterns are scored.
       No-op in OSS runs without app_backend_url or build_registry_id.
     tool_type: Agent_Tool
+  - trigger: on_complete
+    agent: null
+    file: tools/platform/domain_tags_recorder.py
+    function: record_domain_tags
+    description: >
+      Derive domain tags from selected capability_packs and POST them to
+      build_intelligence so gate_failure and refinement_hotspot patterns are
+      domain-specific rather than always landing in "global".
+      No-op in OSS runs without app_backend_url or build_registry_id.
+    tool_type: Agent_Tool
+  - trigger: on_complete
+    agent: null
+    file: tools/platform/gate_corrections_recorder.py
+    function: record_gate_corrections
+    description: >
+      Post quality gate correction records to build_intelligence for any gate
+      that ended in "blocked" status. Increments quality_gate_blocks on the build
+      ledger so gate_failure patterns are scored on completion. No-op in OSS runs
+      without app_backend_url or build_registry_id.
+    tool_type: Agent_Tool
   - trigger: on_fail
     agent: null
     file: tools/platform/build_lifecycle.py
     function: emit_build_failed
     description: Notify platform build tracking when workflow run fails.
+    tool_type: Agent_Tool
+  - trigger: on_fail
+    agent: null
+    file: tools/platform/gate_corrections_recorder.py
+    function: record_gate_corrections
+    description: >
+      Post quality gate correction records to build_intelligence even when the
+      workflow fails. Ensures corrections are captured for failed builds where
+      a gate block may have contributed to the failure.
     tool_type: Agent_Tool
