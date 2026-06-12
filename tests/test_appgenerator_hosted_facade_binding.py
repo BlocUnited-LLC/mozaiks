@@ -287,3 +287,4 @@ class TestFacadeModuleGenerationPattern:
         for bad_path in prohibited_paths:
             for good_path in owned_paths:
                 assert bad_path not in good_path
+

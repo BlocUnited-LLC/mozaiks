@@ -307,3 +307,4 @@ def test_appgenerator_guidance_declares_generic_integration_requests() -> None:
     assert "frontend_safe" in structured_outputs
     assert "email_provider" in structured_outputs
     assert "analytics_provider" in structured_outputs
+

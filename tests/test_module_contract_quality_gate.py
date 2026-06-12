@@ -5,8 +5,8 @@ Covers:
 - audit_module_contracts: YAML validation rules and cross-file consistency
 - review_module_contract_quality: status routing and context variable wiring
 - hook_module_contract_quality_gate: AG2 hook injection and no-op guard
-- hooks.yaml: gate is registered for ModuleContractQualityAgent
-- handoffs.yaml: ConfigMiddlewareAgent routes through the gate; gate routes to ModelAgent or user
+- middleware.yaml: gate is registered for ModuleContractQualityAgent
+- transition_graph.yaml: ConfigMiddlewareAgent routes through the gate; gate routes to ModelAgent or user
 - context_variables.yaml: module_contract_quality_status and warnings are declared
 """
 
@@ -29,8 +29,8 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_HOOKS_YAML = _APPGEN_DIR / "hooks.yaml"
-_HANDOFFS_YAML = _APPGEN_DIR / "handoffs.yaml"
+_HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
+_HANDOFFS_YAML = _APPGEN_DIR / "transition_graph.yaml"
 _CTX_YAML = _APPGEN_DIR / "context_variables.yaml"
 
 
@@ -453,54 +453,53 @@ class TestHookModuleContractQualityGate:
 
 
 # ---------------------------------------------------------------------------
-# hooks.yaml registration
+# middleware.yaml registration
 # ---------------------------------------------------------------------------
 
 class TestHooksYamlRegistration:
     def test_hooks_yaml_registers_module_contract_gate(self):
         data = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
-        hooks = data.get("hooks") or []
+        hooks = data.get("prompt_middleware") or []
         matching = [
             h for h in hooks
             if h.get("filename") == "hook_module_contract_quality_gate.py"
             and h.get("function") == "run_module_contract_quality_gate"
         ]
         assert matching, (
-            "hooks.yaml must register run_module_contract_quality_gate "
+            "middleware.yaml must register run_module_contract_quality_gate "
             "from hook_module_contract_quality_gate.py"
         )
 
     def test_hook_targets_module_contract_quality_agent(self):
         data = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
-        hooks = data.get("hooks") or []
+        hooks = data.get("prompt_middleware") or []
         for h in hooks:
             if h.get("filename") == "hook_module_contract_quality_gate.py":
-                assert h.get("hook_agent") == "ModuleContractQualityAgent"
-                assert h.get("hook_type") == "update_agent_state"
+                assert h.get("agent") == "ModuleContractQualityAgent"
                 break
 
 
 # ---------------------------------------------------------------------------
-# handoffs.yaml routing
+# transition_graph.yaml routing
 # ---------------------------------------------------------------------------
 
 class TestHandoffsYamlRouting:
     def _handoffs(self):
         return yaml.safe_load(_HANDOFFS_YAML.read_text(encoding="utf-8")).get(
-            "handoff_rules", []
+            "transition_rules", []
         )
 
     def test_config_middleware_routes_to_quality_gate(self):
         handoffs = self._handoffs()
-        after_work = [
+        after_turn = [
             h for h in handoffs
             if h.get("source_agent") == "ConfigMiddlewareAgent"
-            and h.get("handoff_type") == "after_work"
+            and h.get("transition_type") == "after_turn"
         ]
-        assert after_work, "ConfigMiddlewareAgent must have an after_work handoff"
-        target = after_work[0].get("target_agent")
+        assert after_turn, "ConfigMiddlewareAgent must have an after_turn handoff"
+        target = after_turn[0].get("target_agent")
         assert target == "ModuleContractQualityAgent", (
-            f"ConfigMiddlewareAgent after_work must target ModuleContractQualityAgent; got {target!r}"
+            f"ConfigMiddlewareAgent after_turn must target ModuleContractQualityAgent; got {target!r}"
         )
 
     def test_quality_gate_passed_routes_to_model_agent(self):
@@ -511,7 +510,7 @@ class TestHandoffsYamlRouting:
             and h.get("target_agent") == "ModelAgent"
         ]
         assert matching, "ModuleContractQualityAgent must route to ModelAgent when passed"
-        assert 'passed' in matching[0].get("condition", "")
+        assert matching[0].get("condition_value") == "passed"
 
     def test_quality_gate_blocked_routes_to_user(self):
         handoffs = self._handoffs()
@@ -521,7 +520,7 @@ class TestHandoffsYamlRouting:
             and h.get("target_agent") == "user"
         ]
         assert matching, "ModuleContractQualityAgent must route to user when blocked"
-        assert "blocked" in matching[0].get("condition", "")
+        assert matching[0].get("condition_value") == "blocked"
 
 
 # ---------------------------------------------------------------------------
@@ -556,3 +555,5 @@ class TestContextVariablesDeclarations:
         data = self._data()
         variables = (data.get("agents") or {}).get("ModuleContractQualityAgent", {}).get("variables", [])
         assert "module_contract_quality_warnings" in variables
+
+

@@ -139,3 +139,4 @@ def test_lifecycle_manager_resolves_shared_context_graph_loader(monkeypatch: pyt
         and callable(tool.callable)
         for tool in before_chat
     )
+

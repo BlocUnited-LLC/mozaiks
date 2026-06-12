@@ -144,7 +144,6 @@ def _patch_runtime_websocket_harness(
             "workflow_name": workflow_name,
             "user_id": user_id,
             "status": 0,
-            "last_sequence": 0,
             "messages": [],
         }
         doc.update(extra_fields or {})
@@ -152,6 +151,11 @@ def _patch_runtime_websocket_harness(
 
     async def fake_get_or_assign_cache_seed(chat_id: str, app_id: str) -> str:
         return f"seed:{app_id}:{chat_id}"
+
+    async def fake_load_run_history(*, chat_id: str, app_id: str):
+        _ = app_id
+        doc = collection._docs.get(chat_id) or {}
+        return list(doc.get("messages") or [])
 
     async def fake_chat_prereqs(**kwargs):  # noqa: ANN003
         return True, None
@@ -165,6 +169,7 @@ def _patch_runtime_websocket_harness(
     monkeypatch.setattr(runtime_app, "authenticate_websocket_with_path_binding", fake_auth)
     monkeypatch.setattr(runtime_app.persistence_manager, "create_chat_session", fake_create_chat_session)
     monkeypatch.setattr(runtime_app.persistence_manager, "get_or_assign_cache_seed", fake_get_or_assign_cache_seed)
+    monkeypatch.setattr(runtime_app.persistence_manager, "load_run_history", fake_load_run_history)
     monkeypatch.setattr(runtime_app.asyncio, "create_task", fake_create_task)
 
     monkeypatch.setattr(session_router_module, "get_session_router", lambda: session_router)
@@ -217,7 +222,6 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
                 "user_id": "user_1",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 1,
                 "messages": [{"role": "user", "content": "Already started"}],
             },
             {
@@ -226,7 +230,6 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
                 "user_id": "user_1",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 3,
                 "messages": [{"role": "assistant", "content": "In progress"}],
             },
         ],
@@ -294,7 +297,7 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
                 "chat_exists": True,
                 "last_artifact": None,
                 "status": 0,
-                "last_sequence": 3,
+                "run_history_count": 1,
                 "created_at": None,
                 "session_state": {
                     "current_chat_id": "chat_resumed",
@@ -319,7 +322,6 @@ async def test_runtime_websocket_endpoint_emits_chat_error_when_prereqs_fail(mon
                 "user_id": "user_1",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 0,
                 "messages": [],
             }
         ],
@@ -380,7 +382,6 @@ async def test_runtime_websocket_endpoint_emits_validation_error_when_prereq_che
                 "user_id": "user_1",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 0,
                 "messages": [],
             }
         ],
@@ -439,7 +440,6 @@ async def test_runtime_websocket_endpoint_auto_starts_empty_agent_driven_chat(mo
                 "user_id": "user_1",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 0,
                 "messages": [],
             }
         ],
@@ -473,7 +473,7 @@ async def test_runtime_websocket_endpoint_auto_starts_empty_agent_driven_chat(mo
     assert harness.transport.connections["chat_agent_1"]["autostarted"] is True
     assert harness.transport.handle_websocket_calls[0]["chat_id"] == "chat_agent_1"
     assert harness.transport.ui_events[0][0]["chat_id"] == "chat_agent_1"
-    assert harness.transport.ui_events[0][0]["last_sequence"] == 0
+    assert harness.transport.ui_events[0][0]["run_history_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -487,7 +487,6 @@ async def test_runtime_websocket_endpoint_rejects_unowned_chat(monkeypatch: pyte
                 "user_id": "other_user",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 0,
                 "messages": [],
             }
         ],
@@ -532,7 +531,6 @@ async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_cl
                 "user_id": "user_1",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 2,
                 "messages": [{"role": "assistant", "content": "Resume me"}],
             }
         ],
@@ -586,7 +584,7 @@ async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_cl
                 "chat_exists": True,
                 "last_artifact": None,
                 "status": 0,
-                "last_sequence": 2,
+                "run_history_count": 1,
                 "created_at": None,
                 "session_state": {},
             },
@@ -609,7 +607,6 @@ async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflo
                 "user_id": "user_1",
                 "workflow_name": "LegacyWorkflow",
                 "status": 0,
-                "last_sequence": 1,
                 "messages": [{"role": "assistant", "content": "Recover me"}],
             }
         ],
@@ -666,7 +663,7 @@ async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflo
                 "chat_exists": True,
                 "last_artifact": None,
                 "status": 0,
-                "last_sequence": 1,
+                "run_history_count": 1,
                 "created_at": None,
                 "session_state": {},
             },
@@ -689,7 +686,6 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
                 "user_id": "user_1",
                 "workflow_name": "AgentGenerator",
                 "status": 0,
-                "last_sequence": 1,
                 "messages": [{"role": "assistant", "content": "Original link"}],
             }
         ],
@@ -772,7 +768,7 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
                 "chat_exists": True,
                 "last_artifact": None,
                 "status": 0,
-                "last_sequence": 0,
+                "run_history_count": 0,
                 "created_at": None,
                 "session_state": {
                     "current_chat_id": "chat_recovered",
@@ -784,3 +780,4 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
         )
     ]
     assert harness.transport.api_calls == []
+

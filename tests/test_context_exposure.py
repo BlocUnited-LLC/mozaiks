@@ -96,7 +96,7 @@ def test_persisted_session_context_overrides_declared_defaults() -> None:
             self.data = {
                 "interview_complete": False,
                 "app_plan_ready": False,
-                "available_hosted_packs": [],
+                "capability_packs": [],
                 "app_build_plan": None,
             }
 
@@ -113,7 +113,7 @@ def test_persisted_session_context_overrides_declared_defaults() -> None:
         {
             "interview_complete": True,
             "app_plan_ready": True,
-            "available_hosted_packs": [{"pack_id": "wallet"}],
+            "capability_packs": [{"pack_id": "wallet"}],
             "app_build_plan": {"app_name": "Support Operations"},
             "parent_chat_id": "chat-parent",
         },
@@ -121,7 +121,7 @@ def test_persisted_session_context_overrides_declared_defaults() -> None:
 
     assert context.get("interview_complete") is True
     assert context.get("app_plan_ready") is True
-    assert context.get("available_hosted_packs") == [{"pack_id": "wallet"}]
+    assert context.get("capability_packs") == [{"pack_id": "wallet"}]
     assert context.get("app_build_plan") == {"app_name": "Support Operations"}
     assert context.get("automated_workflow_run") is True
 
@@ -131,21 +131,16 @@ async def test_initial_agent_override_suppresses_orchestrator_seed() -> None:
     from mozaiksai.core.workflow.orchestration_patterns import _resume_or_initialize_chat
 
     class _Persistence:
-        async def resume_chat(self, chat_id: str, app_id: str):
+        async def load_run_history(self, *, chat_id: str, app_id: str):
             return []
 
         async def create_chat_session(self, **kwargs):
-            return None
-
-    class _Termination:
-        async def on_conversation_start(self, user_id: str):
             return None
 
     logger = SimpleNamespace(info=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
 
     _, initial_messages = await _resume_or_initialize_chat(
         persistence_manager=_Persistence(),
-        termination_handler=_Termination(),
         config={
             "initial_message": "InterviewAgent: Greet the user and ask questions.",
             "workflow_startup_mode": "AgentDriven",
@@ -168,21 +163,16 @@ async def test_default_workflow_start_keeps_orchestrator_seed() -> None:
     from mozaiksai.core.workflow.orchestration_patterns import _resume_or_initialize_chat
 
     class _Persistence:
-        async def resume_chat(self, chat_id: str, app_id: str):
+        async def load_run_history(self, *, chat_id: str, app_id: str):
             return []
 
         async def create_chat_session(self, **kwargs):
-            return None
-
-    class _Termination:
-        async def on_conversation_start(self, user_id: str):
             return None
 
     logger = SimpleNamespace(info=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
 
     _, initial_messages = await _resume_or_initialize_chat(
         persistence_manager=_Persistence(),
-        termination_handler=_Termination(),
         config={
             "initial_message": "InterviewAgent: Greet the user and ask questions.",
             "workflow_startup_mode": "AgentDriven",
@@ -200,3 +190,4 @@ async def test_default_workflow_start_keeps_orchestrator_seed() -> None:
         "InterviewAgent: Greet the user and ask questions.",
         "User prompt.",
     ]
+

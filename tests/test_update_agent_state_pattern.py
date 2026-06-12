@@ -1,64 +1,12 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
+import importlib
 from pathlib import Path
 
-
-def _stub_agent_factory() -> None:
-    app_pkg = sys.modules.get("app")
-    if app_pkg is None:
-        app_pkg = types.ModuleType("app")
-        app_pkg.__path__ = []
-        sys.modules["app"] = app_pkg
-
-    modules_pkg = sys.modules.get("app.modules")
-    if modules_pkg is None:
-        modules_pkg = types.ModuleType("app.modules")
-        modules_pkg.__path__ = []
-        sys.modules["app.modules"] = modules_pkg
-
-    agent_factory_mod = types.ModuleType("app.modules.agent_factory")
-
-    def _compose_prompt_sections(sections):
-        rendered = []
-        for section in sections or []:
-            if not isinstance(section, dict):
-                continue
-            heading = section.get("heading") or ""
-            content = section.get("content") or ""
-            rendered.append("\n".join(part for part in (heading, content) if part))
-        return "\n\n".join(part for part in rendered if part)
-
-    agent_factory_mod._compose_prompt_sections = _compose_prompt_sections
-    sys.modules["app.modules.agent_factory"] = agent_factory_mod
-    app_pkg.plugins = modules_pkg
-    modules_pkg.agent_factory = agent_factory_mod
+import yaml
 
 
-def _load_update_agent_state_pattern_module():
-    _stub_agent_factory()
-    workspace = Path(__file__).resolve().parents[1]
-    file_path = (
-        workspace
-        / "factory_app"
-        / "workflows"
-        / "AgentGenerator"
-        / "tools"
-        / "update_agent_state_pattern.py"
-    )
-    module_name = "tests.update_agent_state_pattern_direct"
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Unable to load module spec for {file_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-update_agent_state_pattern = _load_update_agent_state_pattern_module()
+build_context_projection = importlib.import_module("mozaiksai.core.workflow.context.projection")
 
 
 class _Agent:
@@ -100,7 +48,7 @@ def test_pattern_selection_guidance_uses_shared_ag2_patternbook() -> None:
     agent = _Agent()
     agent.name = "PatternAgent"
 
-    update_agent_state_pattern.inject_pattern_selection_guidance(agent, [])
+    build_context_projection.inject_build_context_projections(agent, [])
 
     injected = agent._mozaiks_prompt_sections[0]["content"]
 
@@ -128,18 +76,69 @@ def test_pattern_agent_prompt_uses_injected_patternbook_instead_of_static_legend
     assert "Organic" not in pattern_section
 
 
-def test_hooks_bind_agents_guidance_to_agents_agent() -> None:
+def test_middleware_binds_pattern_guidance_to_agents() -> None:
     workspace = Path(__file__).resolve().parents[1]
-    hooks_yaml = (
+    middleware_yaml = (
         workspace
         / "factory_app"
         / "workflows"
         / "AgentGenerator"
-        / "hooks.yaml"
+        / "middleware.yaml"
     ).read_text(encoding="utf-8")
 
-    assert "hook_agent: PatternAgent\n  filename: update_agent_state_pattern.py\n  function: inject_pattern_selection_guidance" in hooks_yaml
-    assert "hook_agent: WorkflowBundleBuilderAgent\n  filename: update_agent_state_pattern.py\n  function: inject_workflow_bundle_builder_guidance" in hooks_yaml
+    projector = "function: mozaiksai.core.workflow.context.projection.inject_build_context_projections"
+    assert "agent: PatternAgent\n  " + projector in middleware_yaml
+    assert "agent: WorkflowBundleBuilderAgent\n  " + projector in middleware_yaml
+    assert "prompt_middleware_pattern.py" not in middleware_yaml
+
+
+def test_agentgenerator_manifest_declares_patternbook_projections() -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    manifest = yaml.safe_load((
+        workspace
+        / "factory_app"
+        / "build_context"
+        / "AgentGenerator"
+        / "context.yaml"
+    ).read_text(encoding="utf-8"))
+
+    asset = next(item for item in manifest["assets"] if item["path"] == "ag2_network_patterns.yaml")
+    projections = {item["id"]: item for item in asset["projections"]}
+    assert projections["ag2_patternbook_summary_for_decomposition"]["recipients"] == ["PatternAgent"]
+    selected = projections["ag2_selected_pattern_for_bundle_builder"]
+    assert selected["render"] == "selected_record"
+    assert selected["selected_by"] == "current_task.pattern_id"
+    assert selected["record_id_field"] == "id"
+
+
+def test_generic_build_context_projection_injects_patternbook_summary() -> None:
+    agent = _Agent()
+    agent.name = "PatternAgent"
+
+    build_context_projection.inject_build_context_projections(agent, [])
+
+    injected = agent._mozaiks_prompt_sections[0]["content"]
+    assert "[AG2 NETWORK PATTERNBOOK]" in injected
+    assert "5. Coordinator" in injected
+    assert "llm or string_llm" in injected
+    assert "Organic" not in injected
+
+
+def test_generic_build_context_projection_injects_selected_pattern_detail() -> None:
+    agent = _Agent()
+    agent.context_variables["current_task"] = {
+        "pattern_id": 3,
+        "pattern_name": "Feedback Loop",
+        "workflow_name": "ReviewWorkflow",
+    }
+
+    build_context_projection.inject_build_context_projections(agent, [])
+
+    injected = agent._mozaiks_prompt_sections[0]["content"]
+    assert "[AG2 NETWORK PATTERN]" in injected
+    assert "3. Feedback Loop" in injected
+    assert "transition_generation" in injected
+    assert "handoff_generation" not in injected
 
 
 def test_workflow_bundle_builder_guidance_reads_current_task_pattern() -> None:
@@ -150,8 +149,11 @@ def test_workflow_bundle_builder_guidance_reads_current_task_pattern() -> None:
         "workflow_name": "ReviewWorkflow",
     }
 
-    update_agent_state_pattern.inject_workflow_bundle_builder_guidance(agent, [])
+    build_context_projection.inject_build_context_projections(agent, [])
 
     injected = agent._mozaiks_prompt_sections[0]["content"]
 
-    assert "[PATTERN GUIDANCE: " in injected
+    assert "[AG2 NETWORK PATTERN]" in injected
+    assert "3. Feedback Loop" in injected
+
+

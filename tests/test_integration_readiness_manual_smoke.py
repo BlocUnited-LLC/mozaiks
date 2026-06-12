@@ -56,3 +56,4 @@ def test_manual_smoke_cli_json_output_is_redacted(capsys) -> None:
     payload = json.loads(captured.out)
     assert payload["success"] is True
     assert "test-secret-value" not in captured.out
+

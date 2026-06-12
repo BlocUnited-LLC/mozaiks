@@ -91,3 +91,4 @@ def test_context_graph_health_reports_coverage_warnings() -> None:
     assert "context_graph_limit_reached_before_core_code" in report.blockers
     assert "context_graph_sensitive_paths_skipped" in report.warnings
     assert report.coverage["core_surface_file_count"] == 0
+

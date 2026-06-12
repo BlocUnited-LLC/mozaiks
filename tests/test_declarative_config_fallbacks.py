@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 import sys
 import types
+import asyncio
 
-from mozaiksai.core.workflow.execution import hooks as _hooks_mod
+from mozaiksai.core.workflow.execution import middleware as _middleware_mod
 from tests.import_utils import import_module_directly
 _tools_mod = import_module_directly("mozaiksai.core.workflow.agents.tools")
 _context_graph_hook_mod = import_module_directly(
@@ -13,13 +14,12 @@ _context_graph_hook_mod = import_module_directly(
 )
 
 
-def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
+def test_prompt_middleware_loader_reads_yaml_only(tmp_path: Path) -> None:
     flow_yaml = tmp_path / "FlowYaml"
     flow_yaml.mkdir(parents=True)
-    (flow_yaml / "hooks.yaml").write_text(
-        "hooks:\n"
-        "  - hook_type: update_agent_state\n"
-        "    hook_agent: Planner\n"
+    (flow_yaml / "middleware.yaml").write_text(
+        "prompt_middleware:\n"
+        "  - agent: Planner\n"
         "    filename: hook_file.py\n"
         "    function: set_state\n",
         encoding="utf-8",
@@ -27,10 +27,9 @@ def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
     (flow_yaml / "hooks.json").write_text(
         json.dumps(
             {
-                "hooks": [
+                "prompt_middleware": [
                     {
-                        "hook_type": "update_agent_state",
-                        "hook_agent": "Planner",
+                        "agent": "Planner",
                         "filename": "removed_hook.py",
                         "function": "removed_set_state",
                     }
@@ -40,7 +39,7 @@ def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    entries_yaml = _hooks_mod.load_hook_entries("FlowYaml", base_path=str(tmp_path))
+    entries_yaml = _middleware_mod.load_prompt_middleware_entries("FlowYaml", base_path=str(tmp_path))
     assert entries_yaml and entries_yaml[0]["filename"] == "hook_file.py"
 
     flow_json = tmp_path / "FlowJson"
@@ -48,10 +47,9 @@ def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
     (flow_json / "hooks.json").write_text(
         json.dumps(
             {
-                "hooks": [
+                "prompt_middleware": [
                     {
-                        "hook_type": "update_agent_state",
-                        "hook_agent": "Narrator",
+                        "agent": "Narrator",
                         "filename": "removed_only.py",
                         "function": "before_send",
                     }
@@ -61,8 +59,61 @@ def test_hooks_loader_reads_yaml_only(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    entries_json = _hooks_mod.load_hook_entries("FlowJson", base_path=str(tmp_path))
+    entries_json = _middleware_mod.load_prompt_middleware_entries("FlowJson", base_path=str(tmp_path))
     assert entries_json == []
+
+
+def test_prompt_middleware_loader_accepts_import_path_without_filename(tmp_path: Path) -> None:
+    flow = tmp_path / "FlowImportPath"
+    flow.mkdir(parents=True)
+    (flow / "middleware.yaml").write_text(
+        "prompt_middleware:\n"
+        "  - agent: Planner\n"
+        "    function: mozaiksai.core.workflow.context.projection.inject_build_context_projections\n",
+        encoding="utf-8",
+    )
+
+    entries = _middleware_mod.load_prompt_middleware_entries("FlowImportPath", base_path=str(tmp_path))
+    assert entries == [
+        {
+            "agent": "Planner",
+            "filename": None,
+            "function": "mozaiksai.core.workflow.context.projection.inject_build_context_projections",
+        }
+    ]
+
+    fn, qualname = _middleware_mod._resolve_import(
+        "FlowImportPath",
+        None,
+        "mozaiksai.core.workflow.context.projection.inject_build_context_projections",
+        flow,
+    )
+    assert callable(fn)
+    assert qualname == "mozaiksai.core.workflow.context.projection.inject_build_context_projections"
+
+
+def test_prompt_middleware_updates_current_turn_prompt() -> None:
+    def inject_prompt(agent, _messages):
+        agent.update_system_message(f"{agent.system_message}\n\nInjected for {agent.name}.")
+
+    middleware_factory = _middleware_mod.build_prompt_middleware(
+        middleware_functions=[inject_prompt],
+        agent_name="Planner",
+        base_system_message="Base prompt",
+        context_bridge={},
+    )
+
+    from autogen.beta import Context, MemoryStream
+    from autogen.beta.events import ModelRequest, ModelResponse
+
+    context = Context(MemoryStream(), prompt=["Base prompt"], variables={})
+    middleware = middleware_factory(ModelRequest("go"), context)
+
+    async def call_next(_events, call_context):
+        assert call_context.prompt == ["Base prompt\n\nInjected for Planner."]
+        return ModelResponse()
+
+    asyncio.run(middleware.on_llm_call(call_next, [], context))
 
 
 def test_agent_tools_loader_reads_yaml_only(tmp_path: Path) -> None:
@@ -169,12 +220,12 @@ def test_agent_tools_loader_rebinds_workflows_package_to_active_root(tmp_path: P
     assert result == {"ok": True, "source": "repo-local-helper"}
 
 
-def test_hooks_loader_resolves_shared_context_graph_hook_from_repo() -> None:
+def test_middleware_loader_resolves_shared_context_graph_hook_from_repo() -> None:
     workspace = Path(__file__).resolve().parents[1]
     workflows_root = workspace / "factory_app" / "workflows"
     workflow_path = workflows_root / "AppGenerator"
 
-    fn, qualname = _hooks_mod._resolve_import(
+    fn, qualname = _middleware_mod._resolve_import(
         "AppGenerator",
         "../_shared/context_graph/hook_context_graph.py",
         "inject_context_graph_context",
@@ -261,7 +312,6 @@ def test_shared_context_graph_hook_does_not_treat_catalog_as_prompt_pack() -> No
     assert captured == {}
     assert agent.system_message == "Base prompt"
 
-
 def test_shared_context_graph_hook_ignores_control_plane_scope_payload() -> None:
     captured: dict[str, str] = {}
 
@@ -284,3 +334,4 @@ def test_shared_context_graph_hook_ignores_control_plane_scope_payload() -> None
 
     assert captured == {}
     assert agent.system_message == "Base prompt"
+

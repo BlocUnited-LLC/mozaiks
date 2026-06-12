@@ -968,10 +968,10 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
         context_variables=context,
     )
 
-    data_contract = json.loads((tmp_path / "config" / "data.json").read_text(encoding="utf-8"))
+    data_contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert data_contract["surfaces"][0]["surface_id"] == "users"
     assert context.data["app_data_contract"]["policies"]["default_scope_field"] == "app_id"
-    assert "config/data.json" in result
+    assert "data/contract.json" in result
 
 
 def test_save_app_schema_rejects_invalid_asset_manifest(monkeypatch, tmp_path: Path) -> None:
@@ -1034,3 +1034,4 @@ def test_promote_generated_app_copies_allowlisted_artifacts(tmp_path: Path) -> N
     assert (target / "app.json").exists()
     assert (target / "ui" / "pages" / "Dashboard.yaml").exists()
     assert (target / "services" / "integrations" / "email_client.py").exists()
+

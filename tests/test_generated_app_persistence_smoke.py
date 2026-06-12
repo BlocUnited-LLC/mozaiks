@@ -272,7 +272,7 @@ def _write_generated_persistence_app(root: Path) -> None:
         },
     )
     _write_json(
-        root / "config" / "data.json",
+        root / "data" / "contract.json",
         {
             "version": "1",
             "app_id": "smoke_app",
@@ -318,7 +318,7 @@ def _write_generated_persistence_app(root: Path) -> None:
         },
     )
     _write_json(
-        root / "config" / "data_migrations" / "001_projects_tasks_indexes.json",
+        root / "data" / "migrations" / "001_projects_tasks_indexes.json",
         {
             "migration_id": "001_projects_tasks_indexes",
             "version": "1",
@@ -527,8 +527,8 @@ def test_fixture_app_structure_is_canonical(tmp_path: Path) -> None:
     _write_generated_persistence_app(tmp_path)
 
     assert (tmp_path / "app.json").exists()
-    assert (tmp_path / "config" / "data.json").exists()
-    assert (tmp_path / "config" / "data_migrations" / "001_projects_tasks_indexes.json").exists()
+    assert (tmp_path / "data" / "contract.json").exists()
+    assert (tmp_path / "data" / "migrations" / "001_projects_tasks_indexes.json").exists()
     for module_id in ("projects", "tasks"):
         module_root = tmp_path / "modules" / module_id
         assert (module_root / "module.yaml").exists()
@@ -573,7 +573,7 @@ def test_generated_fixture_code_uses_only_canonical_persistence(tmp_path: Path) 
 
 def test_data_contract_matches_repo_collection_calls_and_is_additive(tmp_path: Path) -> None:
     _write_generated_persistence_app(tmp_path)
-    intent = json.loads((tmp_path / "config" / "data.json").read_text(encoding="utf-8"))
+    intent = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     migrations = load_data_migrations(tmp_path)
 
     intent_keys = {
@@ -686,3 +686,4 @@ async def test_module_executor_runs_generated_persistent_modules_end_to_end(
 
     assert any(context.app_id == "app_a" for context in FakePersistenceContext.constructed)
     assert not hasattr(module_executor_module.ModuleRequest(module="x", action="y"), "db")
+

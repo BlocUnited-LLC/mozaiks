@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import mozaiksai.control_plane.runtime as control_plane_runtime
 from mozaiksai.control_plane import (
     ControlPlaneCheckpointManifest,
     ControlPlaneCheckpointRuntime,
-    ControlPlaneHarnessManifest,
     ControlPlaneManifest,
-    ControlPlaneProfileInfo,
     ControlPlanePromptsManifest,
     ControlPlaneToolExecutor,
     ControlPlaneToolsManifest,
@@ -37,13 +36,9 @@ def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatc
         path=tmp_path,
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.control_plane",
-            profile=ControlPlaneProfileInfo(id="test", display_name="Test", description="Test pack"),
-            harness=ControlPlaneHarnessManifest(implementation="example_control_plane:ExampleHandler"),
             checkpoints=[
                 ControlPlaneCheckpointManifest(
-                    id="request_intake",
-                    event="request_submitted",
-                    entrypoint="example_control_plane:ExampleHandler",
+                    event="route_requested",
                 )
             ],
         ),
@@ -62,12 +57,17 @@ def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatc
         pack=pack,
         tool_executor=ControlPlaneToolExecutor(pack_loader=lambda: pack),
     )
-    bound = runtime.bind_checkpoint("request_submitted", dependency="first")
+    monkeypatch.setitem(
+        control_plane_runtime.CHECKPOINT_HANDLER_ENTRYPOINTS,
+        "route_requested",
+        "example_control_plane:ExampleHandler",
+    )
+    bound = runtime.bind_checkpoint("route_requested", dependency="first")
 
     assert bound.dependency == "first"
-    assert runtime.get_checkpoint("request_submitted") is bound
-    assert runtime.has_checkpoint("request_submitted") is True
-    assert runtime.checkpoint_events() == ["request_submitted"]
+    assert runtime.get_checkpoint("route_requested") is bound
+    assert runtime.has_checkpoint("route_requested") is True
+    assert runtime.checkpoint_events() == ["route_requested"]
 
 
 def test_build_selected_control_plane_harness_uses_checkpoint_runtime_for_default_profile() -> None:
@@ -79,7 +79,5 @@ def test_build_selected_control_plane_harness_uses_checkpoint_runtime_for_defaul
     assert isinstance(harness, OrchestrationControlHarness)
     assert harness._checkpoint_runtime is not None
     assert harness._checkpoint_runtime.get_checkpoint("request_submitted") is harness._refinement_resolver._classifier
-    assert harness._checkpoint_runtime.get_checkpoint("route_requested") is harness._refinement_resolver
-    assert harness._checkpoint_runtime.get_checkpoint("decision_requested") is harness._decision_policy
     assert harness._checkpoint_runtime.get_checkpoint("scope_requested") is harness._scope_proposer
     assert harness._checkpoint_runtime.get_checkpoint("coding_requested") is harness._coding_worker

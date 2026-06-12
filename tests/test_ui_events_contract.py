@@ -160,3 +160,4 @@ def test_render_update_dismiss_share_tool_call_id() -> None:
     dismiss = UIDismissData(tool_call_id=tid)
 
     assert render.tool_call_id == update.tool_call_id == dismiss.tool_call_id == tid
+

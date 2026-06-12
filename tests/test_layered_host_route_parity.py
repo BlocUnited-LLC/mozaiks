@@ -6,8 +6,6 @@ CANONICAL_STUDIO_ROUTES = {
     ("GET", "/api/health"),
     ("GET", "/api/events/metrics"),
     ("GET", "/health/active-runs"),
-    ("GET", "/metrics/perf/aggregate"),
-    ("GET", "/metrics/perf/chats"),
     ("GET", "/api/shell-config"),
     ("GET", "/api/me"),
     ("PUT", "/api/me"),
@@ -53,6 +51,8 @@ REMOVED_RUNTIME_ROUTES = {
     ("GET", "/favicon.ico"),
     ("GET", "/.well-known/appspecific/com.chrome.devtools.json"),
     ("GET", "/api/download/workflow-file"),
+    ("GET", "/metrics/perf/aggregate"),
+    ("GET", "/metrics/perf/chats"),
 }
 
 
@@ -82,3 +82,4 @@ def test_studio_host_does_not_restore_removed_routes():
     studio_routes = _public_routes(import_module("mozaiksai.hosts.studio").app)
 
     assert not (REMOVED_RUNTIME_ROUTES & studio_routes)
+

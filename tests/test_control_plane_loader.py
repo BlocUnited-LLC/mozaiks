@@ -17,7 +17,6 @@ def test_load_default_factory_control_plane_pack() -> None:
     app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
     pack = load_control_plane_pack(app_root=app_root)
 
-    assert pack.manifest.profile.id == "factory_app"
     assert pack.path == (Path(__file__).resolve().parents[1] / "factory_app" / "control_plane").resolve()
     assert pack.manifest.routing.default_artifact_kind == "app_bundle"
     app_bundle = pack.routing_for_artifact("app_bundle")
@@ -26,18 +25,19 @@ def test_load_default_factory_control_plane_pack() -> None:
     assert app_bundle.routes.patch.workflow_sequence == "app_revision"
     request_intake = pack.checkpoint_by_event("request_submitted")
     assert request_intake is not None
+    assert request_intake.mode == "ag2_structured_agent"
     assert request_intake.prompt_id == "change_classifier_system"
+    assert request_intake.output_contract == "ChangeClassifierResult"
     assert request_intake.tool_ids == [
         "get_revision_context",
         "get_artifact_summary",
         "get_stale_artifact_families",
     ]
-    decision = pack.checkpoint_by_event("decision_requested")
-    assert decision is not None
-    assert decision.tool_ids == []
     scope = pack.checkpoint_by_event("scope_requested")
     assert scope is not None
+    assert scope.mode == "ag2_structured_agent"
     assert scope.prompt_id == "coding_scope_selection_system"
+    assert scope.output_contract == "ScopeProposal"
     assert scope.tool_ids == [
         "get_revision_context",
         "get_artifact_summary",
@@ -49,7 +49,9 @@ def test_load_default_factory_control_plane_pack() -> None:
     assert pack.policies.scope.overflow_behavior == "clarify"
     coding = pack.checkpoint_by_event("coding_requested")
     assert coding is not None
+    assert coding.mode == "ag2_structured_agent"
     assert coding.prompt_id == "coding_refinement_system"
+    assert coding.output_contract == "CodingWorkerPlan"
     assert coding.tool_ids == [
         "get_revision_context",
         "get_artifact_summary",
@@ -68,10 +70,13 @@ def test_load_default_factory_control_plane_pack() -> None:
         "get_stale_artifact_families",
         "get_contract_surface_context",
         "get_carry_forward_candidates",
+        "read_artifact_file",
     ]
     contract_surface_checkpoint = pack.checkpoint_by_event("contract_surface_requested")
     assert contract_surface_checkpoint is not None
+    assert contract_surface_checkpoint.mode == "ag2_structured_agent"
     assert contract_surface_checkpoint.prompt_id == "contract_surface_selection_system"
+    assert contract_surface_checkpoint.output_contract == "ContractSurfaceClassification"
     assert contract_surface_checkpoint.tool_ids == ["get_contract_surface_context"]
     assert pack.prompt_by_id("contract_surface_selection_system") is not None
 
@@ -98,20 +103,9 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
         "\n".join(
             [
                 "schema_version: mozaiks.control_plane",
-                "profile:",
-                "  id: custom",
-                "  display_name: Custom",
-                "  description: Custom pack",
-                "harness:",
-                "  implementation: example.harness:Harness",
                 "checkpoints:",
-                "  - id: request_intake",
-                "    event: request_submitted",
-                "    entrypoint: example.classifier:Classifier",
+                "  - event: request_submitted",
                 "    prompt_id: classify",
-                "  - id: route",
-                "    event: route_requested",
-                "    entrypoint: example.router:Router",
             ]
         ),
         encoding="utf-8",
@@ -144,7 +138,6 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
 
     pack = load_selected_control_plane_pack(app_root=app_root)
 
-    assert pack.manifest.profile.id == "custom"
     assert pack.path == (workspace_root / "control_plane").resolve()
     assert pack.policies.scope.max_selected_paths == 2
 
@@ -160,16 +153,8 @@ def test_load_control_plane_pack_validates_prompt_references(tmp_path: Path) -> 
         "\n".join(
             [
                 "schema_version: mozaiks.control_plane",
-                "profile:",
-                "  id: broken",
-                "  display_name: Broken",
-                "  description: Broken pack",
-                "harness:",
-                "  implementation: example.harness:Harness",
                 "checkpoints:",
-                "  - id: request_intake",
-                "    event: request_submitted",
-                "    entrypoint: example.classifier:Classifier",
+                "  - event: request_submitted",
                 "    prompt_id: missing_prompt",
             ]
         ),
@@ -195,22 +180,11 @@ def test_load_control_plane_pack_validates_component_tool_availability(tmp_path:
         "\n".join(
             [
                 "schema_version: mozaiks.control_plane",
-                "profile:",
-                "  id: broken",
-                "  display_name: Broken",
-                "  description: Broken pack",
-                "harness:",
-                "  implementation: example.harness:Harness",
                 "checkpoints:",
-                "  - id: request_intake",
-                "    event: request_submitted",
-                "    entrypoint: example.classifier:Classifier",
+                "  - event: request_submitted",
                 "    prompt_id: classify",
                 "    tool_ids:",
                 "      - router_only_tool",
-                "  - id: route",
-                "    event: route_requested",
-                "    entrypoint: example.router:Router",
             ]
         ),
         encoding="utf-8",
@@ -244,13 +218,115 @@ def test_load_control_plane_pack_validates_component_tool_availability(tmp_path:
         load_control_plane_pack(app_root=app_root, factory_root=pack_root)
 
 
+def _write_checkpoint_contract_pack(
+    pack_root: Path,
+    *,
+    checkpoint_lines: list[str],
+    prompt_id: str | None = "classify",
+) -> None:
+    (pack_root / "config").mkdir(parents=True)
+    (pack_root / "prompts").mkdir(parents=True)
+    (pack_root / "config" / "control_plane.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: mozaiks.control_plane",
+                "checkpoints:",
+                *checkpoint_lines,
+            ]
+        ),
+        encoding="utf-8",
+    )
+    if prompt_id:
+        (pack_root / "prompts" / f"{prompt_id}.yaml").write_text(
+            f"id: {prompt_id}\ncontent: checkpoint prompt\n",
+            encoding="utf-8",
+        )
+    (pack_root / "config" / "tools.yaml").write_text(
+        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
+        encoding="utf-8",
+    )
+
+
+def test_load_control_plane_pack_rejects_ag2_checkpoint_without_prompt(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    pack_root = tmp_path / "control_plane"
+    _write_checkpoint_contract_pack(
+        pack_root,
+        checkpoint_lines=[
+            "  - event: request_submitted",
+        ],
+        prompt_id=None,
+    )
+
+    with pytest.raises(ControlPlanePackLoadError, match="prompt_id"):
+        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+
+
+def test_load_control_plane_pack_rejects_deterministic_checkpoint_prompt(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    pack_root = tmp_path / "control_plane"
+    _write_checkpoint_contract_pack(
+        pack_root,
+        checkpoint_lines=[
+            "  - event: route_requested",
+            "    prompt_id: classify",
+        ],
+    )
+
+    with pytest.raises(ControlPlanePackLoadError, match="must not declare prompt_id"):
+        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+
+
+def test_load_control_plane_pack_rejects_runtime_wiring_fields(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    pack_root = tmp_path / "control_plane"
+    _write_checkpoint_contract_pack(
+        pack_root,
+        checkpoint_lines=[
+            "  - event: scope_requested",
+            "    prompt_id: classify",
+            "    entrypoint: example.scope:Scope",
+        ],
+    )
+
+    with pytest.raises(ControlPlanePackLoadError, match="entrypoint"):
+        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+
+
+def test_load_control_plane_pack_rejects_top_level_harness(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    pack_root = tmp_path / "control_plane"
+    (pack_root / "config").mkdir(parents=True)
+    (pack_root / "prompts").mkdir(parents=True)
+    (pack_root / "config" / "control_plane.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: mozaiks.control_plane",
+                "harness:",
+                "  implementation: example.harness:Harness",
+                "checkpoints: []",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (pack_root / "config" / "tools.yaml").write_text(
+        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ControlPlanePackLoadError, match="harness"):
+        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+
+
 def _write_minimal_control_plane_pack(pack_root: Path, *, route_payload: dict) -> None:
     (pack_root / "config").mkdir(parents=True)
     (pack_root / "prompts").mkdir(parents=True)
     manifest = {
         "schema_version": "mozaiks.control_plane",
-        "profile": {"id": "test", "display_name": "Test", "description": "Test pack"},
-        "harness": {"implementation": "example.harness:Harness"},
         "routing": {
             "default_artifact_kind": "app_bundle",
             "artifacts": [

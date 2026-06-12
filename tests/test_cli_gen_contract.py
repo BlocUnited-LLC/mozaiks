@@ -37,3 +37,4 @@ def test_gen_command_threads_validation_strategy_into_context() -> None:
     assert "default_app_validation_strategy" in source
     assert "normalize_app_validation_strategy" in source
     assert "Validation strategy" in source
+

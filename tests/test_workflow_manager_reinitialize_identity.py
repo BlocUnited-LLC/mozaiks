@@ -44,13 +44,13 @@ def _write_minimal_workflow(root: Path, workflow_name: str) -> None:
         ),
     )
     _write_yaml(
-        wf_dir / "handoffs.yaml",
+        wf_dir / "transition_graph.yaml",
         "\n".join(
             [
-                "handoff_rules:",
+                "transition_rules:",
                 "  - source_agent: DemoAgent",
                 "    target_agent: terminate",
-                "    handoff_type: after_work",
+                "    transition_type: after_turn",
             ]
         ),
     )
@@ -66,7 +66,7 @@ def _write_minimal_workflow(root: Path, workflow_name: str) -> None:
             ]
         ),
     )
-    _write_yaml(wf_dir / "hooks.yaml", "hooks: []\n")
+    _write_yaml(wf_dir / "middleware.yaml", "prompt_middleware: []\n")
     _write_yaml(wf_dir / "tools.yaml", "tools: []\nlifecycle_tools: []\n")
 
 
@@ -105,3 +105,4 @@ def test_initialize_workflows_rejects_multiple_roots(tmp_path: Path) -> None:
         assert "one workflow root" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("initialize_workflows accepted multiple workflow roots")
+

@@ -193,3 +193,4 @@ def test_frontend_shell_normalizes_mobile_and_desktop_footer() -> None:
     assert "resolveShellMode" in route_renderer
     assert "showBottomBarMobile" in route_renderer
     assert "footerConfig.hideOnMobile" in footer
+

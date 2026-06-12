@@ -292,13 +292,13 @@ class TestStaticContractChecks:
         assert "Do not invent helper files" in source or "[FILE CONTRACTS CONTEXT]" in source
 
     def test_file_contracts_module_contract_required_output_is_module_yaml(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         assert fc["task_contracts"]["module_contract"]["required_outputs"] == [
             "modules/{pack_name}/module.yaml"
         ]
 
     def test_file_contracts_module_contract_optional_outputs_use_contracts_subdir(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         opts = fc["task_contracts"]["module_contract"]["optional_outputs"]
         companion_opts = [
             o for o in opts
@@ -310,7 +310,7 @@ class TestStaticContractChecks:
             )
 
     def test_file_contracts_module_contract_no_flat_companions_at_module_root(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         module_contract = fc["task_contracts"]["module_contract"]
         all_outputs = (
             module_contract.get("required_outputs", [])
@@ -324,11 +324,11 @@ class TestStaticContractChecks:
                     )
 
     def test_file_contracts_backend_helper_section_exists(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         assert "backend_helper_files" in fc
 
     def test_file_contracts_backend_helper_rules_require_declaration_before_generation(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         rules = fc["backend_helper_files"]["helper_contract"]["rules"]
         assert any(
             "declared" in r and ("owned_paths" in r or "python_stubs" in r)
@@ -336,12 +336,12 @@ class TestStaticContractChecks:
         ), "No rule requiring helper files to be declared in owned_paths or python_stubs"
 
     def test_file_contracts_backend_helper_prohibited_for_arbitrary_file_splitting(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         prohibited = fc["backend_helper_files"]["helper_contract"]["prohibited_for"]
         assert any("arbitrary" in p and "splitting" in p for p in prohibited)
 
     def test_file_contracts_backend_helper_prohibited_for_generic_service_logic(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         prohibited = fc["backend_helper_files"]["helper_contract"]["prohibited_for"]
         assert any("service.py" in p for p in prohibited)
 
@@ -889,3 +889,8 @@ class TestRuntimeLoadFixture:
         module_names = {m.name for m in result.modules}
         assert "projects" in module_names
         assert "tasks" in module_names
+
+
+
+
+

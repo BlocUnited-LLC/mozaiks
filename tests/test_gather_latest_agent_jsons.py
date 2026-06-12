@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -13,7 +13,7 @@ AG2PersistenceManager = _persist_mod.AG2PersistenceManager
 @pytest.mark.asyncio
 async def test_gather_latest_agent_jsons_ignores_user_messages(caplog) -> None:
     manager = AG2PersistenceManager.__new__(AG2PersistenceManager)
-    manager.resume_chat = AsyncMock(return_value=[
+    manager.load_run_history = AsyncMock(return_value=[
         {"role": "user", "content": "hello"},
         {
             "role": "assistant",
@@ -21,7 +21,6 @@ async def test_gather_latest_agent_jsons_ignores_user_messages(caplog) -> None:
             "structured_output": {"summary": "done"},
         },
     ])
-    manager._coll = AsyncMock(return_value=MagicMock())
 
     with caplog.at_level(logging.WARNING):
         result = await manager.gather_latest_agent_jsons(chat_id="chat-1", app_id="app-1")
@@ -33,7 +32,7 @@ async def test_gather_latest_agent_jsons_ignores_user_messages(caplog) -> None:
 @pytest.mark.asyncio
 async def test_gather_latest_agent_jsons_falls_back_when_latest_message_is_malformed(caplog) -> None:
     manager = AG2PersistenceManager.__new__(AG2PersistenceManager)
-    manager.resume_chat = AsyncMock(
+    manager.load_run_history = AsyncMock(
         return_value=[
             {
                 "role": "assistant",
@@ -54,7 +53,6 @@ async def test_gather_latest_agent_jsons_falls_back_when_latest_message_is_malfo
             },
         ]
     )
-    manager._coll = AsyncMock(return_value=MagicMock())
 
     with caplog.at_level(logging.DEBUG):
         result = await manager.gather_latest_agent_jsons(chat_id="chat-1", app_id="app-1")
@@ -97,3 +95,4 @@ def test_extract_json_from_wrapped_text_event_content() -> None:
             "pack_name": "Internal Helpdesk Ticket Resolution",
         }
     }
+

@@ -163,3 +163,4 @@ def test_app_context_policy_graph_hints_have_no_graph_database_or_proprietary_te
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

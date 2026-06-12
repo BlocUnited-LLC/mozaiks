@@ -60,18 +60,13 @@ class _FakeChatSessionsCollection:
 
 
 @pytest.mark.asyncio
-async def test_build_persisted_admin_stats_reads_chat_session_rollup(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_persisted_admin_stats_reads_chat_session_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     collection = _FakeChatSessionsCollection(
         aggregate_docs=[
             {
                 "tracked_chats": 3,
                 "active_chats": 1,
-                "total_agent_turns": 9,
-                "total_tool_calls": 6,
-                "total_errors": 2,
-                "total_prompt_tokens": 1200,
-                "total_completion_tokens": 450,
-                "total_cost": 1.875,
+                "completed_chats": 2,
             }
         ]
     )
@@ -82,17 +77,13 @@ async def test_build_persisted_admin_stats_reads_chat_session_rollup(monkeypatch
     assert stats == {
         "active_chats": 1,
         "tracked_chats": 3,
-        "total_agent_turns": 9,
-        "total_tool_calls": 6,
-        "total_errors": 2,
-        "total_prompt_tokens": 1200,
-        "total_completion_tokens": 450,
-        "total_cost": 1.875,
+        "completed_chats": 2,
+        "telemetry_source": "ag2_opentelemetry",
     }
     assert len(collection.aggregate_calls) == 1
     project_stage = collection.aggregate_calls[0][0]["$project"]
-    assert "tool_calls_final" in project_stage
-    assert "errors_final" in project_stage
+    assert "usage_" + "prompt_tokens_final" not in project_stage
+    assert "tool_calls" + "_final" not in project_stage
 
 
 @pytest.mark.asyncio
@@ -111,11 +102,6 @@ async def test_build_persisted_admin_runs_maps_sessions_to_existing_ui_shape(
                 "created_at": now - timedelta(seconds=90),
                 "completed_at": None,
                 "duration_sec": 0.0,
-                "usage_prompt_tokens_final": 100,
-                "usage_completion_tokens_final": 50,
-                "usage_total_cost_final": 0.02,
-                "tool_calls_final": 3,
-                "errors_final": 1,
                 "messages": [
                     {"role": "user", "content": "Hi"},
                     {"role": "assistant", "content": "Hello"},
@@ -130,11 +116,6 @@ async def test_build_persisted_admin_runs_maps_sessions_to_existing_ui_shape(
                 "created_at": now - timedelta(minutes=10),
                 "completed_at": now - timedelta(minutes=9, seconds=40),
                 "duration_sec": 15.0,
-                "usage_prompt_tokens_final": 200,
-                "usage_completion_tokens_final": 80,
-                "usage_total_cost_final": 0.04,
-                "tool_calls_final": 4,
-                "errors_final": 0,
                 "messages": [
                     {"role": "assistant", "content": "Draft 1"},
                     {"role": "assistant", "content": "Draft 2"},
@@ -149,11 +130,6 @@ async def test_build_persisted_admin_runs_maps_sessions_to_existing_ui_shape(
                 "created_at": now - timedelta(minutes=20),
                 "completed_at": now - timedelta(minutes=19, seconds=50),
                 "duration_sec": 10.0,
-                "usage_prompt_tokens_final": 1,
-                "usage_completion_tokens_final": 1,
-                "usage_total_cost_final": 0.001,
-                "tool_calls_final": 1,
-                "errors_final": 1,
                 "messages": [],
             },
         ]
@@ -168,12 +144,12 @@ async def test_build_persisted_admin_runs_maps_sessions_to_existing_ui_shape(
     assert response["runs"][0]["ended_at"] is None
     assert response["runs"][0]["runtime_sec"] == 90.0
     assert response["runs"][0]["agent_turns"] == 1
-    assert response["runs"][0]["tool_calls"] == 3
-    assert response["runs"][0]["errors"] == 1
+    assert response["runs"][0]["telemetry_source"] == "ag2_opentelemetry"
+    assert "tool_calls" not in response["runs"][0]
+    assert "prompt_tokens" not in response["runs"][0]
     assert response["runs"][1]["ended_at"] == (now - timedelta(minutes=9, seconds=40)).isoformat()
     assert response["runs"][1]["runtime_sec"] == 20.0
     assert response["runs"][1]["agent_turns"] == 2
-    assert response["runs"][1]["tool_calls"] == 4
 
 
 @pytest.mark.asyncio
@@ -192,9 +168,6 @@ async def test_build_persisted_admin_runs_respects_active_only_and_limit(
                 "created_at": now - timedelta(minutes=1),
                 "completed_at": None,
                 "duration_sec": 0.0,
-                "usage_prompt_tokens_final": 0,
-                "usage_completion_tokens_final": 0,
-                "usage_total_cost_final": 0.0,
                 "messages": [],
             },
             {
@@ -206,9 +179,6 @@ async def test_build_persisted_admin_runs_respects_active_only_and_limit(
                 "created_at": now - timedelta(minutes=2),
                 "completed_at": None,
                 "duration_sec": 0.0,
-                "usage_prompt_tokens_final": 0,
-                "usage_completion_tokens_final": 0,
-                "usage_total_cost_final": 0.0,
                 "messages": [],
             },
             {
@@ -220,9 +190,6 @@ async def test_build_persisted_admin_runs_respects_active_only_and_limit(
                 "created_at": now - timedelta(minutes=3),
                 "completed_at": now - timedelta(minutes=2, seconds=30),
                 "duration_sec": 30.0,
-                "usage_prompt_tokens_final": 0,
-                "usage_completion_tokens_final": 0,
-                "usage_total_cost_final": 0.0,
                 "messages": [],
             },
         ]
@@ -234,3 +201,34 @@ async def test_build_persisted_admin_runs_respects_active_only_and_limit(
 
     assert response["total"] == 1
     assert [run["chat_id"] for run in response["runs"]] == ["chat-1"]
+
+
+@pytest.mark.asyncio
+async def test_admin_usage_endpoint_delegates_to_runtime_usage_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeLedger:
+        async def query_usage(self, *, app_id=None, user_id=None, limit=200):
+            return {
+                "app_id": app_id,
+                "user_id": user_id,
+                "limit": limit,
+                "totals": {"total_tokens": 123},
+            }
+
+    monkeypatch.setattr(
+        "mozaiksai.core.usage.get_runtime_usage_ledger",
+        lambda: _FakeLedger(),
+    )
+
+    response = await admin_router.get_admin_usage(
+        app_id="app-1",
+        user_id="user-1",
+        limit=50,
+        user=object(),
+    )
+
+    assert response == {
+        "app_id": "app-1",
+        "user_id": "user-1",
+        "limit": 50,
+        "totals": {"total_tokens": 123},
+    }

@@ -66,3 +66,4 @@ def test_studio_env_uses_factory_workflows_for_studio_host(monkeypatch, tmp_path
     assert env["MOZAIKS_WORKFLOWS_PATH"].endswith("factory_app\\workflows") or env[
         "MOZAIKS_WORKFLOWS_PATH"
     ].endswith("factory_app/workflows")
+

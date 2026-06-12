@@ -108,9 +108,9 @@ def test_app_build_plan_accepts_persistence_contract_task() -> None:
                 "surface_kind": None,
                 "execution_target": "app",
                 "initial_agent": "DatabaseAgent",
-                "description": "Create config/data.json.",
+                "description": "Create data/contract.json.",
                 "initial_message": "Plan projects/tasks data contract.",
-                "owned_paths": ["config/data.json"],
+                "owned_paths": ["data/contract.json"],
                 "depends_on": [],
                 "acceptance_criteria": [],
             }
@@ -140,7 +140,7 @@ def test_appplan_prompt_injects_persistence_contract_for_planning() -> None:
 
     assert "[FILE CONTRACTS CONTEXT]" in agent.system_message
     assert "persistence_contract" in agent.system_message
-    assert "config/data.json" in agent.system_message
+    assert "data/contract.json" in agent.system_message
 
 
 @pytest.mark.skipif(
@@ -184,7 +184,7 @@ class TestAppPlanPersistentProjectsFixtureReplay:
 
     def test_data_contract_and_canonical_backend_paths_exist(self) -> None:
         assert isinstance(self.plan.get("data_contract"), dict)
-        assert "config/data.json" in self.paths
+        assert "data/contract.json" in self.paths
         for module_id in ("projects", "tasks"):
             assert f"modules/{module_id}/backend/repo.py" in self.paths
             assert f"modules/{module_id}/backend/schemas.py" in self.paths
@@ -201,7 +201,7 @@ class TestAppPlanPersistentProjectsFixtureReplay:
 
     def test_database_migration_paths_are_canonical_when_present(self) -> None:
         migration_paths = [path for path in self.paths if "data_migrations" in path]
-        assert all(path.startswith("config/data_migrations/") for path in migration_paths)
+        assert all(path.startswith("data/migrations/") for path in migration_paths)
 
     def test_persistence_stays_in_repo_layer(self) -> None:
         assert "backend/repo.py" in self.text
@@ -214,3 +214,4 @@ class TestAppPlanPersistentProjectsFixtureReplay:
         assert "/api/modules/mozaikspay" not in all_text
         assert "/api/modules/wallet" not in all_text
         assert "/api/modules/hosted_" not in all_text
+

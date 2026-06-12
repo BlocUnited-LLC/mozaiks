@@ -81,3 +81,4 @@ def test_integrations_summary_includes_connector_health_counts(monkeypatch) -> N
     assert summary["connector_summary"]["configured"] == 1
     assert summary["connector_summary"]["not_configured"] == 1
     assert summary["app_connectors"][1]["health"]["missing_fields"] == ["api_key"]
+

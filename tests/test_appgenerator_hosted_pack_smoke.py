@@ -42,11 +42,11 @@ _TOOLS_DIR = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _PACKS_ROOT_ENV = os.getenv("MOZAIKS_HOSTED_PACKS_ROOT", "").strip()
 _REAL_PACKS_ROOT = Path(_PACKS_ROOT_ENV).expanduser().resolve() if _PACKS_ROOT_ENV else None
 _REAL_WALLET_TEMPLATE = (
-    _REAL_PACKS_ROOT / "wallet" / "service_templates" / "wallet_client.py"
+    _REAL_PACKS_ROOT / "templates" / "services" / "integrations" / "wallet_client.py"
     if _REAL_PACKS_ROOT
     else None
 )
-_REAL_WALLET_MANIFEST = _REAL_PACKS_ROOT / "wallet" / "manifest.yaml" if _REAL_PACKS_ROOT else None
+_REAL_WALLET_MANIFEST = _REAL_PACKS_ROOT / "context.yaml" if _REAL_PACKS_ROOT else None
 
 _REAL_PACK_AVAILABLE = bool(_REAL_WALLET_TEMPLATE and _REAL_WALLET_TEMPLATE.exists())
 
@@ -107,12 +107,12 @@ class _FakeAgent:
 class TestHostedWalletContextInjection:
     """Level A — Hook injects wallet context; OSS mode is a no-op."""
 
-    def test_hook_injects_context_when_hosted_wallet_in_runtime_capabilities(self) -> None:
+    def test_hook_injects_context_when_hosted_wallet_in_capability_packs(self) -> None:
         hook = _load_hook()
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": [
-                "module_execution", "event_dispatch", "admin_shell",
-                "page_primitives", "websocket_transport", "notifications", "hosted_wallet",
+            "capability_packs": [
+                {"id": "hosted_wallet", "display_name": "Hosted Wallet",
+                 "capability_source": "hosted_pack"},
             ],
         })
         hook.inject_hosted_capabilities_context(agent, [])
@@ -122,7 +122,7 @@ class TestHostedWalletContextInjection:
     def test_hook_injects_wallet_pack_capabilities(self) -> None:
         hook = _load_hook()
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "available_hosted_packs": [
+            "capability_packs": [
                 {
                     "id": "wallet",
                     "capability_source": "hosted_pack",
@@ -144,19 +144,28 @@ class TestHostedWalletContextInjection:
     def test_hook_injects_no_module_contract_planning_rule_for_hosted_pack(self) -> None:
         hook = _load_hook()
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "available_hosted_packs": [{"id": "wallet", "capability_source": "hosted_pack"}],
+            "capability_packs": [{"id": "wallet", "capability_source": "hosted_pack"}],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         msg = agent.system_message
         assert "module_contract" in msg
         assert "external_integration" in msg
 
+    def test_hook_supports_selected_active_pack_surfaces(self) -> None:
+        hook = _load_hook()
+        agent = _FakeAgent("AppPlanAgent", context_variables={
+            "capability_packs": [{"id": "mozaikspay", "capability_source": "hosted_pack"}],
+        })
+        hook.inject_hosted_capabilities_context(agent, [])
+        msg = agent.system_message
+        assert "generate one" in msg
+        assert "selected active" in msg
+        assert "operator contract" in msg
+
     def test_hook_no_op_in_oss_mode(self) -> None:
         hook = _load_hook()
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": None,
-            "available_hosted_packs": None,
-            "pack_sources": None,
+            "capability_packs": None,
         })
         hook.inject_hosted_capabilities_context(agent, [])
         assert agent.system_message == ""
@@ -186,17 +195,17 @@ class TestHostedWalletContextInjection:
         assert "modules/{pack_id}/" in source
 
     def test_file_contracts_api_surface_lists_backend_integrations(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         outputs = fc["task_contracts"]["api_surface"]["optional_outputs"]
         assert any("services/integrations" in o for o in outputs)
 
     def test_file_contracts_api_surface_hosted_adapter_constraint(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         constraints = fc["task_contracts"]["api_surface"]["hard_constraints"]
         assert any("hosted" in c.lower() for c in constraints)
 
     def test_file_contracts_api_surface_no_hosted_secrets_or_internals_rule(self) -> None:
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         constraints = fc["task_contracts"]["api_surface"]["hard_constraints"]
         # The contract must prohibit embedding host secrets
         assert any("secret" in c.lower() or "stripe" in c.lower() for c in constraints)
@@ -302,7 +311,7 @@ _CREATOR_DASHBOARD_SERVICES_TASK: Dict[str, Any] = {
     "description": "Generate wallet_dashboard module backend: handler and service.",
     "initial_message": (
         "Generate modules/wallet_dashboard/backend/handler.py and service.py. "
-        "Service must import HostedWalletClient from backend.integrations.wallet_client "
+        "Service must import HostedWalletClient from services.integrations.wallet_client "
         "and delegate to it — do not re-implement wallet logic."
     ),
     "owned_paths": [
@@ -311,7 +320,7 @@ _CREATOR_DASHBOARD_SERVICES_TASK: Dict[str, Any] = {
     ],
     "depends_on": ["creator_dashboard.wallet_dashboard_models"],
     "acceptance_criteria": [
-        "service.py imports HostedWalletClient from backend.integrations.wallet_client",
+        "service.py imports HostedWalletClient from services.integrations.wallet_client",
         "No Stripe imports or STRIPE_SECRET_KEY references",
     ],
 }
@@ -507,23 +516,23 @@ class TestCreatorDashboardBuildPlan:
 
 @pytest.fixture()
 def wallet_pack_root(tmp_path: Path) -> Path:
-    """Minimal pack source with active wallet manifest and template."""
-    wallet_dir = tmp_path / "wallet"
-    tpl_dir = wallet_dir / "service_templates"
+    """Minimal pack source with active wallet context and template tree."""
+    wallet_dir = tmp_path
+    tpl_dir = wallet_dir / "templates" / "services" / "integrations"
     tpl_dir.mkdir(parents=True)
 
     manifest = {
-        "schema_version": "mozaiks.capability_pack",
+        "context_id": "wallet",
+        "assets": [
+            {"path": "templates/", "kind": "templates"},
+        ],
         "pack": {
             "id": "wallet",
-            "display_name": "Wallet",
-            "version": "1.0.0",
             "status": "active",
             "capability_source": "hosted_pack",
         },
-        "service_templates": ["service_templates/wallet_client.py"],
     }
-    (wallet_dir / "manifest.yaml").write_text(yaml.dump(manifest), encoding="utf-8")
+    (wallet_dir / "context.yaml").write_text(yaml.dump(manifest), encoding="utf-8")
     (tpl_dir / "wallet_client.py").write_text(
         '"""\nHosted Wallet Adapter — generated app-side client.\n"""\n'
         "import httpx\n\n"
@@ -539,10 +548,9 @@ def wallet_pack_root(tmp_path: Path) -> Path:
 def pack_sources(wallet_pack_root: Path) -> List[Dict[str, Any]]:
     return [
         {
-            "id": "mozaiks_app_hosted",
-            "kind": "filesystem",
-            "path": str(wallet_pack_root),
+            "id": "wallet",
             "capability_source": "hosted_pack",
+            "pack_source_path": str(wallet_pack_root),
         }
     ]
 
@@ -569,9 +577,7 @@ class TestCreatorDashboardAssembly:
         self, pack_sources: List[Dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, [_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK]
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         assert len(template_files) == 1
         assert template_files[0]["filename"] == "services/integrations/wallet_client.py"
 
@@ -581,9 +587,7 @@ class TestCreatorDashboardAssembly:
         from factory_app.workflows.AppGenerator.tools.assembly_phase import assemble_features
 
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, list(_CREATOR_DASHBOARD_BUILD_TASKS)
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         feature_outputs = _simulate_creator_dashboard_feature_outputs()
         base_result = asyncio.run(assemble_features("creator-dashboard-test", feature_outputs))
 
@@ -601,9 +605,7 @@ class TestCreatorDashboardAssembly:
         self, pack_sources: List[Dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, list(_CREATOR_DASHBOARD_BUILD_TASKS)
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         for entry in template_files:
             assert not entry["filename"].startswith("modules/wallet"), (
                 f"Drift: modules/wallet/ path in template output: {entry['filename']}"
@@ -614,9 +616,7 @@ class TestCreatorDashboardAssembly:
         self, pack_sources: List[Dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, list(_CREATOR_DASHBOARD_BUILD_TASKS)
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         for entry in template_files:
             assert "capability_packs" not in entry["filename"]
 
@@ -624,9 +624,7 @@ class TestCreatorDashboardAssembly:
         self, pack_sources: List[Dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, [_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK]
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         for entry in template_files:
             content = entry["content"]
             import_lines = [ln.strip() for ln in content.splitlines()
@@ -640,9 +638,7 @@ class TestCreatorDashboardAssembly:
         self, pack_sources: List[Dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, [_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK]
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         for entry in template_files:
             assert "STRIPE_SECRET_KEY" not in entry["content"], (
                 "Drift: STRIPE_SECRET_KEY found in wallet adapter content"
@@ -652,9 +648,7 @@ class TestCreatorDashboardAssembly:
         self, pack_sources: List[Dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, [_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK]
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         for entry in template_files:
             import_lines = [ln.strip() for ln in entry["content"].splitlines()
                             if ln.strip().startswith(("import ", "from "))]
@@ -665,26 +659,13 @@ class TestCreatorDashboardAssembly:
 
     def test_oss_mode_no_template_expansion(self) -> None:
         resolver = _load_resolver()
-        result = resolver.resolve_hosted_pack_templates(
-            None, list(_CREATOR_DASHBOARD_BUILD_TASKS)
-        )
+        result = resolver.resolve_hosted_pack_templates(None)
         assert result == []
 
     def test_oss_mode_with_empty_pack_sources(self) -> None:
         resolver = _load_resolver()
-        result = resolver.resolve_hosted_pack_templates(
-            [], list(_CREATOR_DASHBOARD_BUILD_TASKS)
-        )
+        result = resolver.resolve_hosted_pack_templates([])
         assert result == []
-
-    def test_page_tasks_are_not_treated_as_adapter_tasks(
-        self, pack_sources: List[Dict[str, Any]]
-    ) -> None:
-        resolver = _load_resolver()
-        # page_bundle tasks should be skipped — only api_surface adapter tasks expand
-        page_only = [_CREATOR_DASHBOARD_PAGE_TASK]
-        result = resolver.resolve_hosted_pack_templates(pack_sources, page_only)
-        assert result == [], "page_bundle tasks must not trigger template expansion"
 
     def test_hosted_template_wins_over_llm_generated_adapter(
         self, pack_sources: List[Dict[str, Any]]
@@ -693,9 +674,7 @@ class TestCreatorDashboardAssembly:
         from factory_app.workflows.AppGenerator.tools.assembly_phase import assemble_features
 
         resolver = _load_resolver()
-        template_files = resolver.resolve_hosted_pack_templates(
-            pack_sources, [_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK]
-        )
+        template_files = resolver.resolve_hosted_pack_templates(pack_sources)
         # Simulate LLM generating a (wrong) adapter file
         llm_output = [{
             "code_files": [
@@ -776,18 +755,12 @@ class TestRealWalletTemplateDriftGuards:
         resolver = _load_resolver()
         pack_sources = [
             {
-                "id": "mozaiks_app_hosted",
-                "kind": "filesystem",
-                "path": str(_REAL_PACKS_ROOT),
+                "id": "wallet",
                 "capability_source": "hosted_pack",
+                "pack_source_path": str(_REAL_PACKS_ROOT),
             }
         ]
-        task = {
-            "task_type": "api_surface",
-            "capability_pack_id": "wallet",
-            "owned_paths": ["services/integrations/wallet_client.py"],
-        }
-        result = resolver.resolve_hosted_pack_templates(pack_sources, [task])
+        result = resolver.resolve_hosted_pack_templates(pack_sources)
         assert len(result) == 1
         assert result[0]["filename"] == "services/integrations/wallet_client.py"
         assert result[0]["content"] == self.content
@@ -956,6 +929,20 @@ class TestFacadeModuleConvention:
         assert "Hosted-pack page binding rule" in source
         assert "façade module" in source or "facade module" in source.lower()
 
+    def test_appplanagent_allows_app_owned_facade_for_hosted_pack(self) -> None:
+        """Hosted packs must not block app-owned facade module planning."""
+        source = _read("factory_app/workflows/AppGenerator/agents.yaml")
+        assert "for the hosted pack id itself" in source
+        assert "also plan a generated facade module" in source
+        assert "capability_source: generated_module" in source
+
+    def test_structured_output_hosted_pack_description_allows_facade_modules(self) -> None:
+        """Capability source schema must distinguish hosted pack ids from facades."""
+        source = _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+        assert "do not generate" in source
+        assert "for the hosted pack id itself" in source
+        assert "facade module_contract tasks" in source
+
     def test_appschemaagent_facade_binding_guidance_present(self) -> None:
         """AppSchemaAgent must instruct pages to use the façade module id, not hosted pack id."""
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
@@ -966,13 +953,19 @@ class TestFacadeModuleConvention:
         """ServiceAgent rule 19 must describe how façade service imports the adapter client."""
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
         assert "Hosted adapter integration rule" in source
-        assert "from backend.integrations.{pack_id}_client import {PackIdClient}" in source
+        assert "from services.integrations.{pack_id}_client import {PackIdClient}" in source
 
     def test_file_contracts_api_surface_page_binding_constraint(self) -> None:
         """file_contracts.yaml api_surface must prohibit direct page binding to hosted pack."""
-        fc = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
+        fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         constraints = fc["task_contracts"]["api_surface"]["hard_constraints"]
         facade_rules = [c for c in constraints if "façade" in c.lower() or "facade" in c.lower()]
         assert facade_rules, (
             "api_surface hard_constraints must include façade module page binding rule"
         )
+
+
+
+
+
+

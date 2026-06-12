@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 APPGEN = ROOT / "factory_app" / "workflows" / "AppGenerator"
+APPGEN_CATALOGS = ROOT / "factory_app" / "build_context" / "AppGenerator"
 
 
 def _read(path: Path) -> str:
@@ -27,8 +28,9 @@ def test_database_agent_uses_intent_artifacts_not_live_database_tools() -> None:
     block = _agent_block("DatabaseAgent")
 
     assert "data_contract" in block
-    assert "config/data.json" in block
-    assert "config/data_migrations/{migration_id}.json" in block
+    assert "data/contract.json" in block
+    assert "data/migrations/{migration_id}.json" in block
+    assert "Never emit `config/data.json`" in block
     assert "pending_schema_migration" in block
 
     for tool_name in (
@@ -86,16 +88,16 @@ def test_structured_outputs_align_with_persistence_contract() -> None:
 
 
 def test_file_contracts_define_canonical_persistence_and_ban_removed_paths() -> None:
-    text = _read(APPGEN / "tools" / "file_contracts.yaml")
+    text = _read(APPGEN_CATALOGS / "file_contracts.yaml")
     data = yaml.safe_load(text)
     persistence = data["task_contracts"]["persistence_contract"]
     constraints = "\n".join(persistence["hard_constraints"])
 
-    assert persistence["required_outputs"] == ["config/data.json"]
-    assert "config/data_migrations/{migration_id}.json" in persistence["optional_outputs"]
-    assert "modules/{module_id}/backend/repo.py" in persistence["downstream_python_defaults"]
-    assert "modules/{module_id}/backend/schemas.py" in persistence["downstream_python_defaults"]
-    assert "modules/{module_id}/backend/policy.py" in persistence["downstream_python_defaults"]
+    assert persistence["required_outputs"] == ["data/contract.json"]
+    assert "data/migrations/{migration_id}.json" in persistence["optional_outputs"]
+    assert "modules/{module_id}/backend/repo.py" in persistence["downstream_backend_defaults"]
+    assert "modules/{module_id}/backend/schemas.py" in persistence["downstream_backend_defaults"]
+    assert "modules/{module_id}/backend/policy.py" in persistence["downstream_backend_defaults"]
 
     assert "Do not emit backend/models.py." in constraints
     assert "Do not emit backend/models/*.py." in constraints
@@ -105,10 +107,20 @@ def test_file_contracts_define_canonical_persistence_and_ban_removed_paths() -> 
     assert "must not use ctx.db" in constraints
     assert "must not import or call get_mongo_client()" in constraints
     assert "must not hardcode database names" in constraints
+    assert "config/data.json is a removed path" in constraints
+    assert "config/data_migrations is a removed path" in constraints
+
+
+def test_app_plan_agent_explicitly_forbids_legacy_config_data_path() -> None:
+    block = _agent_block("AppPlanAgent")
+
+    assert "data/contract.json" in block
+    assert "`config/data.json` is a removed path" in block
+    assert "config/data_migrations" not in block
 
 
 def test_file_contracts_keep_repo_as_only_persistence_layer() -> None:
-    data = yaml.safe_load(_read(APPGEN / "tools" / "file_contracts.yaml"))
+    data = yaml.safe_load(_read(APPGEN_CATALOGS / "file_contracts.yaml"))
     module_constraints = "\n".join(
         data["task_contracts"]["module_contract"]["hard_constraints"]
     )
@@ -312,8 +324,7 @@ def test_database_agent_output_example_contains_no_placeholder_content() -> None
 
 
 def test_module_archetypes_do_not_reference_removed_manifest_or_model_paths() -> None:
-    text = _read(APPGEN / "tools" / "module_archetypes.yaml")
-    hook_text = _read(APPGEN / "tools" / "hook_scope_transform.py")
+    text = _read(APPGEN_CATALOGS / "module_archetypes.yaml")
     domain_hook_text = _read(APPGEN / "tools" / "hook_domain_catalog_context.py")
 
     assert "channels.yaml" not in text.replace("Do not emit channels.yaml", "")
@@ -321,8 +332,7 @@ def test_module_archetypes_do_not_reference_removed_manifest_or_model_paths() ->
     assert "transitions.yaml" not in text
     assert "backend/models/" not in text
     assert "models.py" not in text
-    assert 'r"^backend/models/' not in hook_text
-    assert "features/{feature_name}/models" not in hook_text
+    assert not (APPGEN / "tools" / "hook_scope_transform.py").exists()
     assert '"channels.yaml"' not in domain_hook_text
     assert "Include channels.yaml only" not in domain_hook_text
 
@@ -341,9 +351,9 @@ def test_schema_save_and_download_paths_are_canonical() -> None:
     save_schema = _read(APPGEN / "tools" / "save_app_schema.py")
     generate_download = _read(APPGEN / "tools" / "generate_and_download.py")
 
-    assert '"config" / "data.json"' in save_schema
-    assert "config/data.json" in save_schema
-    assert "config/data_migrations" in generate_download
+    assert '"data" / "contract.json"' in save_schema
+    assert "data/contract.json" in save_schema
+    assert "data/migrations" in generate_download
 
 
 def test_docs_state_ctx_persistence_is_runtime_supported() -> None:
@@ -364,8 +374,8 @@ def test_docs_state_ctx_persistence_is_runtime_supported() -> None:
     assert "`ctx.db` remains absent and non-canonical" in docs
     assert "must not require `ctx.db`" in docs
     assert "backend/schemas.py" in docs
-    assert "config/data.json" in docs
-    assert "config/data_migrations/{migration_id}.json" in docs
+    assert "data/contract.json" in docs
+    assert "data/migrations/{migration_id}.json" in docs
 
 
 def test_add_module_skill_repo_example_uses_ctx_persistence() -> None:
@@ -376,7 +386,7 @@ def test_add_module_skill_repo_example_uses_ctx_persistence() -> None:
 
     assert 'getattr(ctx, "persistence", None)' in repo_section
     assert 'persistence.collection("{name}", "{name}")' in repo_section
-    assert "app/config/data.json" in repo_section
+    assert "app/data/contract.json" in repo_section
     assert "ctx.db" in repo_section
     assert "Do not use" in repo_section
     assert "get_mongo_client" in repo_section

@@ -125,3 +125,4 @@ def test_graph_authority_doc_is_registered_in_docs_navigation() -> None:
     assert "foundations/graph-authority-boundaries.md" in _read("docs/architecture/index.md")
     assert "graph-authority-boundaries.md" in _read("docs/architecture/foundations/overview.md")
     assert target in _read("mkdocs.yml")
+

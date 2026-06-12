@@ -204,3 +204,4 @@ class TestAgentGeneratorEmitBuildCompleted:
             )
 
         assert result == "outbox_ag_2"
+

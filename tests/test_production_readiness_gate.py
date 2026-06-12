@@ -47,3 +47,4 @@ def test_source_hygiene_scan_passes_current_repo() -> None:
     gate = _load_gate_module()
 
     assert gate.run_source_hygiene_scan() == []
+

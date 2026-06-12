@@ -462,3 +462,4 @@ def test_manifest_can_reference_optional_build_output_contract() -> None:
 
     errors = validate_deployment_template_manifest(manifest)
     assert errors == []
+

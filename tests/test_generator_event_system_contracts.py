@@ -69,6 +69,36 @@ def test_agentgenerator_structured_outputs_include_workflow_event_boundary() -> 
     assert "capability_id" in models["OrchestratorTrigger"]["fields"]
 
 
+def test_agentgenerator_workflow_bundle_contract_uses_workflow_startup_mode() -> None:
+    config = _read_yaml("factory_app/workflows/AgentGenerator/structured_outputs.yaml")
+    models = config["models"]
+
+    assert "workflow_startup_mode" in models["WorkflowStrategy"]["fields"]
+    assert "startup_mode" not in models["WorkflowStrategy"]["fields"]
+    assert "workflow_startup_mode" in models["OrchestrationConfigOutput"]["fields"]
+    assert "startup_mode" not in models["OrchestrationConfigOutput"]["fields"]
+
+
+def test_agentgenerator_bundle_builder_prompt_uses_current_workflow_contract_terms() -> None:
+    source = _read("factory_app/workflows/AgentGenerator/agents.yaml")
+    builder_section = source.split("- name: WorkflowBundleBuilderAgent", 1)[1].split("- name:", 1)[0]
+
+    assert "`workflow_startup_mode`" in builder_section
+    assert "`orchestrator.yaml` must use `workflow_startup_mode`" in builder_section
+    assert "- `startup_mode` (UserDriven / AgentDriven / BackendOnly)" not in builder_section
+    assert "HandoffsAgent" not in builder_section
+
+
+def test_agentgenerator_universal_prompt_hook_uses_current_agents_and_transition_graph() -> None:
+    source = _read("factory_app/workflows/AgentGenerator/tools/hook_universal_prompts.py")
+
+    assert "transition_graph.yaml exists in the agents list" in source
+    assert "WorkflowBundleBuilderAgent" in source
+    assert "PackMetadataAgent" in source
+    assert "HandoffsAgent" not in source
+    assert "HookAgent" not in source
+
+
 def test_agentgenerator_prompts_enforce_workflow_domain_event_boundary() -> None:
     source = _read("factory_app/workflows/AgentGenerator/agents.yaml")
 
@@ -79,4 +109,5 @@ def test_agentgenerator_prompts_enforce_workflow_domain_event_boundary() -> None
     assert "workflows must never publish `domain.*` directly" in source
     assert "Preserve `capability_id` when `WorkflowStrategy.event_boundary.input_events` declares one." in source
     assert "Do not put capability ids into orchestrator.yaml until the runtime trigger contract supports them" not in source
+
 

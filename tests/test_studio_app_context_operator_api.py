@@ -330,7 +330,7 @@ def test_override_allow_with_warning_is_non_mutating_and_preserves_plan_scope(mo
         workflow_sequence="app_revision",
         affected_workflows=["AppGenerator"],
         affected_declarative_families=["app_bundle"],
-        affected_bundle_paths=["config/data.json"],
+        affected_bundle_paths=["data/contract.json"],
         scope_summary="Brownfield data model migration.",
         app_id="app_1",
         request_id="req_1",
@@ -354,7 +354,7 @@ def test_override_allow_with_warning_is_non_mutating_and_preserves_plan_scope(mo
             "override_decision": "allow_with_warning",
             "reason": "Operator reviewed source ownership and will keep validation gates.",
             "reviewer": "operator@example.invalid",
-            "applies_to_paths": ["config/data.json"],
+            "applies_to_paths": ["data/contract.json"],
             "change_class": "feature",
             "refinement_lane": plan.refinement_lane,
             "apply_to_plan": True,
@@ -394,3 +394,4 @@ def test_operator_api_source_does_not_call_generation_promotion_or_graph_databas
     assert "revert_to_artifact_version" not in source
     assert "Falkor" not in source
     assert "mozaiks" + "-app" not in source.lower()
+

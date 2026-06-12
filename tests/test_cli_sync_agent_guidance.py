@@ -63,7 +63,7 @@ def test_generated_agent_guidance_declares_app_service_support_lane() -> None:
     assert "app/services/routes/" in agents
     assert "app/config/secrets.yaml" in agents
     assert "Never store raw API keys" in agents
-    assert "app/config/data.json" in agents
+    assert "app/data/contract.json" in agents
     assert "workflows/" in agents
     assert "business actions, lifecycle state, emitted events, or persistence authority" in agents
     assert "auth/" in agents and "dns/" in agents and "registrar/" in agents and "secrets/" in agents
@@ -185,3 +185,4 @@ def test_auto_sync_agent_guidance_skips_non_app_workspace(tmp_path) -> None:
     sync_agent_guidance_command.auto_sync_agent_guidance(tmp_path)
 
     assert not (tmp_path / "AGENTS.md").exists()
+

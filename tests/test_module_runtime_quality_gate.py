@@ -14,8 +14,8 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_HOOKS_YAML = _APPGEN_DIR / "hooks.yaml"
-_HANDOFFS_YAML = _APPGEN_DIR / "handoffs.yaml"
+_HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
+_HANDOFFS_YAML = _APPGEN_DIR / "transition_graph.yaml"
 _TOOLS_YAML = _APPGEN_DIR / "tools.yaml"
 _CTX_YAML = _APPGEN_DIR / "context_variables.yaml"
 _STRUCTURED_OUTPUTS_YAML = _APPGEN_DIR / "structured_outputs.yaml"
@@ -229,10 +229,10 @@ class TestModuleRuntimeQualityHook:
 
 
 class TestWorkflowWiring:
-    def test_hooks_yaml_registers_module_runtime_gate(self):
-        hooks = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8")).get("hooks") or []
+    def test_middleware_yaml_registers_module_runtime_gate(self):
+        hooks = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8")).get("prompt_middleware") or []
         assert any(
-            hook.get("hook_agent") == "ModuleRuntimeQualityAgent"
+            hook.get("agent") == "ModuleRuntimeQualityAgent"
             and hook.get("filename") == "hook_module_runtime_quality_gate.py"
             and hook.get("function") == "run_module_runtime_quality_gate"
             for hook in hooks
@@ -249,7 +249,7 @@ class TestWorkflowWiring:
 
     def test_handoffs_route_through_module_runtime_gate(self):
         handoffs = yaml.safe_load(_HANDOFFS_YAML.read_text(encoding="utf-8")).get(
-            "handoff_rules", []
+            "transition_rules", []
         )
         assert any(
             rule.get("source_agent") == "ServiceAgent"
@@ -259,19 +259,19 @@ class TestWorkflowWiring:
         assert any(
             rule.get("source_agent") == "ModuleRuntimeQualityAgent"
             and rule.get("target_agent") == "ServiceAgent"
-            and "needs_revision" in str(rule.get("condition"))
+            and rule.get("condition_value") == "needs_revision"
             for rule in handoffs
         )
         assert any(
             rule.get("source_agent") == "ModuleRuntimeQualityAgent"
             and rule.get("target_agent") == "FrontendStubAgent"
-            and "passed" in str(rule.get("condition"))
+            and rule.get("condition_value") == "passed"
             for rule in handoffs
         )
         assert any(
             rule.get("source_agent") == "ModuleRuntimeQualityAgent"
             and rule.get("target_agent") == "user"
-            and "blocked" in str(rule.get("condition"))
+            and rule.get("condition_value") == "blocked"
             for rule in handoffs
         )
 
@@ -290,3 +290,5 @@ class TestWorkflowWiring:
         data = yaml.safe_load(_STRUCTURED_OUTPUTS_YAML.read_text(encoding="utf-8"))
         assert "ModuleRuntimeQualityReviewRequest" in data["models"]
         assert data["registry"]["ModuleRuntimeQualityAgent"] == "ModuleRuntimeQualityReviewRequest"
+
+

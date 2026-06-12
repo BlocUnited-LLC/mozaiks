@@ -288,3 +288,4 @@ def test_context_refresh_execution_has_no_graph_database_or_proprietary_terms() 
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

@@ -444,3 +444,4 @@ def test_studio_connector_request_models_validate_with_postponed_annotations() -
 
     assert request.service == "analytics_provider"
     assert request.required_fields[0]["name"] == "api_key"
+

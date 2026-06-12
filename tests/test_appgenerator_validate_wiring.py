@@ -133,3 +133,4 @@ actions:
 
     assert result["passed"] is False
     assert result["orphaned_pages"][0]["endpoint"] == "/api/tickets"
+

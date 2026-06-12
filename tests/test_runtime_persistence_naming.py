@@ -136,3 +136,4 @@ def test_scope_metadata_includes_app_id_and_optional_scope_values() -> None:
 
 def test_scope_metadata_omits_missing_optional_scope_values() -> None:
     assert scope_metadata("app_1") == {"app_id": "app_1"}
+

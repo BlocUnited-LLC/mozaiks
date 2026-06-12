@@ -236,8 +236,8 @@ def check_plan_shape(plan: dict[str, Any]) -> list[str]:
             if expected not in owned_paths:
                 violations.append(f"missing owned_path {expected}")
 
-    if "config/data.json" not in owned_paths:
-        violations.append("missing owned_path config/data.json")
+    if "data/contract.json" not in owned_paths:
+        violations.append("missing owned_path data/contract.json")
 
     persistence_tasks = [task for task in build_tasks if task.get("task_type") == "persistence_contract"]
     database_tasks = [task for task in build_tasks if task.get("initial_agent") == "DatabaseAgent"]
@@ -252,8 +252,8 @@ def check_plan_shape(plan: dict[str, Any]) -> list[str]:
     else:
         violations.append("missing top-level data_contract")
 
-    migration_paths = [path for path in owned_paths if "data_migrations" in path]
-    if migration_paths and not all(path.startswith("config/data_migrations/") for path in migration_paths):
+    migration_paths = [path for path in owned_paths if "migrations" in path]
+    if migration_paths and not all(path.startswith("data/migrations/") for path in migration_paths):
         violations.append(f"non-canonical data migration path(s): {migration_paths}")
 
     forbidden_paths = (

@@ -163,7 +163,7 @@ def test_generator_prompts_treat_connector_state_as_platform_owned() -> None:
 def test_app_generator_page_contract_stays_declarative() -> None:
     content = _read("factory_app/workflows/AppGenerator/agents.yaml")
     agents = _read_yaml("factory_app/workflows/AppGenerator/agents.yaml")
-    handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
+    handoffs = _read_yaml("factory_app/workflows/AppGenerator/transition_graph.yaml")
 
     agent_names = {agent["name"] for agent in agents["agents"]}
     expected_agents = {
@@ -188,16 +188,16 @@ def test_app_generator_page_contract_stays_declarative() -> None:
     }
     connected_agents = {
         rule[side]
-        for rule in handoffs["handoff_rules"]
+        for rule in handoffs["transition_rules"]
         for side in ("source_agent", "target_agent")
         if rule[side] not in {"user", "terminate"}
     }
 
     assert "Keep persistent app pages declarative." in content
     assert "Only emit custom full-page React when a true primitive gap remains" in content
-    assert "The default owner of persistent pages is `AppSchemaAgent`." in content
+    assert "`AppBuildPlan.pages[]` is the authoritative persistent page inventory" in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
-    assert "Persistent page ownership is exclusive to `AppSchemaAgent`." in content
+    assert "Persistent page materialization is exclusively AppBuildPlan-driven" in content
     assert "persistent app pages still belong in `app.json` + `ui/pages/*.yaml`" in content
     assert "ui/index.js" in content
     assert "theme_config_patch" in content
@@ -434,22 +434,22 @@ def test_agent_generator_smoke_fixture_covers_real_ag2_workflow_ui_contract() ->
 
 
 def test_agent_generator_review_handoff_uses_user_text_state_triggers() -> None:
-    handoffs = _read_yaml("factory_app/workflows/AgentGenerator/handoffs.yaml")
+    handoffs = _read_yaml("factory_app/workflows/AgentGenerator/transition_graph.yaml")
     context_vars = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
 
     review_handoffs = {
         (rule["source_agent"], rule["target_agent"]): rule
-        for rule in handoffs["handoff_rules"]
+        for rule in handoffs["transition_rules"]
         if rule["source_agent"] == "user" and rule["target_agent"] in {"PackBuildCoordinator", "PatternAgent"}
     }
     review_defs = context_vars["definitions"]
 
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_type"] == "expression"
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_scope"] == "pre"
-    assert review_handoffs[("user", "PackBuildCoordinator")]["condition"] == "${workflow_review_approved} == True"
-    assert review_handoffs[("user", "PatternAgent")]["condition_type"] == "expression"
-    assert review_handoffs[("user", "PatternAgent")]["condition_scope"] == "pre"
-    assert review_handoffs[("user", "PatternAgent")]["condition"] == "${workflow_review_revision_requested} == True"
+    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_type"] == "context_equals"
+    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_key"] == "workflow_review_approved"
+    assert review_handoffs[("user", "PackBuildCoordinator")]["condition_value"] is True
+    assert review_handoffs[("user", "PatternAgent")]["condition_type"] == "context_equals"
+    assert review_handoffs[("user", "PatternAgent")]["condition_key"] == "workflow_review_revision_requested"
+    assert review_handoffs[("user", "PatternAgent")]["condition_value"] is True
 
     approved_trigger = review_defs["workflow_review_approved"]["source"]["triggers"][0]
     revision_trigger = review_defs["workflow_review_revision_requested"]["source"]["triggers"][0]
@@ -633,6 +633,18 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
         assert "props" not in ui
 
 
+def test_app_type_selector_emits_generic_monetization_selection_context() -> None:
+    content = _read("factory_app/workflows/extended_orchestration/ui/transitions/AppTypeSelector.js")
+    assert "provider_backed_capabilities" in content
+    assert "intent_id: 'monetization'" in content
+    assert "surfaces: ['checkout', 'billing']" in content
+    assert "monetization_enabled: true" in content
+    assert "onResolve(optionId, resolveContext)" in content
+    assert "provider_backed_capability_selection" not in content
+    assert "hosted_capability_selection" not in content
+    assert "mozaikspay" not in content.lower()
+
+
 def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
     from tests.conftest import active_app_root
     app_root = active_app_root()
@@ -661,3 +673,5 @@ def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
         source = path.read_text(encoding="utf-8")
         for font_name in literal_font_names:
             assert font_name not in source, f"{path} should use semantic font tokens, found literal '{font_name}'"
+
+

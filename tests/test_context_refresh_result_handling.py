@@ -367,3 +367,4 @@ def test_context_refresh_result_handling_has_no_graph_database_or_proprietary_te
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

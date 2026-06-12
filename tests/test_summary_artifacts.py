@@ -227,3 +227,4 @@ async def test_persist_summary_artifact_first_run_has_no_parent() -> None:
     )
 
     assert store.create_calls[0]["parent_version_id"] is None
+

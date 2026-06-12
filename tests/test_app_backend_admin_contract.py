@@ -78,3 +78,4 @@ def test_app_backend_admin_contract_rejects_removed_shapes() -> None:
     assert result["issues"] == [
         "App backend admin config must declare schema_version=mozaiks.admin.app_backend.v1."
     ]
+

@@ -201,3 +201,4 @@ async def test_generated_app_persistence_real_mongo_round_trip(monkeypatch: pyte
             await raw_collection.drop()
             await other_collection.drop()
         close_mongo_client()
+

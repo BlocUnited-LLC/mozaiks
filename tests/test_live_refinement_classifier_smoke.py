@@ -89,3 +89,4 @@ class TestRefinementClassifierFixtureReplay:
             "services/integrations/hosted_analytics_client.py"
             in by_id["hosted_capability_facade"]["impact"]["affected_bundle_paths"]
         )
+

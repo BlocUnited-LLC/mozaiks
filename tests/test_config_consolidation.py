@@ -271,3 +271,4 @@ class TestNavigationProviderUpdated:
 
     def test_no_adapters_reference(self, source):
         assert "/api/available-adapters" not in source
+

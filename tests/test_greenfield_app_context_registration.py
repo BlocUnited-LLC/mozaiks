@@ -119,8 +119,8 @@ def _file_manifest() -> list[dict[str, Any]]:
         "GeneratedApp/workflows/WorkOrderSummary/agents.yaml",
         "GeneratedApp/app/services/integrations/email_gateway_client.py",
         "GeneratedApp/app/config/integrations/email_gateway.json",
-        "GeneratedApp/app/config/data.json",
-        "GeneratedApp/app/config/data_migrations/add_work_orders.json",
+        "GeneratedApp/app/data/contract.json",
+        "GeneratedApp/app/data/migrations/add_work_orders.json",
         "GeneratedApp/app/config/shell.json",
         "GeneratedApp/app/brand/theme_config.json",
     ]
@@ -270,3 +270,4 @@ def test_greenfield_registration_has_no_graph_database_or_proprietary_dependency
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

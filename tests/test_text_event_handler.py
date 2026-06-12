@@ -6,7 +6,9 @@ import pytest
 from pydantic import BaseModel
 
 from mozaiksai.core.events.runtime_events import RUNTIME_AGENT_OUTPUT_VALIDATED
-from mozaiksai.core.workflow.orchestration_patterns import _emit_validated_agent_output
+from mozaiksai.core.workflow.outputs.runtime_events import (
+    emit_validated_agent_output as _emit_validated_agent_output,
+)
 
 
 class _RuntimeSmokeResult(BaseModel):

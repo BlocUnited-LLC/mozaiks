@@ -90,3 +90,4 @@ def test_studio_host_normalizes_repo_root_platform_path_to_factory_app_bundle(mo
     assert platform_path.parent.name == "factory_app"
     assert workflow_root.name == "workflows"
     assert workflow_root.parent.name == "factory_app"
+

@@ -125,3 +125,4 @@ async def test_load_context_prefers_db_value_over_fallback(
 
     context = await _vars_mod._load_context_async(workflow_name, "app-test")
     assert context.get(variable_name) == db_value
+

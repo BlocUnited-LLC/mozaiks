@@ -60,3 +60,4 @@ def test_email_promotion_reads_active_app_admins(monkeypatch, tmp_path: Path) ->
     assert email_promotion.is_admin_by_email("owner@example.com") is True
     assert email_promotion.is_admin_by_email("OWNER@example.com") is True
     assert email_promotion.is_admin_by_email("missing@example.com") is False
+

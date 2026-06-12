@@ -93,4 +93,5 @@ def test_control_plane_and_persistence_companion_notes_are_explicit() -> None:
 
     assert "Add `factory-build-workflow-change` as a companion skill when the change also alters `factory_app/workflows/extended_orchestration/extension_registry.json`" in control_plane_skill
     assert "Add `runtime-change` when `ModuleContext.persistence`, runtime persistence injection, or runtime persistence behavior changes." in persistence_skill
-    assert "Add `appgenerator-change` when generated `config/data.json`, `config/data_migrations/{migration_id}.json`, or generated module persistence output changes." in persistence_skill
+    assert "Add `appgenerator-change` when generated `data/contract.json`, `data/migrations/{migration_id}.json`, or generated module persistence output changes." in persistence_skill
+

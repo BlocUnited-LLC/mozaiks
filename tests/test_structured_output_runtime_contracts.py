@@ -11,7 +11,7 @@ _workflow_manager_mod = import_module_directly("mozaiksai.core.workflow.workflow
 _structured_mod = import_module_directly("mozaiksai.core.workflow.outputs.structured")
 
 
-def test_agentgenerator_structured_outputs_load_optional_dict_contracts() -> None:
+def test_agentgenerator_pack_metadata_output_supports_provider_strict_response_format() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
@@ -19,11 +19,18 @@ def test_agentgenerator_structured_outputs_load_optional_dict_contracts() -> Non
     _structured_mod._workflow_models.clear()
     _structured_mod._workflow_registries.clear()
     _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
 
     models, registry = _structured_mod.load_workflow_structured_outputs("AgentGenerator")
 
     assert registry["PatternAgent"].__name__ == "PatternSelectionOutput"
     assert registry["PackMetadataAgent"].__name__ == "PackMetadataOutput"
+
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["PackMetadataAgent"]
+    )
+    assert supported is True, f"PackMetadataOutput fails strict mode at: {offending_path}"
+    assert offending_path is None
 
     entrypoint = models["PackGraphEntrypoint"](
         id="create_app",
@@ -34,14 +41,19 @@ def test_agentgenerator_structured_outputs_load_optional_dict_contracts() -> Non
         sequence=None,
         requiresAuth=False,
         order=1,
+        meta=None,
     )
     transition_ui = models["PackGraphTransitionUI"](
         component="WorkflowChooser",
         mode="screen",
+        shell_mode=None,
+        props=None,
     )
     option = models["PackGraphTransitionOption"](
         id="new_app",
         route_to="ValueEngine",
+        sequence=None,
+        context_variables=None,
     )
 
     assert entrypoint.meta is None
@@ -85,6 +97,7 @@ def test_appgenerator_structured_outputs_load_task_batch_build_task_contract() -
             },
         ],
         integration_needs=[],
+        domain_context=None,
     )
 
     assert "AppChildWorkflowSpec" not in models
@@ -267,6 +280,25 @@ def test_get_llm_for_workflow_keeps_response_format_for_strict_safe_models() -> 
     assert cfg["response_format"] is expected_model
 
 
+def test_designdocs_agent_output_supports_provider_strict_response_format() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("DesignDocs")
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["DesignDocsAgent"]
+    )
+
+    assert supported is True, f"DesignDocsAgent output fails strict mode at: {offending_path}"
+    assert offending_path is None
+
+
 def test_runtime_task_batch_models_mark_declared_fields_as_required() -> None:
     workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
@@ -280,13 +312,90 @@ def test_runtime_task_batch_models_mark_declared_fields_as_required() -> None:
 
     planner_output = _structured_mod.get_provider_response_model(registry["TaskPlannerAgent"])
     planner_schema = planner_output.model_json_schema()
-    plan_schema = planner_schema["properties"]["RuntimeTaskBatchPlan"]
-    work_unit_schema = plan_schema["properties"]["work_units"]["items"]
+    plan_schema = planner_schema["properties"]["DecompositionPlan"]
+    work_unit_schema = plan_schema["properties"]["tasks"]["items"]
 
     assert planner_output.model_fields["agent_message"].is_required() is True
-    assert planner_output.model_fields["RuntimeTaskBatchPlan"].is_required() is True
-    assert _structured_mod.get_provider_response_model(models["RuntimeTaskBatchPlan"]).model_fields["user_intent"].is_required() is True
-    assert _structured_mod.get_provider_response_model(models["RuntimeTaskBatchWorkUnit"]).model_fields["task_id"].is_required() is True
-    assert _structured_mod.get_provider_response_model(models["RuntimeTaskBatchWorkUnit"]).model_fields["owned_paths"].is_required() is True
+    assert planner_output.model_fields["DecompositionPlan"].is_required() is True
+    assert _structured_mod.get_provider_response_model(models["DecompositionPlan"]).model_fields["user_intent"].is_required() is True
+    assert _structured_mod.get_provider_response_model(models["DecomposedTask"]).model_fields["task_id"].is_required() is True
+    assert _structured_mod.get_provider_response_model(models["DecomposedTask"]).model_fields["owned_paths"].is_required() is True
     assert "default" not in plan_schema["properties"]["user_intent"]
     assert "default" not in work_unit_schema["properties"]["task_id"]
+
+
+def test_runtime_task_batch_planner_supports_provider_strict_response_format() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("RuntimeTaskBatchSmoke")
+
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["TaskPlannerAgent"]
+    )
+    assert supported is True
+    assert offending_path is None
+
+
+def test_valueengine_gap_analysis_output_supports_provider_strict_response_format() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("ValueEngine")
+
+    assert registry["GapAnalysisAgent"].__name__ == "ConceptBlueprint"
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["GapAnalysisAgent"]
+    )
+    assert supported is True, f"ConceptBlueprint fails strict mode at: {offending_path}"
+    assert offending_path is None
+
+
+def test_themecapture_assembler_output_supports_provider_strict_response_format() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("ThemeCapture")
+
+    assert registry["ThemeConfigAssemblerAgent"].__name__ == "CapturedThemeConfig"
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["ThemeConfigAssemblerAgent"]
+    )
+    assert supported is True, f"CapturedThemeConfig fails strict mode at: {offending_path}"
+    assert offending_path is None
+
+
+def test_existingappdiscovery_assembler_output_supports_provider_strict_response_format() -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    _workflow_manager_mod.initialize_workflows(base_path=str(workflows_root))
+    _structured_mod._workflow_models.clear()
+    _structured_mod._workflow_registries.clear()
+    _structured_mod._workflow_structured_agents.clear()
+    _structured_mod._provider_response_model_cache.clear()
+
+    _, registry = _structured_mod.load_workflow_structured_outputs("ExistingAppDiscovery")
+
+    assert registry["DiscoveryArtifactAssemblerAgent"].__name__ == "ExistingAppAugmentationArtifact"
+    supported, offending_path = _structured_mod.supports_provider_response_format(
+        registry["DiscoveryArtifactAssemblerAgent"]
+    )
+    assert supported is True, f"ExistingAppAugmentationArtifact fails strict mode at: {offending_path}"
+    assert offending_path is None
+

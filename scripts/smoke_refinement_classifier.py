@@ -55,8 +55,8 @@ def base_manifest() -> list[dict[str, Any]]:
     return [
         {"path": "app.json"},
         {"path": "config/shell.json"},
-        {"path": "config/data.json"},
-        {"path": "config/data_migrations/001_initial.json"},
+        {"path": "data/contract.json"},
+        {"path": "data/migrations/001_initial.json"},
         {"path": "config/integrations.json"},
         {"path": "docs/integrations.md"},
         {"path": "services/integrations/analytics_provider_client.py"},
@@ -388,7 +388,7 @@ def validate_case(case: dict[str, Any]) -> list[str]:
             violations.append(f"{case_id}: missing integration readiness scope note")
     elif case_id == "data_model_migration":
         required = {
-            "config/data.json",
+            "data/contract.json",
             "modules/projects/module.yaml",
             "modules/projects/backend/repo.py",
             "modules/projects/backend/policy.py",
@@ -397,7 +397,7 @@ def validate_case(case: dict[str, Any]) -> list[str]:
         missing = sorted(required.difference(paths))
         if missing:
             violations.append(f"{case_id}: missing data model paths {missing}")
-        if not any(path.startswith("config/data_migrations/") for path in paths):
+        if not any(path.startswith("data/migrations/") for path in paths):
             violations.append(f"{case_id}: missing database migration path")
         if "Destructive changes require explicit review." not in scope_summary:
             violations.append(f"{case_id}: missing destructive-review warning")

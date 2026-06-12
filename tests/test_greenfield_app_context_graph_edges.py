@@ -63,7 +63,7 @@ integrations:
         {"path": "SampleApp/app/modules/projects/backend/handler.py", "content": "class Handler: pass"},
         {"path": "SampleApp/app/services/integrations/analytics_provider_client.py", "content": "class Client: pass"},
         {
-            "path": "SampleApp/app/config/data.json",
+            "path": "SampleApp/app/data/contract.json",
             "content": """
 {
   "entities": [
@@ -238,3 +238,4 @@ def test_greenfield_graph_edge_enrichment_has_no_graph_database_or_proprietary_t
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

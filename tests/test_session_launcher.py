@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+import types
 import sys
 
 import pytest
@@ -124,6 +125,117 @@ def test_validate_context_for_workflow_keeps_refinement_launch_keys_for_appgener
     }
 
 
+@pytest.mark.asyncio
+async def test_apply_launch_context_provider_invokes_env_provider(monkeypatch) -> None:
+    provider_module = types.ModuleType("_test_launch_context_provider")
+
+    def _merge(  # noqa: ANN001
+        context_variables,
+        *,
+        workflow_id,
+        journey_id,
+        trigger_source,
+        trigger_payload,
+        **_,
+    ):
+        return {
+            **context_variables,
+            "provider_workflow": workflow_id,
+            "provider_journey": journey_id,
+            "provider_trigger_source": trigger_source,
+            "provider_payload": trigger_payload,
+        }
+
+    provider_module.merge = _merge
+    monkeypatch.setitem(sys.modules, "_test_launch_context_provider", provider_module)
+    monkeypatch.setenv(
+        "MOZAIKS_LAUNCH_CONTEXT_PROVIDER",
+        "_test_launch_context_provider:merge",
+    )
+
+    provided = await _session_launcher.apply_launch_context_provider(
+        workflow_id="AppGenerator",
+        context_variables={"concept_overview": "paid marketplace"},
+        app_id="app_1",
+        user_id="user_1",
+        journey_id="build",
+        trigger_source="transition",
+        trigger_payload={"source": "ui"},
+    )
+
+    assert provided == {
+        "concept_overview": "paid marketplace",
+        "provider_workflow": "AppGenerator",
+        "provider_journey": "build",
+        "provider_trigger_source": "transition",
+        "provider_payload": {"source": "ui"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_prepare_routed_workflow_launch_applies_context_provider_before_validation(
+    monkeypatch,
+) -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager.UnifiedWorkflowManager._instance = None
+    _workflow_manager.initialize_workflows(base_path=str(workflows_root))
+
+    provider_module = types.ModuleType("_test_appgenerator_context_provider")
+
+    def _merge(  # noqa: ANN001
+        context_variables,
+        *,
+        workflow_id,
+        journey_id,
+        trigger_source,
+        trigger_payload,
+        **_,
+    ):
+        assert workflow_id == "AppGenerator"
+        return {
+            **context_variables,
+            "capability_packs": [{"id": "paid_downloads"}],
+            "provider_backed_capabilities": [
+                {"intent_id": "monetization", "pack_id": "paid_downloads"}
+            ],
+            "not_declared_for_appgenerator": "drop me",
+        }
+
+    provider_module.merge = _merge
+    monkeypatch.setitem(sys.modules, "_test_appgenerator_context_provider", provider_module)
+    monkeypatch.setenv(
+        "MOZAIKS_LAUNCH_CONTEXT_PROVIDER",
+        "_test_appgenerator_context_provider:merge",
+    )
+
+    class _Router:
+        async def route_trigger(self, trigger):  # noqa: ANN001
+            return _session_model.RoutingDecision(
+                workflow_id="AppGenerator",
+                requested_workflow_id=trigger.workflow_id,
+                journey_id=trigger.journey_id,
+            )
+
+    launch = await _session_launcher.prepare_routed_workflow_launch(
+        workflow_id="AppGenerator",
+        app_id="app_1",
+        user_id="user_1",
+        trigger_source="transition",
+        context_variables={"concept_overview": "paid downloads"},
+        trigger_payload={"source": "ui"},
+        journey_id="build",
+        session_router=_Router(),
+    )
+
+    assert launch.validated_context["concept_overview"] == "paid downloads"
+    assert launch.validated_context["capability_packs"] == [{"id": "paid_downloads"}]
+    assert launch.validated_context["provider_backed_capabilities"] == [
+        {"intent_id": "monetization", "pack_id": "paid_downloads"}
+    ]
+    assert "not_declared_for_appgenerator" not in launch.validated_context
+
+
 @pytest.mark.parametrize(
     ("workflow_id", "context", "expected"),
     [
@@ -241,6 +353,34 @@ def test_validate_context_for_workflow_keeps_refinement_launch_keys_for_builder_
     validated = _session_launcher.validate_context_for_workflow(workflow_id, context)
 
     assert validated == expected
+
+
+@pytest.mark.parametrize(
+    "workflow_id",
+    ["ValueEngine", "ThemeCapture", "DesignDocs", "AgentGenerator", "AppGenerator"],
+)
+def test_validate_context_for_workflow_keeps_builder_options_for_build_sequence(
+    workflow_id: str,
+) -> None:
+    workflows_root = Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
+
+    _workflow_manager.UnifiedWorkflowManager._instance = None
+    _workflow_manager.initialize_workflows(base_path=str(workflows_root))
+
+    builder_options = {
+        "provider_backed_capabilities": [
+            {"intent_id": "monetization", "surfaces": ["checkout", "billing"]}
+        ]
+    }
+    validated = _session_launcher.validate_context_for_workflow(
+        workflow_id,
+        {
+            "builder_options": builder_options,
+            "not_a_declared_context_key": "drop me",
+        },
+    )
+
+    assert validated == {"builder_options": builder_options}
 
 
 @pytest.mark.asyncio
@@ -492,3 +632,4 @@ async def test_emit_workflow_launch_navigation_sends_chat_navigate_envelope(monk
             "chat_source",
         )
     ]
+

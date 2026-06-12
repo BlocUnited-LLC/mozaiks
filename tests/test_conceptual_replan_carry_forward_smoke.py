@@ -504,3 +504,4 @@ class TestLevelG_BundleSafety:
         assert report["workspace_available"] is False
         for path, content in _MARKETPLACE_FILES.items():
             assert ctx["generated_files"][path] == content
+

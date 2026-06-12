@@ -61,21 +61,34 @@ def test_validate_smoke_output_accepts_minimal_valid_payload() -> None:
                 "work_unit_count": 4,
                 "max_parallelism": 4,
                 "executed_task_ids": ["a", "b", "c", "d"],
+                "executed_kinds": ["module", "page", "integration"],
                 "failure_count": 0,
-                "result_context_key": "task_batch_results",
+                "result_context_key": "runtime_smoke_tasks_results",
                 "all_units_succeeded": True,
             },
             "final_context": {
-                "task_batch_status": "completed",
-                "task_batch_results": {
+                "runtime_smoke_tasks_status": "completed",
+                "runtime_smoke_tasks_results": {
                     "_meta": {
                         "status": "completed",
                         "task_count": 4,
                         "concurrency": 4,
                         "completed_tasks": ["a", "b", "c", "d"],
                         "failed_tasks": [],
-                        "result_context_key": "task_batch_results",
-                    }
+                        "result_context_key": "runtime_smoke_tasks_results",
+                    },
+                    "a": {
+                        "_worker_agent": "ModuleTaskWorkerAgent",
+                    },
+                    "b": {
+                        "_worker_agent": "PageTaskWorkerAgent",
+                    },
+                    "c": {
+                        "_worker_agent": "IntegrationTaskWorkerAgent",
+                    },
+                    "d": {
+                        "_worker_agent": "ModuleTaskWorkerAgent",
+                    },
                 },
             },
         },
@@ -105,21 +118,28 @@ def test_validate_smoke_output_rejects_structured_output_meta_drift() -> None:
                 "work_unit_count": 1,
                 "max_parallelism": 4,
                 "executed_task_ids": ["hallucinated"],
+                "executed_kinds": ["module"],
                 "failure_count": 0,
                 "result_context_key": "wrong_key",
                 "all_units_succeeded": True,
             },
             "final_context": {
-                "task_batch_status": "completed",
-                "task_batch_results": {
+                "runtime_smoke_tasks_status": "completed",
+                "runtime_smoke_tasks_results": {
                     "_meta": {
                         "status": "completed",
                         "task_count": 2,
                         "concurrency": 4,
                         "completed_tasks": ["profiles", "feed"],
                         "failed_tasks": [],
-                        "result_context_key": "task_batch_results",
-                    }
+                        "result_context_key": "runtime_smoke_tasks_results",
+                    },
+                    "profiles": {
+                        "_worker_agent": "ModuleTaskWorkerAgent",
+                    },
+                    "feed": {
+                        "_worker_agent": "ModuleTaskWorkerAgent",
+                    },
                 },
             },
         },
@@ -127,9 +147,20 @@ def test_validate_smoke_output_rejects_structured_output_meta_drift() -> None:
 
     violations = smoke.validate_smoke_output(payload)
 
-    assert "Structured output work_unit_count does not match task_batch_results._meta.task_count" in violations
-    assert "Structured output executed_task_ids does not match task_batch_results._meta.completed_tasks" in violations
-    assert "Structured output result_context_key does not match task_batch_results._meta.result_context_key" in violations
+    assert (
+        "Structured output work_unit_count does not match "
+        "runtime_smoke_tasks_results._meta.task_count"
+    ) in violations
+    assert (
+        "Structured output executed_task_ids does not match "
+        "runtime_smoke_tasks_results._meta.completed_tasks"
+    ) in violations
+    assert (
+        "Structured output result_context_key does not match "
+        "runtime_smoke_tasks_results._meta.result_context_key"
+    ) in violations
+    assert "Live workflow smoke did not execute module, page, and integration task kinds" in violations
+    assert "Live workflow smoke did not use all expected task worker agents" in violations
 
 
 @pytest.mark.skipif(
@@ -143,3 +174,4 @@ def test_live_control_plane_task_batch_smoke() -> None:
     assert payload["control_plane"]["route"]["workflow_sequence"]
     assert payload["live_workflow"]["success"] is True
     assert payload["live_workflow"]["structured_output"]["task_batch_execution_used"] is True
+

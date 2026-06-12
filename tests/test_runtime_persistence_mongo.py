@@ -294,3 +294,4 @@ def test_protocols_pass_with_mongo_implementation() -> None:
 
     assert isinstance(context, ModulePersistenceContext)
     assert isinstance(collection, PersistenceCollection)
+

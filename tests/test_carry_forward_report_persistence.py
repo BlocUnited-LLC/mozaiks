@@ -355,3 +355,4 @@ def test_artifact_metadata_key_is_carry_forward_report_not_additions() -> None:
     assert 'bundle_content_metadata["carry_forward_additions"]' not in src, (
         '"carry_forward_additions" must not be written to bundle_content_metadata'
     )
+

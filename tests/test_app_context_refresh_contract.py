@@ -168,7 +168,7 @@ def _refresh_block_policy(summary: AppContextSummary) -> AppContextPolicyResult:
         app_context_summary=summary,
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/data_migrations/add_status.json"],
+        affected_bundle_paths=["data/migrations/add_status.json"],
     )
 
 
@@ -363,3 +363,4 @@ def test_context_refresh_contract_has_no_graph_database_or_proprietary_terms() -
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

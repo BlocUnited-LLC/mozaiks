@@ -36,7 +36,7 @@ import yaml
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _AGENTS_YAML_PATH = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
 _FILE_CONTRACTS_PATH = (
-    _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools" / "file_contracts.yaml"
+    _WORKSPACE / "factory_app" / "build_context" / "AppGenerator" / "file_contracts.yaml"
 )
 
 # Names that must never appear in OSS guidance or this test file.
@@ -714,3 +714,6 @@ class TestOSSProprietaryNamesAbsent:
                 f"Proprietary name {name!r} found in file_contracts checkout constraints. "
                 "Constraints must be host-agnostic."
             )
+
+
+

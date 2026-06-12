@@ -108,3 +108,4 @@ async def test_partial_scope_match_still_denies():
     assert result.success is False
     assert result.error_code == "PERMISSION_DENIED"
     assert "orders:admin" in (result.error or "")
+

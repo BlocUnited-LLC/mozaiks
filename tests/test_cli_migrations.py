@@ -160,3 +160,4 @@ def test_migrations_status_does_not_call_mutation_helper(monkeypatch: pytest.Mon
     args = create_parser().parse_args(["migrations", "status"])
 
     assert migrations_command.run(args) == 0
+

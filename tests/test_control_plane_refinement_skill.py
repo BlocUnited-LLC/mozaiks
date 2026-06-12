@@ -25,7 +25,7 @@ def test_control_plane_refinement_skill_distinguishes_routing_layers() -> None:
     assert "`workflow_sequence` / `workflow_sequences[]`" in skill
     assert "`transitions[]`" in skill
     assert "`entrypoints[]`" in skill
-    assert "`handoffs.yaml`" in skill
+    assert "`transition_graph.yaml`" in skill
     assert "`routing.artifacts[]`" in skill
     assert "`checkpoints[]`" in skill
 
@@ -60,3 +60,4 @@ def test_control_plane_refinement_skill_is_routed_and_public_safe() -> None:
 
     for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in skill, forbidden
+

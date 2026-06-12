@@ -405,3 +405,4 @@ def test_promote_endpoint_source_does_not_call_workflow_or_llm_paths() -> None:
     assert "prepare_routed_workflow_launch" not in source
     assert "launch_prepared_workflow" not in source
     assert "AppGenerator" not in source
+

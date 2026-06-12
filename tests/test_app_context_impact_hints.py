@@ -262,7 +262,7 @@ def test_data_entity_graph_returns_data_model_hints() -> None:
                 "data:project",
                 GraphNodeType.DATA_ENTITY,
                 label="project record",
-                metadata={"path": "config/data.json"},
+                metadata={"path": "data/contract.json"},
             ),
         ],
         edges=[
@@ -280,7 +280,7 @@ def test_data_entity_graph_returns_data_model_hints() -> None:
     )
 
     assert {"module", "data_entity"} <= {node.node_type for node in hints.related_nodes}
-    assert "config/data.json" in hints.additional_path_hints
+    assert "data/contract.json" in hints.additional_path_hints
     assert "modules/projects/backend/schemas.py" in hints.additional_path_hints
 
 
@@ -394,3 +394,4 @@ def test_app_context_impact_helper_has_no_graph_database_or_proprietary_terms() 
         text = path.read_text(encoding="utf-8")
         for term in forbidden_terms:
             assert term.lower() not in text.lower()
+

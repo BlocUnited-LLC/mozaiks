@@ -155,6 +155,23 @@ class TestOrchestrationPortProtocol:
         )
         assert r.status == RunStatus.PAUSED
 
+    def test_interpret_result_failed(self):
+        from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
+
+        adapter = AG2OrchestrationAdapter()
+        req = RunRequest(workflow_name="W", app_id="a", chat_id="c", user_id="u")
+        r = adapter._interpret_result(
+            req,
+            {
+                "run_completed": False,
+                "run_status": "failed",
+                "failed": True,
+                "error": "boom",
+            },
+        )
+        assert r.status == RunStatus.FAILED
+        assert r.error == "boom"
+
     def test_interpret_result_none(self):
         from mozaiksai.core.adapters.ag2_orchestration import AG2OrchestrationAdapter
 
@@ -169,3 +186,4 @@ class TestOrchestrationPortProtocol:
         a = get_ag2_adapter()
         b = get_ag2_adapter()
         assert a is b
+

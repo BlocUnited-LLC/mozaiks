@@ -5,11 +5,28 @@ from pathlib import Path
 
 import pytest
 
-from factory_app.control_plane.tools.get_artifact_summary import get_artifact_summary
-from factory_app.control_plane.tools.get_artifact_workspace_catalog import get_artifact_workspace_catalog
-from factory_app.control_plane.tools.get_artifact_workspace_scope import get_artifact_workspace_scope
+from factory_app.control_plane.tools.get_artifact_workspace_catalog import (
+    get_artifact_workspace_catalog,
+)
+from factory_app.control_plane.tools.get_artifact_workspace_scope import (
+    get_artifact_workspace_scope,
+)
 from factory_app.control_plane.tools.get_context_graph_catalog import get_context_graph_catalog
 from factory_app.control_plane.tools.get_context_graph_scope import get_context_graph_scope
+from mozaiksai.control_plane import (
+    ControlPlaneArtifactChangeRoutesManifest,
+    ControlPlaneArtifactRoutingManifest,
+    ControlPlaneChangeRouteManifest,
+    ControlPlaneManifest,
+    ControlPlanePromptsManifest,
+    ControlPlaneRoutingManifest,
+    ControlPlaneToolCall,
+    ControlPlaneToolContext,
+    ControlPlaneToolDefinition,
+    ControlPlaneToolExecutor,
+    ControlPlaneToolsManifest,
+    LoadedControlPlanePack,
+)
 from mozaiksai.control_plane.tools.get_revision_context import get_revision_context
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
@@ -21,22 +38,11 @@ from mozaiksai.core.artifacts.models import (
     ImpactSetDoc,
     RefinementRequestPayload,
 )
-from mozaiksai.core.session.model import RevisionEntry, SequenceStatus, SessionLifecycle, SessionState
-from mozaiksai.control_plane import (
-    ControlPlaneArtifactChangeRoutesManifest,
-    ControlPlaneArtifactRoutingManifest,
-    ControlPlaneChangeRouteManifest,
-    ControlPlaneHarnessManifest,
-    ControlPlaneManifest,
-    ControlPlaneProfileInfo,
-    ControlPlanePromptsManifest,
-    ControlPlaneRoutingManifest,
-    ControlPlaneToolCall,
-    ControlPlaneToolContext,
-    ControlPlaneToolDefinition,
-    ControlPlaneToolExecutor,
-    ControlPlaneToolsManifest,
-    LoadedControlPlanePack,
+from mozaiksai.core.session.model import (
+    RevisionEntry,
+    SequenceStatus,
+    SessionLifecycle,
+    SessionState,
 )
 
 
@@ -57,12 +63,6 @@ async def test_control_plane_tool_executor_resolves_pack_declared_tool(tmp_path:
         path=tmp_path,
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.control_plane",
-            profile=ControlPlaneProfileInfo(
-                id="test",
-                display_name="Test",
-                description="Test",
-            ),
-            harness=ControlPlaneHarnessManifest(implementation="example.harness:Harness"),
         ),
         prompts=ControlPlanePromptsManifest(
             schema_version="mozaiks.control_plane.prompts",
@@ -166,8 +166,6 @@ def _revision_pack() -> LoadedControlPlanePack:
         path=Path("control_plane"),
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.control_plane",
-            profile=ControlPlaneProfileInfo(id="business_plan", display_name="Business Plan", description="Business plan"),
-            harness=ControlPlaneHarnessManifest(implementation="example.harness:Harness"),
             routing=ControlPlaneRoutingManifest(
                 default_artifact_kind="business_plan_bundle",
                 artifacts=[

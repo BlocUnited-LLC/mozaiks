@@ -377,3 +377,4 @@ def test_app_context_impact_integration_has_no_graph_database_or_proprietary_ter
         text = path.read_text(encoding="utf-8")
         for term in forbidden_terms:
             assert term.lower() not in text.lower()
+

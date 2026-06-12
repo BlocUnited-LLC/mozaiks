@@ -263,3 +263,4 @@ def test_mongo_persistence_context_type_is_available_for_injection() -> None:
     ctx = MongoPersistenceContext(app_id="app_1")
 
     assert ctx.app_id == "app_1"
+

@@ -145,3 +145,4 @@ def test_refinement_contract_examples_remain_provider_neutral() -> None:
     ]
 
     assert [term for term in forbidden_terms if term in touched_content] == []
+

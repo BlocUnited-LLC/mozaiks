@@ -325,3 +325,4 @@ def test_control_plane_app_context_consumption_has_no_graph_database_or_propriet
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

@@ -953,3 +953,4 @@ class TestClassificationInExtractedEntries:
         assert "carry_forward_reasons" in dumped
         assert isinstance(dumped["carry_forward_reasons"], list)
         assert isinstance(dumped["carry_forward_classification"], str)
+

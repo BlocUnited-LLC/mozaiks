@@ -42,8 +42,8 @@ def _base_manifest() -> list[dict[str, str]]:
     return [
         {"path": "app.json"},
         {"path": "config/shell.json"},
-        {"path": "config/data.json"},
-        {"path": "config/data_migrations/001_initial.json"},
+        {"path": "data/contract.json"},
+        {"path": "data/migrations/001_initial.json"},
         {"path": "services/integrations/analytics_provider_client.py"},
         {"path": "modules/projects/module.yaml"},
         {"path": "modules/projects/contracts/events.yaml"},
@@ -154,7 +154,7 @@ async def test_refinement_control_plane_smoke_scopes_module_backend_refinement_t
     ]:
         assert path in decision.impact_set.affected_bundle_paths
     assert not any(path.startswith("modules/reports/") for path in decision.impact_set.affected_bundle_paths)
-    assert "config/data.json" not in decision.impact_set.affected_bundle_paths
+    assert "data/contract.json" not in decision.impact_set.affected_bundle_paths
 
 
 @pytest.mark.asyncio
@@ -204,8 +204,8 @@ async def test_refinement_control_plane_smoke_marks_data_model_migration_review_
     decision = await resolver.route(request)
 
     for path in [
-        "config/data.json",
-        "config/data_migrations/001_initial.json",
+        "data/contract.json",
+        "data/migrations/001_initial.json",
         "modules/projects/module.yaml",
         "modules/projects/backend/schemas.py",
         "modules/projects/backend/repo.py",
@@ -256,3 +256,4 @@ def test_refinement_control_plane_smoke_resolves_llm_profiles_without_provider_a
     )
     with pytest.raises(ValueError, match="references unknown LLM profile 'classifier'"):
         missing_reference.resolve_capability_llm_config("classifier")
+

@@ -107,3 +107,4 @@ def test_appgenerator_structured_output_contract_matches_runtime_schema_version_
         "schema",
         "custom_component",
     ]
+

@@ -70,3 +70,4 @@ async def test_health_response_does_not_expose_secrets(monkeypatch) -> None:
 
     for forbidden in ["password", "secret", "token", "authorization", "mongodb+srv://"]:
         assert forbidden not in rendered
+

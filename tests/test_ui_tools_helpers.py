@@ -248,3 +248,4 @@ def test_use_ui_tool_resolves_manifest_component_when_called_by_function_name() 
     assert captured["payload"]["component_type"] == "ApprovalCard"
     assert captured["payload"]["workflow_primitive"] == "approval_card"
     assert captured["payload"]["ui_realization"] == "shipped_component"
+

@@ -198,3 +198,4 @@ def test_send_event_to_ui_does_not_filter_activity_for_non_visual_agent(monkeypa
             "chat-1",
         )
     ]
+

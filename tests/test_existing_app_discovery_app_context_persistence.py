@@ -342,3 +342,4 @@ def test_existing_app_context_persistence_uses_neutral_oss_terms() -> None:
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term not in text
+

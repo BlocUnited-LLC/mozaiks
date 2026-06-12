@@ -84,3 +84,4 @@ def test_quickstart_bootstraps_workspace_and_launches_studio(monkeypatch, tmp_pa
     assert launched["backend_port"] == 8010
     assert launched["frontend_port"] == 3010
     assert launched["open_browser"] is False
+

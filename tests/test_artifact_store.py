@@ -436,3 +436,4 @@ async def test_get_stale_artifact_families_clears_when_all_rebuilt() -> None:
     result = await store.get_stale_artifact_families(app_id="app-1")
 
     assert result == []
+

@@ -134,3 +134,4 @@ def test_assembly_phase_materializes_split_admin_surface_from_typed_payload() ->
     assert "mozaiks.admin.app_backend.v1" in file_map["services/admin_config.py"]
     assert "get_admin_config" in file_map["services/admin_config.py"]
     assert "APIRouter" in file_map["services/routes/admin.py"]
+

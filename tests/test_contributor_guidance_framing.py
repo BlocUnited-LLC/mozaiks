@@ -54,7 +54,7 @@ def test_refinement_guidance_states_checkpoint_reentry_truth() -> None:
 
 
 def test_control_plane_guide_states_runtime_split_and_generation_ownership() -> None:
-    guide = _read("docs/guides/adding-control-plane/01-overview.md")
+    guide = _read("docs/guides/extending-ai-functionality/01-overview.md")
 
     assert "app/config/ai.json" in guide
     assert "control_plane/config/runtime.yaml" in guide
@@ -78,7 +78,7 @@ def test_create_workflow_skill_uses_current_contract_fields() -> None:
 def test_create_workflow_skill_distinguishes_routing_layers() -> None:
     skill = _read(".claude/skills/create-workflow/SKILL.md")
 
-    assert "`handoffs.yaml`" in skill
+    assert "`transition_graph.yaml`" in skill
     assert "`workflow_sequences[]`" in skill
     assert "`transitions[]`" in skill
     assert "`entrypoints[]`" in skill

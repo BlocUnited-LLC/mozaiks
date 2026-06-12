@@ -147,8 +147,8 @@
       "id": "data_model_migration",
       "impact": {
         "affected_bundle_paths": [
-          "config/data.json",
-          "config/data_migrations/001_initial.json",
+          "data/contract.json",
+          "data/migrations/001_initial.json",
           "modules/projects/module.yaml",
           "modules/projects/contracts/events.yaml",
           "modules/projects/contracts/admin.yaml",

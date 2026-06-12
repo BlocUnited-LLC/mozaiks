@@ -125,3 +125,4 @@ def test_button_primitive_preserves_single_child_for_as_child_slot() -> None:
     as_child_branch = source.split("if (props.asChild)", 1)[1].split("return (", 2)[1]
     assert "{content}" in as_child_branch
     assert "icon &&" not in as_child_branch
+

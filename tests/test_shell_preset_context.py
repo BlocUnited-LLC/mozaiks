@@ -18,8 +18,14 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_HOOKS_YAML = _APPGEN_DIR / "hooks.yaml"
-_SHELL_PRESETS_YAML = _APPGEN_DIR / "tools" / "shell_presets.yaml"
+_BUILD_CONTEXT_DIR = (
+    Path(__file__).parent.parent
+    / "factory_app"
+    / "build_context"
+    / "AppGenerator"
+)
+_HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
+_SHELL_PRESETS_YAML = _BUILD_CONTEXT_DIR / "shell_presets.yaml"
 
 
 class _FakeAgent:
@@ -57,9 +63,9 @@ def test_shell_presets_catalog_exists_and_has_required_presets() -> None:
 
 def test_hooks_yaml_registers_shell_preset_hook_for_planning_and_schema_agents() -> None:
     data = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
-    hooks = data.get("hooks") or []
+    hooks = data.get("prompt_middleware") or []
     targets = {
-        entry.get("hook_agent")
+        entry.get("agent")
         for entry in hooks
         if entry.get("filename") == "hook_shell_preset_context.py"
         and entry.get("function") == "inject_shell_preset_context"
@@ -116,3 +122,5 @@ def test_shell_preset_hook_injects_warning_when_catalog_missing() -> None:
     assert "[SHELL PRESET CONTEXT]" in agent.system_message
     assert "WARNING: Shell preset catalog could not be loaded" in agent.system_message
     assert "Do not emit shell_preset_hint" in agent.system_message
+
+

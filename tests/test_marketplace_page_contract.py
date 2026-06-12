@@ -30,3 +30,4 @@ def test_marketplace_page_is_data_driven() -> None:
     assert table["config"]["actions"][1]["href"] == "/api/modules/investor_marketplace/record_investment_interest"
     assert hero_actions["open-build-journey"]["href"] == "/create"
     assert table["config"]["empty"]["action"]["href"] == "/create"
+

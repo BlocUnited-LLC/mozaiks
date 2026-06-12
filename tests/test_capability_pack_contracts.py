@@ -83,18 +83,6 @@ def test_valueengine_structured_outputs_define_capability_pack_contract() -> Non
     assert "marketplace_pack" in pack_spec_fields["pack_type"]["values"]
     assert "agent_backend_integration" in pack_spec_fields["pack_type"]["values"]
 
-    # SurfaceCandidateHint must carry owner_hint so DesignDocs can honor ownership
-    # intent from concept time rather than inferring it blindly.
-    hint_fields = models["SurfaceCandidateHint"]["fields"]
-    assert "owner_hint" in hint_fields, "SurfaceCandidateHint must declare owner_hint"
-    owner_hint = hint_fields["owner_hint"]
-    assert owner_hint["type"] == "union"
-    assert "null" in owner_hint["variants"]
-    assert "str" in owner_hint["variants"]
-    # Description must constrain the three allowed values
-    desc = owner_hint.get("description", "")
-    assert "app" in desc and "hosted" in desc and "platform" in desc
-
 
 def test_appgenerator_structured_outputs_define_capability_first_build_plan() -> None:
     structured_outputs = _read_yaml(
@@ -119,35 +107,13 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert "Decompose into product capability packs first" in content
     assert "capability_pack_hints" in content
     assert "experience_spec" in content
-    assert "The default owner of persistent pages is `AppSchemaAgent`." in content
+    assert "`AppBuildPlan.pages[]` is the authoritative persistent page inventory" in content
     assert "Do NOT plan a second raw-frontend lane inside AppGenerator." in content
     assert "domain-specific profile records" in content
     assert "host-owned `/api/me` account/profile contract" in content
-    assert "Do not invent a control-plane surface inside AppGenerator" in content
-    assert "Plan `control_plane_pack` only when at least two of these signals are present" in content
-    assert "AgentGenerator owns workflow bundles; AppGenerator emits only the harness files" in content
     assert '"capability_packs": [' in content
     assert '"capability_pack_id": null' in content
     assert '\n        "workflows": [' in content
-
-
-def test_app_plan_agent_prompt_includes_control_plane_planning_matrix_examples() -> None:
-    content = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-
-    assert "Control-plane planning matrix:" in content
-    assert "Omit `control_plane_pack`: CRM/backoffice app with CRUD records, dashboards, and one optional analysis workflow." in content
-    assert "Omit `control_plane_pack`: upload-triggered review workflow whose continuation is already fixed by triggers and `workflow_sequences`." in content
-    assert "Include `control_plane_pack`: builder/refinement assistant that must classify `patch|design|feature|core` and reopen different `workflow_sequences`." in content
-    assert "Include `control_plane_pack`: approval-gated operations console that must choose between automate, clarify, escalate, or resume based on policy." in content
-
-
-def test_valueengine_prompt_limits_control_plane_hints_to_real_harness_signals() -> None:
-    source = _read_text("factory_app/workflows/ValueEngine/agents.yaml")
-
-    assert "Use `control_plane` only when the product clearly needs semantic request intake" in source
-    assert "Emit a `control_plane` hint only when at least two of these signals are present" in source
-    assert "policy, approval, escalation, or risk gating must happen above workflows or modules" in source
-    assert "If the app is mostly CRUD/modules, one known workflow, or fixed transition/sequence routing" in source
 
 
 def test_designdocs_context_exposes_captured_theme_config_as_typed_object() -> None:
@@ -202,18 +168,8 @@ def test_designdocs_prompt_treats_concept_blueprint_as_authoritative_surface_sig
     assert "brand_intent" in source
     # Key authority rule: high-confidence hints must become surface_map entries
     assert "High-confidence hints should become surface_map entries" in source
-    assert "Treat `control_plane` as an app-owned semantic coordination surface above workflows and modules" in source
-    assert "Promote a hint to `surface_kind: control_plane` only when the app needs at least two of" in source
-    assert "If the need is a single known workflow, fixed `workflow_sequence`, or ordinary module action routing" in source
     # Fallback rule when blueprint is absent
     assert "concept_blueprint is null" in source
-
-
-def test_agentgenerator_prompt_keeps_control_plane_out_of_workflow_generation() -> None:
-    source = _read_text("factory_app/workflows/AgentGenerator/agents.yaml")
-
-    assert "Generate workflows ONLY for entries where `surface_kind = workflow`." in source
-    assert "Do NOT invent extra workflows for `module`, `control_plane`, `external_integration`, or `ui_only` surfaces." in source
 
 
 def test_appgenerator_context_exposes_experience_spec_as_typed_object() -> None:
@@ -479,6 +435,120 @@ def test_app_build_plan_tool_rejects_obsolete_host_admin_config_path() -> None:
         )
 
 
+def test_app_build_plan_tool_rejects_noncanonical_config_descriptor_path() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_noncanonical_config_path_guard",
+    )
+
+    with pytest.raises(ValueError, match="noncanonical app config path"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_brownfield_descriptor",
+                    "task_type": "service_foundation",
+                    "capability_pack_id": None,
+                    "surface_kind": "external_integration",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ConfigMiddlewareAgent",
+                    "description": "Generate brownfield descriptor.",
+                    "initial_message": "Generate app_zero_brownfield descriptor.",
+                    "owned_paths": ["config/app_zero_brownfield.json"],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Descriptor exists"],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_build_time_prompting_root() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_app_generator_root_guard",
+    )
+
+    with pytest.raises(ValueError, match="outside canonical app planes"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_hosted_prompt_context",
+                    "task_type": "service_foundation",
+                    "capability_pack_id": None,
+                    "surface_kind": "external_integration",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ConfigMiddlewareAgent",
+                    "description": "Generate hosted build context.",
+                    "initial_message": "Generate product-owned prompt context.",
+                    "owned_paths": ["build_context/hosted_payments/context.yaml"],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Context exists"],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+@pytest.mark.parametrize("bad_path", ["services/security/secrets.py", "services/data/client.py"])
+def test_app_build_plan_tool_rejects_noncanonical_service_planes(bad_path: str) -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_noncanonical_service_path_guard",
+    )
+
+    with pytest.raises(ValueError, match="no longer canonical"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_bad_service_lane",
+                    "task_type": "service_foundation",
+                    "capability_pack_id": None,
+                    "surface_kind": "external_integration",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "ConfigMiddlewareAgent",
+                    "description": "Generate bad service lane.",
+                    "initial_message": "Generate bad service lane.",
+                    "owned_paths": [bad_path],
+                    "depends_on": [],
+                    "acceptance_criteria": ["Bad lane exists"],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_accepts_canonical_service_foundation_paths() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_tool_canonical_service_foundation_accept",
+    )
+
+    result = module.app_build_plan(
+        AppBuildPlan=_minimal_app_build_plan(
+            {
+                "task_id": "task_service_foundation",
+                "task_type": "service_foundation",
+                "capability_pack_id": None,
+                "surface_kind": "external_integration",
+                "execution_target": "AppGenerator",
+                "initial_agent": "ConfigMiddlewareAgent",
+                "description": "Generate canonical service support.",
+                "initial_message": "Generate service support.",
+                "owned_paths": [
+                    "security/secrets.yaml",
+                    "services/adapters/database/existing_provider.py",
+                    "services/routes/webhooks.py",
+                ],
+                "depends_on": [],
+                "acceptance_criteria": ["Service support exists"],
+            }
+        ),
+        context_variables=_Context(),
+    )
+
+    assert "Build tasks: 1" in result
+
+
 def test_app_build_plan_tool_rejects_split_admin_api_with_wrong_task_type() -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
@@ -552,7 +622,7 @@ def test_app_build_plan_tool_rejects_unknown_task_type() -> None:
                         "initial_agent": "ConfigMiddlewareAgent",
                         "description": "Generate a non-canonical task.",
                         "initial_message": "Generate a non-canonical task.",
-                        "owned_paths": ["backend/config.py"],
+                        "owned_paths": ["services/config.py"],
                         "depends_on": [],
                         "acceptance_criteria": ["Config exists"],
                     }
@@ -644,7 +714,7 @@ def test_app_build_plan_tool_rejects_service_foundation_with_wrong_initial_agent
                         "initial_agent": "ControllerAgent",
                         "description": "Generate backend glue.",
                         "initial_message": "Generate backend glue.",
-                        "owned_paths": ["backend/config.py"],
+                        "owned_paths": ["services/config.py"],
                         "depends_on": [],
                         "acceptance_criteria": ["Config exists"],
                     }
@@ -738,7 +808,6 @@ def test_app_build_plan_tool_accepts_control_plane_pack_task() -> None:
                 "description": "Generate app-local refinement harness pack.",
                 "initial_message": "Route scoped refinements to app_revision.",
                 "owned_paths": [
-                    "control_plane/config/runtime.yaml",
                     "control_plane/config/control_plane.yaml",
                     "control_plane/config/tools.yaml",
                     "control_plane/prompts/change_classifier_system.yaml",
@@ -805,7 +874,6 @@ def test_app_build_plan_tool_rejects_control_plane_pack_wrong_initial_agent() ->
                     "description": "Generate app-local refinement harness pack.",
                     "initial_message": "Route scoped refinements to app_revision.",
                     "owned_paths": [
-                        "control_plane/config/runtime.yaml",
                         "control_plane/config/control_plane.yaml",
                         "control_plane/config/tools.yaml",
                     ],
@@ -1050,4 +1118,5 @@ def test_app_generation_strategy_docs_are_indexed_and_examples_are_grounded() ->
     assert "AgentAugmentationPlan" in boundary_text
     assert "Decompose into product artifacts first" in decomposition_text
     assert "typed builder contracts" in builder_text
+
 

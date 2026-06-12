@@ -50,3 +50,4 @@ def test_getting_started_clarifies_workspace_terms() -> None:
     assert "This scaffolds the workspace" in doc
     assert "python -m venv .venv" not in normalized
     assert "MongoDB connection error" in doc
+

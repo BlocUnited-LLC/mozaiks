@@ -40,3 +40,4 @@ def test_load_a2a_agent_specs_filters_invalid_and_disabled_entries() -> None:
     assert spec.client.get("polling") is True
     assert spec.client.get("accepted_output_modes") == ["text/plain"]
 
+

@@ -161,3 +161,4 @@ def test_workflow_manager_prefers_platform_scoped_ai_config() -> None:
     source = _read("mozaiksai/core/workflow/workflow_manager.py")
     assert 'platform_scoped = self.workflows_base_path.resolve().parent / "config" / "ai.json"' in source
     assert 'return (resolve_active_app_root() / "config" / "ai.json").resolve()' in source
+

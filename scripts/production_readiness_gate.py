@@ -98,6 +98,14 @@ SOURCE_HYGIENE_ALLOWED_SNIPPETS: dict[str, tuple[str, ...]] = {
     "docs/yc-alignment.md": (
         "The next generation will replace legacy SaaS with AI-native software.",
     ),
+    # Test files that intentionally reference forbidden terms to verify the system rejects them.
+    "tests/test_factory_build_context_contract.py": (
+        "prose-oriented legacy fields",
+        "deprecated fields",
+    ),
+    "tests/test_oss_prompt_hygiene.py": (
+        "legacy rule that must not render",
+    ),
 }
 
 

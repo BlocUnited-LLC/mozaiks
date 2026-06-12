@@ -109,31 +109,13 @@
         "sections_hint": [
           {
             "primitive": "DataTable",
-            "config_hint": {
-              "columns": [
-                "id",
-                "name",
-                "status"
-              ],
-              "selection": "single",
-              "search": true,
-              "api_endpoint": "/api/modules/projects/list_projects"
-            },
+            "config_hint": "{\"columns\": [\"id\", \"name\", \"status\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/projects/list_projects\"}",
             "section_id_hint": "project-table",
             "title_hint": "All Projects"
           },
           {
             "primitive": "ActionButton",
-            "config_hint": {
-              "layout": "row",
-              "actions": [
-                {
-                  "label": "Create Project",
-                  "action_type": "event",
-                  "event_type": "ui.modal.open"
-                }
-              ]
-            },
+            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Create Project\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\"}]}",
             "section_id_hint": "create-project-action",
             "title_hint": null
           }
@@ -154,32 +136,13 @@
         "sections_hint": [
           {
             "primitive": "DataTable",
-            "config_hint": {
-              "columns": [
-                "id",
-                "name",
-                "status",
-                "project_id"
-              ],
-              "selection": "single",
-              "search": true,
-              "api_endpoint": "/api/modules/tasks/list_tasks"
-            },
+            "config_hint": "{\"columns\": [\"id\", \"name\", \"status\", \"project_id\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/tasks/list_tasks\"}",
             "section_id_hint": "task-table",
             "title_hint": "All Tasks"
           },
           {
             "primitive": "ActionButton",
-            "config_hint": {
-              "layout": "row",
-              "actions": [
-                {
-                  "label": "Create Task",
-                  "action_type": "event",
-                  "event_type": "ui.modal.open"
-                }
-              ]
-            },
+            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Create Task\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\"}]}",
             "section_id_hint": "create-task-action",
             "title_hint": null
           }
@@ -359,10 +322,10 @@
         "execution_target": "AppGenerator",
         "initial_agent": "DatabaseAgent",
         "description": "Stage data contract and additive index migrations for projects and tasks.",
-        "initial_message": "Create data_contract entries for projects/projects and tasks/tasks. Stage config/data.json and optional config/data_migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
+        "initial_message": "Create data_contract entries for projects/projects and tasks/tasks. Stage data/contract.json and optional data/migrations/001_projects_tasks_indexes.json. Keep this intent-first and additive only.",
         "owned_paths": [
-          "config/data.json",
-          "config/data_migrations/001_projects_tasks_indexes.json"
+          "data/contract.json",
+          "data/migrations/001_projects_tasks_indexes.json"
         ],
         "depends_on": [],
         "acceptance_criteria": [
@@ -605,3 +568,4 @@
     }
   ]
 }
+

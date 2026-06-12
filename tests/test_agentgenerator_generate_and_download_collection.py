@@ -248,3 +248,4 @@ def test_generate_and_download_skips_meta_key(monkeypatch, tmp_path: Path) -> No
     with zipfile.ZipFile(Path(result["ui_files"][0]["path"])) as zf:
         # _meta key must not produce a directory in the zip
         assert not any("_meta" in n for n in zf.namelist())
+

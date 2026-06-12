@@ -314,3 +314,4 @@ class TestFacadeBindingPattern:
         assert "analytics_dashboard" in facades
         assert "hosted_analytics" in hosted
         assert "analytics_dashboard" not in hosted
+

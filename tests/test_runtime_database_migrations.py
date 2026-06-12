@@ -156,7 +156,7 @@ def _migration(migration_id: str = "m_001", operations: list[dict[str, Any]] | N
 
 
 def _write_migration(root: Path, filename: str, migration: dict[str, Any] | str) -> None:
-    path = root / "config" / "data_migrations" / filename
+    path = root / "data" / "migrations" / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(migration, str):
         path.write_text(migration, encoding="utf-8")
@@ -821,3 +821,4 @@ async def test_platform_startup_without_database_artifacts_is_unaffected(monkeyp
     monkeypatch.setattr(platform, "get_platform_hooks", lambda: FakeHooks())
 
     await platform._platform_startup()
+

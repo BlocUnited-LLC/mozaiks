@@ -451,3 +451,4 @@ def test_acceptance_module_stays_out_of_workflow_and_llm_paths() -> None:
     assert "execute_workflow" not in text
     assert "conceptual_replan" not in text
     assert "carry_forward" not in text
+

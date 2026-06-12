@@ -148,8 +148,8 @@ def _database_bundle_files(*, valid_intent: bool = True, valid_migration: bool =
     if not valid_migration:
         migration = '{"migration_id": "001_initial", "changes": [}\n'
     return {
-        "config/data.json": intent,
-        "config/data_migrations/001_initial.json": migration,
+        "data/contract.json": intent,
+        "data/migrations/001_initial.json": migration,
     }
 
 
@@ -506,3 +506,4 @@ def test_validation_evidence_from_runner_can_enable_ui_patch_promotion(tmp_path:
     assert result.mutation_applied is True
     assert result.promoted_files[0].status == "promoted"
     assert (source / "ui/pages/dashboard.yaml").read_text(encoding="utf-8") == "page_type: landing\ntitle: Overview Updated\n"
+

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+from autogen.beta.network.policies import CHANNEL_STATE_DEP
 
 from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,
@@ -14,6 +15,11 @@ from mozaiksai.core.workflow.task_batches import (
     resolve_path_value,
     workflow_has_task_batches,
 )
+
+
+def _ag2_task_context(kwargs: dict) -> dict:
+    state = kwargs["dependencies"][CHANNEL_STATE_DEP]
+    return dict(state.context_vars)
 
 
 def _valid_payload() -> dict:
@@ -55,9 +61,54 @@ def test_parse_task_batches_config_accepts_canonical_payload() -> None:
     assert config.batches[0].execution.concurrency == 4
 
 
+def test_parse_task_batches_config_accepts_minimal_conveyor_payload() -> None:
+    config = parse_task_batches_config(
+        {
+            "version": 1,
+            "conveyors": [
+                {
+                    "id": "workflow_generation",
+                    "decomposition_agent": "DecompositionAgent",
+                    "execution_agents": ["AgentRosterAgent", "ToolsAgent"],
+                    "concurrency": 3,
+                }
+            ],
+        }
+    )
+
+    batch = config.batches[0]
+    assert batch.id == "workflow_generation"
+    assert batch.trigger_agent == "DecompositionAgent"
+    assert batch.source.kind == "structured_output"
+    assert batch.source.path == "DecompositionPlan.tasks"
+    assert batch.source.task_model == "DecomposedTask"
+    assert batch.worker.agent_field == "execution_agent"
+    assert batch.worker.prompt_field == "task_prompt"
+    assert batch.execution.dependency_field == "depends_on"
+    assert batch.execution.concurrency == 3
+    assert batch.result.context_key == "workflow_generation_results"
+    assert batch.result.status_key == "workflow_generation_status"
+    assert batch.result.require_owned_paths is False
+    assert batch.allowed_execution_agents == ["AgentRosterAgent", "ToolsAgent"]
+
+
 def test_parse_task_batches_config_rejects_duplicate_batch_ids() -> None:
     payload = _valid_payload()
     payload["batches"].append(dict(payload["batches"][0]))
+
+    with pytest.raises(ValueError, match="duplicate task batch id"):
+        parse_task_batches_config(payload)
+
+
+def test_parse_task_batches_config_rejects_duplicate_conveyor_and_batch_ids() -> None:
+    payload = _valid_payload()
+    payload["conveyors"] = [
+        {
+            "id": "document_reviews",
+            "decomposition_agent": "TriageAgent",
+            "execution_agents": ["ReviewAgent"],
+        }
+    ]
 
     with pytest.raises(ValueError, match="duplicate task batch id"):
         parse_task_batches_config(payload)
@@ -131,8 +182,9 @@ async def test_execute_task_batches_for_trigger_collects_worker_outputs() -> Non
 
     class _FakeAgent:
         async def ask(self, message, **kwargs):
-            seen_variables.append(kwargs["variables"])
-            task_id = kwargs["variables"]["current_build_task_id"]
+            variables = _ag2_task_context(kwargs)
+            seen_variables.append(variables)
+            task_id = variables["current_build_task_id"]
             return SimpleNamespace(
                 body=json.dumps(
                     {
@@ -200,6 +252,142 @@ async def test_execute_task_batches_for_trigger_collects_worker_outputs() -> Non
     )
     assert feed_variables["app_task_batch_results"]["_meta"]["status"] == "running"
     assert feed_variables["app_task_batch_results"]["_meta"]["completed_tasks"] == ["profiles"]
+
+
+@pytest.mark.asyncio
+async def test_conveyor_executes_dependency_graph_and_injects_upstream_outputs() -> None:
+    config = parse_task_batches_config(
+        {
+            "version": 1,
+            "conveyors": [
+                {
+                    "id": "workflow_generation",
+                    "decomposition_agent": "DecompositionAgent",
+                    "execution_agents": ["AgentRosterAgent", "TransitionGraphAgent"],
+                    "concurrency": 2,
+                }
+            ],
+        }
+    )
+
+    seen_variables: dict[str, dict] = {}
+
+    class _FakeAgent:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def ask(self, message, **kwargs):
+            variables = _ag2_task_context(kwargs)
+            task_id = variables["current_task_id"]
+            seen_variables[task_id] = variables
+            if self.name == "AgentRosterAgent":
+                return SimpleNamespace(
+                    body=json.dumps(
+                        {
+                            "task_id": task_id,
+                            "agents": ["IntakeAgent", "ReviewAgent"],
+                            "summary": "Agent roster complete.",
+                        }
+                    )
+                )
+            dependency_outputs = variables["dependency_task_outputs"]
+            roster = dependency_outputs["agent_roster"]["agents"]
+            return SimpleNamespace(
+                body=json.dumps(
+                    {
+                        "task_id": task_id,
+                        "transition_sources": roster,
+                        "summary": "Transition graph used upstream roster.",
+                    }
+                )
+            )
+
+    context = {}
+    structured_output = {
+        "DecompositionPlan": {
+            "tasks": [
+                {
+                    "task_id": "agent_roster",
+                    "execution_agent": "AgentRosterAgent",
+                    "task_prompt": "Create the agent roster.",
+                    "depends_on": [],
+                },
+                {
+                    "task_id": "transition_graph",
+                    "execution_agent": "TransitionGraphAgent",
+                    "task_prompt": "Create transitions from the agent roster.",
+                    "depends_on": ["agent_roster"],
+                },
+            ]
+        }
+    }
+
+    await execute_task_batches_for_trigger(
+        workflow_name="AgentGenerator",
+        trigger_agent="DecompositionAgent",
+        batches_config=config,
+        agents={
+            "AgentRosterAgent": _FakeAgent("AgentRosterAgent"),
+            "TransitionGraphAgent": _FakeAgent("TransitionGraphAgent"),
+        },
+        context_variables=context,
+        structured_output=structured_output,
+        fresh_agents_per_task=False,
+    )
+
+    assert context["workflow_generation_status"] == "completed"
+    assert context["workflow_generation_results"]["transition_graph"]["transition_sources"] == [
+        "IntakeAgent",
+        "ReviewAgent",
+    ]
+    transition_context = seen_variables["transition_graph"]
+    assert transition_context["decomposition_plan"]["tasks"][0]["task_id"] == "agent_roster"
+    assert transition_context["dependency_task_outputs"] == {
+        "agent_roster": context["workflow_generation_results"]["agent_roster"]
+    }
+    assert transition_context["completed_task_outputs"]["agent_roster"]["summary"] == (
+        "Agent roster complete."
+    )
+    assert transition_context["workflow_generation_results"]["_meta"]["completed_tasks"] == [
+        "agent_roster"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_conveyor_rejects_task_for_agent_outside_allowed_execution_agents() -> None:
+    config = parse_task_batches_config(
+        {
+            "version": 1,
+            "conveyors": [
+                {
+                    "id": "workflow_generation",
+                    "decomposition_agent": "DecompositionAgent",
+                    "execution_agents": ["AgentRosterAgent"],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="outside allowed conveyor agents"):
+        await execute_task_batches_for_trigger(
+            workflow_name="AgentGenerator",
+            trigger_agent="DecompositionAgent",
+            batches_config=config,
+            agents={"ToolsAgent": object()},
+            context_variables={},
+            structured_output={
+                "DecompositionPlan": {
+                    "tasks": [
+                        {
+                            "task_id": "tools",
+                            "execution_agent": "ToolsAgent",
+                            "task_prompt": "Create tools.",
+                        }
+                    ]
+                }
+            },
+            fresh_agents_per_task=False,
+        )
 
 
 @pytest.mark.asyncio
@@ -286,7 +474,7 @@ async def test_execute_task_batches_materializes_typed_worker_files_before_valid
                         "DatabaseOutput": {
                             "database_files": [
                                 {
-                                    "path": "config/data.json",
+                                    "path": "data/contract.json",
                                     "kind": "data_contract_json",
                                     "purpose": "Data contract artifact.",
                                     "entity_refs": ["ticket"],
@@ -306,7 +494,7 @@ async def test_execute_task_batches_materializes_typed_worker_files_before_valid
                 "task_id": "data_contract",
                 "initial_agent": "WorkerAgent",
                 "initial_message": "Build data contract.",
-                "owned_paths": ["config/data.json"],
+                "owned_paths": ["data/contract.json"],
             },
         ],
     }
@@ -322,7 +510,7 @@ async def test_execute_task_batches_materializes_typed_worker_files_before_valid
 
     output = context["app_task_batch_results"]["data_contract"]
     assert output["code_files"] == [
-        {"filename": "config/data.json", "content": "{\"surfaces\":[]}\n"}
+        {"filename": "data/contract.json", "content": "{\"surfaces\":[]}\n"}
     ]
 
 
@@ -389,7 +577,7 @@ async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
                         {
                             "primitive": "ResourceTable",
                             "section_id_hint": "tickets-table",
-                            "config_hint": {"api_endpoint": "/api/modules/tickets/list_tickets"},
+                            "config_hint": "{\"api_endpoint\": \"/api/modules/tickets/list_tickets\"}",
                         }
                     ],
                 },
@@ -401,7 +589,7 @@ async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
                         {
                             "primitive": "PageHeader",
                             "section_id_hint": "settings-header",
-                            "config_hint": {"title": "Settings"},
+                            "config_hint": "{\"title\": \"Settings\"}",
                         }
                     ],
                 },
@@ -428,8 +616,14 @@ async def test_page_bundle_task_normalizes_owned_pages_from_app_plan() -> None:
     )
 
     code_files = context["app_task_batch_results"]["pages"]["code_files"]
+    output = context["app_task_batch_results"]["pages"]
     file_map = {entry["filename"]: entry["content"] for entry in code_files}
     assert set(file_map) >= {"ui/pages/tickets.yaml", "ui/pages/settings.yaml"}
+    assert output["_page_materialization_source"] == "app_build_plan.pages"
+    assert output["_page_materialized_paths"] == [
+        "ui/pages/tickets.yaml",
+        "ui/pages/settings.yaml",
+    ]
     tickets_page = yaml.safe_load(file_map["ui/pages/tickets.yaml"])
     assert tickets_page["sections"][0]["primitive"] == "ResourceTable"
     assert tickets_page["sections"][0]["config"]["api_endpoint"] == "/api/modules/tickets/list_tickets"

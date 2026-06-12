@@ -185,3 +185,4 @@ def test_runtime_admin_config_discovers_module_admin_yaml(tmp_path) -> None:
             "source": "module",
         }
     ]
+

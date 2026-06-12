@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from factory_app.workflows.AgentGenerator.patternbook import (
+from factory_app.workflows.AgentGenerator.tools.ag2_patterns import (
     get_pattern_by_name,
     list_patterns,
     render_pattern_example,
@@ -48,3 +48,6 @@ def test_patternbook_rendering_is_deterministic_and_beta_network_specific() -> N
     assert "[AG2 NETWORK PATTERN - Pipeline]" in guidance
     assert "TransitionGraph.sequence" in guidance
     assert example["WorkflowStrategy"]["pattern"] == ["Pipeline"]
+
+
+

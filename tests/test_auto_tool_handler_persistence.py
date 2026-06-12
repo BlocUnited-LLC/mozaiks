@@ -247,3 +247,4 @@ async def test_persist_context_variables_filters_canonical_fields():
     assert update_doc["$set"]["app_task_batch_status"] == "consumed"
     assert update_doc["$set"]["smoke_presented_summary"] == "Smoke path summarized."
     assert isinstance(update_doc["$set"]["last_updated_at"], datetime)
+

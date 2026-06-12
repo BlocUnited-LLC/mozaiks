@@ -135,3 +135,4 @@ async def test_artifact_invalidation_service_uses_session_refs_and_affected_fami
             "reason": "change_request:cr_123",
         }
     ]
+

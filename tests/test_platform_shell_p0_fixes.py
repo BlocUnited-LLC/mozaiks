@@ -279,3 +279,4 @@ def test_build_shell_config_always_injects_admin_portal(monkeypatch, tmp_path: P
     assert "admin-portal" in ids, (
         "admin-portal must appear in profile menu even when no shortcuts are configured"
     )
+

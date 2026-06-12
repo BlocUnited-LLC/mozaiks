@@ -384,3 +384,4 @@ class TestAdapterRegistryAutoDetection:
 
     def test_no_config_defaults_to_none(self) -> None:
         assert self._detect({}) == "none"
+

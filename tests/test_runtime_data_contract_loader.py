@@ -43,7 +43,7 @@ def _valid_intent() -> dict:
 
 
 def _write_intent(root: Path, value: dict) -> None:
-    path = root / "config" / "data.json"
+    path = root / "data" / "contract.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
 
@@ -84,11 +84,11 @@ async def test_valid_intent_is_indexed_by_module_and_entity(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_invalid_json_produces_clear_app_load_failure(tmp_path: Path) -> None:
     _write_app(tmp_path)
-    path = tmp_path / "config" / "data.json"
+    path = tmp_path / "data" / "contract.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not json", encoding="utf-8")
 
-    with pytest.raises(AppLoadError, match="Invalid config/data.json"):
+    with pytest.raises(AppLoadError, match="Invalid data/contract.json"):
         await AppLoader.load(str(tmp_path))
 
 
@@ -161,3 +161,4 @@ async def test_intent_loading_does_not_call_mongo(monkeypatch: pytest.MonkeyPatc
     result = await AppLoader.load(str(tmp_path))
 
     assert result.data_contract is not None
+

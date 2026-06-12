@@ -30,3 +30,4 @@ def test_resolve_requested_workflow_uses_loaded_name_when_known(monkeypatch) -> 
     monkeypatch.setattr(platform_app, "_get_configured_entry_point", lambda: "AppGenerator")
 
     assert platform_app._resolve_requested_workflow_name("valueengine") == "ValueEngine"
+

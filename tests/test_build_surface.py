@@ -326,3 +326,4 @@ def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:
     assert "function StatusPill" not in source
     assert "function MetricTile" not in source
     assert "function StatCard" not in source
+

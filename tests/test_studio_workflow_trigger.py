@@ -1511,3 +1511,4 @@ def _async_coding_worker(result: dict):
         return CodingWorkerResult.model_validate(result)
 
     return _run
+

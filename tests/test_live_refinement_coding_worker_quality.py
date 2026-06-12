@@ -151,3 +151,4 @@ def test_live_refinement_coding_worker_matrix_quality() -> None:
         assert "execute_workflow" not in scenario_text
         forbidden_terms = ["app" + " zero", "app_" + "zero", "mozaiks-" + "app", "bloc" + "united"]
         assert not any(term in scenario_text for term in forbidden_terms)
+

@@ -6,22 +6,24 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from mozaiksai.control_plane import (
+from mozaiksai.control_plane import (  # noqa: E402
     LLMChangeClassifier,
     RefinementTriggerRouteResolver,
     load_control_plane_config,
     load_control_plane_pack,
 )
-from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
-from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
-from scripts import run_live_workflow_smoke, smoke_refinement_classifier
-
+from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService  # noqa: E402
+from mozaiksai.core.workflow.pack.config import (  # noqa: E402
+    get_workflow_sequence,
+    load_global_pack_graph,
+)
+from scripts import run_live_workflow_smoke, smoke_refinement_classifier  # noqa: E402
 
 APP_ROOT = REPO_ROOT / "factory_app" / "app"
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
@@ -53,7 +55,7 @@ DEFAULT_SPEC = CombinedSmokeSpec(
 )
 
 
-def _serialize_sequence(sequence: Any) -> Optional[Dict[str, Any]]:
+def _serialize_sequence(sequence: Any) -> dict[str, Any] | None:
     if sequence is None:
         return None
     steps: list[dict[str, Any]] = []
@@ -196,7 +198,11 @@ def validate_smoke_output(payload: dict[str, Any]) -> list[str]:
     live_workflow = payload.get("live_workflow") if isinstance(payload.get("live_workflow"), dict) else {}
     structured_output = live_workflow.get("structured_output") if isinstance(live_workflow.get("structured_output"), dict) else {}
     final_context = live_workflow.get("final_context") if isinstance(live_workflow.get("final_context"), dict) else {}
-    task_batch_results = final_context.get("task_batch_results") if isinstance(final_context.get("task_batch_results"), dict) else {}
+    task_batch_results = (
+        final_context.get("runtime_smoke_tasks_results")
+        if isinstance(final_context.get("runtime_smoke_tasks_results"), dict)
+        else {}
+    )
     task_batch_meta = task_batch_results.get("_meta") if isinstance(task_batch_results.get("_meta"), dict) else {}
     if live_workflow.get("success") is not True:
         violations.append("Live workflow smoke did not succeed")
@@ -207,7 +213,7 @@ def validate_smoke_output(payload: dict[str, Any]) -> list[str]:
     if int(structured_output.get("work_unit_count") or 0) < 3:
         violations.append("Live workflow smoke produced fewer than 3 work units")
     if not task_batch_meta:
-        violations.append("Live workflow smoke did not persist task_batch_results._meta")
+        violations.append("Live workflow smoke did not persist runtime_smoke_tasks_results._meta")
     else:
         completed_tasks = [str(task_id) for task_id in task_batch_meta.get("completed_tasks") or []]
         failed_tasks = [str(task_id) for task_id in task_batch_meta.get("failed_tasks") or []]
@@ -215,8 +221,13 @@ def validate_smoke_output(payload: dict[str, Any]) -> list[str]:
         concurrency = int(task_batch_meta.get("concurrency") or 0)
         result_context_key = str(task_batch_meta.get("result_context_key") or "")
         meta_status = str(task_batch_meta.get("status") or "")
+        worker_agents = {
+            str((task_batch_results.get(task_id) or {}).get("_worker_agent") or "")
+            for task_id in completed_tasks
+            if isinstance(task_batch_results.get(task_id), dict)
+        }
         expected_success = (
-            final_context.get("task_batch_status") == "completed"
+            final_context.get("runtime_smoke_tasks_status") == "completed"
             and meta_status == "completed"
             and not failed_tasks
             and len(completed_tasks) == task_count
@@ -226,17 +237,27 @@ def validate_smoke_output(payload: dict[str, Any]) -> list[str]:
         output_max_parallelism = structured_output.get("max_parallelism")
         output_failure_count = structured_output.get("failure_count")
         if int(output_work_unit_count if output_work_unit_count is not None else -1) != task_count:
-            violations.append("Structured output work_unit_count does not match task_batch_results._meta.task_count")
+            violations.append("Structured output work_unit_count does not match runtime_smoke_tasks_results._meta.task_count")
         if int(output_max_parallelism if output_max_parallelism is not None else -1) != concurrency:
-            violations.append("Structured output max_parallelism does not match task_batch_results._meta.concurrency")
+            violations.append("Structured output max_parallelism does not match runtime_smoke_tasks_results._meta.concurrency")
         if list(structured_output.get("executed_task_ids") or []) != completed_tasks:
-            violations.append("Structured output executed_task_ids does not match task_batch_results._meta.completed_tasks")
+            violations.append("Structured output executed_task_ids does not match runtime_smoke_tasks_results._meta.completed_tasks")
         if int(output_failure_count if output_failure_count is not None else -1) != len(failed_tasks):
-            violations.append("Structured output failure_count does not match task_batch_results._meta.failed_tasks")
+            violations.append("Structured output failure_count does not match runtime_smoke_tasks_results._meta.failed_tasks")
         if str(structured_output.get("result_context_key") or "") != result_context_key:
-            violations.append("Structured output result_context_key does not match task_batch_results._meta.result_context_key")
+            violations.append("Structured output result_context_key does not match runtime_smoke_tasks_results._meta.result_context_key")
         if bool(structured_output.get("all_units_succeeded")) != expected_success:
             violations.append("Structured output all_units_succeeded does not match task batch executor status")
+        expected_kinds = {"module", "page", "integration"}
+        if not expected_kinds.issubset(set(structured_output.get("executed_kinds") or [])):
+            violations.append("Live workflow smoke did not execute module, page, and integration task kinds")
+        expected_workers = {
+            "ModuleTaskWorkerAgent",
+            "PageTaskWorkerAgent",
+            "IntegrationTaskWorkerAgent",
+        }
+        if not expected_workers.issubset(worker_agents):
+            violations.append("Live workflow smoke did not use all expected task worker agents")
     if smoke_refinement_classifier._rendered_has_proprietary_term(payload):
         violations.append("Smoke output includes a proprietary term")
     return violations
@@ -267,8 +288,8 @@ async def run_smoke(spec: CombinedSmokeSpec = DEFAULT_SPEC) -> dict[str, Any]:
         payload["violations"] = validate_smoke_output(payload)
         return payload
 
-    live_error: Optional[str] = None
-    live_payload: Dict[str, Any]
+    live_error: str | None = None
+    live_payload: dict[str, Any]
     try:
         result = await run_live_workflow_smoke.run_live_workflow_smoke(
             workflow_name=spec.workflow_name,

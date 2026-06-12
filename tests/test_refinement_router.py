@@ -12,9 +12,7 @@ from mozaiksai.control_plane import (
     ControlPlaneArtifactChangeRoutesManifest,
     ControlPlaneArtifactRoutingManifest,
     ControlPlaneChangeRouteManifest,
-    ControlPlaneHarnessManifest,
     ControlPlaneManifest,
-    ControlPlaneProfileInfo,
     ControlPlanePromptsManifest,
     ControlPlaneRoutingManifest,
     ControlPlaneToolsManifest,
@@ -117,14 +115,6 @@ def _pack() -> LoadedControlPlanePack:
         path=Path("custom/control_plane"),
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.control_plane",
-            profile=ControlPlaneProfileInfo(
-                id="business_plan",
-                display_name="Business Plan Harness",
-                description="Control-plane pack for a business-plan workflow app.",
-            ),
-            harness=ControlPlaneHarnessManifest(
-                implementation="example.harness:Harness",
-            ),
             routing=ControlPlaneRoutingManifest(
                 default_artifact_kind="business_plan_bundle",
                 artifacts=[
@@ -774,8 +764,8 @@ async def test_data_model_impact_includes_data_contract_migrations_and_known_mod
                 "raw_user_request": "Add an optional field to the projects data model.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/data.json"},
-                        {"path": "config/data_migrations/001_projects_status.json"},
+                        {"path": "data/contract.json"},
+                        {"path": "data/migrations/001_projects_status.json"},
                         {"path": "modules/projects/module.yaml"},
                         {"path": "modules/projects/contracts/events.yaml"},
                         {"path": "modules/projects/contracts/admin.yaml"},
@@ -798,8 +788,8 @@ async def test_data_model_impact_includes_data_contract_migrations_and_known_mod
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "config/data.json",
-        "config/data_migrations/001_projects_status.json",
+        "data/contract.json",
+        "data/migrations/001_projects_status.json",
         "modules/projects/module.yaml",
         "modules/projects/contracts/events.yaml",
         "modules/projects/contracts/admin.yaml",
@@ -836,8 +826,8 @@ async def test_data_model_impact_unknown_module_uses_conservative_hints() -> Non
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "config/data.json",
-        "config/data_migrations/*.json",
+        "data/contract.json",
+        "data/migrations/*.json",
         "modules/*/backend/schemas.py",
         "modules/*/backend/repo.py",
         "modules/*/backend/policy.py",
@@ -860,7 +850,7 @@ async def test_data_model_impact_ui_request_includes_page_paths() -> None:
                 "raw_user_request": "Add a customers field and show it on the edit form.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/data.json"},
+                        {"path": "data/contract.json"},
                         {"path": "modules/customers/module.yaml"},
                         {"path": "modules/customers/backend/schemas.py"},
                         {"path": "modules/customers/backend/repo.py"},
@@ -878,8 +868,8 @@ async def test_data_model_impact_ui_request_includes_page_paths() -> None:
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "config/data.json",
-        "config/data_migrations/*.json",
+        "data/contract.json",
+        "data/migrations/*.json",
         "modules/customers/module.yaml",
         "modules/customers/backend/repo.py",
         "modules/customers/backend/policy.py",
@@ -903,7 +893,7 @@ async def test_data_model_destructive_change_adds_review_warning() -> None:
                 "raw_user_request": "Remove field from reports and backfill existing records.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/data.json"},
+                        {"path": "data/contract.json"},
                         {"path": "modules/reports/module.yaml"},
                         {"path": "modules/reports/backend/schemas.py"},
                         {"path": "modules/reports/backend/repo.py"},
@@ -938,8 +928,8 @@ async def test_non_data_model_backend_request_does_not_include_database_paths() 
                 "raw_user_request": "Add a tasks backend endpoint for closing tasks.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "config/data.json"},
-                        {"path": "config/data_migrations/001_tasks_status.json"},
+                        {"path": "data/contract.json"},
+                        {"path": "data/migrations/001_tasks_status.json"},
                         {"path": "modules/tasks/module.yaml"},
                         {"path": "modules/tasks/backend/handler.py"},
                         {"path": "modules/tasks/backend/service.py"},
@@ -965,8 +955,8 @@ async def test_non_data_model_backend_request_does_not_include_database_paths() 
         "modules/tasks/backend/policy.py",
         "modules/tasks/backend/schemas.py",
     ]
-    assert "config/data.json" not in decision.impact_set.affected_bundle_paths
-    assert "config/data_migrations/001_tasks_status.json" not in decision.impact_set.affected_bundle_paths
+    assert "data/contract.json" not in decision.impact_set.affected_bundle_paths
+    assert "data/migrations/001_tasks_status.json" not in decision.impact_set.affected_bundle_paths
 
 
 @pytest.mark.asyncio
@@ -1209,7 +1199,7 @@ async def test_integration_impact_includes_exact_connector_adapter_and_module_pa
                     "files_manifest": [
                         {"path": "services/integrations/reporting_provider_client.py"},
                         {"path": "services/integrations/analytics_provider_client.py"},
-                        {"path": "modules/reports/backend/service.py", "content": "from backend.integrations.analytics_provider_client import AnalyticsProviderClient"},
+                        {"path": "modules/reports/backend/service.py", "content": "from services.integrations.analytics_provider_client import AnalyticsProviderClient"},
                         {"path": "modules/reports/backend/schemas.py", "content": "connector_id = 'analytics_provider'"},
                         {"path": "modules/reports/backend/policy.py"},
                         {"path": "modules/reports/module.yaml"},

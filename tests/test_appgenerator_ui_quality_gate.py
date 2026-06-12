@@ -454,9 +454,9 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
 
 
 def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
-    handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
+    handoffs = _read_yaml("factory_app/workflows/AppGenerator/transition_graph.yaml")
     tools = _read_yaml("factory_app/workflows/AppGenerator/tools.yaml")
-    hooks = _read_yaml("factory_app/workflows/AppGenerator/hooks.yaml")
+    hooks = _read_yaml("factory_app/workflows/AppGenerator/middleware.yaml")
     agents = (
         Path(__file__).resolve().parents[1]
         / "factory_app"
@@ -467,7 +467,7 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
 
     handoff_pairs = {
         (rule["source_agent"], rule["target_agent"]): rule
-        for rule in handoffs["handoff_rules"]
+        for rule in handoffs["transition_rules"]
     }
     tool_entries = {
         (entry["agent"], entry["function"]): entry
@@ -475,19 +475,19 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     }
 
     assert ("AppSchemaAgent", "AppUIQualityAgent") in handoff_pairs
-    assert handoff_pairs[("AppUIQualityAgent", "AppSchemaAgent")]["condition"] == (
-        '${app_ui_quality_status} == "needs_revision"'
-    )
-    assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition"] == (
-        '${app_ui_quality_status} == "passed"'
-    )
+    assert handoff_pairs[("AppUIQualityAgent", "AppSchemaAgent")]["condition_type"] == "context_equals"
+    assert handoff_pairs[("AppUIQualityAgent", "AppSchemaAgent")]["condition_key"] == "app_ui_quality_status"
+    assert handoff_pairs[("AppUIQualityAgent", "AppSchemaAgent")]["condition_value"] == "needs_revision"
+    assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition_type"] == "context_equals"
+    assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition_key"] == "app_ui_quality_status"
+    assert handoff_pairs[("AppUIQualityAgent", "AdminRegistryAgent")]["condition_value"] == "passed"
     assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
     assert ("AssemblyAgent", "IntegrationReadinessAgent") in handoff_pairs
     assert ("IntegrationReadinessAgent", "AppValidationAgent") in handoff_pairs
     assert ("AppValidationAgent", "DownloadAgent") in handoff_pairs
-    assert handoff_pairs[("AppUIQualityAgent", "user")]["condition"] == (
-        '${app_ui_quality_status} == "blocked"'
-    )
+    assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_type"] == "context_equals"
+    assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_key"] == "app_ui_quality_status"
+    assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_value"] == "blocked"
 
     assert ("AppUIQualityAgent", "review_ui_quality") in tool_entries
     assert (
@@ -497,9 +497,9 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert ("AppUIQualityAgent", "review_ui_acceptance") not in tool_entries
 
     assert any(
-        entry["hook_agent"] == "AppUIQualityAgent"
+        entry["agent"] == "AppUIQualityAgent"
         and entry["function"] == "run_app_ui_quality_gate"
-        for entry in hooks["hooks"]
+        for entry in hooks["prompt_middleware"]
     )
 
     assert "- name: AppUIQualityAgent" in agents
@@ -584,3 +584,5 @@ def test_app_ui_quality_hook_persists_previous_schema_before_handoff(
     assert context.data["app_schema_ready"] is True
     assert context.data["app_ui_quality_status"] == "passed"
     assert context.data["app_pages"][0]["route"] == "/tickets"
+
+

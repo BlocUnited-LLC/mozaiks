@@ -192,3 +192,4 @@ def _extract_dedupe_region(source: str) -> str:
     end_match = re.search(r"dedupe\s*:\s*\[([^\]]*)\]", source[idx:], re.DOTALL)
     end = idx + (end_match.end() if end_match else 100)
     return source[start:end]
+

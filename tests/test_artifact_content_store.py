@@ -349,3 +349,4 @@ class TestArtifactWorkspaceContentRef:
         result = await self._call({})
         assert result["present"] is False
         assert result["reason"] == "workspace_unavailable"
+

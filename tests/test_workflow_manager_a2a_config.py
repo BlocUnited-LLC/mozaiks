@@ -90,3 +90,4 @@ def test_workflow_manager_rejects_removed_startup_mode_only(tmp_path: Path) -> N
     assert info is not None
     assert info.get("status") == "error"
     assert "workflow_startup_mode" in str(info.get("error") or "")
+

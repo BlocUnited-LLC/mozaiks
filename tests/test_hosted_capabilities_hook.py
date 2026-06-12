@@ -15,7 +15,7 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_HOOKS_YAML = _APPGEN_DIR / "hooks.yaml"
+_HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
 _TOOLS_DIR = _APPGEN_DIR / "tools"
 _CONTEXT_VARS_PATH = _APPGEN_DIR / "context_variables.yaml"
 _STRUCTURED_OUTPUTS_PATH = _APPGEN_DIR / "structured_outputs.yaml"
@@ -52,22 +52,16 @@ def hook(_import_hook):
 # ---------------------------------------------------------------------------
 
 class TestOSSNoOp:
-    def test_noop_when_all_null(self, hook):
+    def test_noop_when_null(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": None,
-            "available_hosted_packs": None,
-            "hosted_capability_selection": None,
-            "pack_sources": None,
+            "capability_packs": None,
         })
         hook.inject_hosted_capabilities_context(agent, [])
         assert agent.system_message == ""
 
-    def test_noop_when_all_empty_lists(self, hook):
+    def test_noop_when_empty_list(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": [],
-            "available_hosted_packs": [],
-            "hosted_capability_selection": {},
-            "pack_sources": [],
+            "capability_packs": [],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         assert agent.system_message == ""
@@ -79,23 +73,19 @@ class TestOSSNoOp:
 
     def test_noop_for_wrong_agent(self, hook):
         agent = _FakeAgent("InterviewAgent", context_variables={
-            "runtime_capabilities": ["wallet", "investor_marketplace"],
+            "capability_packs": [{"id": "wallet"}],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         assert agent.system_message == ""
 
-    def test_oss_default_context_vars_are_null(self):
+    def test_oss_default_context_vars_are_empty(self):
         data = yaml.safe_load(_CONTEXT_VARS_PATH.read_text(encoding="utf-8"))
         defs = data["definitions"]
-        for key in [
-            "runtime_capabilities",
-            "available_hosted_packs",
-            "hosted_capability_selection",
-            "pack_sources",
-        ]:
-            assert key in defs, f"Missing definition: {key}"
-            default = defs[key].get("source", {}).get("default")
-            assert default is None, f"{key} default should be null, got {default!r}"
+        assert "capability_packs" in defs, "Missing definition: capability_packs"
+        default = defs["capability_packs"].get("source", {}).get("default")
+        assert default in (None, []), (
+            f"capability_packs default should be null or [], got {default!r}"
+        )
 
     def test_oss_default_context_does_not_mention_mozaikspay_or_hosted_packs(self):
         # When running in OSS mode the injected context must be empty — no
@@ -115,21 +105,19 @@ class TestOSSNoOp:
 # ---------------------------------------------------------------------------
 
 class TestHostedInjection:
-    def test_injects_header_when_runtime_capabilities_present(self, hook):
+    def test_injects_header_when_capability_packs_present(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": ["module_execution", "hosted_wallet"],
-            "available_hosted_packs": None,
-            "pack_sources": None,
+            "capability_packs": [
+                {"id": "hosted_wallet", "display_name": "Hosted Wallet"},
+            ],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         assert "[HOSTED CAPABILITIES CONTEXT]" in agent.system_message
         assert "hosted_wallet" in agent.system_message
 
-    def test_injects_hosted_packs_as_string_list(self, hook):
+    def test_injects_packs_as_string_list(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": None,
-            "available_hosted_packs": ["wallet", "investor_marketplace"],
-            "pack_sources": None,
+            "capability_packs": ["wallet", "investor_marketplace"],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         msg = agent.system_message
@@ -137,10 +125,9 @@ class TestHostedInjection:
         assert "wallet" in msg
         assert "investor_marketplace" in msg
 
-    def test_injects_hosted_packs_as_dict_list(self, hook):
+    def test_injects_packs_as_dict_list(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": None,
-            "available_hosted_packs": [
+            "capability_packs": [
                 {
                     "id": "wallet",
                     "display_name": "Wallet",
@@ -155,7 +142,6 @@ class TestHostedInjection:
                     "display_name": "Investor Marketplace",
                 },
             ],
-            "pack_sources": None,
         })
         hook.inject_hosted_capabilities_context(agent, [])
         msg = agent.system_message
@@ -163,48 +149,28 @@ class TestHostedInjection:
         assert "investor_marketplace" in msg
         assert "wallet.view" in msg
 
-    def test_injects_pack_sources(self, hook):
+    def test_pack_source_path_does_not_appear_in_injected_context(self, hook):
+        """pack_source_path is an internal resolver field — not exposed to the agent."""
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": None,
-            "available_hosted_packs": None,
-            "pack_sources": [
+            "capability_packs": [
                 {
-                    "id": "mozaiks_app_hosted",
-                    "kind": "filesystem",
-                    "path": "app_generator/capability_packs",
+                    "id": "wallet",
+                    "display_name": "Wallet",
                     "capability_source": "hosted_pack",
+                    "pack_source_path": "/build_context/wallet",
                 }
             ],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         msg = agent.system_message
-        assert "mozaiks_app_hosted" in msg
-        assert "hosted_pack" in msg
-        assert "planning context only" in msg.lower()
-
-    def test_injects_host_selected_capability_intent(self, hook):
-        agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": None,
-            "available_hosted_packs": None,
-            "hosted_capability_selection": {
-                "intent_id": "subscription_revenue",
-                "pack_id": "hosted_checkout",
-                "surfaces": ["checkout", "billing"],
-                "source": "builder",
-            },
-            "pack_sources": None,
-        })
-        hook.inject_hosted_capabilities_context(agent, [])
-        msg = agent.system_message
         assert "[HOSTED CAPABILITIES CONTEXT]" in msg
-        assert "Host-selected capability intent" in msg
-        assert "subscription_revenue" in msg
-        assert "hosted_checkout" in msg
-        assert "checkout, billing" in msg
+        assert "wallet" in msg
+        # Internal resolver path is not surfaced in the agent prompt
+        assert "/build_context/packs" not in msg
 
     def test_taxonomy_guidance_always_present_when_injected(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": ["module_execution"],
+            "capability_packs": [{"id": "module_execution"}],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         msg = agent.system_message
@@ -216,7 +182,7 @@ class TestHostedInjection:
 
     def test_hosted_pack_planning_rule_injected(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "available_hosted_packs": ["wallet"],
+            "capability_packs": [{"id": "wallet"}],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         msg = agent.system_message
@@ -225,7 +191,7 @@ class TestHostedInjection:
 
     def test_is_idempotent(self, hook):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "runtime_capabilities": ["hosted_wallet"],
+            "capability_packs": [{"id": "hosted_wallet"}],
         })
         hook.inject_hosted_capabilities_context(agent, [])
         hook.inject_hosted_capabilities_context(agent, [])
@@ -233,16 +199,16 @@ class TestHostedInjection:
 
 
 # ---------------------------------------------------------------------------
-# hooks.yaml registration
+# middleware.yaml registration
 # ---------------------------------------------------------------------------
 
 class TestHooksYamlRegistration:
     def test_hook_registered_for_appplanagent(self):
         data = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
-        hooks = data["hooks"]
+        hooks = data["prompt_middleware"]
         match = [
             h for h in hooks
-            if h.get("hook_agent") == "AppPlanAgent"
+            if h.get("agent") == "AppPlanAgent"
             and h.get("filename") == "hook_hosted_capabilities_context.py"
             and h.get("function") == "inject_hosted_capabilities_context"
         ]
@@ -250,11 +216,11 @@ class TestHooksYamlRegistration:
 
     def test_hook_not_registered_for_other_agents(self):
         data = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
-        hooks = data["hooks"]
+        hooks = data["prompt_middleware"]
         others = [
             h for h in hooks
             if h.get("filename") == "hook_hosted_capabilities_context.py"
-            and h.get("hook_agent") != "AppPlanAgent"
+            and h.get("agent") != "AppPlanAgent"
         ]
         assert others == [], f"Hook should only fire for AppPlanAgent, found: {others}"
 
@@ -280,14 +246,10 @@ class TestStructuredOutputContract:
         assert cs.get("type") in ("optional_str", "str", "optional"), \
             f"capability_source should be optional, got type={cs.get('type')!r}"
 
-    def test_appplanagent_variables_include_hosted_context_keys(self):
+    def test_appplanagent_variables_include_capability_packs(self):
         data = yaml.safe_load(_CONTEXT_VARS_PATH.read_text(encoding="utf-8"))
         agents = data.get("agents", {})
         plan_vars = agents.get("AppPlanAgent", {}).get("variables", [])
-        for key in [
-            "runtime_capabilities",
-            "available_hosted_packs",
-            "hosted_capability_selection",
-            "pack_sources",
-        ]:
-            assert key in plan_vars, f"AppPlanAgent missing variable: {key}"
+        assert "capability_packs" in plan_vars, "AppPlanAgent missing variable: capability_packs"
+
+

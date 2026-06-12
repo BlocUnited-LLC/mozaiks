@@ -227,3 +227,4 @@ def test_workspace_helpers_keep_brand_and_ui_inside_active_app_root(tmp_path) ->
     app_root = tmp_path / "workspace" / "app"
     assert resolve_theme_config_path(app_root) == app_root / "brand" / "theme_config.json"
     assert resolve_ui_route_manifest_path(app_root) == app_root / "ui" / "route_manifest.json"
+

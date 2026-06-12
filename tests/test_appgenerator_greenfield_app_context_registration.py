@@ -348,3 +348,4 @@ def test_appgenerator_context_registration_has_no_graph_database_or_proprietary_
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

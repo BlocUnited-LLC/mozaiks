@@ -115,3 +115,4 @@ async def test_get_marketplace_summary_returns_metrics_contract_when_marketplace
     assert result["metrics"]["submitted_listings"]["value"] == 1
     assert result["metrics"]["investor_profiles"]["value"] == 18
     assert result["metrics"]["investment_interests"]["value"] == 27
+

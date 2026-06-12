@@ -4,50 +4,75 @@ from pathlib import Path
 
 import pytest
 import yaml
-from autogen.beta.network import TransitionGraph
+from autogen.beta.network import (
+    EV_PACKET,
+    Envelope,
+    TransitionGraph,
+    WorkflowAdapter,
+    WorkflowState,
+)
 
 from mozaiksai.core.workflow.execution.network_graph import (
     WorkflowGraphCompileError,
-    compile_handoffs_to_transition_graph,
-    evaluate_context_expression,
+    compile_transition_rules_to_graph,
     resolve_next_agent,
 )
 
 
-def test_context_expression_supports_boolean_comparisons_and_membership():
-    context = {
-        "ready": True,
-        "status": "passed",
-        "adoption_level": "ecosystem",
-    }
+def test_transition_graph_uses_only_canonical_terminate_literal():
+    graph = compile_transition_rules_to_graph(
+        [
+            {
+                "source_agent": "FinalAgent",
+                "target_agent": "terminate",
+                "transition_type": "after_turn",
+                "transition_target": "TerminateTarget",
+            }
+        ],
+        initial_agent_name="FinalAgent",
+        agent_id_by_name={"FinalAgent": "FinalAgent"},
+        max_turns=4,
+    )
 
-    assert evaluate_context_expression("${ready} == true", context) is True
-    assert evaluate_context_expression("${status} != \"failed\"", context) is True
-    assert evaluate_context_expression(
-        "${ready} == true and ${adoption_level} in [\"ecosystem\", \"embed\"]",
-        context,
-    ) is True
+    assert (
+        resolve_next_agent(
+            graph,
+            current_agent_name="FinalAgent",
+            context_variables={},
+        )
+        == "terminate"
+    )
 
-
-def test_context_expression_rejects_non_deterministic_python():
     with pytest.raises(WorkflowGraphCompileError):
-        evaluate_context_expression("__import__('os').system('echo nope')", {})
+        compile_transition_rules_to_graph(
+            [
+                {
+                    "source_agent": "FinalAgent",
+                    "target_agent": "stop",
+                    "transition_type": "after_turn",
+                }
+            ],
+            initial_agent_name="FinalAgent",
+            agent_id_by_name={"FinalAgent": "FinalAgent"},
+            max_turns=4,
+        )
 
 
-def test_handoffs_compile_to_serializable_ag2_transition_graph():
-    graph = compile_handoffs_to_transition_graph(
+def test_transition_rules_compile_to_serializable_ag2_transition_graph():
+    graph = compile_transition_rules_to_graph(
         [
             {
                 "source_agent": "PlannerAgent",
                 "target_agent": "ReviewAgent",
-                "handoff_type": "condition",
-                "condition_type": "expression",
-                "condition": "${plan_ready} == true",
+                "transition_type": "condition",
+                "condition_type": "context_equals",
+                "condition_key": "plan_ready",
+                "condition_value": True,
             },
             {
                 "source_agent": "ReviewAgent",
                 "target_agent": "user",
-                "handoff_type": "after_work",
+                "transition_type": "after_turn",
             },
         ],
         initial_agent_name="PlannerAgent",
@@ -75,14 +100,15 @@ def test_handoffs_compile_to_serializable_ag2_transition_graph():
 
 
 def test_resolve_next_agent_supports_distinct_ag2_agent_ids():
-    graph = compile_handoffs_to_transition_graph(
+    graph = compile_transition_rules_to_graph(
         [
             {
                 "source_agent": "PlannerAgent",
                 "target_agent": "ReviewAgent",
-                "handoff_type": "condition",
-                "condition_type": "expression",
-                "condition": "${plan_ready} == true",
+                "transition_type": "condition",
+                "condition_type": "context_equals",
+                "condition_key": "plan_ready",
+                "condition_value": True,
             }
         ],
         initial_agent_name="PlannerAgent",
@@ -101,14 +127,136 @@ def test_resolve_next_agent_supports_distinct_ag2_agent_ids():
     )
 
 
-def test_llm_handoffs_are_rejected():
+def test_context_condition_is_source_scoped():
+    graph = compile_transition_rules_to_graph(
+        [
+            {
+                "source_agent": "PlannerAgent",
+                "target_agent": "ReviewAgent",
+                "transition_type": "condition",
+                "condition_type": "context_equals",
+                "condition_key": "plan_ready",
+                "condition_value": True,
+            }
+        ],
+        initial_agent_name="PlannerAgent",
+        agent_id_by_name={
+            "PlannerAgent": "PlannerAgent",
+            "ReviewAgent": "ReviewAgent",
+            "WorkerAgent": "WorkerAgent",
+        },
+    )
+
+    assert (
+        resolve_next_agent(
+            graph,
+            current_agent_name="WorkerAgent",
+            context_variables={"plan_ready": True},
+            agent_name_by_id={
+                "PlannerAgent": "PlannerAgent",
+                "ReviewAgent": "ReviewAgent",
+                "WorkerAgent": "WorkerAgent",
+            },
+            participant_order=["PlannerAgent", "ReviewAgent", "WorkerAgent"],
+        )
+        == "terminate"
+    )
+
+
+def test_context_expression_condition_uses_ag2_context_expression_and_is_source_scoped():
+    graph = compile_transition_rules_to_graph(
+        [
+            {
+                "source_agent": "PlannerAgent",
+                "target_agent": "ReviewAgent",
+                "transition_type": "condition",
+                "condition_type": "context_expression",
+                "context_expression": "${route} == 'review' and len(${pending_items}) > 0",
+            }
+        ],
+        initial_agent_name="PlannerAgent",
+        agent_id_by_name={
+            "PlannerAgent": "PlannerAgent",
+            "ReviewAgent": "ReviewAgent",
+            "WorkerAgent": "WorkerAgent",
+        },
+    )
+
+    assert isinstance(TransitionGraph.loads(graph.to_dict()), TransitionGraph)
+    assert (
+        resolve_next_agent(
+            graph,
+            current_agent_name="PlannerAgent",
+            context_variables={"route": "review", "pending_items": ["a"]},
+            agent_name_by_id={
+                "PlannerAgent": "PlannerAgent",
+                "ReviewAgent": "ReviewAgent",
+                "WorkerAgent": "WorkerAgent",
+            },
+            participant_order=["PlannerAgent", "ReviewAgent", "WorkerAgent"],
+        )
+        == "ReviewAgent"
+    )
+    assert (
+        resolve_next_agent(
+            graph,
+            current_agent_name="WorkerAgent",
+            context_variables={"route": "review", "pending_items": ["a"]},
+            agent_name_by_id={
+                "PlannerAgent": "PlannerAgent",
+                "ReviewAgent": "ReviewAgent",
+                "WorkerAgent": "WorkerAgent",
+            },
+            participant_order=["PlannerAgent", "ReviewAgent", "WorkerAgent"],
+        )
+        == "terminate"
+    )
+
+
+def test_tool_called_condition_uses_ag2_routing_tool_packet():
+    graph = compile_transition_rules_to_graph(
+        [
+            {
+                "source_agent": "PlannerAgent",
+                "target_agent": "ReviewAgent",
+                "transition_type": "condition",
+                "condition_type": "tool_called",
+                "tool_name": "route_to_review",
+            }
+        ],
+        initial_agent_name="PlannerAgent",
+        agent_id_by_name={"PlannerAgent": "PlannerAgent", "ReviewAgent": "ReviewAgent"},
+    )
+    state = WorkflowState(
+        participant_order=["PlannerAgent", "ReviewAgent"],
+        expected_next_speaker="PlannerAgent",
+        last_speaker_id="PlannerAgent",
+        turn_count=1,
+        creator_id="user",
+        graph_data=graph.to_dict(),
+        context_vars={},
+    )
+    envelope = Envelope(
+        channel_id="mozaiks-local-routing",
+        sender_id="PlannerAgent",
+        audience=None,
+        event_type=EV_PACKET,
+        event_data={"routing": {"tool": "route_to_review"}},
+    )
+
+    next_state = WorkflowAdapter().fold(envelope, state)
+
+    assert next_state.expected_next_speaker == "ReviewAgent"
+
+
+def test_llm_transition_conditions_are_rejected():
     with pytest.raises(WorkflowGraphCompileError):
-        compile_handoffs_to_transition_graph(
+        compile_transition_rules_to_graph(
             [
                 {
                     "source_agent": "user",
                     "target_agent": "PlannerAgent",
-                    "handoff_type": "condition",
+                    "transition_type": "condition",
                     "condition_type": "string_llm",
                     "condition": "When the user wants changes.",
                 }
@@ -118,14 +266,100 @@ def test_llm_handoffs_are_rejected():
         )
 
 
-def test_factory_workflow_handoffs_compile_to_ag2_network_graphs():
-    workflow_root = Path("factory_app/workflows")
-    handoff_files = sorted(workflow_root.glob("*/handoffs.yaml"))
-    assert handoff_files
+def test_expression_transition_conditions_are_rejected():
+    with pytest.raises(WorkflowGraphCompileError):
+        compile_transition_rules_to_graph(
+            [
+                {
+                    "source_agent": "user",
+                    "target_agent": "PlannerAgent",
+                    "transition_type": "condition",
+                    "condition_type": "expression",
+                    "condition": "${route} == 'plan'",
+                }
+            ],
+            initial_agent_name="PlannerAgent",
+            agent_id_by_name={"PlannerAgent": "PlannerAgent"},
+        )
 
-    for handoffs_path in handoff_files:
-        workflow_dir = handoffs_path.parent
-        handoffs = yaml.safe_load(handoffs_path.read_text(encoding="utf-8")) or {}
+
+def test_factory_transition_graphs_contain_no_stale_condition_field():
+    """No transition rule may use the removed `condition` string field.
+
+    The compiler raises WorkflowGraphCompileError at runtime if it finds the field;
+    this scan catches authoring mistakes before compilation so the error is
+    surfaced at test time with a precise location.
+    """
+    workflow_root = Path("factory_app/workflows")
+    transition_files = sorted(workflow_root.glob("*/transition_graph.yaml"))
+    assert transition_files
+
+    violations: list[str] = []
+    for transition_path in transition_files:
+        data = yaml.safe_load(transition_path.read_text(encoding="utf-8")) or {}
+        for rule in data.get("transition_rules", []):
+            if "condition" in rule:
+                violations.append(
+                    f"{transition_path.parent.name}: "
+                    f"{rule.get('source_agent')!r} -> {rule.get('target_agent')!r} "
+                    "uses removed 'condition' field"
+                )
+
+    assert not violations, "\n".join(violations)
+
+
+def test_factory_transition_graph_condition_rules_use_canonical_fields():
+    """All condition-type rules must declare condition_type and the matching sub-fields.
+
+    context_equals requires condition_key + condition_value.
+    tool_called requires tool_name.
+    Non-deterministic types (expression, llm, string_llm) are banned.
+    """
+    workflow_root = Path("factory_app/workflows")
+    transition_files = sorted(workflow_root.glob("*/transition_graph.yaml"))
+
+    violations: list[str] = []
+    for transition_path in transition_files:
+        data = yaml.safe_load(transition_path.read_text(encoding="utf-8")) or {}
+        for rule in data.get("transition_rules", []):
+            if rule.get("transition_type") != "condition":
+                continue
+            condition_type = rule.get("condition_type", "")
+            label = (
+                f"{transition_path.parent.name}: "
+                f"{rule.get('source_agent')!r} -> {rule.get('target_agent')!r}"
+            )
+            if not condition_type:
+                violations.append(f"{label}: missing condition_type")
+                continue
+            if condition_type in {"expression", "llm", "string_llm"}:
+                violations.append(f"{label}: non-deterministic condition_type={condition_type!r}")
+                continue
+            if condition_type == "context_equals":
+                if not rule.get("condition_key"):
+                    violations.append(f"{label}: context_equals missing condition_key")
+                if "condition_value" not in rule:
+                    violations.append(f"{label}: context_equals missing condition_value")
+            elif condition_type == "context_expression":
+                if not rule.get("context_expression"):
+                    violations.append(f"{label}: context_expression missing context_expression")
+            elif condition_type == "tool_called":
+                if not rule.get("tool_name"):
+                    violations.append(f"{label}: tool_called missing tool_name")
+            else:
+                violations.append(f"{label}: unknown condition_type={condition_type!r}")
+
+    assert not violations, "\n".join(violations)
+
+
+def test_factory_workflow_transition_rules_compile_to_ag2_network_graphs():
+    workflow_root = Path("factory_app/workflows")
+    transition_files = sorted(workflow_root.glob("*/transition_graph.yaml"))
+    assert transition_files
+
+    for transition_path in transition_files:
+        workflow_dir = transition_path.parent
+        transitions = yaml.safe_load(transition_path.read_text(encoding="utf-8")) or {}
         orchestrator = yaml.safe_load((workflow_dir / "orchestrator.yaml").read_text(encoding="utf-8")) or {}
         agents_raw = yaml.safe_load((workflow_dir / "agents.yaml").read_text(encoding="utf-8")) or {}
         agent_names = [
@@ -135,11 +369,12 @@ def test_factory_workflow_handoffs_compile_to_ag2_network_graphs():
         ]
         initial_agent = str(orchestrator.get("initial_agent") or (agent_names[0] if agent_names else "user"))
 
-        graph = compile_handoffs_to_transition_graph(
-            handoffs.get("handoff_rules", []),
+        graph = compile_transition_rules_to_graph(
+            transitions.get("transition_rules", []),
             initial_agent_name=initial_agent,
             agent_id_by_name={name: name for name in agent_names},
             max_turns=orchestrator.get("max_turns"),
         )
 
-        assert isinstance(graph, TransitionGraph), handoffs_path
+        assert isinstance(graph, TransitionGraph), transition_path
+

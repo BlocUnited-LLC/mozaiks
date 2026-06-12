@@ -98,7 +98,7 @@ def _bundle():
                             "id": "user-list",
                             "primitive": "DataTable",
                             "intent": "List all users",
-                            "config_hint": {"columns": ["id", "name", "email"], "api_endpoint": "/api/users"},
+                            "config_hint": "{\"columns\": [\"id\", \"name\", \"email\"], \"api_endpoint\": \"/api/users\"}",
                         }
                     ],
                 }
@@ -210,3 +210,4 @@ def test_save_design_docs_bundle_persists_surface_map_and_data_contract(monkeypa
     assert summary_artifact["summary_payload"]["surface_map"]["surfaces"][0]["surface_id"] == "users"
     assert summary_artifact["summary_payload"]["experience_spec"]["pages"][0]["name"] == "Users"
     assert result["page_count"] == 1
+

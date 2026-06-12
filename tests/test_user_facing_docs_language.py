@@ -70,3 +70,4 @@ def test_mkdocs_nav_uses_plain_user_facing_labels() -> None:
 
     assert "- Quickstart: getting-started.md" not in nav
     assert "- Local Dev Setup: local-setup.md" not in nav
+

@@ -156,3 +156,4 @@ async def test_workspace_snapshot_feeds_graph_aware_scope_catalog(tmp_path: Path
     assert candidate_paths[0].startswith("app/modules/wallet/")
     assert candidate_paths.index("app/modules/wallet/backend/handler.py") < candidate_paths.index("tests/test_wallet.py")
     assert catalog["scan_health"]["selected_by_priority"]["app_modules"] == 2
+

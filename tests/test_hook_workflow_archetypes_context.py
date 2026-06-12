@@ -1,10 +1,10 @@
 """
-Tests for hook_workflow_archetypes_context.py and the hooks.yaml registrations
+Tests for hook_workflow_archetypes_context.py and the middleware.yaml registrations
 that close Gap #7 (archetype library gap for WorkflowBundleBuilderAgent).
 
 Verifies:
-- hooks.yaml registers hook_workflow_archetypes_context.py for WorkflowBundleBuilderAgent
-- hooks.yaml registers hook_ai_pack_archetype_context.py for WorkflowBundleBuilderAgent
+- middleware.yaml registers hook_workflow_archetypes_context.py for WorkflowBundleBuilderAgent
+- middleware.yaml registers hook_ai_pack_archetype_context.py for WorkflowBundleBuilderAgent
 - inject_workflow_archetypes_context fires for AI-native capability_ids
 - Injected section header contains archetype name
 - Canonical agent sequence and hard_constraints appear in injected content
@@ -24,15 +24,14 @@ _AGENTGEN_DIR = (
     / "workflows"
     / "AgentGenerator"
 )
-_HOOKS_YAML = _AGENTGEN_DIR / "hooks.yaml"
-_APPGEN_TOOLS_DIR = (
+_HOOKS_YAML = _AGENTGEN_DIR / "middleware.yaml"
+_APPGEN_CATALOG_DIR = (
     Path(__file__).parent.parent
     / "factory_app"
-    / "workflows"
+    / "build_context"
     / "AppGenerator"
-    / "tools"
 )
-_WORKFLOW_ARCHETYPES_YAML = _APPGEN_TOOLS_DIR / "workflow_archetypes.yaml"
+_WORKFLOW_ARCHETYPES_YAML = _APPGEN_CATALOG_DIR / "workflow_archetypes.yaml"
 
 
 class _FakeAgent:
@@ -53,23 +52,23 @@ def _run_hook(agent: _FakeAgent) -> None:
 
 
 # ---------------------------------------------------------------------------
-# hooks.yaml registration checks
+# middleware.yaml registration checks
 # ---------------------------------------------------------------------------
 
 class TestHooksYamlRegistration:
     def _hooks(self):
         with _HOOKS_YAML.open(encoding="utf-8") as f:
-            return yaml.safe_load(f).get("hooks", [])
+            return yaml.safe_load(f).get("prompt_middleware", [])
 
     def test_hook_workflow_archetypes_registered_for_workflowbundlebuilderagent(self):
         hooks = self._hooks()
         match = [
             h for h in hooks
-            if h.get("hook_agent") == "WorkflowBundleBuilderAgent"
+            if h.get("agent") == "WorkflowBundleBuilderAgent"
             and "hook_workflow_archetypes_context" in str(h.get("filename", ""))
         ]
         assert match, (
-            "hooks.yaml must register hook_workflow_archetypes_context.py "
+            "middleware.yaml must register hook_workflow_archetypes_context.py "
             "for WorkflowBundleBuilderAgent"
         )
 
@@ -77,11 +76,11 @@ class TestHooksYamlRegistration:
         hooks = self._hooks()
         match = [
             h for h in hooks
-            if h.get("hook_agent") == "WorkflowBundleBuilderAgent"
+            if h.get("agent") == "WorkflowBundleBuilderAgent"
             and "hook_ai_pack_archetype_context" in str(h.get("filename", ""))
         ]
         assert match, (
-            "hooks.yaml must register hook_ai_pack_archetype_context.py "
+            "middleware.yaml must register hook_ai_pack_archetype_context.py "
             "for WorkflowBundleBuilderAgent to fire the [AI PACK CALLBACK CONTRACT] injection"
         )
 
@@ -196,3 +195,5 @@ class TestWorkflowArchetypesYamlAiNativePacks:
 
     def test_ai_extraction_requires_task_batches(self):
         assert self._archetypes()["ai_extraction"].get("task_batches_required") is True
+
+

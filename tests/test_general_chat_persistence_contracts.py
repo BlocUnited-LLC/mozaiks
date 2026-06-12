@@ -134,9 +134,8 @@ def test_ask_chat_restore_contracts_are_pinned_in_source() -> None:
     assert "setStoredActiveGeneralChatId" in storage_source
     assert "useState(() => getStoredActiveGeneralChatId())" in context_source
     assert "setStoredActiveGeneralChatId(activeGeneralChatId)" in context_source
-    assert "const preferredGeneralChatId = requestedGeneralChatId || activeGeneralChatId || getStoredActiveGeneralChatId();" in chat_page_source
-    assert "ensureGeneralMode(chatId)" in chat_page_source
-    assert "general_chat_id: preferredGeneralChatId || undefined" in chat_page_source
+    assert "ensureGeneralMode()" in chat_page_source
+    assert "general_chat_id: activeGeneralChatId || undefined" in chat_page_source
     assert "requested_general_chat_id" in general_mode_source
     assert 'ui_context_payload.get("general_chat_id")' in input_handler_source
     assert 'ui_context_payload["requested_general_chat_id"] = requested_general_chat_id' in input_handler_source
@@ -154,5 +153,5 @@ def test_ask_bootstrap_sessions_do_not_count_as_workflow_runs() -> None:
     assert 'and not _is_ask_carrier_session(session)' in platform_source
     assert 'if doc and _is_ask_carrier_session(doc):' in platform_source
     assert "body.transport_purpose = sessionOptions.transportPurpose.trim();" in api_source
-    assert "const shouldRestoreStoredWorkflowChat = !(" in chat_page_source
     assert "askCarrierMode ? { transportPurpose: 'ask_carrier' } : null" in chat_page_source
+

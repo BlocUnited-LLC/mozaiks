@@ -46,3 +46,4 @@ def test_app_registry_yaml_page_does_not_duplicate_apps_console() -> None:
     page_path = _workspace() / "factory_app" / "app" / "ui" / "pages" / "app-registry.yaml"
 
     assert not page_path.exists()
+

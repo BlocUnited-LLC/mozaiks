@@ -483,3 +483,4 @@ async def test_deterministic_staged_patch_smoke_restores_dashboard_title(monkeyp
     assert artifact_store.versions[accepted_result.artifact_version_id].lifecycle_status == ArtifactLifecycleStatus.CURRENT
     assert artifact_store.versions[source_version.id].lifecycle_status == ArtifactLifecycleStatus.SUPERSEDED
     assert content_store.put_calls
+

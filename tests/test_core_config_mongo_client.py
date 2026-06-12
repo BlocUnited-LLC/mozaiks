@@ -30,3 +30,4 @@ def test_get_mongo_client_reuses_cached_client_until_closed(monkeypatch) -> None
     assert len(created) == 2
     assert created[0].closed is True
     assert created[1].closed is True
+

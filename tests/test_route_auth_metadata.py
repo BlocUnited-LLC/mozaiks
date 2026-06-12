@@ -303,3 +303,4 @@ def test_app_custom_route_meta_requires_role_description_mentions_module_policy(
     assert "module" in meta_block.lower(), (
         "requiresRole description must reference module policy as the authoritative boundary"
     )
+

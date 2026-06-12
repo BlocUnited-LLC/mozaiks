@@ -383,7 +383,7 @@ class TestRejectsPathTraversal:
         ):
             result = await read_carry_forward_module_contract(
                 "auth",
-                files=["app.json", "config/data.json", "ui/index.js"],
+                files=["app.json", "data/contract.json", "ui/index.js"],
                 context_variables=_ctx(),
             )
 
@@ -844,3 +844,4 @@ class TestExistingTestsUnaffected:
             "contracts/profile.yaml",
         }
         assert required == set(_ALLOWED_CONTRACT_FILES)
+

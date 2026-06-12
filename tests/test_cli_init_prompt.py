@@ -147,7 +147,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "app/services/security/" in agents_md
     assert "app/config/secrets.yaml" in agents_md
     assert "Never store raw API keys" in agents_md
-    assert "app/config/data.json" in agents_md
+    assert "app/data/contract.json" in agents_md
     assert "workflows/" in agents_md
 
     claude_md = (target_dir / "CLAUDE.md").read_text(encoding="utf-8")
@@ -202,3 +202,4 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     studio_script = (target_dir / "scripts" / "run-studio.ps1").read_text(encoding="utf-8")
     assert '"studio"' in studio_script
     assert '"--dir"' in studio_script
+

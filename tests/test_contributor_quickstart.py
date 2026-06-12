@@ -115,3 +115,4 @@ def test_skill_index_still_maps_common_tasks_for_quickstart_follow_through() -> 
     assert "Release/changelog change" in skills
     assert "Hosted-pack support" in skills
     assert "If unsure or scope spans layers" in skills
+

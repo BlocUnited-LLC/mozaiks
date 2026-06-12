@@ -69,3 +69,4 @@ def test_agentgenerator_guidance_stays_public_safe() -> None:
     skill = _read(".claude/skills/agentgenerator-change/SKILL.md")
     for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in skill, forbidden
+

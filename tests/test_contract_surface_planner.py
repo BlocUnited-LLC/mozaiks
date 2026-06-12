@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig, ControlPlaneConfig
 from mozaiksai.control_plane.contracts import (
     CONTRACT_SURFACE_CANONICAL_PATHS,
     CONTRACT_SURFACE_DEPENDENCY_ORDER,
@@ -25,9 +26,23 @@ from mozaiksai.control_plane.contracts import (
 from mozaiksai.control_plane.implementations.contract_surface_planner import (
     ContractSurfacePlanner,
     _ContractSurfaceClassification,
-    _SurfaceEntry,
 )
-
+from mozaiksai.control_plane.implementations.refinement_router import (
+    ArtifactKind,
+    ChangeClass,
+    ChangeIntent,
+    ImpactSet,
+    RefinementRequest,
+    RefinementRoutingDecision,
+)
+from mozaiksai.control_plane.schema import (
+    ControlPlaneCheckpointManifest,
+    ControlPlaneManifest,
+    ControlPlanePromptDefinition,
+    ControlPlanePromptsManifest,
+    ControlPlaneToolsManifest,
+    LoadedControlPlanePack,
+)
 
 # ---------------------------------------------------------------------------
 # Contract type smoke tests
@@ -148,6 +163,131 @@ def _make_classification(**kwargs: Any) -> _ContractSurfaceClassification:
     }
     defaults.update(kwargs)
     return _ContractSurfaceClassification.model_validate(defaults)
+
+
+class _FakeAgentRunner:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+        self.calls: list[dict[str, Any]] = []
+
+    async def run(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return kwargs["response_schema"].model_validate(self.payload)
+
+
+def _enabled_contract_surface_config() -> ControlPlaneConfig:
+    return ControlPlaneConfig(
+        enabled=True,
+        contract_surface=ControlPlaneCapabilityConfig(
+            enabled=True,
+            llm_config={"model": "gpt-5.2-codex", "temperature": 0.1},
+        ),
+    )
+
+
+def _planner_pack() -> LoadedControlPlanePack:
+    return LoadedControlPlanePack(
+        path="factory_app/control_plane",
+        manifest=ControlPlaneManifest(
+            schema_version="mozaiks.control_plane",
+            checkpoints=[
+                ControlPlaneCheckpointManifest(
+                    event="contract_surface_requested",
+                    prompt_id="contract_surface_selection_system",
+                )
+            ],
+        ),
+        prompts=ControlPlanePromptsManifest(
+            schema_version="mozaiks.control_plane.prompts",
+            prompts=[
+                ControlPlanePromptDefinition(
+                    id="contract_surface_selection_system",
+                    content="contract surface prompt from pack",
+                )
+            ],
+        ),
+        tools=ControlPlaneToolsManifest(schema_version="mozaiks.control_plane.tools"),
+    )
+
+
+def _planner_request() -> RefinementRequest:
+    return RefinementRequest(
+        request_kind="refinement",
+        artifact_kind=ArtifactKind.APP_BUNDLE,
+        artifact_key="app_bundle",
+        artifact_version_id="av_123",
+        raw_user_request="Add exports to the projects module and page.",
+        app_id="app_1",
+        requested_workflow_id="AppGenerator",
+    )
+
+
+def _planner_routing_decision() -> RefinementRoutingDecision:
+    request = _planner_request()
+    return RefinementRoutingDecision(
+        workflow_id="AppGenerator",
+        workflow_sequence="app_revision",
+        refinement_request=request,
+        change_intent=ChangeIntent(
+            change_class=ChangeClass.FEATURE,
+            source="llm",
+            signals=["new_action"],
+            rationale="Adds a new module action and page binding.",
+            confidence=0.9,
+            touches_app_bundle=True,
+        ),
+        impact_set=ImpactSet(
+            workflow_sequence="app_revision",
+            affected_workflows=["AppGenerator"],
+            affected_declarative_families=["app_bundle"],
+            requires_replanning=True,
+            requires_rebuild=True,
+            restart_from="AppGenerator",
+            scope_summary="Feature update in app bundle.",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_propose_uses_ag2_runner_for_contract_surface_classification():
+    agent_runner = _FakeAgentRunner(
+        {
+            "surfaces": [
+                {
+                    "kind": "module_action",
+                    "target_id": "projects",
+                    "target_kind": "module",
+                    "rationale": "add export action",
+                    "confidence": 0.9,
+                    "generation_hint": "add export_projects action",
+                }
+            ],
+            "summary": "Add export support to projects.",
+            "confidence": 0.9,
+            "requires_schema_migration": False,
+            "fallback_to_workflow": False,
+            "fallback_reason": None,
+        }
+    )
+    planner = ContractSurfacePlanner(
+        agent_runner=agent_runner,
+        config_loader=_enabled_contract_surface_config,
+        pack_loader=_planner_pack,
+    )
+
+    plan = await planner.propose(
+        refinement_request=_planner_request(),
+        routing_decision=_planner_routing_decision(),
+        context_graph_catalog=None,
+    )
+
+    assert plan.fallback_to_workflow is False
+    assert plan.summary == "Add export support to projects."
+    assert plan.surfaces[0].kind == "module_action"
+    assert plan.surfaces[0].target_id == "projects"
+    assert agent_runner.calls[0]["agent_name"] == "ContractSurfacePlanner"
+    assert agent_runner.calls[0]["system_prompt"] == "contract surface prompt from pack"
+    assert agent_runner.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
 
 
 def test_resolve_surfaces_module_action_no_catalog():
@@ -307,6 +447,7 @@ def test_resolve_surfaces_skips_empty_target_id():
 
 def _make_routing_decision(change_class: str = "feature", workflow_id: str = "AppGenerator") -> Any:
     from unittest.mock import MagicMock
+
     from mozaiksai.control_plane.implementations.refinement_router import ChangeClass
 
     intent = MagicMock()
@@ -322,7 +463,9 @@ def _make_routing_decision(change_class: str = "feature", workflow_id: str = "Ap
 
 
 def test_for_contract_surface_plan_targeted_regeneration():
-    from mozaiksai.control_plane.implementations.harness_decision import FirstPartyHarnessDecisionPolicy
+    from mozaiksai.control_plane.implementations.harness_decision import (
+        FirstPartyHarnessDecisionPolicy,
+    )
 
     policy = FirstPartyHarnessDecisionPolicy.__new__(FirstPartyHarnessDecisionPolicy)
     plan = ContractSurfacePlan(
@@ -366,7 +509,9 @@ def test_for_contract_surface_plan_targeted_regeneration():
 
 
 def test_for_contract_surface_plan_fallback_to_workflow_reentry():
-    from mozaiksai.control_plane.implementations.harness_decision import FirstPartyHarnessDecisionPolicy
+    from mozaiksai.control_plane.implementations.harness_decision import (
+        FirstPartyHarnessDecisionPolicy,
+    )
 
     policy = FirstPartyHarnessDecisionPolicy.__new__(FirstPartyHarnessDecisionPolicy)
     plan = ContractSurfacePlan(
@@ -387,7 +532,9 @@ def test_for_contract_surface_plan_fallback_to_workflow_reentry():
 
 
 def test_for_contract_surface_plan_empty_surfaces_falls_back():
-    from mozaiksai.control_plane.implementations.harness_decision import FirstPartyHarnessDecisionPolicy
+    from mozaiksai.control_plane.implementations.harness_decision import (
+        FirstPartyHarnessDecisionPolicy,
+    )
 
     policy = FirstPartyHarnessDecisionPolicy.__new__(FirstPartyHarnessDecisionPolicy)
     plan = ContractSurfacePlan(

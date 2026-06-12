@@ -99,3 +99,4 @@ def test_workflow_start_posts_app_and_user_scope_for_triggered_workflows() -> No
     assert "app_id: resolvedAppId" in source
     assert "user_id: resolvedUserId" in source
     assert "const { user, config } = useChatUI();" in source
+

@@ -16,3 +16,4 @@ def test_mozaiks_app_keeps_workflow_initializer_stable() -> None:
 
     assert "const moduleInitializer = useCallback(" in source
     assert "workflowInitializer={moduleInitializer}" in source
+

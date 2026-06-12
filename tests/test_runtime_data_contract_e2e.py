@@ -190,9 +190,9 @@ def _write_bundle(root: Path, intent: dict[str, Any] | None = None) -> None:
         encoding="utf-8",
     )
     if intent is not None:
-        config = root / "config"
-        config.mkdir(exist_ok=True)
-        (config / "data.json").write_text(
+        data_dir = root / "data"
+        data_dir.mkdir(exist_ok=True)
+        (data_dir / "contract.json").write_text(
             json.dumps(intent),
             encoding="utf-8",
         )
@@ -424,3 +424,4 @@ async def test_e2e_full_load_then_apply_indexes(
     # No migration collection.
     db = client[DEFAULT_APP_DATABASE_NAME]
     assert not any("migration" in n.lower() for n in db.collections)
+

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+
 class _Logger:
     def info(self, *args, **kwargs):
         return None
@@ -136,39 +137,103 @@ def test_orchestrator_triggers_are_normalized_to_runtime_schema() -> None:
 
 
 def test_normalize_visual_agents_backend_only_blank_to_null() -> None:
-    assert workflow_converter._normalize_visual_agents(None, startup_mode="BackendOnly") is None
-    assert workflow_converter._normalize_visual_agents("  ", startup_mode="BackendOnly") is None
-    assert workflow_converter._normalize_visual_agents([], startup_mode="BackendOnly") is None
+    assert workflow_converter._normalize_visual_agents(None, workflow_startup_mode="BackendOnly") is None
+    assert workflow_converter._normalize_visual_agents("  ", workflow_startup_mode="BackendOnly") is None
+    assert workflow_converter._normalize_visual_agents([], workflow_startup_mode="BackendOnly") is None
 
 
-def test_normalize_handoff_rules_blank_condition_defaults_to_after_work() -> None:
+def test_normalize_transition_rules_preserves_clean_after_turn() -> None:
     raw_rules = [
         {
             "source_agent": "PlannerAgent",
             "target_agent": "ExecutorAgent",
-            "handoff_type": "condition",
-            "condition": " ",
-            "condition_scope": "",
-            "condition_type": "  ",
+            "transition_type": "after_turn",
         }
     ]
 
-    normalized = workflow_converter._normalize_handoff_rules(raw_rules)
-    assert len(normalized) == 1
-    assert normalized[0]["condition"] is None
-    assert normalized[0]["condition_scope"] is None
-    assert normalized[0]["condition_type"] is None
-    assert normalized[0]["handoff_type"] == "after_work"
+    normalized = workflow_converter._normalize_transition_rules(raw_rules)
+    assert normalized == [
+        {
+            "source_agent": "PlannerAgent",
+            "target_agent": "ExecutorAgent",
+            "transition_type": "after_turn",
+        }
+    ]
 
 
-def test_normalize_handoff_rules_rejects_llm_conditions() -> None:
-    with pytest.raises(ValueError, match="no longer supports LLM-evaluated"):
-        workflow_converter._normalize_handoff_rules(
+def test_normalize_transition_rules_accepts_context_equals() -> None:
+    raw_rules = [
+        {
+            "source_agent": "PlannerAgent",
+            "target_agent": "ExecutorAgent",
+            "transition_type": "condition",
+            "condition_type": "Context_Equals",
+            "condition_key": "route",
+            "condition_value": "execute",
+        }
+    ]
+
+    normalized = workflow_converter._normalize_transition_rules(raw_rules)
+
+    assert normalized == [
+        {
+            "source_agent": "PlannerAgent",
+            "target_agent": "ExecutorAgent",
+            "transition_type": "condition",
+            "condition_type": "context_equals",
+            "condition_key": "route",
+            "condition_value": "execute",
+        }
+    ]
+
+
+def test_normalize_transition_rules_accepts_context_expression() -> None:
+    raw_rules = [
+        {
+            "source_agent": "PlannerAgent",
+            "target_agent": "ExecutorAgent",
+            "transition_type": "condition",
+            "condition_type": "Context_Expression",
+            "context_expression": "${route} == 'execute' and ${ready}",
+        }
+    ]
+
+    normalized = workflow_converter._normalize_transition_rules(raw_rules)
+
+    assert normalized == [
+        {
+            "source_agent": "PlannerAgent",
+            "target_agent": "ExecutorAgent",
+            "transition_type": "condition",
+            "condition_type": "context_expression",
+            "context_expression": "${route} == 'execute' and ${ready}",
+        }
+    ]
+
+
+def test_normalize_transition_rules_rejects_expression_conditions() -> None:
+    with pytest.raises(ValueError, match="no longer supports expression"):
+        workflow_converter._normalize_transition_rules(
             [
                 {
                     "source_agent": "user",
                     "target_agent": "PlannerAgent",
-                    "handoff_type": "condition",
+                    "transition_type": "condition",
+                    "condition_type": "expression",
+                    "condition": "${route} == 'plan'",
+                }
+            ]
+        )
+
+
+def test_normalize_transition_rules_rejects_llm_conditions() -> None:
+    with pytest.raises(ValueError, match="does not support LLM-evaluated"):
+        workflow_converter._normalize_transition_rules(
+            [
+                {
+                    "source_agent": "user",
+                    "target_agent": "PlannerAgent",
+                    "transition_type": "condition",
                     "condition_type": "string_llm",
                     "condition": "When the user wants changes.",
                 }
@@ -426,3 +491,4 @@ def test_collect_code_files_uses_canonical_codefile_contract() -> None:
             "content": "async def analyze():\n    return None\n",
         }
     ]
+

@@ -623,3 +623,4 @@ export class CloudflareConnector implements InfraConnector<DnsZone> {
     connectors = mod._detect_connectors([], source)
     provider_ids = [c["provider_id"] for c in connectors]
     assert "cloudflare" in provider_ids, f"Cloudflare not detected via class name; got {provider_ids}"
+

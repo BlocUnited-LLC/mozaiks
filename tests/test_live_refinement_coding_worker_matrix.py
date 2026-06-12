@@ -111,3 +111,4 @@ def test_live_refinement_coding_worker_matrix_replay(tmp_path: Path) -> None:
             staged_file = Path(staging_result.staging_area) / "workspace" / change.path
             assert staged_file.read_text(encoding="utf-8") == change.new_content
             assert (source_bundle / change.path).read_text(encoding="utf-8") == source_before[change.path]
+

@@ -201,3 +201,4 @@ def test_admin_ui_tiers_doc_no_product_specific_examples() -> None:
             f"admin-ui-tiers.md introduced a product-specific term: {term!r}. "
             f"Use neutral names such as: {', '.join(_NEUTRAL_EXAMPLES)}"
         )
+

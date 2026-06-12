@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from mozaiksai.control_plane import (
+    CodingWorkerPlan,
     CodingWorkerRequest,
     ControlPlaneToolCall,
     ScopedRefinementCodingWorker,
@@ -192,25 +194,26 @@ async def test_smoke_control_plane_tool_executor_returns_structured_stub_context
 
 @pytest.mark.asyncio
 async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Path) -> None:
-    class _FakeCapabilityService:
-        async def generate_json_completion(self, **kwargs):  # noqa: ANN003
-            parsed = {
-                "summary": "Patch the dashboard title.",
-                "owned_paths": ["ui/pages/dashboard.yaml"],
-                "updated_files": {
-                    "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Reports Dashboard\n",
-                },
-                "validation_strategy": "skip",
-                "validation_commands": [],
-                "start_preview": False,
-                "needs_human_review": False,
-                "rationale": "Single-file title update.",
-            }
-            return {
-                "content": json.dumps(parsed),
-                "parsed": parsed,
-                "usage": {},
-            }
+    _SMOKE_PLAN = CodingWorkerPlan(
+        summary="Patch the dashboard title.",
+        owned_paths=["ui/pages/dashboard.yaml"],
+        updated_files={
+            "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Reports Dashboard\n",
+        },
+        validation_strategy="skip",
+        validation_commands=[],
+        start_preview=False,
+        needs_human_review=False,
+        rationale="Single-file title update.",
+    )
+
+    class _FakeReply:
+        async def content(self, *, retries: int = 0) -> Any:
+            return _SMOKE_PLAN
+
+    class _FakeAgent:
+        async def ask(self, user_prompt: str, **kwargs: Any) -> _FakeReply:  # noqa: ANN003
+            return _FakeReply()
 
     store = _SmokeArtifactStore()
     executor = _SmokeControlPlaneToolExecutor(
@@ -222,7 +225,7 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
         plan=_build_plan(request_id=REQUEST_ID, staging_root=tmp_path / ".refinement_staging", request=REQUEST_TEXT, app_id=APP_ID),
     )
     worker = ScopedRefinementCodingWorker(
-        capability_service=_FakeCapabilityService(),
+        agent_factory=lambda sp, lc: _FakeAgent(),
         tool_executor=executor,
         validation_runner=_manual_validation_runner,
         artifact_store=store,
@@ -257,3 +260,4 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
     assert store.calls and store.calls[0]["artifact_kind"] == "app_bundle"
     assert store.created_versions[0].app_id == APP_ID
     assert store.created_versions[0].artifact_kind == "app_bundle"
+

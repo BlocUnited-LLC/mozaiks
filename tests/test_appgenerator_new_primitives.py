@@ -250,3 +250,4 @@ class TestPagePrimitiveGuidance:
 
     def test_guidance_references_primitive_registry(self, guidance: str) -> None:
         assert "PrimitiveRegistry" in guidance
+

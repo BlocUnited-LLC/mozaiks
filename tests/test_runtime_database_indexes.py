@@ -347,3 +347,4 @@ async def test_platform_startup_required_index_failure_raises(monkeypatch: pytes
 
     with pytest.raises(platform.DatabaseStartupError, match="Database indexes were not applied"):
         await platform._platform_startup()
+

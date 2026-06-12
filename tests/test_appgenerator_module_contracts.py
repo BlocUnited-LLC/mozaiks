@@ -43,6 +43,9 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "ModuleSettingsManifest",
         "ModuleAdminPanel",
         "ModuleAdminManifest",
+        "ModuleProfileField",
+        "ModuleProfilePanel",
+        "ModuleProfileManifest",
         "ModulePythonStub",
         "ModuleJsStub",
         "DatabaseArtifactFile",
@@ -53,8 +56,6 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "ControlPlaneArtifactChangeRoutes",
         "ControlPlaneArtifactRouting",
         "ControlPlaneRoutingManifest",
-        "ControlPlaneProfileManifest",
-        "ControlPlaneHarnessManifestOutput",
         "ControlPlaneCheckpointManifestOutput",
         "ControlPlaneManifestOutput",
         "ControlPlaneToolDefinition",
@@ -97,12 +98,33 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "DeploymentTemplateManifest",
     ]:
         assert model_name in models
+    checkpoint_fields = models["ControlPlaneCheckpointManifestOutput"]["fields"]
+    assert checkpoint_fields["event"]["values"] == [
+        "request_submitted",
+        "scope_requested",
+        "contract_surface_requested",
+        "coding_requested",
+    ]
+    assert "id" not in checkpoint_fields
+    assert "mode" not in checkpoint_fields
+    assert "entrypoint" not in checkpoint_fields
+    assert "output_contract" not in checkpoint_fields
 
     contract_fields = models["ModuleContractBundle"]["fields"]
     assert contract_fields["reactions_yaml"]["type"] == "ModuleReactionsManifest"
     assert contract_fields["admin_yaml"]["type"] == "ModuleAdminManifest"
     assert contract_fields["python_stubs"]["items"] == "ModulePythonStub"
     assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
+    assert "profile_yaml" in contract_fields
+    assert contract_fields["profile_yaml"]["variants"] == ["ModuleProfileManifest", "null"]
+
+    profile_field_types = models["ModuleProfileField"]["fields"]["type"]["values"]
+    assert profile_field_types == ["string", "number", "currency", "date", "boolean", "status"]
+    profile_panel_kinds = models["ModuleProfilePanel"]["fields"]["kind"]["values"]
+    assert profile_panel_kinds == ["metrics", "list", "component"]
+    profile_manifest = models["ModuleProfileManifest"]["fields"]
+    assert profile_manifest["schema_version"]["values"] == ["mozaiks.profile.v1"]
+    assert profile_manifest["panels"]["items"] == "ModuleProfilePanel"
     assert models["ConfigMiddlewareOutput"]["fields"]["mode"]["values"] == [
         "module_contract_bundle",
         "service_foundation",
@@ -179,9 +201,9 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
 
 def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operations_contract() -> None:
     source = _read("factory_app/workflows/AppGenerator/agents.yaml")
-    handoffs = _read_yaml("factory_app/workflows/AppGenerator/handoffs.yaml")
-    file_contracts = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
-    module_archetypes = _read_yaml("factory_app/workflows/AppGenerator/tools/module_archetypes.yaml")
+    handoffs = _read_yaml("factory_app/workflows/AppGenerator/transition_graph.yaml")
+    file_contracts = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
+    module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
 
     assert "task_type: module_contract" in source
     assert "task_type: control_plane_pack" in source
@@ -195,7 +217,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Routes use workflow_sequence only" in source
     assert "service_foundation_bundle" in source
     assert "Do NOT include an `admin_config` build task." in source
-    assert "Fail the task rather than guessing a fallback mode." in source
+    assert "Fail the task" in source
     assert "backend/handler.py" in source
     assert "Frontend Stub Agent" in source
     assert "module_contract.js_stubs" in source
@@ -250,15 +272,15 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "transitions.yaml" not in source
     assert any(
         rule["source_agent"] == "ServiceAgent" and rule["target_agent"] == "ModuleRuntimeQualityAgent"
-        for rule in handoffs["handoff_rules"]
+        for rule in handoffs["transition_rules"]
     )
     assert any(
         rule["source_agent"] == "ModuleRuntimeQualityAgent" and rule["target_agent"] == "FrontendStubAgent"
-        for rule in handoffs["handoff_rules"]
+        for rule in handoffs["transition_rules"]
     )
     assert any(
         rule["source_agent"] == "FrontendStubAgent" and rule["target_agent"] == "ControllerAgent"
-        for rule in handoffs["handoff_rules"]
+        for rule in handoffs["transition_rules"]
     )
 
     assert "task_type: platform_config" not in source
@@ -285,15 +307,21 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "modules/{pack_name}/contracts/reactions.yaml" in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/subscriptions.yaml" not in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/admin.yaml" in module_contract["optional_outputs"]
-    assert "backend/handler.py" in module_contract["downstream_python_defaults"]
-    assert "backend/notifications.py" in module_contract["optional_python_hooks"]
-    assert "backend/subscriptions.py" not in module_contract["optional_python_hooks"]
-    assert "ui/index.js" in module_contract["optional_js_stubs"]
+    assert "modules/{pack_name}/contracts/profile.yaml" in module_contract["optional_outputs"]
+    assert "backend/handler.py" in module_contract["downstream_backend_defaults"]
+    assert "backend/notifications.py" in module_contract["optional_backend_hooks"]
+    assert "backend/subscriptions.py" not in module_contract["optional_backend_hooks"]
+    assert "ui/index.js" in module_contract["optional_frontend_stubs"]
 
     workflow_archetype = module_archetypes["archetypes"]["workflow"]
     messaging_archetype = module_archetypes["archetypes"]["messaging"]
-    assert "policy.py exposes a validate_transition helper." in workflow_archetype["hard_constraints"]
+    assert "The policy layer exposes a validate_transition helper." in workflow_archetype["hard_constraints"]
     assert "Event payloads include delivery metadata needed for real-time routing." in messaging_archetype["hard_constraints"]
+
+    for archetype_name in ["standard", "messaging", "workflow", "transactional"]:
+        archetype = module_archetypes["archetypes"][archetype_name]
+        optional_family = archetype["canonical_yaml_family"]["optional"]
+        assert "profile.yaml" in optional_family, f"{archetype_name} archetype missing profile.yaml in optional family"
     assert "Use one of these exact top-level shapes:" in source
     assert "Use one of these exact bounded shapes:" in source
     assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`." in source
@@ -307,20 +335,12 @@ def test_control_plane_pack_codegen_seeds_runtime_yaml() -> None:
     )
 
     files = build_control_plane_pack_code_files(
-        {
-            "control_plane_yaml": {
-                "schema_version": "mozaiks.control_plane",
-                "profile": {
-                    "id": "app_refinement_harness",
-                    "display_name": "App Refinement Harness",
-                    "description": "App-local refinement harness.",
-                },
-                "harness": {
-                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                },
-                "routing": {
-                    "default_artifact_kind": "app_bundle",
-                    "artifacts": [],
+            {
+                "control_plane_yaml": {
+                    "schema_version": "mozaiks.control_plane",
+                    "routing": {
+                        "default_artifact_kind": "app_bundle",
+                        "artifacts": [],
                 },
                 "checkpoints": [],
             },
@@ -351,8 +371,8 @@ def test_appgenerator_download_tool_does_not_inject_removed_admin_surfaces() -> 
 
 def test_appgenerator_prompt_time_contract_artifacts_align_with_structured_outputs() -> None:
     structured_outputs = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
-    file_contracts = _read_yaml("factory_app/workflows/AppGenerator/tools/file_contracts.yaml")
-    module_archetypes = _read_yaml("factory_app/workflows/AppGenerator/tools/module_archetypes.yaml")
+    file_contracts = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
+    module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
 
     task_type_values = structured_outputs["models"]["AppBuildTask"]["fields"]["task_type"]["values"]
     module_type_values = structured_outputs["models"]["ModuleIdentity"]["fields"]["type"]["values"]

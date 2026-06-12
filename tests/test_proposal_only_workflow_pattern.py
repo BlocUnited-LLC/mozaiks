@@ -29,8 +29,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLS_DIR = REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools"
+APPGEN_CATALOG_DIR = REPO_ROOT / "factory_app" / "build_context" / "AppGenerator"
 AGENTS_YAML = REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
-WORKFLOW_ARCHETYPES_YAML = TOOLS_DIR / "workflow_archetypes.yaml"
+WORKFLOW_ARCHETYPES_YAML = APPGEN_CATALOG_DIR / "workflow_archetypes.yaml"
 HOOK_FILE = TOOLS_DIR / "hook_file_contract_context.py"
 PATTERN_DOC = REPO_ROOT / "docs" / "architecture" / "workflows" / "proposal-only-workflow-pattern.md"
 WORKFLOWS_INDEX = REPO_ROOT / "docs" / "architecture" / "workflows" / "index.md"
@@ -91,7 +92,7 @@ class TestProposalOnlyDocumentationExists:
 
     def test_workflow_archetypes_yaml_exists(self):
         assert WORKFLOW_ARCHETYPES_YAML.exists(), (
-            "workflow_archetypes.yaml must exist in AppGenerator/tools/"
+            "workflow_archetypes.yaml must exist in factory_app/build_context/AppGenerator/"
         )
 
     def test_proposal_only_archetype_declared(self):
@@ -557,3 +558,4 @@ class TestNoProprietaryProductExamples:
                 assert term not in text, (
                     f"{path.name} must not contain provider credential term: {term}"
                 )
+

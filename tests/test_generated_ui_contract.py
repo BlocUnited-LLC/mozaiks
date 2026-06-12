@@ -809,3 +809,4 @@ def test_api_endpoint_config_field_also_checked() -> None:
     )
     ep_warnings = [w for w in warnings if "api_endpoint" in w]
     assert ep_warnings, "config.api_endpoint with query string must be flagged"
+

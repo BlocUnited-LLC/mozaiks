@@ -64,3 +64,4 @@ def test_mozaiks_app_workflows_are_local_and_builder_workflows_are_shared() -> N
     for workflow_name in ("AppGenerator", "AgentGenerator", "ExistingAppDiscovery"):
         orchestrator = shared_root / workflow_name / "orchestrator.yaml"
         assert orchestrator.exists(), f"Expected shared workflow: {workflow_name}"
+

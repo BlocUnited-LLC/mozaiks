@@ -58,3 +58,4 @@ def test_context_snapshot_command_registers_workspace(monkeypatch, tmp_path, cap
     payload = json.loads(capsys.readouterr().out)
     assert payload["app_bundle_artifact_version_id"] == "av_bundle"
     assert payload["health_report"]["status"] == "healthy"
+

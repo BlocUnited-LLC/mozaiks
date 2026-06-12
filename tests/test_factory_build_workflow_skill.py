@@ -19,7 +19,7 @@ def test_factory_build_workflow_skill_exists_and_states_build_truth() -> None:
 def test_factory_build_workflow_skill_distinguishes_routing_mechanisms_and_human_review_boundary() -> None:
     skill = _read(".claude/skills/factory-build-workflow-change/SKILL.md")
 
-    assert "`workflow_sequence`, `transitions[]`, `entrypoints[]`, and workflow-local `handoffs.yaml` are different mechanisms" in skill
+    assert "`workflow_sequence`, `transitions[]`, `entrypoints[]`, and workflow-local `transition_graph.yaml` are different mechanisms" in skill
     assert "`workflow_sequence` auto-advance must not be used as a human review or HITL boundary" in skill
     assert "Do not add `workflow_sequence` steps for operator-review or HITL checkpoints" in skill
 
@@ -92,3 +92,4 @@ def test_factory_build_workflow_guidance_stays_public_safe() -> None:
     skill = _read(".claude/skills/factory-build-workflow-change/SKILL.md")
     for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in skill, forbidden
+

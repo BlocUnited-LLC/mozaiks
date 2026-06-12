@@ -30,7 +30,7 @@ def _load_module(relative_path: str, module_name: str):
 
 def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
     context_vars = _read_yaml("factory_app/workflows/ThemeCapture/context_variables.yaml")
-    handoffs = _read_yaml("factory_app/workflows/ThemeCapture/handoffs.yaml")
+    handoffs = _read_yaml("factory_app/workflows/ThemeCapture/transition_graph.yaml")
     tools = _read_yaml("factory_app/workflows/ThemeCapture/tools.yaml")
 
     assert "definitions" in context_vars
@@ -49,7 +49,7 @@ def test_theme_capture_uses_canonical_context_and_handoffs() -> None:
 
     route_pairs = {
         (item["source_agent"], item["target_agent"])
-        for item in handoffs.get("handoff_rules", [])
+        for item in handoffs.get("transition_rules", [])
     }
     assert ("ThemeInterviewAgent", "ThemeAnalysisAgent") in route_pairs
     assert ("ThemeAnalysisAgent", "ThemeConfigAssemblerAgent") in route_pairs
@@ -272,4 +272,6 @@ def test_workflow_chat_uses_websocket_adapter_and_workflow_send_path() -> None:
     assert "workflowApi.startChat(" in source
     assert "workflowApi.sendMessageToWorkflow(" in source
     assert "wsSendMessage" not in source
+
+
 

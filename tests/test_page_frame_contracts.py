@@ -52,3 +52,4 @@ def test_platform_dashboard_uses_shared_page_frame() -> None:
     source = dashboard_path.read_text(encoding="utf-8")
     assert "import { PageFrame } from '@mozaiks/chat-ui'" in source
     assert "<PageFrame" in source
+

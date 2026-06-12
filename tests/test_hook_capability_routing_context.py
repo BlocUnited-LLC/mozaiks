@@ -2,7 +2,7 @@
 Tests for hook_capability_routing_context.py
 
 Verifies:
-- hooks.yaml registers the hook on AppPlanAgent
+- middleware.yaml registers the hook on AppPlanAgent
 - inject_capability_routing_context appends [CAPABILITY ROUTING CONTEXT] to the agent message
 - The block surfaces all four routing layers
 - The block lists known capability packs from capability_routing.yaml
@@ -28,8 +28,14 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_HOOKS_YAML = _APPGEN_DIR / "hooks.yaml"
-_ROUTING_YAML = _APPGEN_DIR / "tools" / "capability_routing.yaml"
+_APPGEN_CATALOG_DIR = (
+    Path(__file__).parent.parent
+    / "factory_app"
+    / "build_context"
+    / "AppGenerator"
+)
+_HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
+_ROUTING_YAML = _APPGEN_CATALOG_DIR / "capability_routing.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -54,33 +60,32 @@ def _run_hook(agent: _FakeAgent, messages: List[Dict] | None = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# hooks.yaml registration
+# middleware.yaml registration
 # ---------------------------------------------------------------------------
 
 class TestHooksYamlRegistration:
     def test_hooks_yaml_contains_capability_routing_hook(self) -> None:
         assert _HOOKS_YAML.exists()
         data = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
-        hooks = data.get("hooks") or []
+        hooks = data.get("prompt_middleware") or []
         matching = [
             h for h in hooks
             if h.get("filename") == "hook_capability_routing_context.py"
             and h.get("function") == "inject_capability_routing_context"
         ]
         assert matching, (
-            "hooks.yaml must register inject_capability_routing_context "
+            "middleware.yaml must register inject_capability_routing_context "
             "from hook_capability_routing_context.py"
         )
 
     def test_capability_routing_hook_targets_appplanagent(self) -> None:
         data = yaml.safe_load(_HOOKS_YAML.read_text(encoding="utf-8"))
-        hooks = data.get("hooks") or []
+        hooks = data.get("prompt_middleware") or []
         for h in hooks:
             if h.get("filename") == "hook_capability_routing_context.py":
-                assert h.get("hook_agent") == "AppPlanAgent", (
+                assert h.get("agent") == "AppPlanAgent", (
                     "inject_capability_routing_context must target AppPlanAgent"
                 )
-                assert h.get("hook_type") == "update_agent_state"
                 break
 
 
@@ -106,13 +111,12 @@ class TestCapabilityRoutingYaml:
             assert "id" in pack, f"pack missing 'id': {pack}"
             assert "capability_kind" in pack, f"pack {pack.get('id')} missing 'capability_kind'"
 
-    def test_capability_routing_yaml_includes_entitlements_pack(self) -> None:
+    def test_capability_routing_yaml_includes_operator_packs(self) -> None:
         data = yaml.safe_load(_ROUTING_YAML.read_text(encoding="utf-8"))
         packs = (data.get("layers") or {}).get("capability_pack", {}).get("packs") or []
         ids = [p.get("id") for p in packs if isinstance(p, dict)]
-        assert "entitlements" in ids, (
-            "capability_routing.yaml must include the 'entitlements' framework_pack"
-        )
+        assert "messaging" in ids
+        assert "files" in ids
 
 
 # ---------------------------------------------------------------------------
@@ -136,8 +140,8 @@ class TestCapabilityRoutingHook:
     def test_routing_block_lists_known_packs(self) -> None:
         agent = _FakeAgent("AppPlanAgent")
         _run_hook(agent)
-        # At minimum messaging and entitlements should appear
-        assert "entitlements" in agent.system_message
+        # At minimum messaging and files should appear.
+        assert "files" in agent.system_message
         assert "messaging" in agent.system_message
 
     def test_routing_block_contains_decision_order(self) -> None:
@@ -181,11 +185,11 @@ class TestCapabilityRoutingHook:
             "Pack entries must include avoid_when guidance"
         )
 
-    def test_routing_block_includes_hosted_only_note(self) -> None:
+    def test_routing_block_includes_operator_pack_note(self) -> None:
         agent = _FakeAgent("AppPlanAgent")
         _run_hook(agent)
-        assert "Hosted-only packs" in agent.system_message, (
-            "Hosted-only pack guidance must appear in the routing block"
+        assert "Operator capability packs" in agent.system_message, (
+            "Operator pack guidance must appear in the routing block"
         )
 
     def test_routing_block_preserves_trailing_sections(self) -> None:
@@ -204,3 +208,5 @@ class TestCapabilityRoutingHook:
         result1 = _load_routing()
         result2 = _load_routing()
         assert result1 is result2, "_load_routing must return the same object on repeated calls (cached)"
+
+

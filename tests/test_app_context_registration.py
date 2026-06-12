@@ -326,3 +326,4 @@ def test_registration_store_does_not_canonicalize_legacy_placeholders() -> None:
 
     assert "native_migration" not in text
     assert "module_decomposition_plan" not in text
+

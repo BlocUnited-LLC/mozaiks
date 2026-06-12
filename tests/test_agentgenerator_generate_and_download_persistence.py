@@ -76,3 +76,4 @@ def test_register_workflow_bundle_artifact_version_sets_canonical_inputs(monkeyp
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"
     assert fake_artifact_store.calls[0]["validation_status"].value == "pending"
     assert context.data["artifact_version_id"] == "av_workflow_bundle_1"
+

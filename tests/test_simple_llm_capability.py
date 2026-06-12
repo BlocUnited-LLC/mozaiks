@@ -142,3 +142,4 @@ async def _fake_select_provider(llm_config=None):  # noqa: ANN001
         "api_key": "test-key",
         "api_base": "https://api.openai.com/v1",
     }
+

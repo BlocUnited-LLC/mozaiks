@@ -91,3 +91,4 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     assert "getAppJourneyLabel" not in source
     assert "next_step" in source
     assert "WorkspaceLayout" in source
+

@@ -146,3 +146,4 @@ def test_primitive_schema_catalog_is_generated() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+

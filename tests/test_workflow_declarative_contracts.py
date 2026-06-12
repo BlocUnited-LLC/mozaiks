@@ -114,30 +114,28 @@ def test_workflow_manager_rejects_invalid_structured_outputs_contract(tmp_path: 
     assert "structured_outputs.yaml" in str(info.get("error") or "")
 
 
-def test_workflow_manager_rejects_invalid_hooks_contract(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "FlowBadHooks"
+def test_workflow_manager_rejects_invalid_middleware_contract(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowBadMiddleware"
     wf_dir.mkdir(parents=True)
-    _write_minimal_orchestrator_and_agents(wf_dir, "FlowBadHooks")
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowBadMiddleware")
     _write_yaml(
-        wf_dir / "hooks.yaml",
+        wf_dir / "middleware.yaml",
         "\n".join(
             [
-                "hooks:",
-                "  - hook_type: unknown_hook",
-                "    hook_agent: Planner",
+                "prompt_middleware:",
+                "  - agent: Planner",
                 "    filename: hooks.py",
-                "    function: before_send",
             ]
         ),
     )
 
     _workflow_manager_mod.UnifiedWorkflowManager._instance = None
     manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
-    info = manager.get_workflow_info("FlowBadHooks")
+    info = manager.get_workflow_info("FlowBadMiddleware")
 
     assert info is not None
     assert info.get("status") == "error"
-    assert "hooks.yaml" in str(info.get("error") or "")
+    assert "middleware.yaml" in str(info.get("error") or "")
 
 
 def test_workflow_manager_rejects_removed_context_variables_shape(tmp_path: Path) -> None:
@@ -166,18 +164,184 @@ def test_workflow_manager_rejects_removed_context_variables_shape(tmp_path: Path
     assert "context_variables.yaml" in str(info.get("error") or "")
 
 
+def test_workflow_manager_rejects_undeclared_transition_context_variable(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowUndeclaredRouteContext"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowUndeclaredRouteContext")
+    _write_yaml(
+        wf_dir / "agents.yaml",
+        "\n".join(
+            [
+                "agents:",
+                "  - name: Planner",
+                "    system_message: \"You are a planner.\"",
+                "  - name: Reviewer",
+                "    system_message: \"You are a reviewer.\"",
+            ]
+        ),
+    )
+    _write_yaml(
+        wf_dir / "context_variables.yaml",
+        "\n".join(
+            [
+                "definitions: {}",
+                "agents: {}",
+            ]
+        ),
+    )
+    _write_yaml(
+        wf_dir / "transition_graph.yaml",
+        "\n".join(
+            [
+                "transition_rules:",
+                "  - source_agent: Planner",
+                "    target_agent: Reviewer",
+                "    transition_type: condition",
+                "    condition_type: context_equals",
+                "    condition_key: route_decision",
+                "    condition_value: review",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowUndeclaredRouteContext")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "route_decision" in str(info.get("error") or "")
+    assert "context_variables.yaml contract mismatch" in str(info.get("error") or "")
+
+
+def test_workflow_manager_rejects_undeclared_transition_context_expression_variable(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowUndeclaredRouteExpressionContext"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowUndeclaredRouteExpressionContext")
+    _write_yaml(
+        wf_dir / "agents.yaml",
+        "\n".join(
+            [
+                "agents:",
+                "  - name: Planner",
+                "    system_message: \"You are a planner.\"",
+                "  - name: Reviewer",
+                "    system_message: \"You are a reviewer.\"",
+            ]
+        ),
+    )
+    _write_yaml(
+        wf_dir / "context_variables.yaml",
+        "\n".join(
+            [
+                "definitions:",
+                "  route_decision:",
+                "    source:",
+                "      type: state",
+                "      default: draft",
+                "agents: {}",
+            ]
+        ),
+    )
+    _write_yaml(
+        wf_dir / "transition_graph.yaml",
+        "\n".join(
+            [
+                "transition_rules:",
+                "  - source_agent: Planner",
+                "    target_agent: Reviewer",
+                "    transition_type: condition",
+                "    condition_type: context_expression",
+                "    context_expression: \"${route_decision} == 'review' and ${approval_ready}\"",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowUndeclaredRouteExpressionContext")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "approval_ready" in str(info.get("error") or "")
+    assert "context_variables.yaml contract mismatch" in str(info.get("error") or "")
+
+
+def test_workflow_manager_rejects_undeclared_task_batch_result_keys(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowUndeclaredTaskBatchContext"
+    (wf_dir / "extended_orchestration").mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowUndeclaredTaskBatchContext")
+    _write_yaml(
+        wf_dir / "context_variables.yaml",
+        "\n".join(
+            [
+                "definitions: {}",
+                "agents: {}",
+            ]
+        ),
+    )
+    _write_yaml(
+        wf_dir / "extended_orchestration" / "task_batches.yaml",
+        "\n".join(
+            [
+                "version: 1",
+                "conveyors:",
+                "  - id: review_tasks",
+                "    decomposition_agent: Planner",
+                "    execution_agents:",
+                "      - Planner",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowUndeclaredTaskBatchContext")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "review_tasks_results" in str(info.get("error") or "")
+    assert "review_tasks_status" in str(info.get("error") or "")
+
+
+def test_workflow_manager_rejects_agent_context_exposure_to_undeclared_variable(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "FlowBadAgentContextExposure"
+    wf_dir.mkdir(parents=True)
+    _write_minimal_orchestrator_and_agents(wf_dir, "FlowBadAgentContextExposure")
+    _write_yaml(
+        wf_dir / "context_variables.yaml",
+        "\n".join(
+            [
+                "definitions: {}",
+                "agents:",
+                "  Planner:",
+                "    variables:",
+                "      - missing_context",
+            ]
+        ),
+    )
+
+    _workflow_manager_mod.UnifiedWorkflowManager._instance = None
+    manager = _workflow_manager_mod.UnifiedWorkflowManager(workflows_base_path=str(tmp_path))
+    info = manager.get_workflow_info("FlowBadAgentContextExposure")
+
+    assert info is not None
+    assert info.get("status") == "error"
+    assert "missing_context" in str(info.get("error") or "")
+
+
 def test_workflow_manager_accepts_valid_declarative_bundle(tmp_path: Path) -> None:
     wf_dir = tmp_path / "FlowValid"
     wf_dir.mkdir(parents=True)
     _write_minimal_orchestrator_and_agents(wf_dir, "FlowValid")
     _write_yaml(
-        wf_dir / "handoffs.yaml",
+        wf_dir / "transition_graph.yaml",
         "\n".join(
             [
-                "handoff_rules:",
+                "transition_rules:",
                 "  - source_agent: Planner",
                 "    target_agent: user",
-                "    handoff_type: after_work",
+                "    transition_type: after_turn",
             ]
         ),
     )
@@ -194,12 +358,11 @@ def test_workflow_manager_accepts_valid_declarative_bundle(tmp_path: Path) -> No
         ),
     )
     _write_yaml(
-        wf_dir / "hooks.yaml",
+        wf_dir / "middleware.yaml",
         "\n".join(
             [
-                "hooks:",
-                "  - hook_type: update_agent_state",
-                "    hook_agent: Planner",
+                "prompt_middleware:",
+                "  - agent: Planner",
                 "    filename: planner_hooks.py",
                 "    function: update_state",
             ]
@@ -240,7 +403,7 @@ def test_workflow_manager_accepts_valid_declarative_bundle(tmp_path: Path) -> No
     assert config.get("workflow_name") == "FlowValid"
     assert isinstance((config.get("agents") or {}).get("agents"), dict)
     assert isinstance(config.get("tools"), list)
-    assert isinstance(config.get("handoffs", {}).get("handoff_rules"), list)
+    assert isinstance(config.get("transition_graph", {}).get("transition_rules"), list)
 
 
 def test_workflow_manager_accepts_user_text_state_trigger(tmp_path: Path) -> None:

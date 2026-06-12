@@ -55,3 +55,4 @@ def active_app_root() -> Path:
 def app_root() -> Path:
     """Pytest fixture: active app workspace root. Skips if not configured."""
     return active_app_root()
+

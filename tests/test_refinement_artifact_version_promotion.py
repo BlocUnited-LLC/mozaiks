@@ -702,3 +702,4 @@ def test_artifact_promotion_module_stays_out_of_conceptual_replan_and_workflow_o
     assert "AppGenerator" not in source
     assert "LLMChangeClassifier" not in source
     assert "execute_workflow" not in source
+

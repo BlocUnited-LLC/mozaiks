@@ -102,14 +102,17 @@ def test_resolve_export_gate_uses_validation_status_and_integration(status, inte
     assert gate["integration_tests_passed"] is integration_passed
 
 
-def test_validation_strategy_defaults_to_skip_when_e2b_and_local_are_unavailable(monkeypatch) -> None:
+def test_validation_strategy_defaults_to_skip_when_e2b_local_and_docker_are_unavailable(monkeypatch) -> None:
     from mozaiksai.core.workflow.generator_support import app_validation_strategy as app_validation_strategy_module
 
     monkeypatch.delenv("E2B_API_KEY", raising=False)
     monkeypatch.delenv("MOZAIKS_APP_VALIDATION_STRATEGY", raising=False)
     monkeypatch.setattr(app_validation_strategy_module, "local_app_validation_available", lambda: False)
+    monkeypatch.setattr(app_validation_strategy_module, "docker_app_validation_available", lambda: False)
 
-    strategy, reason = app_validation_strategy_module.resolve_app_validation_strategy(requested=None, context_value=None)
+    strategy, reason = app_validation_strategy_module.resolve_app_validation_strategy(
+        requested=None, context_value=None, local_available=False, docker_available=False
+    )
 
     assert strategy == "skip"
     assert "resolved" in reason
@@ -120,13 +123,14 @@ def test_validation_strategy_summary_exposes_allowed_values() -> None:
         build_app_validation_strategy_summary,
     )
 
-    summary = build_app_validation_strategy_summary(env={}, local_available=False)
+    summary = build_app_validation_strategy_summary(env={}, local_available=False, docker_available=False)
 
-    assert summary["allowed_values"] == ["e2b", "local", "skip"]
+    assert summary["allowed_values"] == ["e2b", "docker", "local", "skip"]
     assert summary["default_value"] == "skip"
     assert summary["options"][0]["value"] == "e2b"
-    assert summary["options"][1]["value"] == "local"
-    assert summary["options"][2]["value"] == "skip"
+    assert summary["options"][1]["value"] == "docker"
+    assert summary["options"][2]["value"] == "local"
+    assert summary["options"][3]["value"] == "skip"
 
 
 def test_validation_strategy_rejects_invalid_explicit_values() -> None:
@@ -487,3 +491,4 @@ def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:
     from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 
     assert validate_wiring.__annotations__["context_variables"] != "Optional[Dict[str, Any]]"
+

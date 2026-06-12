@@ -29,12 +29,14 @@ def test_transition_screens_use_shell_safe_height() -> None:
     launcher = _read("chat-ui/src/ui/screens/LauncherScreen.jsx")
     confirm = _read("chat-ui/src/ui/screens/ConfirmScreen.jsx")
     transition = _read("chat-ui/src/ui/screens/TransitionScreen.jsx")
+    primitives = _read("chat-ui/src/platform/transitionPrimitives.jsx")
 
+    # No screen may use min-h-screen (breaks inside overlay frames)
     assert "min-h-screen" not in launcher
     assert "min-h-screen" not in confirm
     assert "min-h-screen" not in transition
-    assert "min-h-full flex-1" in launcher
-    assert "min-h-full flex-1" in confirm
+    # Shell-safe height lives in the shared primitives — screens delegate layout there
+    assert "min-h-full flex-1" in primitives
 
 
 def test_platform_transitions_stay_declarative() -> None:
@@ -58,6 +60,7 @@ def test_platform_transitions_stay_declarative() -> None:
             "progress_view",
             "prerequisite_redirect",
             "chat_session",
+            "workflow_complete",
         }
         if transition["transition_type"] in {"user_choice", "user_choice_context", "user_choice_route", "confirm"}:
             assert transition.get("ui", {}).get("component")
@@ -71,10 +74,11 @@ def test_platform_transitions_stay_declarative() -> None:
             if "context_variables" in option:
                 assert isinstance(option["context_variables"], dict)
     assert (_workspace() / "factory_app" / "workflows" / "extended_orchestration" / "ui").exists()
-    # App workspace overlay should not have a UI bundle (shared factory owns it)
+    # App workspace build context should not have a UI bundle (shared factory owns it)
     from tests.import_utils import active_app_root
     app_root = active_app_root()
     if app_root.resolve() == (_workspace() / "factory_app" / "app").resolve():
         pytest.skip("The repo-local factory bundle intentionally owns the shared transition UI bundle.")
     workflows_root = app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"
     assert not (workflows_root / "extended_orchestration" / "ui" / "index.js").exists()
+

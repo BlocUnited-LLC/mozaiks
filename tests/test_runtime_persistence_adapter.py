@@ -75,3 +75,4 @@ def test_module_persistence_context_protocol_can_be_implemented_by_fake_adapter(
     assert isinstance(context, ModulePersistenceContext)
     assert context.collection("projects", "projects") is context.collection("projects", "projects")
     assert context.scope_filter({"status": "open"}) == {"app_id": "app_1", "status": "open"}
+

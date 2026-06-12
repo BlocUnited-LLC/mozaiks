@@ -284,3 +284,4 @@ class _Context:
 
 def graph_node(graph, node_id: str):
     return next(node for node in graph.nodes if node.node_id == node_id)
+

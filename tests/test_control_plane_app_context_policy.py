@@ -81,7 +81,7 @@ def test_missing_context_data_model_migration_blocks_for_refresh() -> None:
         app_context_summary=_missing_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/data_migrations/add_phase.json"],
+        affected_bundle_paths=["data/migrations/add_phase.json"],
     )
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
@@ -94,7 +94,7 @@ def test_stale_context_data_model_migration_blocks_for_refresh() -> None:
         app_context_summary=_stale_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/data.json"],
+        affected_bundle_paths=["data/contract.json"],
     )
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
@@ -219,3 +219,4 @@ def test_control_plane_app_context_policy_has_no_graph_database_or_proprietary_t
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

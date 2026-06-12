@@ -1,6 +1,8 @@
-from tests.import_utils import import_module_directly
-import pytest
 import inspect
+
+import pytest
+
+from tests.import_utils import import_module_directly
 
 
 def test_validation_package_re_exports_canonical_llm_config() -> None:
@@ -33,3 +35,27 @@ async def test_canonical_llm_config_has_no_stream_kwarg(monkeypatch: pytest.Monk
 
     assert "stream" not in inspect.signature(module.get_llm_config).parameters
     assert "stream" not in llm_config
+
+
+@pytest.mark.asyncio
+async def test_llm_config_skip_mongo_uses_env_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = import_module_directly("mozaiksai.core.workflow.llm_config")
+    module.clear_llm_caches()
+    mongo_called = False
+
+    def fail_if_mongo_called():
+        nonlocal mongo_called
+        mongo_called = True
+        raise AssertionError("Mongo should be skipped")
+
+    monkeypatch.setenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+    monkeypatch.delenv("OPENAI_MODEL_FALLBACK", raising=False)
+    monkeypatch.setattr(module, "get_mongo_client", fail_if_mongo_called)
+    monkeypatch.setattr(module, "get_secret", lambda _name: (_ for _ in ()).throw(KeyError(_name)))
+
+    providers = await module._load_raw_config_list(force=True)
+
+    assert mongo_called is False
+    assert providers == [{"model": "gpt-4o-mini", "api_key": "test-openai-key"}]

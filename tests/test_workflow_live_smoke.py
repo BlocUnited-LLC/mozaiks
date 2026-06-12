@@ -99,3 +99,4 @@ def test_live_agentgenerator_smoke_workflow() -> None:
     assert isinstance(result.structured_output, dict)
     assert result.structured_output
 
+

@@ -43,7 +43,6 @@ def _build_workspace(tmp_path: Path) -> Path:
             [
                 "schema_version: mozaiks.control_plane.runtime",
                 "enabled: true",
-                "profile: default",
                 "classifier:",
                 "  enabled: true",
                 "  llm_profile: classifier",
@@ -75,3 +74,4 @@ def test_build_summary_defaults_without_saved_state(tmp_path: Path) -> None:
     assert summary["build"]["approval_state"] == "not_started"
     assert summary["build"]["current_request"]["text"] == ""
     assert summary["build"]["recent_requests"] == []
+

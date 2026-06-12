@@ -314,3 +314,4 @@ def test_all_factory_sequence_ids_are_unique(monkeypatch) -> None:
     assert graph is not None
     ids = [s.id for s in graph.journeys]
     assert len(ids) == len(set(ids)), f"Duplicate sequence ids: {[x for x in ids if ids.count(x) > 1]}"
+

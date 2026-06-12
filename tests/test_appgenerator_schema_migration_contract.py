@@ -2,7 +2,7 @@
 
 Verifies that generate_migration() produces a document that satisfies the
 runtime _validate_migration() contract so files written to
-config/data_migrations/*.json can be loaded and validated by the
+data/migrations/*.json can be loaded and validated by the
 runtime migration loader without raising DatabaseMigrationError.
 """
 
@@ -154,3 +154,5 @@ def test_generated_migration_survives_roundtrip_through_runtime_loader(tmp_path:
     assert loaded[0]["migration_id"] == migration["migration_id"]
     assert isinstance(loaded[0]["operations"], list)
     assert loaded[0]["operations"][0]["type"] == "ensure_collection"
+
+

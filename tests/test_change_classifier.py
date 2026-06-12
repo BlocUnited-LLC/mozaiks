@@ -10,19 +10,16 @@ from mozaiksai.control_plane import (
     ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
     ControlPlaneConfig,
-    ControlPlaneHarnessManifest,
     ControlPlaneManifest,
-    ControlPlaneProfileInfo,
     ControlPlanePromptDefinition,
     ControlPlanePromptsManifest,
     ControlPlaneToolContext,
-    ControlPlaneToolsManifest,
     ControlPlaneToolDefinition,
     ControlPlaneToolResult,
+    ControlPlaneToolsManifest,
     LLMChangeClassifier,
     LoadedControlPlanePack,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fake AG2 agent infrastructure
@@ -85,27 +82,11 @@ def _pack() -> LoadedControlPlanePack:
         path=Path("factory_app/control_plane"),
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.control_plane",
-            profile=ControlPlaneProfileInfo(
-                id="factory_app",
-                display_name="Factory App Harness",
-                description="App-zero declarative control-plane pack for the first-party Mozaiks build experience.",
-            ),
-            harness=ControlPlaneHarnessManifest(
-                implementation="mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                supported_trigger_sources=["refinement"],
-            ),
             checkpoints=[
                 ControlPlaneCheckpointManifest(
-                    id="request_intake",
                     event="request_submitted",
-                    entrypoint="mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier",
                     prompt_id="change_classifier_system",
                     tool_ids=["get_revision_context", "get_artifact_summary"],
-                ),
-                ControlPlaneCheckpointManifest(
-                    id="route",
-                    event="route_requested",
-                    entrypoint="mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver",
                 ),
             ],
         ),
@@ -142,16 +123,7 @@ def _pack() -> LoadedControlPlanePack:
 
 @pytest.mark.asyncio
 async def test_change_classifier_uses_control_plane_llm_config() -> None:
-    agent = _FakeAgent("", {})
     tool_executor = _FakeToolExecutor()
-
-    classifier = LLMChangeClassifier(
-        agent_factory=lambda system_prompt, llm_config: _FakeAgent(system_prompt, llm_config),
-        config_loader=_enabled_control_plane,
-        pack_loader=_pack,
-        tool_executor=tool_executor,
-    )
-    # Capture the agent that the factory creates
     created: list[_FakeAgent] = []
 
     def capturing_factory(system_prompt: str, llm_config: dict) -> _FakeAgent:
@@ -159,7 +131,12 @@ async def test_change_classifier_uses_control_plane_llm_config() -> None:
         created.append(a)
         return a
 
-    classifier._agent_factory = capturing_factory  # type: ignore[assignment]
+    classifier = LLMChangeClassifier(
+        agent_factory=capturing_factory,
+        config_loader=_enabled_control_plane,
+        pack_loader=_pack,
+        tool_executor=tool_executor,
+    )
 
     result = await classifier.classify(
         artifact_kind="app_bundle",

@@ -364,3 +364,4 @@ def test_app_context_model_files_do_not_canonicalize_legacy_placeholders() -> No
         "workspace_app",
     ):
         assert term not in model_text
+

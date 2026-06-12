@@ -145,3 +145,4 @@ async def test_send_tool_call_event_emits_canonical_tool_call_envelope() -> None
     assert event["awaiting_response"] is True
     assert event["agent"] == "PlannerAgent"
     assert event["agent_name"] == "PlannerAgent"
+

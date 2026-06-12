@@ -43,7 +43,7 @@ import pytest
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _AGENTS_YAML_PATH = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "agents.yaml"
 _FILE_CONTRACTS_PATH = (
-    _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools" / "file_contracts.yaml"
+    _WORKSPACE / "factory_app" / "build_context" / "AppGenerator" / "file_contracts.yaml"
 )
 _GENERATE_DOWNLOAD_PATH = (
     _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools" / "generate_and_download.py"
@@ -470,3 +470,6 @@ export default function ApprovalRequestPage() {
                 assert name not in jsx, (
                     f"JSX fixture must not contain proprietary name '{name}'"
                 )
+
+
+

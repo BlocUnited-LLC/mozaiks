@@ -176,3 +176,4 @@ def test_brownfield_discovery_refresh_contract_has_no_proprietary_examples() -> 
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

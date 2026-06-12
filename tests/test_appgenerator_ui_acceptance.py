@@ -126,3 +126,4 @@ def test_review_ui_acceptance_can_require_runner_execution() -> None:
 
     assert result["status"] == "needs_revision"
     assert "did not run" in result["revision_request"]
+

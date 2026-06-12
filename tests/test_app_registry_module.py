@@ -93,3 +93,4 @@ async def test_app_registry_service_creates_and_updates_lifecycle_records() -> N
     assert updated["success"] is True
     assert updated["app"]["lifecycle_state"] == "review"
     assert updated["app"]["bundle_path"] == "generated/apps/app_1/build_1/app"
+

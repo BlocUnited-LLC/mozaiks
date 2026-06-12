@@ -112,9 +112,9 @@ def _expect_min_shapes(docs: Sequence[Any], path: Path) -> List[ValidationIssue]
     if not has_tools_manifest:
         issues.append(ValidationIssue(path, "Missing ToolsManagerAgent doc with keys: tools, lifecycle_tools"))
 
-    # HookFilesOutput shape: hook_files list
-    if not any(_has_key(d, "hook_files") for d in docs):
-        issues.append(ValidationIssue(path, "Missing HookAgent doc with key: hook_files"))
+    # MiddlewareFilesOutput shape: middleware_files list
+    if not any(_has_key(d, "middleware_files") for d in docs):
+        issues.append(ValidationIssue(path, "Missing MiddlewareAgent doc with key: middleware_files"))
 
     # RuntimeAgentsOutput shape: agents list
     if not any(_has_key(d, "agents") for d in docs):
@@ -142,9 +142,9 @@ def _expect_min_shapes(docs: Sequence[Any], path: Path) -> List[ValidationIssue]
             )
         )
 
-    # HandoffRulesOutput shape
-    if not any(_has_key(d, "handoff_rules") for d in docs):
-        issues.append(ValidationIssue(path, "Missing HandoffsAgent doc with key: handoff_rules"))
+    # TransitionRulesOutput shape
+    if not any(_has_key(d, "transition_rules") for d in docs):
+        issues.append(ValidationIssue(path, "Missing TransitionGraphAgent doc with key: transition_rules"))
 
     # StructuredModelsOutput shape
     has_structured_outputs = any(

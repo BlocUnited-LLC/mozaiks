@@ -36,7 +36,6 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
     data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
 
     assert data["enabled"] is True
-    assert data["profile"] == "default"
     assert sorted(data["llm_profiles"]) == [
         "architecture",
         "classifier",
@@ -88,3 +87,4 @@ def test_existing_app_discovery_is_agent_driven() -> None:
     config = _mozaiks_workflow_manager().get_config("ExistingAppDiscovery")
     assert config.get("workflow_startup_mode") == "AgentDriven"
     assert config.get("initial_agent") == "DiscoveryHostAgent"
+

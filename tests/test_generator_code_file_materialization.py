@@ -41,7 +41,7 @@ def test_extract_code_file_map_materializes_typed_database_output() -> None:
     payload = {
         "database_files": [
             {
-                "path": "config/data.json",
+                "path": "data/contract.json",
                 "kind": "data_contract_json",
                 "purpose": "Data contract artifact.",
                 "entity_refs": ["project"],
@@ -50,7 +50,7 @@ def test_extract_code_file_map_materializes_typed_database_output() -> None:
         ],
         "code_files": [
             {
-                "filename": "config/data.json",
+                "filename": "data/contract.json",
                 "content": "BROKEN",
             }
         ],
@@ -58,7 +58,7 @@ def test_extract_code_file_map_materializes_typed_database_output() -> None:
 
     file_map = extract_code_file_map_from_payload(payload)
 
-    assert file_map["config/data.json"] == "{\"collections\":[]}\n"
+    assert file_map["data/contract.json"] == "{\"collections\":[]}\n"
 
 
 def test_extract_code_file_map_unwraps_provider_output_envelope() -> None:
@@ -66,7 +66,7 @@ def test_extract_code_file_map_unwraps_provider_output_envelope() -> None:
         "DatabaseOutput": {
             "database_files": [
                 {
-                    "path": "config/data.json",
+                    "path": "data/contract.json",
                     "kind": "data_contract_json",
                     "purpose": "Data contract artifact.",
                     "entity_refs": ["ticket"],
@@ -80,7 +80,7 @@ def test_extract_code_file_map_unwraps_provider_output_envelope() -> None:
 
     file_map = extract_code_file_map_from_payload(payload)
 
-    assert file_map == {"config/data.json": "{\"surfaces\":[]}\n"}
+    assert file_map == {"data/contract.json": "{\"surfaces\":[]}\n"}
 
 
 def test_extract_code_file_map_canonicalizes_module_contract_paths() -> None:
@@ -138,6 +138,56 @@ def test_extract_code_file_map_materializes_typed_module_contract_bundle() -> No
         "modules/tickets/contracts/reactions.yaml",
     }
     assert yaml.safe_load(file_map["modules/tickets/module.yaml"])["id"] == "tickets"
+
+
+def test_extract_code_file_map_materializes_module_contract_with_profile_yaml() -> None:
+    payload = {
+        "module_contract": {
+            "module_id": "wallet",
+            "module_yaml": {
+                "schema_version": "mozaiks.module.v1",
+                "id": "wallet",
+                "actions": [{"id": "get_wallet_summary", "name": "Get Wallet Summary", "description": "Returns balance."}],
+            },
+            "profile_yaml": {
+                "schema_version": "mozaiks.profile.v1",
+                "panels": [
+                    {
+                        "id": "wallet-balance",
+                        "title": "Wallet",
+                        "kind": "metrics",
+                        "action": "get_wallet_summary",
+                        "fields": [
+                            {"id": "balance", "label": "Balance", "type": "currency"},
+                        ],
+                    }
+                ],
+            },
+        }
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert "modules/wallet/contracts/profile.yaml" in file_map
+    parsed = yaml.safe_load(file_map["modules/wallet/contracts/profile.yaml"])
+    assert parsed["schema_version"] == "mozaiks.profile.v1"
+    assert parsed["panels"][0]["id"] == "wallet-balance"
+    assert parsed["panels"][0]["kind"] == "metrics"
+    assert parsed["panels"][0]["fields"][0]["type"] == "currency"
+
+
+def test_extract_code_file_map_omits_profile_yaml_when_null() -> None:
+    payload = {
+        "module_contract": {
+            "module_id": "projects",
+            "module_yaml": {"schema_version": "mozaiks.module.v1", "id": "projects", "actions": []},
+            "profile_yaml": None,
+        }
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert "modules/projects/contracts/profile.yaml" not in file_map
 
 
 def test_extract_code_file_map_materializes_app_schema_output() -> None:
@@ -281,15 +331,6 @@ def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pac
         "control_plane_pack": {
             "control_plane_yaml": {
                 "schema_version": "mozaiks.control_plane",
-                "profile": {
-                    "id": "app_refinement_harness",
-                    "display_name": "App Refinement Harness",
-                    "description": "App-local refinement harness.",
-                },
-                "harness": {
-                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                    "supported_trigger_sources": ["refinement"],
-                },
                 "routing": {
                     "default_artifact_kind": "app_bundle",
                     "artifacts": [
@@ -362,11 +403,6 @@ def test_appgenerator_control_plane_pack_rejects_prompt_paths_outside_pack() -> 
         "control_plane_pack": {
             "control_plane_yaml": {
                 "schema_version": "mozaiks.control_plane",
-                "profile": {"id": "demo", "display_name": "Demo", "description": "Demo"},
-                "harness": {
-                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                    "supported_trigger_sources": ["refinement"],
-                },
                 "routing": {"default_artifact_kind": "app_bundle", "artifacts": []},
                 "checkpoints": [],
             },
@@ -394,10 +430,6 @@ def test_appgenerator_control_plane_pack_rejects_schema_violations() -> None:
         "control_plane_pack": {
             "control_plane_yaml": {
                 "schema_version": "mozaiks.control_plane",
-                "profile": {"id": "demo", "display_name": "Demo", "description": "Demo"},
-                "harness": {
-                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                },
                 "routing": {
                     "default_artifact_kind": "app_bundle",
                     "artifacts": [
@@ -435,10 +467,6 @@ def test_appgenerator_control_plane_pack_rejects_extra_route_fields() -> None:
         "control_plane_pack": {
             "control_plane_yaml": {
                 "schema_version": "mozaiks.control_plane",
-                "profile": {"id": "demo", "display_name": "Demo", "description": "Demo"},
-                "harness": {
-                    "implementation": "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                },
                 "routing": {
                     "default_artifact_kind": "app_bundle",
                     "artifacts": [
@@ -516,7 +544,7 @@ def test_assembly_phase_merges_typed_database_model_and_service_foundation_outpu
             {
                 "database_files": [
                     {
-                        "path": "config/data.json",
+                        "path": "data/contract.json",
                         "kind": "data_contract_json",
                         "purpose": "Data contract artifact.",
                         "entity_refs": ["project"],
@@ -555,6 +583,7 @@ def test_assembly_phase_merges_typed_database_model_and_service_foundation_outpu
 
     file_map = {entry["filename"]: entry["content"] for entry in merged}
 
-    assert file_map["config/data.json"] == "{\"collections\":[]}\n"
+    assert file_map["data/contract.json"] == "{\"collections\":[]}\n"
     assert file_map["modules/projects/backend/schemas.py"] == "class ProjectRecord(TypedDict):\n    project_id: str\n"
     assert file_map["backend/config.py"] == "SETTINGS = {}\n"
+

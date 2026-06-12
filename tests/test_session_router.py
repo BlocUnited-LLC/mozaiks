@@ -1329,3 +1329,4 @@ async def test_fail_active_revision_ignores_empty_app_or_user():
     # Should not raise.
     await router.fail_active_revision(app_id="", user_id="user_1", workflow_id="AppGenerator")
     await router.fail_active_revision(app_id="app_1", user_id="", workflow_id="AppGenerator")
+

@@ -10,3 +10,4 @@ def test_runtime_root_imports_actual_app_symbols() -> None:
     assert runtime_pkg.LoadedModule is app_pkg.LoadedModule
     assert runtime_pkg.ModuleDefinition is app_pkg.ModuleDefinition
     assert runtime_pkg.ActionDef is app_pkg.ActionDef
+

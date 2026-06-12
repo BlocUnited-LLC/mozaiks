@@ -30,7 +30,7 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
     assert "DesignDocs" in build_rule
     assert "AgentGenerator" in build_rule
     assert "ExistingAppDiscovery" in build_rule
-    assert "handoffs.yaml" in build_rule
+    assert "transition_graph.yaml" in build_rule
     assert "transitions[]" in build_rule
     assert "entrypoints[]" in build_rule
 
@@ -55,8 +55,8 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
     assert "route_manifest.json" in frontend_rule
     assert "admin/index.js" in frontend_rule
 
-    assert "config/data.json" in persistence_rule
-    assert "data_migrations" in persistence_rule
+    assert "data/contract.json" in persistence_rule
+    assert "data/migrations" in persistence_rule
     assert "ModuleContext.persistence" in persistence_rule
     assert "ctx.db" in persistence_rule
 
@@ -110,7 +110,7 @@ def test_high_value_skill_stubs_anchor_current_truth() -> None:
     assert "AppGenerator" in build_skill
     assert "ExistingAppDiscovery" in build_skill
     assert "transitions[]" in build_skill
-    assert "handoffs.yaml" in build_skill
+    assert "transition_graph.yaml" in build_skill
     assert "entrypoints[]" in build_skill
 
     assert "app/config/ai.json" in control_plane_skill
@@ -120,7 +120,7 @@ def test_high_value_skill_stubs_anchor_current_truth() -> None:
     assert "factory_control_plane" in control_plane_skill
 
     assert "data_contract" in persistence_skill
-    assert "config/data.json" in persistence_skill
+    assert "data/contract.json" in persistence_skill
     assert "ModuleContext.persistence" in persistence_skill
     assert "ctx.db" in persistence_skill
     assert "backend/models.py" in persistence_skill
@@ -146,3 +146,5 @@ def test_no_private_repo_or_app_zero_language_in_new_guidance_surfaces() -> None
         assert "App Zero" not in text, relative_path
         assert "App-zero" not in text, relative_path
         assert "mozaiks-app" not in text, relative_path
+
+

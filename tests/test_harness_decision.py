@@ -127,3 +127,4 @@ def test_decision_policy_requires_confirmation_for_multi_file_scope() -> None:
 
     assert decision.decision_type == "clarify_scope"
     assert decision.actions[0].action_id == "apply_proposed_scope"
+

@@ -275,3 +275,4 @@ def test_no_proprietary_examples() -> None:
     forbidden_terms = ['app' + ' zero', 'app_' + 'zero', 'mozaiks-' + 'app', 'bloc' + 'united']
 
     assert not any(term in combined for term in forbidden_terms)
+

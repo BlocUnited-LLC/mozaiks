@@ -227,3 +227,4 @@ def test_staging_fixtures_are_neutral() -> None:
     ]
 
     assert not any(term in combined for term in forbidden_terms)
+

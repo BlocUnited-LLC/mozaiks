@@ -13,10 +13,8 @@ from mozaiksai.control_plane import (
     ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
     ControlPlaneConfig,
-    ControlPlaneHarnessManifest,
     ControlPlaneManifest,
     ControlPlanePoliciesManifest,
-    ControlPlaneProfileInfo,
     ControlPlanePromptDefinition,
     ControlPlanePromptsManifest,
     ControlPlaneScopePolicyManifest,
@@ -30,28 +28,21 @@ from mozaiksai.control_plane import (
 )
 
 
-class _FakeCapabilityService:
-    def __init__(self) -> None:
+class _FakeAgentRunner:
+    def __init__(self, proposal: dict | None = None) -> None:
+        self._proposal = proposal or {
+            "resolution": "scoped_files",
+            "selected_paths": ["app/ui/pages/Dashboard.jsx"],
+            "rationale": "Dashboard is the primary surface for this export copy change.",
+            "confidence": 0.92,
+            "clarification_question": None,
+            "signals": ["dashboard_surface", "copy_change"],
+        }
         self.calls: list[dict] = []
 
-    async def generate_json_completion(self, **kwargs):  # noqa: ANN003
+    async def run(self, **kwargs):  # noqa: ANN003
         self.calls.append(kwargs)
-        return {
-            "content": (
-                '{"resolution":"scoped_files","selected_paths":["app/ui/pages/Dashboard.jsx"],'
-                '"rationale":"Dashboard is the primary surface for this export copy change.",'
-                '"confidence":0.92,"clarification_question":null,"signals":["dashboard_surface","copy_change"]}'
-            ),
-            "parsed": {
-                "resolution": "scoped_files",
-                "selected_paths": ["app/ui/pages/Dashboard.jsx"],
-                "rationale": "Dashboard is the primary surface for this export copy change.",
-                "confidence": 0.92,
-                "clarification_question": None,
-                "signals": ["dashboard_surface", "copy_change"],
-            },
-            "usage": {},
-        }
+        return kwargs["response_schema"].model_validate(self._proposal)
 
 
 class _FakeToolExecutor:
@@ -103,20 +94,9 @@ def _pack() -> LoadedControlPlanePack:
         path=Path("factory_app/control_plane"),
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.control_plane",
-            profile=ControlPlaneProfileInfo(
-                id="factory_app",
-                display_name="Factory App Harness",
-                description="App-zero declarative control-plane pack for the first-party Mozaiks build experience.",
-            ),
-            harness=ControlPlaneHarnessManifest(
-                implementation="mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                supported_trigger_sources=["refinement"],
-            ),
             checkpoints=[
                 ControlPlaneCheckpointManifest(
-                    id="scope_selection",
                     event="scope_requested",
-                    entrypoint="mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer",
                     prompt_id="coding_scope_selection_system",
                     tool_ids=["get_revision_context", "get_artifact_summary", "get_artifact_workspace_catalog"],
                 )
@@ -232,10 +212,10 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
                 ),
             )
 
-    service = _FakeCapabilityService()
+    agent_runner = _FakeAgentRunner()
     tool_executor = _FakeToolExecutor()
     proposer = ArtifactScopeProposer(
-        capability_service=service,
+        agent_runner=agent_runner,
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=tool_executor,
@@ -255,33 +235,15 @@ async def test_scope_proposer_selects_paths_and_materializes_files(tmp_path: Pat
     assert proposal.resolution == "scoped_files"
     assert proposal.selected_paths == ["app/ui/pages/Dashboard.jsx"]
     assert files["app/ui/pages/Dashboard.jsx"].startswith("export default function Dashboard")
-    assert service.calls[0]["system_prompt"] == "scope selection prompt from pack"
-    assert service.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
-    assert '"control_plane_context"' in service.calls[0]["user_prompt"]
+    assert agent_runner.calls[0]["agent_name"] == "ScopeProposer"
+    assert agent_runner.calls[0]["system_prompt"] == "scope selection prompt from pack"
+    assert agent_runner.calls[0]["llm_config"] == {"model": "gpt-5.2-codex", "temperature": 0.1}
+    assert '"control_plane_context"' in agent_runner.calls[0]["user_prompt"]
     assert len(tool_executor.calls) == 3
 
 
 @pytest.mark.asyncio
 async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit(tmp_path: Path) -> None:
-    class _WideScopeService(_FakeCapabilityService):
-        async def generate_json_completion(self, **kwargs):  # noqa: ANN003
-            self.calls.append(kwargs)
-            return {
-                "parsed": {
-                    "resolution": "scoped_files",
-                    "selected_paths": [
-                        "app/ui/pages/Dashboard.jsx",
-                        "app/ui/components/ExportPanel.jsx",
-                        "app/ui/components/Header.jsx",
-                        "app/ui/components/Footer.jsx",
-                    ],
-                    "rationale": "Several dashboard-adjacent files look affected.",
-                    "confidence": 0.88,
-                    "clarification_question": None,
-                    "signals": ["multi_file_scope"],
-                }
-            }
-
     pack = _pack().model_copy(
         update={
             "policies": ControlPlanePoliciesManifest(
@@ -315,7 +277,21 @@ async def test_scope_proposer_clarifies_when_selected_paths_exceed_policy_limit(
             )
 
     proposer = ArtifactScopeProposer(
-        capability_service=_WideScopeService(),
+        agent_runner=_FakeAgentRunner(
+            {
+                "resolution": "scoped_files",
+                "selected_paths": [
+                    "app/ui/pages/Dashboard.jsx",
+                    "app/ui/components/ExportPanel.jsx",
+                    "app/ui/components/Header.jsx",
+                    "app/ui/components/Footer.jsx",
+                ],
+                "rationale": "Several dashboard-adjacent files look affected.",
+                "confidence": 0.88,
+                "clarification_question": None,
+                "signals": ["multi_file_scope"],
+            }
+        ),
         config_loader=_enabled_control_plane,
         pack_loader=lambda: pack,
         tool_executor=_FakeToolExecutor(),
@@ -342,20 +318,6 @@ async def test_scope_proposer_rejects_paths_missing_from_artifact_workspace(tmp_
         encoding="utf-8",
     )
 
-    class _HallucinatedScopeService(_FakeCapabilityService):
-        async def generate_json_completion(self, **kwargs):  # noqa: ANN003
-            self.calls.append(kwargs)
-            return {
-                "parsed": {
-                    "resolution": "scoped_files",
-                    "selected_paths": ["app/ui/pages/MissingDashboard.jsx"],
-                    "rationale": "The dashboard page appears to be the target.",
-                    "confidence": 0.9,
-                    "clarification_question": None,
-                    "signals": ["dashboard_surface"],
-                }
-            }
-
     class _LocalArtifactStore(_FakeArtifactStore):
         async def get_artifact_version(self, *, app_id: str, artifact_version_id: str):
             return SimpleNamespace(
@@ -368,7 +330,16 @@ async def test_scope_proposer_rejects_paths_missing_from_artifact_workspace(tmp_
             )
 
     proposer = ArtifactScopeProposer(
-        capability_service=_HallucinatedScopeService(),
+        agent_runner=_FakeAgentRunner(
+            {
+                "resolution": "scoped_files",
+                "selected_paths": ["app/ui/pages/MissingDashboard.jsx"],
+                "rationale": "The dashboard page appears to be the target.",
+                "confidence": 0.9,
+                "clarification_question": None,
+                "signals": ["dashboard_surface"],
+            }
+        ),
         config_loader=_enabled_control_plane,
         pack_loader=_pack,
         tool_executor=_FakeToolExecutor(),

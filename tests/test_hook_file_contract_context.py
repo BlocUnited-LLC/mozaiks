@@ -15,9 +15,15 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_HOOKS_YAML = _APPGEN_DIR / "hooks.yaml"
-_FILE_CONTRACTS_PATH = _APPGEN_DIR / "tools" / "file_contracts.yaml"
-_MODULE_ARCHETYPES_PATH = _APPGEN_DIR / "tools" / "module_archetypes.yaml"
+_APPGEN_CATALOG_DIR = (
+    Path(__file__).parent.parent
+    / "factory_app"
+    / "build_context"
+    / "AppGenerator"
+)
+_HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
+_FILE_CONTRACTS_PATH = _APPGEN_CATALOG_DIR / "file_contracts.yaml"
+_MODULE_ARCHETYPES_PATH = _APPGEN_CATALOG_DIR / "module_archetypes.yaml"
 
 
 class _FakeAgent:
@@ -53,7 +59,7 @@ class TestHooksYaml:
     def test_cookie_cutter_hook_entries_present(self):
         with open(_HOOKS_YAML, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-        hooks = data["hooks"]
+        hooks = data["prompt_middleware"]
 
         expected_agents = {
             "AppPlanAgent",
@@ -66,7 +72,7 @@ class TestHooksYaml:
         }
 
         actual_agents = {
-            hook.get("hook_agent")
+            hook.get("agent")
             for hook in hooks
             if hook.get("filename") == "hook_file_contract_context.py"
             and hook.get("function") == "inject_cookie_cutter_contracts_context"
@@ -180,3 +186,5 @@ class TestInjectCookieCutterContractsContext:
         self.mod.inject_cookie_cutter_contracts_context(agent, [])
         self.mod.inject_cookie_cutter_contracts_context(agent, [])
         assert agent.system_message.count("[FILE CONTRACTS CONTEXT]") == 1
+
+

@@ -11,6 +11,7 @@ from factory_app.workflows.AppGenerator.tools.assembly_phase import _merge_code_
 
 ROOT = Path(__file__).resolve().parents[1]
 APPGEN = ROOT / "factory_app" / "workflows" / "AppGenerator"
+APPGEN_CATALOGS = ROOT / "factory_app" / "build_context" / "AppGenerator"
 
 
 def _read(path: Path) -> str:
@@ -41,8 +42,8 @@ def _app_build_plan_fixture() -> dict[str, Any]:
                 "task_id": "data_contract",
                 "task_type": "persistence_contract",
                 "owned_paths": [
-                    "config/data.json",
-                    "config/data_migrations/001_projects_tasks_indexes.json",
+                    "data/contract.json",
+                    "data/migrations/001_projects_tasks_indexes.json",
                     "modules/projects/backend/repo.py",
                     "modules/projects/backend/policy.py",
                     "modules/projects/backend/schemas.py",
@@ -210,14 +211,14 @@ def _database_output() -> dict[str, Any]:
     return {
         "database_files": [
             {
-                "path": "config/data.json",
+                "path": "data/contract.json",
                 "kind": "data_contract_json",
                 "purpose": "Canonical generated data contract.",
                 "entity_refs": ["projects", "tasks"],
                 "content": json.dumps(_data_contract(), indent=2) + "\n",
             },
             {
-                "path": "config/data_migrations/001_projects_tasks_indexes.json",
+                "path": "data/migrations/001_projects_tasks_indexes.json",
                 "kind": "database_migration_json",
                 "purpose": "Additive project/task index migration.",
                 "entity_refs": ["projects", "tasks"],
@@ -226,9 +227,9 @@ def _database_output() -> dict[str, Any]:
         ],
         "pending_schema_migration": _schema_migration(),
         "code_files": [
-            {"filename": "config/data.json", "content": "BROKEN\n"},
+            {"filename": "data/contract.json", "content": "BROKEN\n"},
             {
-                "filename": "config/data_migrations/001_projects_tasks_indexes.json",
+                "filename": "data/migrations/001_projects_tasks_indexes.json",
                 "content": "BROKEN\n",
             },
         ],
@@ -361,8 +362,8 @@ def test_app_build_plan_fixture_uses_canonical_persistence_paths() -> None:
 
     assert plan["data_contract"]["surfaces"]
     assert plan["pending_schema_migration"]["migration_id"] == "001_projects_tasks_indexes"
-    assert "config/data.json" in owned_paths
-    assert "config/data_migrations/001_projects_tasks_indexes.json" in owned_paths
+    assert "data/contract.json" in owned_paths
+    assert "data/migrations/001_projects_tasks_indexes.json" in owned_paths
     for module_id in ("projects", "tasks"):
         assert f"modules/{module_id}/backend/repo.py" in owned_paths
         assert f"modules/{module_id}/backend/schemas.py" in owned_paths
@@ -423,8 +424,8 @@ def test_service_agent_style_backend_uses_ctx_persistence_boundary() -> None:
 def test_assembly_materializes_canonical_persistent_artifact_tree() -> None:
     file_map = _assembled_file_map()
 
-    assert "config/data.json" in file_map
-    assert "config/data_migrations/001_projects_tasks_indexes.json" in file_map
+    assert "data/contract.json" in file_map
+    assert "data/migrations/001_projects_tasks_indexes.json" in file_map
     for module_id in ("projects", "tasks"):
         for filename in ("handler.py", "service.py", "repo.py", "policy.py", "schemas.py"):
             assert f"modules/{module_id}/backend/{filename}" in file_map
@@ -444,8 +445,8 @@ def test_assembly_materializes_canonical_persistent_artifact_tree() -> None:
 
 def test_assembled_data_contract_migration_and_repos_align() -> None:
     file_map = _assembled_file_map()
-    intent = json.loads(file_map["config/data.json"])
-    migration = json.loads(file_map["config/data_migrations/001_projects_tasks_indexes.json"])
+    intent = json.loads(file_map["data/contract.json"])
+    migration = json.loads(file_map["data/migrations/001_projects_tasks_indexes.json"])
     intent_keys = {
         (collection["module_id"], collection.get("entity_name") or collection["name"])
         for surface in intent["surfaces"]
@@ -469,24 +470,27 @@ def test_assembled_data_contract_migration_and_repos_align() -> None:
 
 def test_appgenerator_guidance_still_targets_persistent_module_contract() -> None:
     service_agent = _agent_block("ServiceAgent")
-    file_contracts = yaml.safe_load(_read(APPGEN / "tools" / "file_contracts.yaml"))
+    file_contracts = yaml.safe_load(_read(APPGEN_CATALOGS / "file_contracts.yaml"))
     structured_outputs = yaml.safe_load(_read(APPGEN / "structured_outputs.yaml"))
     generate_and_download = _read(APPGEN / "tools" / "generate_and_download.py")
-    module_archetypes = _read(APPGEN / "tools" / "module_archetypes.yaml")
-    domain_catalog = _read(APPGEN / "tools" / "domain_catalogs.yaml")
+    module_archetypes = _read(APPGEN_CATALOGS / "module_archetypes.yaml")
+    domain_catalog = _read(APPGEN_CATALOGS / "domain_catalogs.yaml")
 
     persistence_contract = file_contracts["task_contracts"]["persistence_contract"]
     hard_constraints = "\n".join(persistence_contract["hard_constraints"])
     database_output_fields = structured_outputs["models"]["DatabaseOutput"]["fields"]
 
     assert "context.persistence.collection(module_id, entity_name)" in service_agent
-    assert "config/data.json" in persistence_contract["required_outputs"]
-    assert "config/data_migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
+    assert "data/contract.json" in persistence_contract["required_outputs"]
+    assert "data/migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
     assert "must not use ctx.db" in hard_constraints
     assert "must not import or call get_mongo_client()" in hard_constraints
     assert "pending_schema_migration" in database_output_fields
-    assert "config/data_migrations" in generate_and_download
+    assert "data/migrations" in generate_and_download
     assert "backend/models.py" not in module_archetypes
     assert "backend/models/" not in module_archetypes
     assert "backend/models.py" not in domain_catalog
     assert "backend/models/" not in domain_catalog
+
+
+

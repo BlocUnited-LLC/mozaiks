@@ -8,7 +8,6 @@ import yaml
 from mozaiksai.control_plane import (
     ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS,
     ControlPlaneConfig,
-    ControlPlaneManifest,
     load_control_plane_config,
 )
 
@@ -18,7 +17,6 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
     config = load_control_plane_config(app_root)
 
     assert config.enabled is True
-    assert config.profile == "default"
     assert tuple(config.llm_profiles.keys()) == ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS
     assert config.classifier.enabled is True
     assert config.classifier.llm_profile == "classifier"
@@ -40,7 +38,7 @@ def test_factory_control_plane_runtime_config_is_staged_under_control_plane_dir(
     data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
 
     assert data["enabled"] is True
-    assert data["profile"] == "default"
+    assert "profile" not in data
     assert data["classifier"]["llm_profile"] == "classifier"
     assert data["coding"]["llm_profile"] == "codegen"
 
@@ -62,6 +60,21 @@ def test_control_plane_rejects_unknown_llm_profile_id() -> None:
         assert "Unknown control-plane LLM profile id" in str(exc)
     else:
         raise AssertionError("unknown profile id should fail validation")
+
+
+def test_control_plane_rejects_legacy_runtime_profile_field() -> None:
+    try:
+        ControlPlaneConfig.model_validate(
+            {
+                "schema_version": "mozaiks.control_plane.runtime",
+                "enabled": True,
+                "profile": "default",
+            }
+        )
+    except ValueError as exc:
+        assert "profile" in str(exc)
+    else:
+        raise AssertionError("profile is not a recognized ControlPlaneConfig field")
 
 
 def test_control_plane_rejects_unknown_capability_profile_reference() -> None:

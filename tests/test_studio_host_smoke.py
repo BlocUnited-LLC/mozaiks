@@ -284,3 +284,4 @@ async def test_platform_host_loads_app_zero_product_modules(monkeypatch):
         "communications": "CommunicationsHandler",
         "investor_marketplace": "InvestorMarketplaceHandler",
     }
+

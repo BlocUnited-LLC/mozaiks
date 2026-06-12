@@ -591,3 +591,4 @@ def test_profile_page_fetches_profile_panels() -> None:
     assert "ListPanel" in source
     assert "ComponentPanel" in source
     assert "componentRegistry" in source
+

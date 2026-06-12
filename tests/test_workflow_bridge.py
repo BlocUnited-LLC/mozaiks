@@ -255,3 +255,4 @@ async def test_handle_user_input_from_api_skips_synthetic_run_complete_when_pers
 
     assert result["status"] == "success"
     assert transport.sent_ui_events == []
+

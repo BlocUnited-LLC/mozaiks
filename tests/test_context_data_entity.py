@@ -90,3 +90,4 @@ def test_data_entity_manager_rejects_invalid_enum_and_type(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="must be one of"):
         asyncio.run(manager.create({"user_id": "user_1", "role": "owner"}))
+

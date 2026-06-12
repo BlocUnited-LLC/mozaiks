@@ -85,8 +85,8 @@ def test_data_model_request_includes_database_paths_and_review_warning() -> None
         "feature",
     )
 
-    assert "config/data.json" in plan.affected_bundle_paths
-    assert "config/data_migrations/001_initial.json" in plan.affected_bundle_paths
+    assert "data/contract.json" in plan.affected_bundle_paths
+    assert "data/migrations/001_initial.json" in plan.affected_bundle_paths
     assert "modules/projects/backend/repo.py" in plan.affected_bundle_paths
     assert "modules/projects/backend/policy.py" in plan.affected_bundle_paths
     assert "Destructive changes require explicit review." in plan.scope_summary
@@ -189,3 +189,4 @@ def test_no_proprietary_examples() -> None:
     assert "app_zero" not in combined
     assert "mozaiks-app" not in combined
     assert "blocunited" not in combined
+

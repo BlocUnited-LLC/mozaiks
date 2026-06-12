@@ -581,3 +581,4 @@ def test_admin_index_registers_build_history_page():
         "admin/index.js must import and register AppBuildHistoryPage"
     )
     assert "registerComponent" in src
+

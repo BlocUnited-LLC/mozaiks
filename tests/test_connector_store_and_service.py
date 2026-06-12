@@ -432,3 +432,4 @@ def test_compute_connector_health_for_unknown_connector_is_deterministic() -> No
     assert health["missing_fields"] == ["api_key", "endpoint_url"]
     assert health["checked_by"] == "manual"
     assert health["frontend_safe"] is True
+

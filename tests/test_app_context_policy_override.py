@@ -56,7 +56,7 @@ def _blocked_execution_plan():
         workflow_sequence="app_revision",
         affected_workflows=["AppGenerator"],
         affected_declarative_families=["app_bundle"],
-        affected_bundle_paths=["config/data.json"],
+        affected_bundle_paths=["data/contract.json"],
         scope_summary="Data migration update.",
         app_id="field_service",
         request_id="request_123",
@@ -98,7 +98,7 @@ def test_can_create_override_for_block_requires_human_override() -> None:
         app_context_summary=_missing_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/data.json"],
+        affected_bundle_paths=["data/contract.json"],
         human_override_requested=True,
     )
     assert policy.decision is AppContextPolicyDecision.BLOCK_REQUIRES_HUMAN_OVERRIDE
@@ -121,7 +121,7 @@ def test_allow_with_warning_attaches_to_human_override_block() -> None:
         app_context_summary=_missing_context(),
         change_class="feature",
         refinement_lane="data_model_migration",
-        affected_bundle_paths=["config/data.json"],
+        affected_bundle_paths=["data/contract.json"],
         human_override_requested=True,
     )
     plan = _blocked_execution_plan().model_copy(
@@ -261,7 +261,7 @@ def test_override_is_scoped_to_app_request_context_paths_and_lane() -> None:
         override_decision="allow_with_warning",
         reason="Proceed with scoped planning only.",
         reviewer="reviewer@example.invalid",
-        applies_to_paths=["config/data.json"],
+        applies_to_paths=["data/contract.json"],
         applies_to_change_class="feature",
         applies_to_refinement_lane="data_model_migration",
     )
@@ -269,7 +269,7 @@ def test_override_is_scoped_to_app_request_context_paths_and_lane() -> None:
     assert override.app_id == "field_service"
     assert override.request_id == "request_123"
     assert override.context_version_id == "ctx_stale"
-    assert override.applies_to_paths == ["config/data.json"]
+    assert override.applies_to_paths == ["data/contract.json"]
     assert override.applies_to_change_class == "feature"
     assert override.applies_to_refinement_lane == "data_model_migration"
 
@@ -295,3 +295,4 @@ def test_override_has_no_graph_database_or_proprietary_terms() -> None:
         text = path.read_text(encoding="utf-8").lower()
         for term in forbidden_terms:
             assert term.lower() not in text
+

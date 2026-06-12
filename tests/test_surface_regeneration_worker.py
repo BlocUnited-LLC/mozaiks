@@ -13,7 +13,7 @@ Covers:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -21,14 +21,12 @@ from mozaiksai.control_plane.config import ControlPlaneConfig
 from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
     ContractSurfaceUpdate,
-    SurfaceExecutionRecord,
     SurfacePlanExecutionResult,
 )
 from mozaiksai.control_plane.implementations.surface_regeneration_worker import (
     SurfaceRegenerationWorker,
 )
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,6 +53,7 @@ def _make_surface(
 
 def _make_routing_decision(change_class: str = "feature") -> Any:
     from unittest.mock import MagicMock
+
     from mozaiksai.control_plane.implementations.refinement_router import ChangeClass
 
     intent = MagicMock()
@@ -101,24 +100,30 @@ def _make_mock_pack() -> MagicMock:
     return mock_pack
 
 
+class _FakeAgentRunner:
+    def __init__(self, responses: list[dict[str, Any]] | None = None, error: Exception | None = None) -> None:
+        self._responses = responses or []
+        self._error = error
+        self.calls: list[dict[str, Any]] = []
+
+    async def run(self, **kwargs: Any) -> Any:
+        if self._error is not None:
+            raise self._error
+        index = len(self.calls)
+        self.calls.append(kwargs)
+        if not self._responses:
+            payload = {}
+        elif index < len(self._responses):
+            payload = self._responses[index]
+        else:
+            payload = self._responses[-1]
+        return kwargs["response_schema"].model_validate(payload)
+
+
 def _make_worker_with_mock_llm(llm_responses: list[dict[str, Any]]) -> SurfaceRegenerationWorker:
     """Return a worker whose LLM returns the given responses in sequence."""
-    call_index = {"n": 0}
-
-    async def _fake_generate_json_completion(**kwargs: Any) -> dict[str, Any]:
-        i = call_index["n"]
-        call_index["n"] += 1
-        resp = llm_responses[i] if i < len(llm_responses) else llm_responses[-1]
-        return {"content": "", "parsed": resp, "usage": {}}
-
-    mock_service = MagicMock()
-    mock_service.generate_json_completion = _fake_generate_json_completion
-
-    # ControlPlaneConfig() with no llm_profile → resolve_capability_llm_config returns None.
-    # That is fine; the service will use the default provider.
-
     return SurfaceRegenerationWorker(
-        capability_service=mock_service,
+        agent_runner=_FakeAgentRunner(llm_responses),
         config_loader=ControlPlaneConfig,  # callable that returns ControlPlaneConfig()
         pack_loader=_make_mock_pack,
     )
@@ -300,26 +305,17 @@ async def test_execute_plan_later_surface_sees_earlier_file():
         fallback_to_workflow=False,
     )
 
-    received_user_prompts: list[str] = []
-
-    async def _capture_generate(**kwargs: Any) -> dict[str, Any]:
-        received_user_prompts.append(kwargs.get("user_prompt", ""))
-        call_n = len(received_user_prompts)
-        if call_n == 1:
-            return {
-                "content": "",
-                "parsed": {
-                    "updated_files": {
-                        "modules/tasks/backend/schemas.py": "class CompleteRequest: ...",
-                    },
-                    "summary": "schema",
-                    "rationale": "new schema",
+    mock_pack = _make_mock_pack()
+    agent_runner = _FakeAgentRunner(
+        [
+            {
+                "updated_files": {
+                    "modules/tasks/backend/schemas.py": "class CompleteRequest: ...",
                 },
-                "usage": {},
-            }
-        return {
-            "content": "",
-            "parsed": {
+                "summary": "schema",
+                "rationale": "new schema",
+            },
+            {
                 "updated_files": {
                     "modules/tasks/backend/schemas.py": "class CompleteRequest: ...",
                     "modules/tasks/backend/handler.py": "# handler",
@@ -327,16 +323,11 @@ async def test_execute_plan_later_surface_sees_earlier_file():
                 "summary": "handler",
                 "rationale": "new handler",
             },
-            "usage": {},
-        }
-
-    mock_service = MagicMock()
-    mock_service.generate_json_completion = _capture_generate
-
-    mock_pack = _make_mock_pack()
+        ]
+    )
 
     worker = SurfaceRegenerationWorker(
-        capability_service=mock_service,
+        agent_runner=agent_runner,
         config_loader=ControlPlaneConfig,
         pack_loader=lambda: mock_pack,
     )
@@ -353,7 +344,7 @@ async def test_execute_plan_later_surface_sees_earlier_file():
 
     assert result.status == "success"
     # Second surface's prompt should include the updated schemas.py content
-    assert "class CompleteRequest" in received_user_prompts[1]
+    assert "class CompleteRequest" in agent_runner.calls[1]["user_prompt"]
 
 
 # ---------------------------------------------------------------------------
@@ -382,29 +373,21 @@ async def test_execute_plan_partial_failure():
         fallback_to_workflow=False,
     )
 
-    call_n = {"n": 0}
-
-    async def _flaky_generate(**kwargs: Any) -> dict[str, Any]:
-        n = call_n["n"]
-        call_n["n"] += 1
-        if n == 0:
-            # First surface fails — no updated_files
-            return {"content": "", "parsed": {"summary": "oops"}, "usage": {}}
-        return {
-            "content": "",
-            "parsed": {
-                "updated_files": {"modules/projects/module.yaml": "id: projects"},
-                "summary": "ok",
-                "rationale": "ok",
-            },
-            "usage": {},
-        }
-
-    mock_service = MagicMock()
-    mock_service.generate_json_completion = _flaky_generate
-
     worker = SurfaceRegenerationWorker(
-        capability_service=mock_service,
+        agent_runner=_FakeAgentRunner(
+            [
+                {
+                    "updated_files": {},
+                    "summary": "oops",
+                    "rationale": "missing files",
+                },
+                {
+                    "updated_files": {"modules/projects/module.yaml": "id: projects"},
+                    "summary": "ok",
+                    "rationale": "ok",
+                },
+            ]
+        ),
         config_loader=ControlPlaneConfig,
         pack_loader=_make_mock_pack,
     )
@@ -434,14 +417,8 @@ async def test_execute_plan_all_failed():
         fallback_to_workflow=False,
     )
 
-    async def _failing_generate(**kwargs: Any) -> dict[str, Any]:
-        raise RuntimeError("LLM unavailable")
-
-    mock_service = MagicMock()
-    mock_service.generate_json_completion = _failing_generate
-
     worker = SurfaceRegenerationWorker(
-        capability_service=mock_service,
+        agent_runner=_FakeAgentRunner(error=RuntimeError("LLM unavailable")),
         config_loader=ControlPlaneConfig,
         pack_loader=_make_mock_pack,
     )
@@ -521,7 +498,9 @@ async def test_execute_plan_propagates_requires_schema_migration():
 @pytest.mark.asyncio
 async def test_harness_execute_surface_plan_delegates_to_worker():
     from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig
-    from mozaiksai.control_plane.implementations.orchestration_control import OrchestrationControlHarness
+    from mozaiksai.control_plane.implementations.orchestration_control import (
+        OrchestrationControlHarness,
+    )
 
     mock_result = SurfacePlanExecutionResult(
         status="success",
@@ -568,7 +547,9 @@ async def test_harness_execute_surface_plan_delegates_to_worker():
 @pytest.mark.asyncio
 async def test_harness_execute_surface_plan_raises_when_disabled():
     from mozaiksai.control_plane.config import ControlPlaneCapabilityConfig
-    from mozaiksai.control_plane.implementations.orchestration_control import OrchestrationControlHarness
+    from mozaiksai.control_plane.implementations.orchestration_control import (
+        OrchestrationControlHarness,
+    )
 
     disabled_config = ControlPlaneConfig(
         enabled=True,

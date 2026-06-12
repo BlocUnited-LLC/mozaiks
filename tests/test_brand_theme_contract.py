@@ -145,3 +145,4 @@ def test_local_fonts_remain_under_brand_fonts_and_are_referenced_by_url() -> Non
             src = font.get("src")
             assert isinstance(src, str)
             assert src.startswith("/fonts/")
+

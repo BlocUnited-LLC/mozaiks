@@ -18,11 +18,11 @@ def test_appgenerator_change_skill_exists_and_states_current_truth() -> None:
 def test_appgenerator_change_skill_references_key_contract_anchors() -> None:
     skill = _read(".claude/skills/appgenerator-change/SKILL.md")
 
-    assert "tools/file_contracts.yaml" in skill
+    assert "factory_app/build_context/AppGenerator/file_contracts.yaml" in skill
     assert "tools/app_build_plan.py" in skill
     assert "generated_ui_contract.py" in skill
-    assert "tools/domain_catalogs.yaml" in skill
-    assert "tools/module_archetypes.yaml" in skill
+    assert "factory_app/build_context/AppGenerator/domain_catalogs.yaml" in skill
+    assert "factory_app/build_context/AppGenerator/module_archetypes.yaml" in skill
 
 
 def test_appgenerator_change_skill_forbids_drift_paths_and_runtime_leaks() -> None:
@@ -72,3 +72,7 @@ def test_appgenerator_guidance_stays_public_safe() -> None:
     skill = _read(".claude/skills/appgenerator-change/SKILL.md")
     for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in skill, forbidden
+
+
+
+

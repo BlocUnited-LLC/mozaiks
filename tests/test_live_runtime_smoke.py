@@ -29,7 +29,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
 
@@ -107,8 +106,8 @@ class TestRuntimeTaskBatchSmokeStructure:
         assert data["registry"]["TaskPlannerAgent"] == "RuntimeTaskBatchPlanOutput"
         assert data["registry"]["SynthesisAgent"] == "RuntimeTaskBatchSmokeResult"
         models = data["models"]
-        assert "RuntimeTaskBatchPlan" in models
-        assert "RuntimeTaskBatchWorkUnit" in models
+        assert "DecompositionPlan" in models
+        assert "DecomposedTask" in models
 
     def test_task_batches_yaml_exists(self) -> None:
         task_batches = (
@@ -116,15 +115,25 @@ class TestRuntimeTaskBatchSmokeStructure:
         )
         assert task_batches.exists(), "task_batches.yaml must exist for declarative task batch execution"
         data = _read_yaml(task_batches)
-        batch = data["batches"][0]
-        assert batch["source"]["path"] == "RuntimeTaskBatchPlan.work_units"
-        assert batch["result"]["context_key"] == "task_batch_results"
+        assert data["version"] == 1
+        conveyor = data["conveyors"][0]
+        assert conveyor["decomposition_agent"] == "TaskPlannerAgent"
+        assert len(conveyor["execution_agents"]) > 0
 
-    def test_handoffs_terminate_after_synthesis(self) -> None:
-        data = _read_yaml(WORKFLOWS_ROOT / "RuntimeTaskBatchSmoke" / "handoffs.yaml")
-        rules = {r["source_agent"]: r["target_agent"] for r in data["handoff_rules"]}
-        assert rules["TaskPlannerAgent"] == "SynthesisAgent"
-        assert rules["SynthesisAgent"] == "terminate"
+    def test_transition_graph_routes_by_context_then_terminates(self) -> None:
+        data = _read_yaml(WORKFLOWS_ROOT / "RuntimeTaskBatchSmoke" / "transition_graph.yaml")
+        planner_rule = data["transition_rules"][0]
+        synthesis_rule = data["transition_rules"][1]
+
+        assert planner_rule["source_agent"] == "TaskPlannerAgent"
+        assert planner_rule["target_agent"] == "SynthesisAgent"
+        assert planner_rule["transition_type"] == "condition"
+        assert planner_rule["condition_type"] == "context_equals"
+        assert planner_rule["condition_key"] == "task_batch_route_ready"
+        assert planner_rule["condition_value"] is True
+        assert synthesis_rule["source_agent"] == "SynthesisAgent"
+        assert synthesis_rule["target_agent"] == "terminate"
+        assert synthesis_rule["transition_type"] == "after_turn"
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +266,9 @@ class TestLiveRuntimeTaskBatchSmoke:
         """
         Validates the declarative task_batches.yaml execution pipeline:
           1. TaskPlannerAgent produces RuntimeTaskBatchPlanOutput with 3-6 work units.
-          2. task_batches.yaml executor picks up RuntimeTaskBatchPlan.work_units.
-          3. TaskWorkerAgent instances run with bounded concurrency.
-          4. SynthesisAgent synthesizes results from task_batch_results context.
+          2. task_batches.yaml executor picks up DecompositionPlan.tasks.
+          3. Module/Page/Integration worker agents run with bounded concurrency.
+          4. SynthesisAgent synthesizes results from runtime_smoke_tasks_results context.
 
         This verifies the canonical workflow-local task batch execution path.
         """
@@ -292,7 +301,20 @@ class TestLiveRuntimeTaskBatchSmoke:
         )
         assert output.get("failure_count", -1) == 0
         executed_kinds = output.get("executed_kinds") or []
-        assert len(executed_kinds) >= 2, (
-            f"Expected at least 2 distinct work-unit kinds, got {executed_kinds}. "
-            "The task batch should span modules, pages, services, or workflows."
+        assert {"module", "page", "integration"} <= set(executed_kinds), (
+            f"Expected module, page, and integration work-unit kinds, got {executed_kinds}. "
+            "The task batch should span concrete module, page, and integration work."
         )
+        final_context = result.final_context or {}
+        task_results = final_context.get("runtime_smoke_tasks_results") or {}
+        worker_agents = {
+            str((task_results.get(task_id) or {}).get("_worker_agent") or "")
+            for task_id in output.get("executed_task_ids") or []
+            if isinstance(task_results.get(task_id), dict)
+        }
+        assert {
+            "ModuleTaskWorkerAgent",
+            "PageTaskWorkerAgent",
+            "IntegrationTaskWorkerAgent",
+        } <= worker_agents
+

@@ -72,19 +72,24 @@ def _data_contract() -> dict:
 
 
 def test_file_contracts_define_data_contract_as_opt_in_generic_lane() -> None:
-    contract_path = ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools" / "file_contracts.yaml"
+    contract_path = (
+        ROOT
+        / "factory_app"
+        / "build_context"
+        / "AppGenerator"
+        / "file_contracts.yaml"
+    )
     contracts = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
     persistence_contract = contracts["task_contracts"]["persistence_contract"]
     text = json.dumps(persistence_contract, sort_keys=True)
 
-    assert "config/data.json" in persistence_contract["required_outputs"]
-    assert "services/data/persistence.py" in persistence_contract["optional_outputs"]
-    assert "services/data/proposals.py" in persistence_contract["optional_outputs"]
+    assert "data/contract.json" in persistence_contract["required_outputs"]
+    assert "data/migrations/{migration_id}.json" in persistence_contract["optional_outputs"]
     assert "opt-in only" in text
     assert "ctx.persistence.collection(module_id, entity_name)" in text
-    assert "services/data/" in text
-    assert "host-internal helper names" in text
-    assert "normal generated apps" in text
+    assert "app/data is declarative only" in text
+    assert "documented alias exclusions" in text
+    assert "data/contract.json" in text
 
 
 def test_save_app_schema_omits_data_contract_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -110,11 +115,11 @@ def test_save_app_schema_writes_data_contract_from_context(monkeypatch, tmp_path
         context_variables=context,
     )
 
-    contract = json.loads((tmp_path / "config" / "data.json").read_text(encoding="utf-8"))
+    contract = json.loads((tmp_path / "data" / "contract.json").read_text(encoding="utf-8"))
     assert contract["mode"] == "app_data_contract"
     assert contract["aliases"][0]["alias"] == "orders.lifecycle"
     assert context.data["app_data_contract"]["aliases"][0]["collection"] == "orders"
-    assert "config/data.json" in result
+    assert "data/contract.json" in result
     assert "Data contract: yes" in result
 
 
@@ -139,7 +144,7 @@ def test_structured_outputs_expose_data_contract() -> None:
 
     assert "data_contract" in structured_outputs
     assert "shared_collections" in structured_outputs
-    assert "config/data.json" in structured_outputs
+    assert "data/contract.json" in structured_outputs
     assert "data_contract_json" in structured_outputs
     assert "services/data/" in structured_outputs
 
@@ -156,8 +161,9 @@ def test_data_contract_architecture_doc_exists() -> None:
     )
 
     assert "ctx.persistence.collection(module_id, entity_name)" in doc
-    assert "config/data.json" in doc
-    assert "Do not generate hosted-product-specific or host-internal helper names" in doc
-    assert "services/data/proposals.py" in doc
-    assert "host-internal helper names" in doc
+    assert "app/data/contract.json" in doc
+    assert "documented_alias_exclusions" in doc
+    assert "strict structured outputs" in doc
+    assert "data/migrations/{migration_id}.json" in doc
+
 

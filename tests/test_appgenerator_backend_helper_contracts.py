@@ -26,7 +26,13 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_FILE_CONTRACTS = _APPGEN_DIR / "tools" / "file_contracts.yaml"
+_APPGEN_CATALOG_DIR = (
+    Path(__file__).parent.parent
+    / "factory_app"
+    / "build_context"
+    / "AppGenerator"
+)
+_FILE_CONTRACTS = _APPGEN_CATALOG_DIR / "file_contracts.yaml"
 _AGENTS_YAML = _APPGEN_DIR / "agents.yaml"
 
 
@@ -337,7 +343,7 @@ class TestFileContractsIntegrity:
 
     def test_module_contract_canonical_downstream_python_unchanged(self):
         data = _load_yaml(_FILE_CONTRACTS)
-        defaults = data["task_contracts"]["module_contract"].get("downstream_python_defaults", [])
+        defaults = data["task_contracts"]["module_contract"].get("downstream_backend_defaults", [])
         assert "backend/handler.py" in defaults
         assert "backend/service.py" in defaults
         assert "backend/repo.py" in defaults
@@ -496,15 +502,7 @@ class TestListSerializerContracts:
         )
 
     def test_module_archetypes_standard_has_list_serializer_constraint(self):
-        archetypes_path = (
-            Path(__file__).parent.parent
-            / "factory_app"
-            / "workflows"
-            / "AppGenerator"
-            / "tools"
-            / "module_archetypes.yaml"
-        )
-        data = _load_yaml(archetypes_path)
+        data = _load_yaml(_APPGEN_CATALOG_DIR / "module_archetypes.yaml")
         constraints = data["archetypes"]["standard"]["hard_constraints"]
         constraints_str = "\n".join(str(c) for c in constraints)
         assert "list_*" in constraints_str or "list_" in constraints_str, (
@@ -515,15 +513,7 @@ class TestListSerializerContracts:
         )
 
     def test_module_archetypes_serializer_constraint_names_schemas_py(self):
-        archetypes_path = (
-            Path(__file__).parent.parent
-            / "factory_app"
-            / "workflows"
-            / "AppGenerator"
-            / "tools"
-            / "module_archetypes.yaml"
-        )
-        data = _load_yaml(archetypes_path)
+        data = _load_yaml(_APPGEN_CATALOG_DIR / "module_archetypes.yaml")
         constraints = data["archetypes"]["standard"]["hard_constraints"]
         constraints_str = "\n".join(str(c) for c in constraints)
         assert "schemas.py" in constraints_str, (
@@ -542,3 +532,4 @@ class TestListSerializerContracts:
             assert term not in combined, (
                 f"module_contract list_* constraint must not reference '{term}' — use neutral language"
             )
+

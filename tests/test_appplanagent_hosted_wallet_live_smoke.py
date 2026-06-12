@@ -424,3 +424,4 @@ class TestAppPlanAgentFixtureReplay:
 
     def test_generation_order_is_present(self) -> None:
         assert self.plan.get("generation_order"), "Plan must have generation_order phases"
+

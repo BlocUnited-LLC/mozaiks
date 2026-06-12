@@ -11,9 +11,7 @@ from mozaiksai.control_plane import (
     ControlPlaneCapabilityConfig,
     ControlPlaneCheckpointManifest,
     ControlPlaneConfig,
-    ControlPlaneHarnessManifest,
     ControlPlaneManifest,
-    ControlPlaneProfileInfo,
     ControlPlanePromptDefinition,
     ControlPlanePromptsManifest,
     ControlPlaneToolDefinition,
@@ -22,7 +20,6 @@ from mozaiksai.control_plane import (
     LoadedControlPlanePack,
     ScopedRefinementCodingWorker,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fake AG2 agent infrastructure
@@ -120,20 +117,9 @@ def _pack() -> LoadedControlPlanePack:
         path=Path("factory_app/control_plane"),
         manifest=ControlPlaneManifest(
             schema_version="mozaiks.control_plane",
-            profile=ControlPlaneProfileInfo(
-                id="factory_app",
-                display_name="Factory App Harness",
-                description="App-zero declarative control-plane pack for the first-party Mozaiks build experience.",
-            ),
-            harness=ControlPlaneHarnessManifest(
-                implementation="mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness",
-                supported_trigger_sources=["refinement"],
-            ),
             checkpoints=[
                 ControlPlaneCheckpointManifest(
-                    id="coding_refinement",
                     event="coding_requested",
-                    entrypoint="mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker",
                     prompt_id="coding_refinement_system",
                     tool_ids=["get_revision_context", "get_artifact_summary"],
                 )

@@ -59,3 +59,4 @@ def test_existing_app_discovery_guidance_stays_public_safe() -> None:
         assert "App Zero" not in text, relative_path
         assert "App-zero" not in text, relative_path
         assert "mozaiks-app" not in text, relative_path
+

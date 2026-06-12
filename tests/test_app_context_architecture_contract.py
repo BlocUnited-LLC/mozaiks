@@ -113,3 +113,4 @@ def test_app_context_doc_has_no_proprietary_examples_or_product_concepts() -> No
     )
     for term in forbidden:
         assert term not in doc
+

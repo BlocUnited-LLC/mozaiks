@@ -870,3 +870,4 @@ async def test_collect_events_raises_on_websocket_error_event() -> None:
             chat_id="chat-test-3",
             timeout_seconds=0.1,
         )
+

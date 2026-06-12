@@ -7,7 +7,7 @@ Verifies that base OSS generator prompts are host-agnostic:
 2. AppGenerator agents.yaml does not use HOSTED_WALLET_URL as the primary generic example.
 3. Generic hosted adapter acceptance criteria do not say "Stripe" in non-wallet-scoped templates.
 4. OSS mode: hook_hosted_capabilities_context is a no-op when no hosted context is supplied.
-5. When a hosted pack descriptor includes generation_rules, the hook renders them.
+5. When typed operator contracts are supplied, the hook renders them.
 6. MozaiksPay does not appear anywhere in OSS default prompts or hooks.
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ _WORKSPACE = Path(__file__).resolve().parents[1]
 _AGENTGEN_TOOLS = _WORKSPACE / "factory_app" / "workflows" / "AgentGenerator" / "tools"
 _APPGEN_TOOLS = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _APPGEN_DIR = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator"
+_APPGEN_CATALOGS = _WORKSPACE / "factory_app" / "build_context" / "AppGenerator"
 _UNIVERSAL_PROMPTS_PATH = _AGENTGEN_TOOLS / "hook_universal_prompts.py"
 _HOSTED_CAPS_PATH = _APPGEN_TOOLS / "hook_hosted_capabilities_context.py"
 _AGENTS_YAML_PATH = _APPGEN_DIR / "agents.yaml"
@@ -180,7 +181,7 @@ class TestAppGeneratorAgentsYamlHostAgnostic:
 
 
 # ---------------------------------------------------------------------------
-# 3. hook_hosted_capabilities_context.py — OSS no-op + generation_rules rendering
+# 3. hook_hosted_capabilities_context.py — OSS no-op + typed contract rendering
 # ---------------------------------------------------------------------------
 
 
@@ -196,8 +197,7 @@ class TestHostedCapabilitiesHook:
         mod.inject_hosted_capabilities_context(agent, [])
         assert agent.system_message == "base prompt", (
             "inject_hosted_capabilities_context must be a no-op in OSS mode "
-            "(no runtime_capabilities, no available_hosted_packs, "
-            "no hosted_capability_selection, no pack_sources)."
+            "(no capability_packs supplied)."
         )
 
     def test_hook_injects_when_hosted_packs_present(self) -> None:
@@ -206,7 +206,7 @@ class TestHostedCapabilitiesHook:
         agent = _FakeAgent(
             name="AppPlanAgent",
             context_variables={
-                "available_hosted_packs": [
+                "capability_packs": [
                     {"id": "wallet", "label": "Wallet", "capability_source": "hosted_pack"}
                 ]
             },
@@ -214,65 +214,85 @@ class TestHostedCapabilitiesHook:
         mod.inject_hosted_capabilities_context(agent, [])
         assert "[HOSTED CAPABILITIES CONTEXT]" in agent.system_message, (
             "inject_hosted_capabilities_context must inject the context block when "
-            "available_hosted_packs is non-empty."
+            "capability_packs is non-empty."
         )
 
-    def test_generation_rules_rendered_when_supplied(self) -> None:
-        """
-        If a hosted pack descriptor includes generation_rules, the hook must render them
-        into the injected context block.
-        """
+    def test_pack_descriptor_rules_are_not_a_prompt_instruction_channel(self) -> None:
+        """Pack descriptors list availability; typed operator_contracts carry rules."""
         mod = self._load_hook()
         agent = _FakeAgent(
             name="AppPlanAgent",
             context_variables={
-                "available_hosted_packs": [
+                "capability_packs": [
                     {
-                        "id": "testpay",
-                        "label": "TestPay",
+                        "id": "wallet",
+                        "label": "Wallet",
                         "capability_source": "hosted_pack",
-                        "generation_rules": [
-                            "Do not generate token tracking modules.",
-                            "Do not generate payment rails.",
-                        ],
+                        "generation_rules": ["legacy rule that must not render"],
                     }
                 ]
             },
         )
         mod.inject_hosted_capabilities_context(agent, [])
-        msg = agent.system_message
-        assert "Do not generate token tracking modules." in msg, (
-            "generation_rules supplied by host pack descriptor must be rendered into "
-            "the injected context block."
-        )
-        assert "Do not generate payment rails." in msg
+        assert "legacy rule that must not render" not in agent.system_message
+        assert "Host-provided generation rules" not in agent.system_message
 
-    def test_generation_rules_absent_when_not_supplied(self) -> None:
-        """When no pack supplies generation_rules, the rules block must not appear."""
+    def test_typed_operator_contracts_are_rendered_when_supplied(self) -> None:
         mod = self._load_hook()
         agent = _FakeAgent(
             name="AppPlanAgent",
             context_variables={
-                "available_hosted_packs": [
-                    {"id": "wallet", "label": "Wallet", "capability_source": "hosted_pack"}
-                ]
+                "capability_packs": [
+                    {"id": "testpay", "label": "TestPay", "capability_source": "hosted_pack"}
+                ],
+                "operator_contracts": [
+                    {
+                        "contract_id": "testpay",
+                        "contract_type": "build_pack_instructions",
+                        "selection_rules": [
+                            {
+                                "id": "select_for_saas_billing",
+                                "when": {"intent_any": ["saas billing"]},
+                                "action": "select_pack",
+                            }
+                        ],
+                        "required_outputs": [
+                            {"path": "services/integrations/testpay_client.py", "owner": "templates"}
+                        ],
+                        "forbidden_outputs": [{"path_prefix": "modules/testpay/"}],
+                        "runtime_boundaries": [
+                            {"id": "usage_runtime", "rule": "Do not create a custom token ledger."}
+                        ],
+                        "facades": [
+                            {
+                                "module_id": "billing_portal",
+                                "provider_module": "testpay",
+                                "pages": [{"route": "/billing", "primary_actions": ["open_billing_portal"]}],
+                            }
+                        ],
+                    }
+                ],
             },
         )
         mod.inject_hosted_capabilities_context(agent, [])
-        assert "Host-provided generation rules" not in agent.system_message, (
-            "The generation rules block must not appear when no pack provides rules."
-        )
+        msg = agent.system_message
+        assert "Operator build-pack contracts" in msg
+        assert "select_for_saas_billing" in msg
+        assert "services/integrations/testpay_client.py" in msg
+        assert "modules/testpay/" in msg
+        assert "Do not create a custom token ledger." in msg
+        assert "billing_portal wraps testpay" in msg
 
-    def test_generation_rules_only_from_host_not_oss_defaults(self) -> None:
+    def test_typed_contracts_only_from_runtime_context_not_oss_defaults(self) -> None:
         """
-        The base hook code must not contain any hardcoded MozaiksPay generation rules.
-        Rules are always supplied by the host at runtime via pack descriptors.
+        The base hook code must not contain any hardcoded MozaiksPay rules.
+        Rules are supplied at runtime via typed operator_contracts.
         """
         source = _HOSTED_CAPS_PATH.read_text(encoding="utf-8")
         for name in _PROPRIETARY_NAMES:
             assert name not in source, (
                 f"Proprietary product name {name!r} found in hook_hosted_capabilities_context.py. "
-                "Host-specific rules must be supplied at runtime via pack descriptors, "
+                "Host-specific rules must be supplied at runtime via typed operator_contracts, "
                 "not hardcoded in OSS base hooks."
             )
 
@@ -282,7 +302,7 @@ class TestHostedCapabilitiesHook:
         agent = _FakeAgent(
             name="ConfigMiddlewareAgent",
             context_variables={
-                "available_hosted_packs": [
+                "capability_packs": [
                     {"id": "wallet", "label": "Wallet"}
                 ]
             },
@@ -415,7 +435,7 @@ class TestProviderNeutralHelperExamples:
         return _AGENTS_YAML_PATH.read_text(encoding="utf-8")
 
     def _read_file_contracts(self) -> dict:
-        file_contracts_path = _APPGEN_TOOLS / "file_contracts.yaml"
+        file_contracts_path = _APPGEN_CATALOGS / "file_contracts.yaml"
         with file_contracts_path.open(encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
 
@@ -459,3 +479,6 @@ class TestProviderNeutralHelperExamples:
         assert "worker" in examples_str.lower() or "service" in examples_str.lower(), (
             "Helper examples should include a generic worker or service pattern."
         )
+
+
+

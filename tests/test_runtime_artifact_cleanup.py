@@ -82,3 +82,4 @@ def test_runtime_cleanup_scripts_are_available() -> None:
 
     assert "CLEAR_RUNTIME_ARTIFACTS_ON_START=0" in env_example
     assert "MOZAIKS_AGENT_OUTPUTS_DIR=logs/agent_outputs" in env_example
+

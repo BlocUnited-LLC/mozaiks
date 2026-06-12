@@ -343,14 +343,14 @@ def _database_output(plan: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "database_files": [
             {
-                "path": "config/data.json",
+                "path": "data/contract.json",
                 "kind": "data_contract_json",
                 "purpose": "Canonical generated data contract.",
                 "entity_refs": ["projects", "tasks"],
                 "content": json.dumps(_canonical_data_contract(), indent=2) + "\n",
             },
             {
-                "path": f"config/data_migrations/{migration['migration_id']}.json",
+                "path": f"data/migrations/{migration['migration_id']}.json",
                 "kind": "database_migration_json",
                 "purpose": "Additive generated project/task indexes.",
                 "entity_refs": ["projects", "tasks"],
@@ -359,9 +359,9 @@ def _database_output(plan: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "pending_schema_migration": migration,
         "code_files": [
-            {"filename": "config/data.json", "content": "BROKEN_MIRROR\n"},
+            {"filename": "data/contract.json", "content": "BROKEN_MIRROR\n"},
             {
-                "filename": f"config/data_migrations/{migration['migration_id']}.json",
+                "filename": f"data/migrations/{migration['migration_id']}.json",
                 "content": "BROKEN_MIRROR\n",
             },
         ],
@@ -666,8 +666,8 @@ def test_live_fixture_replay_has_downstream_persistence_tasks() -> None:
     assert any(task.get("task_type") == "page_bundle" for task in tasks.values())
 
     expected_paths = {
-        "config/data.json",
-        "config/data_migrations/001_projects_tasks_indexes.json",
+        "data/contract.json",
+        "data/migrations/001_projects_tasks_indexes.json",
         "modules/projects/backend/repo.py",
         "modules/projects/backend/policy.py",
         "modules/projects/backend/schemas.py",
@@ -691,8 +691,8 @@ def test_deterministic_downstream_outputs_assemble_canonical_tree() -> None:
 
     expected_paths = {
         "app.json",
-        "config/data.json",
-        "config/data_migrations/001_projects_tasks_indexes.json",
+        "data/contract.json",
+        "data/migrations/001_projects_tasks_indexes.json",
         "modules/projects/module.yaml",
         "modules/projects/contracts/events.yaml",
         "modules/projects/backend/handler.py",
@@ -711,8 +711,8 @@ def test_deterministic_downstream_outputs_assemble_canonical_tree() -> None:
         "ui/pages/tasks.yaml",
     }
     assert expected_paths <= set(file_map)
-    assert file_map["config/data.json"] != "BROKEN_MIRROR\n"
-    assert file_map["config/data_migrations/001_projects_tasks_indexes.json"] != "BROKEN_MIRROR\n"
+    assert file_map["data/contract.json"] != "BROKEN_MIRROR\n"
+    assert file_map["data/migrations/001_projects_tasks_indexes.json"] != "BROKEN_MIRROR\n"
     assert file_map["modules/projects/backend/repo.py"] != "BROKEN_MIRROR\n"
     assert file_map["modules/tasks/backend/repo.py"] != "BROKEN_MIRROR\n"
     assert all("backend/models.py" not in path for path in file_map)
@@ -755,8 +755,8 @@ def test_backend_layers_use_ctx_persistence_boundary() -> None:
 
 def test_assembled_database_artifacts_align_with_repo_collections() -> None:
     file_map = _assembled_file_map()
-    intent = json.loads(file_map["config/data.json"])
-    migration = json.loads(file_map["config/data_migrations/001_projects_tasks_indexes.json"])
+    intent = json.loads(file_map["data/contract.json"])
+    migration = json.loads(file_map["data/migrations/001_projects_tasks_indexes.json"])
     intent_keys = {
         (collection["module_id"], collection.get("entity_name") or collection["name"])
         for surface in intent["surfaces"]
@@ -862,3 +862,4 @@ async def test_downstream_artifact_loads_indexes_migrations_and_executes(
     assert app_b_projects.success is True
     assert app_b_projects.data == {"items": [], "count": 0}
     assert any(context.app_id == "app_a" for context in FakePersistenceContext.constructed)
+

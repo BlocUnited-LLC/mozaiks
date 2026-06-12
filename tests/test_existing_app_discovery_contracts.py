@@ -65,7 +65,7 @@ def test_existing_app_discovery_structured_outputs_use_augmentation_artifact() -
 
 def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> None:
     context_vars = _read_yaml("factory_app/workflows/ExistingAppDiscovery/context_variables.yaml")
-    hooks = _read_yaml("factory_app/workflows/ExistingAppDiscovery/hooks.yaml")
+    hooks = _read_yaml("factory_app/workflows/ExistingAppDiscovery/middleware.yaml")
     agents = _read_text("factory_app/workflows/ExistingAppDiscovery/agents.yaml")
 
     definitions = context_vars["definitions"]
@@ -94,11 +94,10 @@ def test_existing_app_discovery_context_and_prompts_use_adoption_language() -> N
     assert "adoption_level" in definitions
     assert "ecosystem_bindings" in definitions
     assert any(
-        item.get("hook_type") == "update_agent_state"
-        and item.get("hook_agent") == "all"
+        item.get("agent") == "all"
         and item.get("filename") == "../_shared/context_graph/hook_context_graph.py"
         and item.get("function") == "inject_context_graph_context"
-        for item in hooks.get("hooks") or []
+        for item in hooks.get("prompt_middleware") or []
     )
 
     assert "Embed" in agents
@@ -555,3 +554,5 @@ def test_existing_app_docs_describe_workspace_app_preset() -> None:
     assert "MOZAIKS_APP_WORKSPACE_PATH" in preload_tool
     assert "mozaiks-app" not in preload_tool
     assert "ThemeCapture" in preload_tool
+
+

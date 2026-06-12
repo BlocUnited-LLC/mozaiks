@@ -380,7 +380,7 @@ async def test_module_event_router_invokes_capability_target(tmp_path: Path) -> 
     assert invoked[0][0] == "tasks.review"
     assert invoked[0][1]["id"] == "evt_1"
     assert invoked[0][2]["id"] == "task_created_react"
-    assert emitted[0][0] == "platform.subscription.capability_requested"
+    assert emitted[0][0] == "platform.reaction.capability_dispatched"
     assert emitted[0][1]["payload"]["target"]["capability_id"] == "tasks.review"
     assert emitted[0][1]["payload"]["result"]["workflow_id"] == "ReviewWorkflow"
 
@@ -837,3 +837,4 @@ extensions:
 
     with pytest.raises(ModuleLoadError, match="module-local"):
         ModuleLoader(str(tmp_path)).load("tasks")
+

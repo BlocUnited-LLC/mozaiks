@@ -36,8 +36,19 @@ async def test_handle_resume_request_emits_resume_state(monkeypatch):
             "journey_key": "build",
         }
 
+    class _FakePM:
+        async def load_run_history(self, **kwargs):  # noqa: ANN003
+            return [
+                {"role": "user", "name": "user", "content": "hello"},
+                {"role": "assistant", "name": "BuilderAgent", "content": "hi"},
+            ]
+
+        async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
+            return None
+
     monkeypatch.setattr(resumer, "_fetch_chat_doc", _fake_fetch)
     monkeypatch.setattr(resumer, "_load_resume_state", _fake_resume_state)
+    monkeypatch.setattr(resumer, "_get_persistence_manager", lambda: _FakePM())
 
     summary = await resumer.handle_resume_request(
         chat_id="chat_1",
@@ -77,6 +88,11 @@ async def test_handle_resume_request_uses_app_scope_for_pending_input_lookup(mon
         return None
 
     class _FakePM:
+        async def load_run_history(self, **kwargs):  # noqa: ANN003
+            return [
+                {"role": "assistant", "name": "AppPlanAgent", "content": "Please review the plan."},
+            ]
+
         async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
             captured.update(kwargs)
             return None
@@ -118,6 +134,11 @@ async def test_handle_resume_request_re_emits_awaiting_reply_for_generic_feedbac
         return None
 
     class _FakePM:
+        async def load_run_history(self, **kwargs):  # noqa: ANN003
+            return [
+                {"role": "assistant", "name": "InterviewAgent", "content": "Tell me about the app."},
+            ]
+
         async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
             return {
                 "request_id": "req-1",
@@ -188,6 +209,17 @@ async def test_handle_resume_request_skips_marked_agentdriven_seed_message(monke
         return None
 
     class _FakePM:
+        async def load_run_history(self, **kwargs):  # noqa: ANN003
+            return [
+                {
+                    "role": "user",
+                    "agent_name": "user",
+                    "content": "Hidden workflow primer",
+                    "_mozaiks_seed_kind": "initial_message",
+                },
+                {"role": "assistant", "agent_name": "InterviewAgent", "content": "Visible question"},
+            ]
+
         async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
             return None
 
@@ -235,6 +267,16 @@ async def test_handle_resume_request_skips_unmarked_agentdriven_primer_match(mon
         return None
 
     class _FakePM:
+        async def load_run_history(self, **kwargs):  # noqa: ANN003
+            return [
+                {
+                    "role": "user",
+                    "agent_name": "user",
+                    "content": "Hidden startup primer",
+                },
+                {"role": "assistant", "agent_name": "InterviewAgent", "content": "Visible follow-up"},
+            ]
+
         async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
             return None
 
@@ -258,3 +300,78 @@ async def test_handle_resume_request_skips_unmarked_agentdriven_primer_match(mon
     text_events = [event for _chat_id, event in emitted if event.get("kind") == "text"]
     assert len(text_events) == 1
     assert text_events[0]["content"] == "Visible follow-up"
+
+
+@pytest.mark.asyncio
+async def test_handle_resume_request_restores_tool_call_state_from_workflow_ui_state(monkeypatch):
+    resumer = AgentRunResumer()
+    emitted = []
+
+    async def _fake_send(event, chat_id):  # noqa: ANN001
+        emitted.append((chat_id, event))
+
+    async def _fake_fetch(chat_id, app_id, projection=None):  # noqa: ANN001
+        return {
+            "status": 0,
+            "workflow_name": "AgentGenerator",
+            "user_id": "user_1",
+        }
+
+    async def _fake_resume_state(app_id, user_id):  # noqa: ANN001
+        return None
+
+    class _FakePM:
+        async def load_run_history(self, **kwargs):  # noqa: ANN003
+            return [
+                {
+                    "role": "assistant",
+                    "name": "BuilderAgent",
+                    "content": "Here is the draft plan.",
+                },
+            ]
+
+        async def get_workflow_tool_call_states(self, **kwargs):  # noqa: ANN003
+            return [
+                {
+                    "tool_name": "PlanReview",
+                    "tool_call_id": "plan_review_123",
+                    "component_type": "PlanReview",
+                    "display": "artifact",
+                    "workflow_name": "AgentGenerator",
+                    "payload": {"plan": "v1"},
+                    "tool_call_completed": False,
+                    "tool_call_status": "pending",
+                    "message_index": 0,
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                },
+            ]
+
+        async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
+            return None
+
+    monkeypatch.setattr(resumer, "_fetch_chat_doc", _fake_fetch)
+    monkeypatch.setattr(resumer, "_load_resume_state", _fake_resume_state)
+    monkeypatch.setattr(resumer, "_get_persistence_manager", lambda: _FakePM())
+
+    await resumer.handle_resume_request(
+        chat_id="chat_1",
+        app_id="app_1",
+        last_client_index=-1,
+        send_event=_fake_send,
+    )
+
+    text_events = [event for _chat_id, event in emitted if event.get("kind") == "text"]
+    assert len(text_events) == 1
+    text_event = text_events[0]
+    assert text_event["toolCall"]["tool_name"] == "PlanReview"
+    assert text_event["toolCall"]["tool_call_id"] == "plan_review_123"
+    assert text_event["toolCall"]["payload"] == {"plan": "v1"}
+    assert text_event["tool_call_completed"] is False
+    assert text_event["tool_call_status"] == "pending"
+
+    _, boundary = emitted[-1]
+    assert boundary["kind"] == "resume_boundary"
+    resume_event = boundary["ag2_resume"]["events"][0]
+    assert resume_event["metadata"]["tool_call"]["tool_call_id"] == "plan_review_123"
+    assert resume_event["metadata"]["tool_call"]["tool_name"] == "PlanReview"
+

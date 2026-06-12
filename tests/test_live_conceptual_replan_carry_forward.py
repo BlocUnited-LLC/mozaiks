@@ -461,3 +461,4 @@ class TestPipelineSafety:
 
     def test_no_warnings(self, report):
         assert report.get("warnings", []) == [], f"Unexpected warnings: {report.get('warnings')}"
+

@@ -44,3 +44,4 @@ def test_module_reactions_docs_state_canonical_contract() -> None:
     assert "contracts/reactions.yaml" in add_module_skill
     assert "backend/schemas.py" in app_bundle
     assert "backend/models.py" in builder_contract
+

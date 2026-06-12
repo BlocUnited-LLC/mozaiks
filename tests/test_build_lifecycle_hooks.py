@@ -201,3 +201,4 @@ async def test_deliver_outbox_event_posts_payload_and_marks_attempt(monkeypatch)
             "error": None,
         }
     ]
+

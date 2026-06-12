@@ -370,3 +370,4 @@ def test_route_component_guidance_uses_neutral_examples() -> None:
 
     for forbidden in ("MozaiksPay", "proprietary app"):
         assert forbidden not in changed_guidance
+

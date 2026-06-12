@@ -161,3 +161,4 @@ def test_live_classifier_fixture_cases_convert_to_execution_plans() -> None:
     assert "integration_readiness" in _required_validation_ids(by_request_id["fixture_external_integration"])
     assert "database_migration_review" in _required_validation_ids(by_request_id["fixture_data_model_migration"])
     assert "hosted_facade_validation" in _required_validation_ids(by_request_id["fixture_hosted_capability_facade"])
+

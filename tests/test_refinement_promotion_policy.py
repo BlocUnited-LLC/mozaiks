@@ -111,14 +111,14 @@ def test_validation_evidence_tracks_completed_failed_warnings_and_artifacts() ->
         completed=["route_component_validation", "ui_theme_primitive_validation"],
         failed=["migration_plan_validation"],
         warnings=["manual review recommended"],
-        artifacts=["config/data.json"],
+        artifacts=["data/contract.json"],
         checked_at="2026-05-21T00:00:00Z",
         source="unit-test",
     )
 
     assert evidence.completed_names() == {"route_component_validation", "ui_theme_primitive_validation"}
     assert evidence.failed_names() == {"migration_plan_validation"}
-    assert evidence.artifact_names() == {"config/data.json"}
+    assert evidence.artifact_names() == {"data/contract.json"}
     assert evidence.warnings == ["manual review recommended"]
     assert evidence.checked_at == "2026-05-21T00:00:00Z"
     assert evidence.source == "unit-test"
@@ -248,7 +248,7 @@ def test_data_model_migration_blocks_repo_py_without_database_artifacts(tmp_path
 
     assert decision.allowed is False
     assert decision.mode == "blocked_requires_upstream_artifact"
-    assert decision.required_artifacts == ["config/data.json", "config/data_migrations/*.json"]
+    assert decision.required_artifacts == ["data/contract.json", "data/migrations/*.json"]
 
 
 def test_data_model_migration_allows_repo_py_with_data_contract_evidence(tmp_path: Path) -> None:
@@ -260,7 +260,7 @@ def test_data_model_migration_allows_repo_py_with_data_contract_evidence(tmp_pat
         affected_bundle_paths=["modules/projects/backend/repo.py"],
         candidate_path="modules/projects/backend/repo.py",
         validation_completed=["data_contract_validation", "migration_plan_validation"],
-        validation_artifacts=["config/data.json", "config/data_migrations/001_initial.json"],
+        validation_artifacts=["data/contract.json", "data/migrations/001_initial.json"],
     )
 
     decision = evaluate_refinement_promotion_policy(
@@ -410,3 +410,4 @@ def test_failed_validation_blocks_even_with_other_completed_validations(tmp_path
 
     assert decision.allowed is False
     assert decision.mode == "blocked_requires_validation"
+

@@ -259,3 +259,4 @@ def test_carry_forward_report_shape_valid() -> None:
     }
     missing = required - set(report.keys())
     assert not missing, f"carry_forward_report missing keys: {sorted(missing)}"
+

@@ -2,7 +2,7 @@
 Tests for hook_domain_catalog_context.py
 
 Verifies:
-- hooks.yaml loads and contains the two new hook entries
+- middleware.yaml loads and contains the two new hook entries
 - inject_domain_catalog_context appends [DOMAIN CATALOG CONTEXT] to the agent system message
 - inject_module_file_manifest_guard appends [MODULE FILE MANIFEST GUARD] for module_contract tasks
 - Both hooks exit silently for wrong agent names
@@ -29,8 +29,14 @@ _APPGEN_DIR = (
     / "workflows"
     / "AppGenerator"
 )
-_HOOKS_YAML = _APPGEN_DIR / "hooks.yaml"
-_CATALOG_PATH = _APPGEN_DIR / "tools" / "domain_catalogs.yaml"
+_APPGEN_CATALOG_DIR = (
+    Path(__file__).parent.parent
+    / "factory_app"
+    / "build_context"
+    / "AppGenerator"
+)
+_HOOKS_YAML = _APPGEN_DIR / "middleware.yaml"
+_CATALOG_PATH = _APPGEN_CATALOG_DIR / "domain_catalogs.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -52,48 +58,51 @@ class _FakeAgent:
 
 
 # ---------------------------------------------------------------------------
-# hooks.yaml tests
+# middleware.yaml tests
 # ---------------------------------------------------------------------------
 
 class TestHooksYaml:
     def test_hooks_yaml_loads(self):
-        assert _HOOKS_YAML.exists(), f"hooks.yaml not found at {_HOOKS_YAML}"
+        assert _HOOKS_YAML.exists(), f"middleware.yaml not found at {_HOOKS_YAML}"
         with open(_HOOKS_YAML, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
         assert isinstance(data, dict)
-        assert "hooks" in data
-        assert isinstance(data["hooks"], list)
+        assert "prompt_middleware" in data
+        assert isinstance(data["prompt_middleware"], list)
 
     def test_domain_catalog_hook_for_app_plan_agent_present(self):
         with open(_HOOKS_YAML, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-        hooks = data["hooks"]
+        hooks = data["prompt_middleware"]
         match = [
             h for h in hooks
-            if h.get("hook_agent") == "AppPlanAgent"
+            if h.get("agent") == "AppPlanAgent"
             and h.get("filename") == "hook_domain_catalog_context.py"
             and h.get("function") == "inject_domain_catalog_context"
         ]
-        assert match, "AppPlanAgent / inject_domain_catalog_context hook missing from hooks.yaml"
+        assert match, "AppPlanAgent / inject_domain_catalog_context hook missing from middleware.yaml"
 
     def test_manifest_guard_hook_for_config_middleware_agent_present(self):
         with open(_HOOKS_YAML, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-        hooks = data["hooks"]
+        hooks = data["prompt_middleware"]
         match = [
             h for h in hooks
-            if h.get("hook_agent") == "ConfigMiddlewareAgent"
+            if h.get("agent") == "ConfigMiddlewareAgent"
             and h.get("filename") == "hook_domain_catalog_context.py"
             and h.get("function") == "inject_module_file_manifest_guard"
         ]
-        assert match, "ConfigMiddlewareAgent / inject_module_file_manifest_guard hook missing from hooks.yaml"
+        assert match, "ConfigMiddlewareAgent / inject_module_file_manifest_guard hook missing from middleware.yaml"
 
     def test_all_hooks_have_required_fields(self):
         with open(_HOOKS_YAML, encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-        for hook in data["hooks"]:
-            for field in ("hook_type", "hook_agent", "filename", "function"):
-                assert field in hook, f"Hook missing field '{field}': {hook}"
+        for hook in data["prompt_middleware"]:
+            assert "agent" in hook, f"Hook missing field 'agent': {hook}"
+            assert "function" in hook, f"Hook missing field 'function': {hook}"
+            # filename is required unless function is a dotted module path (framework callable)
+            if "." not in hook.get("function", ""):
+                assert "filename" in hook, f"Hook missing field 'filename': {hook}"
 
 
 # ---------------------------------------------------------------------------
@@ -341,3 +350,5 @@ class TestInjectModuleFileManifestGuard:
         self.mod.inject_module_file_manifest_guard(agent, [])
         self.mod.inject_module_file_manifest_guard(agent, [])
         assert agent.system_message.count("[MODULE FILE MANIFEST GUARD]") == 1
+
+

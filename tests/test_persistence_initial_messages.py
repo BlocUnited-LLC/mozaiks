@@ -413,3 +413,4 @@ async def test_persistence_manager_backfills_pre_migration_workflow_ui_state_wit
     assert modern["workflow_ui_state"]["schema_version"] == 1
     assert modern["workflow_ui_state"]["last_artifact"] == {"tool_name": "CurrentArtifact"}
     assert coll.bulk_write_calls == 1
+
