@@ -1,0 +1,28 @@
+schema_version: mozaiks.page.v1
+name: Usage
+route: /usage
+title: Usage
+page_type: dashboard
+layout: stack
+shell_mode: workspace
+navigation:
+  id: usage
+  label: Usage
+  icon: Gauge
+  scope: global
+  order: 75
+  visible: true
+sections:
+  - id: usage-status
+    primitive: DataPanel
+    title: Usage
+    config:
+      api_endpoint: /api/modules/billing_portal/get_usage_status
+      method: POST
+      fields:
+        - runtime_ai_usage.totals.total_tokens
+        - runtime_ai_usage.totals.prompt_tokens
+        - runtime_ai_usage.totals.completion_tokens
+        - runtime_ai_usage.totals.llm_calls
+roles: null
+extensions: null

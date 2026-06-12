@@ -1,0 +1,28 @@
+context_id: AppGenerator
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: capability_directory.yaml
+    kind: catalog
+    projections:
+      - id: appgenerator_capability_directory_for_planning
+        records: capabilities
+        recipients:
+          - AppPlanAgent
+        render: summary
+        marker: CAPABILITY_DIRECTORY_CONTEXT
+        heading: Capability Directory
+  - path: capability_routing.yaml
+    kind: catalog
+  - path: domain_catalogs.yaml
+    kind: catalog
+  - path: file_contracts.yaml
+    kind: catalog
+  - path: module_archetypes.yaml
+    kind: catalog
+  - path: shell_presets.yaml
+    kind: catalog
+  - path: workflow_archetypes.yaml
+    kind: catalog
+projections:
+  context_variables: {}

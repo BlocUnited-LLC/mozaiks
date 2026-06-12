@@ -1,0 +1,48 @@
+context_id: webapp_builder
+pack_id: webapp_builder
+label: Web Application
+version: 2
+
+applies_to_workflows:
+  - AppGenerator
+
+# Context variables projected by this pack at workflow launch time.
+# These seed domain identity into the workflow session so the harness
+# and hooks resolve the correct pack-specific behavior.
+context_variable_projections:
+  dev_pack_id: webapp_builder
+  build_task_model: AppBuildTask
+
+# Validation hooks declared by this pack. The middleware loader runs
+# these for the webapp domain; non-webapp packs declare their own set.
+# This replaces the previous always-on hook wiring in middleware.yaml.
+validation_hooks:
+  - id: hook_module_contract_quality_gate
+    agent: ModuleContractQualityAgent
+    function: run_module_contract_quality_gate
+  - id: hook_module_runtime_quality_gate
+    agent: ModuleRuntimeQualityAgent
+    function: run_module_runtime_quality_gate
+  - id: hook_primitive_catalog
+    agent: AppSchemaAgent
+    function: inject_primitive_catalog
+  - id: hook_app_ui_quality_gate
+    agent: AppUIQualityAgent
+    function: run_app_ui_quality_gate
+
+assets:
+  - path: language_profile.yaml
+    kind: catalog
+    projections:
+      - id: webapp_language_profile
+        records: null
+        recipients:
+          - ConfigMiddlewareAgent
+          - ModelAgent
+          - ServiceAgent
+          - FrontendStubAgent
+          - ControllerAgent
+          - DatabaseAgent
+        render: full
+        marker: LANGUAGE_PROFILE_CONTEXT
+        heading: Language and Framework Profile

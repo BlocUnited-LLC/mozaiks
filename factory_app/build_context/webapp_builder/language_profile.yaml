@@ -1,0 +1,194 @@
+version: 1
+pack_id: webapp_builder
+label: Web Application — Python / FastAPI / MongoDB / React
+
+description: >
+  Technology profile for generated web applications. Declares the backend
+  language, frontend framework, database conventions, file path templates,
+  and integration catalog used by AppGenerator execution agents.
+
+  Agents read this profile at prompt time via middleware injection. No agent
+  should hardcode Python file paths, React component patterns, or MongoDB
+  API calls — they should read them from this injected context.
+
+# ---------------------------------------------------------------------------
+# Backend
+# ---------------------------------------------------------------------------
+
+backend:
+  language: python
+  framework: fastapi
+  runtime_api: mozaiksai
+
+  module_path_prefix: "modules/{module_id}/backend/"
+
+  stub_files:
+    - backend/handler.py
+    - backend/service.py
+    - backend/repo.py
+    - backend/policy.py
+    - backend/schemas.py
+
+  optional_hooks:
+    - backend/settings.py
+    - backend/notifications.py
+    - backend/admin.py
+
+  entrypoint_format: "{module_id}.backend.handler:{ModuleClass}Handler"
+  module_class_convention: "PascalCase(module_id) + 'Handler'"
+
+  persistence:
+    api: "ctx.persistence.collection(module_id, entity_name)"
+    note: >
+      Injected at runtime into ModuleContext as ctx.persistence.
+      Generated repo.py must use this API. Must not use ctx.db or
+      import get_mongo_client().
+
+  event_api: "await ctx.emit(event_type, payload)"
+
+  serialization:
+    list_helper_convention: "_serialize_{entity}_row(doc) -> dict"
+    note: >
+      list_* service methods must serialize repo documents through an
+      allowlist helper declared in backend/schemas.py. Never pass raw
+      repo documents to callers.
+
+  hard_constraints:
+    - handler.py stays thin dispatch — no business logic, no persistence.
+    - service.py owns business logic and event emission.
+    - repo.py owns persistence operations only — no product policy.
+    - policy.py owns tenant/app/user scope query helpers.
+    - schemas.py owns typed DTO/document shapes and pure helpers.
+    - Do not emit backend/models.py or backend/models/*.py.
+    - Do not emit backend/database/schema.json or backend/database/seed.json.
+    - Generated code must not import get_mongo_client() or use ctx.db.
+
+# ---------------------------------------------------------------------------
+# Frontend
+# ---------------------------------------------------------------------------
+
+frontend:
+  language: javascript
+  framework: react
+  component_extension: jsx
+
+  custom_route:
+    path_template: "ui/pages/custom/{ComponentName}.jsx"
+    export_convention: "export default function {ComponentName}(props)"
+    api_client_import: "import { moduleAction } from 'ui/lib/moduleApi';"
+    api_client_module: "ui/lib/moduleApi.js"
+
+  admin_stub:
+    path_template: "ui/admin/{module_id}.jsx"
+    barrel_export: "ui/index.js"
+
+  hard_constraints:
+    - Custom route JSX must call module actions through moduleAction() from ui/lib/moduleApi.
+    - Do not write raw fetch() calls to /api/modules/** in page components.
+    - Error handling must branch on err.error_code from the caught structured error.
+    - No hardcoded hex/rgb colors — use semantic token classes.
+    - No direct font-family declarations.
+    - No local primitive clones (StatusPill, MetricTile, StatCard, Badge).
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+
+database:
+  type: mongodb
+  schema_format: document_model
+
+  collection_api: "ctx.persistence.collection(module_id, entity_name)"
+
+  index_format:
+    description: >
+      Declared as an array of key-value pair arrays.
+      Example: [["app_id", 1], ["record_id", 1]]
+    unique_field: unique
+    sparse_field: sparse
+    name_field: name
+
+  field_types:
+    - string
+    - boolean
+    - number
+    - object
+    - array
+    - datetime
+    - objectid
+
+  hard_constraints:
+    - Never hardcode database names in generated code.
+    - Collection names derive from module_id and entity_name via ctx.persistence.
+    - Indexes are declared in data/contract.json, not in repo.py directly.
+    - Destructive migrations are not allowed in generated output.
+
+# ---------------------------------------------------------------------------
+# App service structure
+# ---------------------------------------------------------------------------
+
+services:
+  integration_client_path: "services/integrations/{service_id}_client.py"
+  adapter_path: "services/adapters/{area}/{provider}.py"
+  auth_adapter_path: "services/adapters/auth/{provider}.py"
+  subscription_config_path: "config/subscriptions.yaml"
+
+# ---------------------------------------------------------------------------
+# Integration catalog
+# ---------------------------------------------------------------------------
+
+integration_catalog:
+  description: >
+    Integration service types recognized by this dev pack. AppPlanAgent and
+    IntegrationReadinessAgent use these to classify and aggregate external
+    dependencies discovered during planning and code generation.
+
+  service_types:
+    - id: email_provider
+      label: Email Provider
+      common_providers: [sendgrid, mailgun, postmark, ses, resend]
+    - id: analytics_provider
+      label: Analytics Provider
+      common_providers: [mixpanel, amplitude, segment, posthog]
+    - id: crm_provider
+      label: CRM Provider
+      common_providers: [salesforce, hubspot, pipedrive]
+    - id: storage_provider
+      label: File Storage Provider
+      common_providers: [s3, gcs, azure_blob, cloudflare_r2]
+    - id: model_provider
+      label: AI Model Provider
+      common_providers: [openai, anthropic, google, mistral]
+    - id: payment_processor
+      label: Payment Processor
+      common_providers: [stripe, braintree, adyen, square]
+    - id: sms_provider
+      label: SMS Provider
+      common_providers: [twilio, vonage, aws_sns]
+    - id: push_provider
+      label: Push Notification Provider
+      common_providers: [firebase_fcm, apns, onesignal]
+    - id: search_provider
+      label: Search Provider
+      common_providers: [algolia, typesense, elasticsearch]
+    - id: maps_provider
+      label: Maps / Geocoding Provider
+      common_providers: [google_maps, mapbox, here]
+
+  integration_kinds:
+    - id: payments
+      label: Payment processing and billing
+    - id: email
+      label: Transactional email delivery
+    - id: analytics
+      label: Product analytics and event tracking
+    - id: agent-backend
+      label: AI agent backend integration
+    - id: storage
+      label: File and media storage
+    - id: external-api
+      label: Generic external API integration
+    - id: sms
+      label: SMS and push notifications
+    - id: search
+      label: Full-text and semantic search

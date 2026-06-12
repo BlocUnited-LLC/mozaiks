@@ -1,0 +1,25 @@
+context_id: AgentGenerator
+applies_to_workflows:
+  - AgentGenerator
+assets:
+  - path: ag2_network_patterns.yaml
+    kind: catalog
+    projections:
+      - id: ag2_patternbook_summary_for_decomposition
+        records: patterns
+        recipients:
+          - PatternAgent
+        render: summary
+        marker: PATTERN_GUIDANCE_AND_EXAMPLES
+        heading: AG2 Network Patternbook
+      - id: ag2_selected_pattern_for_bundle_builder
+        records: patterns
+        recipients:
+          - WorkflowBundleBuilderAgent
+        render: selected_record
+        selected_by: current_task.pattern_id
+        record_id_field: id
+        marker: PATTERN_GUIDANCE_AND_EXAMPLES
+        heading: AG2 Network Pattern
+projections:
+  context_variables: {}

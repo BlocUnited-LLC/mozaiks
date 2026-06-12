@@ -1,0 +1,93 @@
+contract_id: mozaikspay
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_saas_billing
+    when:
+      intent_any:
+        - saas billing
+        - subscriptions
+        - billing portal
+        - runtime usage display
+    action: select_pack
+  - id: do_not_select_for_generic_payments
+    when:
+      intent_any:
+        - checkout
+        - marketplace payments
+        - wallet connection
+        - creator payouts
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - billing
+  - subscriptions
+  - usage
+  - saas
+
+required_outputs:
+  - path: services/integrations/mozaikspay_client.py
+    owner: templates
+  - path: modules/billing_portal/module.yaml
+    owner: templates
+  - path: modules/billing_portal/backend/handler.py
+    owner: templates
+  - path: modules/billing_portal/backend/service.py
+    owner: templates
+  - path: modules/billing_portal/backend/schemas.py
+    owner: templates
+  - path: modules/billing_portal/contracts/reactions.yaml
+    owner: templates
+  - path: ui/pages/billing.yaml
+    owner: templates
+  - path: ui/pages/usage.yaml
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/mozaikspay/
+  - path_prefix: modules/wallet/
+  - path_prefix: app/capability_packs/
+  - path_prefix: services/hosted_billing/
+  - path_prefix: services/wallet/
+
+runtime_boundaries:
+  - id: entitlements_runtime
+    rule: Keep entitlement enforcement on the OSS runtime/module contract path.
+  - id: usage_runtime
+    rule: Read runtime token usage through /api/me/usage or /api/admin/usage; do not create a custom token ledger.
+  - id: plan_limits
+    rule: Use app/config/subscriptions.yaml usage_limits for generated SaaS plan limits.
+  - id: hosted_internals
+    rule: Do not generate hosted service internals, checkout, wallet, settlement logic, private APIs, or provider credentials.
+  - id: page_bindings
+    rule: Generated pages must call app-owned billing_portal actions, not hosted backing modules directly.
+
+facades:
+  - module_id: billing_portal
+    provider_module: mozaikspay
+    provider_actions:
+      - billing_portal
+      - create_billing_portal_session
+      - subscription_status
+      - get_subscription_status
+      - usage_status
+      - get_usage_status
+    pages:
+      - name: Billing
+        route: /billing
+        primary_entities:
+          - subscription
+        primary_actions:
+          - get_subscription_status
+          - open_billing_portal
+      - name: Usage
+        route: /usage
+        primary_entities:
+          - runtime_usage
+        primary_actions:
+          - get_usage_status
+
+inactive_surfaces:
+  - checkout
+  - creator_earnings
+  - wallet_connection

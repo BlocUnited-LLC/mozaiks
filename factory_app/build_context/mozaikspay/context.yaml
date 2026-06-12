@@ -1,0 +1,40 @@
+context_id: mozaikspay
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: mozaikspay
+  status: active
+  capability_source: hosted_pack
+capabilities:
+  - capability_id: mozaikspay.billing_portal
+    facade_recommended: billing_portal
+  - capability_id: mozaikspay.subscription_status
+    facade_recommended: billing_portal
+  - capability_id: mozaikspay.usage_status
+    facade_recommended: billing_portal
+facades:
+  - module_id: billing_portal
+    provider_module: mozaikspay
+    provider_actions:
+      - billing_portal
+      - create_billing_portal_session
+      - subscription_status
+      - get_subscription_status
+      - usage_status
+      - get_usage_status
+    pages:
+      - name: Billing
+        route: /billing
+      - name: Usage
+        route: /usage
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs
+    operator_contracts:
+      from: operator_contracts

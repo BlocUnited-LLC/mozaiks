@@ -1,0 +1,290 @@
+version: 1
+
+description: >
+  Advisory file contract catalog for AppGenerator. Declares task ownership
+  boundaries, canonical output families, and hard constraints for each task type.
+
+  Language-agnostic by design. File path templates under downstream_backend_defaults
+  and optional_frontend_stubs use the active dev pack's language profile for their
+  actual extension and path conventions. The webapp_builder dev pack
+  (build_context/webapp_builder/language_profile.yaml) is the authoritative source
+  for Python/FastAPI/MongoDB/React path conventions. A different dev pack would
+  declare different conventions without changing this file.
+
+  Runtime truth remains the structured outputs, build_tasks, owned_paths, and
+  runtime loaders — not this catalog.
+
+task_contracts:
+  page_bundle:
+    owner_agent: AppSchemaAgent
+    summary: Declarative persistent app UI bundle owned by AppSchemaAgent.
+    required_outputs:
+      - app.json
+      - ui/pages/*.yaml
+    optional_outputs:
+      - ui/route_manifest.json
+      - ui/pages/custom/*.jsx
+      - ui/index.js
+      - ui/lib/moduleApi.js
+      - brand/theme_config.json
+      - config/shell.json
+      - config/asset_manifest.json
+    hard_constraints:
+      - Persistent app pages stay declarative by default.
+      - "Workflow launches from pages use action_type: workflow."
+      - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
+      - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as dashboard, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy. Do NOT include admin_portal in any shortcuts list — it is framework-injected automatically for admin users and must not be declared by app config or generated output.
+      - Prefer route-level AppPageSchema.navigation for page-owned global/local/profile/footer nav contributions; keep config/shell.json focused on app-wide navigation policy and built-in chrome shortcuts.
+      - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
+      - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
+      - Use shell_mode=conversation for DM/chat/thread routes, workspace for dense module/profile/admin-like work surfaces, focused for setup/review flows, immersive for full-viewport experiences, public for public/legal routes, and standard for ordinary pages.
+      - Use explicit shell arrays only when labels, icons, role gates, or custom paths differ from the shortcut catalog.
+      - Durable page mutations bind through declared api_endpoint values or canonical module actions.
+      - Do not emit raw frontend source outside the bounded custom route bundle.
+      - Pages that require reading URL query params on mount, polling an endpoint until state changes, or rendering conditional sections based on API response value must use custom_route_bundle; they cannot be expressed as declarative AppPageSchema.
+      - A post-redirect confirmation page must not display confirmed/success state from the redirect URL alone. Confirmation must come from querying an app-owned module action after the backend has processed the event.
+      - The api_endpoint field on a page section is a POST path only — no query strings, fragments, or dynamic path segments. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
+      - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
+      - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
+
+  module_contract:
+    owner_agent: ConfigMiddlewareAgent
+    summary: Canonical module contract bundle that declares module behavior before Python or JS implementation.
+    required_outputs:
+      - modules/{pack_name}/module.yaml
+    optional_outputs:
+      - modules/{pack_name}/contracts/events.yaml
+      - modules/{pack_name}/contracts/reactions.yaml
+      - modules/{pack_name}/contracts/notifications.yaml
+      - modules/{pack_name}/contracts/settings.yaml
+      - modules/{pack_name}/contracts/admin.yaml
+      - modules/{pack_name}/contracts/profile.yaml
+      - modules/{pack_name}/runtime_extensions.yaml
+    downstream_backend_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/schemas.py
+    optional_backend_hooks:
+      - backend/settings.py
+      - backend/notifications.py
+      - backend/admin.py
+    optional_frontend_stubs:
+      - ui/admin/*.jsx
+      - ui/index.js
+    hard_constraints:
+      - module.yaml is always required.
+      - Emit only files declared by owned_paths or explicit file_manifest.
+      - Omit YAML files that would serialize to empty arrays or null objects.
+      - YAML declares the contract; downstream agents implement Python and JS stubs.
+      - JS stubs are allowed only for declared customization surfaces.
+      - Emit contracts/profile.yaml only when a module has user-scoped data worth surfacing on the profile page (e.g. account summary, notification preferences, usage stats). Do not emit profile.yaml for every module.
+      - profile.yaml panels must bind to module actions declared in module.yaml. Do not expose admin-only actions or secrets through profile panels.
+      - Do not emit profile.yaml with kind=form — that kind is reserved and not yet implemented.
+      - profile.yaml does not replace /api/me identity. Auth identity and core account data remain platform-owned.
+      - Persistent modules express collection ownership through data_contract, not ad hoc database files.
+      - backend/repo.py owns persistence operations and must not contain product policy.
+      - backend/schemas.py owns typed DTO/document shapes and pure helpers.
+      - backend/policy.py owns scope query helpers.
+      - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - backend/repo.py must use module_id/entity_name values aligned with data_contract and data/contract.json.
+      - Generated repo code must not use ctx.db.
+      - Generated repo code must not import or call get_mongo_client().
+      - Generated repo code must not hardcode database names.
+      - Do not emit backend/models.py or backend/models/*.py.
+      - Do not emit backend/database/schema.json or backend/database/seed.json.
+      - Do not put DB access in backend/handler.py.
+      - Do not put raw persistence logic in backend/service.py.
+      - "list_* action output_schema must declare items.properties explicitly. A bare { type: array } with no items or item properties is invalid for list_* action outputs."
+      - backend/service.py must not return raw repo records from list_* methods. Each record must be serialized through a _serialize_{entity}_row or _serialize_{entity}_record allowlist helper declared in backend/schemas.py. The allowlist ensures unknown future DB fields cannot leak into caller responses.
+
+  persistence_contract:
+    owner_agent: DatabaseAgent
+    summary: Canonical generated app persistence intent and migration artifact family.
+    required_outputs:
+      - data/contract.json
+    optional_outputs:
+      - data/migrations/{migration_id}.json
+    downstream_backend_defaults:
+      - modules/{module_id}/backend/repo.py
+      - modules/{module_id}/backend/policy.py
+      - modules/{module_id}/backend/schemas.py
+    hard_constraints:
+      - data_contract is the canonical source of truth for durable generated app collections.
+      - data/contract.json is the exported app artifact for that bundle.
+      - data/migrations/{migration_id}.json is the exported additive migration artifact.
+      - config/data.json is a removed path and must never appear in owned_paths, database_files, code_files, or generated bundle output.
+      - config/data_migrations is a removed path and must never appear in owned_paths, database_files, code_files, or generated bundle output.
+      - data/contract.json is opt-in only. Generate it only when the app plan explicitly needs a canonical app data contract, cross-module aggregate ownership, explicit authority records with stable collection names, explicit aliases, or an external existing database contract that ordinary generated-scoped persistence cannot represent.
+      - Default generated apps must omit data/contract.json and use generated-scoped ctx.persistence.
+      - Data contracts are generic app infrastructure, not hosted-product special cases. Do not emit ad hoc folders or host-internal helper names for normal generated apps.
+      - app/data is declarative only. Do not emit Python helper files under data/ or services/data/.
+      - Cross-surface collection access must be declared before module repo code uses it. Cross-module reads, lifecycle updates, shared aggregate ownership, and documented alias exclusions must be explicit in data/contract.json.
+      - backend/schemas.py replaces backend model files.
+      - backend/repo.py is derived from the data contract and owns persistence operations only.
+      - backend/policy.py owns tenant/app/user scope query helpers.
+      - Generated repo.py must use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
+      - Generated repo.py may use data aliases only when its module/action is explicitly declared in data/contract.json.
+      - module_id/entity_name in repo.py must match data_contract surfaces and collections.
+      - Generated repo.py must not use ctx.db.
+      - Generated repo.py must not import or call get_mongo_client().
+      - Generated repo.py must not hardcode database names.
+      - backend/service.py calls repo.py and must not contain raw persistence logic.
+      - backend/handler.py must not contain persistence logic.
+      - Do not emit backend/models.py.
+      - Do not emit backend/models/*.py.
+      - Do not emit backend/database/schema.json.
+      - Do not emit backend/database/seed.json.
+      - Do not generate destructive migrations.
+
+  service_foundation:
+    owner_agent: ConfigMiddlewareAgent
+    summary: App-level service support code and scaffold files for the active app host. Paths are app-bundle-relative and assemble under physical app/services/.
+    required_outputs: []
+    optional_outputs:
+      - services/config.py
+      - config/secrets.yaml
+      - services/integrations/*.py
+      - services/security/*.py
+      - services/routes/*.py
+      - services/adapters/**/*.py
+      - task-owned service support files
+    hard_constraints:
+      - Stay within current_build_task.owned_paths.
+      - Emit integration glue or provider adapter support only.
+      - Do not generate a standalone platform or alternate host.
+      - App-owned support code belongs under app-bundle-relative services/integrations/ for external or hosted API clients, services/adapters/ for provider-specific implementation boundaries, services/security/ for provider-neutral auth/secret helpers, and services/routes/ for app-level routes only when needed; physical generated workspaces place these under app/services/.
+      - If app-owned runtime secrets are required, emit config/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
+      - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is provider mechanics rather than product state.
+      - services/adapters/ and services/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.
+      - Deployment artifacts generated from this lane must follow the provider-neutral deployment contract.
+      - Deployment artifacts must never include real secrets or provider-tenant identifiers.
+      - Generated CI workflow secret references must stay names-only and be declared through ci_secret_requirements; never emit secret values.
+
+  control_plane_pack:
+    owner_agent: ControlPlaneAgent
+    summary: >
+      Optional app-local declarative control-plane harness pack. Use only when
+      the app needs checkpoint/routing/refinement behavior beyond ordinary
+      extension_registry.json transitions and workflow_sequences.
+    required_outputs:
+      - control_plane/config/runtime.yaml
+      - control_plane/config/control_plane.yaml
+      - control_plane/config/tools.yaml
+    optional_outputs:
+      - control_plane/config/policies.yaml
+      - control_plane/prompts/*.yaml
+    hard_constraints:
+      - Generate this task only when the product explicitly needs a harnessed app lifecycle/refinement/session loop; most apps should omit it.
+      - Do NOT generate module.yaml, handler.py, service.py, repo.py, backend/control_plane/*.py, or other module/runtime files.
+      - Do NOT register this surface as a runtime module under app/modules/.
+      - Stay within current_build_task.owned_paths.
+      - control_plane/config/runtime.yaml is the app-local control-plane runtime policy seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into control_plane.yaml.
+      - control_plane.yaml routes declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
+      - Every workflow_sequence referenced by control_plane.yaml must exist in workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
+      - Use shipped mozaiksai.control_plane implementations and tool entrypoints unless a future custom-harness Python contract is explicitly introduced.
+      - Control-plane artifacts coordinate app-level lifecycle, refinement, or session state only — no business domain logic.
+      - Do not duplicate host-universal control-plane behavior already provided by the platform.
+
+  api_surface:
+    owner_agent: ControllerAgent
+    summary: Optional external API adapter lane. Default app behavior uses the platform module API.
+    required_outputs: []
+    optional_outputs:
+      - modules/{pack_name}/backend/api.py
+      - backend/admin_config.py
+      - services/routes/admin.py
+      - services/integrations/{pack_id}_client.py
+    hard_constraints:
+      - Default module access is /api/modules/{module_name}/{action_name}.
+      - Page api_endpoint values must use /api/modules/{module_name}/{action_name} without query strings or fragments. Put pagination limits in page_size and filters in payload/input schemas.
+      - Emit bespoke REST adapters only when explicitly requested.
+      - Delegate behavior to backend/handler.py instead of duplicating business logic.
+      - Service admin config is a separate contract and must expose only GET /api/admin/config.
+      - For hosted-pack adapter tasks (owned_paths under services/integrations/), generate thin client wrappers only — no hosted business logic, no proprietary pack internals in generated files.
+      - Hosted adapter clients must target the stable hosted API contract supplied by the deployment host (e.g. POST {MOZAIKS_APP_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or provider credentials in generated files.
+      - Pages must not bind directly to /api/modules/{hosted_pack_id}/{action}. When hosted-pack data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the hosted adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
+      - Provider implementation adapters that are not hosted-pack API clients belong in services/adapters/ through service_foundation, not under modules/ and not in services/integrations/.
+
+  agent_backend_integration:
+    owner_agent: AppPlanAgent
+    summary: Planning lane for wiring an existing agent backend into the generated app.
+    required_outputs: []
+    optional_outputs:
+      - workflow touchpoints in page schemas
+      - build task initial_message context for downstream agents
+    hard_constraints:
+      - Treat upstream agent metadata as exact values, not inferred values.
+      - Persistent pages launch workflows declaratively; live workflow UI stays workflow-owned.
+      - Do not convert agent integrations into app-owned module collections by default.
+
+backend_helper_files:
+  description: >
+    Rules for backend/{helper_name}.py files generated under app/modules/{module_id}/backend/.
+    Helper files are explicit build outputs — they must be declared before generation.
+    They are not a catch-all for logic that does not fit canonical layers.
+    App-level support code under services/integrations/ or services/adapters/ is governed by
+    task_contracts.service_foundation or task_contracts.api_surface, not by this module-local
+    helper contract.
+
+  canonical_layers:
+    - backend/handler.py   # thin dispatch only — one method per declared action
+    - backend/service.py   # business logic and event publication
+    - backend/repo.py      # persistence queries and writes
+    - backend/policy.py    # authorization, ownership, transition checks
+    - backend/schemas.py   # typed DTOs, enums, normalization helpers
+
+  helper_contract:
+    canonical_location: backend/{helper_name}.py
+    kind: helper
+    generated_by: ServiceAgent
+    required: false
+    allowed_when:
+      - external provider client wrapper for a declared integration
+      - runtime_extensions.yaml api_router entrypoint implementation
+      - runtime_extensions.yaml startup_service entrypoint implementation
+      - module-local adapter or client wrapper for an external service
+      - complex domain helper that would bloat service.py without creating a new canonical layer
+      - integration helper tying two declared capabilities together at the module level
+      - event subscriber startup logic when declared as a startup_service extension
+      - module-local guard wrapper bridging a declared capability into this module's action layer
+    prohibited_for:
+      - generic business logic that belongs in service.py
+      - persistence or database access that belongs in repo.py
+      - authorization or scoping that belongs in policy.py
+      - typed shapes or DTOs that belong in schemas.py
+      - transport or WebSocket infrastructure (use runtime_extensions.yaml startup_service instead)
+      - workflow or agent orchestration logic
+      - arbitrary file splitting to break up long files
+    rules:
+      - must be declared in current_build_task.owned_paths or python_stubs before ServiceAgent generates it
+      - must be imported by at least one canonical backend layer (handler.py, service.py) or referenced by runtime_extensions.yaml
+      - must be module-local — no cross-module imports except to hosted capability service interfaces
+      - must not create new public module actions or bypass the handler dispatch contract
+      - AppPlanAgent must declare it with a short rationale in the build task initial_message
+      - ConfigMiddlewareAgent must add it to python_stubs before ServiceAgent runs
+      - ServiceAgent must not invent helper files that do not appear in python_stubs
+
+  runtime_extension_entrypoints:
+    description: >
+      When runtime_extensions.yaml is declared, each extension type requires an explicit backend file
+      that must be declared in python_stubs. Entrypoints are module-local values such as
+      backend.routes_hooks:get_router or backend.event_worker:MessageDeliveryWorker;
+      never use modules.*, app.modules.*, or mozaiksai.* import paths.
+    api_router:
+      required_stub: backend/{router_file}.py
+      factory_function: get_router
+      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+    startup_service:
+      required_stub: backend/{worker_file}.py
+      service_class: "{ServiceClass}"
+      note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
+
+  examples:
+    - backend/provider_client.py   # external provider client wrapper
+    - backend/routes_hooks.py       # api_router entrypoint — custom inbound route mounting
+    - backend/event_worker.py      # startup_service entrypoint — background subscriber/worker
+    - backend/notification_client.py # module-local wrapper over a notification capability
+    - backend/audit_subscriber.py    # startup_service entrypoint for audit event handling
+

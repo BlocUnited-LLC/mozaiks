@@ -1,0 +1,51 @@
+version: 1
+catalog_id: appgenerator_capability_directory
+description: >
+  Provider-neutral capability packs for AppGenerator.
+  This catalog guides pack recommendation order only; selected packs still come
+  from build_context/packs descriptors or explicit user intent.
+global_rules:
+  - Recommend packs only for capability intent present in the product brief or upstream plan.
+  - Do not force a provider when the user names a different provider.
+  - If a recommended pack is selected, use app-owned facade modules and thin service clients.
+  - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, and token usage measurement are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
+capabilities:
+  - id: billing_pack
+    label: Billing and Subscriptions
+    capability_kind: framework_pack
+    recommendation_rank: 1
+    domains:
+      - billing
+      - subscriptions
+      - usage
+      - saas
+    intent_signals:
+      - App sells plans, tiers, seats, subscriptions, credits, usage, or paid access.
+      - App needs a billing portal, subscription status, or runtime usage status.
+      - User asks to turn the generated app into a SaaS product.
+    selection_aliases:
+      - billing_pack
+      - billing
+      - subscriptions
+      - saas monetization
+    generator_notes:
+      - Use the billing_pack capability pack for SaaS monetization, or generate a provider-neutral external_adapter path when the user names a specific provider.
+      - Generate app-owned billing facade modules and adapter stubs under services/adapters/payments/.
+      - Do not generate provider-specific billing module internals or hosted service code.
+      - Do not generate token metering storage; read measured runtime usage from /api/me/usage or /api/admin/usage.
+      - Use app/config/subscriptions.yaml when a generated SaaS app needs plan quotas and usage limits.
+      - Pages must bind through app-owned facade modules, not directly to any external billing endpoint.
+    alternatives:
+      - id: stripe
+        capability_kind: external_adapter
+        use_when: User explicitly asks for Stripe or already has Stripe as the required processor.
+        generator_notes:
+          - Generate provider-neutral app-owned billing/subscription modules.
+          - Put Stripe mechanics behind services/adapters/payments/stripe.py or services/integrations/stripe_client.py.
+          - Never embed raw Stripe secrets in generated files.
+      - id: custom_payments_provider
+        capability_kind: external_adapter
+        use_when: User brings a custom payment processor, wallet rail, or billing service.
+        generator_notes:
+          - Generate strict app-owned facade contracts and adapter stubs only.
+          - Keep provider-specific mechanics under app/services/adapters/payments/.
