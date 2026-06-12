@@ -1,7 +1,7 @@
 import {
   TransitionChoiceCard,
   TransitionChoicePanel,
-  useTransitionChoiceMotion,
+  useTransitionMotion,
 } from '@mozaiks/chat-ui/platform';
 
 const OPTION_VIEW = {
@@ -28,7 +28,7 @@ const toLabel = (value) =>
 
 export default function BrownfieldPathSelector({ transition, onResolve, overlayTitleId, overlayDescriptionId }) {
   const options = Array.isArray(transition?.options) ? transition.options : [];
-  const motion = useTransitionChoiceMotion();
+  const motion = useTransitionMotion();
 
   return (
     <TransitionChoicePanel
