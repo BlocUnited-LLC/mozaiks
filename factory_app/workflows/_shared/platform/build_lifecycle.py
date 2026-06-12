@@ -508,6 +508,19 @@ async def emit_build_completed(
         payload=payload,
     )
     _spawn_delivery(outbox_event_id=outbox_event_id)
+
+    # Opt-in anonymized OSS telemetry — fire-and-forget, never raises.
+    try:
+        from mozaiksai.core.telemetry import build_workflow_payload, emit_build_telemetry
+        _telemetry_payload = build_workflow_payload(
+            workflow_name=workflow_name,
+            final_status="completed",
+            build_registry_id=context.get("build_registry_id", ""),
+        )
+        asyncio.create_task(emit_build_telemetry(_telemetry_payload))
+    except Exception:
+        pass
+
     return outbox_event_id
 
 
@@ -561,6 +574,19 @@ async def emit_build_failed(
         payload=payload,
     )
     _spawn_delivery(outbox_event_id=outbox_event_id)
+
+    # Opt-in anonymized OSS telemetry — fire-and-forget, never raises.
+    try:
+        from mozaiksai.core.telemetry import build_workflow_payload, emit_build_telemetry
+        _telemetry_payload = build_workflow_payload(
+            workflow_name=workflow_name,
+            final_status="failed",
+            build_registry_id=context.get("build_registry_id", ""),
+        )
+        asyncio.create_task(emit_build_telemetry(_telemetry_payload))
+    except Exception:
+        pass
+
     return outbox_event_id
 
 

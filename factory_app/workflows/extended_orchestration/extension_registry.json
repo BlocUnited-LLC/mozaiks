@@ -1,7 +1,7 @@
 {
   "pack_name": "DefaultPack",
   "version": 3,
-  "description": "Universal workflow routing layer. Defines workflow registry entries, dependencies, transition routes, and optional workflow sequence metadata. NOT agent routing; that lives in handoffs.yaml.",
+  "description": "Universal workflow routing layer. Defines workflow registry entries, dependencies, transition routes, and optional workflow sequence metadata. NOT agent routing; that lives in transition_graph.yaml.",
 
   "artifact_dependency_graph": {
     "concept":                 [],
@@ -63,7 +63,8 @@
         { "workflows": ["DesignDocs"] },
         { "workflows": ["AgentGenerator"] },
         { "workflows": ["AppGenerator"] },
-        { "transition": "app_review" }
+        { "transition": "app_review" },
+        { "transition": "build_satisfaction_rating" }
       ]
     },
     {
@@ -339,6 +340,37 @@
           }
         }
       ]
+    },
+    {
+      "id": "build_satisfaction_rating",
+      "transition_type": "user_choice_context",
+      "optional": true,
+      "ui": {
+        "component": "BuildSatisfactionRating",
+        "mode": "screen",
+        "shell_mode": "focused"
+      },
+      "options": [
+        {
+          "id": "rated",
+          "route_to": "workflow_complete",
+          "context_variables": {}
+        },
+        {
+          "id": "skip",
+          "route_to": "workflow_complete",
+          "context_variables": {}
+        }
+      ]
+    },
+    {
+      "id": "workflow_complete",
+      "transition_type": "workflow_complete",
+      "ui": {
+        "component": "WorkflowCompletion",
+        "mode": "screen",
+        "shell_mode": "focused"
+      }
     }
   ]
 }
