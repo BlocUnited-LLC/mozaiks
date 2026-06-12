@@ -262,6 +262,15 @@ lifecycle_tools:
     function: emit_build_completed
     description: Notify platform build tracking when workflow run completes.
     tool_type: Agent_Tool
+  - trigger: on_complete
+    agent: null
+    file: tools/platform/module_pattern_recorder.py
+    function: record_module_patterns
+    description: >
+      Extract generated module IDs from the assembled bundle and POST them to the
+      hosted build_intelligence module so pairwise cooccurrence patterns are scored.
+      No-op in OSS runs without app_backend_url or build_registry_id.
+    tool_type: Agent_Tool
   - trigger: on_fail
     agent: null
     file: tools/platform/build_lifecycle.py
