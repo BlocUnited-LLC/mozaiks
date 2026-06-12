@@ -15,10 +15,13 @@ import { WorkspaceStudioHero, formatCompactNumber, formatCurrencyValue } from '.
 import { useWorkspaceStudioData } from './useWorkspaceStudioData.js'
 
 
-function buildAppRows(runs, appNameMap) {
+function buildAppRows(usage, appNameMap, demoRuns = []) {
   const groups = new Map()
+  const sourceRows = Array.isArray(usage?.events) && usage.events.length > 0
+    ? usage.events
+    : (Array.isArray(demoRuns) ? demoRuns : [])
 
-  for (const run of Array.isArray(runs) ? runs : []) {
+  for (const run of sourceRows) {
     const appId = run?.app_id || 'unknown'
     const appName = appNameMap[appId] || appId || 'Unknown app'
     if (!groups.has(appId)) {
@@ -35,11 +38,10 @@ function buildAppRows(runs, appNameMap) {
     }
 
     const current = groups.get(appId)
-    current.runs += 1
+    current.runs += Number(run?.llm_calls || 1)
     current.inputTokens += Number(run?.prompt_tokens || 0)
     current.outputTokens += Number(run?.completion_tokens || 0)
-    current.cost += Number(run?.cost || 0)
-    current.errors += Number(run?.errors || 0)
+    current.cost += Number(run?.estimated_cost_usd ?? run?.cost ?? 0)
     if (run?.workflow_name) current.workflows.add(run.workflow_name)
   }
 
@@ -61,7 +63,7 @@ function buildAppRows(runs, appNameMap) {
 }
 
 export default function WorkspaceUsagePage() {
-  const { apps, workspaceStats, workspaceRuns, loading, error, dataMode } = useWorkspaceStudioData('Workspace usage could not be loaded.')
+  const { apps, workspaceStats, workspaceRuns, workspaceUsage, loading, error, dataMode } = useWorkspaceStudioData('Workspace usage could not be loaded.')
   const [searchValue, setSearchValue] = useState('')
 
   const appNameMap = useMemo(() => {
@@ -74,16 +76,19 @@ export default function WorkspaceUsagePage() {
     return map
   }, [apps])
 
-  const appRows = useMemo(() => buildAppRows(workspaceRuns, appNameMap), [workspaceRuns, appNameMap])
+  const appRows = useMemo(
+    () => buildAppRows(workspaceUsage, appNameMap, dataMode === 'demo' ? workspaceRuns : []),
+    [workspaceUsage, workspaceRuns, appNameMap, dataMode],
+  )
   const visibleRows = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
     if (!search) return appRows
     return appRows.filter((row) => row.searchText.includes(search))
   }, [appRows, searchValue])
-  const totalInputTokens = Number(workspaceStats.total_prompt_tokens || 0)
-  const totalOutputTokens = Number(workspaceStats.total_completion_tokens || 0)
-  const totalTokens = totalInputTokens + totalOutputTokens
-  const totalCost = Number(workspaceStats.total_cost || 0)
+  const totalInputTokens = Number(workspaceUsage?.totals?.prompt_tokens || 0)
+  const totalOutputTokens = Number(workspaceUsage?.totals?.completion_tokens || 0)
+  const totalTokens = Number(workspaceUsage?.totals?.total_tokens || totalInputTokens + totalOutputTokens)
+  const totalCost = Number(workspaceUsage?.totals?.estimated_cost_usd || 0)
   const totalRuns = Number(workspaceStats.tracked_chats || workspaceRuns.length || 0)
   const handleExportCsv = () => {
     const headers = [
@@ -95,7 +100,6 @@ export default function WorkspaceUsagePage() {
       'avg_tokens',
       'cost',
       'avg_cost',
-      'errors',
       'workflows',
     ]
     const lines = [
@@ -109,7 +113,6 @@ export default function WorkspaceUsagePage() {
         Math.round(row.avgTokens),
         Number(row.cost).toFixed(4),
         Number(row.avgCost).toFixed(4),
-        row.errors,
         JSON.stringify(row.workflowLabel),
       ].join(',')),
     ]
@@ -130,7 +133,7 @@ export default function WorkspaceUsagePage() {
   }
   const summaryItems = [
     { id: 'tokens', label: 'Tokens Used', value: formatCompactNumber(totalTokens, 'Pending'), detail: 'Input + output' },
-    { id: 'cost', label: 'LLM Cost', value: formatCurrencyValue(totalCost, 'Pending'), detail: 'Observed spend' },
+    { id: 'cost', label: 'LLM Cost', value: formatCurrencyValue(totalCost, 'Pending'), detail: 'Estimated or provider supplied' },
     { id: 'runs', label: 'Workflow Runs', value: formatCompactNumber(totalRuns, '0'), detail: 'Tracked executions' },
     { id: 'avgCost', label: 'Avg Cost / Run', value: totalRuns > 0 ? formatCurrencyValue(totalCost / totalRuns, 'Pending') : 'Pending' },
   ]
@@ -194,12 +197,6 @@ export default function WorkspaceUsagePage() {
       width: '10%',
       cellClassName: 'text-muted-foreground tabular-nums',
       render: (row) => formatCurrencyValue(row.avgCost, '$0.00'),
-    },
-    {
-      id: 'errors',
-      header: 'Errors',
-      width: '6%',
-      render: (row) => <StatusPill tone={row.errors > 0 ? 'warning' : 'success'}>{formatCompactNumber(row.errors, '0')}</StatusPill>,
     },
   ]
 

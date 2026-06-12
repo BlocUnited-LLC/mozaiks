@@ -433,11 +433,7 @@ const DEMO_SESSIONS_BY_APP = Object.fromEntries(
       created_at: run.started_at,
       ended_at: run.ended_at,
       duration_sec: run.runtime_sec,
-      usage_prompt_tokens_final: run.prompt_tokens,
-      usage_completion_tokens_final: run.completion_tokens,
-      usage_total_cost_final: run.cost,
-      tool_calls_final: run.tool_calls,
-      errors_final: run.errors,
+      telemetry_source: 'ag2_opentelemetry',
     })),
   ]),
 )

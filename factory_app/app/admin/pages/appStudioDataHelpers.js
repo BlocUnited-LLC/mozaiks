@@ -33,6 +33,7 @@ export function getAppStudioSnapshot(appId, data, dataMode = 'live') {
   const summary = data?.summary || {}
   const app = summary.app || {}
   const stats = data?.stats || {}
+  const usage = data?.usage || {}
   const runs = toArray(data?.runs?.runs)
   const sessions = toArray(data?.sessions?.sessions)
   const buildHistory = toArray(data?.buildHistory?.artifact_versions)
@@ -47,6 +48,7 @@ export function getAppStudioSnapshot(appId, data, dataMode = 'live') {
     summary,
     app,
     stats,
+    usage,
     runs,
     sessions,
     buildHistory,

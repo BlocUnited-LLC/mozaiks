@@ -104,6 +104,7 @@ export function useAppStudioData(appId) {
           statsRes,
           runsRes,
           sessionsRes,
+          usageRes,
           buildRes,
           historyRes,
           integrationsRes,
@@ -112,6 +113,7 @@ export function useAppStudioData(appId) {
           fetch(`${API_BASE}/api/admin/stats?app_id=${encodeURIComponent(appId)}`),
           fetch(`${API_BASE}/api/admin/runs?app_id=${encodeURIComponent(appId)}&limit=12`),
           fetch(`${API_BASE}/api/admin/sessions?app_id=${encodeURIComponent(appId)}&limit=12`),
+          fetch(`${API_BASE}/api/admin/usage?app_id=${encodeURIComponent(appId)}&limit=500`),
           fetch(`${API_BASE}/api/studio/build?app_id=${encodeURIComponent(appId)}`),
           fetch(`${API_BASE}/api/studio/build/history?app_id=${encodeURIComponent(appId)}&limit=8`),
           fetch(`${API_BASE}/api/studio/integrations?app_id=${encodeURIComponent(appId)}`),
@@ -121,6 +123,7 @@ export function useAppStudioData(appId) {
         const stats = statsRes.status === 'fulfilled' && statsRes.value.ok ? await statsRes.value.json() : null
         const runs = runsRes.status === 'fulfilled' && runsRes.value.ok ? await runsRes.value.json() : null
         const sessions = sessionsRes.status === 'fulfilled' && sessionsRes.value.ok ? await sessionsRes.value.json() : null
+        const usage = usageRes.status === 'fulfilled' && usageRes.value.ok ? await usageRes.value.json() : null
         const buildState = buildRes.status === 'fulfilled' && buildRes.value.ok ? await buildRes.value.json() : null
         const buildHistory = historyRes.status === 'fulfilled' && historyRes.value.ok ? await historyRes.value.json() : null
         const integrations = integrationsRes.status === 'fulfilled' && integrationsRes.value.ok ? await integrationsRes.value.json() : null
@@ -135,6 +138,7 @@ export function useAppStudioData(appId) {
             stats,
             runs,
             sessions,
+            usage,
             buildState,
             buildHistory,
             integrations,
