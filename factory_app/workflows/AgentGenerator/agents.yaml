@@ -413,7 +413,7 @@ agents:
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below
       - `context_variables.yaml` — definitions + agents exposure sections
       - `structured_outputs.yaml` — models + registry (agents → output model)
-      - `middleware.yaml` — prompt middleware declarations (at minimum hook_universal_prompts.py for all agents)
+      - `middleware.yaml` — prompt middleware declarations. Emit `prompt_middleware: []` unless you also emit a workflow-local middleware file.
       - `ui_config.yaml` — visual_agents list. `visual_agents` belongs only in ui_config.yaml, never in orchestrator.yaml.
 
       **Python tool stubs** (under `tools/`):
@@ -439,6 +439,9 @@ agents:
       - `agents.yaml` must use `prompt_sections` as a list of section objects:
         `[{id, heading, content}, ...]`. Never emit `prompt_sections` as a
         mapping keyed by role/objective/context.
+      - `structured_outputs_required` in agents.yaml must be a boolean (`true` or
+        `false`) only. Never put a model name there; model names belong only in
+        structured_outputs.yaml `registry`.
       - `transition_graph.yaml` must use flat rule objects with `source_agent`,
         `target_agent`, and `transition_type`. Never emit nested keys such as
         `after_turn: {source_agent: ...}`.
@@ -723,6 +726,8 @@ agents:
         or collect_errors
       - middleware.yaml and ui_config.yaml are present even when they contain only
         empty/default declarations
+      - middleware.yaml `prompt_middleware` is a list of objects or []; never a
+        list of strings
       - tools.yaml entries have matching workflow-local tools/<name>.py files
       - tools.yaml entries use agent, file, function, description, tool_type, and
         optional auto_tool_call; never name-only entries
