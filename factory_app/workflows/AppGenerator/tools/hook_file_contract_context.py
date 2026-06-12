@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from factory_app.workflows._shared.hook_utils import workflow_context_path
