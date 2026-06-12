@@ -1,14 +1,14 @@
 # ==============================================================================
 # FILE: mozaiksai/core/workflow/orchestration_patterns.py
-# DESCRIPTION: autogen.beta Agent orchestration engine.
+# DESCRIPTION: Workflow orchestration entry point.
 #
-# This is the single entry point to run a workflow using the beta Agent harness
-# with streaming, tools, routing, persistence, and observability.
+# Wires together the AG2 beta agent factory, chat resume/init, AG2 Network
+# execution, persistence, transport, lifecycle, and observability into a single
+# async function that callers use to start or resume a workflow run.
 #
-# Multi-agent routing compiles handoffs.yaml into an AG2 beta Network
-# TransitionGraph. Each workflow run owns one persistent AG2 MemoryStream
-# while the orchestration adapter owns Mozaiks transport,
-# persistence, hooks, and UI event integration.
+# Internals are in focused execution sub-modules:
+#   execution/stream_bridge.py  — AG2 MemoryStream → UI transport bridge
+#   execution/resume.py         — chat resume / session init logic
 # ==============================================================================
 
 from __future__ import annotations
@@ -17,45 +17,35 @@ import asyncio
 import inspect
 import json
 import logging
-import uuid
+from collections.abc import Callable
 from time import perf_counter
-from typing import Any, Callable, Dict, List, Optional, Tuple  # Tuple kept for _resume_or_initialize_chat
-
-from autogen.beta import MemoryStream
-from autogen.beta.events import (
-    HumanInputRequest,
-    ModelMessageChunk,
-    ModelResponse,
-    ToolCallsEvent,
-    ToolResultsEvent,
-)
-from autogen.beta.middleware import HistoryLimiter
-from pydantic import BaseModel
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
 from logs.runtime_artifacts import get_agent_outputs_dir
+from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-from mozaiksai.core.observability.performance_manager import get_performance_manager
+from mozaiksai.core.ports.orchestration import RunStatus
 
 from .context import DerivedContextManager
-from .execution import create_termination_handler
-from .execution.network_graph import (
-    compile_handoffs_to_transition_graph,
-    resolve_next_agent,
-)
-from .messages import (
-    normalize_to_strict_ag2 as _normalize_to_strict_ag2,
-)
-from .orchestration_utils import (
-    _load_workflow_config,
-    _reconcile_final_usage,
-)
+from .execution.resume import merge_persisted_extra_context, resume_or_initialize_chat
+from .messages import normalize_to_strict_ag2 as _normalize_to_strict_ag2
+from .orchestration_utils import _load_workflow_config
 
 logger = logging.getLogger(__name__)
 
 chat_logger = get_workflow_logger("orchestration")
 workflow_logger = get_workflow_logger("orchestration")
 performance_logger = get_workflow_logger("performance.orchestration")
+
+# ---------------------------------------------------------------------------
+# Public re-exports — existing callers import these names from this module
+# ---------------------------------------------------------------------------
+
+# _merge_persisted_extra_context keeps its underscore-prefixed name for callers
+# that import it (tests, ag2_orchestration adapter).
+_merge_persisted_extra_context = merge_persisted_extra_context
+_resume_or_initialize_chat = resume_or_initialize_chat
 
 __all__ = [
     "run_workflow_orchestration",
@@ -64,672 +54,186 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Context merge helper
+# AG2 Network orchestration helpers
 # ---------------------------------------------------------------------------
 
-def _merge_persisted_extra_context(context: Any, extra_ctx: Dict[str, Any]) -> None:
-    """Apply persisted run context over workflow-declared defaults.
+def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
+    """Render persisted Mozaiks messages into one AG2 workflow-channel prompt."""
 
-    Workflow ``context_variables.yaml`` supplies defaults. Persisted chat-session
-    extra fields are the explicit launch/resume context for this run and must
-    therefore override those defaults. ``fetch_chat_session_extra_context`` strips
-    canonical chat identity fields before this function is called.
-    """
-    if not isinstance(extra_ctx, dict) or not extra_ctx:
-        return
-    for k, v in extra_ctx.items():
-        if not isinstance(k, str) or not k.strip():
+    rendered: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
             continue
-        try:
-            if hasattr(context, "set"):
-                context.set(k, v)
-            elif hasattr(context, "__setitem__"):
-                context[k] = v
-        except Exception:
+        content = str(message.get("content") or "").strip()
+        if not content:
             continue
-    try:
-        if extra_ctx.get("parent_chat_id"):
-            if hasattr(context, "set"):
-                context.set("automated_workflow_run", True)
-    except Exception:
-        pass
+        role = str(message.get("role") or "user").strip() or "user"
+        name = str(message.get("name") or role).strip() or role
+        rendered.append(f"{name} ({role}): {content}")
+    return "\n\n".join(rendered).strip() or "."
 
 
-# ---------------------------------------------------------------------------
-# Resume / init chat from AG2 run history plus runtime-only hidden seeds.
-# ---------------------------------------------------------------------------
+def _first_agent_payload_from_runner_result(runner_result: Any, agent_name: str) -> dict[str, Any] | None:
+    for entry in runner_result.structured_outputs:
+        if entry.get("agent") == agent_name and isinstance(entry.get("structured_data"), dict):
+            return dict(entry["structured_data"])
 
-async def _resume_or_initialize_chat(
-    persistence_manager: AG2PersistenceManager,
-    termination_handler: Any,
-    config: Dict[str, Any],
-    chat_id: str,
-    app_id: str,
-    workflow_name: str,
-    user_id: Optional[str],
-    initial_message: Optional[str],
-    initial_agent_name: Optional[str],
-    wf_logger: Any,
-    suppress_config_seed: bool = False,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    def _build_hidden_config_seed() -> Optional[Dict[str, Any]]:
-        if suppress_config_seed:
-            return None
-        seed = config.get("initial_message")
-        if not isinstance(seed, str) or not seed.strip():
-            return None
-        return {"role": "user", "name": "user", "content": seed.strip(), "_mozaiks_seed_kind": "initial_message"}
-
-    resumed_messages = await persistence_manager.load_run_history(chat_id=chat_id, app_id=app_id) or []
-    initial_messages: List[Dict[str, Any]] = []
-    hidden_config_seed = _build_hidden_config_seed()
-
-    # Strip general-mode chatter
-    filtered: List[Dict[str, Any]] = []
-    for msg in resumed_messages:
-        meta = msg.get("metadata") if isinstance(msg, dict) else None
-        if isinstance(meta, dict) and meta.get("source") == "general_agent":
+    for envelope in runner_result.wal:
+        if not isinstance(envelope, dict) or envelope.get("event_type") != "ag2.packet":
             continue
-        filtered.append(msg)
-    resumed_messages = filtered
-
-    meaningful_roles = {"user", "assistant", "agent", "tool"}
-    meaningful_messages = [m for m in resumed_messages if isinstance(m, dict) and m.get("role") in meaningful_roles]
-    resume_valid = bool(resumed_messages) and bool(meaningful_messages)
-
-    if resume_valid:
-        wf_logger.info("[RESUME] Resuming chat %s: messages=%d meaningful=%d", chat_id, len(resumed_messages), len(meaningful_messages))
-        initial_messages = list(resumed_messages)
-        if hidden_config_seed:
-            initial_messages = [dict(hidden_config_seed)] + initial_messages
-        if initial_message:
-            initial_messages.append({"role": "user", "name": "user", "content": initial_message, "_mozaiks_seed_kind": "initial_message"})
-    else:
-        if resumed_messages:
-            wf_logger.info("[RESUME] Discarding scaffolding-only resume for %s; treating as NEW", chat_id)
-        resumed_messages = []
-
-        if hidden_config_seed:
-            initial_messages.append(dict(hidden_config_seed))
-        if initial_message:
-            initial_messages.append({"role": "user", "name": "user", "content": initial_message, "_mozaiks_seed_kind": "initial_message"})
-
-        current_user_id = user_id or "system_user"
-        try:
-            await persistence_manager.create_chat_session(
-                chat_id=chat_id, app_id=app_id, workflow_name=workflow_name, user_id=current_user_id,
-            )
-        except Exception as cs_err:
-            wf_logger.error("Failed to create chat session for %s: %s", chat_id, cs_err)
-
-        try:
-            await termination_handler.on_conversation_start(user_id=current_user_id)
-        except Exception:
-            pass
-
-    # UserDriven trigger
-    if not initial_messages and config.get("workflow_startup_mode", "").strip().lower() == "userdriven":
-        initial_messages = [{"role": "user", "name": "user", "content": ".", "_mozaiks_seed_kind": "userdriven_trigger"}]
-
-    return resumed_messages, initial_messages
+        sender_id = str(envelope.get("sender_id") or "")
+        if runner_result.agent_name_by_id.get(sender_id) != agent_name:
+            continue
+        event_data = envelope.get("event_data")
+        if not isinstance(event_data, dict):
+            continue
+        body = event_data.get("body")
+        if isinstance(body, dict):
+            return dict(body)
+        if isinstance(body, str):
+            try:
+                parsed = json.loads(body)
+            except json.JSONDecodeError:
+                return None
+            return dict(parsed) if isinstance(parsed, dict) else None
+    return None
 
 
-# ---------------------------------------------------------------------------
-# Pre-turn hook prompt injection
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Stream event forwarding — named class replaces the old anonymous closure
-# ---------------------------------------------------------------------------
-
-class _MozaiksStreamForwarder:
-    """Forwards AG2 MemoryStream events to the Mozaiks UI transport.
-
-    Registered once on the persistent run-stream via stream.subscribe() so
-    every agent in the workflow run shares the same forwarder instance.
-    Using a named class instead of a closure makes this unit-testable and
-    keeps the orchestration loop free of event-dispatch logic.
-    """
-
-    __slots__ = ("_transport", "_chat_id", "_wf_logger", "_sequence_state")
-
-    def __init__(
-        self,
-        transport: Any,
-        chat_id: str,
-        wf_logger: Any,
-        sequence_state: Dict[str, Any],
-    ) -> None:
-        self._transport = transport
-        self._chat_id = chat_id
-        self._wf_logger = wf_logger
-        self._sequence_state = sequence_state
-
-    async def __call__(self, event: Any) -> None:
-        try:
-            seq = self._sequence_state.get("counter", 0)
-            self._sequence_state["counter"] = seq + 1
-            agent_name = str(self._sequence_state.get("current_agent_name") or "assistant")
-
-            if isinstance(event, ModelMessageChunk):
-                await self._transport.send_event_to_ui({
-                    "kind": "stream_chunk",
-                    "agent": agent_name,
-                    "content": event.content,
-                    "sequence": seq,
-                }, self._chat_id)
-
-            elif isinstance(event, ModelResponse) and event.content:
-                await self._transport.send_event_to_ui({
-                    "kind": "chat.text",
-                    "agent": agent_name,
-                    "role": "assistant",
-                    "content": event.content,
-                    "sequence": seq,
-                    "metadata": {"source": "agent", "model": event.model},
-                }, self._chat_id)
-
-            elif isinstance(event, ToolCallsEvent):
-                for call in event.calls:
-                    await self._transport.send_event_to_ui({
-                        "kind": "tool_call",
-                        "agent": agent_name,
-                        "tool": getattr(call, "name", "unknown"),
-                        "call_id": getattr(call, "id", None),
-                        "sequence": seq,
-                    }, self._chat_id)
-
-            elif isinstance(event, ToolResultsEvent):
-                for result in event.results:
-                    await self._transport.send_event_to_ui({
-                        "kind": "tool_result",
-                        "agent": agent_name,
-                        "call_id": getattr(result, "id", None),
-                        "sequence": seq,
-                    }, self._chat_id)
-
-            elif isinstance(event, HumanInputRequest):
-                self._sequence_state["awaiting_user_input"] = True
-                await self._transport.send_event_to_ui({
-                    "kind": "input_request",
-                    "agent": agent_name,
-                    "prompt": getattr(event, "prompt", ""),
-                    "request_id": getattr(event, "id", str(uuid.uuid4())),
-                    "sequence": seq,
-                }, self._chat_id)
-
-        except Exception as fwd_err:
-            self._wf_logger.debug(
-                "[STREAM] Event forward failed (%s): %s", type(event).__name__, fwd_err
-            )
-
-
-def _attach_stream_forwarder(
-    stream: MemoryStream,
-    transport: Any,
-    chat_id: str,
-    wf_logger: Any,
-    sequence_state: Dict[str, Any],
-) -> None:
-    """Attach a _MozaiksStreamForwarder to the persistent run-stream."""
-    stream.subscribe(
-        _MozaiksStreamForwarder(transport, chat_id, wf_logger, sequence_state),
-        sync_to_thread=False,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Multi-agent orchestration loop
-# ---------------------------------------------------------------------------
-
-
-def _reply_body_to_data(reply: Any) -> Any:
-    body = getattr(reply, "body", reply)
-    if isinstance(body, BaseModel):
-        return body.model_dump(mode="json")
-    if isinstance(body, (dict, list)):
-        return body
-    if isinstance(body, str):
-        text = body.strip()
-        if not text:
-            return text
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return body
-    return body
-
-
-def _compact_history_content(agent_name: str, content: str, max_chars: int = 12000) -> str:
-    if len(content) <= max_chars:
-        return content
-
-    def _summarize_value(value: Any) -> Any:
-        if isinstance(value, dict):
-            summary: Dict[str, Any] = {}
-            for key, item in value.items():
-                if key == "code_files" and isinstance(item, list):
-                    summary[key] = [
-                        {
-                            "filename": str(entry.get("filename") or entry.get("path") or ""),
-                            "chars": len(str(entry.get("content") or "")),
-                        }
-                        for entry in item
-                        if isinstance(entry, dict)
-                    ]
-                elif key == "build_tasks" and isinstance(item, list):
-                    summary[key] = [
-                        {
-                            "task_id": str(entry.get("task_id") or ""),
-                            "task_type": str(entry.get("task_type") or ""),
-                            "initial_agent": str(entry.get("initial_agent") or ""),
-                        }
-                        for entry in item
-                        if isinstance(entry, dict)
-                    ]
-                elif key == "pages" and isinstance(item, list):
-                    summary[key] = [
-                        {
-                            "name": str(entry.get("name") or ""),
-                            "route": str(entry.get("route") or ""),
-                            "sections": len(entry.get("sections") or []),
-                        }
-                        for entry in item
-                        if isinstance(entry, dict)
-                    ]
-                elif isinstance(item, (dict, list)):
-                    encoded = json.dumps(item, ensure_ascii=False, default=str)
-                    summary[key] = {
-                        "type": type(item).__name__,
-                        "items": len(item),
-                        "chars": len(encoded),
-                    }
-                else:
-                    text = "" if item is None else str(item)
-                    summary[key] = text if len(text) <= 500 else f"{text[:500]}... [truncated]"
-            return summary
-        return f"{str(value)[:max_chars]}... [truncated]"
-
-    try:
-        parsed = json.loads(content)
-        summary = _summarize_value(parsed)
-    except Exception:
-        summary = f"{content[:max_chars]}... [truncated]"
-
-    return json.dumps(
-        {
-            "_mozaiks_compacted_agent_output": True,
-            "agent": agent_name,
-            "original_chars": len(content),
-            "summary": summary,
-        },
-        ensure_ascii=False,
-    )
-
-
-async def _emit_validated_agent_output(
+def _next_agent_after_trigger(
     *,
-    current_agent_name: str,
-    last_reply: Any,
-    workflow_name: str,
-    chat_id: str,
-    app_id: str,
-    user_id: Optional[str],
-    turn_sequence: int,
-    context_vars_dict: Dict[str, Any],
-    context_bridge: Any,
-    structured_registry: Dict[str, Any],
-    auto_tool_agents: set[str],
-    wf_logger: Any,
-) -> Optional[Dict[str, Any]]:
-    model_cls = structured_registry.get(current_agent_name)
-    if model_cls is None or last_reply is None:
-        return None
+    transition_rules: list[dict[str, Any]],
+    trigger_agent: str,
+) -> str | None:
+    for rule in transition_rules:
+        if str(rule.get("source_agent") or "").strip() != trigger_agent:
+            continue
+        target = str(rule.get("target_agent") or "").strip()
+        if target and target != "terminate":
+            return target
+    return None
 
-    raw_data = _reply_body_to_data(last_reply)
-    if not isinstance(raw_data, dict):
-        wf_logger.warning(
-            "[%s] Structured output from %s was not a JSON object",
-            workflow_name.upper(),
-            current_agent_name,
-        )
-        return None
 
-    try:
-        validated = model_cls.model_validate(raw_data)
-        structured_data = validated.model_dump(mode="json")
-    except Exception as err:
-        wf_logger.warning(
-            "[%s] Structured output validation failed for %s: %s",
-            workflow_name.upper(),
-            current_agent_name,
-            err,
-        )
-        return None
-
-    model_name = getattr(model_cls, "__name__", str(model_cls))
-
-    try:
-        from mozaiksai.core.events.runtime_events import (
-            RUNTIME_AGENT_OUTPUT_VALIDATED,
-            build_runtime_agent_output_validated_event,
-            build_runtime_context_payload,
-            build_turn_idempotency_key,
-        )
-        from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
-
-        context_payload = build_runtime_context_payload(
-            chat_id=chat_id,
-            app_id=app_id,
-            workflow_name=workflow_name,
-            turn_sequence=turn_sequence,
-            user_id=user_id,
-            context_variables=context_vars_dict,
-        )
-        event_payload = build_runtime_agent_output_validated_event(
-            agent=current_agent_name,
-            model_name=model_name,
-            structured_data=structured_data,
-            auto_tool_call=current_agent_name in auto_tool_agents,
-            context=context_payload,
-            source="ag2_beta_orchestration",
-            turn_idempotency_key=build_turn_idempotency_key(chat_id, turn_sequence),
-            pattern_context_ref=context_bridge,
-            validation_passed=True,
-        )
-        await get_event_dispatcher().emit(RUNTIME_AGENT_OUTPUT_VALIDATED, event_payload)
-    except Exception as err:
-        wf_logger.warning(
-            "[%s] runtime.agent_output_validated dispatch failed for %s: %s",
-            workflow_name.upper(),
-            current_agent_name,
-            err,
-        )
-
-    return structured_data
-
-async def _run_beta_orchestration_loop(
+async def _emit_startup_greeting_if_needed(
     *,
-    agents: Dict[str, Any],
+    config: dict[str, Any],
+    resumed_messages: list[dict[str, Any]],
+    workflow_startup_mode: str,
     initial_agent_name: str,
-    initial_messages: List[Dict[str, Any]],
-    resumed_messages: List[Dict[str, Any]],
-    context_vars_dict: Dict[str, Any],
-    context_bridge: Any,
-    handoff_rules: List[Dict[str, Any]],
-    max_turns: int,
     transport: Any,
+    persistence_manager: AG2PersistenceManager,
     chat_id: str,
     app_id: str,
-    run_stream: MemoryStream,
-    workflow_name: str,
     workflow_name_upper: str,
-    user_id: Optional[str],
-    persistence_manager: AG2PersistenceManager,
-    perf_mgr: Any,
     wf_logger: Any,
-    lifecycle_manager: Optional[Any] = None,
-    derived_context_manager: Optional[Any] = None,
-    workflow_startup_mode: str = "AgentDriven",
-    config: Optional[Dict[str, Any]] = None,
-    task_batches_config: Optional[Any] = None,
-    structured_registry: Optional[Dict[str, Any]] = None,
-    auto_tool_agents: Optional[set[str]] = None,
-) -> Dict[str, Any]:
-    agent_id_by_name = {name: name for name in agents}
-    agent_id_by_name.setdefault("user", "user")
-    agent_name_by_id = {agent_id: name for name, agent_id in agent_id_by_name.items()}
-    transition_graph = compile_handoffs_to_transition_graph(
-        handoff_rules,
-        initial_agent_name=initial_agent_name,
-        agent_id_by_name=agent_id_by_name,
-        max_turns=max_turns,
+) -> int:
+    """Emit the static UserDriven greeting before AG2 owns agent turns."""
+
+    if resumed_messages or workflow_startup_mode != "UserDriven":
+        return 0
+    greeting = str(config.get("initial_message_to_user") or "").strip()
+    if not greeting:
+        return 0
+
+    await transport.send_event_to_ui(
+        {
+            "kind": "chat.text",
+            "agent": initial_agent_name,
+            "role": "assistant",
+            "content": greeting,
+            "sequence": 0,
+        },
+        chat_id,
     )
-    config = config or {}
+    await persistence_manager.append_run_assistant_message(
+        chat_id=chat_id,
+        app_id=app_id,
+        content=greeting,
+        agent_name=initial_agent_name,
+        metadata={"source": "startup_greeting"},
+    )
+    wf_logger.info("[%s] UserDriven greeting sent", workflow_name_upper)
+    return 1
 
-    # History starts from the initial messages (possibly with resumed history)
-    history = list(initial_messages)
-    current_agent_name = initial_agent_name
-    awaiting_user_input = False
-    run_completed = False
-    last_reply: Optional[Any] = None
-    sequence_state: Dict[str, Any] = {
-        "counter": 0,
-        "awaiting_user_input": False,
-        "current_agent_name": initial_agent_name,
-    }
-    structured_registry = structured_registry or {}
-    auto_tool_agents = auto_tool_agents or set()
 
-    _attach_stream_forwarder(run_stream, transport, chat_id, wf_logger, sequence_state)
+async def _project_ag2_wal_to_mozaiks_transport(
+    *,
+    runner_result: Any,
+    transport: Any,
+    persistence_manager: AG2PersistenceManager,
+    chat_id: str,
+    app_id: str,
+    agent_name_by_id: dict[str, str],
+    initial_sequence: int,
+) -> int:
+    """Project AG2 round-end packets into Mozaiks chat events and run storage."""
 
-    # UserDriven greeting via static first reply (before LLM call)
-    if (
-        not resumed_messages
-        and workflow_startup_mode == "UserDriven"
-        and config.get("initial_message_to_user")
-    ):
-        greeting = str(config["initial_message_to_user"]).strip()
-        if greeting:
-            await transport.send_event_to_ui({
+    sequence = initial_sequence
+    for envelope in runner_result.wal:
+        if not isinstance(envelope, dict) or envelope.get("event_type") != "ag2.packet":
+            continue
+        agent_name = agent_name_by_id.get(str(envelope.get("sender_id") or ""))
+        if not agent_name:
+            continue
+        event_data = envelope.get("event_data")
+        if not isinstance(event_data, dict):
+            continue
+        body = event_data.get("body")
+        if isinstance(body, (dict, list)):
+            content = json.dumps(body, ensure_ascii=False, default=str)
+        else:
+            content = str(body or "").strip()
+        if not content:
+            continue
+
+        await transport.send_event_to_ui(
+            {
                 "kind": "chat.text",
-                "agent": current_agent_name,
+                "agent": agent_name,
                 "role": "assistant",
-                "content": greeting,
-                "sequence": sequence_state.get("counter", 0),
-            }, chat_id)
-            await persistence_manager.append_run_assistant_message(
-                chat_id=chat_id,
-                app_id=app_id,
-                content=greeting,
-                agent_name=current_agent_name,
-                metadata={"source": "startup_greeting"},
-            )
-            sequence_state["counter"] = sequence_state.get("counter", 0) + 1
-            wf_logger.info("[%s] UserDriven greeting sent", workflow_name_upper)
-
-    # Main orchestration loop
-    for turn in range(max_turns):
-        if current_agent_name in (None, "terminate"):
-            run_completed = True
-            break
-
-        agent = agents.get(current_agent_name)
-        if agent is None:
-            wf_logger.warning("[%s] Agent '%s' not found; ending loop", workflow_name_upper, current_agent_name)
-            run_completed = True
-            break
-
-        # Emit select_speaker so UI shows thinking indicator
-        await transport.send_event_to_ui({
-            "kind": "select_speaker",
-            "agent": current_agent_name,
-            "sequence": sequence_state.get("counter", 0),
-        }, chat_id)
-
-        sequence_state["current_agent_name"] = current_agent_name
-
-        # Execute agent turn
-        wf_logger.info(
-            "[%s] Turn %d — running agent '%s' (history=%d)",
-            workflow_name_upper, turn, current_agent_name, len(history),
+                "content": content,
+                "sequence": sequence,
+                "source": "ag2_network_wal",
+            },
+            chat_id,
         )
+        await persistence_manager.append_run_assistant_message(
+            chat_id=chat_id,
+            app_id=app_id,
+            content=content,
+            agent_name=agent_name,
+            metadata={"source": "ag2_network_wal", "channel_id": runner_result.channel_id},
+        )
+        sequence += 1
+    return sequence
 
-        # Convert history list to beta-compatible messages
-        # Beta Agent.ask() accepts str | Input; we pass the last user message
-        # as a string and the rest as prior context via the stream history.
-        # For full history replay we pass the whole list as a joined prompt
-        # via variables and pass the user-facing trigger as the first arg.
 
-        # Determine the user-facing message for this turn
-        user_messages = [m for m in history if isinstance(m, dict) and m.get("role") == "user"]
-        last_user_msg = (user_messages[-1].get("content") or "") if user_messages else ""
-
-        # Keep the shared context bridge aligned with the per-turn AG2 variables so
-        # tools can observe the same live history and runtime metadata as the agent.
-        context_vars_dict["_mozaiks_history"] = list(history)
-        context_vars_dict["_mozaiks_agent_name"] = current_agent_name
-        context_vars_dict["_mozaiks_chat_id"] = chat_id
-        context_vars_dict["_mozaiks_app_id"] = app_id
-
-        if lifecycle_manager is not None:
-            try:
-                await lifecycle_manager.trigger_before_agent(
-                    current_agent_name,
-                    context_variables=context_bridge,
-                )
-            except Exception as lc_err:
-                wf_logger.debug(
-                    "[%s] Lifecycle before_agent failed for '%s': %s",
-                    workflow_name_upper,
-                    current_agent_name,
-                    lc_err,
-                )
-
-        # Build context with full history for the agent
-        turn_vars = dict(context_vars_dict)
-
-        try:
-            last_reply = await agent.ask(
-                last_user_msg or ".",
-                stream=run_stream,
-                variables=turn_vars,
-                middleware=[HistoryLimiter(max_events=120)],
-            )
-        except Exception as ask_err:
-            wf_logger.error(
-                "[%s] agent.ask() failed for '%s': %s", workflow_name_upper, current_agent_name, ask_err,
-                exc_info=True,
-            )
-            run_completed = True
-            break
-
-        # Tools are wrapped with context_bridge which writes directly to
-        # context_vars_dict (same dict reference). No sync-back needed here —
-        # syncing turn_vars back would overwrite those mutations with the
-        # pre-turn snapshot.
-
-        # Apply agent_text derived context triggers before routing.
-        if derived_context_manager is not None and last_reply is not None:
-            reply_body = last_reply.body if hasattr(last_reply, "body") else str(last_reply or "")
-            if reply_body:
-                derived_context_manager.apply_agent_text(current_agent_name, reply_body)
-
-        structured_payload = await _emit_validated_agent_output(
-            current_agent_name=current_agent_name,
-            last_reply=last_reply,
+async def _run_ag2_network_phase(
+    *,
+    workflow_name: str,
+    chat_id: str,
+    app_id: str,
+    agents: dict[str, Any],
+    transition_rules: list[dict[str, Any]],
+    initial_agent_name: str,
+    initial_message: str,
+    context_variables: dict[str, Any],
+    structured_registry: dict[str, Any],
+    max_turns: int,
+) -> Any:
+    return await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
             workflow_name=workflow_name,
             chat_id=chat_id,
             app_id=app_id,
-            user_id=user_id,
-            turn_sequence=turn,
-            context_vars_dict=context_vars_dict,
-            context_bridge=context_bridge,
+            agents=agents,
+            transition_rules=transition_rules,
+            initial_agent_name=initial_agent_name,
+            initial_message=initial_message,
+            context_variables=context_variables,
             structured_registry=structured_registry,
-            auto_tool_agents=auto_tool_agents,
-            wf_logger=wf_logger,
+            max_turns=max_turns,
         )
-        if isinstance(structured_payload, dict):
-            code_files = structured_payload.get("code_files")
-            if isinstance(code_files, list) and code_files:
-                file_map: Dict[str, str] = {}
-                for entry in code_files:
-                    if not isinstance(entry, dict):
-                        continue
-                    filename = entry.get("filename") or entry.get("path")
-                    content = entry.get("content")
-                    if filename and content is not None:
-                        file_map[str(filename)] = str(content)
-                if file_map and not (
-                    current_agent_name in auto_tool_agents
-                    and isinstance(context_vars_dict.get("generated_files"), dict)
-                    and context_vars_dict.get("generated_files")
-                ):
-                    context_vars_dict["generated_files"] = file_map
-                    context_vars_dict.setdefault("assembled_source", "structured_code_files")
-
-        if task_batches_config is not None:
-            try:
-                from .task_batches import execute_task_batches_for_trigger
-
-                await execute_task_batches_for_trigger(
-                    workflow_name=workflow_name,
-                    trigger_agent=current_agent_name,
-                    batches_config=task_batches_config,
-                    agents=agents,
-                    context_variables=context_vars_dict,
-                    structured_output=structured_payload,
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    user_id=user_id,
-                    transport=transport,
-                    wf_logger=wf_logger,
-                )
-            except Exception as task_batch_err:
-                wf_logger.error(
-                    "[%s] Task batch execution failed after %s: %s",
-                    workflow_name_upper,
-                    current_agent_name,
-                    task_batch_err,
-                    exc_info=True,
-                )
-                run_completed = True
-                break
-
-        # Determine next agent through the compiled AG2 Network graph.
-        if sequence_state.get("awaiting_user_input"):
-            awaiting_user_input = True
-            wf_logger.info("[%s] Pausing for user input at agent '%s'", workflow_name_upper, current_agent_name)
-            break
-
-        next_agent = resolve_next_agent(
-            transition_graph,
-            current_agent_name=current_agent_name,
-            context_variables=context_vars_dict,
-            agent_name_by_id=agent_name_by_id,
-            participant_order=list(agent_id_by_name.values()),
-            turn_count=turn + 1,
-        )
-        wf_logger.info("[%s] Routing: %s -> %s", workflow_name_upper, current_agent_name, next_agent)
-
-        if next_agent == "user":
-            awaiting_user_input = True
-            break
-        elif next_agent in ("terminate", None):
-            run_completed = True
-            break
-        else:
-            # Add agent response to shared history for next agent
-            if last_reply and last_reply.body:
-                body = last_reply.body
-                if not isinstance(body, str):
-                    body = json.dumps(_reply_body_to_data(last_reply), ensure_ascii=False, default=str)
-                history.append({
-                    "role": "assistant",
-                    "name": current_agent_name,
-                    "content": _compact_history_content(current_agent_name, body),
-                })
-            current_agent_name = next_agent
-
-    else:
-        # Exhausted max_turns
-        run_completed = True
-
-    # Emit run completion event
-    await transport.send_event_to_ui({
-        "kind": "run_complete",
-        "workflow": workflow_name,
-        "chat_id": chat_id,
-        "run_completed": run_completed,
-        "awaiting_user_input": awaiting_user_input,
-    }, chat_id)
-
-    return {
-        "response": last_reply,
-        "run_completed": run_completed,
-        "awaiting_user_input": awaiting_user_input,
-        "sequence_counter": sequence_state.get("counter", 0),
-    }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -740,19 +244,19 @@ async def run_workflow_orchestration(
     workflow_name: str,
     app_id: str,
     chat_id: str,
-    user_id: Optional[str] = None,
-    initial_message: Optional[str] = None,
-    initial_agent_name_override: Optional[str] = None,
-    agents_factory: Optional[Callable] = None,
-    context_factory: Optional[Callable] = None,
-    handoffs_factory: Optional[Callable] = None,
+    user_id: str | None = None,
+    initial_message: str | None = None,
+    initial_agent_name_override: str | None = None,
+    agents_factory: Callable | None = None,
+    context_factory: Callable | None = None,
+    transition_graph_factory: Callable | None = None,
     **kwargs: Any,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     start_time = perf_counter()
     workflow_name_upper = workflow_name.upper()
-    agents: Dict[str, Any] = {}
-    stream_state: Dict[str, Any] = {}
-    result_payload: Optional[Dict[str, Any]] = None
+    agents: dict[str, Any] = {}
+    stream_state: dict[str, Any] = {}
+    result_payload: dict[str, Any] | None = None
     workflow_status_value = 0
 
     wf_logger = get_workflow_logger(workflow_name, chat_id=chat_id, app_id=app_id)
@@ -767,15 +271,7 @@ async def run_workflow_orchestration(
     if not transport:
         raise RuntimeError(f"SimpleTransport not available for {workflow_name}")
 
-    termination_handler = create_termination_handler(
-        chat_id=chat_id, app_id=app_id, workflow_name=workflow_name, transport=transport,
-    )
-
-    trace_id_hex = uuid.uuid4().hex
-    perf_mgr = await get_performance_manager()
-    await perf_mgr.initialize()
-    await perf_mgr.record_workflow_start(chat_id, app_id, workflow_name, user_id or "unknown")
-    await perf_mgr.attach_trace_id(chat_id, trace_id_hex)
+    lifecycle_manager = None
 
     try:
         # 1) Load configuration
@@ -784,8 +280,8 @@ async def run_workflow_orchestration(
         max_turns = cfg["max_turns"]
         workflow_startup_mode = cfg["workflow_startup_mode"]
         initial_agent_name: str = cfg["initial_agent_name"]
-        handoff_rules: List[Dict[str, Any]] = (
-            (config.get("handoffs") or {}).get("handoff_rules") or []
+        transition_rules: list[dict[str, Any]] = (
+            (config.get("transition_graph") or {}).get("transition_rules") or []
         )
 
         if initial_agent_name_override:
@@ -797,9 +293,8 @@ async def run_workflow_orchestration(
         )
 
         # 2) Resume or start chat
-        resumed_messages, initial_messages = await _resume_or_initialize_chat(
+        resumed_messages, initial_messages = await resume_or_initialize_chat(
             persistence_manager=persistence_manager,
-            termination_handler=termination_handler,
             config=config,
             chat_id=chat_id,
             app_id=app_id,
@@ -817,8 +312,8 @@ async def run_workflow_orchestration(
         except Exception:
             cache_seed = None
 
-        # 4) Structured outputs and task batch preload
-        structured_registry: Dict[str, Any] = {}
+        # 4) Structured outputs and task batch contract check
+        structured_registry: dict[str, Any] = {}
         try:
             from .outputs.structured import load_workflow_structured_outputs as _preload_so
 
@@ -834,13 +329,6 @@ async def run_workflow_orchestration(
             task_batches_config = None
             wf_logger.warning("[%s] task_batches.yaml preload failed: %s", workflow_name_upper, tb_err)
 
-        try:
-            from .workflow_manager import workflow_manager
-
-            auto_tool_agents = set(workflow_manager.get_auto_tool_agents(workflow_name))
-        except Exception:
-            auto_tool_agents = set()
-
         chat_logger.info(
             "[%s] WORKFLOW_STARTED chat_id=%s mode=%s",
             workflow_name_upper, chat_id, workflow_startup_mode,
@@ -848,7 +336,7 @@ async def run_workflow_orchestration(
 
         # 5) Build context
         context_start = perf_counter()
-        frontend_context: Optional[Dict[str, Any]] = None
+        frontend_context: dict[str, Any] | None = None
         try:
             if transport and hasattr(transport, "connections") and chat_id in transport.connections:
                 frontend_context = transport.connections[chat_id].get("frontend_context")
@@ -866,7 +354,6 @@ async def run_workflow_orchestration(
             from .context.variables import _load_context_async
             context = await _load_context_async(workflow_name, app_id)
 
-        # Merge frontend context
         if frontend_context and context is not None:
             for key, value in frontend_context.items():
                 prefixed = f"ui_{key}" if not key.startswith("ui_") else key
@@ -878,12 +365,11 @@ async def run_workflow_orchestration(
                 except Exception:
                     pass
 
-        # Merge persisted extra context (caller-provided run context and correlation)
         try:
             if context is not None:
                 extra_ctx = await persistence_manager.fetch_chat_session_extra_context(chat_id=chat_id, app_id=app_id)
                 if isinstance(extra_ctx, dict) and extra_ctx:
-                    _merge_persisted_extra_context(context, extra_ctx)
+                    merge_persisted_extra_context(context, extra_ctx)
         except Exception as seed_err:
             wf_logger.debug("[%s] Persisted extra context merge failed: %s", workflow_name_upper, seed_err)
 
@@ -895,7 +381,7 @@ async def run_workflow_orchestration(
 
         # Flatten context to a plain dict for beta Agent
         if context is None:
-            ctx_dict: Dict[str, Any] = {}
+            ctx_dict: dict[str, Any] = {}
         elif hasattr(context, "to_dict"):
             ctx_dict = context.to_dict()
         elif hasattr(context, "data") and isinstance(getattr(context, "data", None), dict):
@@ -905,12 +391,22 @@ async def run_workflow_orchestration(
         else:
             ctx_dict = {}
 
-        # Ensure routing keys are present
         ctx_dict.setdefault("workflow_name", workflow_name)
         ctx_dict.setdefault("app_id", app_id)
         ctx_dict.setdefault("chat_id", chat_id)
         if user_id:
             ctx_dict.setdefault("user_id", user_id)
+        if context is not None:
+            for key in ("workflow_name", "app_id", "chat_id", "user_id"):
+                if key not in ctx_dict:
+                    continue
+                try:
+                    if hasattr(context, "set"):
+                        context.set(key, ctx_dict[key])
+                    elif hasattr(context, "__setitem__"):
+                        context[key] = ctx_dict[key]
+                except Exception:
+                    pass
 
         # 6) Create agents
         if agents_factory:
@@ -929,16 +425,14 @@ async def run_workflow_orchestration(
             cb = getattr(ag, "_mozaiks_context_bridge", None)
             if cb is not None:
                 context_bridge = cb
-                # Sync ctx_dict into the bridge's underlying data dict
                 context_bridge._data.update(ctx_dict)
-                ctx_dict = context_bridge._data  # point to the same dict
+                ctx_dict = context_bridge._data
                 break
 
         if context_bridge is None:
             from .agents.factory import ContextVariablesBridge
             context_bridge = ContextVariablesBridge(ctx_dict)
 
-        # Store agents on transport
         try:
             if transport and hasattr(transport, "connections") and chat_id in transport.connections:
                 transport.connections[chat_id]["agents"] = agents
@@ -946,14 +440,14 @@ async def run_workflow_orchestration(
         except Exception:
             pass
 
-        # Derived context manager
-        derived_context_manager: Optional[Any] = None
+        # 7) Derived context manager
+        derived_context_manager: Any | None = None
         try:
             derived_context_manager = DerivedContextManager(workflow_name, agents, context)
             if derived_context_manager.has_variables():
                 derived_context_manager.seed_defaults()
 
-                def _derived_listener(payload: Dict[str, Any]) -> None:
+                def _derived_listener(payload: dict[str, Any]) -> None:
                     try:
                         var_name = payload.get("variable")
                         value = payload.get("value")
@@ -979,24 +473,19 @@ async def run_workflow_orchestration(
             except Exception:
                 pass
 
-        # Validate handoff routing (warn on misconfigured rules)
         try:
-            from .agents.handoffs import wire_handoffs_with_debugging
-            wire_handoffs_with_debugging(workflow_name, agents)
+            from .agents.transition_graph import wire_transition_graph_with_debugging
+            wire_transition_graph_with_debugging(workflow_name, agents)
         except Exception as hw_err:
-            wf_logger.debug("[%s] Handoff validation failed: %s", workflow_name_upper, hw_err)
+            wf_logger.debug("[%s] Transition graph validation failed: %s", workflow_name_upper, hw_err)
 
-        # 7) Normalize initial messages
+        # 8) Normalize initial messages
         initial_messages = _normalize_to_strict_ag2(initial_messages, default_user_name="user")
 
-        run_stream = persistence_manager.build_run_stream(chat_id=chat_id, app_id=app_id)
-
-        # 8) Lifecycle before_chat
-        lifecycle_manager = None
+        # 9) Lifecycle before_chat
         try:
             from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
             lifecycle_manager = get_lifecycle_manager(workflow_name)
-            # Wrap ctx_dict in a bridge-compatible object for lifecycle tools
             await lifecycle_manager.trigger_before_chat(context_variables=context_bridge)
             wf_logger.info("[%s] Lifecycle before_chat completed", workflow_name_upper)
         except Exception as lc_err:
@@ -1010,36 +499,155 @@ async def run_workflow_orchestration(
             is_resume=resumed_mode,
         )
 
-        # 9) Execute beta orchestration loop
-        stream_state = await _run_beta_orchestration_loop(
-            agents=agents,
-            initial_agent_name=initial_agent_name,
-            initial_messages=initial_messages,
+        # 10) Execute AG2 Network workflow channel
+        startup_sequence = await _emit_startup_greeting_if_needed(
+            config=config,
             resumed_messages=resumed_messages,
-            context_vars_dict=ctx_dict,
-            context_bridge=context_bridge,
-            handoff_rules=handoff_rules,
-            max_turns=max_turns,
+            workflow_startup_mode=workflow_startup_mode,
+            initial_agent_name=initial_agent_name,
             transport=transport,
+            persistence_manager=persistence_manager,
             chat_id=chat_id,
             app_id=app_id,
-            run_stream=run_stream,
-            workflow_name=workflow_name,
             workflow_name_upper=workflow_name_upper,
-            user_id=user_id,
-            persistence_manager=persistence_manager,
-            perf_mgr=perf_mgr,
             wf_logger=wf_logger,
-            lifecycle_manager=lifecycle_manager,
-            derived_context_manager=derived_context_manager,
-            workflow_startup_mode=workflow_startup_mode,
-            config=config,
-            task_batches_config=task_batches_config,
-            structured_registry=structured_registry,
-            auto_tool_agents=auto_tool_agents,
         )
+        network_prompt = _messages_to_network_prompt(initial_messages)
+        projected_sequence = startup_sequence
+        project_final_runner_result = True
+        if task_batches_config is not None:
+            trigger_agent_name = initial_agent_name
+            first_phase_result = await _run_ag2_network_phase(
+                workflow_name=workflow_name,
+                chat_id=chat_id,
+                app_id=app_id,
+                agents=agents,
+                transition_rules=[
+                    {
+                        "source_agent": trigger_agent_name,
+                        "target_agent": "terminate",
+                        "transition_type": "after_turn",
+                    }
+                ],
+                initial_agent_name=trigger_agent_name,
+                initial_message=network_prompt,
+                context_variables=dict(ctx_dict),
+                structured_registry=structured_registry,
+                max_turns=max_turns,
+            )
+            if first_phase_result.status is not RunStatus.COMPLETED:
+                runner_result = first_phase_result
+            else:
+                projected_sequence = await _project_ag2_wal_to_mozaiks_transport(
+                    runner_result=first_phase_result,
+                    transport=transport,
+                    persistence_manager=persistence_manager,
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    agent_name_by_id=first_phase_result.agent_name_by_id,
+                    initial_sequence=projected_sequence,
+                )
+                structured_payload = _first_agent_payload_from_runner_result(
+                    first_phase_result,
+                    trigger_agent_name,
+                )
+                from .task_batches import execute_task_batches_for_trigger
 
-        # 10) Persist final context snapshot
+                await execute_task_batches_for_trigger(
+                    workflow_name=workflow_name,
+                    trigger_agent=trigger_agent_name,
+                    batches_config=task_batches_config,
+                    agents=agents,
+                    context_variables=ctx_dict,
+                    structured_output=structured_payload,
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    user_id=user_id,
+                    transport=transport,
+                    wf_logger=wf_logger,
+                    fresh_agents_per_task=True,
+                )
+                continuation_agent = _next_agent_after_trigger(
+                    transition_rules=transition_rules,
+                    trigger_agent=trigger_agent_name,
+                )
+                if continuation_agent:
+                    runner_result = await _run_ag2_network_phase(
+                        workflow_name=workflow_name,
+                        chat_id=chat_id,
+                        app_id=app_id,
+                        agents=agents,
+                        transition_rules=transition_rules,
+                        initial_agent_name=continuation_agent,
+                        initial_message="Continue with the completed deterministic task batch outputs.",
+                        context_variables=ctx_dict,
+                        structured_registry=structured_registry,
+                        max_turns=max_turns,
+                    )
+                else:
+                    runner_result = first_phase_result
+                    project_final_runner_result = False
+        else:
+            runner_result = await _run_ag2_network_phase(
+                workflow_name=workflow_name,
+                chat_id=chat_id,
+                app_id=app_id,
+                agents=agents,
+                transition_rules=transition_rules,
+                initial_agent_name=initial_agent_name,
+                initial_message=network_prompt,
+                context_variables=ctx_dict,
+                structured_registry=structured_registry,
+                max_turns=max_turns,
+            )
+
+        if project_final_runner_result:
+            sequence_counter = await _project_ag2_wal_to_mozaiks_transport(
+                runner_result=runner_result,
+                transport=transport,
+                persistence_manager=persistence_manager,
+                chat_id=chat_id,
+                app_id=app_id,
+                agent_name_by_id=runner_result.agent_name_by_id,
+                initial_sequence=projected_sequence,
+            )
+        else:
+            sequence_counter = projected_sequence
+
+        ctx_dict.update(dict(runner_result.context_variables or {}))
+        run_failed = runner_result.status is RunStatus.FAILED
+        run_error = runner_result.error
+        awaiting_user_input = runner_result.status is RunStatus.PAUSED
+        run_completed = runner_result.status is RunStatus.COMPLETED
+        run_status = (
+            "failed" if run_failed
+            else "paused" if awaiting_user_input
+            else "completed" if run_completed
+            else "in_progress"
+        )
+        await transport.send_event_to_ui(
+            {
+                "kind": "run_complete",
+                "workflow": workflow_name,
+                "chat_id": chat_id,
+                "run_completed": bool(run_completed and not run_failed),
+                "awaiting_user_input": awaiting_user_input,
+                "status": run_status,
+                "reason": "failed" if run_failed else ("awaiting_user_input" if awaiting_user_input else "finished"),
+                **({"error": run_error} if run_error else {}),
+            },
+            chat_id,
+        )
+        stream_state = {
+            "run_completed": bool(run_completed and not run_failed),
+            "awaiting_user_input": awaiting_user_input,
+            "failed": run_failed,
+            "error": run_error,
+            "run_status": run_status,
+            "sequence_counter": sequence_counter,
+        }
+
+        # 11) Persist final context snapshot
         try:
             await persistence_manager.persist_context_variables(
                 chat_id=chat_id, app_id=app_id, variables=dict(ctx_dict),
@@ -1047,27 +655,25 @@ async def run_workflow_orchestration(
         except Exception as persist_ctx_err:
             wf_logger.debug("[%s] Final context persist failed: %s", workflow_name_upper, persist_ctx_err)
 
-        # 11) Usage reconciliation
-        await _reconcile_final_usage(
-            agents=agents,
-            persistence_manager=persistence_manager,
-            chat_id=chat_id,
-            app_id=app_id,
-            user_id=user_id,
-            workflow_name=workflow_name,
-            wf_logger=wf_logger,
-        )
-
-        run_completed = bool(stream_state.get("run_completed", False))
-        awaiting_user_input = bool(stream_state.get("awaiting_user_input", False))
-        workflow_complete = run_completed and not awaiting_user_input
+        workflow_complete = run_completed and not awaiting_user_input and not run_failed
         workflow_status_value = 1 if workflow_complete else 0
 
-        if workflow_complete:
-            try:
-                await termination_handler.on_conversation_end(max_turns_reached=False)
-            except Exception as term_err:
-                logger.error("Termination handler failed: %s", term_err)
+        if run_failed:
+            wf_logger.error("[%s] Run failed%s", workflow_name_upper, f": {run_error}" if run_error else "")
+            if lifecycle_manager is not None:
+                try:
+                    await lifecycle_manager.execute_trigger(
+                        "on_fail",
+                        context_variables=context_bridge,
+                        app_id=app_id,
+                        execution_id=chat_id,
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        workflow_name=workflow_name,
+                        error=run_error,
+                    )
+                except Exception as fail_lifecycle_err:
+                    wf_logger.debug("[%s] Lifecycle on_fail failed: %s", workflow_name_upper, fail_lifecycle_err)
         else:
             wf_logger.info("[%s] Run paused awaiting user input", workflow_name_upper)
 
@@ -1081,31 +687,59 @@ async def run_workflow_orchestration(
             "user_id": user_id,
             "messages": None,
             "max_turns_reached": False,
-            "response": stream_state.get("response"),
+            "response": None,
             "run_completed": workflow_complete,
             "awaiting_user_input": awaiting_user_input,
-            "run_status": workflow_status_value,
+            "run_status": "failed" if run_failed else workflow_status_value,
+            "failed": run_failed,
+            "error": run_error,
+            "ag2_channel_id": runner_result.channel_id,
+            "ag2_close_reason": runner_result.close_reason,
+            "structured_outputs": runner_result.structured_outputs,
         }
 
     except Exception as e:
         logger.error("[%s] Orchestration failed: %s", workflow_name_upper, e, exc_info=True)
+        if lifecycle_manager is not None:
+            try:
+                await lifecycle_manager.execute_trigger(
+                    "on_fail",
+                    app_id=app_id,
+                    execution_id=chat_id,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    workflow_name=workflow_name,
+                    error=str(e),
+                )
+            except Exception:
+                pass
         try:
-            await termination_handler.on_conversation_end()
+            await transport.send_event_to_ui(
+                {"kind": "error", "workflow": workflow_name, "chat_id": chat_id, "message": str(e), "error": str(e), "status": "failed"},
+                chat_id,
+            )
+        except Exception:
+            pass
+        try:
+            await transport.send_event_to_ui(
+                {"kind": "run_complete", "workflow": workflow_name, "chat_id": chat_id, "run_completed": False, "awaiting_user_input": False, "status": "failed", "reason": "failed", "error": str(e)},
+                chat_id,
+            )
         except Exception:
             pass
         raise
     finally:
         try:
-            await perf_mgr.record_workflow_end(chat_id, workflow_status_value)
-            await perf_mgr.flush(chat_id)
+            if workflow_status_value == 1:
+                await persistence_manager.mark_chat_completed(chat_id, app_id=app_id)
         except Exception:
             pass
-        duration_sec = perf_counter() - start_time
 
-    # Post-run cleanup
+    # Post-run cleanup and final logging
     try:
         duration = perf_counter() - start_time
-        final_label = "completed" if workflow_status_value == 1 else "awaiting_input"
+        failed_label = bool(isinstance(result_payload, dict) and result_payload.get("failed"))
+        final_label = "completed" if workflow_status_value == 1 else ("failed" if failed_label else "awaiting_input")
         wf_lifecycle_logger.info(
             "[%s] Workflow settled",
             workflow_name_upper,
@@ -1119,15 +753,14 @@ async def run_workflow_orchestration(
         chat_logger.info(
             "[%s] WORKFLOW_%s chat_id=%s duration=%.2fs agents=%d",
             workflow_name_upper,
-            "COMPLETED" if workflow_status_value == 1 else "AWAITING_INPUT",
+            "COMPLETED" if workflow_status_value == 1 else ("FAILED" if failed_label else "AWAITING_INPUT"),
             chat_id, duration, len(agents),
         )
-        # Log agent outputs file if it exists
         try:
             agent_outputs_file = get_agent_outputs_dir() / f"agent_outputs_{chat_id}.jsonl"
             if agent_outputs_file.exists():
                 file_size = agent_outputs_file.stat().st_size
-                with open(agent_outputs_file, "r", encoding="utf-8") as f:
+                with open(agent_outputs_file, encoding="utf-8") as f:
                     line_count = sum(1 for _ in f)
                 print("\n" + "=" * 80)
                 print(f"AGENT OUTPUTS LOG: {agent_outputs_file.resolve()}")

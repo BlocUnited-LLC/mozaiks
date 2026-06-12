@@ -3,25 +3,29 @@
 # DESCRIPTION: Loads workflow declaratives, caches parsed configs, and indexes workflow UI tool metadata.
 # ==============================================================================
 
+import importlib
 import json
 import os
-import yaml
-import importlib
-from typing import Dict, Any, List, Optional, Tuple, Callable, Awaitable, Set
-from pathlib import Path
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
+
+from .contract_validation import validate_workflow_context_contract
 from .declarative import (
     parse_a2a_config,
     parse_agents_config,
     parse_context_variables_config,
-    parse_handoffs_config,
-    parse_hooks_config,
+    parse_middleware_config,
     parse_orchestrator_config,
     parse_structured_outputs_config,
     parse_tools_config,
+    parse_transition_graph_config,
     parse_ui_config,
 )
 from .paths import (
@@ -37,14 +41,14 @@ logger = get_workflow_logger(workflow_name="unified_workflow_manager")
 class WorkflowInfo:
     """Container for complete workflow information"""
     name: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
     path: str
     status: str = "loaded"
-    module: Optional[Any] = None
+    module: Any | None = None
     tools_loaded: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation"""
         return {
             'name': self.name,
@@ -59,8 +63,8 @@ class WorkflowInfo:
 class UnifiedWorkflowManager:
     """Unified workflow manager focusing on config + UI tool metadata.
 
-    Lifecycle "tools" removed; backend (agent) tools are bound directly during
-    agent creation; hooks are managed via hooks_loader.
+    Backend agent tools are bound directly during agent creation; prompt
+    middleware declarations are compiled into AG2 beta middleware.
     """
 
     _instance = None
@@ -71,21 +75,21 @@ class UnifiedWorkflowManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, workflows_base_path: Optional[str] = None):
+    def __init__(self, workflows_base_path: str | None = None):
         if hasattr(self, "_initialized"):
             return
         # Core caches / registries
         self.workflows_base_path = resolve_workflows_root(workflows_base_path)
-        self._ai_config: Dict[str, Any] = {}
-        self._workflows: Dict[str, WorkflowInfo] = {}
-        self._workflow_paths: Dict[str, Path] = {}
-        self._config_cache: Dict[str, Dict[str, Any]] = {}
-        self._ui_registry: Dict[str, Dict[str, Any]] = {}
-        self._ui_tool_path_cache: Dict[str, str] = {}
+        self._ai_config: dict[str, Any] = {}
+        self._workflows: dict[str, WorkflowInfo] = {}
+        self._workflow_paths: dict[str, Path] = {}
+        self._config_cache: dict[str, dict[str, Any]] = {}
+        self._ui_registry: dict[str, dict[str, Any]] = {}
+        self._ui_tool_path_cache: dict[str, str] = {}
         self._ui_loaded_workflows: set[str] = set()
         # Runtime handler and metadata registries
-        self._handlers: Dict[str, Callable[..., Awaitable[Any]]] = {}
-        self._handler_metadata: Dict[str, Dict[str, Any]] = {}
+        self._handlers: dict[str, Callable[..., Awaitable[Any]]] = {}
+        self._handler_metadata: dict[str, dict[str, Any]] = {}
         self._initialized = False
         # Initial load
         self._load_all_workflows()
@@ -95,7 +99,7 @@ class UnifiedWorkflowManager:
         )
 
     # ------------------------- UI TOOLS -------------------------
-    def _load_workflow_tools(self, workflow_path: str, *, tools_payload: Optional[Dict[str, Any]] = None) -> None:
+    def _load_workflow_tools(self, workflow_path: str, *, tools_payload: dict[str, Any] | None = None) -> None:
         from pathlib import Path as _P
         tools_yaml_path = _P(workflow_path) / "tools.yaml"
 
@@ -104,11 +108,11 @@ class UnifiedWorkflowManager:
             return
 
         try:
-            data: Dict[str, Any] = {}
+            data: dict[str, Any] = {}
             if isinstance(tools_payload, dict):
                 data = dict(tools_payload)
             elif tools_yaml_path.exists():
-                with open(tools_yaml_path, 'r', encoding='utf-8') as f:
+                with open(tools_yaml_path, encoding='utf-8') as f:
                     raw = yaml.safe_load(f) or {}
                 data = parse_tools_config(raw)
 
@@ -259,7 +263,7 @@ class UnifiedWorkflowManager:
             logger.error(f"Failed parsing tool config for {workflow_name}: {e}")
 
 
-    def get_ui_tool_record(self, tool_path_or_id: str) -> Optional[Dict[str, Any]]:
+    def get_ui_tool_record(self, tool_path_or_id: str) -> dict[str, Any] | None:
         """Lookup UI tool record by module path or tool id.
 
         Accepts either the full python path or the tool_id.
@@ -273,10 +277,10 @@ class UnifiedWorkflowManager:
                 return rec
         return None
 
-    def iter_ui_tools(self) -> List[Dict[str, Any]]:
+    def iter_ui_tools(self) -> list[dict[str, Any]]:
         return list(self._ui_registry.values())
 
-    def detect_ui_tool_call(self, event: Any) -> Tuple[bool, Dict[str, Any]]:
+    def detect_ui_tool_call(self, event: Any) -> tuple[bool, dict[str, Any]]:
         name = getattr(event, "tool_name", None)
         if not isinstance(name, str) or not name:
             return False, {}
@@ -289,7 +293,7 @@ class UnifiedWorkflowManager:
     # DISCOVERY & LOADING
     # ========================================================================
     
-    def discover_workflows(self) -> List[str]:
+    def discover_workflows(self) -> list[str]:
         """Discover all available workflows in the workflows directory."""
         if not self.workflows_base_path.exists():
             logger.warning(f"Workflows directory not found: {self.workflows_base_path}")
@@ -341,6 +345,11 @@ class UnifiedWorkflowManager:
             logger.warning(f"⚠️ Empty config for workflow: {workflow_name}")
             config = {}
         self._validate_orchestrator_contract(workflow_name, config)
+        validate_workflow_context_contract(
+            workflow_name=workflow_name,
+            workflow_config=config,
+            workflow_path=workflow_path,
+        )
 
         workflow_info = WorkflowInfo(name=workflow_name, config=config, path=str(workflow_path))
 
@@ -374,7 +383,7 @@ class UnifiedWorkflowManager:
         logger.info(f"Successfully loaded workflow: {workflow_name}")
         return workflow_info
 
-    def resolve_workflow_path(self, workflow_name: str) -> Optional[Path]:
+    def resolve_workflow_path(self, workflow_name: str) -> Path | None:
         normalized_name = str(workflow_name or "").strip().lower()
         if not normalized_name:
             return None
@@ -390,7 +399,7 @@ class UnifiedWorkflowManager:
     # CONFIGURATION ACCESS API
     # ========================================================================
     
-    def get_config(self, workflow_name: str) -> Dict[str, Any]:
+    def get_config(self, workflow_name: str) -> dict[str, Any]:
         """Get configuration for a workflow type"""
         normalized_name = workflow_name.lower()
         return self._config_cache.get(normalized_name, {})
@@ -415,12 +424,12 @@ class UnifiedWorkflowManager:
                 return False
         return False
     
-    def get_initial_message(self, workflow_name: str) -> Optional[str]:
+    def get_initial_message(self, workflow_name: str) -> str | None:
         """Get initial message for workflow"""
         config = self.get_config(workflow_name)
         return config.get("initial_message")
     
-    def get_visual_agents(self, workflow_name: str) -> List[str]:
+    def get_visual_agents(self, workflow_name: str) -> list[str]:
         """Return list of agents considered 'visual' for chat rendering.
 
         The canonical representation is the top-level "visual_agents" list in the
@@ -433,7 +442,7 @@ class UnifiedWorkflowManager:
             return []
         return [str(agent) for agent in visual_agents if isinstance(agent, str)]
 
-    def get_auto_tool_agents(self, workflow_name: str) -> Set[str]:
+    def get_auto_tool_agents(self, workflow_name: str) -> set[str]:
         """Return set of agent names that have auto-invoke tools.
 
         Derives auto-tool agents from tools.yaml - any agent with a tool marked
@@ -453,7 +462,7 @@ class UnifiedWorkflowManager:
         if not isinstance(tools_list, list):
             return set()
 
-        auto_tool_agents: Set[str] = set()
+        auto_tool_agents: set[str] = set()
 
         for entry in tools_list:
             if not isinstance(entry, dict):
@@ -475,7 +484,7 @@ class UnifiedWorkflowManager:
 
         return auto_tool_agents
 
-    def get_ui_hidden_triggers(self, workflow_name: str) -> Dict[str, Set[str]]:
+    def get_ui_hidden_triggers(self, workflow_name: str) -> dict[str, set[str]]:
         """Return mapping of agent_name -> set of ui_hidden trigger values.
 
         Extracts state variables with ui_hidden: true from context_variables.yaml
@@ -489,7 +498,7 @@ class UnifiedWorkflowManager:
         context_vars = config.get("context_variables", {})
         definitions = context_vars.get("definitions", {}) if isinstance(context_vars, dict) else {}
 
-        hidden_triggers: Dict[str, Set[str]] = {}
+        hidden_triggers: dict[str, set[str]] = {}
         if not isinstance(definitions, dict):
             return hidden_triggers
 
@@ -517,13 +526,13 @@ class UnifiedWorkflowManager:
 
         return hidden_triggers
 
-    def get_structured_output_registry(self, workflow_name: str) -> Dict[str, Optional[str]]:
+    def get_structured_output_registry(self, workflow_name: str) -> dict[str, str | None]:
         """Return a normalized mapping: agent_name -> model_name or None."""
         config = self.get_config(workflow_name)
         so = config.get("structured_outputs") or {}
         reg = so.get("registry")
 
-        normalized: Dict[str, Optional[str]] = {}
+        normalized: dict[str, str | None] = {}
 
         if isinstance(reg, dict):
             for agent, model in reg.items():
@@ -532,16 +541,16 @@ class UnifiedWorkflowManager:
 
         return normalized
 
-    def get_agent_structured_outputs_config(self, workflow_name: str) -> Dict[str, bool]:
+    def get_agent_structured_outputs_config(self, workflow_name: str) -> dict[str, bool]:
         """Return agent -> bool indicating whether a structured model is assigned."""
         reg = self.get_structured_output_registry(workflow_name)
         return {agent: (model is not None) for agent, model in reg.items()}
     
-    def get_all_workflow_names(self) -> List[str]:
+    def get_all_workflow_names(self) -> list[str]:
         """Get list of all loaded workflow names"""
         return [info.name for info in self._workflows.values() if info.status == "loaded"]
 
-    def list_workflows(self) -> List[str]:
+    def list_workflows(self) -> list[str]:
         """Alias for get_all_workflow_names() — returns all loaded workflow names."""
         return self.get_all_workflow_names()
 
@@ -549,7 +558,7 @@ class UnifiedWorkflowManager:
     # LIFECYCLE MANAGEMENT API
     # ========================================================================
     
-    def reload_workflow(self, workflow_name: str) -> Dict[str, Any]:
+    def reload_workflow(self, workflow_name: str) -> dict[str, Any]:
         """Hot-reload a workflow and its tools"""
         normalized_name = workflow_name.lower()
         
@@ -595,17 +604,17 @@ class UnifiedWorkflowManager:
         
         logger.info(f"Unloaded workflow: {workflow_name}")
     
-    def get_workflow_info(self, workflow_name: str) -> Optional[Dict[str, Any]]:
+    def get_workflow_info(self, workflow_name: str) -> dict[str, Any] | None:
         """Get complete information about a loaded workflow"""
         normalized_name = workflow_name.lower()
         workflow_info = self._workflows.get(normalized_name)
         return workflow_info.to_dict() if workflow_info else None
     
-    def list_loaded_workflows(self) -> List[str]:
+    def list_loaded_workflows(self) -> list[str]:
         """List all currently loaded workflows"""
         return [info.name for info in self._workflows.values()]
     
-    def get_ui_tools(self, workflow_name: str) -> Dict[str, Any]:
+    def get_ui_tools(self, workflow_name: str) -> dict[str, Any]:
         return {k: v for k, v in getattr(self, '_ui_registry', {}).items() if v.get('workflow_name') == workflow_name}
 
     # Convenience method (list form) for external callers
@@ -616,7 +625,7 @@ class UnifiedWorkflowManager:
     # VALIDATION API
     # ========================================================================
     
-    def validate_workflow(self, workflow_name: str) -> Dict[str, Any]:
+    def validate_workflow(self, workflow_name: str) -> dict[str, Any]:
         """Validate a workflow's structure and configuration"""
         workflow_path = self.resolve_workflow_path(workflow_name) or (self.workflows_base_path / workflow_name)
         validation_result = {
@@ -640,7 +649,7 @@ class UnifiedWorkflowManager:
         if orchestrator_yaml.exists():
             validation_result['info']['has_orchestrator_yaml'] = True
             try:
-                with open(orchestrator_yaml, 'r', encoding='utf-8') as f:
+                with open(orchestrator_yaml, encoding='utf-8') as f:
                     orchestrator_data = yaml.safe_load(f) or {}
                 parsed_orchestrator = parse_orchestrator_config(orchestrator_data)
                 self._validate_orchestrator_contract(workflow_name, parsed_orchestrator)
@@ -654,12 +663,12 @@ class UnifiedWorkflowManager:
         # Validate other declarative config files against strict contracts.
         section_parsers = {
             "agents": parse_agents_config,
-            "handoffs": parse_handoffs_config,
+            "transition_graph": parse_transition_graph_config,
             "context_variables": parse_context_variables_config,
             "structured_outputs": parse_structured_outputs_config,
             "tools": parse_tools_config,
             "ui_config": parse_ui_config,
-            "hooks": parse_hooks_config,
+            "middleware": parse_middleware_config,
             "a2a": parse_a2a_config,
         }
         for section_name, parser in section_parsers.items():
@@ -668,7 +677,7 @@ class UnifiedWorkflowManager:
                 continue
             validation_result['info'][f'has_{section_name}'] = True
             try:
-                with open(yaml_path, "r", encoding="utf-8-sig") as f:
+                with open(yaml_path, encoding="utf-8-sig") as f:
                     payload = yaml.safe_load(f)
                 if payload is None:
                     payload = {}
@@ -677,6 +686,18 @@ class UnifiedWorkflowManager:
             except Exception as e:
                 validation_result['errors'].append(f"Invalid {section_name}.yaml: {e}")
                 validation_result['valid'] = False
+
+        try:
+            modular_config = self._load_modular_workflow_config(workflow_path)
+            validate_workflow_context_contract(
+                workflow_name=workflow_name,
+                workflow_config=modular_config,
+                workflow_path=workflow_path,
+            )
+            validation_result['info']['context_contract_valid'] = True
+        except Exception as e:
+            validation_result['errors'].append(f"Invalid workflow context contract: {e}")
+            validation_result['valid'] = False
         
         # Check for tools directory
         tools_dir = workflow_path / "tools"
@@ -705,7 +726,7 @@ class UnifiedWorkflowManager:
     # UTILITY METHODS
     # ========================================================================
     
-    def get_status_summary(self) -> Dict[str, Any]:
+    def get_status_summary(self) -> dict[str, Any]:
         """Get comprehensive status summary"""
         loaded_count = len([w for w in self._workflows.values() if w.status == "loaded"])
         error_count = len([w for w in self._workflows.values() if w.status == "error"])
@@ -721,7 +742,7 @@ class UnifiedWorkflowManager:
             "summary": f"{loaded_count} loaded, {error_count} errors, {tools_loaded_count} with tools"
         }
     
-    def refresh_all(self) -> Dict[str, Any]:
+    def refresh_all(self) -> dict[str, Any]:
         """Refresh all workflows and return summary"""
         logger.info("Refreshing all workflows...")
         self._workflows.clear()
@@ -733,7 +754,7 @@ class UnifiedWorkflowManager:
     # ========================================================================
     # INTERNAL CONFIG LOADING
     # ========================================================================
-    def _load_config_if_exists(self, base_path: Path, config_name: str) -> Optional[Dict[str, Any]]:
+    def _load_config_if_exists(self, base_path: Path, config_name: str) -> dict[str, Any] | None:
         """Load YAML config file.
         
         Args:
@@ -749,7 +770,7 @@ class UnifiedWorkflowManager:
             return None
         
         try:
-            with open(yaml_path, 'r', encoding='utf-8-sig') as f:
+            with open(yaml_path, encoding='utf-8-sig') as f:
                 data = yaml.safe_load(f)
             if data is None:
                 return {}
@@ -769,7 +790,7 @@ class UnifiedWorkflowManager:
 
         return (resolve_active_app_root() / "config" / "ai.json").resolve()
 
-    def _load_ai_config(self) -> Dict[str, Any]:
+    def _load_ai_config(self) -> dict[str, Any]:
         path = self._resolve_ai_config_path()
         sibling_app_root = (self.workflows_base_path.resolve().parent / "app").resolve()
         sibling_app_ai_path = (sibling_app_root / "config" / "ai.json").resolve()
@@ -784,7 +805,7 @@ class UnifiedWorkflowManager:
                 return resolve_runtime_ai_config({}, app_root=app_root)
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 logger.warning(f"AI config must be a JSON object: {path}")
@@ -794,21 +815,22 @@ class UnifiedWorkflowManager:
             logger.error(f"Failed reading AI config {path}: {e}")
             return resolve_runtime_ai_config({}, app_root=app_root)
 
-    def _load_modular_workflow_config(self, workflow_path: Path) -> Dict[str, Any]:
+    def _load_modular_workflow_config(self, workflow_path: Path) -> dict[str, Any]:
         """Load modular workflow configuration from YAML files.
 
-        Canonical files: orchestrator.yaml, agents.yaml, handoffs.yaml, context_variables.yaml,
-        structured_outputs.yaml, tools.yaml, ui_config.yaml, hooks.yaml.
+        Canonical files: orchestrator.yaml, agents.yaml, transition_graph.yaml,
+        context_variables.yaml, structured_outputs.yaml, tools.yaml,
+        ui_config.yaml, middleware.yaml.
         Optional file: a2a.yaml.
         Tools file is expected to expose a unified 'tools' list.
 
         Top-level merge rules:
           - orchestrator keys merged at root
-          - explicit sections under their key (agents, handoffs, context_variables, structured_outputs)
+          - explicit sections under their key (agents, transition_graph, middleware, context_variables, structured_outputs)
           - tools contributes its root keys ('tools' and 'lifecycle_tools') without transformation
           - ui_config contributes its root keys
         """
-        config: Dict[str, Any] = {}
+        config: dict[str, Any] = {}
         if not workflow_path.exists():
             return config
 
@@ -822,10 +844,10 @@ class UnifiedWorkflowManager:
         # Sectioned files
         section_parsers = {
             "agents": parse_agents_config,
-            "handoffs": parse_handoffs_config,
+            "transition_graph": parse_transition_graph_config,
             "context_variables": parse_context_variables_config,
             "structured_outputs": parse_structured_outputs_config,
-            "hooks": parse_hooks_config,
+            "middleware": parse_middleware_config,
             "a2a": parse_a2a_config,
         }
         for section_name, parser in section_parsers.items():
@@ -858,7 +880,7 @@ class UnifiedWorkflowManager:
         
         return config
 
-    def _validate_orchestrator_contract(self, workflow_name: str, config: Dict[str, Any]) -> None:
+    def _validate_orchestrator_contract(self, workflow_name: str, config: dict[str, Any]) -> None:
         """Enforce required orchestrator contract fields for runtime safety."""
         declared_name = str(config.get("workflow_name") or "").strip()
         if not declared_name:
@@ -902,13 +924,13 @@ class UnifiedWorkflowManager:
             return func
         return decorator
 
-    def get_workflow_handler(self, workflow_name: str) -> Optional[Callable[..., Awaitable[Any]]]:
+    def get_workflow_handler(self, workflow_name: str) -> Callable[..., Awaitable[Any]] | None:
         """Return a handler; if absent create a dynamic orchestration delegate."""
         key = workflow_name.lower()
         if key in self._handlers:
             return self._handlers[key]
         # Lazy dynamic handler creation via OrchestrationPort (engine-agnostic)
-        async def dynamic_handler(app_id: str, chat_id: str, user_id: Optional[str] = None, initial_message: Optional[str] = None, **kwargs):
+        async def dynamic_handler(app_id: str, chat_id: str, user_id: str | None = None, initial_message: str | None = None, **kwargs):
             from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
             from mozaiksai.core.ports.orchestration import RunRequest
             adapter = get_ag2_adapter()
@@ -933,7 +955,7 @@ class UnifiedWorkflowManager:
         # Fallback: future: derive from config
         return "websocket"
 
-    def workflow_status_summary(self) -> Dict[str, Any]:
+    def workflow_status_summary(self) -> dict[str, Any]:
         handlers = list(self._handlers.keys())
         return {
             "registered_workflows": handlers,
@@ -954,7 +976,7 @@ def get_workflow_manager() -> UnifiedWorkflowManager:
     """Get the global workflow manager instance"""
     return _unified_workflow_manager
 
-def initialize_workflows(base_path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+def initialize_workflows(base_path: str | None = None) -> dict[str, dict[str, Any]]:
     """Initialize workflows with custom base path"""
     global _unified_workflow_manager, workflow_manager
 
@@ -994,7 +1016,7 @@ def get_workflow_handler(workflow_name: str):
 def get_workflow_transport(workflow_name: str) -> str:
     return workflow_manager.get_workflow_transport(workflow_name)
 
-def workflow_status_summary() -> Dict[str, Any]:
+def workflow_status_summary() -> dict[str, Any]:
     return workflow_manager.workflow_status_summary()
 
 def get_workflow_tools(workflow_name: str):

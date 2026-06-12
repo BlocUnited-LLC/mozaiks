@@ -7,10 +7,6 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from autogen.beta import Agent, MemoryStream
-from autogen.beta.config import OpenAIConfig
-from autogen.beta.middleware import RetryMiddleware
-from autogen.beta.observers import TokenMonitor
 from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
@@ -23,6 +19,7 @@ from mozaiksai.control_plane.contracts import (
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
+from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts import (
     ArtifactLifecycleStatus,
     ArtifactValidationStatus,
@@ -55,6 +52,7 @@ class ScopedRefinementCodingWorker:
         self,
         *,
         agent_factory: Any = None,
+        agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_control_plane_pack,
         tool_executor: Any = None,
@@ -62,7 +60,7 @@ class ScopedRefinementCodingWorker:
         artifact_store: Any = None,
         output_root: Any = None,
     ) -> None:
-        self._agent_factory = agent_factory
+        self._agent_runner = agent_runner or AG2StructuredAgentRunner(agent_factory=agent_factory)
         self._config_loader = config_loader
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
@@ -89,18 +87,13 @@ class ScopedRefinementCodingWorker:
             system_prompt = self._load_system_prompt()
             control_plane_context = await self._load_control_plane_context(request)
             user_prompt = self._build_user_prompt(request=request, control_plane_context=control_plane_context)
-            agent = self._make_agent(system_prompt=system_prompt, llm_config=llm_config)
-            stream = MemoryStream()
-            reply = await agent.ask(
-                user_prompt,
-                stream=stream,
-                middleware=[RetryMiddleware(max_retries=2)],
-                observers=[TokenMonitor()],
+            plan = await self._agent_runner.run(
+                agent_name="CodingWorker",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                llm_config=llm_config,
                 response_schema=CodingWorkerPlan,
             )
-            plan = await reply.content()
-            if plan is None:
-                raise ValueError("CodingWorker returned an empty response")
         except Exception as exc:
             return CodingWorkerResult(
                 eligible=True,
@@ -295,18 +288,6 @@ class ScopedRefinementCodingWorker:
                 )
 
         return {path: str(content) for path, content in plan.updated_files.items()}
-
-    def _make_agent(self, *, system_prompt: str, llm_config: dict[str, Any]) -> Any:
-        if self._agent_factory is not None:
-            return self._agent_factory(system_prompt, llm_config)
-        return Agent(
-            "CodingWorker",
-            system_prompt,
-            config=OpenAIConfig(
-                model=llm_config.get("model") or "gpt-4o",
-                temperature=llm_config.get("temperature"),
-            ),
-        )
 
     @staticmethod
     def _resolve_validation_strategy(raw: str) -> str:

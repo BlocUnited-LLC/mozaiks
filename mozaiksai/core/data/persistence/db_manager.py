@@ -11,7 +11,6 @@ from bson import ObjectId
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
-from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 class DatabaseManagerError(Exception):
     """Custom exception for database manager errors."""
@@ -366,6 +365,9 @@ def _get_database_config(workflow_name: Optional[str], database_name: Optional[s
     # Try to load from workflow configuration
     if workflow_name:
         try:
+            from mozaiksai.core.workflow.workflow_manager import get_workflow_manager
+
+            workflow_manager = get_workflow_manager()
             workflow_config = workflow_manager.get_config(workflow_name)
             if workflow_config and 'database_manager' in workflow_config:
                 db_config = workflow_config['database_manager']

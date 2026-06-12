@@ -162,7 +162,7 @@ class UnifiedEventDispatcher:
         self._event_handlers: Dict[str, List[Callable[[Dict[str, Any]], Awaitable[Any] | Any]]] = {}
         # Greeting echo dedup: tracks (chat_id, agent_name) pairs where
         # ws_protocol already sent the greeting before the workflow started.
-        # The next text message from that agent is a transcript echo and
+        # The next text message from that agent is a run-history echo and
         # should be converted to a silent 'greeting_echo' event.
         self._greeting_echo_keys: set = set()
         self._hidden_initial_message_keys: set = set()
@@ -183,6 +183,10 @@ class UnifiedEventDispatcher:
         self.register_runtime_handler(RUNTIME_PROCESS_COMPLETED, self._journey_orchestrator.handle_run_complete)
         # Best-effort control-plane notification; must never block execution.
         self.register_handler("chat.usage_summary", self._usage_ingest.handle_usage_summary)
+        from mozaiksai.core.usage import get_runtime_usage_ledger
+
+        self._runtime_usage_ledger = get_runtime_usage_ledger()
+        self.register_handler("chat.usage_delta", self._runtime_usage_ledger.record_usage_delta)
 
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
@@ -363,7 +367,7 @@ class UnifiedEventDispatcher:
 
         # ── Greeting echo detection (no workflow_manager dependency) ──
         # If ws_protocol already sent the UserDriven greeting, the AG2
-        # transcript replay is just bookkeeping — emit as chat.greeting_echo
+        # run-history replay is just bookkeeping — emit as chat.greeting_echo
         # so the frontend silently ignores it.
         if base_kind in ('text', 'print') and chat_id:
             _agent = event_dict.get('agent') or event_dict.get('sender')

@@ -1,13 +1,18 @@
 # ==============================================================================
 # FILE: mozaiksai/core/data/persistence/persistence_manager.py
-# DESCRIPTION: Mongo-backed persistence layer for chat sessions, indexes, and runtime usage tracking.
+# DESCRIPTION: Mongo-backed persistence layer for chat sessions, AG2 streams, and runtime UI state.
 # ==============================================================================
 
 """Persistence layer for mozaiksai workflows.
 
-Clean implementation aligned with AG2 event system:
+Runtime persistence owns durable run records, resume state, artifacts, and
+AG2 stream storage:
   * PersistenceManager: Mongo client + indexes (runtime-owned only)
-  * AG2PersistenceManager: chat sessions + real-time usage tracking
+  * AG2PersistenceManager: ChatSessions + AG2 run stream projections
+
+AG2 beta telemetry is middleware-based OpenTelemetry instrumentation and lives
+in ``mozaiksai.core.observability``. Do not add agent-turn telemetry collectors
+or in-memory performance counters here.
 """
 
 from __future__ import annotations
@@ -17,20 +22,17 @@ import ast
 import json
 import os
 from datetime import datetime, UTC
-from typing import Dict, List, Any, Optional, Union, cast
+from typing import Dict, List, Any, Optional, Union
 import hashlib
 from copy import deepcopy
 import textwrap
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, UpdateOne
 from uuid import uuid4
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.multitenant import build_app_scope_filter, coalesce_app_id, dual_write_app_scope
 from .namespaces import SYSTEM_DATABASE, RuntimeCollections
-from autogen.events.agent_events import TextEvent
-from autogen.events.base_event import BaseEvent
-from ..models import WorkflowStatus
-from mozaiksai.core.workflow.startup_messages import matches_hidden_initial_message
+from ..models import WorkflowStatus, WorkflowUIState
 # Lazy import to avoid circular dependency - see _format_message_for_storage
 
 logger = get_workflow_logger("persistence")
@@ -72,6 +74,55 @@ _GENERAL_CHAT_COLLECTION = RuntimeCollections.GENERAL_CHAT_SESSIONS
 _GENERAL_CHAT_COUNTER_COLLECTION = RuntimeCollections.GENERAL_CHAT_COUNTERS
 
 
+# Canonical field names and defaults are derived directly from WorkflowUIState()
+# so the dict representation can never diverge from the Pydantic model.
+_WORKFLOW_UI_STATE_MODEL_DEFAULTS: Dict[str, Any] = WorkflowUIState().model_dump()
+
+
+def build_default_workflow_ui_state() -> Dict[str, Any]:
+    return deepcopy(_WORKFLOW_UI_STATE_MODEL_DEFAULTS)
+
+
+def extract_workflow_ui_state(chat_doc: Any) -> Dict[str, Any]:
+    normalized = build_default_workflow_ui_state()
+    if not isinstance(chat_doc, dict):
+        return normalized
+
+    raw_state = chat_doc.get("workflow_ui_state")
+    if not isinstance(raw_state, dict):
+        return normalized
+
+    # Forward every field that the model declares; type-check dict-valued fields.
+    for field_name in WorkflowUIState.model_fields:
+        if field_name not in raw_state:
+            continue
+        raw_value = raw_state[field_name]
+        if raw_value is None:
+            normalized[field_name] = None
+        elif field_name == "tool_calls" and isinstance(raw_value, dict):
+            normalized[field_name] = {
+                str(k): deepcopy(v)
+                for k, v in raw_value.items()
+                if isinstance(k, str) and isinstance(v, dict)
+            }
+        elif isinstance(raw_value, dict):
+            normalized[field_name] = deepcopy(raw_value)
+        else:
+            # Scalar fields (e.g. schema_version)
+            normalized[field_name] = raw_value
+    return normalized
+
+
+def extract_last_artifact(chat_doc: Any) -> Optional[Dict[str, Any]]:
+    artifact = extract_workflow_ui_state(chat_doc).get("last_artifact")
+    return artifact if isinstance(artifact, dict) else None
+
+
+def extract_pending_input_request(chat_doc: Any) -> Optional[Dict[str, Any]]:
+    pending = extract_workflow_ui_state(chat_doc).get("pending_input_request")
+    return pending if isinstance(pending, dict) else None
+
+
 class PersistenceManager:
     """Mongo connection holder for runtime persistence."""
 
@@ -79,6 +130,67 @@ class PersistenceManager:
         self.client: Optional[Any] = None
         self._init_lock = asyncio.Lock()
         logger.info("PersistenceManager created (lazy init)")
+
+    async def _backfill_chat_sessions_workflow_ui_state(self, coll: Any) -> None:
+        query = {
+            "$or": [
+                {"workflow_ui_state": {"$exists": False}},
+                {"workflow_ui_state.schema_version": {"$exists": False}},
+                {"last_artifact": {"$exists": True}},
+                {"pending_input_request": {"$exists": True}},
+            ]
+        }
+        projection = {
+            "workflow_ui_state": 1,
+            "last_artifact": 1,
+            "pending_input_request": 1,
+        }
+
+        operations: List[UpdateOne] = []
+        migrated = 0
+        async for doc in coll.find(query, projection):
+            if not isinstance(doc, dict):
+                continue
+            chat_id = doc.get("_id")
+            if not chat_id:
+                continue
+
+            workflow_ui_state = extract_workflow_ui_state(doc)
+            legacy_last_artifact = doc.get("last_artifact")
+            legacy_pending_input = doc.get("pending_input_request")
+
+            if workflow_ui_state.get("last_artifact") is None and isinstance(legacy_last_artifact, dict):
+                workflow_ui_state["last_artifact"] = deepcopy(legacy_last_artifact)
+            if workflow_ui_state.get("pending_input_request") is None and isinstance(legacy_pending_input, dict):
+                workflow_ui_state["pending_input_request"] = deepcopy(legacy_pending_input)
+
+            operations.append(
+                UpdateOne(
+                    {"_id": chat_id},
+                    {
+                        "$set": {"workflow_ui_state": workflow_ui_state},
+                        "$unset": {
+                            "last_artifact": "",
+                            "pending_input_request": "",
+                        },
+                    },
+                )
+            )
+
+            if len(operations) >= 200:
+                await coll.bulk_write(operations, ordered=False)
+                migrated += len(operations)
+                operations = []
+
+        if operations:
+            await coll.bulk_write(operations, ordered=False)
+            migrated += len(operations)
+
+        if migrated > 0:
+            logger.info(
+                "[WORKFLOW_UI_STATE] Migrated %d ChatSessions docs to canonical workflow_ui_state",
+                migrated,
+            )
 
     async def _ensure_client(self) -> None:
         if self.client is not None:
@@ -140,10 +252,6 @@ class PersistenceManager:
                     )
                     logger.debug("Created ChatSessions TTL index (%d days)", ttl_days)
 
-                # Note: per-event normalized rows and their indexes in WorkflowStats
-                # were removed to reduce collection noise; WorkflowStats now holds
-                # live rollup documents (mon_ prefix) only, so no per-event index is needed.
-
                 general_coll = self.client[SYSTEM_DATABASE][_GENERAL_CHAT_COLLECTION]
                 general_indexes = await general_coll.list_indexes().to_list(length=None)
                 general_index_names = [idx["name"] for idx in general_indexes]
@@ -173,56 +281,33 @@ class PersistenceManager:
                 elif "gc_counter_app_user" not in counter_names and "gc_counter_ent_user" not in counter_names:
                     await counter_coll.create_index(app_user_counter_keys, name="gc_counter_app_user", unique=True)
                     logger.debug("Created general chat counter unique index")
+
+                try:
+                    await self._backfill_chat_sessions_workflow_ui_state(coll)
+                except Exception as migration_err:
+                    logger.warning("Workflow UI-state backfill skipped: %s", migration_err)
             except Exception as e:  # pragma: no cover
                 logger.warning(f"Index ensure issue: {e}")
 
 class AG2PersistenceManager:
-    """Lean persistence using two collections: ChatSessions and WorkflowStats.
+    """Runtime persistence for ChatSessions and AG2 run stream history.
 
-    ChatSessions: one document per chat workflow with embedded messages (transcript).
-    WorkflowStats: holds unified live rollup documents (mon_{app}_{workflow}).
+    ChatSessions: one document per workflow run with status, UI artifact,
+    and session/journey correlation metadata.
 
-    Per-event normalized rows were intentionally disabled to reduce collection noise.
-    Replay/resume relies on ChatSessions.messages; metrics aggregate in real-time
-    in the mon_ rollup documents.
+    LLM token usage belongs to RuntimeUsageEvents. Agent turn, LLM-call,
+    tool-call, and HITL telemetry spans belong to AG2 beta
+    TelemetryMiddleware/OpenTelemetry.
     """
 
     def __init__(self):
         self.persistence = PersistenceManager()
         logger.info("AG2PersistenceManager (lean) ready")
-        self._workflow_stats_indexes_checked = False
 
     async def _coll(self):
         await self.persistence._ensure_client()
         assert self.persistence.client is not None, "Mongo client not initialized"
         return self.persistence.client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
-
-    async def _workflow_stats_coll(self):
-        await self.persistence._ensure_client()
-        assert self.persistence.client is not None, "Mongo client not initialized"
-        coll = self.persistence.client[SYSTEM_DATABASE][RuntimeCollections.WORKFLOW_STATS]
-        if not getattr(self, "_workflow_stats_indexes_checked", False):
-            await self._ensure_workflow_stats_indexes(coll)
-        return coll
-
-    async def _ensure_workflow_stats_indexes(self, coll):
-        """Drop stale unique indexes that conflict with rollup documents."""
-        try:
-            existing = await coll.list_indexes().to_list(length=None)
-            stale_index_names = {"ux_chat_seq", "ux_workflow_chat_seq"}
-            for idx in existing:
-                name = idx.get("name")
-                if name in stale_index_names:
-                    try:
-                        await coll.drop_index(name)
-                        logger.info("Dropped stale WorkflowStats index %s", name)
-                    except Exception as drop_err:
-                        logger.warning("Failed to drop stale WorkflowStats index %s: %s", name, drop_err)
-            self._workflow_stats_indexes_checked = True
-        except Exception as idx_err:
-            logger.warning("WorkflowStats index check failed: %s", idx_err)
-            # Avoid repeated attempts in tight loops if Mongo unavailable
-            self._workflow_stats_indexes_checked = True
 
     async def _general_coll(self):
         await self.persistence._ensure_client()
@@ -311,22 +396,13 @@ class AG2PersistenceManager:
                 "_id": chat_id,
                 "chat_id": chat_id,
                 "app_id": resolved_app_id,
+                "ag2_stream_id": str(self._run_stream_id(chat_id=chat_id, app_id=resolved_app_id)),
                 "workflow_name": workflow_name,
                 "user_id": user_id,
                 "status": int(WorkflowStatus.IN_PROGRESS),
                 "created_at": now,
                 "last_updated_at": now,
-                # per-session atomic sequence counter for message diffs
-                "last_sequence": 0,
-                # persisted UI context for multi-user resume of active artifact/tool panel
-                # null until first artifact/tool emission is persisted via update_last_artifact()
-                "last_artifact": None,
-                "usage_prompt_tokens_final": 0,
-                "usage_completion_tokens_final": 0,
-                "usage_total_tokens_final": 0,
-                "usage_total_cost_final": 0.0,
-                "tool_calls_final": 0,
-                "errors_final": 0,
+                "workflow_ui_state": build_default_workflow_ui_state(),
                 "messages": [],
             }
 
@@ -343,6 +419,9 @@ class AG2PersistenceManager:
                     "last_updated_at",
                     "last_sequence",
                     "messages",
+                    "workflow_ui_state",
+                    "last_artifact",
+                    "pending_input_request",
                 }
                 for k, v in list(extra_fields.items()):
                     if not isinstance(k, str) or not k.strip():
@@ -353,43 +432,6 @@ class AG2PersistenceManager:
 
             session_doc = dual_write_app_scope(session_doc, resolved_app_id)
             await coll.insert_one(session_doc)
-            # Initialize / upsert unified real-time rollup doc (mon_{app_id}_{workflow_name})
-            # We maintain a single rollup document that is updated live instead of
-            # a per-chat metrics_{chat_id} document plus a completion rollup.
-            stats_coll = await self._workflow_stats_coll()
-            summary_id = f"mon_{resolved_app_id}_{workflow_name}"
-            # Use $setOnInsert so we don't clobber existing real-time aggregates if concurrent chats start.
-            await stats_coll.update_one(
-                {"_id": summary_id},
-                {"$setOnInsert": {
-                    "_id": summary_id,
-                    "app_id": resolved_app_id,
-                    "workflow_name": workflow_name,
-                    "last_updated_at": now,
-                    # overall_avg block mirrors models.WorkflowSummaryDoc schema
-                    "overall_avg": {
-                        "avg_duration_sec": 0.0,
-                        "avg_prompt_tokens": 0,
-                        "avg_completion_tokens": 0,
-                        "avg_total_tokens": 0,
-                        "avg_cost_total_usd": 0.0,
-                    },
-                    "chat_sessions": {},
-                    "agents": {}
-                }},
-                upsert=True
-            )
-            # Seed empty per-chat metrics container if not present
-            await stats_coll.update_one(
-                {"_id": summary_id, f"chat_sessions.{chat_id}": {"$exists": False}},
-                {"$set": {f"chat_sessions.{chat_id}": {
-                    "duration_sec": 0.0,
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                    "cost_total_usd": 0.0
-                }, "last_updated_at": now}}
-            )
         except Exception as e:  # pragma: no cover
             logger.error(f"Failed to create chat session {chat_id}: {e}")
 
@@ -433,7 +475,9 @@ class AG2PersistenceManager:
                 "last_updated_at",
                 "last_sequence",
                 "messages",
+                "workflow_ui_state",
                 "last_artifact",
+                "pending_input_request",
             }
             extra: Dict[str, Any] = {}
             for k, v in doc.items():
@@ -477,7 +521,9 @@ class AG2PersistenceManager:
             "last_updated_at",
             "last_sequence",
             "messages",
+            "workflow_ui_state",
             "last_artifact",
+            "pending_input_request",
         }
         safe_updates: Dict[str, Any] = {}
         for key, value in variables.items():
@@ -540,10 +586,6 @@ class AG2PersistenceManager:
                 "last_sequence": 0,
                 "last_artifact": None,
                 "messages": [],
-                "usage_prompt_tokens_final": 0,
-                "usage_completion_tokens_final": 0,
-                "usage_total_tokens_final": 0,
-                "usage_total_cost_final": 0.0,
             },
                 ent_id,
             )
@@ -574,30 +616,24 @@ class AG2PersistenceManager:
         try:
             coll = await self._coll()
             now = datetime.now(UTC)
-            # Fetch created_at & usage to compute duration for rollup averages
-            base_doc = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {"created_at": 1})
+            # Fetch created_at to compute run duration.
+            base_doc = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
+                {"created_at": 1},
+            )
             created_at = base_doc.get("created_at") if base_doc else None
             if isinstance(created_at, datetime) and created_at.tzinfo is None:
                 # Mongo can return naive datetimes when tz_aware=False; treat them as UTC.
                 created_at = created_at.replace(tzinfo=UTC)
             dur = float((now - created_at).total_seconds()) if isinstance(created_at, datetime) else 0.0
+            # Use dot-path write so unrecognized workflow_ui_state fields are preserved.
             res = await coll.update_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {"$set": {
                 "status": int(WorkflowStatus.COMPLETED),
                 "completed_at": now,
                 "last_updated_at": now,
                 "duration_sec": dur,
+                "workflow_ui_state.pending_input_request": None,
             }})
-            # Fire & forget rollup refresh (no await block on success path)
-            if res.modified_count > 0:
-                try:  # pragma: no cover
-                    from ..models import refresh_workflow_rollup_by_id  # local import to avoid circular at module import
-                    # Need workflow_name for rollup; fetch minimally
-                    doc = await coll.find_one({"_id": chat_id}, {"workflow_name": 1})
-                    if doc and (wf := doc.get("workflow_name")):
-                        summary_id = f"mon_{resolved_app_id}_{wf}"
-                        asyncio.create_task(refresh_workflow_rollup_by_id(summary_id))
-                except Exception as e:
-                    logger.debug(f"Rollup refresh failed for {chat_id}: {e}")
             return res.modified_count > 0
         except Exception as e:  # pragma: no cover
             logger.error(f"Failed to mark chat {chat_id} as completed: {e}")
@@ -641,11 +677,11 @@ class AG2PersistenceManager:
                 "workflow_name": artifact.get("workflow_name"),
                 # Keep payload shallow (avoid huge memory copies); truncate strings if massive in future enhancement
                 "payload": artifact.get("payload"),
-                "updated_at": now,
+                "updated_at": now.isoformat(),
             }
             await coll.update_one(
                 {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
-                {"$set": {"last_artifact": doc, "last_updated_at": now}},
+                {"$set": {"workflow_ui_state.last_artifact": doc, "last_updated_at": now}},
             )
             logger.debug(
                 "[LAST_ARTIFACT] Updated",
@@ -654,125 +690,105 @@ class AG2PersistenceManager:
         except Exception as e:  # pragma: no cover
             logger.debug(f"[LAST_ARTIFACT] Update failed chat_id={chat_id}: {e}")
 
-    async def persist_initial_messages(
+    def _run_stream_id(self, *, chat_id: str, app_id: str):
+        from mozaiksai.core.adapters.ag2_stream_storage import stream_id_for_run
+
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        return stream_id_for_run(resolved_app_id, chat_id)
+
+    def build_run_stream(self, *, chat_id: str, app_id: str):
+        from autogen.beta import MemoryStream
+        from mozaiksai.core.adapters.ag2_stream_storage import MongoAG2StreamStorage
+
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        return MemoryStream(
+            storage=MongoAG2StreamStorage(app_id=resolved_app_id),
+            id=self._run_stream_id(chat_id=chat_id, app_id=resolved_app_id),
+        )
+
+    async def load_run_events(self, *, chat_id: str, app_id: str) -> List[Any]:
+        stream = self.build_run_stream(chat_id=chat_id, app_id=app_id)
+        return list(await stream.history.get_events())
+
+    @staticmethod
+    def _run_event_to_message(event: Any) -> Optional[Dict[str, Any]]:
+        from autogen.beta.events import ModelResponse
+        from autogen.beta.events.input_events import TextInput
+
+        if isinstance(event, TextInput) and getattr(event, "content", None):
+            return {
+                "role": "user",
+                "name": "user",
+                "content": str(event.content),
+            }
+
+        if isinstance(event, ModelResponse) and event.content:
+            metadata = event.metadata if isinstance(event.metadata, dict) else {}
+            message: Dict[str, Any] = {
+                "role": "assistant",
+                "name": str(metadata.get("agent_name") or metadata.get("agent") or "assistant"),
+                "content": str(event.content),
+            }
+            if event.model or metadata:
+                message["metadata"] = {
+                    "source": "agent",
+                    **({"model": event.model} if event.model else {}),
+                    **metadata,
+                }
+            return message
+
+        return None
+
+    async def load_run_history(self, *, chat_id: str, app_id: str) -> List[Dict[str, Any]]:
+        events = await self.load_run_events(chat_id=chat_id, app_id=app_id)
+        history: List[Dict[str, Any]] = []
+        for event in events:
+            message = self._run_event_to_message(event)
+            if isinstance(message, dict):
+                history.append(message)
+        return history
+
+    async def append_run_assistant_message(
         self,
         *,
         chat_id: str,
         app_id: str,
-        messages: List[Dict[str, Any]],
+        content: str,
+        agent_name: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Persist initial seed / user messages that AG2 does NOT emit as TextEvents.
+        from types import SimpleNamespace
 
-        Rationale:
-            AG2 beta workflow runs consume the provided initial message list as
-            starting context but do not re-emit those messages as TextEvent
-            instances. Our persistence layer stores them explicitly so
-            brand-new ChatSessions do not start with an empty messages[] array.
+        from autogen.beta.events import ModelResponse
+        from autogen.beta.events.types import ModelMessage
+        from mozaiksai.core.adapters.ag2_stream_storage import MongoAG2StreamStorage
 
-        Behavior:
-            - Each provided message gets an auto-assigned sequence (incrementing last_sequence).
-            - event_id is generated with 'init_' prefix for traceability.
-            - Hidden AG2 seed messages (`initial_message`, `userdriven_trigger`) are ignored.
-            - Skips if list empty or chat session missing.
-            - Safe to call multiple times: we perform a basic duplicate guard by checking
-              if an identical (role, content) pair already exists as the latest message to
-              avoid accidental double insertion on rare retries.
-        """
-        if not messages:
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        text = str(content or "").strip()
+        if not text:
             return
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        try:
-            coll = await self._coll()
-            base_doc = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {"messages": {"$slice": -5}})
-            recent: List[Dict[str, Any]] = []
-            if base_doc and isinstance(base_doc.get("messages"), list):
-                recent = [m for m in base_doc["messages"] if isinstance(m, dict)]
-            for m in messages:
-                role = m.get("role") or "user"
-                content = m.get("content")
-                if content is None:
-                    continue
-                seed_kind = str(m.get("_mozaiks_seed_kind") or "").strip().lower()
-                if seed_kind in {"initial_message", "userdriven_trigger"}:
-                    continue
-                # Duplicate guard: if last message matches role+content, skip
-                if recent and isinstance(recent[-1], dict):
-                    last = recent[-1]
-                    if last.get("role") == role and last.get("content") == content:
-                        continue
-                # Increment sequence counter atomically & fetch new value
-                bump = await coll.find_one_and_update(
-                    {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
-                    {"$inc": {"last_sequence": 1}, "$set": {"last_updated_at": datetime.now(UTC)}},
-                    return_document=ReturnDocument.AFTER,
-                )
-                seq = int(bump.get("last_sequence", 1)) if bump else 1
-                msg_doc = {
-                    "role": role,
-                    "content": str(content),
-                    "timestamp": datetime.now(UTC),
-                    "event_type": "message.created",
-                    "event_id": f"init_{uuid4()}",
-                    "sequence": seq,
-                    "agent_name": m.get("name") or ("user" if role == "user" else "assistant"),
-                }
-                seed_kind = m.get("_mozaiks_seed_kind")
-                raw_metadata = m.get("metadata")
-                metadata = deepcopy(raw_metadata) if isinstance(raw_metadata, dict) else None
-                if isinstance(seed_kind, str) and seed_kind.strip():
-                    normalized_seed_kind = seed_kind.strip()
-                    msg_doc["_mozaiks_seed_kind"] = normalized_seed_kind
-                    if metadata is None:
-                        metadata = {}
-                    metadata.setdefault("_mozaiks_seed_kind", normalized_seed_kind)
-                if metadata:
-                    msg_doc["metadata"] = metadata
-                await coll.update_one(
-                    {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
-                    {"$push": {"messages": msg_doc}, "$set": {"last_updated_at": datetime.now(UTC)}},
-                )
-                recent.append(msg_doc)
-                logger.debug(
-                    "[INIT_MSG_PERSIST] Inserted initial message",
-                    extra={"chat_id": chat_id, "app_id": resolved_app_id, "seq": seq, "role": role},
-                )
-        except Exception as e:  # pragma: no cover
-            logger.debug(f"[INIT_MSG_PERSIST] Failed chat_id={chat_id}: {e}")
 
-    async def resume_chat(self, chat_id: str, app_id: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
-        """Return full message list for an in-progress chat.
+        merged_metadata = dict(metadata or {})
+        if agent_name:
+            merged_metadata.setdefault("agent_name", agent_name)
 
-        Strict mode: only active (IN_PROGRESS) sessions are resumable; completed
-        sessions require explicit inspection via administrative paths (not a
-        transparent fallback inside runtime code).
-        """
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        try:
-            coll = await self._coll()
-            doc = await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {"messages": 1, "status": 1})
-            
-            if not doc:
-                logger.warning(f"[RESUME_CHAT] No document found for chat_id={chat_id} app_id={resolved_app_id}")
-                return None
-            
-            status = int(doc.get("status", -1))
-            status_name = WorkflowStatus(status).name if status in [s.value for s in WorkflowStatus] else "UNKNOWN"
-            msgs = doc.get("messages", [])
-            
-            logger.info(f"[RESUME_CHAT] chat_id={chat_id} status={status_name}({status}) messages_count={len(msgs)}")
-            
-            if status != int(WorkflowStatus.IN_PROGRESS):
-                logger.warning(f"[RESUME_CHAT] Chat status is {status_name}, not IN_PROGRESS - returning None")
-                return None
-            
-            return msgs
-        except Exception as e:  # pragma: no cover
-            logger.warning(f"[RESUME_CHAT] Failed to resume chat {chat_id}: {e}")
-            return None
+        event = ModelResponse(
+            ModelMessage(text, metadata=merged_metadata),
+            model="mozaiks.runtime",
+            provider="mozaiks.runtime",
+            finish_reason="stop",
+        )
+        storage = MongoAG2StreamStorage(app_id=resolved_app_id)
+        stream_context = SimpleNamespace(
+            stream=SimpleNamespace(id=self._run_stream_id(chat_id=chat_id, app_id=resolved_app_id))
+        )
+        await storage.save_event(event, stream_context)
 
     async def append_general_message(
         self,
@@ -929,596 +945,6 @@ class AG2PersistenceManager:
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        workflows = await self.get_user_workflow_statuses(app_id=resolved_app_id, user_id=user_id)
-        return {
-            "app_id": str(resolved_app_id),
-            "user_id": user_id,
-            "workflows": workflows,
-        }
-
-    async def fetch_general_chat_transcript(
-        self,
-        *,
-        general_chat_id: str,
-        app_id: Optional[str] = None,
-        after_sequence: int = -1,
-        limit: int = 500,
-    ) -> Optional[Dict[str, Any]]:
-        coll = await self._general_coll()
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        ent_id = str(resolved_app_id)
-        doc = await coll.find_one({"_id": general_chat_id, **build_app_scope_filter(ent_id)})
-        if not doc:
-            return None
-
-        messages = doc.get("messages", []) or []
-        filtered: List[Dict[str, Any]] = []
-        for message in messages:
-            try:
-                sequence_val = int(message.get("sequence", 0) or 0)
-            except Exception:
-                sequence_val = 0
-            if after_sequence >= 0 and sequence_val <= after_sequence:
-                continue
-            filtered.append(message)
-
-        if limit > 0:
-            limit = max(1, min(int(limit), 2000))
-            filtered = filtered[-limit:]
-
-        payload = {
-            "chat_id": doc.get("_id"),
-            "label": doc.get("general_label") or doc.get("_id"),
-            "sequence": int(doc.get("general_sequence", 0) or 0),
-            "status": int(doc.get("status", -1)),
-            "app_id": ent_id,
-            "user_id": doc.get("user_id"),
-            "messages": filtered,
-            "last_sequence": int(doc.get("last_sequence", 0) or 0),
-            "created_at": doc.get("created_at"),
-            "last_updated_at": doc.get("last_updated_at"),
-        }
-        return payload
-
-    async def delete_general_chat(
-        self,
-        *,
-        general_chat_id: str,
-        app_id: Optional[str] = None,
-        user_id: str,
-    ) -> bool:
-        coll = await self._general_coll()
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        result = await coll.delete_one(
-            {
-                "_id": str(general_chat_id),
-                "user_id": str(user_id),
-                **build_app_scope_filter(str(resolved_app_id)),
-            }
-        )
-        return bool(result.deleted_count)
-
-    async def fetch_event_diff(self, *, chat_id: str, app_id: Optional[str] = None, last_sequence: int) -> List[Dict[str, Any]]:
-        """Return message diff (messages with sequence > last_sequence).
-
-        Assumes every persisted message carries an authoritative 'sequence'
-        integer; absence of that field is considered a data integrity issue and
-        results in those messages being ignored for diff purposes.
-        """
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        try:
-            coll = await self._coll()
-            doc = await coll.find_one({"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))}, {"messages": 1})
-            if not doc:
-                return []
-            msgs = doc.get("messages", [])
-            return [m for m in msgs if isinstance(m, dict) and m.get("sequence", 0) > int(last_sequence)]
-        except Exception as e:  # pragma: no cover
-            logger.warning(f"Failed to fetch event diff for {chat_id}: {e}")
-            return []
-
-    # Events ------------------------------------------------------------
-    async def save_event(self, event: BaseEvent, chat_id: str, app_id: Optional[str] = None) -> None:
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        try:
-            # Only persist TextEvent messages; ignore all other AG2 event types
-            if not isinstance(event, TextEvent):
-                return
-            # After the isinstance guard, we can safely treat event as TextEvent for type checkers
-            text_event = cast(TextEvent, event)
-            coll = await self._coll()
-            # Atomically bump per-session sequence counter and read new value
-            try:
-                bump = await coll.find_one_and_update(
-                    {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                    {"$inc": {"last_sequence": 1}, "$set": {"last_updated_at": datetime.now(UTC)}},
-                    return_document=ReturnDocument.AFTER,
-                )
-                seq = int(bump.get("last_sequence", 1)) if bump else 1
-                wf_name = bump.get("workflow_name") if bump else None
-            except Exception as e:
-                logger.warning(f"Failed to update sequence counter for {chat_id}: {e}")
-                seq = 1
-                wf_name = None
-            event_id = getattr(text_event, "id", None) or getattr(text_event, "event_id", None) or getattr(text_event, "event_uuid", None) or str(uuid4())
-            sender_obj = getattr(text_event, "sender", None)
-            raw_name = getattr(sender_obj, "name", None) if sender_obj else None
-            raw_content = getattr(text_event, "content", "")
-
-            # Helper: attempt extraction from dict-like content
-            def _extract_name_from_content(rc: Any) -> Optional[str]:
-                try:
-                    if isinstance(rc, dict):
-                        for k in ("sender", "agent", "agent_name", "name"):
-                            v = rc.get(k)
-                            if isinstance(v, str) and v.strip():
-                                return v.strip()
-                    return None
-                except Exception:  # pragma: no cover
-                    return None
-
-            if not raw_name:
-                # If the raw content is a pydantic / dataclass / object with dict method, attempt that
-                if hasattr(raw_content, "model_dump"):
-                    try:
-                        raw_name = _extract_name_from_content(raw_content.model_dump())  # type: ignore
-                    except Exception:
-                        pass
-                if not raw_name and hasattr(raw_content, "dict"):
-                    try:
-                        raw_name = _extract_name_from_content(raw_content.dict())  # type: ignore
-                    except Exception:
-                        pass
-                if not raw_name:
-                    raw_name = _extract_name_from_content(raw_content)
-            # Fallback: parse from string representation if still missing
-            if not raw_name:
-                try:
-                    txt_for_parse = None
-                    if isinstance(raw_content, str):
-                        txt_for_parse = raw_content
-                    else:
-                        # Convert to str only if small to avoid huge dumps
-                        dumped = str(raw_content)
-                        if len(dumped) < 5000:
-                            txt_for_parse = dumped
-                    if txt_for_parse:
-                        import re
-                        # Try both sender='Name' and "sender": "Name" JSON style
-                        m = re.search(r"sender(?:=|\"\s*:)['\"](?P<sender>[^'\"\\]+)['\"]", txt_for_parse)
-                        if m:
-                            raw_name = m.group("sender").strip()
-                except Exception as e:
-                    logger.debug(f"Failed to parse sender from string content: {e}")
-            if not raw_name:
-                raw_name = "assistant"  # final fallback
-            name_lower = raw_name.lower()
-            role = "user" if name_lower in ("user", "userproxy", "userproxyagent") else "assistant"
-            # Preserve structured content when possible
-            if isinstance(raw_content, (dict, list)):
-                try:
-                    content_str = json.dumps(raw_content)[:10000]
-                except (TypeError, ValueError) as e:
-                    logger.debug(f"Failed to serialize content as JSON: {e}")
-                    content_str = str(raw_content)
-            else:
-                content_str = str(raw_content)
-
-            if (
-                wf_name
-                and seq == 1
-                and matches_hidden_initial_message(
-                    workflow_name=str(wf_name),
-                    role=role,
-                    content=content_str,
-                    agent_name=raw_name,
-                )
-            ):
-                logger.debug(
-                    "[SAVE_EVENT] Skipping hidden AgentDriven initial_message for chat_id=%s workflow=%s",
-                    chat_id,
-                    wf_name,
-                )
-                return
-
-            # UserDriven workflows use a synthetic "." user message only to kick off
-            # AG2 group chat execution. It is internal coordination, not transcript.
-            if role == "user" and content_str.strip() == "." and seq == 1 and wf_name:
-                try:
-                    from mozaiksai.core.workflow.workflow_manager import workflow_manager
-
-                    cfg = workflow_manager.get_config(str(wf_name)) or {}
-                    workflow_startup_mode = str(cfg.get("workflow_startup_mode") or "").strip().lower()
-                    if workflow_startup_mode == "userdriven":
-                        logger.debug(
-                            "[SAVE_EVENT] Skipping synthetic UserDriven trigger for chat_id=%s workflow=%s",
-                            chat_id,
-                            wf_name,
-                        )
-                        return
-                except Exception:
-                    pass
-            # --------------------------------------------------
-            # Post-process: extract inner message content to avoid storing the
-            # verbose debug string: "uuid=UUID('...') content='...' sender='Agent' ..."
-            # We keep only the 'content' portion; if that portion looks like JSON
-            # we attempt to parse & re-dump for clean storage.
-            # --------------------------------------------------
-            try:
-                content_str = self._normalize_wrapped_text_content(content_str)
-            except Exception as _ce:  # pragma: no cover
-                logger.debug(f"Content clean failed: {_ce}")
-            ts = getattr(event, "timestamp", None)
-            evt_ts = datetime.fromtimestamp(ts) if isinstance(ts, (int, float)) else datetime.now(UTC)
-            msg = {
-                "role": role,
-                "content": content_str,
-                "timestamp": evt_ts,
-                "event_type": "message.created",
-                "event_id": event_id,
-                "sequence": seq,
-            }
-            if role == "assistant":
-                msg["agent_name"] = raw_name
-            else:
-                msg["agent_name"] = "user"
-            # Structured output attachment (if agent registered for structured outputs in workflow)
-            try:
-                # Lazy import to avoid circular dependency
-                from mozaiksai.core.workflow.outputs.structured import agent_has_structured_output, get_structured_output_model_fields
-                if role == "assistant" and wf_name and raw_name and agent_has_structured_output(wf_name, raw_name):
-                    # Attempt to parse JSON from cleaned content
-                    parsed = self._extract_json_from_text(content_str, agent_name=raw_name)
-                    if parsed:
-                        normalized = self._normalize_structured_output(raw_name, parsed)
-                        if normalized != parsed:
-                            logger.warning(
-                                f"[SAVE_EVENT] Normalized structured output for {raw_name}"
-                            )
-                        msg["structured_output"] = normalized
-                        schema_fields = get_structured_output_model_fields(wf_name, raw_name) or {}
-                        if schema_fields:
-                            msg["structured_schema"] = schema_fields
-                        logger.info(f"[SAVE_EVENT] ✓ Added structured_output for {raw_name}")
-                    else:
-                        logger.warning(f"[SAVE_EVENT] ✗ Failed to parse JSON for {raw_name}, content_preview: {content_str[:200] if content_str else '(empty)'}")
-            except Exception as so_err:  # pragma: no cover
-                logger.debug(f"[SAVE_EVENT] Structured output parse skipped agent={raw_name}: {so_err}")
-            await coll.update_one(
-                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                {"$push": {"messages": msg}, "$set": {"last_updated_at": datetime.now(UTC)}},
-            )
-            
-            # Log agent conversation to dedicated file with pretty formatting
-            try:
-                import logging as _logging
-                import json as _json
-                agent_conv_logger = _logging.getLogger("mozaiks.workflow.agent_messages")
-                agent_name = msg.get("agent_name", "unknown")
-                
-                # Try to parse and pretty-print JSON content
-                display_content = content_str
-                is_json = False
-                if content_str.strip().startswith('{') or content_str.strip().startswith('['):
-                    try:
-                        parsed = _json.loads(content_str)
-                        # Pretty print with indentation
-                        display_content = _json.dumps(parsed, indent=2, ensure_ascii=False)
-                        is_json = True
-                    except Exception:
-                        # Not valid JSON, use as-is
-                        pass
-                
-                # Optional truncation (controlled via env) and text wrapping
-                max_len = _AGENT_CONV_JSON_MAX_LEN if is_json else _AGENT_CONV_TEXT_MAX_LEN
-                truncated_suffix = ""
-                if max_len is not None and len(display_content) > max_len:
-                    display_content = display_content[:max_len]
-                    truncated_suffix = "\n... (truncated)"
-
-                if not is_json and display_content:
-                    wrapped_lines: list[str] = []
-                    split_lines = display_content.splitlines() or [display_content]
-                    for raw_line in split_lines:
-                        if not raw_line.strip():
-                            wrapped_lines.append("")
-                            continue
-                        wrapped_lines.extend(
-                            textwrap.wrap(
-                                raw_line,
-                                width=100,
-                                break_long_words=False,
-                                break_on_hyphens=False,
-                            )
-                        )
-                    display_content = "\n".join(wrapped_lines)
-
-                if truncated_suffix:
-                    display_content = f"{display_content}{truncated_suffix}"
-
-                # Add visual separator and metadata block for readability
-                separator = "=" * 80
-                meta_lines = [
-                    f"agent: {agent_name}",
-                    f"chat_id: {chat_id}",
-                    f"app_id: {resolved_app_id}",
-                    f"app_id: {resolved_app_id}",
-                    f"sequence: {seq}",
-                    f"event_id: {event_id}",
-                ]
-                body = display_content if display_content else "(empty)"
-                log_message = (
-                    f"\n{separator}\n"
-                    + "\n".join(meta_lines)
-                    + f"\n{separator}\n{body}\n"
-                )
-                
-                agent_conv_logger.info(
-                    log_message,
-                    extra={
-                        "chat_id": chat_id,
-                        "app_id": resolved_app_id,
-                        "sequence": seq,
-                        "event_id": event_id,
-                    }
-                )
-            except Exception as log_err:  # pragma: no cover
-                logger.debug(f"Failed to log agent conversation: {log_err}")
-                
-        except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to save event for {chat_id}: {e}")
-
-    async def save_usage_summary_event(
-        self,
-        *,
-        envelope: Dict[str, Any],
-        chat_id: str,
-        app_id: Optional[str] = None,
-        workflow_name: str,
-        user_id: str,
-    ) -> None:
-        """Process AG2 UsageSummaryEvent for metrics updates.
-        
-        Called directly from orchestration when UsageSummaryEvent is encountered.
-        """
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        try:
-            if not envelope or envelope.get("event_type") != "UsageSummaryEvent":
-                logger.warning(f"Invalid UsageSummaryEvent envelope for {chat_id}")
-                return
-                
-            meta = envelope.get("meta", {})
-            # Extract an event timestamp (seconds since epoch) if provided, else now()
-            raw_ts = meta.get("timestamp") or meta.get("ts") or envelope.get("timestamp")
-            evt_dt: Optional[datetime] = None
-            try:
-                if isinstance(raw_ts, (int, float)):
-                    evt_dt = datetime.utcfromtimestamp(float(raw_ts))
-            except Exception:
-                evt_dt = None
-            await self.update_session_metrics(
-                chat_id=chat_id,
-                app_id=resolved_app_id,
-                user_id=user_id,
-                workflow_name=workflow_name,
-                prompt_tokens=int(meta.get("prompt_tokens", 0)),
-                completion_tokens=int(meta.get("completion_tokens", 0)),
-                cost_usd=float(meta.get("cost_usd", 0.0)),
-                agent_name=meta.get("agent") or envelope.get("name"),
-                event_ts=evt_dt,
-            )
-        except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to process UsageSummaryEvent for {chat_id}: {e}")
-
-    # Usage summary ----------------------------------------------------
-    async def update_session_metrics(
-        self,
-        chat_id: str,
-        user_id: str,
-        workflow_name: str,
-        prompt_tokens: int,
-        completion_tokens: int,
-        cost_usd: float,
-        app_id: Optional[str] = None,
-        *,
-        agent_name: Optional[str] = None,
-        event_ts: Optional[datetime] = None,
-        duration_sec: float = 0.0,
-        session_type: str = "workflow",
-    ) -> None:
-        """Update live unified rollup document with per-chat + per-agent metrics and usage aggregation.
-
-        Replaces per-chat metrics document updates. We directly mutate the
-        rollup doc (mon_{app_id}_{workflow_name}) so UI / analytics can read
-        a single authoritative structure during execution.
-        """
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            raise ValueError("app_id is required")
-        try:
-            stats_coll = await self._workflow_stats_coll()
-            summary_id = f"mon_{resolved_app_id}_{workflow_name}"
-            total_tokens = prompt_tokens + completion_tokens
-            now = datetime.now(UTC)
-            if event_ts is None:
-                event_ts = now
-            # Ensure base summary & chat session containers exist
-            await stats_coll.update_one(
-                {"_id": summary_id},
-                {"$setOnInsert": {
-                    "_id": summary_id,
-                    "app_id": resolved_app_id,
-                    "workflow_name": workflow_name,
-                    "last_updated_at": now,
-                    "overall_avg": {
-                        "avg_duration_sec": 0.0,
-                        "avg_prompt_tokens": 0,
-                        "avg_completion_tokens": 0,
-                        "avg_total_tokens": 0,
-                        "avg_cost_total_usd": 0.0,
-                    },
-                    "chat_sessions": {},
-                    "agents": {}
-                }}, upsert=True
-            )
-            # Seed chat session metrics if absent
-            await stats_coll.update_one(
-                {"_id": summary_id, f"chat_sessions.{chat_id}": {"$exists": False}},
-                {"$set": {f"chat_sessions.{chat_id}": {
-                    "duration_sec": 0.0,
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                    "cost_total_usd": 0.0,
-                    # Track per-chat last event time to accumulate duration between usage deltas
-                    "last_event_ts": event_ts
-                }}, "$setOnInsert": {"last_updated_at": now}}
-            )
-            # Increment per-chat metrics
-            inc_ops = {
-                f"chat_sessions.{chat_id}.prompt_tokens": prompt_tokens,
-                f"chat_sessions.{chat_id}.completion_tokens": completion_tokens,
-                f"chat_sessions.{chat_id}.total_tokens": total_tokens,
-                f"chat_sessions.{chat_id}.cost_total_usd": cost_usd,
-            }
-            # Compute chat-level duration delta, prefer provided duration_sec
-            chat_duration_delta = max(0.0, duration_sec)
-            if chat_duration_delta <= 0:
-                try:
-                    prev_ts_doc = await stats_coll.find_one({"_id": summary_id}, {f"chat_sessions.{chat_id}.last_event_ts": 1})
-                    prev_session = None
-                    if prev_ts_doc:
-                        prev_cs_map = prev_ts_doc.get("chat_sessions") or {}
-                        prev_session = prev_cs_map.get(chat_id) or {}
-                    prev_ts_val = prev_session.get("last_event_ts") if prev_session else None  # type: ignore
-                    if isinstance(prev_ts_val, datetime):
-                        chat_duration_delta = max(0.0, (event_ts - prev_ts_val).total_seconds())  # type: ignore
-                except Exception:
-                    chat_duration_delta = 0.0
-            if chat_duration_delta > 0:
-                inc_ops[f"chat_sessions.{chat_id}.duration_sec"] = chat_duration_delta
-            await stats_coll.update_one({"_id": summary_id}, {"$inc": inc_ops, "$set": {"last_updated_at": now, f"chat_sessions.{chat_id}.last_event_ts": event_ts}})
-
-            # Also reflect usage counters directly inside ChatSessions doc so rollup recompute stays consistent
-            chat_coll = await (self._general_coll() if session_type == "general" else self._coll())
-            await chat_coll.update_one(
-                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                {"$inc": {
-                    "usage_prompt_tokens_final": prompt_tokens,
-                    "usage_completion_tokens_final": completion_tokens,
-                    "usage_total_tokens_final": total_tokens,
-                    "usage_total_cost_final": cost_usd,
-                }, "$set": {"last_updated_at": now, "app_id": resolved_app_id}}
-            )
-
-            # Per-agent session metrics (with duration accumulation based on event timestamp)
-            if agent_name:
-                # Seed agent container & agent.session container if absent
-                await stats_coll.update_one(
-                    {"_id": summary_id, f"agents.{agent_name}": {"$exists": False}},
-                    {"$set": {f"agents.{agent_name}": {
-                        "avg": {
-                            "avg_duration_sec": 0.0,
-                            "avg_prompt_tokens": 0,
-                            "avg_completion_tokens": 0,
-                            "avg_total_tokens": 0,
-                            "avg_cost_total_usd": 0.0,
-                        },
-                        "sessions": {}
-                    }}}
-                )
-                await stats_coll.update_one(
-                    {"_id": summary_id, f"agents.{agent_name}.sessions.{chat_id}": {"$exists": False}},
-                    {"$set": {f"agents.{agent_name}.sessions.{chat_id}": {
-                        "duration_sec": 0.0,
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
-                        "cost_total_usd": 0.0
-                    }}}
-                )
-                agent_inc = {
-                    f"agents.{agent_name}.sessions.{chat_id}.prompt_tokens": prompt_tokens,
-                    f"agents.{agent_name}.sessions.{chat_id}.completion_tokens": completion_tokens,
-                    f"agents.{agent_name}.sessions.{chat_id}.total_tokens": total_tokens,
-                    f"agents.{agent_name}.sessions.{chat_id}.cost_total_usd": cost_usd,
-                }
-                # Compute duration delta using last_event_ts (stored per agent session)
-                duration_delta = max(0.0, duration_sec)
-                if duration_delta <= 0:
-                    try:
-                        prev_ts_doc = await stats_coll.find_one({"_id": summary_id}, {f"agents.{agent_name}.sessions.{chat_id}.last_event_ts": 1})
-                        prev_session = None
-                        if prev_ts_doc:
-                            prev_agents = prev_ts_doc.get("agents") or {}
-                            prev_agent = prev_agents.get(agent_name) or {}
-                            prev_sessions = prev_agent.get("sessions") or {}
-                            prev_session = prev_sessions.get(chat_id) or {}
-                        prev_ts_val = prev_session.get("last_event_ts") if prev_session else None  # type: ignore
-                        if isinstance(prev_ts_val, datetime):
-                            duration_delta = max(0.0, (event_ts - prev_ts_val).total_seconds())  # type: ignore
-                        else:
-                            duration_delta = 0.0
-                    except Exception:
-                        duration_delta = 0.0
-                if duration_delta > 0:
-                    agent_inc[f"agents.{agent_name}.sessions.{chat_id}.duration_sec"] = duration_delta
-                # Apply increments and set last_event_ts
-                await stats_coll.update_one({"_id": summary_id}, {"$inc": agent_inc, "$set": {f"agents.{agent_name}.sessions.{chat_id}.last_event_ts": event_ts}})
-
-            # Recompute averages (simple read & aggregate) -- small doc so acceptable.
-            doc = await stats_coll.find_one({"_id": summary_id}, {"chat_sessions": 1, "agents": 1})
-            if doc and isinstance(doc.get("chat_sessions"), dict):
-                cs = doc["chat_sessions"]
-                n = len(cs) if cs else 0
-                if n:
-                    total_prompt = sum(int(v.get("prompt_tokens", 0)) for v in cs.values())
-                    total_completion = sum(int(v.get("completion_tokens", 0)) for v in cs.values())
-                    total_total = sum(int(v.get("total_tokens", 0)) for v in cs.values())
-                    total_cost = sum(float(v.get("cost_total_usd", 0.0)) for v in cs.values())
-                    total_duration = sum(float(v.get("duration_sec", 0.0)) for v in cs.values())
-                    await stats_coll.update_one(
-                        {"_id": summary_id},
-                        {"$set": {
-                            "overall_avg.avg_prompt_tokens": int(total_prompt / n),
-                            "overall_avg.avg_completion_tokens": int(total_completion / n),
-                            "overall_avg.avg_total_tokens": int(total_total / n),
-                            "overall_avg.avg_cost_total_usd": (total_cost / n),
-                            "overall_avg.avg_duration_sec": (total_duration / n),
-                        }}
-                    )
-            if agent_name:
-                doc = await stats_coll.find_one({"_id": summary_id}, {f"agents.{agent_name}": 1})
-                ag = doc.get("agents", {}).get(agent_name) if doc else None
-                if ag and isinstance(ag.get("sessions"), dict):
-                    sess_map = ag["sessions"]
-                    an = len(sess_map)
-                    if an:
-                        ap = sum(int(v.get("prompt_tokens", 0)) for v in sess_map.values())
-                        ac = sum(int(v.get("completion_tokens", 0)) for v in sess_map.values())
-                        at = sum(int(v.get("total_tokens", 0)) for v in sess_map.values())
-                        acost = sum(float(v.get("cost_total_usd", 0.0)) for v in sess_map.values())
-                        adur = sum(float(v.get("duration_sec", 0.0)) for v in sess_map.values())
-                        await stats_coll.update_one({"_id": summary_id}, {"$set": {
-                            f"agents.{agent_name}.avg.avg_prompt_tokens": int(ap / an),
-                            f"agents.{agent_name}.avg.avg_completion_tokens": int(ac / an),
-                            f"agents.{agent_name}.avg.avg_total_tokens": int(at / an),
-                            f"agents.{agent_name}.avg.avg_cost_total_usd": (acost / an),
-                            f"agents.{agent_name}.avg.avg_duration_sec": (adur / an),
-                        }})
-        except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to update session metrics for {chat_id}: {e}")
-
 
 #############################################
     # used for generate_and_download
@@ -1689,24 +1115,12 @@ class AG2PersistenceManager:
         if not resolved_app_id:
             raise ValueError("app_id is required")
         try:
-            msgs = await self.resume_chat(chat_id, resolved_app_id) or []
-            logger.info(f"[GATHER_AGENT_JSONS] chat_id={chat_id} app_id={resolved_app_id} msgs_count={len(msgs) if msgs else 0}")
-            
+            msgs = await self.load_run_history(chat_id=chat_id, app_id=resolved_app_id)
+            logger.info(f"[GATHER_AGENT_JSONS] chat_id={chat_id} app_id={resolved_app_id} msgs_count={len(msgs)}")
+
             if not msgs:
-                coll = await self._coll()
-                doc = await coll.find_one(
-                    {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
-                    {"messages": 1, "status": 1},
-                )
-                fallback_msgs = doc.get("messages", []) if isinstance(doc, dict) else []
-                if not isinstance(fallback_msgs, list) or not fallback_msgs:
-                    logger.debug(f"[GATHER_AGENT_JSONS] No resumable or persisted messages for chat_id={chat_id}")
-                    return result
-                msgs = fallback_msgs
-                logger.debug(
-                    f"[GATHER_AGENT_JSONS] Falling back to persisted messages for chat_id={chat_id} "
-                    f"status={doc.get('status') if isinstance(doc, dict) else 'unknown'} msgs_count={len(msgs)}"
-                )
+                logger.debug(f"[GATHER_AGENT_JSONS] No AG2 run history for chat_id={chat_id}")
+                return result
             
             def agent_name_from(m: Dict[str, Any]) -> str:
                 if m.get("role") == "assistant":
@@ -1785,6 +1199,46 @@ class AG2PersistenceManager:
             return result
 
     # UI Tool Persistence -----------------------------------------------
+    def _workflow_tool_call_storage_key(self, event_id: str) -> str:
+        return hashlib.sha1(str(event_id or "").encode("utf-8")).hexdigest()
+
+    async def get_workflow_tool_call_states(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return persisted workflow UI tool state for resume/reconnect."""
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            return []
+        try:
+            coll = await self._coll()
+            doc = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {"workflow_ui_state.tool_calls": 1},
+            )
+            workflow_ui_state = (doc or {}).get("workflow_ui_state") or {}
+            tool_calls = workflow_ui_state.get("tool_calls")
+            if not isinstance(tool_calls, dict):
+                return []
+
+            states: List[Dict[str, Any]] = []
+            for raw_state in tool_calls.values():
+                if isinstance(raw_state, dict) and raw_state.get("tool_call_id"):
+                    states.append(deepcopy(raw_state))
+
+            states.sort(
+                key=lambda state: (
+                    int(state.get("message_index", -1)) if isinstance(state.get("message_index"), int) else -1,
+                    str(state.get("updated_at") or state.get("timestamp") or ""),
+                )
+            )
+            return states
+        except Exception as e:
+            logger.error(f"[TOOL_CALL_STATE] Failed to load workflow UI state for {chat_id}: {e}")
+            return []
+
     async def attach_tool_call_metadata(
         self,
         *,
@@ -1793,46 +1247,33 @@ class AG2PersistenceManager:
         event_id: str,
         metadata: Dict[str, Any]
     ) -> None:
-        """Attach tool-call metadata to the most recent agent message.
-
-        This enables workflow UI state to persist across reconnections.
-        When a tool call is emitted, we store its configuration and state
-        in the last agent message's metadata field.
-        """
+        """Persist workflow UI tool state for resume without mutating chat messages."""
         resolved_app_id = coalesce_app_id(app_id=app_id)
         if not resolved_app_id:
             raise ValueError("app_id is required")
         try:
-            coll = await self._coll()
-            
-            # Find the chat document first
-            doc = await coll.find_one(
-                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                {"messages": 1}
-            )
-            
-            if not doc:
-                logger.debug(f"[TOOL_CALL_METADATA] Chat {chat_id} not found")
-                return
-            
-            messages = doc.get("messages", [])
-            if not messages:
-                logger.debug(f"[TOOL_CALL_METADATA] No messages in chat {chat_id}")
-                return
-            
-            # Find the last assistant message index
+            history = await self.load_run_history(chat_id=chat_id, app_id=str(resolved_app_id))
             last_assistant_idx = None
-            for idx in range(len(messages) - 1, -1, -1):
-                msg = messages[idx]
+            for idx in range(len(history) - 1, -1, -1):
+                msg = history[idx]
                 if isinstance(msg, dict) and msg.get("role") == "assistant":
                     last_assistant_idx = idx
                     break
-            
+
             if last_assistant_idx is None:
-                logger.debug(f"[TOOL_CALL_METADATA] No assistant message found in {chat_id}")
+                logger.debug(f"[TOOL_CALL_METADATA] No assistant message found in run history for {chat_id}")
                 return
-            
-            # Update the specific message with tool_call metadata
+
+            coll = await self._coll()
+            now = datetime.now(UTC)
+            tool_call_id = str((metadata or {}).get("tool_call_id") or event_id)
+            storage_key = self._workflow_tool_call_storage_key(tool_call_id)
+            state_doc = deepcopy(metadata if isinstance(metadata, dict) else {})
+            state_doc["tool_call_id"] = tool_call_id
+            state_doc["message_index"] = last_assistant_idx
+            state_doc["updated_at"] = now.isoformat()
+            state_doc.setdefault("timestamp", now.isoformat())
+
             result = await coll.update_one(
                 {
                     "_id": chat_id,
@@ -1840,20 +1281,19 @@ class AG2PersistenceManager:
                 },
                 {
                     "$set": {
-                        f"messages.{last_assistant_idx}.metadata": {
-                            "tool_call": metadata
-                        }
+                        f"workflow_ui_state.tool_calls.{storage_key}": state_doc,
+                        "last_updated_at": now,
                     }
                 }
             )
-            
+
             if result.modified_count > 0:
                 logger.info(
-                    f"[TOOL_CALL_METADATA] Attached tool_call metadata to message[{last_assistant_idx}] "
-                    f"in {chat_id} (tool={metadata.get('tool_name')}, event={event_id})"
+                    f"[TOOL_CALL_METADATA] Persisted workflow UI state for message[{last_assistant_idx}] "
+                    f"in {chat_id} (tool={state_doc.get('tool_name')}, event={tool_call_id})"
                 )
             else:
-                logger.debug(f"[TOOL_CALL_METADATA] Failed to update message in {chat_id}")
+                logger.debug(f"[TOOL_CALL_METADATA] Failed to persist tool-call state in {chat_id}")
         except Exception as e:
             logger.error(f"[TOOL_CALL_METADATA] Failed to attach metadata for {chat_id}: {e}", exc_info=True)
 
@@ -1873,30 +1313,30 @@ class AG2PersistenceManager:
         try:
             coll = await self._coll()
             now = datetime.now(UTC).isoformat()
+            storage_key = self._workflow_tool_call_storage_key(event_id)
             updates: Dict[str, Any] = {
-                "messages.$[elem].metadata.tool_call.tool_call_status": status,
+                f"workflow_ui_state.tool_calls.{storage_key}.tool_call_status": status,
+                f"workflow_ui_state.tool_calls.{storage_key}.updated_at": now,
+                "last_updated_at": datetime.now(UTC),
             }
             if completed is not None:
-                updates["messages.$[elem].metadata.tool_call.tool_call_completed"] = completed
+                updates[f"workflow_ui_state.tool_calls.{storage_key}.tool_call_completed"] = completed
             if status == "responded":
-                updates["messages.$[elem].metadata.tool_call.responded_at"] = now
+                updates[f"workflow_ui_state.tool_calls.{storage_key}.responded_at"] = now
             if completed or status in {"completed", "dismissed", "cancelled", "skipped"}:
-                updates["messages.$[elem].metadata.tool_call.completed_at"] = now
+                updates[f"workflow_ui_state.tool_calls.{storage_key}.completed_at"] = now
 
             result = await coll.update_one(
                 {
                     "_id": chat_id,
                     **build_app_scope_filter(str(resolved_app_id)),
-                    "messages.metadata.tool_call.tool_call_id": event_id
+                    f"workflow_ui_state.tool_calls.{storage_key}.tool_call_id": event_id,
                 },
                 {
                     "$set": updates
                 },
-                array_filters=[
-                    {"elem.metadata.tool_call.tool_call_id": event_id}
-                ]
             )
-            
+
             if result.modified_count > 0:
                 logger.info(
                     f"[TOOL_CALL_STATE] Updated tool_call state for event={event_id} "
@@ -1904,7 +1344,7 @@ class AG2PersistenceManager:
                 )
             else:
                 logger.debug(
-                    f"[TOOL_CALL_STATE] No message found with tool_call.tool_call_id={event_id} "
+                    f"[TOOL_CALL_STATE] No persisted tool-call state found for event={event_id} "
                     f"in {chat_id}"
                 )
         except Exception as e:
@@ -1948,7 +1388,7 @@ class AG2PersistenceManager:
                 {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
                 {
                     "$set": {
-                        "pending_input_request": {
+                        "workflow_ui_state.pending_input_request": {
                             "request_id": request_id,
                             "agent": agent,
                             "prompt": prompt,
@@ -1987,8 +1427,10 @@ class AG2PersistenceManager:
             await coll.update_one(
                 {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
                 {
-                    "$unset": {"pending_input_request": ""},
-                    "$set": {"last_updated_at": datetime.now(UTC)},
+                    "$set": {
+                        "workflow_ui_state.pending_input_request": None,
+                        "last_updated_at": datetime.now(UTC),
+                    },
                 }
             )
             logger.debug(f"[PENDING_INPUT] Cleared pending input request for chat {chat_id}")
@@ -2013,38 +1455,13 @@ class AG2PersistenceManager:
             coll = await self._coll()
             doc = await coll.find_one(
                 {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                {"pending_input_request": 1}
+                {"workflow_ui_state.pending_input_request": 1}
             )
-            if doc and doc.get("pending_input_request"):
-                return doc["pending_input_request"]
-            return None
+            return extract_pending_input_request(doc)
         except Exception as e:
             logger.error(f"[PENDING_INPUT] Failed to get pending input request for {chat_id}: {e}")
             return None
 
-    async def get_latest_message(
-        self,
-        *,
-        chat_id: str,
-        app_id: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """Return the latest persisted chat message, if any."""
-        resolved_app_id = coalesce_app_id(app_id=app_id)
-        if not resolved_app_id:
-            return None
-        try:
-            coll = await self._coll()
-            doc = await coll.find_one(
-                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                {"messages": {"$slice": -1}},
-            )
-            messages = (doc or {}).get("messages")
-            if isinstance(messages, list) and messages and isinstance(messages[-1], dict):
-                return messages[-1]
-            return None
-        except Exception as e:
-            logger.error(f"[MESSAGES] Failed to get latest message for {chat_id}: {e}")
-            return None
 
 #############################################
 #############################################

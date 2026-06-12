@@ -1,19 +1,25 @@
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
 import asyncio
 import json
-import re
-from collections.abc import Mapping
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from mozaiksai.core.ports.orchestration import RunStatus
 
 from .generator_support.code_files import (
     extract_code_file_entries_from_payload,
     extract_code_file_map_from_payload,
     safe_relpath,
+)
+from .generator_support.page_plan_utils import (
+    _page_from_plan,
+    _page_stem_from_path,
+    _page_stems,
 )
 from .paths import resolve_workflow_path
 
@@ -27,12 +33,38 @@ class TaskBatchSource(BaseModel):
     path: str
     task_model: str
 
-    @field_validator("path", "task_model")
+    @field_validator("path")
     @classmethod
-    def _required_text(cls, value: str) -> str:
+    def _required_path(cls, value: str) -> str:
         text = str(value or "").strip()
         if not text:
-            raise ValueError("task batch source fields must be non-empty")
+            raise ValueError("task batch source path must be non-empty")
+        return text
+
+    @field_validator("task_model")
+    @classmethod
+    def _required_task_model(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("task batch source task_model must be non-empty")
+        return text
+
+    def resolve_task_model(self, context_variables: dict[str, Any]) -> str:
+        """Resolve ${variable_name} references in task_model from context.
+
+        Allows dev packs to declare ``task_model: ${build_task_model}`` in
+        task_batches.yaml without hardcoding a domain-specific model name in
+        the harness YAML. The harness stores task items as plain dicts so the
+        resolved name is currently advisory; it will be used for validation
+        when typed task model resolution is introduced.
+        """
+        text = self.task_model
+        if not text.startswith("${") or not text.endswith("}"):
+            return text
+        var_name = text[2:-1].strip()
+        resolved = context_variables.get(var_name)
+        if resolved and isinstance(resolved, str) and resolved.strip():
+            return resolved.strip()
         return text
 
 
@@ -44,7 +76,7 @@ class TaskBatchWorker(BaseModel):
     mode: Literal["ag2_agent"] = "ag2_agent"
     agent_field: str = "initial_agent"
     prompt_field: str = "initial_message"
-    context_fields: List[str] = Field(default_factory=list)
+    context_fields: list[str] = Field(default_factory=list)
 
     @field_validator("agent_field", "prompt_field")
     @classmethod
@@ -56,8 +88,8 @@ class TaskBatchWorker(BaseModel):
 
     @field_validator("context_fields")
     @classmethod
-    def _clean_context_fields(cls, value: List[str]) -> List[str]:
-        fields: List[str] = []
+    def _clean_context_fields(cls, value: list[str]) -> list[str]:
+        fields: list[str] = []
         for item in value or []:
             text = str(item or "").strip()
             if text and text not in fields:
@@ -74,7 +106,7 @@ class TaskBatchExecution(BaseModel):
     dependency_field: str = "depends_on"
     failure_policy: Literal["fail_batch", "continue_with_available", "collect_errors"] = "fail_batch"
     retry_limit: int = Field(default=0, ge=0, le=5)
-    timeout_seconds: Optional[int] = Field(default=None, ge=1)
+    timeout_seconds: int | None = Field(default=None, ge=1)
 
     @field_validator("dependency_field")
     @classmethod
@@ -104,6 +136,76 @@ class TaskBatchResult(BaseModel):
         return text
 
 
+class TaskBatchConveyor(BaseModel):
+    """Minimal decomposition-driven task conveyor declaration.
+
+    A conveyor keeps workflow YAML focused on the static contract: which agent
+    decomposes and which agents may execute. The task list, dependencies, and
+    task prompts come from the decomposition agent's structured output.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    decomposition_agent: str
+    execution_agents: list[str] = Field(default_factory=list)
+    concurrency: int = Field(default=4, ge=1, le=32)
+    failure_policy: Literal["fail_batch", "continue_with_available", "collect_errors"] = "fail_batch"
+    retry_limit: int = Field(default=0, ge=0, le=5)
+    timeout_seconds: int | None = Field(default=None, ge=1)
+    require_owned_paths: bool = False
+
+    @field_validator("id", "decomposition_agent")
+    @classmethod
+    def _required_conveyor_text(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("conveyor id and decomposition_agent must be non-empty")
+        return text
+
+    @field_validator("execution_agents")
+    @classmethod
+    def _clean_execution_agents(cls, value: list[str]) -> list[str]:
+        agents: list[str] = []
+        for item in value or []:
+            text = str(item or "").strip()
+            if text and text not in agents:
+                agents.append(text)
+        if not agents:
+            raise ValueError("conveyor execution_agents must contain at least one agent")
+        return agents
+
+    def to_batch_spec(self) -> TaskBatchSpec:
+        return TaskBatchSpec(
+            id=self.id,
+            trigger_agent=self.decomposition_agent,
+            source=TaskBatchSource(
+                kind="structured_output",
+                path="DecompositionPlan.tasks",
+                task_model="DecomposedTask",
+            ),
+            worker=TaskBatchWorker(
+                mode="ag2_agent",
+                agent_field="execution_agent",
+                prompt_field="task_prompt",
+            ),
+            execution=TaskBatchExecution(
+                concurrency=self.concurrency,
+                dependency_field="depends_on",
+                failure_policy=self.failure_policy,
+                retry_limit=self.retry_limit,
+                timeout_seconds=self.timeout_seconds,
+            ),
+            result=TaskBatchResult(
+                context_key=f"{self.id}_results",
+                status_key=f"{self.id}_status",
+                merge_strategy="collect_task_outputs",
+                require_owned_paths=self.require_owned_paths,
+            ),
+            allowed_execution_agents=list(self.execution_agents),
+        )
+
+
 class TaskBatchSpec(BaseModel):
     """One workflow-local AG2 task batch declaration."""
 
@@ -115,6 +217,7 @@ class TaskBatchSpec(BaseModel):
     worker: TaskBatchWorker = Field(default_factory=TaskBatchWorker)
     execution: TaskBatchExecution = Field(default_factory=TaskBatchExecution)
     result: TaskBatchResult
+    allowed_execution_agents: list[str] = Field(default_factory=list, exclude=True)
 
     @field_validator("id", "trigger_agent")
     @classmethod
@@ -124,6 +227,16 @@ class TaskBatchSpec(BaseModel):
             raise ValueError("task batch id and trigger_agent must be non-empty")
         return text
 
+    @field_validator("allowed_execution_agents")
+    @classmethod
+    def _clean_allowed_execution_agents(cls, value: list[str]) -> list[str]:
+        agents: list[str] = []
+        for item in value or []:
+            text = str(item or "").strip()
+            if text and text not in agents:
+                agents.append(text)
+        return agents
+
 
 class TaskBatchesConfig(BaseModel):
     """Validated workflow-local task batch contract."""
@@ -131,19 +244,22 @@ class TaskBatchesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1] = 1
-    batches: List[TaskBatchSpec] = Field(default_factory=list)
+    batches: list[TaskBatchSpec] = Field(default_factory=list)
+    conveyors: list[TaskBatchConveyor] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_unique_batches(self) -> "TaskBatchesConfig":
+    def _validate_unique_batches(self) -> TaskBatchesConfig:
         seen: set[str] = set()
-        for batch in self.batches:
+        materialized_batches = [*self.batches, *[conveyor.to_batch_spec() for conveyor in self.conveyors]]
+        for batch in materialized_batches:
             if batch.id in seen:
                 raise ValueError(f"duplicate task batch id: {batch.id}")
             seen.add(batch.id)
+        self.batches = materialized_batches
         return self
 
 
-def parse_task_batches_config(payload: Dict[str, Any]) -> TaskBatchesConfig:
+def parse_task_batches_config(payload: dict[str, Any]) -> TaskBatchesConfig:
     """Validate a raw task_batches.yaml payload."""
 
     if not isinstance(payload, dict):
@@ -151,7 +267,7 @@ def parse_task_batches_config(payload: Dict[str, Any]) -> TaskBatchesConfig:
     return TaskBatchesConfig.model_validate(payload)
 
 
-def get_task_batches_path(workflow_name: str, workflows_root: Optional[Path] = None) -> Path:
+def get_task_batches_path(workflow_name: str, workflows_root: Path | None = None) -> Path:
     """Resolve the canonical task_batches.yaml path for a workflow."""
 
     workflow_path = resolve_workflow_path(workflow_name, root=workflows_root)
@@ -162,8 +278,8 @@ def get_task_batches_path(workflow_name: str, workflows_root: Optional[Path] = N
 
 def load_task_batches_config(
     workflow_name: str,
-    workflows_root: Optional[Path] = None,
-) -> Optional[TaskBatchesConfig]:
+    workflows_root: Path | None = None,
+) -> TaskBatchesConfig | None:
     """Load and validate task_batches.yaml for a workflow when present."""
 
     path = get_task_batches_path(workflow_name, workflows_root)
@@ -173,7 +289,7 @@ def load_task_batches_config(
     return parse_task_batches_config(raw)
 
 
-def workflow_has_task_batches(workflow_name: str, workflows_root: Optional[Path] = None) -> bool:
+def workflow_has_task_batches(workflow_name: str, workflows_root: Path | None = None) -> bool:
     """Return true when a workflow declares at least one task batch."""
 
     config = load_task_batches_config(workflow_name, workflows_root)
@@ -205,23 +321,23 @@ async def execute_task_batches_for_trigger(
     *,
     workflow_name: str,
     trigger_agent: str,
-    batches_config: Optional[TaskBatchesConfig],
-    agents: Dict[str, Any],
-    context_variables: Dict[str, Any],
-    structured_output: Optional[Dict[str, Any]] = None,
-    chat_id: Optional[str] = None,
-    app_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    transport: Optional[Any] = None,
-    wf_logger: Optional[Any] = None,
+    batches_config: TaskBatchesConfig | None,
+    agents: dict[str, Any],
+    context_variables: dict[str, Any],
+    structured_output: dict[str, Any] | None = None,
+    chat_id: str | None = None,
+    app_id: str | None = None,
+    user_id: str | None = None,
+    transport: Any | None = None,
+    wf_logger: Any | None = None,
     fresh_agents_per_task: bool = True,
-    agents_factory: Optional[Callable[..., Awaitable[Dict[str, Any]]]] = None,
-) -> Dict[str, Any]:
+    agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
     """Execute workflow-local task batches triggered by an agent turn.
 
-    Worker agents are called as async functions inside the current workflow run,
-    normalized outputs are written back to context, and the parent handoff graph
-    continues deterministically.
+    Each task item runs through its own AG2 workflow channel. Normalized outputs
+    are written back to context, then the parent AG2 Network channel continues
+    from the next declared transition.
     """
 
     if not batches_config or not batches_config.batches:
@@ -233,13 +349,14 @@ async def execute_task_batches_for_trigger(
     if not matching_batches:
         return {}
 
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
     for batch in matching_batches:
         source_payload = (
             structured_output
             if batch.source.kind == "structured_output"
             else context_variables
         )
+        resolved_task_model = batch.source.resolve_task_model(context_variables)
         raw_tasks = resolve_path_value(source_payload, batch.source.path)
         task_items = _normalize_task_items(raw_tasks)
         if not task_items:
@@ -253,10 +370,11 @@ async def execute_task_batches_for_trigger(
 
         if wf_logger:
             wf_logger.info(
-                "[TASK_BATCH] Starting %s tasks=%d trigger=%s",
+                "[TASK_BATCH] Starting %s tasks=%d trigger=%s task_model=%s",
                 batch.id,
                 len(task_items),
                 trigger_agent,
+                resolved_task_model,
             )
         _validate_batch_owned_paths(batch, task_items)
         await _emit_task_batch_activity(
@@ -312,19 +430,19 @@ async def _execute_one_batch(
     *,
     workflow_name: str,
     batch: TaskBatchSpec,
-    task_items: List[Dict[str, Any]],
-    agents: Dict[str, Any],
-    context_variables: Dict[str, Any],
-    chat_id: Optional[str],
-    app_id: Optional[str],
-    user_id: Optional[str],
-    wf_logger: Optional[Any],
+    task_items: list[dict[str, Any]],
+    agents: dict[str, Any],
+    context_variables: dict[str, Any],
+    chat_id: str | None,
+    app_id: str | None,
+    user_id: str | None,
+    wf_logger: Any | None,
     fresh_agents_per_task: bool,
-    agents_factory: Optional[Callable[..., Awaitable[Dict[str, Any]]]],
-) -> Dict[str, Any]:
+    agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
+) -> dict[str, Any]:
     pending = {str(item["task_id"]): item for item in task_items}
-    completed: Dict[str, Dict[str, Any]] = {}
-    failed: Dict[str, Dict[str, Any]] = {}
+    completed: dict[str, dict[str, Any]] = {}
+    failed: dict[str, dict[str, Any]] = {}
 
     while pending:
         ready = [
@@ -354,10 +472,11 @@ async def _execute_one_batch(
         )
         settled = await asyncio.gather(
             *[
-                _run_task_with_retries(
+                _run_one_task(
                     workflow_name=workflow_name,
                     batch=batch,
                     task=item,
+                    all_task_items=task_items,
                     base_context=context_variables,
                     completed_task_outputs=completed,
                     current_batch_outputs=current_batch_outputs,
@@ -366,7 +485,6 @@ async def _execute_one_batch(
                     app_id=app_id,
                     user_id=user_id,
                     semaphore=semaphore,
-                    wf_logger=wf_logger,
                     fresh_agents_per_task=fresh_agents_per_task,
                     agents_factory=agents_factory,
                 )
@@ -375,7 +493,7 @@ async def _execute_one_batch(
             return_exceptions=True,
         )
 
-        for task, outcome in zip(ready, settled):
+        for task, outcome in zip(ready, settled, strict=False):
             task_id = str(task["task_id"])
             pending.pop(task_id, None)
             if isinstance(outcome, Exception):
@@ -431,81 +549,40 @@ async def _execute_one_batch(
     }
 
 
-async def _run_task_with_retries(
-    *,
-    workflow_name: str,
-    batch: TaskBatchSpec,
-    task: Dict[str, Any],
-    base_context: Dict[str, Any],
-    completed_task_outputs: Dict[str, Dict[str, Any]],
-    current_batch_outputs: Dict[str, Any],
-    agents: Dict[str, Any],
-    chat_id: Optional[str],
-    app_id: Optional[str],
-    user_id: Optional[str],
-    semaphore: asyncio.Semaphore,
-    wf_logger: Optional[Any],
-    fresh_agents_per_task: bool,
-    agents_factory: Optional[Callable[..., Awaitable[Dict[str, Any]]]],
-) -> Dict[str, Any]:
-    attempts = batch.execution.retry_limit + 1
-    last_error: Optional[Exception] = None
-    for attempt in range(1, attempts + 1):
-        try:
-            async with semaphore:
-                return await _run_one_task(
-                    workflow_name=workflow_name,
-                    batch=batch,
-                    task=task,
-                    base_context=base_context,
-                    completed_task_outputs=completed_task_outputs,
-                    current_batch_outputs=current_batch_outputs,
-                    agents=agents,
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    user_id=user_id,
-                    fresh_agents_per_task=fresh_agents_per_task,
-                    agents_factory=agents_factory,
-                )
-        except Exception as exc:
-            last_error = exc
-            if wf_logger:
-                wf_logger.warning(
-                    "[TASK_BATCH] task=%s attempt=%d/%d failed: %s",
-                    task.get("task_id"),
-                    attempt,
-                    attempts,
-                    exc,
-                )
-    assert last_error is not None
-    raise last_error
-
-
 async def _run_one_task(
     *,
     workflow_name: str,
     batch: TaskBatchSpec,
-    task: Dict[str, Any],
-    base_context: Dict[str, Any],
-    completed_task_outputs: Dict[str, Dict[str, Any]],
-    current_batch_outputs: Dict[str, Any],
-    agents: Dict[str, Any],
-    chat_id: Optional[str],
-    app_id: Optional[str],
-    user_id: Optional[str],
+    task: dict[str, Any],
+    all_task_items: list[dict[str, Any]],
+    base_context: dict[str, Any],
+    completed_task_outputs: dict[str, dict[str, Any]],
+    current_batch_outputs: dict[str, Any],
+    agents: dict[str, Any],
+    chat_id: str | None,
+    app_id: str | None,
+    user_id: str | None,
+    semaphore: asyncio.Semaphore,
     fresh_agents_per_task: bool,
-    agents_factory: Optional[Callable[..., Awaitable[Dict[str, Any]]]],
-) -> Dict[str, Any]:
+    agents_factory: Callable[..., Awaitable[dict[str, Any]]] | None,
+) -> dict[str, Any]:
     agent_name = str(task.get(batch.worker.agent_field) or "").strip()
     prompt = str(task.get(batch.worker.prompt_field) or "").strip()
     if not agent_name:
         raise ValueError(f"task {task.get('task_id')!r} is missing worker agent")
+    if batch.allowed_execution_agents and agent_name not in set(batch.allowed_execution_agents):
+        allowed = ", ".join(batch.allowed_execution_agents)
+        raise ValueError(
+            f"task {task.get('task_id')!r} references execution agent {agent_name!r} "
+            f"outside allowed conveyor agents: {allowed}"
+        )
     if not prompt:
         raise ValueError(f"task {task.get('task_id')!r} is missing worker prompt")
 
     task_context = _build_task_context(
         base_context=base_context,
         task=task,
+        all_task_items=all_task_items,
         batch=batch,
         completed_task_outputs=completed_task_outputs,
         current_batch_outputs=current_batch_outputs,
@@ -513,12 +590,13 @@ async def _run_one_task(
         app_id=app_id,
         user_id=user_id,
     )
+    scoped_prompt = _build_scoped_worker_prompt(prompt, task_context)
 
     if fresh_agents_per_task:
         if agents_factory is None:
             from .agents import create_agents
 
-            async def _default_factory(**kwargs: Any) -> Dict[str, Any]:
+            async def _default_factory(**kwargs: Any) -> dict[str, Any]:
                 return await create_agents(**kwargs)
 
             agents_factory = _default_factory
@@ -534,18 +612,43 @@ async def _run_one_task(
     if agent is None:
         raise ValueError(f"task {task.get('task_id')!r} references unknown agent {agent_name!r}")
 
-    ask_kwargs = {"variables": dict(task_context)}
-    if batch.execution.timeout_seconds:
-        reply = await asyncio.wait_for(
-            agent.ask(prompt, **ask_kwargs),
-            timeout=batch.execution.timeout_seconds,
+    async with semaphore:
+        from mozaiksai.core.adapters.ag2_task_batch_runner import (
+            AG2TaskBatchRunner,
+            AG2TaskBatchRunnerRequest,
         )
-    else:
-        reply = await agent.ask(prompt, **ask_kwargs)
 
-    output = _normalize_agent_reply(reply)
+        runner_result = None
+        attempts = batch.execution.retry_limit + 1
+        last_error: str | None = None
+        for _attempt in range(attempts):
+            runner_result = await AG2TaskBatchRunner().run(
+                AG2TaskBatchRunnerRequest(
+                    workflow_name=workflow_name,
+                    batch_id=batch.id,
+                    task_id=str(task["task_id"]),
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    agent_name=agent_name,
+                    agent=agent,
+                    prompt=scoped_prompt,
+                    context_variables=task_context,
+                    structured_registry=_structured_registry_for_agent(workflow_name, agent_name),
+                    timeout_seconds=batch.execution.timeout_seconds,
+                )
+            )
+            if runner_result.status is RunStatus.COMPLETED:
+                break
+            last_error = runner_result.error or runner_result.status.value
+        if runner_result is None or runner_result.status is not RunStatus.COMPLETED:
+            raise RuntimeError(
+                f"AG2 task channel failed for task {task.get('task_id')!r}: {last_error or 'unknown error'}"
+            )
+
+    output = _normalize_agent_reply(runner_result.output)
     if not isinstance(output, dict):
         output = {"agent_message": str(output)}
+    _reject_task_output_identity_drift(task, output)
     canonical_code_files = extract_code_file_entries_from_payload(output)
     if canonical_code_files:
         output["code_files"] = canonical_code_files
@@ -555,40 +658,81 @@ async def _run_one_task(
             task=task,
             base_context=base_context,
         )
+        output["_page_materialization_source"] = "app_build_plan.pages"
+        output["_page_materialized_paths"] = [
+            path
+            for path in _normalize_owned_paths(task.get("owned_paths"))
+            if _page_stem_from_path(path)
+        ]
     _validate_task_output_ownership(batch, task, output)
+    _stamp_task_output_identity(task, output)
     output.setdefault("_task_id", str(task["task_id"]))
     output.setdefault("_worker_agent", agent_name)
     output.setdefault("_owned_paths", list(task.get("owned_paths") or []))
+    output.setdefault(
+        "_ag2_task_channel",
+        {
+            "channel_id": runner_result.channel_id,
+            "close_reason": runner_result.close_reason,
+        },
+    )
     return output
 
 
-def _slug(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip()).strip("_").lower()
+def _build_scoped_worker_prompt(prompt: str, task_context: dict[str, Any]) -> str:
+    envelope = {
+        "current_task_batch_id": task_context.get("current_task_batch_id"),
+        "current_task_id": task_context.get("current_task_id"),
+        "current_task": task_context.get("current_task"),
+        "dependency_task_outputs": task_context.get("dependency_task_outputs") or {},
+    }
+    return (
+        f"{prompt}\n\n"
+        "[TASK BATCH CONTEXT]\n"
+        "This JSON envelope is authoritative for the worker response. "
+        "The response `task_id` MUST equal `current_task_id`; the response `kind` MUST equal `current_task.kind`.\n"
+        f"{json.dumps(envelope, indent=2, sort_keys=True, default=str)}"
+    )
 
 
-def _page_stem_from_path(path: str) -> Optional[str]:
-    safe = safe_relpath(path)
-    if not safe:
-        return None
-    pure = PurePosixPath(safe)
-    if len(pure.parts) == 3 and pure.parts[0] == "ui" and pure.parts[1] == "pages" and pure.suffix in {".yaml", ".yml"}:
-        return _slug(pure.stem)
-    return None
+def _reject_task_output_identity_drift(task: dict[str, Any], output: dict[str, Any]) -> None:
+    task_id = str(task.get("task_id") or "").strip()
+    output_task_id = str(output.get("task_id") or "").strip()
+    if task_id and output_task_id and output_task_id != task_id:
+        raise ValueError(
+            f"task {task_id!r} emitted mismatched task_id {output_task_id!r}"
+        )
+
+    task_kind = str(task.get("kind") or "").strip()
+    output_kind = str(output.get("kind") or "").strip()
+    if task_kind and output_kind and output_kind != task_kind:
+        raise ValueError(
+            f"task {task_id!r} emitted kind {output_kind!r}; expected {task_kind!r}"
+        )
 
 
-def _page_stems(page: Dict[str, Any]) -> set[str]:
-    stems: set[str] = set()
-    route = str(page.get("route") or "").strip()
-    if route and route != "/":
-        stems.add(_slug(route.strip("/").split("/")[-1]))
-    for key in ("name", "id", "surface_id"):
-        value = str(page.get(key) or "").strip()
-        if value:
-            stems.add(_slug(value))
-    return {stem for stem in stems if stem}
+def _stamp_task_output_identity(task: dict[str, Any], output: dict[str, Any]) -> None:
+    task_id = str(task.get("task_id") or "").strip()
+    if task_id and not str(output.get("task_id") or "").strip():
+        output["task_id"] = task_id
+
+    task_kind = str(task.get("kind") or "").strip()
+    if task_kind and not str(output.get("kind") or "").strip():
+        output["kind"] = task_kind
 
 
-def _planned_pages(base_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _structured_registry_for_agent(workflow_name: str, agent_name: str) -> dict[str, Any]:
+    try:
+        from .outputs.structured import load_workflow_structured_outputs
+
+        _, registry = load_workflow_structured_outputs(workflow_name)
+    except Exception:
+        return {}
+    model_cls = registry.get(agent_name) if isinstance(registry, dict) else None
+    return {agent_name: model_cls} if model_cls is not None else {}
+
+
+def _planned_pages(base_context: dict[str, Any]) -> list[dict[str, Any]]:
     plan = base_context.get("app_build_plan")
     if isinstance(plan, dict) and isinstance(plan.get("pages"), list):
         return [dict(page) for page in plan["pages"] if isinstance(page, dict)]
@@ -598,67 +742,13 @@ def _planned_pages(base_context: Dict[str, Any]) -> List[Dict[str, Any]]:
     return []
 
 
-def _page_from_plan(page: Dict[str, Any], stem: str) -> Dict[str, Any]:
-    title = str(page.get("title") or page.get("name") or stem.replace("_", " ").title()).strip()
-    route = str(page.get("route") or f"/{stem.replace('_', '-')}").strip()
-    sections: List[Dict[str, Any]] = []
-    hints = page.get("sections_hint")
-    if isinstance(hints, list):
-        for index, hint in enumerate(hints):
-            if not isinstance(hint, dict):
-                continue
-            primitive = str(hint.get("primitive") or "PageHeader").strip()
-            section_id = str(hint.get("section_id_hint") or f"{stem}-{index + 1}").strip()
-            sections.append(
-                {
-                    "id": section_id,
-                    "primitive": primitive,
-                    "title": hint.get("title_hint"),
-                    "config": hint.get("config_hint") if isinstance(hint.get("config_hint"), dict) else {},
-                    "event_triggers": [],
-                    "roles": None,
-                }
-            )
-    if not sections:
-        sections.append(
-            {
-                "id": f"{stem}-header",
-                "primitive": "PageHeader",
-                "title": None,
-                "config": {"title": title, "subtitle": str(page.get("purpose") or "").strip()},
-                "event_triggers": [],
-                "roles": None,
-            }
-        )
-    return {
-        "name": str(page.get("name") or title).strip(),
-        "route": route,
-        "title": title,
-        "page_type": str(page.get("page_type") or page.get("ui_layout") or "standard").strip(),
-        "layout": str(page.get("layout") or "stack").strip(),
-        "shell_mode": str(page.get("shell_mode") or "workspace").strip(),
-        "roles": page.get("roles"),
-        "navigation": {
-            "id": stem,
-            "label": title,
-            "icon": None,
-            "scope": "global",
-            "order": 10,
-            "visible": True,
-            "placement": None,
-        },
-        "sections": sections,
-        "extensions": None,
-    }
-
-
 def _normalize_owned_page_files_from_plan(
     code_files: Any,
     *,
-    task: Dict[str, Any],
-    base_context: Dict[str, Any],
-) -> List[Dict[str, str]]:
-    file_map: Dict[str, str] = {}
+    task: dict[str, Any],
+    base_context: dict[str, Any],
+) -> list[dict[str, str]]:
+    file_map: dict[str, str] = {}
     if isinstance(code_files, list):
         for entry in code_files:
             if not isinstance(entry, dict):
@@ -681,7 +771,7 @@ def _normalize_owned_page_files_from_plan(
             for filename, content in file_map.items()
         ]
 
-    planned_by_stem: Dict[str, Dict[str, Any]] = {}
+    planned_by_stem: dict[str, dict[str, Any]] = {}
     for page in _planned_pages(base_context):
         for stem in _page_stems(page):
             planned_by_stem.setdefault(stem, page)
@@ -705,10 +795,10 @@ def _normalize_owned_page_files_from_plan(
     ]
 
 
-def _normalize_owned_paths(value: Any) -> List[str]:
+def _normalize_owned_paths(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    paths: List[str] = []
+    paths: list[str] = []
     for item in value:
         safe = safe_relpath(str(item or ""))
         if safe and safe not in paths:
@@ -716,12 +806,12 @@ def _normalize_owned_paths(value: Any) -> List[str]:
     return paths
 
 
-def _validate_batch_owned_paths(batch: TaskBatchSpec, task_items: List[Dict[str, Any]]) -> None:
+def _validate_batch_owned_paths(batch: TaskBatchSpec, task_items: list[dict[str, Any]]) -> None:
     if not batch.result.require_owned_paths:
         return
 
-    owner_by_path: Dict[str, str] = {}
-    duplicate_paths: Dict[str, List[str]] = {}
+    owner_by_path: dict[str, str] = {}
+    duplicate_paths: dict[str, list[str]] = {}
     for task in task_items:
         task_id = str(task.get("task_id") or "").strip()
         owned_paths = _normalize_owned_paths(task.get("owned_paths"))
@@ -748,8 +838,8 @@ def _validate_batch_owned_paths(batch: TaskBatchSpec, task_items: List[Dict[str,
 
 def _validate_task_output_ownership(
     batch: TaskBatchSpec,
-    task: Dict[str, Any],
-    output: Dict[str, Any],
+    task: dict[str, Any],
+    output: dict[str, Any],
 ) -> None:
     if not batch.result.require_owned_paths:
         return
@@ -783,20 +873,25 @@ def _validate_task_output_ownership(
 
 def _build_task_context(
     *,
-    base_context: Dict[str, Any],
-    task: Dict[str, Any],
+    base_context: dict[str, Any],
+    task: dict[str, Any],
+    all_task_items: list[dict[str, Any]],
     batch: TaskBatchSpec,
-    completed_task_outputs: Dict[str, Dict[str, Any]],
-    current_batch_outputs: Dict[str, Any],
-    chat_id: Optional[str],
-    app_id: Optional[str],
-    user_id: Optional[str],
-) -> Dict[str, Any]:
+    completed_task_outputs: dict[str, dict[str, Any]],
+    current_batch_outputs: dict[str, Any],
+    chat_id: str | None,
+    app_id: str | None,
+    user_id: str | None,
+) -> dict[str, Any]:
     task_context = dict(base_context)
     task_context["task_run_mode"] = True
     task_context["current_task_batch_id"] = batch.id
     task_context["current_task_id"] = str(task["task_id"])
     task_context["current_task"] = dict(task)
+    task_context["decomposition_plan"] = {
+        "batch_id": batch.id,
+        "tasks": [dict(item) for item in all_task_items],
+    }
     task_context["current_build_task_id"] = str(task["task_id"])
     task_context["current_build_task_type"] = str(task.get("task_type") or "")
     task_context["current_build_task"] = dict(task)
@@ -828,13 +923,13 @@ def _build_task_context(
     return task_context
 
 
-def _optional_task_output_paths(task: Dict[str, Any]) -> set[str]:
+def _optional_task_output_paths(task: dict[str, Any]) -> set[str]:
     task_type = str(task.get("task_type") or "").strip()
     if task_type == "page_bundle":
         return {
             "brand/theme_config.json",
             "config/asset_manifest.json",
-            "config/data.json",
+            "data/contract.json",
             "config/shell.json",
             "ui/index.js",
             "ui/route_manifest.json",
@@ -856,12 +951,12 @@ def _optional_task_output_paths(task: Dict[str, Any]) -> set[str]:
 def _build_batch_outputs(
     *,
     batch: TaskBatchSpec,
-    completed: Dict[str, Dict[str, Any]],
-    failed: Dict[str, Dict[str, Any]],
+    completed: dict[str, dict[str, Any]],
+    failed: dict[str, dict[str, Any]],
     task_count: int,
     status: str,
-) -> Dict[str, Any]:
-    outputs: Dict[str, Any] = dict(completed)
+) -> dict[str, Any]:
+    outputs: dict[str, Any] = dict(completed)
     if failed:
         outputs["_failed"] = dict(failed)
     outputs["_meta"] = {
@@ -876,7 +971,7 @@ def _build_batch_outputs(
     return outputs
 
 
-def _normalize_task_items(raw_tasks: Any) -> List[Dict[str, Any]]:
+def _normalize_task_items(raw_tasks: Any) -> list[dict[str, Any]]:
     raw_tasks = _to_plain_data(raw_tasks)
     if isinstance(raw_tasks, Mapping):
         raw_iterable = list(raw_tasks.values())
@@ -885,7 +980,7 @@ def _normalize_task_items(raw_tasks: Any) -> List[Dict[str, Any]]:
     else:
         raw_iterable = []
 
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_iterable):
         item = _to_plain_data(raw)
         if not isinstance(item, Mapping):
@@ -904,7 +999,7 @@ def _normalize_task_items(raw_tasks: Any) -> List[Dict[str, Any]]:
     return items
 
 
-def _task_dependencies(task: Dict[str, Any], dependency_field: str) -> List[str]:
+def _task_dependencies(task: dict[str, Any], dependency_field: str) -> list[str]:
     raw = task.get(dependency_field)
     if raw is None:
         return []
@@ -937,9 +1032,9 @@ def _to_plain_data(value: Any) -> Any:
 
 
 async def _emit_task_batch_activity(
-    transport: Optional[Any],
-    chat_id: Optional[str],
-    payload: Dict[str, Any],
+    transport: Any | None,
+    chat_id: str | None,
+    payload: dict[str, Any],
 ) -> None:
     if not transport or not chat_id:
         return
@@ -958,6 +1053,7 @@ async def _emit_task_batch_activity(
 
 __all__ = [
     "TaskBatchExecution",
+    "TaskBatchConveyor",
     "TaskBatchResult",
     "TaskBatchSource",
     "TaskBatchSpec",

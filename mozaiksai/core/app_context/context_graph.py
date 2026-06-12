@@ -850,14 +850,14 @@ def _workflow_file_contract_role(path: str) -> str:
         return "workflow_orchestrator_contract"
     if name == "agents.yaml":
         return "workflow_agent_contract"
-    if name == "handoffs.yaml":
-        return "workflow_handoff_contract"
+    if name == "transition_graph.yaml":
+        return "workflow_transition_graph_contract"
     if name == "structured_outputs.yaml":
         return "workflow_output_contract"
     if name == "tools.yaml":
         return "workflow_tool_contract"
-    if name == "hooks.yaml":
-        return "workflow_hook_contract"
+    if name == "middleware.yaml":
+        return "workflow_middleware_contract"
     if name == "context_variables.yaml":
         return "workflow_context_contract"
     if "/tools/" in path:

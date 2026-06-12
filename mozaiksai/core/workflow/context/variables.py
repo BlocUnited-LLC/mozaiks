@@ -20,7 +20,6 @@ from .schema import (
     ContextAgentView,
     load_context_variables_config,
 )
-from ..workflow_manager import workflow_manager
 from logs.logging_config import get_workflow_logger
 
 business_logger = get_workflow_logger("context_variables")
@@ -415,6 +414,9 @@ def _create_data_entity_manager(
 def _load_workflow_plan(workflow_name: str) -> Tuple[ContextVariablesPlan, Dict[str, Any]]:
     raw_section: Dict[str, Any] = {}
     try:
+        from ..workflow_manager import get_workflow_manager
+
+        workflow_manager = get_workflow_manager()
         workflow_config = workflow_manager.get_config(workflow_name) or {}
         context_section = workflow_config.get("context_variables") or {}
         if isinstance(context_section, dict):
@@ -630,6 +632,9 @@ async def _load_context_async(workflow_name: str, app_id: Optional[str]):
         elif source_type == "external":
             context.set(name, None)
             business_logger.debug("Registered external variable %s (fetched by tools)", name)
+        elif source_type == "build_context":
+            context.set(name, None)
+            business_logger.debug("Registered build_context variable %s (projected at launch)", name)
         elif source_type == "file":
             try:
                 value = _resolve_file_source(definition)

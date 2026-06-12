@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 # Workflow routing transitions — user-choice and non-chat routing moments that
 # live in the global pack graph (extension_registry.json), NOT in individual
 # workflow orchestrator.yaml files. Transitions are the workflow-routing layer;
-# handoffs.yaml is the agent-routing layer. These are distinct concerns.
+# transition_graph.yaml is the agent-routing layer. These are distinct concerns.
 # ---------------------------------------------------------------------------
 
 
@@ -129,6 +129,10 @@ class WorkflowTransition(BaseModel):
       prerequisite_redirect — optional UI explaining a prerequisite redirect
       chat_session          — launches route_to workflow in the current chat surface
                                with no blocking overlay; user can type freely
+      workflow_complete     — terminal: shell fires this client-side when a workflow
+                               run finishes and no server transition is pending.
+                               Renders the registered completion component; resolves
+                               client-side only — no /api/transitions/resolve call.
 
     UI resolution (shell responsibility):
       1. Look up transition.ui.component in the component registry.
@@ -159,6 +163,7 @@ class WorkflowTransition(BaseModel):
         "progress_view",
         "prerequisite_redirect",
         "chat_session",
+        "workflow_complete",
     ]
     ui: Optional[TransitionUIBinding] = None
 

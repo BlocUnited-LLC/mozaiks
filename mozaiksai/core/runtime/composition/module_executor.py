@@ -35,6 +35,7 @@ from uuid import uuid4
 import jsonschema
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
@@ -132,13 +133,17 @@ class ModuleExecutor:
         self,
         *,
         event_emitter: Callable[[str, dict[str, Any]], Awaitable[Any] | Any] | None = None,
+        entitlement_checker: EntitlementPort | None = None,
     ) -> None:
         self._modules: dict[str, Any] = {}
         self._action_methods: dict[str, dict[str, str]] = {}
         self._settings: dict[str, list[dict[str, Any]] | None] = {}
         self._action_permissions: dict[str, dict[str, list[str]]] = {}
         self._action_schemas: dict[str, dict[str, dict[str, Any]]] = {}
+        self._action_entitlements: dict[str, dict[str, str | None]] = {}
         self._event_emitter = event_emitter
+        # When None, use the no-op adapter — grants everything without a DB check.
+        self._entitlement_checker: EntitlementPort = entitlement_checker or NoOpEntitlementAdapter()
 
     # ------------------------------------------------------------------
     # Registration
@@ -153,25 +158,31 @@ class ModuleExecutor:
         settings: list[dict[str, Any]] | None = None,
         action_permissions: dict[str, list[str]] | None = None,
         action_schemas: dict[str, dict[str, Any]] | None = None,
+        action_entitlements: dict[str, str | None] | None = None,
     ) -> None:
         """Register a module handler instance under a name.
 
         Args:
-            name:               Module name as declared in module.yaml and ModuleRequest.module
-            handler:            Instantiated module handler object
-            action_method_map:  Maps public action id -> handler method name
-            settings:           Setting definitions from settings.yaml (list of setting dicts).
-                                Injected into ModuleContext.settings on every action call.
-            action_permissions: Maps action id -> list of required permission ids.
-                                Used to enforce ModuleRequest.granted_permissions at dispatch time.
-            action_schemas:     Maps action id -> {input: JSON Schema, output: JSON Schema}.
-                                Input validated before dispatch; output validated after (warn only).
+            name:                Module name as declared in module.yaml and ModuleRequest.module
+            handler:             Instantiated module handler object
+            action_method_map:   Maps public action id -> handler method name
+            settings:            Setting definitions from settings.yaml (list of setting dicts).
+                                 Injected into ModuleContext.settings on every action call.
+            action_permissions:  Maps action id -> list of required permission ids.
+                                 Used to enforce ModuleRequest.granted_permissions at dispatch time.
+            action_schemas:      Maps action id -> {input: JSON Schema, output: JSON Schema}.
+                                 Input validated before dispatch; output validated after (warn only).
+            action_entitlements: Maps action id -> capability_id (or None).
+                                 When a capability_id is set, the executor calls
+                                 EntitlementPort.check() before dispatch and returns
+                                 ENTITLEMENT_REQUIRED on denial.
         """
         self._modules[name] = handler
         self._action_methods[name] = dict(action_method_map or {})
         self._settings[name] = settings
         self._action_permissions[name] = dict(action_permissions or {})
         self._action_schemas[name] = dict(action_schemas or {})
+        self._action_entitlements[name] = dict(action_entitlements or {})
         logger.info(f"MODULE_REGISTERED: {name} ({type(handler).__name__})")
 
     def registered_modules(self) -> list[str]:
@@ -219,6 +230,29 @@ class ModuleExecutor:
                     error=f"Permission denied for {request.module}.{request.action}: missing {missing}",
                     error_code="PERMISSION_DENIED",
                 )
+
+        # Entitlement check — only when the action declares an entitlement_gate.
+        # Trusted internal/AI-workflow calls (granted_permissions is None) bypass
+        # both permission and entitlement checks.
+        if request.granted_permissions is not None:
+            capability_id = self._action_entitlements.get(request.module, {}).get(request.action)
+            if capability_id:
+                ent_result = await self._entitlement_checker.check(
+                    capability_id,
+                    app_id=request.app_id,
+                    user_id=request.user_id,
+                    tenant_id=request.tenant_id,
+                )
+                if not ent_result.granted:
+                    logger.warning(
+                        f"MODULE_ENTITLEMENT_DENIED: module={request.module} action={request.action} "
+                        f"capability={capability_id} reason={ent_result.reason} user={request.user_id}"
+                    )
+                    return ModuleResult(
+                        success=False,
+                        error=f"Entitlement required for {request.module}.{request.action}: {capability_id}",
+                        error_code="ENTITLEMENT_REQUIRED",
+                    )
 
         # Input schema validation — applied before dispatch when a schema is declared.
         schemas = self._action_schemas.get(request.module, {}).get(request.action, {})

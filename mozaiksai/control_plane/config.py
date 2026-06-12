@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from mozaiksai.resources import resolve_factory_app_root
 from mozaiksai.core.workflow.paths import resolve_active_app_root
-
+from mozaiksai.resources import resolve_factory_app_root
 
 ControlPlaneLLMProfileId = Literal[
     "classifier",
@@ -34,24 +33,24 @@ class ControlPlaneLLMProfileConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     purpose: str = ""
-    default_temperature: Optional[float] = None
+    default_temperature: float | None = None
     expected_behavior: str = ""
-    llm_config: Optional[dict[str, Any]] = None
+    llm_config: dict[str, Any] | None = None
 
 
 class ControlPlaneCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     enabled: bool = False
-    llm_profile: Optional[ControlPlaneLLMProfileId] = None
-    llm_config: Optional[dict[str, Any]] = None
+    llm_profile: ControlPlaneLLMProfileId | None = None
+    llm_config: dict[str, Any] | None = None
 
 
 class ControlPlaneConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
+    schema_version: Literal["mozaiks.control_plane.runtime"] = "mozaiks.control_plane.runtime"
     enabled: bool = False
-    profile: str = "default"
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
@@ -76,7 +75,7 @@ class ControlPlaneConfig(BaseModel):
     def coding_enabled(self) -> bool:
         return bool(self.enabled and self.coding.enabled)
 
-    def resolve_capability_llm_config(self, capability: str) -> Optional[dict[str, Any]]:
+    def resolve_capability_llm_config(self, capability: str) -> dict[str, Any] | None:
         capability_config = getattr(self, capability, None)
         if not isinstance(capability_config, ControlPlaneCapabilityConfig):
             raise ValueError(f"Unknown control-plane capability '{capability}'")
@@ -99,7 +98,7 @@ class ControlPlaneConfig(BaseModel):
         return None
 
 
-def resolve_ai_config_path(app_root: Optional[Path] = None) -> Path:
+def resolve_ai_config_path(app_root: Path | None = None) -> Path:
     if app_root is not None:
         return (app_root / "config" / "ai.json").resolve()
 
@@ -117,7 +116,7 @@ def resolve_ai_config_path(app_root: Optional[Path] = None) -> Path:
     return active_path
 
 
-def load_ai_config_json(app_root: Optional[Path] = None) -> dict[str, Any]:
+def load_ai_config_json(app_root: Path | None = None) -> dict[str, Any]:
     ai_path = resolve_ai_config_path(app_root)
     if not ai_path.exists():
         return {}
@@ -129,7 +128,7 @@ def load_ai_config_json(app_root: Optional[Path] = None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def resolve_control_plane_runtime_config_path(app_root: Optional[Path] = None) -> Path:
+def resolve_control_plane_runtime_config_path(app_root: Path | None = None) -> Path:
     if app_root is not None:
         return (app_root.parent / "control_plane" / "config" / "runtime.yaml").resolve()
 
@@ -147,7 +146,7 @@ def resolve_control_plane_runtime_config_path(app_root: Optional[Path] = None) -
     return active_path
 
 
-def load_control_plane_config_yaml(app_root: Optional[Path] = None) -> dict[str, Any]:
+def load_control_plane_config_yaml(app_root: Path | None = None) -> dict[str, Any]:
     config_path = resolve_control_plane_runtime_config_path(app_root)
     if not config_path.exists():
         return {}
@@ -159,7 +158,7 @@ def load_control_plane_config_yaml(app_root: Optional[Path] = None) -> dict[str,
     return data if isinstance(data, dict) else {}
 
 
-def load_control_plane_config(app_root: Optional[Path] = None) -> ControlPlaneConfig:
+def load_control_plane_config(app_root: Path | None = None) -> ControlPlaneConfig:
     raw = load_control_plane_config_yaml(app_root)
     if not isinstance(raw, dict) or not raw:
         return ControlPlaneConfig()

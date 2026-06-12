@@ -15,17 +15,64 @@ from mozaiksai.core.transport.session_registry import session_registry
 
 logger = get_core_logger("journey_orchestrator")
 
+_CHAT_CONTEXT_INTERNAL_KEYS = {
+    "_id",
+    "chat_id",
+    "app_id",
+    "user_id",
+    "workflow_name",
+    "messages",
+    "status",
+    "created_at",
+    "updated_at",
+    "last_updated_at",
+    "completed_at",
+    "last_sequence",
+    "last_artifact",
+    "pending_input_request",
+    "workflow_ui_state",
+    "trigger_meta",
+    "session_router_session_id",
+    "journey_instance_id",
+    "journey_key",
+    "journey_position",
+    "journey_total_steps",
+}
+
 
 def _is_completed_status(value: Any) -> bool:
     if value is None:
-        return True
+        return False
     if isinstance(value, bool):
         return bool(value)
     if isinstance(value, int):
         return int(value) == 1
     if isinstance(value, str):
         return value.strip().lower() in {"completed", "complete", "success", "succeeded", "ok", "done"}
-    return True
+    return False
+
+
+def _is_successful_completion(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("failed") or payload.get("awaiting_user_input") or payload.get("error"):
+        return False
+    if "run_completed" in payload and not bool(payload.get("run_completed")):
+        return False
+    return _is_completed_status(payload.get("status"))
+
+
+def _extract_launch_context_from_chat_doc(chat_doc: Any) -> Dict[str, Any]:
+    if not isinstance(chat_doc, dict):
+        return {}
+    context: Dict[str, Any] = {}
+    for key, value in chat_doc.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if key in _CHAT_CONTEXT_INTERNAL_KEYS or key.startswith("_"):
+            continue
+        context[key] = value
+    return context
 
 
 class JourneyOrchestrator:
@@ -38,7 +85,7 @@ class JourneyOrchestrator:
         chat_id = str(payload.get("chat_id") or "").strip()
         if not chat_id:
             return
-        if not _is_completed_status(payload.get("status")):
+        if not _is_successful_completion(payload):
             return
 
         lock = self._inflight.setdefault(chat_id, asyncio.Lock())
@@ -72,6 +119,10 @@ class JourneyOrchestrator:
 
         pm = transport._get_or_create_persistence_manager()
         coll = await pm._coll()
+        source_chat_doc = await coll.find_one(
+            {"_id": chat_id, **build_app_scope_filter(app_id)}
+        )
+        inherited_context = _extract_launch_context_from_chat_doc(source_chat_doc)
         session_router = get_session_router()
         advance = await session_router.advance_journey_after_run_complete(
             app_id=app_id,
@@ -112,12 +163,23 @@ class JourneyOrchestrator:
         session_scope_id = SessionStateStore.session_id_for_scope(app_id, user_id)
         next_group_index = int(advance.next_group_index or 0)
         for wf in advance.next_workflows:
+            trigger_payload = {
+                "source_chat_id": chat_id,
+                "source_workflow_id": workflow_name,
+                "journey_instance_id": advance.journey_instance_id,
+                "journey_key": advance.journey_key,
+                "journey_position": next_group_index,
+            }
+            route_context = {**inherited_context, **dict(advance.context_seed or {})}
             route_decision = await session_router.route_trigger(
                 TriggerInput(
                     app_id=app_id,
                     user_id=user_id,
                     trigger_source="run_complete",
                     workflow_id=wf,
+                    journey_id=advance.journey_key,
+                    context_variables=route_context,
+                    trigger_payload=trigger_payload,
                 )
             )
             if route_decision.workflow_id != wf:
@@ -141,6 +203,24 @@ class JourneyOrchestrator:
                 )
                 return
 
+            from mozaiksai.core.session.launcher import (
+                apply_launch_context_provider,
+                validate_context_for_workflow,
+            )
+
+            merged_context = {**dict(route_decision.context_seed), **route_context}
+            provided_context = await apply_launch_context_provider(
+                workflow_id=wf,
+                requested_workflow_id=route_decision.requested_workflow_id,
+                context_variables=merged_context,
+                app_id=app_id,
+                user_id=user_id,
+                journey_id=advance.journey_key,
+                trigger_source="run_complete",
+                trigger_payload=trigger_payload,
+            )
+            validated_context = validate_context_for_workflow(wf, provided_context)
+
             existing_next = await coll.find_one(
                 {
                     "session_router_session_id": session_scope_id,
@@ -160,18 +240,20 @@ class JourneyOrchestrator:
             created_new = False
             if not next_chat_id:
                 next_chat_id = str(uuid.uuid4())
+                extra_fields = {
+                    **validated_context,
+                    "session_router_session_id": session_scope_id,
+                    "journey_instance_id": advance.journey_instance_id,
+                    "journey_key": advance.journey_key,
+                    "journey_position": next_group_index,
+                    "journey_total_steps": int(advance.journey_total_steps),
+                }
                 await pm.create_chat_session(
                     chat_id=next_chat_id,
                     app_id=app_id,
                     workflow_name=wf,
                     user_id=user_id,
-                    extra_fields={
-                        "session_router_session_id": session_scope_id,
-                        "journey_instance_id": advance.journey_instance_id,
-                        "journey_key": advance.journey_key,
-                        "journey_position": next_group_index,
-                        "journey_total_steps": int(advance.journey_total_steps),
-                    },
+                    extra_fields=extra_fields,
                 )
                 created_new = True
             await session_router.annotate_workflow_chat(

@@ -1,16 +1,13 @@
-"""
-Proper separation of observability from business persistence
-"""
-
 from .performance_manager import (
-    PerformanceManager,
-    PerformanceConfig,
-    get_performance_manager,
+    AG2TelemetryConfig,
+    build_ag2_span_attributes,
+    build_ag2_telemetry_middleware,
 )
+from mozaiksai.core.usage import build_ag2_usage_middleware
 
 __all__ = [
-    "PerformanceManager",
-    "PerformanceConfig",
-    "get_performance_manager",
+    "AG2TelemetryConfig",
+    "build_ag2_span_attributes",
+    "build_ag2_telemetry_middleware",
+    "build_ag2_usage_middleware",
 ]
-

@@ -92,7 +92,7 @@ async def handle_switch_workflow(
 
     # UserDriven auto-start: start the AG2 run immediately so the initial
     # agent's register_reply can emit the static greeting as a native AG2 event.
-    # On resume the greeting is already in the transcript — auto_resume handles it.
+    # On resume that greeting is already present in AG2 run history — auto_resume handles it.
     try:
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -113,13 +113,15 @@ async def handle_switch_workflow(
                 coll = await pm._coll()
                 doc = await coll.find_one(
                     {"_id": target_chat_id_str},
-                    {"status": 1, "last_sequence": 1, "messages": {"$slice": 1}},
+                    {"status": 1},
                 )
                 status = int(doc.get("status", -1)) if doc else -1
-                last_sequence = int(doc.get("last_sequence", 0) or 0) if doc else 0
-                has_messages = bool(doc and doc.get("messages"))
+                run_history = await pm.load_run_history(
+                    chat_id=target_chat_id_str,
+                    app_id=str(active_context.app_id),
+                )
 
-                if status == 0 and last_sequence == 0 and not has_messages:
+                if status == 0 and not run_history:
                     transport._background_tasks[target_chat_id_str] = asyncio.create_task(
                         transport._run_workflow_background(
                             chat_id=target_chat_id_str,
@@ -139,7 +141,7 @@ async def handle_switch_workflow(
             native_start_err,
         )
 
-    # Replay persisted transcript when switching back into workflow mode so the
+    # Replay persisted AG2 run history when switching back into workflow mode so the
     # UI can reliably reconstruct workflow messages after Ask-mode transitions.
     if replay_on_switch:
         try:

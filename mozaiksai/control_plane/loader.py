@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from pydantic import ValidationError
 
 from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
+
 from .config import load_control_plane_config
 from .schema import (
-    ControlPlanePromptDefinition,
+    AG2_CHECKPOINT_OUTPUT_CONTRACTS,
+    ControlPlaneCheckpointEvent,
     ControlPlaneManifest,
     ControlPlanePoliciesManifest,
+    ControlPlanePromptDefinition,
     ControlPlanePromptsManifest,
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
@@ -22,11 +24,14 @@ class ControlPlanePackLoadError(Exception):
     """Raised when a control-plane pack cannot be found or validated."""
 
 
+CONTROL_PLANE_TOOL_TARGETS: set[str] = {"harness", *ControlPlaneCheckpointEvent.__args__}
+
+
 def resolve_factory_control_plane_root() -> Path:
     return (Path(__file__).resolve().parents[2] / "factory_app" / "control_plane").resolve()
 
 
-def resolve_app_control_plane_root(app_root: Optional[Path] = None) -> Path:
+def resolve_app_control_plane_root(app_root: Path | None = None) -> Path:
     from mozaiksai.core.workflow.paths import resolve_active_app_root
 
     root = app_root or resolve_active_app_root()
@@ -35,8 +40,8 @@ def resolve_app_control_plane_root(app_root: Optional[Path] = None) -> Path:
 
 def resolve_control_plane_pack_path(
     *,
-    app_root: Optional[Path] = None,
-    factory_root: Optional[Path] = None,
+    app_root: Path | None = None,
+    factory_root: Path | None = None,
 ) -> Path:
     app_candidate = resolve_app_control_plane_root(app_root)
     if (app_candidate / "config" / "control_plane.yaml").exists():
@@ -53,8 +58,8 @@ def resolve_control_plane_pack_path(
 
 def load_selected_control_plane_pack(
     *,
-    app_root: Optional[Path] = None,
-    factory_root: Optional[Path] = None,
+    app_root: Path | None = None,
+    factory_root: Path | None = None,
 ) -> LoadedControlPlanePack:
     _ = load_control_plane_config(app_root)
     return load_control_plane_pack(app_root=app_root, factory_root=factory_root)
@@ -62,8 +67,8 @@ def load_selected_control_plane_pack(
 
 def load_control_plane_pack(
     *,
-    app_root: Optional[Path] = None,
-    factory_root: Optional[Path] = None,
+    app_root: Path | None = None,
+    factory_root: Path | None = None,
 ) -> LoadedControlPlanePack:
     pack_path = resolve_control_plane_pack_path(app_root=app_root, factory_root=factory_root)
     try:
@@ -122,7 +127,7 @@ def _validate_pack(
 ) -> None:
     prompt_ids = {prompt.id for prompt in prompts.prompts}
     tool_ids = {tool.id for tool in tools.tools}
-    checkpoint_targets = {"harness"} | {checkpoint.event for checkpoint in manifest.checkpoints}
+    checkpoint_targets = CONTROL_PLANE_TOOL_TARGETS
 
     for tool in tools.tools:
         invalid_targets = [target for target in tool.available_to if target not in checkpoint_targets]
@@ -132,6 +137,18 @@ def _validate_pack(
             )
 
     for checkpoint in manifest.checkpoints:
+        expected_output = AG2_CHECKPOINT_OUTPUT_CONTRACTS.get(checkpoint.event)
+        if expected_output is not None and not checkpoint.prompt_id:
+            raise ControlPlanePackLoadError(
+                f"control_plane.yaml checkpoint '{checkpoint.id}' for event '{checkpoint.event}' "
+                "must declare prompt_id"
+            )
+        if expected_output is None and checkpoint.prompt_id:
+            raise ControlPlanePackLoadError(
+                f"control_plane.yaml checkpoint '{checkpoint.id}' for deterministic event '{checkpoint.event}' "
+                "must not declare prompt_id"
+            )
+
         if checkpoint.prompt_id and checkpoint.prompt_id not in prompt_ids:
             raise ControlPlanePackLoadError(
                 f"control_plane.yaml checkpoint '{checkpoint.id}' prompt_id '{checkpoint.prompt_id}' was not found in prompts.yaml"

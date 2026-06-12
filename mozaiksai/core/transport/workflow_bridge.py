@@ -433,6 +433,7 @@ class WorkflowBridgeMixin:
         This enables parallel execution of multiple independent chats (each with its
         own chat_id) while preserving AG2-native semantics within each chat.
         """
+        run_status_value = "failed"
         try:
             async with self._workflow_spawn_semaphore:
                 try:
@@ -445,6 +446,7 @@ class WorkflowBridgeMixin:
                         initial_agent_name_override=initial_agent_name_override,
                     )
                     run_status = str(result.get("run_status") or "completed").strip().lower() or "completed"
+                    run_status_value = run_status
                     # Emit run_complete success asynchronously to dispatcher
                     try:
                         from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
@@ -519,7 +521,7 @@ class WorkflowBridgeMixin:
                 if ws_id:
                     task = asyncio.current_task()
                     was_cancelled = bool(task and task.cancelled())
-                    if not was_cancelled:
+                    if not was_cancelled and run_status_value == "completed":
                         session_registry.complete_workflow(ws_id, chat_id)
             except Exception:
                 pass

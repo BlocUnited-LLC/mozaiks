@@ -215,63 +215,24 @@ class GeneralModeMixin:
 
         usage = response.get("usage") or {}
         try:
-            pm = self._get_or_create_persistence_manager()
-            await pm.update_session_metrics(
+            from mozaiksai.core.tokens.manager import TokenManager
+
+            prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or 0)
+            await TokenManager.emit_usage_delta(
                 chat_id=str(general_chat_id),
                 app_id=str(app_id),
                 user_id=str(user_id) if user_id else "anonymous",
                 workflow_name="GeneralCapability",
-                prompt_tokens=int(usage.get("prompt_tokens") or 0),
-                completion_tokens=int(usage.get("completion_tokens") or 0),
-                cost_usd=0.0,
                 agent_name="assistant",
-                session_type="general",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=int(usage.get("total_tokens") or (prompt_tokens + completion_tokens)),
+                cached=False,
+                duration_sec=0.0,
             )
-            try:
-                from mozaiksai.core.tokens.manager import TokenManager
-
-                await TokenManager.emit_usage_delta(
-                    chat_id=str(general_chat_id),
-                    app_id=str(app_id),
-                    user_id=str(user_id) if user_id else "anonymous",
-                    workflow_name="GeneralCapability",
-                    agent_name="assistant",
-                    prompt_tokens=int(usage.get("prompt_tokens") or 0),
-                    completion_tokens=int(usage.get("completion_tokens") or 0),
-                    total_tokens=int(
-                        usage.get("total_tokens")
-                        or (int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0))
-                    ),
-                    cached=False,
-                    duration_sec=0.0,
-                )
-
-                try:
-                    coll = await pm._general_coll()  # type: ignore[attr-defined]
-                    totals = await coll.find_one(
-                        {"_id": str(general_chat_id), "app_id": str(app_id)},
-                        {
-                            "usage_prompt_tokens_final": 1,
-                            "usage_completion_tokens_final": 1,
-                            "usage_total_tokens_final": 1,
-                        },
-                    )
-                    if isinstance(totals, dict):
-                        await TokenManager.emit_usage_summary(
-                            chat_id=str(general_chat_id),
-                            app_id=str(app_id),
-                            user_id=str(user_id) if user_id else "anonymous",
-                            workflow_name="GeneralCapability",
-                            prompt_tokens=int(totals.get("usage_prompt_tokens_final") or 0),
-                            completion_tokens=int(totals.get("usage_completion_tokens_final") or 0),
-                            total_tokens=int(totals.get("usage_total_tokens_final") or 0),
-                        )
-                except Exception:
-                    logger.debug("Failed to emit general-mode usage summary", exc_info=True)
-            except Exception:
-                logger.debug("Failed to emit general-mode usage delta", exc_info=True)
         except Exception as metrics_err:
-            logger.debug("Failed to record general-mode usage metrics: %s", metrics_err)
+            logger.debug("Failed to emit general-mode usage delta: %s", metrics_err)
 
     async def _persist_general_message(
         self,

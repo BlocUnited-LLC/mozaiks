@@ -4,18 +4,21 @@
 # ==============================================================================
 from __future__ import annotations
 
-import asyncio
-import logging
 import inspect
+import logging
+from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any
 
 from autogen.beta import Agent
-from autogen.beta.assembly import AssemblyPolicy
 from autogen.beta.config import OpenAIConfig
-from autogen.beta.context import ConversationContext
-from autogen.beta.events import BaseEvent
 
+from ..context.context_utils import (
+    apply_context_exposures as _apply_context_exposures,
+)
+from ..context.context_utils import (
+    context_to_dict as _context_to_dict,
+)
 from ..outputs.structured import (
     get_provider_response_model,
     get_structured_outputs_for_workflow,
@@ -23,12 +26,6 @@ from ..outputs.structured import (
 )
 from ..workflow_manager import workflow_manager
 from .a2a import create_a2a_remote_agent, load_a2a_agent_specs
-
-from ..context.context_utils import (
-    context_to_dict as _context_to_dict,
-    apply_context_exposures as _apply_context_exposures,
-)
-from ..messages.utils import extract_images_from_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -38,39 +35,73 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 
 class ContextVariablesBridge:
-    """Bridges a plain dict to the AG2 ContextVariables-compatible interface.
+    """Shared workflow context exposed to tools and committed through AG2.
 
-    Tools written for the old system call .get() / .set() / .data — this
-    bridge satisfies those calls against a shared mutable dict so writes
-    from tools propagate through the orchestration loop.
+    Tool code mutates this bridge with a small dict-like API. During an AG2
+    Network turn, the runner consumes the recorded mutations and injects them
+    into the AG2 workflow packet's ``context_updates`` payload so AG2 routing
+    conditions see the same state that tools just wrote.
     """
 
-    __slots__ = ("_data",)
+    __slots__ = ("_data", "_pending_set", "_pending_delete")
 
-    def __init__(self, data: Dict[str, Any]) -> None:
+    def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
+        self._pending_set: dict[str, Any] = {}
+        self._pending_delete: set[str] = set()
 
     # AG2-compatible read/write API
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
-        self._data[key] = value
+        self[key] = value
 
     def __getitem__(self, key: str) -> Any:
         return self._data[key]
 
     def __setitem__(self, key: str, value: Any) -> None:
-        self._data[key] = value
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            raise KeyError("context variable key must be non-empty")
+        self._data[clean_key] = value
+        self._pending_set[clean_key] = value
+        self._pending_delete.discard(clean_key)
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            raise KeyError("context variable key must be non-empty")
+        existed = clean_key in self._data
+        value = self._data.pop(clean_key, default)
+        if existed:
+            self._pending_set.pop(clean_key, None)
+            self._pending_delete.add(clean_key)
+        return value
+
+    def delete(self, key: str) -> None:
+        self.pop(key, None)
 
     def __contains__(self, key: str) -> bool:
         return key in self._data
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self._data)
 
+    def clear_context_updates(self) -> None:
+        self._pending_set.clear()
+        self._pending_delete.clear()
+
+    def consume_context_updates(self) -> dict[str, Any]:
+        updates = {
+            "set": dict(self._pending_set),
+            "delete": sorted(self._pending_delete),
+        }
+        self.clear_context_updates()
+        return updates
+
     @property
-    def data(self) -> Dict[str, Any]:
+    def data(self) -> dict[str, Any]:
         return self._data
 
 
@@ -78,7 +109,7 @@ class ContextVariablesBridge:
 # LLM CONFIG BRIDGE
 # ------------------------------------------------------------------
 
-def llm_config_to_openai_config(llm_config: Dict[str, Any]) -> OpenAIConfig:
+def llm_config_to_openai_config(llm_config: dict[str, Any]) -> OpenAIConfig:
     """Convert an AG2 llm_config dict to an autogen.beta OpenAIConfig."""
     config_list = llm_config.get("config_list") or []
     if not config_list:
@@ -97,9 +128,9 @@ def llm_config_to_openai_config(llm_config: Dict[str, Any]) -> OpenAIConfig:
 # PROMPT SECTION COMPOSITION
 # ------------------------------------------------------------------
 
-def _compose_prompt_sections(sections: Sequence[Dict[str, Any]] | Dict[str, Any]) -> str:
+def _compose_prompt_sections(sections: Sequence[dict[str, Any]] | dict[str, Any]) -> str:
     """Reconstruct the system message string from structured prompt sections."""
-    parts: List[str] = []
+    parts: list[str] = []
 
     if isinstance(sections, dict) and not any(k in sections for k in ("heading", "content")):
         section_order = [
@@ -169,81 +200,14 @@ def _wrap_tool_with_context(fn: Callable, context_bridge: ContextVariablesBridge
 
 
 # ------------------------------------------------------------------
-# ASSEMBLY POLICY — hook-driven prompt injection via AG2 AssemblyPolicy
-# ------------------------------------------------------------------
-
-class MozaiksHookPolicy(AssemblyPolicy):
-    """Wraps ``update_agent_state`` hooks as an AG2 ``AssemblyPolicy``.
-
-    Runs before each LLM call.  If a hook calls ``agent.update_system_message()``
-    the returned string replaces the current prompt list; otherwise prompts are
-    unchanged.  This replaces the old ``_SystemMessageCapture`` + per-turn
-    ``_compute_hook_prompt`` pattern.
-    """
-
-    name: str = "mozaiks_update_agent_state"
-
-    def __init__(
-        self,
-        hooks: List[Callable],
-        agent_name: str,
-        base_system_message: str,
-        context_bridge: Any,
-    ) -> None:
-        self._hooks = hooks
-        self._agent_name = agent_name
-        self._base = base_system_message
-        self._context_bridge = context_bridge
-
-    async def apply(
-        self,
-        prompts: List[str],
-        events: List[BaseEvent],
-        context: ConversationContext,
-    ) -> tuple[List[str], List[BaseEvent]]:
-        if not self._hooks:
-            return prompts, events
-
-        class _Capture:
-            def __init__(self, name: str, ctx: Any, base_message: str) -> None:
-                self.name = name
-                self.context_variables = ctx
-                self.system_message = base_message
-                self._system_message = base_message
-                self._captured: Optional[str] = None
-
-            def update_system_message(self, msg: str) -> None:
-                self.system_message = msg
-                self._system_message = msg
-                self._captured = msg
-
-        history = context.variables.get("_mozaiks_history", [])
-        capture = _Capture(self._agent_name, self._context_bridge, self._base)
-
-        for hook in self._hooks:
-            try:
-                if asyncio.iscoroutinefunction(hook):
-                    await hook(capture, history)
-                else:
-                    hook(capture, history)
-            except Exception as exc:
-                logger.debug("[HOOKS] update_agent_state hook failed: %s", exc)
-
-        if capture._captured and capture._captured != self._base:
-            return [capture._captured], events
-
-        return prompts, events
-
-
-# ------------------------------------------------------------------
 # AGENT CREATION
 # ------------------------------------------------------------------
 
 async def create_agents(
     workflow_name: str,
-    context_variables: Optional[Any] = None,
-    cache_seed: Optional[int] = None,
-) -> Dict[str, Agent]:
+    context_variables: Any | None = None,
+    cache_seed: int | None = None,
+) -> dict[str, Agent]:
     """Create autogen.beta.Agent instances for a workflow."""
 
     logger.info("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
@@ -256,7 +220,7 @@ async def create_agents(
         agent_configs = agent_configs["agents"]
 
     if isinstance(agent_configs, list):
-        normalized: Dict[str, Any] = {}
+        normalized: dict[str, Any] = {}
         for item in agent_configs:
             if not isinstance(item, dict):
                 continue
@@ -271,7 +235,7 @@ async def create_agents(
 
     # Normalise context to a mutable dict for the bridge
     if context_variables is None:
-        ctx_dict: Dict[str, Any] = {}
+        ctx_dict: dict[str, Any] = {}
     elif isinstance(context_variables, dict):
         ctx_dict = context_variables
     elif hasattr(context_variables, "to_dict"):
@@ -286,7 +250,7 @@ async def create_agents(
     a2a_specs = load_a2a_agent_specs(workflow_config)
     local_agent_names = [n for n in agent_configs if n not in a2a_specs]
 
-    base_llm_config: Dict[str, Any] = {}
+    base_llm_config: dict[str, Any] = {}
     if local_agent_names:
         try:
             from ..llm_config import get_llm_config as _get_base_llm_config
@@ -312,7 +276,7 @@ async def create_agents(
     except Exception:
         structured_registry = {}
 
-    context_dict: Dict[str, Any] = {}
+    context_dict: dict[str, Any] = {}
     if context_variables is not None:
         try:
             context_dict = _context_to_dict(context_variables)
@@ -322,7 +286,7 @@ async def create_agents(
     exposures_map = getattr(context_variables, "_mozaiks_context_exposures", {}) or {}
     agent_plan_map = getattr(context_variables, "_mozaiks_context_agents", {}) or {}
 
-    agents: Dict[str, Agent] = {}
+    agents: dict[str, Agent] = {}
 
     for agent_name, agent_config in agent_configs.items():
         # A2A remote agents
@@ -330,7 +294,7 @@ async def create_agents(
         if a2a_spec is not None:
             try:
                 remote = create_a2a_remote_agent(a2a_spec, context_variables=context_variables)
-                setattr(remote, "_mozaiks_agent_kind", "a2a_remote")
+                remote._mozaiks_agent_kind = "a2a_remote"
                 agents[agent_name] = remote
                 continue
             except Exception as a2a_err:
@@ -380,35 +344,49 @@ async def create_agents(
                 f"[AGENTS] Agent '{agent_name}' has auto_tool_call but no structured output model"
             )
 
-        raw_tool_fns: List[Callable] = [] if auto_tool_call_enabled else agent_tool_functions.get(agent_name, [])
+        raw_tool_fns: list[Callable] = [] if auto_tool_call_enabled else agent_tool_functions.get(agent_name, [])
+
+        # Inject LocalShellTool when agent declares sandbox_shell: true.
+        # LocalShellTool is an AG2 Tool subclass and does not need context wrapping.
+        shell_tools: list[Any] = []
+        if not auto_tool_call_enabled and agent_config.get("sandbox_shell"):
+            try:
+                from autogen.beta.tools import LocalShellTool
+                shell_tools = [LocalShellTool()]
+                logger.debug("[AGENTS] LocalShellTool attached to '%s'", agent_name)
+            except Exception as shell_err:
+                logger.warning(
+                    "[AGENTS] sandbox_shell requested for '%s' but LocalShellTool unavailable: %s",
+                    agent_name,
+                    shell_err,
+                )
 
         # Wrap tools to inject context_variables
-        wrapped_tools: List[Callable] = [
+        wrapped_tools: list[Any] = [
             _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns
-        ]
+        ] + shell_tools
 
-        # Load update_agent_state hooks for pre-turn prompt injection
-        update_hooks: List[Callable] = []
+        # Load workflow-local AG2 beta prompt middleware declarations.
+        prompt_middleware_functions: list[Callable] = []
         try:
-            from ..execution.hooks import _resolve_import, load_hook_entries
+            from ..execution.middleware import _resolve_import, load_prompt_middleware_entries
             workflow_path = workflow_manager.resolve_workflow_path(workflow_name)
             if workflow_path is not None:
-                for entry in load_hook_entries(workflow_name, base_path=str(workflow_path.parent)):
+                for entry in load_prompt_middleware_entries(workflow_name, base_path=str(workflow_path.parent)):
                     if (
                         isinstance(entry, dict)
-                        and entry.get("hook_type") == "update_agent_state"
-                        and entry.get("hook_agent") in (agent_name, "all")
+                        and entry.get("agent") in (agent_name, "all")
                     ):
-                        fn, qual = _resolve_import(workflow_name, entry["filename"], entry["function"], workflow_path)
+                        fn, qual = _resolve_import(workflow_name, entry.get("filename"), entry["function"], workflow_path)
                         if fn:
-                            update_hooks.append(fn)
-                            logger.debug("[AGENTS] Loaded update_agent_state hook %s for %s", qual, agent_name)
-        except Exception as hook_err:
-            logger.debug("[AGENTS] Hook pre-load failed for '%s': %s", agent_name, hook_err)
-
-        # Collect any "all" scoped update_agent_state hooks that we might have missed
-        # above if per-agent hooks were already added (dedup by function identity)
-        # The orchestrator is the canonical caller of these hooks — we only store them.
+                            prompt_middleware_functions.append(fn)
+                            logger.debug(
+                                "[AGENTS] Loaded prompt middleware %s for %s",
+                                qual,
+                                agent_name,
+                            )
+        except Exception as middleware_err:
+            logger.debug("[AGENTS] Prompt middleware pre-load failed for '%s': %s", agent_name, middleware_err)
 
         # Determine response schema for structured outputs
         beta_response_schema = None
@@ -423,11 +401,48 @@ async def create_agents(
             except Exception:
                 beta_response_schema = None
 
-        # Build AssemblyPolicy from hooks (replaces _SystemMessageCapture + _compute_hook_prompt)
-        assembly = []
-        if update_hooks:
-            assembly.append(
-                MozaiksHookPolicy(update_hooks, agent_name, system_message, context_bridge)
+        middleware = []
+        telemetry_enabled = False
+        try:
+            from mozaiksai.core.observability import build_ag2_telemetry_middleware
+
+            telemetry_middleware = build_ag2_telemetry_middleware(
+                agent_name=agent_name,
+                workflow_name=workflow_name,
+                context_variables=context_bridge,
+                provider_name="openai",
+                model_name=str((llm_config_dict or {}).get("model") or "").strip() or None,
+            )
+            if telemetry_middleware is not None:
+                middleware.append(telemetry_middleware)
+                telemetry_enabled = True
+        except Exception as telemetry_err:
+            logger.debug("[AGENTS] AG2 telemetry middleware skipped for '%s': %s", agent_name, telemetry_err)
+
+        try:
+            from mozaiksai.core.observability import build_ag2_usage_middleware
+
+            middleware.append(
+                build_ag2_usage_middleware(
+                    agent_name=agent_name,
+                    workflow_name=workflow_name,
+                    context_variables=context_bridge,
+                    model_name=str((llm_config_dict or {}).get("model") or "").strip() or None,
+                )
+            )
+        except Exception as usage_err:
+            logger.debug("[AGENTS] AG2 usage middleware skipped for '%s': %s", agent_name, usage_err)
+
+        if prompt_middleware_functions:
+            from ..execution.middleware import build_prompt_middleware
+
+            middleware.append(
+                build_prompt_middleware(
+                    middleware_functions=prompt_middleware_functions,
+                    agent_name=agent_name,
+                    base_system_message=system_message,
+                    context_bridge=context_bridge,
+                )
             )
 
         # Create beta Agent
@@ -437,22 +452,23 @@ async def create_agents(
             config=model_config,
             tools=tuple(wrapped_tools),
             response_schema=beta_response_schema,
-            assembly=assembly,
+            middleware=middleware,
         )
 
         # Store Mozaiks metadata
         if prompt_sections and isinstance(prompt_sections, Sequence):
-            setattr(agent, "_mozaiks_prompt_sections", prompt_sections)
-        setattr(agent, "_mozaiks_base_system_message", system_message)
-        setattr(agent, "_mozaiks_update_hooks", update_hooks)  # kept for introspection only
-        setattr(agent, "_mozaiks_agent_kind", "local")
-        setattr(agent, "_mozaiks_context_bridge", context_bridge)
+            agent._mozaiks_prompt_sections = prompt_sections
+        agent._mozaiks_base_system_message = system_message
+        agent._mozaiks_prompt_middleware = prompt_middleware_functions
+        agent._mozaiks_ag2_telemetry_enabled = telemetry_enabled
+        agent._mozaiks_agent_kind = "local"
+        agent._mozaiks_context_bridge = context_bridge
 
         if structured_model_cls is not None:
             model_name = getattr(structured_model_cls, "__name__", None)
             if model_name:
-                setattr(agent, "_mozaiks_structured_model_name", model_name)
-            setattr(agent, "_mozaiks_structured_model_cls", structured_model_cls)
+                agent._mozaiks_structured_model_name = model_name
+            agent._mozaiks_structured_model_cls = structured_model_cls
 
         agents[agent_name] = agent
 
@@ -466,25 +482,25 @@ async def create_agents(
 # RUNTIME INSPECTION UTILITIES
 # ------------------------------------------------------------------
 
-def list_agent_hooks(agent: Any) -> Dict[str, List[str]]:
-    """Return hook names stored on a beta Agent."""
-    out: Dict[str, List[str]] = {}
-    hooks = getattr(agent, "_mozaiks_update_hooks", [])
-    if hooks:
-        out["update_agent_state"] = [getattr(fn, "__name__", repr(fn)) for fn in hooks]
+def list_agent_middleware(agent: Any) -> dict[str, list[str]]:
+    """Return Mozaiks prompt middleware registered as AG2 beta middleware."""
+    out: dict[str, list[str]] = {}
+    middleware_functions = getattr(agent, "_mozaiks_prompt_middleware", [])
+    if middleware_functions:
+        out["prompt_middleware"] = [
+            getattr(fn, "__name__", repr(fn)) for fn in middleware_functions
+        ]
     return out
 
 
-def list_hooks_for_workflow(agents: Dict[str, Any]) -> Dict[str, Dict[str, List[str]]]:
-    return {name: list_agent_hooks(agent) for name, agent in agents.items()}
+def list_middleware_for_workflow(agents: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
+    return {name: list_agent_middleware(agent) for name, agent in agents.items()}
 
 
 __all__ = [
     "create_agents",
     "ContextVariablesBridge",
-    "MozaiksHookPolicy",
     "llm_config_to_openai_config",
-    "extract_images_from_conversation",
-    "list_agent_hooks",
-    "list_hooks_for_workflow",
+    "list_agent_middleware",
+    "list_middleware_for_workflow",
 ]

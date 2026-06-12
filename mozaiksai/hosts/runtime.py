@@ -45,7 +45,6 @@ from mozaiksai.core.core_config import close_mongo_client, get_mongo_client
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
-from mozaiksai.core.observability.performance_manager import get_performance_manager
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_tools,
@@ -253,9 +252,6 @@ async def _runtime_startup() -> None:
     startup_start = datetime.now(UTC)
     wf_logger.info("RUNTIME_STARTUP: starting runtime host in %s mode", env)
 
-    perf_mgr = await get_performance_manager()
-    await perf_mgr.initialize()
-
     simple_transport = await SimpleTransport.get_instance()
     app.state.simple_transport = simple_transport
 
@@ -405,50 +401,6 @@ async def health_active_runs(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.get("/metrics/perf/aggregate")
-async def metrics_perf_aggregate(
-    principal: UserPrincipal = Depends(require_any_auth),
-):
-    """Return aggregate in-memory performance counters."""
-    _ = principal
-    try:
-        perf_mgr = await get_performance_manager()
-        return await perf_mgr.aggregate()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to collect aggregate metrics: {exc}") from exc
-
-
-@app.get("/metrics/perf/chats")
-async def metrics_perf_chats(
-    principal: UserPrincipal = Depends(require_any_auth),
-):
-    """Return per-chat in-memory performance snapshots."""
-    _ = principal
-    try:
-        perf_mgr = await get_performance_manager()
-        return await perf_mgr.snapshot_all()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to collect chat metrics: {exc}") from exc
-
-
-@app.get("/metrics/perf/chats/{chat_id}")
-async def metrics_perf_chat(
-    chat_id: str,
-    principal: UserPrincipal = Depends(require_any_auth),
-):
-    _ = principal
-    try:
-        perf_mgr = await get_performance_manager()
-        snap = await perf_mgr.snapshot_chat(chat_id)
-        if not snap:
-            raise HTTPException(status_code=404, detail="Chat not tracked")
-        return snap
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to collect chat metric: {exc}") from exc
-
-
 def _validate_context_for_workflow(workflow_name: str, context: Dict[str, Any]) -> Dict[str, Any]:
     """Filter caller-provided context to declared workflow context variables."""
     if not context:
@@ -562,12 +514,6 @@ async def start_chat(
     )
 
     try:
-        perf_mgr = await get_performance_manager()
-        await perf_mgr.record_workflow_start(chat_id, app_id, workflow_name, user_id)
-    except Exception as perf_err:
-        wf_logger.debug("perf_start skipped for chat %s: %s", chat_id, perf_err)
-
-    try:
         cache_seed = await persistence_manager.get_or_assign_cache_seed(chat_id, app_id)
     except Exception:
         cache_seed = None
@@ -642,12 +588,6 @@ async def trigger_workflow(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid journey binding: {exc}") from exc
 
-    try:
-        perf_mgr = await get_performance_manager()
-        await perf_mgr.record_workflow_start(chat_id, app_id, workflow_name, user_id)
-    except Exception as perf_err:
-        wf_logger.debug("perf_start skipped for trigger %s: %s", chat_id, perf_err)
-
     return {
         "success": True,
         "chat_id": chat_id,
@@ -686,6 +626,7 @@ async def websocket_endpoint(
     user_id = ws_user.user_id
 
     try:
+        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
         from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
         from mozaiksai.core.session.router import get_session_router
         from mozaiksai.core.transport.session_registry import session_registry
@@ -701,11 +642,9 @@ async def websocket_endpoint(
                 "_id": 1,
                 "user_id": 1,
                 "workflow_name": 1,
-                "last_artifact": 1,
+                "workflow_ui_state.last_artifact": 1,
                 "status": 1,
-                "last_sequence": 1,
                 "created_at": 1,
-                "messages": 1,
             },
         )
         if existing:
@@ -788,19 +727,15 @@ async def websocket_endpoint(
                     "_id": 1,
                     "user_id": 1,
                     "workflow_name": 1,
-                    "last_artifact": 1,
+                    "workflow_ui_state.last_artifact": 1,
                     "status": 1,
-                    "last_sequence": 1,
                     "created_at": 1,
-                    "messages": 1,
                 },
             ) or {
                 "_id": chat_id,
                 "user_id": user_id,
                 "workflow_name": resolved_workflow_name,
                 "status": 0,
-                "last_sequence": 0,
-                "messages": [],
             }
 
         session_router = get_session_router()
@@ -817,11 +752,9 @@ async def websocket_endpoint(
                 "_id": 1,
                 "user_id": 1,
                 "workflow_name": 1,
-                "last_artifact": 1,
+                "workflow_ui_state.last_artifact": 1,
                 "status": 1,
-                "last_sequence": 1,
                 "created_at": 1,
-                "messages": 1,
             },
         )
 
@@ -846,19 +779,15 @@ async def websocket_endpoint(
                     "_id": 1,
                     "user_id": 1,
                     "workflow_name": 1,
-                    "last_artifact": 1,
+                    "workflow_ui_state.last_artifact": 1,
                     "status": 1,
-                    "last_sequence": 1,
                     "created_at": 1,
-                    "messages": 1,
                 },
             ) or {
                 "_id": resolved_chat_id,
                 "user_id": user_id,
                 "workflow_name": resolved_workflow_name,
                 "status": 0,
-                "last_sequence": 0,
-                "messages": [],
             }
 
         owner = resolved_doc.get("user_id")
@@ -897,6 +826,8 @@ async def websocket_endpoint(
         )
 
         created_at = resolved_doc.get("created_at")
+        run_history = await persistence_manager.load_run_history(chat_id=resolved_chat_id, app_id=app_id)
+        run_history_count = len(run_history)
         chat_meta = {
             "kind": "chat_meta",
             "chat_id": resolved_chat_id,
@@ -906,9 +837,9 @@ async def websocket_endpoint(
             "has_children": False,
             "cache_seed": cache_seed,
             "chat_exists": True,
-            "last_artifact": resolved_doc.get("last_artifact"),
+            "last_artifact": extract_last_artifact(resolved_doc),
             "status": int(resolved_doc.get("status", 0) or 0),
-            "last_sequence": int(resolved_doc.get("last_sequence", 0) or 0),
+            "run_history_count": run_history_count,
             "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
             "session_state": session_state or {},
         }
@@ -916,8 +847,7 @@ async def websocket_endpoint(
 
         config = workflow_manager.get_config(resolved_workflow_name) or {}
         startup_mode = str(config.get("workflow_startup_mode") or "").strip().lower()
-        messages = resolved_doc.get("messages") or []
-        if startup_mode == "agentdriven" and not messages and chat_meta["last_sequence"] == 0:
+        if startup_mode == "agentdriven" and run_history_count == 0:
             conn = simple_transport.connections.setdefault(resolved_chat_id, {})
             conn["autostarted"] = True
             asyncio.create_task(

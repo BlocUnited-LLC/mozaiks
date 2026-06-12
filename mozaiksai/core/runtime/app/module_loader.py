@@ -27,7 +27,7 @@ import inspect
 import sys
 from pathlib import Path, PurePosixPath
 from types import ModuleType
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -48,19 +48,19 @@ def _required_text(value: Any, *, field_name: str) -> str:
     return text
 
 
-def _optional_text(value: Any) -> Optional[str]:
+def _optional_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-def _string_list(values: Any) -> List[str]:
+def _string_list(values: Any) -> list[str]:
     if values is None:
         return []
     if not isinstance(values, list):
         raise ValueError("value must be a list")
-    result: List[str] = []
+    result: list[str] = []
     seen: set[str] = set()
     for raw in values:
         text = str(raw or "").strip()
@@ -70,7 +70,7 @@ def _string_list(values: Any) -> List[str]:
     return result
 
 
-def _load_yaml_file(path: Path) -> Dict[str, Any]:
+def _load_yaml_file(path: Path) -> dict[str, Any]:
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -105,11 +105,11 @@ def _validate_entrypoint(entrypoint: str) -> tuple[str, str]:
 
 class ModuleIdentity(ModuleContractModel):
     id: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     version: str = "1.0.0"
-    description: Optional[str] = None
-    owner: Optional[str] = None
-    visibility: Optional[str] = None
+    description: str | None = None
+    owner: str | None = None
+    visibility: str | None = None
     handler: str
 
     @field_validator("id", "handler", mode="before")
@@ -119,7 +119,7 @@ class ModuleIdentity(ModuleContractModel):
 
     @field_validator("display_name", "description", "owner", "visibility", mode="before")
     @classmethod
-    def _optional(cls, value: Any) -> Optional[str]:
+    def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("version", mode="before")
@@ -148,11 +148,16 @@ class ActionDef(ModuleContractModel):
     id: str
     description: str
     handler_method: str
-    api_surface: Optional[str] = None
-    input_schema: Dict[str, Any] = Field(default_factory=dict)
-    output_schema: Dict[str, Any] = Field(default_factory=dict)
-    permissions: List[str] = Field(default_factory=list)
-    emits: List[str] = Field(default_factory=list)
+    api_surface: str | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+    permissions: list[str] = Field(default_factory=list)
+    emits: list[str] = Field(default_factory=list)
+    # Optional entitlement gate: capability_id to check before dispatch.
+    # When set, ModuleExecutor calls EntitlementPort.check(entitlement_gate, ...)
+    # and returns ENTITLEMENT_REQUIRED if the grant is not active.
+    # When null/absent, no entitlement check is performed.
+    entitlement_gate: str | None = None
 
     @field_validator("id", "description", "handler_method", mode="before")
     @classmethod
@@ -161,12 +166,17 @@ class ActionDef(ModuleContractModel):
 
     @field_validator("permissions", "emits", mode="before")
     @classmethod
-    def _lists(cls, value: Any) -> List[str]:
+    def _lists(cls, value: Any) -> list[str]:
         return _string_list(value)
+
+    @field_validator("entitlement_gate", mode="before")
+    @classmethod
+    def _entitlement_gate(cls, value: Any) -> str | None:
+        return _optional_text(value)
 
     @field_validator("api_surface", mode="before")
     @classmethod
-    def _api_surface(cls, value: Any) -> Optional[str]:
+    def _api_surface(cls, value: Any) -> str | None:
         if value is None:
             return None
         if not isinstance(value, str):
@@ -182,8 +192,8 @@ class ModuleCapability(ModuleContractModel):
     kind: Literal["action", "workflow", "page", "transition", "hosted"]
     target: str
     title: str
-    permissions: List[str] = Field(default_factory=list)
-    input_schema: Optional[Dict[str, Any]] = None
+    permissions: list[str] = Field(default_factory=list)
+    input_schema: dict[str, Any] | None = None
 
     @field_validator("capability_id", "target", "title", mode="before")
     @classmethod
@@ -192,16 +202,16 @@ class ModuleCapability(ModuleContractModel):
 
     @field_validator("permissions", mode="before")
     @classmethod
-    def _permissions(cls, value: Any) -> List[str]:
+    def _permissions(cls, value: Any) -> list[str]:
         return _string_list(value)
 
 
 class ModuleDefinition(ModuleContractModel):
     schema_version: Literal["mozaiks.module.v1"]
     module: ModuleIdentity
-    permissions: List[ModulePermission] = Field(default_factory=list)
-    actions: List[ActionDef] = Field(default_factory=list)
-    capabilities: List[ModuleCapability] = Field(default_factory=list)
+    permissions: list[ModulePermission] = Field(default_factory=list)
+    actions: list[ActionDef] = Field(default_factory=list)
+    capabilities: list[ModuleCapability] = Field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -212,24 +222,29 @@ class ModuleDefinition(ModuleContractModel):
         return self.module.version
 
     @property
-    def action_method_map(self) -> Dict[str, str]:
+    def action_method_map(self) -> dict[str, str]:
         return {action.id: action.handler_method for action in self.actions}
 
     @property
-    def action_permissions_map(self) -> Dict[str, List[str]]:
+    def action_permissions_map(self) -> dict[str, list[str]]:
         """Maps each action id to its declared required permission ids."""
         return {action.id: list(action.permissions) for action in self.actions}
 
     @property
-    def action_schemas_map(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    def action_schemas_map(self) -> dict[str, dict[str, dict[str, Any]]]:
         """Maps each action id to its declared input/output JSON Schemas."""
         return {
             action.id: {"input": action.input_schema, "output": action.output_schema}
             for action in self.actions
         }
 
+    @property
+    def action_entitlement_map(self) -> dict[str, str | None]:
+        """Maps each action id to its entitlement_gate capability_id (or None)."""
+        return {action.id: action.entitlement_gate for action in self.actions}
+
     @model_validator(mode="after")
-    def _validate_unique_ids(self) -> "ModuleDefinition":
+    def _validate_unique_ids(self) -> ModuleDefinition:
         action_ids = [action.id for action in self.actions]
         if len(action_ids) != len(set(action_ids)):
             raise ValueError("module actions must have unique ids")
@@ -254,9 +269,9 @@ class ModuleDefinition(ModuleContractModel):
 class ModuleEvent(ModuleContractModel):
     type: str
     version: int
-    description: Optional[str] = None
+    description: str | None = None
     producer: str
-    payload_schema: Dict[str, Any] = Field(default_factory=dict)
+    payload_schema: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("type", "producer", mode="before")
     @classmethod
@@ -265,7 +280,7 @@ class ModuleEvent(ModuleContractModel):
 
     @field_validator("description", mode="before")
     @classmethod
-    def _description(cls, value: Any) -> Optional[str]:
+    def _description(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("type")
@@ -279,14 +294,14 @@ class ModuleEvent(ModuleContractModel):
 
 class ModuleEventsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.events.v1"] = "mozaiks.events.v1"
-    events: List[ModuleEvent] = Field(default_factory=list)
+    events: list[ModuleEvent] = Field(default_factory=list)
 
     @property
     def event_types(self) -> set[str]:
         return {event.type for event in self.events}
 
     @model_validator(mode="after")
-    def _validate_unique_events(self) -> "ModuleEventsManifest":
+    def _validate_unique_events(self) -> ModuleEventsManifest:
         event_types = [event.type for event in self.events]
         if len(event_types) != len(set(event_types)):
             raise ValueError("events.yaml events must have unique type values")
@@ -295,17 +310,17 @@ class ModuleEventsManifest(ModuleContractModel):
 
 class ModuleReactionTarget(ModuleContractModel):
     kind: Literal["handler", "capability", "notification"]
-    handler_method: Optional[str] = None
-    capability_id: Optional[str] = None
-    notification_id: Optional[str] = None
+    handler_method: str | None = None
+    capability_id: str | None = None
+    notification_id: str | None = None
 
     @field_validator("handler_method", "capability_id", "notification_id", mode="before")
     @classmethod
-    def _optional(cls, value: Any) -> Optional[str]:
+    def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @model_validator(mode="after")
-    def _validate_target_contract(self) -> "ModuleReactionTarget":
+    def _validate_target_contract(self) -> ModuleReactionTarget:
         if self.kind == "handler":
             if not self.handler_method:
                 raise ValueError("handler reactions must declare target.handler_method")
@@ -328,10 +343,10 @@ class ModuleReaction(ModuleContractModel):
     id: str
     event_type: str
     target: ModuleReactionTarget
-    description: Optional[str] = None
-    filters: Optional[Dict[str, Any]] = None
-    idempotency_key: Optional[str] = None
-    permissions: List[str] = Field(default_factory=list)
+    description: str | None = None
+    filters: dict[str, Any] | None = None
+    idempotency_key: str | None = None
+    permissions: list[str] = Field(default_factory=list)
 
     @field_validator("id", "event_type", mode="before")
     @classmethod
@@ -340,12 +355,12 @@ class ModuleReaction(ModuleContractModel):
 
     @field_validator("description", "idempotency_key", mode="before")
     @classmethod
-    def _optional(cls, value: Any) -> Optional[str]:
+    def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("permissions", mode="before")
     @classmethod
-    def _permissions(cls, value: Any) -> List[str]:
+    def _permissions(cls, value: Any) -> list[str]:
         return _string_list(value)
 
     @field_validator("event_type")
@@ -359,10 +374,10 @@ class ModuleReaction(ModuleContractModel):
 
 class ModuleReactionsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.reactions.v1"] = "mozaiks.reactions.v1"
-    reactions: List[ModuleReaction] = Field(default_factory=list)
+    reactions: list[ModuleReaction] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_unique_reactions(self) -> "ModuleReactionsManifest":
+    def _validate_unique_reactions(self) -> ModuleReactionsManifest:
         reaction_ids = [reaction.id for reaction in self.reactions]
         if len(reaction_ids) != len(set(reaction_ids)):
             raise ValueError("reactions.yaml reactions must have unique id values")
@@ -371,26 +386,26 @@ class ModuleReactionsManifest(ModuleContractModel):
 
 class ModuleNotificationsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.notifications.v1"] = "mozaiks.notifications.v1"
-    notifications: List[Dict[str, Any]] = Field(default_factory=list)
+    notifications: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ModuleSettingsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.settings.v1"] = "mozaiks.settings.v1"
-    settings: List[Dict[str, Any]] = Field(default_factory=list)
-    features: List[Dict[str, Any]] = Field(default_factory=list)
+    settings: list[dict[str, Any]] = Field(default_factory=list)
+    features: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ModuleAdminPanel(ModuleContractModel):
     id: str
     label: str
-    description: Optional[str] = None
+    description: str | None = None
     page: str  # references a page id declared in app/admin/admin_registry.yaml
     order: int = 0
     renderer: Literal["schema", "custom_component"] = "schema"
-    layout: Optional[Literal["grid", "sidebar", "full-width", "split"]] = None
-    sections: List[Dict[str, Any]] = Field(default_factory=list)
-    component: Optional[str] = None
-    permissions: List[str] = Field(default_factory=list)
+    layout: Literal["grid", "sidebar", "full-width", "split"] | None = None
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    component: str | None = None
+    permissions: list[str] = Field(default_factory=list)
 
     @field_validator("id", "label", mode="before")
     @classmethod
@@ -407,22 +422,22 @@ class ModuleAdminPanel(ModuleContractModel):
 
     @field_validator("description", "component", mode="before")
     @classmethod
-    def _optional(cls, value: Any) -> Optional[str]:
+    def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @field_validator("permissions", mode="before")
     @classmethod
-    def _permissions(cls, value: Any) -> List[str]:
+    def _permissions(cls, value: Any) -> list[str]:
         return _string_list(value)
 
     @field_validator("sections", mode="before")
     @classmethod
-    def _sections(cls, value: Any) -> List[Dict[str, Any]]:
+    def _sections(cls, value: Any) -> list[dict[str, Any]]:
         if value is None:
             return []
         if not isinstance(value, list):
             raise ValueError("sections must be a list")
-        result: List[Dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for item in value:
             if not isinstance(item, dict):
                 raise ValueError("sections entries must be objects")
@@ -430,7 +445,7 @@ class ModuleAdminPanel(ModuleContractModel):
         return result
 
     @model_validator(mode="after")
-    def _validate_renderer_contract(self) -> "ModuleAdminPanel":
+    def _validate_renderer_contract(self) -> ModuleAdminPanel:
         if self.renderer == "schema":
             if self.component is not None:
                 raise ValueError("schema admin panels must not declare component")
@@ -457,12 +472,12 @@ class ModuleAdminManifest(ModuleContractModel):
     """
 
     schema_version: Literal["mozaiks.admin.v2"] = "mozaiks.admin.v2"
-    panels: List[ModuleAdminPanel] = Field(default_factory=list)
-    hooks: List[str] = Field(default_factory=list)
+    panels: list[ModuleAdminPanel] = Field(default_factory=list)
+    hooks: list[str] = Field(default_factory=list)
 
     @field_validator("hooks", mode="before")
     @classmethod
-    def _hooks(cls, value: Any) -> List[str]:
+    def _hooks(cls, value: Any) -> list[str]:
         entries = _string_list(value)
         for entry in entries:
             if ":" not in entry:
@@ -477,7 +492,7 @@ class ModuleAdminManifest(ModuleContractModel):
         return entries
 
     @model_validator(mode="after")
-    def _unique_panel_ids(self) -> "ModuleAdminManifest":
+    def _unique_panel_ids(self) -> ModuleAdminManifest:
         panel_ids = [panel.id for panel in self.panels]
         if len(panel_ids) != len(set(panel_ids)):
             raise ValueError("admin.yaml panels must have unique id values")
@@ -519,12 +534,12 @@ class ModuleProfileField(ModuleContractModel):
 class ModuleProfilePanel(ModuleContractModel):
     id: str
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     order: int = 100
     kind: str = "metrics"
-    action: Optional[str] = None          # module action called to hydrate panel data
-    component: Optional[str] = None       # registered React component (kind=component)
-    fields: List[ModuleProfileField] = Field(default_factory=list)
+    action: str | None = None          # module action called to hydrate panel data
+    component: str | None = None       # registered React component (kind=component)
+    fields: list[ModuleProfileField] = Field(default_factory=list)
 
     @field_validator("id", "title", mode="before")
     @classmethod
@@ -543,11 +558,11 @@ class ModuleProfilePanel(ModuleContractModel):
 
     @field_validator("description", "action", "component", mode="before")
     @classmethod
-    def _optional(cls, value: Any) -> Optional[str]:
+    def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
 
     @model_validator(mode="after")
-    def _validate_panel_contract(self) -> "ModuleProfilePanel":
+    def _validate_panel_contract(self) -> ModuleProfilePanel:
         if self.kind == "component":
             if not self.component:
                 raise ValueError("component profile panels must declare 'component'")
@@ -561,10 +576,10 @@ class ModuleProfilePanel(ModuleContractModel):
 
 class ModuleProfileManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.profile.v1"] = "mozaiks.profile.v1"
-    panels: List[ModuleProfilePanel] = Field(default_factory=list)
+    panels: list[ModuleProfilePanel] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _unique_panel_ids(self) -> "ModuleProfileManifest":
+    def _unique_panel_ids(self) -> ModuleProfileManifest:
         panel_ids = [panel.id for panel in self.panels]
         if len(panel_ids) != len(set(panel_ids)):
             raise ValueError("profile.yaml panels must have unique id values")
@@ -574,7 +589,7 @@ class ModuleProfileManifest(ModuleContractModel):
 class ModuleRuntimeExtension(ModuleContractModel):
     kind: Literal["api_router", "startup_service"]
     entrypoint: str
-    prefix: Optional[str] = None
+    prefix: str | None = None
 
     @field_validator("entrypoint", mode="before")
     @classmethod
@@ -602,7 +617,7 @@ class ModuleRuntimeExtension(ModuleContractModel):
         return f"{module_path}:{attr}"
 
     @model_validator(mode="after")
-    def _validate_extension_contract(self) -> "ModuleRuntimeExtension":
+    def _validate_extension_contract(self) -> ModuleRuntimeExtension:
         if self.kind == "startup_service" and self.prefix:
             raise ValueError("startup_service runtime extensions must not declare prefix")
         if self.kind == "api_router" and self.prefix is not None and not self.prefix.startswith("/"):
@@ -612,17 +627,17 @@ class ModuleRuntimeExtension(ModuleContractModel):
 
 class ModuleRuntimeExtensionsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.runtime_extensions.v1"]
-    extensions: List[ModuleRuntimeExtension] = Field(default_factory=list)
+    extensions: list[ModuleRuntimeExtension] = Field(default_factory=list)
 
 
 class ModuleCompanionManifests(ModuleContractModel):
-    events: Optional[ModuleEventsManifest] = None
-    reactions: Optional[ModuleReactionsManifest] = None
-    notifications: Optional[ModuleNotificationsManifest] = None
-    settings: Optional[ModuleSettingsManifest] = None
-    admin: Optional[ModuleAdminManifest] = None
-    profile: Optional[ModuleProfileManifest] = None
-    runtime_extensions: Optional[ModuleRuntimeExtensionsManifest] = None
+    events: ModuleEventsManifest | None = None
+    reactions: ModuleReactionsManifest | None = None
+    notifications: ModuleNotificationsManifest | None = None
+    settings: ModuleSettingsManifest | None = None
+    admin: ModuleAdminManifest | None = None
+    profile: ModuleProfileManifest | None = None
+    runtime_extensions: ModuleRuntimeExtensionsManifest | None = None
 
 
 class LoadedModule:
@@ -645,16 +660,20 @@ class LoadedModule:
         return self.definition.name
 
     @property
-    def action_method_map(self) -> Dict[str, str]:
+    def action_method_map(self) -> dict[str, str]:
         return self.definition.action_method_map
 
     @property
-    def action_permissions_map(self) -> Dict[str, List[str]]:
+    def action_permissions_map(self) -> dict[str, list[str]]:
         return self.definition.action_permissions_map
 
     @property
-    def action_schemas_map(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    def action_schemas_map(self) -> dict[str, dict[str, dict[str, Any]]]:
         return self.definition.action_schemas_map
+
+    @property
+    def action_entitlement_map(self) -> dict[str, str | None]:
+        return self.definition.action_entitlement_map
 
     def __repr__(self) -> str:
         return f"<LoadedModule name={self.name!r} handler={type(self.handler).__name__}>"
@@ -685,18 +704,18 @@ class ModuleLoader:
         if workspace_root_text not in sys.path:
             sys.path.insert(0, workspace_root_text)
 
-    def discover_module_names(self) -> List[str]:
+    def discover_module_names(self) -> list[str]:
         """Return module names for every modules/*/module.yaml in the bundle."""
         modules_dir = self._base / "modules"
         if not modules_dir.exists():
             return []
-        names: List[str] = []
+        names: list[str] = []
         for child in sorted(modules_dir.iterdir(), key=lambda item: item.name.lower()):
             if child.is_dir() and (child / self.YAML_FILENAME).exists():
                 names.append(child.name)
         return names
 
-    async def load_all(self, module_names: Optional[List[str]] = None) -> List[LoadedModule]:
+    async def load_all(self, module_names: list[str] | None = None) -> list[LoadedModule]:
         """Load named modules, or discover all when no list is provided."""
         loaded = []
         names = module_names if module_names is not None else self.discover_module_names()
@@ -752,7 +771,7 @@ class ModuleLoader:
         module_dir: Path,
         definition: ModuleDefinition,
     ) -> ModuleCompanionManifests:
-        parsed: Dict[str, Any] = {}
+        parsed: dict[str, Any] = {}
         contracts_dir = module_dir / self.CONTRACTS_DIRNAME
 
         reactions_path = contracts_dir / "reactions.yaml"

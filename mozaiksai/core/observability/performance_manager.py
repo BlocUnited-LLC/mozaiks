@@ -1,451 +1,134 @@
-from __future__ import annotations
-"""Lean Performance Manager aligned with ChatSessions as the run-level record.
+"""AG2 beta telemetry wiring for Mozaiks workflow agents.
 
-In the current runtime, `chat_id` is the concrete workflow-run identifier
-persisted in `ChatSessions`. Session continuity remains owned by
-`SessionRouterState` (`session_router::{app_id}::{user_id}`).
-
-This manager keeps minimal in-memory metrics for one workflow run while
-optionally carrying session-router linkage (`session_router_session_id`,
-`journey_instance_id`) so run-level observability can be correlated back to the
-owning orchestration session.
+AG2 owns agent turn, LLM-call, tool-call, and human-input telemetry through
+``TelemetryMiddleware``. Mozaiks adds only deterministic span attributes that
+tie those spans back to the runtime run record stored in ``ChatSessions``.
 """
 
-import asyncio
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Union
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from logs.logging_config import get_workflow_logger
-from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-from mozaiksai.core.data.models import WorkflowStatus
 
-logger = get_workflow_logger("performance_manager")
-perf_logger = get_workflow_logger("performance")
+logger = get_workflow_logger("observability.telemetry")
 
 
-@dataclass
-class PerformanceConfig:
-    flush_interval_sec: int = 0
+def _env_bool(name: str, *, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class AG2TelemetryConfig:
+    """Runtime configuration for AG2 beta telemetry middleware."""
+
     enabled: bool = True
+    capture_content: bool = False
+    service_name: str = "mozaiks-runtime"
+    environment: str = "development"
 
-@dataclass
-class ChatPerfState:
-    chat_id: str
-    app_id: str
-    workflow_name: str
-    user_id: str
-    session_router_session_id: Optional[str] = None
-    journey_instance_id: Optional[str] = None
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    ended_at: Optional[datetime] = None
-    agent_turns: int = 0
-    tool_calls: int = 0
-    errors: int = 0
-    last_turn_duration_sec: Optional[float] = None
-    total_prompt_tokens: int = 0
-    total_completion_tokens: int = 0
-    total_cost: float = 0.0
-
-class PerformanceManager:
-    def __init__(self, config: Optional[PerformanceConfig] = None):
-        self.config = config or PerformanceConfig()
-        self._states: Dict[str, ChatPerfState] = {}
-        self._lock = asyncio.Lock()
-        self._flush_task: Optional[asyncio.Task] = None
-        self._persistence = AG2PersistenceManager()
-        self._chat_coll = None
-        self._agent_turn_duration = None
-        self._workflow_duration = None
-        self.initialized = False
-
-    # --------------------------------------------------
-    # Run snapshots keyed by chat_id (in-memory only)
-    # --------------------------------------------------
-    async def snapshot_chat(self, chat_id: str) -> Optional[Dict[str, Any]]:
-        """Return an in-memory snapshot for one workflow run keyed by `chat_id`.
-
-        This is intentionally run-scoped rather than SessionRouter session-scoped.
-        Includes derived runtime duration (seconds) whether or not the workflow
-        ended. Returns None if the chat_id/run is not tracked yet.
-        """
-        async with self._lock:
-            st = self._states.get(chat_id)
-            if not st:
-                return None
-            ended_at = st.ended_at or datetime.now(timezone.utc)
-            runtime_sec = (ended_at - st.started_at).total_seconds()
-            return {
-                "chat_id": st.chat_id,
-                "app_id": st.app_id,
-                "workflow_name": st.workflow_name,
-                "user_id": st.user_id,
-                "session_router_session_id": st.session_router_session_id,
-                "journey_instance_id": st.journey_instance_id,
-                "started_at": st.started_at.isoformat(),
-                "ended_at": st.ended_at.isoformat() if st.ended_at else None,
-                "runtime_sec": runtime_sec,
-                "agent_turns": st.agent_turns,
-                "tool_calls": st.tool_calls,
-                "errors": st.errors,
-                "last_turn_duration_sec": st.last_turn_duration_sec,
-                "prompt_tokens": st.total_prompt_tokens,
-                "completion_tokens": st.total_completion_tokens,
-                "cost": st.total_cost,
-            }
-
-    async def snapshot_all(self) -> List[Dict[str, Any]]:
-        async with self._lock:
-            ids = list(self._states.keys())
-        out: List[Dict[str, Any]] = []
-        for cid in ids:
-            snap = await self.snapshot_chat(cid)
-            if snap:
-                out.append(snap)
-        return out
-
-    async def aggregate(self) -> Dict[str, Any]:
-        """Aggregate simple counters across all tracked workflow runs."""
-        snaps = await self.snapshot_all()
-        total_agent_turns = sum(s["agent_turns"] for s in snaps)
-        total_tool_calls = sum(s["tool_calls"] for s in snaps)
-        total_errors = sum(s["errors"] for s in snaps)
-        total_prompt_tokens = sum(s["prompt_tokens"] for s in snaps)
-        total_completion_tokens = sum(s["completion_tokens"] for s in snaps)
-        total_cost = sum(s["cost"] for s in snaps)
-        active_chats = sum(1 for s in snaps if s["ended_at"] is None)
-        return {
-            "active_chats": active_chats,
-            "tracked_chats": len(snaps),
-            "total_agent_turns": total_agent_turns,
-            "total_tool_calls": total_tool_calls,
-            "total_errors": total_errors,
-            "total_prompt_tokens": total_prompt_tokens,
-            "total_completion_tokens": total_completion_tokens,
-            "total_cost": total_cost,
-            "chats": snaps,
-        }
-
-    async def _get_coll(self):
-        if self._chat_coll is None:
-            await self._persistence.persistence._ensure_client()
-            client_obj = self._persistence.persistence.client
-            if client_obj is None:
-                raise RuntimeError("Mongo client unavailable")
-            # Updated collection name
-            self._chat_coll = client_obj["mozaiksai"]["ChatSessions"]
-        return self._chat_coll
-
-    async def _load_chat_scope_metadata(self, chat_id: str) -> Dict[str, Optional[str]]:
-        """Load persisted session/journey linkage for a chat if present."""
-        try:
-            coll = await self._get_coll()
-            doc = await coll.find_one(
-                {"_id": chat_id},
-                {
-                    "session_router_session_id": 1,
-                    "journey_instance_id": 1,
-                },
-            )
-        except Exception:
-            logger.debug("Failed to load chat scope metadata", exc_info=True)
-            return {
-                "session_router_session_id": None,
-                "journey_instance_id": None,
-            }
-
-        if not isinstance(doc, dict):
-            return {
-                "session_router_session_id": None,
-                "journey_instance_id": None,
-            }
-
-        session_router_session_id = str(doc.get("session_router_session_id") or "").strip() or None
-        journey_instance_id = str(doc.get("journey_instance_id") or "").strip() or None
-        return {
-            "session_router_session_id": session_router_session_id,
-            "journey_instance_id": journey_instance_id,
-        }
-
-    async def initialize(self):
-        if self.initialized:
-            logger.info("🔍 PERF_INIT: Performance manager already initialized, skipping")
-            return
-        
-        logger.info("🔧 PERF_INIT: Starting performance manager initialization")
-
-        self._agent_turn_duration = None
-        self._workflow_duration = None
-
-        if self.config.flush_interval_sec > 0:
-            logger.info(f"🔧 PERF_INIT: Starting periodic flush task (interval={self.config.flush_interval_sec}s)")
-            self._flush_task = asyncio.create_task(self._periodic_flush())
-        else:
-            logger.info("🔧 PERF_INIT: Periodic flush disabled (interval=0)")
-            
-        self.initialized = True
-        logger.info("✅ PERF_INIT: Performance manager initialization completed")
-
-    async def _periodic_flush(self):
-        while True:
-            await asyncio.sleep(self.config.flush_interval_sec)
-            async with self._lock:
-                ids = list(self._states.keys())
-            for cid in ids:
-                await self.flush(cid)
-
-    async def record_workflow_start(
-        self,
-        chat_id: str,
-        app_id: str,
-        workflow_name: str,
-        user_id: str,
-        *,
-        session_router_session_id: Optional[str] = None,
-        journey_instance_id: Optional[str] = None,
-    ):
-        async with self._lock:
-            if chat_id not in self._states:
-                self._states[chat_id] = ChatPerfState(
-                    chat_id=chat_id,
-                    app_id=app_id,
-                    workflow_name=workflow_name,
-                    user_id=user_id,
-                )
-        # Delegate creation to AG2PersistenceManager (single source of truth)
-        try:
-            await self._persistence.create_chat_session(chat_id, app_id, workflow_name, user_id)
-        except Exception:
-            # Fallback: direct minimal upsert if persistence manager path changes
-            coll = await self._get_coll()
-            now = datetime.now(timezone.utc)
-            await coll.update_one(
-                {"_id": chat_id, "app_id": app_id},
-                {"$setOnInsert": {
-                    "_id": chat_id,
-                    "app_id": app_id,
-                    "workflow_name": workflow_name,
-                    "user_id": user_id,
-                    "status": 0,
-                    "created_at": now,
-                    "last_updated_at": now,
-                    "duration_sec": 0.0,
-                    "usage_prompt_tokens_final": 0,
-                    "usage_completion_tokens_final": 0,
-                    "usage_total_tokens_final": 0,
-                    "usage_total_cost_final": 0.0,
-                    "tool_calls_final": 0,
-                    "errors_final": 0,
-                    "messages": []
-                }},
-                upsert=True,
-            )
-
-        scope_metadata = await self._load_chat_scope_metadata(chat_id)
-        resolved_session_router_session_id = (
-            str(session_router_session_id or "").strip()
-            or scope_metadata["session_router_session_id"]
-        )
-        resolved_journey_instance_id = (
-            str(journey_instance_id or "").strip()
-            or scope_metadata["journey_instance_id"]
-        )
-
-        async with self._lock:
-            st = self._states.get(chat_id)
-            if st is not None:
-                st.session_router_session_id = resolved_session_router_session_id
-                st.journey_instance_id = resolved_journey_instance_id
-        perf_logger.info("workflow_start", chat_id=chat_id, workflow=workflow_name)
-
-    async def attach_trace_id(self, chat_id: str, trace_id: str):
-        if not trace_id or trace_id == '0' * 32:
-            # Ignore invalid trace ids; caller should provide fallback
-            perf_logger.warning(f"ignored_zero_trace_id chat_id={chat_id}")
-            return
-        coll = await self._get_coll()
-        await coll.update_one({"_id": chat_id}, {"$set": {"trace_id": trace_id}})
-
-    async def record_agent_turn(self, chat_id: str, agent_name: str, duration_sec: float, model: Optional[str], prompt_tokens: int = 0, completion_tokens: int = 0, cost: float = 0.0):
-        st_ref = self._states.get(chat_id)
-        async with self._lock:
-            st = self._states.get(chat_id)
-            if not st:
-                return
-            st.agent_turns += 1
-            st.last_turn_duration_sec = duration_sec
-        perf_logger.info(
-            "agent_turn",
-            chat_id=chat_id,
-            workflow=(st_ref.workflow_name if st_ref else None),
-            app_id=(st_ref.app_id if st_ref else None),
-            agent=agent_name,
-            model=(model or "unknown"),
-            prompt_tokens=int(prompt_tokens),
-            completion_tokens=int(completion_tokens),
-            total_tokens=int(prompt_tokens + completion_tokens),
-            cost_usd=float(cost),
-            duration_sec=float(duration_sec),
-        )
-
-        if prompt_tokens > 0 or completion_tokens > 0 or cost > 0:
-            await self.record_usage_delta(
-                chat_id=chat_id,
-                agent_name=agent_name,
-                model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cost=cost,
-                duration_sec=duration_sec,
-            )
-
-    async def record_usage_delta(
-        self,
-        *,
-        chat_id: str,
-        agent_name: str,
-        model: Optional[str],
-        prompt_tokens: int,
-        completion_tokens: int,
-        cost: float,
-        duration_sec: float = 0.0,
-    ) -> None:
-        st_ref = self._states.get(chat_id)
-        if not st_ref:
-            return
-        async with self._lock:
-            st = self._states.get(chat_id)
-            if not st:
-                return
-            if prompt_tokens:
-                st.total_prompt_tokens += int(prompt_tokens)
-            if completion_tokens:
-                st.total_completion_tokens += int(completion_tokens)
-            if cost:
-                st.total_cost += float(cost)
-        perf_logger.debug(
-            "usage_delta_recorded",
-            chat_id=chat_id,
-            agent=agent_name,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cost=cost,
-            duration_sec=float(duration_sec),
-        )
-
-    async def record_tool_call(self, chat_id: str, tool_name: str, success: bool):
-        """Increment tool call counters.
-
-        Duration/error attribution removed; upstream callers may choose their own
-        measurement strategy if needed. We only count global success vs error totals.
-        """
-        async with self._lock:
-            st = self._states.get(chat_id)
-            if not st:
-                return
-            st.tool_calls += 1
-            if not success:
-                st.errors += 1
-        try:
-            coll = await self._get_coll()
-            inc_ops: Dict[str, Any] = {"tool_calls_final": 1}
-            if not success:
-                inc_ops["errors_final"] = 1
-            await coll.update_one(
-                {"_id": chat_id},
-                {
-                    "$inc": inc_ops,
-                    "$set": {"last_updated_at": datetime.now(timezone.utc)},
-                },
-            )
-        except Exception:
-            logger.debug("Failed to persist tool/error counters", exc_info=True)
-        perf_logger.debug("tool_call", chat_id=chat_id, tool=tool_name, success=success)
-
-    async def record_workflow_end(self, chat_id: str, status: Union[int, str, WorkflowStatus]):
-        async with self._lock:
-            st = self._states.get(chat_id)
-            if not st:
-                return
-            st.ended_at = datetime.now(timezone.utc)
-
-        # record duration metric
-        if self._workflow_duration:
-            duration = (st.ended_at - st.started_at).total_seconds()  # type: ignore[arg-type]
-            # store status as string in prframnce attributes to avoid serializer issues
-            self._workflow_duration.record(duration, {"workflow_name": st.workflow_name, "status": str(status)})
-
-        # Persist final status / end time prior to duration flush
-        coll = await self._get_coll()
-
-        # Normalize status to WorkflowStatus enum if passed as string
-        # Normalize status to WorkflowStatus numeric
-        if isinstance(status, WorkflowStatus):
-            status_enum = status
-        elif isinstance(status, int):
-            status_enum = WorkflowStatus.COMPLETED if status == 1 else WorkflowStatus.IN_PROGRESS
-        else:
-            status_enum = WorkflowStatus.COMPLETED if str(status).lower() == "completed" else WorkflowStatus.IN_PROGRESS
-
-        # Only update the DB status if it differs from current stored value to avoid duplicate writes
-        update_doc: Dict[str, Any] = {}
-        update_doc["ended_at"] = st.ended_at
-        update_doc["last_updated_at"] = datetime.now(timezone.utc)
-
-        try:
-            existing = await coll.find_one({"_id": chat_id}, {"status": 1})
-            existing_status = existing.get("status") if existing else None
-        except Exception:
-            existing_status = None
-
-        if existing_status is None or int(existing_status) != int(status_enum):
-            update_doc["status"] = int(status_enum)
-
-        if update_doc:
-            await coll.update_one({"_id": chat_id}, {"$set": update_doc})
-
-        # Final flush to persist computed duration_sec
-        await self.flush(chat_id)
-
-        # Best-effort workflow summary refresh (does not block)
-        if status_enum == WorkflowStatus.COMPLETED:
-            try:  # pragma: no cover
-                from mozaiksai.core.data.models import refresh_workflow_rollup_by_id
-                summary_id = f"mon_{st.app_id}_{st.workflow_name}"
-                asyncio.create_task(refresh_workflow_rollup_by_id(summary_id))
-            except Exception:
-                pass
-
-    async def flush(self, chat_id: str):
-        async with self._lock:
-            st = self._states.get(chat_id)
-            if not st:
-                return
-            runtime_sec = ((st.ended_at or datetime.now(timezone.utc)) - st.started_at).total_seconds()
-        coll = await self._get_coll()
-        await coll.update_one({"_id": chat_id}, {"$set": {"duration_sec": runtime_sec, "last_updated_at": datetime.now(timezone.utc)}})
-
-
-class _PerformanceManagerSingleton:
-    _instance: Optional[PerformanceManager] = None
-    _lock = asyncio.Lock()
-    
     @classmethod
-    async def get_instance(cls) -> PerformanceManager:
-        if cls._instance is None:
-            logger.info("🔧 PERF_SINGLETON: Creating new PerformanceManager instance")
-            async with cls._lock:
-                if cls._instance is None:
-                    logger.info("🔧 PERF_SINGLETON: Double-checked lock - creating instance")
-                    cls._instance = PerformanceManager()
-                    await cls._instance.initialize()
-                    logger.info("✅ PERF_SINGLETON: PerformanceManager singleton created and initialized")
-                else:
-                    logger.info("🔍 PERF_SINGLETON: Instance already created by another coroutine")
-        else:
-            logger.info("🔍 PERF_SINGLETON: Using existing PerformanceManager instance")
-        return cls._instance
+    def from_env(cls) -> AG2TelemetryConfig:
+        return cls(
+            enabled=_env_bool("MOZAIKS_AG2_TELEMETRY_ENABLED", default=True),
+            capture_content=_env_bool("MOZAIKS_AG2_TELEMETRY_CAPTURE_CONTENT", default=False),
+            service_name=os.getenv("MOZAIKS_OTEL_SERVICE_NAME", "mozaiks-runtime").strip()
+            or "mozaiks-runtime",
+            environment=os.getenv("ENVIRONMENT", "development").strip() or "development",
+        )
 
-async def get_performance_manager() -> PerformanceManager:
-    return await _PerformanceManagerSingleton.get_instance()
 
+def _context_data(context_variables: Any) -> Mapping[str, Any]:
+    if context_variables is None:
+        return {}
+    if hasattr(context_variables, "data") and isinstance(context_variables.data, dict):
+        return context_variables.data
+    if isinstance(context_variables, Mapping):
+        return context_variables
+    return {}
+
+
+def _string_attr(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def build_ag2_span_attributes(
+    *,
+    agent_name: str,
+    workflow_name: str,
+    context_variables: Any,
+    config: AG2TelemetryConfig | None = None,
+) -> dict[str, str]:
+    """Return stable span attributes for AG2 telemetry middleware."""
+
+    cfg = config or AG2TelemetryConfig.from_env()
+    data = _context_data(context_variables)
+    candidates = {
+        "service.name": cfg.service_name,
+        "deployment.environment": cfg.environment,
+        "mozaiks.workflow.name": workflow_name,
+        "mozaiks.agent.name": agent_name,
+        "mozaiks.app.id": data.get("app_id"),
+        "mozaiks.chat.id": data.get("chat_id"),
+        "mozaiks.user.id": data.get("user_id"),
+        "mozaiks.workflow.run.id": data.get("chat_id") or data.get("run_id"),
+        "mozaiks.session_router.session_id": data.get("session_router_session_id"),
+        "mozaiks.journey.instance_id": data.get("journey_instance_id"),
+    }
+    return {
+        key: value
+        for key, raw_value in candidates.items()
+        if (value := _string_attr(raw_value)) is not None
+    }
+
+
+def build_ag2_telemetry_middleware(
+    *,
+    agent_name: str,
+    workflow_name: str,
+    context_variables: Any,
+    provider_name: str | None = None,
+    model_name: str | None = None,
+    config: AG2TelemetryConfig | None = None,
+) -> Any | None:
+    """Create AG2 ``TelemetryMiddleware`` wrapped as AG2 beta middleware.
+
+    Returns ``None`` when disabled or when tracing extras are not installed.
+    """
+
+    cfg = config or AG2TelemetryConfig.from_env()
+    if not cfg.enabled:
+        return None
+
+    try:
+        from autogen.beta.middleware.builtin import TelemetryMiddleware
+    except Exception as exc:  # pragma: no cover - depends on optional AG2 extras
+        logger.debug("AG2 TelemetryMiddleware unavailable: %s", exc)
+        return None
+
+    return TelemetryMiddleware(
+        capture_content=cfg.capture_content,
+        agent_name=agent_name,
+        provider_name=provider_name,
+        model_name=model_name,
+        span_attributes=build_ag2_span_attributes(
+            agent_name=agent_name,
+            workflow_name=workflow_name,
+            context_variables=context_variables,
+            config=cfg,
+        ),
+    )
+
+
+__all__ = [
+    "AG2TelemetryConfig",
+    "build_ag2_span_attributes",
+    "build_ag2_telemetry_middleware",
+]

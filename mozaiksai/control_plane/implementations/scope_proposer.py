@@ -16,8 +16,8 @@ from mozaiksai.control_plane.contracts import (
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
+from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts.store import get_artifact_store
-from mozaiksai.core.capabilities import get_general_capability_service
 
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
@@ -30,13 +30,13 @@ class ArtifactScopeProposer:
     def __init__(
         self,
         *,
-        capability_service: Any = None,
+        agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_control_plane_pack,
         tool_executor: Any = None,
         artifact_store: Any = None,
     ) -> None:
-        self._service = capability_service or get_general_capability_service()
+        self._agent_runner = agent_runner or AG2StructuredAgentRunner()
         self._config_loader = config_loader
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
@@ -54,22 +54,16 @@ class ArtifactScopeProposer:
         if checkpoint is None or not checkpoint.prompt_id:
             raise RuntimeError(
                 f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
-            )
+        )
 
         llm_config = self._load_config().resolve_capability_llm_config("coding")
-        temperature = None
-        if isinstance(llm_config, dict) and llm_config.get("temperature") is not None:
-            try:
-                temperature = float(llm_config["temperature"])
-            except Exception:
-                temperature = None
-
         control_plane_context = await self._load_control_plane_context(
             refinement_request=refinement_request,
             routing_decision=routing_decision,
             payload=payload or {},
         )
-        response = await self._service.generate_json_completion(
+        proposal = await self._agent_runner.run(
+            agent_name="ScopeProposer",
             system_prompt=self._load_system_prompt(),
             user_prompt=self._build_user_prompt(
                 refinement_request=refinement_request,
@@ -77,13 +71,9 @@ class ArtifactScopeProposer:
                 control_plane_context=control_plane_context,
                 payload=payload or {},
             ),
-            app_id=refinement_request.app_id,
-            user_id=None,
-            ui_context={"surface": refinement_request.source_surface or "scope_proposer"},
             llm_config=llm_config,
-            temperature=temperature,
+            response_schema=ScopeProposal,
         )
-        proposal = ScopeProposal.model_validate(response.get("parsed") or {})
         proposal = self._normalize_proposal(proposal)
         proposal = await self._apply_available_path_policy(
             proposal=proposal,

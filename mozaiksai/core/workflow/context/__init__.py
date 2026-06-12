@@ -6,8 +6,11 @@ that actually exist in the submodules are exposed here to avoid import
 errors after the package reorganization.
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 from .adapter import create_context_container
-from .derived import DerivedContextManager
 from .schema import (
     ContextAgentView,
     ContextTriggerMatch,
@@ -17,6 +20,15 @@ from .schema import (
     ContextVariablesPlan,
     load_context_variables_config,
 )
+
+
+def __getattr__(name: str) -> Any:
+    if name == "DerivedContextManager":
+        from .derived import DerivedContextManager
+
+        globals()[name] = DerivedContextManager
+        return DerivedContextManager
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _create_minimal_context(workflow_name: str, app_id):  # type: ignore[no-untyped-def]

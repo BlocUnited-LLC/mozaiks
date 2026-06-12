@@ -3,19 +3,24 @@
 # DESCRIPTION: Port protocols — engine-agnostic contracts for the runtime layer.
 # ==============================================================================
 
-from .orchestration import (
-    OrchestrationPort,
-    RunRequest,
-    ResumeRequest,
-    RunResult,
-    RunStatus,
-    DomainEvent,
-)
-
 from .app_backend import (
     AppBackendPort,
-    BackendResponse,
     BackendHealth,
+    BackendResponse,
+)
+from .entitlement import (
+    ENTITLEMENT_REQUIRED,
+    EntitlementPort,
+    EntitlementResult,
+    NoOpEntitlementAdapter,
+)
+from .orchestration import (
+    DomainEvent,
+    OrchestrationPort,
+    ResumeRequest,
+    RunRequest,
+    RunResult,
+    RunStatus,
 )
 from .sandbox import (
     SandboxPort,
@@ -39,4 +44,9 @@ __all__ = [
     "SandboxPort",
     "SandboxRunResult",
     "SandboxSessionInfo",
+    # Entitlement
+    "EntitlementPort",
+    "EntitlementResult",
+    "NoOpEntitlementAdapter",
+    "ENTITLEMENT_REQUIRED",
 ]

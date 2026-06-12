@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import importlib
+import inspect
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -81,6 +84,64 @@ def validate_context_for_workflow(workflow_id: str, merged_context: Dict[str, An
             continue
         validated_context[key] = value
     return validated_context
+
+
+async def apply_launch_context_provider(
+    *,
+    workflow_id: str,
+    context_variables: Dict[str, Any],
+    app_id: str,
+    user_id: str,
+    trigger_source: str,
+    trigger_payload: Optional[Dict[str, Any]] = None,
+    requested_workflow_id: Optional[str] = None,
+    journey_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Apply an optional launch context provider before workflow validation."""
+    provider_spec = str(os.getenv("MOZAIKS_LAUNCH_CONTEXT_PROVIDER") or "").strip()
+    if not provider_spec:
+        return dict(context_variables or {})
+    if ":" not in provider_spec:
+        logger.warning("SESSION_LAUNCH_CONTEXT_PROVIDER_INVALID: spec=%s", provider_spec)
+        return dict(context_variables or {})
+
+    module_name, function_name = provider_spec.split(":", 1)
+    module_name = module_name.strip()
+    function_name = function_name.strip()
+    if not module_name or not function_name:
+        logger.warning("SESSION_LAUNCH_CONTEXT_PROVIDER_INVALID: spec=%s", provider_spec)
+        return dict(context_variables or {})
+
+    try:
+        provider = getattr(importlib.import_module(module_name), function_name)
+        result = provider(
+            workflow_id=workflow_id,
+            requested_workflow_id=requested_workflow_id,
+            context_variables=dict(context_variables or {}),
+            trigger_payload=dict(trigger_payload or {}),
+            app_id=app_id,
+            user_id=user_id,
+            trigger_source=trigger_source,
+            journey_id=journey_id,
+        )
+        if inspect.isawaitable(result):
+            result = await result
+        if not isinstance(result, dict):
+            logger.warning(
+                "SESSION_LAUNCH_CONTEXT_PROVIDER_IGNORED: provider=%s returned=%s",
+                provider_spec,
+                type(result).__name__,
+            )
+            return dict(context_variables or {})
+        return dict(result)
+    except Exception as exc:
+        logger.warning(
+            "SESSION_LAUNCH_CONTEXT_PROVIDER_FAILED: provider=%s workflow=%s error=%s",
+            provider_spec,
+            workflow_id,
+            exc,
+        )
+        return dict(context_variables or {})
 
 
 async def create_routed_chat_session(
@@ -168,6 +229,16 @@ async def prepare_routed_workflow_launch(
     )
     resolved_workflow_id = routing_decision.workflow_id
     merged_context = {**dict(routing_decision.context_seed), **dict(context_variables or {})}
+    merged_context = await apply_launch_context_provider(
+        workflow_id=resolved_workflow_id,
+        requested_workflow_id=routing_decision.requested_workflow_id,
+        context_variables=merged_context,
+        trigger_payload=trigger_payload,
+        app_id=app_id,
+        user_id=user_id,
+        trigger_source=trigger_source,
+        journey_id=routing_decision.journey_id,
+    )
     validated_context = validate_context_for_workflow(resolved_workflow_id, merged_context)
     trigger_meta = _build_trigger_meta(
         trigger_source=trigger_source,

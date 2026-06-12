@@ -12,9 +12,9 @@ ContractSurfaceKind = Literal[
     "module_action",    # module.yaml + handler + service + schemas (+ repo/policy)
     "module_contract",  # module.yaml declarations only (events, capabilities, settings)
     "page_binding",     # ui/pages/*.yaml + app.json
-    "data_schema",      # schemas.py + optionally config/data.json
+    "data_schema",      # schemas.py + optionally data/contract.json
     "workflow_tool",    # tools.yaml + tool Python file
-    "workflow_agent",   # agents.yaml + structured_outputs.yaml + handoffs.yaml
+    "workflow_agent",   # agents.yaml + structured_outputs.yaml + transition_graph.yaml
     "ui_component",     # ui/{WorkflowName}/components/*.js
     "app_config",       # app.json, shell.json, theme_config.json
 ]
@@ -59,7 +59,7 @@ CONTRACT_SURFACE_CANONICAL_PATHS: dict[str, list[str]] = {
     "workflow_agent": [
         "workflows/{target_id}/agents.yaml",
         "workflows/{target_id}/structured_outputs.yaml",
-        "workflows/{target_id}/handoffs.yaml",
+        "workflows/{target_id}/transition_graph.yaml",
     ],
     "ui_component": [
         "workflows/{target_id}/ui_config.yaml",

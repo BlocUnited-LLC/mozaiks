@@ -3,6 +3,9 @@
 Mozaiks uses one canonical system database for runtime state and builder
 artifacts. Generated/hosted app business collections are separate from these
 framework-owned collections and should be scoped by app/module contracts.
+
+AG2 beta telemetry is exported through OpenTelemetry spans. Runtime token usage
+measurements are stored separately in RuntimeUsageEvents.
 """
 
 from __future__ import annotations
@@ -13,9 +16,11 @@ SYSTEM_DATABASE = "mozaiksai"
 
 class RuntimeCollections:
     CHAT_SESSIONS = "ChatSessions"
-    WORKFLOW_STATS = "WorkflowStats"
+    AG2_STREAM_EVENTS = "AG2StreamEvents"
+    AG2_STREAM_HEADS = "AG2StreamHeads"
     GENERAL_CHAT_SESSIONS = "GeneralChatSessions"
     GENERAL_CHAT_COUNTERS = "GeneralChatCounters"
+    RUNTIME_USAGE_EVENTS = "RuntimeUsageEvents"
 
 
 class BuilderCollections:

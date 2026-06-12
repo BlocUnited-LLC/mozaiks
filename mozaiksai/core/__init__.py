@@ -26,9 +26,9 @@ _LAZY_EXPORTS: dict[str, str] = {
     # Transport
     "SimpleTransport": ".transport",
     # Observability
-    "PerformanceManager": ".observability",
-    "PerformanceConfig": ".observability",
-    "get_performance_manager": ".observability",
+    "AG2TelemetryConfig": ".observability",
+    "build_ag2_span_attributes": ".observability",
+    "build_ag2_telemetry_middleware": ".observability",
     # Persistence
     "PersistenceManager": ".data",
     "AG2PersistenceManager": ".data",

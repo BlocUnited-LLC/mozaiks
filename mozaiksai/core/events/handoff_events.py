@@ -38,7 +38,7 @@ def emit_handoff_event(event_kind: str, payload: Dict[str, Any]) -> None:
     """Emit a runtime handoff event through the unified dispatcher.
 
     Args:
-        event_kind: Logical subtype (e.g. "context", "after_work").
+        event_kind: Logical subtype (e.g. "context", "after_turn").
         payload: Structured payload describing the transition.
     """
     dispatcher = get_event_dispatcher()

@@ -613,6 +613,7 @@ def _normalize_app_bundle_path(path: Any) -> str | None:
         "config/",
         "brand/",
         "admin/",
+        "data/",
     )
     for prefix in known_prefixes:
         marker = f"/{prefix}"
@@ -800,27 +801,27 @@ def _greenfield_data_entities(
                 surface_id=_surface_id("data", entity_id),
                 kind="data_entity",
                 label=entity_id,
-                location="config/data.json",
+                location="data/contract.json",
                 source_ref_id=source_ref_id,
                 metadata={
-                    "path": "config/data.json",
+                    "path": "data/contract.json",
                     "module_ids": sorted(entity.get("module_ids") or []),
                     "operations_by_module": entity.get("operations_by_module") or {},
                 },
             )
         )
-    if "config/data.json" in paths:
+    if "data/contract.json" in paths:
         entities.append(
             SurfaceRef(
                 surface_id="data_contract",
                 kind="data_contract",
                 label="Data contract",
-                location="config/data.json",
+                location="data/contract.json",
                 source_ref_id=source_ref_id,
             )
         )
     for path in paths:
-        if path.startswith("config/data_migrations/") and path.endswith(".json"):
+        if path.startswith("data/migrations/") and path.endswith(".json"):
             entities.append(
                 SurfaceRef(
                     surface_id=_surface_id("database_migration", path),
@@ -1045,7 +1046,7 @@ def _workflow_metadata(
 
 
 def _data_contract_entities(manifest_by_path: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    data = _load_json_manifest("config/data.json", manifest_by_path)
+    data = _load_json_manifest("data/contract.json", manifest_by_path)
     if not isinstance(data, dict):
         return []
 
@@ -1305,8 +1306,8 @@ def _greenfield_risk_report(paths: list[str], integrations: list[IntegrationInve
                 mitigation="Confirm integration config before promoting integration-dependent changes.",
             )
         )
-    has_migrations = any(path.startswith("config/data_migrations/") for path in paths)
-    if has_migrations and "config/data.json" not in paths:
+    has_migrations = any(path.startswith("data/migrations/") for path in paths)
+    if has_migrations and "data/contract.json" not in paths:
         risks.append(
             RiskItem(
                 risk_id="risk_data_migration_without_contract",

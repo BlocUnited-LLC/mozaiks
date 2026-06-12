@@ -20,18 +20,13 @@ from __future__ import annotations
 import logging
 import string
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     'context_to_dict',
-    'stringify_context_value',
-    'format_template',
-    'render_exposure_fragment',
-    'merge_message_parts',
     'apply_context_exposures',
-    'render_default_context_fragment',
 ]
 
 
@@ -156,25 +151,6 @@ def render_exposure_fragment(
 
     return rendered_body.strip()
 
-
-def render_default_context_fragment(variables: List[str], context_dict: Dict[str, Any]) -> str:
-    """Render default context fragment when no exposures configured.
-    
-    Args:
-        variables: List of variable names to display
-        context_dict: Current context variable values
-        
-    Returns:
-        Formatted context variables block
-    """
-    cleaned = [var.strip() for var in variables if isinstance(var, str) and var.strip()]
-    if not cleaned:
-        return ""
-    lines = ["Context Variables"]
-    for var in cleaned:
-        value = stringify_context_value(context_dict.get(var), "null")
-        lines.append(f"{var.upper()}: {value}")
-    return "\n".join(lines)
 
 
 # ==============================================================================

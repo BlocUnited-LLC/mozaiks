@@ -363,7 +363,7 @@ class BuilderArtifactStore:
         migration_id = str(migration.get("migration_id") or "").strip()
         if not migration_id:
             raise ValueError("migration.migration_id is required")
-        relative_path = bundle_relative_path or f"config/data_migrations/{migration_id}.json"
+        relative_path = bundle_relative_path or f"data/migrations/{migration_id}.json"
         doc: Dict[str, Any] = {
             "app_id": app_id,
             "build_id": build_id,

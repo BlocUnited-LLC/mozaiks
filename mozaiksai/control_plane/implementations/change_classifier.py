@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Literal, Optional
+from collections.abc import Callable
+from typing import Any, Literal
 
-from autogen.beta import Agent, MemoryStream
-from autogen.beta.config import OpenAIConfig
-from autogen.beta.middleware import RetryMiddleware
-from autogen.beta.observers import TokenMonitor
 from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
@@ -14,7 +11,7 @@ from mozaiksai.control_plane.contracts import ControlPlaneToolCall, ControlPlane
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
-
+from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 
 ChangeClassLiteral = Literal["patch", "design", "feature", "core"]
 _CHECKPOINT_EVENT = "request_submitted"
@@ -35,12 +32,13 @@ class LLMChangeClassifier:
     def __init__(
         self,
         *,
-        agent_factory: Optional[Callable[[str, dict[str, Any]], Any]] = None,
+        agent_factory: Callable[[str, dict[str, Any]], Any] | None = None,
+        agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_control_plane_pack,
         tool_executor: Any = None,
     ) -> None:
-        self._agent_factory = agent_factory
+        self._agent_runner = agent_runner or AG2StructuredAgentRunner(agent_factory=agent_factory)
         self._config_loader = config_loader
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
@@ -49,15 +47,15 @@ class LLMChangeClassifier:
         self,
         *,
         artifact_kind: str,
-        artifact_key: Optional[str] = None,
+        artifact_key: str | None = None,
         raw_user_request: str,
-        declared_change_class: Optional[str] = None,
-        artifact_version_id: Optional[str] = None,
-        source_surface: Optional[str] = None,
-        app_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        requested_workflow_id: Optional[str] = None,
-        extra: Optional[dict[str, Any]] = None,
+        declared_change_class: str | None = None,
+        artifact_version_id: str | None = None,
+        source_surface: str | None = None,
+        app_id: str | None = None,
+        user_id: str | None = None,
+        requested_workflow_id: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> ChangeClassifierResult:
         control_plane = self._load_config()
         if not control_plane.enabled:
@@ -89,34 +87,14 @@ class LLMChangeClassifier:
             extra=extra or {},
         )
 
-        agent = self._make_agent(
+        result = await self._agent_runner.run(
+            agent_name="ChangeClassifier",
             system_prompt=self._load_system_prompt(),
+            user_prompt=user_prompt,
             llm_config=llm_config,
-        )
-        stream = MemoryStream()
-        reply = await agent.ask(
-            user_prompt,
-            stream=stream,
-            middleware=[RetryMiddleware(max_retries=2)],
-            observers=[TokenMonitor()],
             response_schema=ChangeClassifierResult,
         )
-        result = await reply.content()
-        if result is None:
-            raise ValueError("ChangeClassifier returned an empty response")
         return result
-
-    def _make_agent(self, *, system_prompt: str, llm_config: dict[str, Any]) -> Any:
-        if self._agent_factory is not None:
-            return self._agent_factory(system_prompt, llm_config)
-        return Agent(
-            "ChangeClassifier",
-            system_prompt,
-            config=OpenAIConfig(
-                model=llm_config.get("model") or "gpt-4o",
-                temperature=llm_config.get("temperature"),
-            ),
-        )
 
     def _load_config(self) -> ControlPlaneConfig:
         config = self._config_loader()
@@ -142,13 +120,13 @@ class LLMChangeClassifier:
         self,
         *,
         artifact_kind: str,
-        artifact_key: Optional[str],
+        artifact_key: str | None,
         raw_user_request: str,
-        artifact_version_id: Optional[str],
-        source_surface: Optional[str],
-        app_id: Optional[str],
-        user_id: Optional[str],
-        requested_workflow_id: Optional[str],
+        artifact_version_id: str | None,
+        source_surface: str | None,
+        app_id: str | None,
+        user_id: str | None,
+        requested_workflow_id: str | None,
         extra: dict[str, Any],
     ) -> dict[str, Any]:
         pack = self._load_pack()
@@ -188,11 +166,11 @@ class LLMChangeClassifier:
         *,
         artifact_kind: str,
         raw_user_request: str,
-        declared_change_class: Optional[str],
-        artifact_version_id: Optional[str],
-        source_surface: Optional[str],
-        app_id: Optional[str],
-        requested_workflow_id: Optional[str],
+        declared_change_class: str | None,
+        artifact_version_id: str | None,
+        source_surface: str | None,
+        app_id: str | None,
+        requested_workflow_id: str | None,
         control_plane_context: dict[str, Any],
         extra: dict[str, Any],
     ) -> str:
@@ -214,7 +192,7 @@ class LLMChangeClassifier:
         return "\n".join(lines)
 
 
-_classifier: Optional[LLMChangeClassifier] = None
+_classifier: LLMChangeClassifier | None = None
 
 
 def get_change_classifier() -> LLMChangeClassifier:

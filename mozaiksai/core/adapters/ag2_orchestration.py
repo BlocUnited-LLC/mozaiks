@@ -1,14 +1,14 @@
 # FILE: mozaiksai/core/adapters/ag2_orchestration.py
 # DESCRIPTION: AG2-specific implementation of OrchestrationPort.
 #
-# This is one of 2-3 files that import AG2 types directly.
-# When AG2 ships bidirectional streaming or a new engine is added,
-# ONLY this file (and orchestration_patterns.py) change.
+# This is one of the narrow files allowed to import AG2 types directly.
+# When AG2 ships bidirectional streaming or a new engine is added, the adapter
+# boundary changes instead of transport/runtime callers.
 #
 # Consumers (transport, runtime routes, workflow callers) interact
 # exclusively through the OrchestrationPort protocol and never import AG2.
 # ==============================================================================
-"""AG2OrchestrationAdapter — wraps the autogen.beta Agent loop behind OrchestrationPort.
+"""AG2OrchestrationAdapter — wraps AG2 Network execution behind OrchestrationPort.
 
 Responsibilities:
     - run()    → delegates to orchestration_patterns.run_workflow_orchestration()
@@ -17,9 +17,9 @@ Responsibilities:
     - capabilities() → reports engine version and supported features
 
 This adapter does not own workflow-specific task planning. AG2 beta provides the
-agent and network execution substrate; workflow-local task batches are declared
-beside workflow YAML and executed by runtime code that calls agents as async
-functions.
+agent and network execution substrate; Mozaiks owns deterministic contracts
+around AG2, such as workflow YAML loading, structured-output validation, context
+persistence, artifact materialization, and task-batch dependency contracts.
 
 Architecture (Layer 1.5):
 
@@ -33,7 +33,7 @@ Architecture (Layer 1.5):
                           │  (this file)                 │
                           │  ┌────────────────────────┐  │
                           │  │ orchestration_patterns  │  │
-                          │  │ .run_workflow_orch…()   │  │
+                          │  │ + AG2NetworkRunner      │  │
                           │  └────────────────────────┘  │
                           └──────────────┬──────────────┘
                                          │ emits events
@@ -48,19 +48,15 @@ Architecture (Layer 1.5):
 from __future__ import annotations
 
 import asyncio
-import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
+from logs.logging_config import get_core_logger
 from mozaiksai.core.ports.orchestration import (
-    DomainEvent,
-    OrchestrationPort,
     ResumeRequest,
     RunRequest,
     RunResult,
     RunStatus,
 )
-
-from logs.logging_config import get_core_logger
 
 logger = get_core_logger("ag2_orchestration_adapter")
 
@@ -93,8 +89,9 @@ class AG2OrchestrationAdapter:
         """Start a workflow orchestration.
 
         Delegates to ``orchestration_patterns.run_workflow_orchestration()``
-        which creates beta Agents, runs the compiled AG2 Network transition
-        graph, and streams events through the transport.
+        which creates beta Agents, opens an AG2 Network workflow channel, runs
+        the compiled transition graph through AG2, and projects resulting WAL
+        packets through Mozaiks persistence/transport.
 
         The function is long-running (blocks until the loop finishes or pauses).
         Callers should wrap in ``asyncio.create_task()`` when fire-and-forget
@@ -242,7 +239,7 @@ class AG2OrchestrationAdapter:
     # OrchestrationPort.capabilities
     # ------------------------------------------------------------------
 
-    def capabilities(self) -> Dict[str, Any]:
+    def capabilities(self) -> dict[str, Any]:
         return {
             "engine": "ag2",
             "version": self._version,
@@ -260,7 +257,7 @@ class AG2OrchestrationAdapter:
     # ------------------------------------------------------------------
 
     def _interpret_result(
-        self, request: RunRequest, raw: Optional[Dict[str, Any]]
+        self, request: RunRequest, raw: dict[str, Any] | None
     ) -> RunResult:
         """Convert the raw dict from ``run_workflow_orchestration`` into a typed RunResult."""
         if raw is None:
@@ -273,8 +270,19 @@ class AG2OrchestrationAdapter:
         run_completed = bool(raw.get("run_completed", False))
         awaiting_user_input = bool(raw.get("awaiting_user_input", False))
         run_status = raw.get("run_status")
+        normalized_run_status = str(run_status or "").strip().lower()
+        failed = bool(raw.get("failed")) or normalized_run_status == "failed"
 
-        if run_completed and not awaiting_user_input and str(run_status) not in {"0", "in_progress", "paused"}:
+        if failed:
+            return RunResult(
+                status=RunStatus.FAILED,
+                chat_id=request.chat_id,
+                workflow_name=request.workflow_name,
+                usage=raw.get("usage"),
+                error=str(raw.get("error") or "") or None,
+            )
+
+        if run_completed and not awaiting_user_input and normalized_run_status not in {"0", "in_progress", "paused"}:
             status = RunStatus.COMPLETED
         elif awaiting_user_input or not run_completed:
             status = RunStatus.PAUSED
@@ -291,7 +299,7 @@ class AG2OrchestrationAdapter:
     async def _inject_context_before_resume(self, request: ResumeRequest) -> None:
         """Persist injected context into the chat session before resume.
 
-        This ensures the next agent's ``update_agent_state`` hook can read the
+        This ensures the next agent's prompt middleware can read the
         injected outputs from ``context_variables``.
         """
         if not request.injected_context:
@@ -323,7 +331,7 @@ class AG2OrchestrationAdapter:
 # Module-level singleton accessor
 # ---------------------------------------------------------------------------
 
-_adapter: Optional[AG2OrchestrationAdapter] = None
+_adapter: AG2OrchestrationAdapter | None = None
 
 
 def get_ag2_adapter() -> AG2OrchestrationAdapter:

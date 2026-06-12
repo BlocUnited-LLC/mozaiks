@@ -25,7 +25,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
@@ -36,7 +38,7 @@ from mozaiksai.control_plane.contracts import (
 )
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
-from mozaiksai.core.capabilities import get_general_capability_service
+from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
@@ -46,6 +48,14 @@ _logger = logging.getLogger("mozaiksai.control_plane.implementations.surface_reg
 # structured-output-first file generation guidance without surface-specific
 # assumptions baked in.
 _CODING_CHECKPOINT_EVENT = "coding_requested"
+
+
+class SurfaceRegenerationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1)
+    updated_files: dict[str, str] = Field(default_factory=dict)
+    rationale: str = Field(min_length=1)
 
 
 class SurfaceRegenerationWorker:
@@ -63,11 +73,11 @@ class SurfaceRegenerationWorker:
     def __init__(
         self,
         *,
-        capability_service: Any = None,
+        agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_control_plane_pack,
     ) -> None:
-        self._service = capability_service or get_general_capability_service()
+        self._agent_runner = agent_runner or AG2StructuredAgentRunner()
         self._config_loader = config_loader
         self._pack_loader = pack_loader
 
@@ -192,8 +202,8 @@ class SurfaceRegenerationWorker:
         routing_decision: RefinementRoutingDecision,
         current_files: dict[str, str],
         system_prompt: str,
-        llm_config: Optional[dict[str, Any]],
-    ) -> tuple[dict[str, str], Optional[str]]:
+        llm_config: dict[str, Any] | None,
+    ) -> tuple[dict[str, str], str | None]:
         user_prompt = self._build_user_prompt(
             surface=surface,
             refinement_request=refinement_request,
@@ -201,17 +211,15 @@ class SurfaceRegenerationWorker:
             current_files=current_files,
         )
         try:
-            response = await self._service.generate_json_completion(
+            response = await self._agent_runner.run(
+                agent_name="SurfaceRegenerationWorker",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
-                app_id=str(refinement_request.app_id or "").strip() or None,
-                user_id=str(refinement_request.user_id or "").strip() or None,
-                ui_context={"surface": "surface_regeneration", "kind": surface.kind},
                 llm_config=llm_config,
-                temperature=0.1,
+                response_schema=SurfaceRegenerationResponse,
             )
             updated_files = self._extract_updated_files(
-                response=response.get("parsed") or {},
+                response=response.model_dump(mode="python"),
                 allowed_paths=set(surface.affected_paths),
             )
             return updated_files, None

@@ -911,7 +911,7 @@ class RefinementTriggerRouteResolver:
 
     @staticmethod
     def _is_database_migration_path(path: str) -> bool:
-        return bool(re.fullmatch(r"config/data_migrations/[^/]+\.json", path))
+        return bool(re.fullmatch(r"data/migrations/[^/]+\.json", path))
 
     @classmethod
     def _data_model_bundle_paths(
@@ -931,8 +931,8 @@ class RefinementTriggerRouteResolver:
 
         if not manifest_paths:
             paths = [
-                "config/data.json",
-                "config/data_migrations/*.json",
+                "data/contract.json",
+                "data/migrations/*.json",
                 "modules/*/backend/schemas.py",
                 "modules/*/backend/repo.py",
                 "modules/*/backend/policy.py",
@@ -948,7 +948,7 @@ class RefinementTriggerRouteResolver:
             known_module_ids=known_module_ids,
         )
 
-        paths: list[str] = ["config/data.json"]
+        paths: list[str] = ["data/contract.json"]
 
         migration_paths = sorted(
             path
@@ -958,7 +958,7 @@ class RefinementTriggerRouteResolver:
         if migration_paths:
             paths.extend(migration_paths)
         else:
-            paths.append("config/data_migrations/*.json")
+            paths.append("data/migrations/*.json")
 
         if mentioned_module_ids:
             module_paths: list[str] = []
@@ -997,8 +997,8 @@ class RefinementTriggerRouteResolver:
         if not paths:
             paths.extend(
                 [
-                    "config/data.json",
-                    "config/data_migrations/*.json",
+                    "data/contract.json",
+                    "data/migrations/*.json",
                     "modules/*/backend/schemas.py",
                     "modules/*/backend/repo.py",
                     "modules/*/backend/policy.py",
@@ -1011,8 +1011,8 @@ class RefinementTriggerRouteResolver:
     @staticmethod
     def _data_model_path_hint_present(paths: list[str]) -> bool:
         return any(
-            path == "config/data.json"
-            or path.startswith("config/data_migrations/")
+            path == "data/contract.json"
+            or path.startswith("data/migrations/")
             or path.startswith("modules/*/backend/schemas.py")
             or path.endswith("/backend/schemas.py")
             or path.endswith("/backend/repo.py")

@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 from autogen.events.agent_events import TextEvent
 
 from logs.logging_config import get_workflow_logger
-from ..workflow_manager import workflow_manager
+
 from .schema import load_context_variables_config
 
 logger = get_workflow_logger("derived_context")
 
 
-def _resolve_nested_key(payload: Any, key: Optional[str]) -> Any:
+def _resolve_nested_key(payload: Any, key: str | None) -> Any:
     if key is None:
         return payload
     if not isinstance(key, str) or not key.strip():
@@ -36,7 +37,7 @@ def _resolve_nested_key(payload: Any, key: Optional[str]) -> Any:
     return current
 
 
-def _compile_optional_regex(pattern: Optional[str]) -> Optional[re.Pattern[str]]:
+def _compile_optional_regex(pattern: str | None) -> re.Pattern[str] | None:
     if not pattern:
         return None
     try:
@@ -48,9 +49,9 @@ def _compile_optional_regex(pattern: Optional[str]) -> Optional[re.Pattern[str]]
 def _matches_text_conditions(
     *,
     text: str,
-    equals: Optional[str],
-    contains: Optional[str],
-    compiled: Optional[re.Pattern[str]],
+    equals: str | None,
+    contains: str | None,
+    compiled: re.Pattern[str] | None,
 ) -> bool:
     candidate = str(text or "").strip()
     if not candidate:
@@ -63,10 +64,10 @@ def _matches_text_conditions(
         return True
     return False
 
-def _resolve_sender_name(event: TextEvent) -> Optional[str]:
+def _resolve_sender_name(event: TextEvent) -> str | None:
     """Extract logical agent name for matching triggers."""
 
-    def _from_value(value: Any, *, allow_string: bool = True) -> Optional[str]:
+    def _from_value(value: Any, *, allow_string: bool = True) -> str | None:
         if value is None:
             return None
         if isinstance(value, str):
@@ -125,13 +126,13 @@ class AgentTextTrigger:
     """Represents a derived trigger driven by agent text output."""
 
     agent: str
-    equals: Optional[str] = None
-    contains: Optional[str] = None
-    regex: Optional[str] = None
+    equals: str | None = None
+    contains: str | None = None
+    regex: str | None = None
     value: Any = True
-    from_state: Optional[str] = None
+    from_state: str | None = None
     ui_hidden: bool = True
-    _compiled: Optional[re.Pattern[str]] = None
+    _compiled: re.Pattern[str] | None = None
 
     def __post_init__(self) -> None:
         self._compiled = _compile_optional_regex(self.regex)
@@ -155,11 +156,11 @@ class UserTextBinding:
     """Represents a derived trigger driven by a plain user reply."""
 
     variable: str
-    equals: Optional[str] = None
-    contains: Optional[str] = None
-    regex: Optional[str] = None
+    equals: str | None = None
+    contains: str | None = None
+    regex: str | None = None
     value: Any = True
-    _compiled: Optional[re.Pattern[str]] = None
+    _compiled: re.Pattern[str] | None = None
 
     def __post_init__(self) -> None:
         self._compiled = _compile_optional_regex(self.regex)
@@ -176,7 +177,7 @@ class UserTextBinding:
 def _extract_text(event: TextEvent) -> str:
     raw = getattr(event, "content", None)
 
-    def _dig(value: Any) -> Optional[str]:
+    def _dig(value: Any) -> str | None:
         if value is None:
             return None
         if isinstance(value, str):
@@ -215,7 +216,7 @@ def _extract_text(event: TextEvent) -> str:
 class DerivedVariableSpec:
     name: str
     default: Any
-    triggers: List[AgentTextTrigger]
+    triggers: list[AgentTextTrigger]
 
     def seed(self, providers: Iterable[Any]) -> None:
         for provider in providers:
@@ -254,11 +255,11 @@ class DerivedVariableSpec:
 class DerivedContextManager:
     """Runtime helper that enforces declarative derived context variables."""
 
-    def __init__(self, workflow_name: str, agents: Dict[str, Any], base_context: Any) -> None:
+    def __init__(self, workflow_name: str, agents: dict[str, Any], base_context: Any) -> None:
         self.workflow_name = workflow_name
         self.base_context = base_context
-        self.providers: List[Any] = []
-        self._listeners: List[Any] = []
+        self.providers: list[Any] = []
+        self._listeners: list[Any] = []
 
         if base_context is not None:
             self.providers.append(base_context)
@@ -294,13 +295,16 @@ class DerivedContextManager:
     class UIResponseBinding:
         variable: str
         tool: str
-        response_key: Optional[str] = None
+        response_key: str | None = None
 
-    def _load_definitions(self) -> Dict[str, Any]:
+    def _load_definitions(self) -> dict[str, Any]:
         definitions = getattr(self.base_context, "_mozaiks_context_definitions", None)
         if isinstance(definitions, dict) and definitions:
             return definitions
         try:
+            from ..workflow_manager import get_workflow_manager
+
+            workflow_manager = get_workflow_manager()
             config = workflow_manager.get_config(self.workflow_name) or {}
             ctx_section = config.get("context_variables") or {}
             plan = load_context_variables_config(ctx_section)
@@ -309,8 +313,8 @@ class DerivedContextManager:
             logger.debug(f"Derived context fallback load failed: {err}")
             return {}
 
-    def _load_state_defaults(self, definitions: Dict[str, Any]) -> Dict[str, Any]:
-        defaults: Dict[str, Any] = {}
+    def _load_state_defaults(self, definitions: dict[str, Any]) -> dict[str, Any]:
+        defaults: dict[str, Any] = {}
         for name, definition in definitions.items():
             source = getattr(definition, "source", None)
             if not source or getattr(source, "type", None) != "state":
@@ -318,8 +322,8 @@ class DerivedContextManager:
             defaults[name] = getattr(source, "default", False)
         return defaults
 
-    def _from_definitions(self, definitions: Dict[str, Any]) -> List[DerivedVariableSpec]:
-        results: List[DerivedVariableSpec] = []
+    def _from_definitions(self, definitions: dict[str, Any]) -> list[DerivedVariableSpec]:
+        results: list[DerivedVariableSpec] = []
         for name, definition in definitions.items():
             source = getattr(definition, "source", None)
             if not source:
@@ -329,7 +333,7 @@ class DerivedContextManager:
             if source_type != "state":
                 continue
 
-            triggers: List[AgentTextTrigger] = []
+            triggers: list[AgentTextTrigger] = []
 
             # Direct triggers from source.triggers
             if source_type == "state" and getattr(source, "triggers", None):
@@ -365,8 +369,8 @@ class DerivedContextManager:
             )
         return results
 
-    def _ui_bindings_from_definitions(self, definitions: Dict[str, Any]) -> List["DerivedContextManager.UIResponseBinding"]:
-        bindings: List[DerivedContextManager.UIResponseBinding] = []
+    def _ui_bindings_from_definitions(self, definitions: dict[str, Any]) -> list[DerivedContextManager.UIResponseBinding]:
+        bindings: list[DerivedContextManager.UIResponseBinding] = []
         for name, definition in definitions.items():
             source = getattr(definition, "source", None)
             if not source:
@@ -392,8 +396,8 @@ class DerivedContextManager:
 
         return bindings
 
-    def _user_text_bindings_from_definitions(self, definitions: Dict[str, Any]) -> List[UserTextBinding]:
-        bindings: List[UserTextBinding] = []
+    def _user_text_bindings_from_definitions(self, definitions: dict[str, Any]) -> list[UserTextBinding]:
+        bindings: list[UserTextBinding] = []
         for name, definition in definitions.items():
             source = getattr(definition, "source", None)
             if not source or getattr(source, "type", None) != "state":
@@ -419,7 +423,7 @@ class DerivedContextManager:
         # Back-compat method name: treat any trigger binding as active.
         return bool(self.variables or self.ui_response_bindings or self.user_text_bindings)
 
-    def apply_tool_call_response(self, *, tool_name: str, response_data: Dict[str, Any]) -> List[str]:
+    def apply_tool_call_response(self, *, tool_name: str, response_data: dict[str, Any]) -> list[str]:
         """Apply declarative ui_response triggers based on a completed tool call response.
 
         This updates AG2 ContextVariables providers (group manager, pattern context, etc.)
@@ -429,7 +433,7 @@ class DerivedContextManager:
         if not normalized_tool or not isinstance(response_data, dict):
             return []
 
-        updated_vars: List[str] = []
+        updated_vars: list[str] = []
         for binding in self.ui_response_bindings or []:
             if binding.tool != normalized_tool:
                 continue
@@ -457,12 +461,12 @@ class DerivedContextManager:
 
         return updated_vars
 
-    def apply_agent_text(self, agent_name: str, text: str) -> Dict[str, Any]:
+    def apply_agent_text(self, agent_name: str, text: str) -> dict[str, Any]:
         """Apply declarative agent_text triggers based on what an agent just said.
 
-        Called by the orchestration loop after agent.ask() returns so that
-        context variables that depend on agent output (e.g. `intake_complete`)
-        are updated before the next routing decision is made.
+        Called after an AG2 agent packet is projected so context variables that
+        depend on agent output (e.g. `intake_complete`) are updated before the
+        next routing decision is made.
         """
 
         candidate = str(text or "").strip()
@@ -471,7 +475,7 @@ class DerivedContextManager:
 
         # Build a per-agent lookup once and check only variables that care about
         # this specific agent to keep the hot path O(matching triggers).
-        updated_vars: Dict[str, Any] = {}
+        updated_vars: dict[str, Any] = {}
         for var in self.variables:
             for trigger in var.triggers:
                 if trigger.agent != agent_name:
@@ -502,14 +506,14 @@ class DerivedContextManager:
                             pass
         return updated_vars
 
-    def apply_user_text(self, text: str) -> Dict[str, Any]:
+    def apply_user_text(self, text: str) -> dict[str, Any]:
         """Apply declarative user_text triggers based on a free-form composer reply."""
 
         candidate = str(text or "").strip()
         if not candidate:
             return {}
 
-        updated_vars: Dict[str, Any] = {}
+        updated_vars: dict[str, Any] = {}
         for binding in self.user_text_bindings or []:
             if not binding.matches(candidate):
                 continue

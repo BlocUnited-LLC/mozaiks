@@ -149,11 +149,18 @@ async def _load_raw_config_list(force: bool = False) -> List[ProviderConfig]:
 
         # Attempt DB fetch
         db_doc = None
-        try:
-            db = get_mongo_client()[SYSTEM_DATABASE]
-            db_doc = await db[BuilderCollections.LLM_CONFIG].find_one()
-        except Exception as e:  # pragma: no cover
-            logger.debug(f"[LLM_CONFIG] Mongo fetch failed, will fallback: {e}")
+        skip_mongo = os.getenv("MOZAIKS_LLM_CONFIG_SKIP_MONGO", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not skip_mongo:
+            try:
+                db = get_mongo_client()[SYSTEM_DATABASE]
+                db_doc = await db[BuilderCollections.LLM_CONFIG].find_one()
+            except Exception as e:  # pragma: no cover
+                logger.debug(f"[LLM_CONFIG] Mongo fetch failed, will fallback: {e}")
 
         if db_doc and isinstance(db_doc, dict):
             # Avoid dumping raw secrets from the DB document

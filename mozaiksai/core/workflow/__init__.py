@@ -19,10 +19,19 @@ _EXPORTS = {
     "get_workflow_tools": ".workflow_manager",
 }
 
-__all__ = list(_EXPORTS)
+# Subpackages exposed as lazy attributes so dotted imports like
+# ``mozaiksai.core.workflow.artifacts.get_review_artifact`` work without
+# eagerly loading any orchestration internals at startup.
+_SUBPACKAGES = {"artifacts"}
+
+__all__ = list(_EXPORTS) + list(_SUBPACKAGES)
 
 
 def __getattr__(name: str) -> Any:
+    if name in _SUBPACKAGES:
+        module = import_module(f".{name}", __name__)
+        globals()[name] = module
+        return module
     module_path = _EXPORTS.get(name)
     if module_path is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

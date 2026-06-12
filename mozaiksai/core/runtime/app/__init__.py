@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .definition import AppDefinition, AppFeatureFlags, ModuleRef, ExecutionMode, WorkflowRef, PageRef
+from .entitlements import ConfiguredEntitlementAdapter
 from .loader import AppLoader, AppLoadError, AppLoadResult
 from .module_loader import ModuleLoader, ModuleLoadError, LoadedModule, ModuleDefinition, ActionDef
 
@@ -28,6 +29,7 @@ __all__ = [
     "LoadedModule",
     "ModuleDefinition",
     "ActionDef",
+    "ConfiguredEntitlementAdapter",
     *_STUDIO_SUMMARY_EXPORTS,
 ]
 

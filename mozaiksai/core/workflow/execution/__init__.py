@@ -1,31 +1,32 @@
 """Runtime execution package facade."""
 
 from .lifecycle import (
-    LifecycleTrigger,
     LifecycleTool,
     LifecycleToolManager,
+    LifecycleTrigger,
     get_lifecycle_manager,
 )
-from .termination import AG2TerminationHandler, TerminationResult, create_termination_handler
 from .network_graph import (
-    MozaiksContextExpression,
+    SourceScopedContextEquals,
+    SourceScopedContextExpression,
+    SourceScopedToolCalled,
     WorkflowGraphCompileError,
-    compile_handoffs_to_transition_graph,
-    evaluate_context_expression,
+    compile_transition_rules_to_graph,
     resolve_next_agent,
 )
+from .resume import merge_persisted_extra_context, resume_or_initialize_chat
 
 __all__ = [
     "LifecycleTrigger",
     "LifecycleTool",
     "LifecycleToolManager",
     "get_lifecycle_manager",
-    "AG2TerminationHandler",
-    "TerminationResult",
-    "create_termination_handler",
-    "MozaiksContextExpression",
+    "SourceScopedContextEquals",
+    "SourceScopedContextExpression",
+    "SourceScopedToolCalled",
     "WorkflowGraphCompileError",
-    "compile_handoffs_to_transition_graph",
-    "evaluate_context_expression",
+    "compile_transition_rules_to_graph",
     "resolve_next_agent",
+    "merge_persisted_extra_context",
+    "resume_or_initialize_chat",
 ]

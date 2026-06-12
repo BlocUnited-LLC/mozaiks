@@ -23,7 +23,6 @@ from mozaiksai.core.auth.dependencies import require_user, UserPrincipal
 from mozaiksai.core.admin.paths import resolve_admin_app_root as resolve_admin_app_root_path
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.admin.email_promotion import is_admin_by_email
-from mozaiksai.core.observability.performance_manager import get_performance_manager
 from mozaiksai.core.data.models import WorkflowStatus
 from logs.logging_config import get_core_logger
 
@@ -93,20 +92,6 @@ async def _build_persisted_admin_stats(*, app_id: Optional[str] = None) -> dict[
         {
             "$project": {
                 "status": 1,
-                "usage_prompt_tokens_final": {"$ifNull": ["$usage_prompt_tokens_final", 0]},
-                "usage_completion_tokens_final": {"$ifNull": ["$usage_completion_tokens_final", 0]},
-                "usage_total_cost_final": {"$ifNull": ["$usage_total_cost_final", 0.0]},
-                "tool_calls_final": {"$ifNull": ["$tool_calls_final", 0]},
-                "errors_final": {"$ifNull": ["$errors_final", 0]},
-                "assistant_turns": {
-                    "$size": {
-                        "$filter": {
-                            "input": {"$ifNull": ["$messages", []]},
-                            "as": "message",
-                            "cond": {"$eq": ["$$message.role", "assistant"]},
-                        }
-                    }
-                },
             }
         },
         {
@@ -118,12 +103,11 @@ async def _build_persisted_admin_stats(*, app_id: Optional[str] = None) -> dict[
                         "$cond": [{"$eq": ["$status", int(WorkflowStatus.IN_PROGRESS)]}, 1, 0]
                     }
                 },
-                "total_agent_turns": {"$sum": "$assistant_turns"},
-                "total_tool_calls": {"$sum": "$tool_calls_final"},
-                "total_errors": {"$sum": "$errors_final"},
-                "total_prompt_tokens": {"$sum": "$usage_prompt_tokens_final"},
-                "total_completion_tokens": {"$sum": "$usage_completion_tokens_final"},
-                "total_cost": {"$sum": "$usage_total_cost_final"},
+                "completed_chats": {
+                    "$sum": {
+                        "$cond": [{"$eq": ["$status", int(WorkflowStatus.COMPLETED)]}, 1, 0]
+                    }
+                },
             }
         },
     ]
@@ -132,12 +116,8 @@ async def _build_persisted_admin_stats(*, app_id: Optional[str] = None) -> dict[
     return {
         "active_chats": int(aggregate.get("active_chats") or 0),
         "tracked_chats": int(aggregate.get("tracked_chats") or 0),
-        "total_agent_turns": int(aggregate.get("total_agent_turns") or 0),
-        "total_tool_calls": int(aggregate.get("total_tool_calls") or 0),
-        "total_errors": int(aggregate.get("total_errors") or 0),
-        "total_prompt_tokens": int(aggregate.get("total_prompt_tokens") or 0),
-        "total_completion_tokens": int(aggregate.get("total_completion_tokens") or 0),
-        "total_cost": float(aggregate.get("total_cost") or 0.0),
+        "completed_chats": int(aggregate.get("completed_chats") or 0),
+        "telemetry_source": "ag2_opentelemetry",
     }
 
 
@@ -165,11 +145,6 @@ async def _build_persisted_admin_runs(
             "created_at": 1,
             "completed_at": 1,
             "duration_sec": 1,
-            "usage_prompt_tokens_final": 1,
-            "usage_completion_tokens_final": 1,
-            "usage_total_cost_final": 1,
-            "tool_calls_final": 1,
-            "errors_final": 1,
             "messages": 1,
         },
     ).sort("created_at", -1).limit(limit)
@@ -186,13 +161,9 @@ async def _build_persisted_admin_runs(
                 "started_at": _serialize_datetime(doc.get("created_at")),
                 "ended_at": _serialize_datetime(doc.get("completed_at")),
                 "agent_turns": _count_assistant_turns(doc.get("messages")),
-                "tool_calls": int(doc.get("tool_calls_final") or 0),
-                "errors": int(doc.get("errors_final") or 0),
-                "prompt_tokens": int(doc.get("usage_prompt_tokens_final") or 0),
-                "completion_tokens": int(doc.get("usage_completion_tokens_final") or 0),
-                "cost": float(doc.get("usage_total_cost_final") or 0.0),
                 "runtime_sec": _compute_session_runtime_sec(doc, now=now),
                 "status": int(doc.get("status")) if doc.get("status") is not None else None,
+                "telemetry_source": "ag2_opentelemetry",
             }
         )
 
@@ -233,7 +204,7 @@ async def _require_admin(
 
 
 # ---------------------------------------------------------------------------
-# Stats — aggregate across persisted chat sessions (fallback to in-memory)
+# Stats — aggregate across persisted chat sessions
 # ---------------------------------------------------------------------------
 
 @router.get("/stats")
@@ -241,27 +212,16 @@ async def get_admin_stats(
     app_id: Optional[str] = Query(None, description="Filter stats to a specific app"),
     user: UserPrincipal = Depends(_require_admin),
 ):
-    """Aggregate runtime stats: active chats, token usage, errors. Scoped to app_id when provided."""
+    """Aggregate lifecycle stats. Token metering is served by /api/admin/usage."""
     try:
         return await _build_persisted_admin_stats(app_id=app_id)
     except Exception as e:
-        logger.warning(f"[admin] stats query failed, falling back to live runtime state: {e}")
-        pm = await get_performance_manager()
-        agg = await pm.aggregate()
-        return {
-            "active_chats": agg["active_chats"],
-            "tracked_chats": agg["tracked_chats"],
-            "total_agent_turns": agg["total_agent_turns"],
-            "total_tool_calls": agg["total_tool_calls"],
-            "total_errors": agg["total_errors"],
-            "total_prompt_tokens": agg["total_prompt_tokens"],
-            "total_completion_tokens": agg["total_completion_tokens"],
-            "total_cost": agg["total_cost"],
-        }
+        logger.warning(f"[admin] stats query failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load persisted admin stats") from e
 
 
 # ---------------------------------------------------------------------------
-# Runs — recent persisted workflow sessions (fallback to live snapshots)
+# Runs — recent persisted workflow sessions
 # ---------------------------------------------------------------------------
 
 @router.get("/runs")
@@ -275,14 +235,30 @@ async def get_admin_runs(
     try:
         return await _build_persisted_admin_runs(app_id=app_id, active_only=active_only, limit=limit)
     except Exception as e:
-        logger.warning(f"[admin] runs query failed, falling back to live runtime state: {e}")
-        pm = await get_performance_manager()
-        runs = await pm.snapshot_all()
-        if app_id:
-            runs = [r for r in runs if r.get("app_id") == app_id]
-        if active_only:
-            runs = [r for r in runs if r.get("ended_at") is None]
-        return {"runs": runs[:limit], "total": min(len(runs), limit)}
+        logger.warning(f"[admin] runs query failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load persisted admin runs") from e
+
+
+# ---------------------------------------------------------------------------
+# Usage — token metering from runtime usage events
+# ---------------------------------------------------------------------------
+
+@router.get("/usage")
+async def get_admin_usage(
+    app_id: Optional[str] = Query(None, description="Filter usage to a specific app"),
+    user_id: Optional[str] = Query(None, description="Filter usage to a specific end user"),
+    limit: int = Query(500, ge=1, le=1000, description="Max usage events to aggregate"),
+    user: UserPrincipal = Depends(_require_admin),
+):
+    """Return neutral token usage measurements from the runtime usage ledger."""
+    try:
+        from mozaiksai.core.usage import get_runtime_usage_ledger
+
+        ledger = get_runtime_usage_ledger()
+        return await ledger.query_usage(app_id=app_id, user_id=user_id, limit=limit)
+    except Exception as e:
+        logger.warning(f"[admin] usage query failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load runtime usage") from e
 
 
 # ---------------------------------------------------------------------------
@@ -319,9 +295,6 @@ async def get_admin_sessions(
                 "created_at": 1,
                 "ended_at": 1,
                 "duration_sec": 1,
-                "usage_prompt_tokens_final": 1,
-                "usage_completion_tokens_final": 1,
-                "usage_total_cost_final": 1,
             },
         ).sort("created_at", -1).limit(limit)
 

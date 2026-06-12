@@ -28,6 +28,11 @@ from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.definition import AppDefinition
 from mozaiksai.core.runtime.app.module_loader import LoadedModule, ModuleLoader
+from mozaiksai.core.runtime.app.subscriptions_loader import (
+    SubscriptionsConfig,
+    SubscriptionsLoadError,
+    load_subscriptions_config,
+)
 from mozaiksai.core.runtime.persistence.intent_loader import (
     DataContractLoadError,
     index_data_contract_by_entity,
@@ -48,13 +53,17 @@ class AppLoadResult:
     """Result of AppLoader.load().
 
     Attributes:
-        definition: Parsed AppDefinition from app.json and discovered owners
-        modules:    Loaded module handlers
+        definition:           Parsed AppDefinition from app.json and discovered owners
+        modules:              Loaded module handlers
+        data_contract:        Parsed data contract, or None
+        data_entities_by_key: Data entities indexed by (module_id, entity_name)
+        subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
     """
     definition: AppDefinition
     modules: List[LoadedModule] = field(default_factory=list)
     data_contract: Dict[str, Any] | None = None
     data_entities_by_key: Dict[tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
+    subscriptions_config: SubscriptionsConfig | None = None
 
 
 class AppLoader:
@@ -118,7 +127,20 @@ class AppLoader:
             data_contract = load_data_contract(base_path)
             data_entities_by_key = index_data_contract_by_entity(data_contract)
         except DataContractLoadError as exc:
-            raise AppLoadError(f"Invalid config/data.json: {exc}") from exc
+            raise AppLoadError(f"Invalid data/contract.json: {exc}") from exc
+
+        subscriptions_config: SubscriptionsConfig | None = None
+        try:
+            subscriptions_config = load_subscriptions_config(base_path)
+            if subscriptions_config is not None:
+                logger.info(
+                    f"SUBSCRIPTIONS_LOADED: {len(subscriptions_config.plans)} plans "
+                    f"({[p.plan_id for p in subscriptions_config.plans]})"
+                )
+        except SubscriptionsLoadError as exc:
+            logger.warning(
+                f"SUBSCRIPTIONS_CONFIG_INVALID: {exc} — entitlement enforcement disabled"
+            )
 
         logger.info(
             f"APP_LOADED: name={app_def.name!r} version={app_def.version!r} "
@@ -139,6 +161,7 @@ class AppLoader:
             modules=loaded_modules,
             data_contract=data_contract,
             data_entities_by_key=data_entities_by_key,
+            subscriptions_config=subscriptions_config,
         )
 
     @classmethod

@@ -23,9 +23,9 @@ _CORE_PRIORITY_BUCKETS = {
     "app_config",
     "workflows",
     "control_plane",
-    "app_generator",
-    "app_generator_contracts",
-    "app_generator_capability_packs",
+    "build_context",
+    "build_context_contracts",
+    "build_context_packs",
     "src",
 }
 

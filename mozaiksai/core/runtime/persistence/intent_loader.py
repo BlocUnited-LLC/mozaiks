@@ -9,7 +9,7 @@ DataEntityIndex = dict[tuple[str, str], dict[str, Any]]
 
 
 class DataContractLoadError(ValueError):
-    """Raised when config/data.json is present but invalid."""
+    """Raised when data/contract.json is present but invalid."""
 
 
 def _is_non_empty_string(value: Any) -> bool:
@@ -29,19 +29,21 @@ def _require_list(value: Any, path: str) -> list[Any]:
 
 
 def load_data_contract(app_root: Path) -> DataContract | None:
-    """Load app/config/data.json as runtime metadata only.
+    """Load the app data contract as runtime metadata only.
 
-    This does not apply migrations, create indexes, or connect to Mongo.
+    Loads from the canonical path ``data/contract.json``. Does not apply
+    migrations, create indexes, or connect to Mongo.
     """
 
-    contract_path = Path(app_root) / "config" / "data.json"
+    root = Path(app_root)
+    contract_path = root / "data" / "contract.json"
     if not contract_path.exists():
         return None
 
     try:
         raw = json.loads(contract_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise DataContractLoadError(f"Failed to read config/data.json: {exc}") from exc
+        raise DataContractLoadError(f"Failed to read data/contract.json: {exc}") from exc
 
     contract = _require_object(raw, "data_contract")
     _validate_data_contract(contract)

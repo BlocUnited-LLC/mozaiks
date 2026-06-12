@@ -14,8 +14,9 @@ This keeps module event meaning above the runtime kernel.
 import inspect
 import re
 from collections import defaultdict
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from logs.logging_config import get_workflow_logger
@@ -23,21 +24,21 @@ from mozaiksai.core.runtime.app.module_loader import LoadedModule
 
 logger = get_workflow_logger("module_event_router")
 
-EventEmitter = Callable[[str, Dict[str, Any]], Awaitable[Any] | Any]
-NotificationStore = Callable[[Dict[str, Any]], Awaitable[Any] | Any]
-CapabilityInvoker = Callable[[str, Dict[str, Any], Dict[str, Any]], Awaitable[Any] | Any]
+EventEmitter = Callable[[str, dict[str, Any]], Awaitable[Any] | Any]
+NotificationStore = Callable[[dict[str, Any]], Awaitable[Any] | Any]
+CapabilityInvoker = Callable[[str, dict[str, Any], dict[str, Any]], Awaitable[Any] | Any]
 
 
 class _ReactionCtx:
     """Minimal context passed to handler methods during reaction dispatch."""
 
-    def __init__(self, *, app_id: str, tenant_id: str, user_id: str, event_emitter: Optional[EventEmitter]) -> None:
+    def __init__(self, *, app_id: str, tenant_id: str, user_id: str, event_emitter: EventEmitter | None) -> None:
         self.app_id = app_id
         self.tenant_id = tenant_id
         self.user_id = user_id
         self._event_emitter = event_emitter
 
-    async def emit(self, event_type: str, payload: Dict[str, Any]) -> None:
+    async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         if self._event_emitter is not None:
             await ModuleEventRouter._maybe_await(self._event_emitter(event_type, payload))
 
@@ -49,21 +50,21 @@ class ModuleEventRouter:
         self,
         modules: Iterable[LoadedModule],
         *,
-        event_emitter: Optional[EventEmitter] = None,
-        notification_store: Optional[NotificationStore] = None,
-        capability_invoker: Optional[CapabilityInvoker] = None,
+        event_emitter: EventEmitter | None = None,
+        notification_store: NotificationStore | None = None,
+        capability_invoker: CapabilityInvoker | None = None,
     ) -> None:
         self._event_emitter = event_emitter
         self._notification_store = notification_store
         self._capability_invoker = capability_invoker
-        self._reactions_by_event: Dict[str, List[dict]] = defaultdict(list)
-        self._notifications_by_event: Dict[str, List[dict]] = defaultdict(list)
-        self._notifications_by_key: Dict[tuple[str, str], dict] = {}
-        self._handlers_by_module: Dict[str, Any] = {}
+        self._reactions_by_event: dict[str, list[dict]] = defaultdict(list)
+        self._notifications_by_event: dict[str, list[dict]] = defaultdict(list)
+        self._notifications_by_key: dict[tuple[str, str], dict] = {}
+        self._handlers_by_module: dict[str, Any] = {}
         self._index_modules(modules)
 
     @property
-    def event_types(self) -> List[str]:
+    def event_types(self) -> list[str]:
         return sorted(set(self._reactions_by_event) | set(self._notifications_by_event))
 
     def register(self, dispatcher: Any) -> int:
@@ -76,7 +77,7 @@ class ModuleEventRouter:
             logger.info("MODULE_EVENT_ROUTER_READY: %s event type(s)", count)
         return count
 
-    async def handle_event(self, event_type: str, envelope: Dict[str, Any]) -> None:
+    async def handle_event(self, event_type: str, envelope: dict[str, Any]) -> None:
         """Handle one canonical module event envelope."""
         emitted_notifications: set[tuple[str, str]] = set()
 
@@ -130,8 +131,8 @@ class ModuleEventRouter:
                     self._notifications_by_event[event_type].append(rule)
                     self._notifications_by_key[(module_id, rule_id)] = rule
 
-    def _handler_for(self, event_type: str) -> Callable[[Dict[str, Any]], Awaitable[None]]:
-        async def handle(envelope: Dict[str, Any]) -> None:
+    def _handler_for(self, event_type: str) -> Callable[[dict[str, Any]], Awaitable[None]]:
+        async def handle(envelope: dict[str, Any]) -> None:
             await self.handle_event(event_type, envelope)
 
         return handle
@@ -142,7 +143,7 @@ class ModuleEventRouter:
         module_id: str,
         notification_id: str,
         event_type: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         if module_id and notification_id:
             rule = self._notifications_by_key.get((module_id, notification_id))
             if rule is not None:
@@ -159,7 +160,7 @@ class ModuleEventRouter:
         self,
         reaction: dict,
         event_type: str,
-        envelope: Dict[str, Any],
+        envelope: dict[str, Any],
     ) -> None:
         if self._event_emitter is None:
             return
@@ -178,7 +179,7 @@ class ModuleEventRouter:
                     self._capability_invoker(capability_id, envelope, reaction)
                 )
 
-        reaction_event_type = f"platform.subscription.{target_kind}_requested"
+        reaction_event_type = f"platform.reaction.{target_kind}_dispatched"
         reaction_payload = {
             "id": f"evt_{uuid4().hex}",
             "type": reaction_event_type,
@@ -187,7 +188,7 @@ class ModuleEventRouter:
             "source": {
                 "layer": "platform",
                 "module_id": reaction.get("module_id"),
-                "subscription_id": reaction.get("id"),
+                "reaction_id": reaction.get("id"),
             },
             "tenant": envelope.get("tenant") if isinstance(envelope.get("tenant"), dict) else {},
             "correlation": envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {},
@@ -206,7 +207,7 @@ class ModuleEventRouter:
         self,
         reaction: dict,
         event_type: str,
-        envelope: Dict[str, Any],
+        envelope: dict[str, Any],
     ) -> None:
         module_id = str(reaction.get("module_id") or "").strip()
         target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
@@ -257,7 +258,7 @@ class ModuleEventRouter:
         self,
         rule: dict,
         event_type: str,
-        envelope: Dict[str, Any],
+        envelope: dict[str, Any],
     ) -> None:
         # Structured envelope: {tenant: {...}, payload: {...}, ...}
         # Flat envelope (module events): {session_id: ..., app_id: ..., amount: ..., ...}
@@ -287,7 +288,7 @@ class ModuleEventRouter:
         # keys are stripped as a defence-in-depth guard even if listed.
         context_fields = rule.get("context_fields")
         if isinstance(context_fields, list) and context_fields:
-            context: Optional[Dict[str, Any]] = {
+            context: dict[str, Any] | None = {
                 k: payload[k]
                 for k in context_fields
                 if isinstance(k, str) and k in payload and not _is_secret_context_key(k)
@@ -334,7 +335,7 @@ class ModuleEventRouter:
             }
             await self._maybe_await(self._event_emitter("notification.created", notification_event))
 
-    async def _store_notification(self, record: Dict[str, Any]) -> None:
+    async def _store_notification(self, record: dict[str, Any]) -> None:
         try:
             if self._notification_store is not None:
                 await self._maybe_await(self._notification_store(record))
@@ -372,7 +373,7 @@ def _is_secret_context_key(key: str) -> bool:
     return any(pat in k for pat in _CONTEXT_SECRET_PATTERNS)
 
 
-def _render_template(template: str, payload: Dict[str, Any]) -> str:
+def _render_template(template: str, payload: dict[str, Any]) -> str:
     """
     Render a notification template with payload substitution.
 

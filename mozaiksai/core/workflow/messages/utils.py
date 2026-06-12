@@ -6,8 +6,6 @@ Purpose:
 - Extract text content from complex AG2 payloads
 - Serialize event content for transport
 - Extract agent names from event objects
-- Extract images from conversation history (AG2 message parsing)
-
 Extracted from orchestration_patterns.py to reduce complexity and improve maintainability.
 """
 
@@ -22,7 +20,6 @@ __all__ = [
     'normalize_text_content',
     'serialize_event_content',
     'extract_agent_name',
-    'extract_images_from_conversation',
 ]
 
 
@@ -175,64 +172,4 @@ def extract_agent_name(obj: Any) -> Optional[str]:
 
 
 
-def extract_images_from_conversation(sender, recipient):
-    """Extract PIL images from agent conversation history (for image generation capabilities).
-    
-    Parses GPT-4V format messages where content is an array with image_url entries.
-    
-    Args:
-        sender: Agent that sent messages (image generator)
-        recipient: Agent that received messages
-        
-    Returns:
-        List of PIL Image objects found in conversation
-        
-    Raises:
-        ValueError: If no images found in message history
-    """
-    try:
-        from autogen.agentchat.contrib import img_utils
-    except ImportError:
-        logger.error("[IMAGE_EXTRACT] Failed to import img_utils from autogen.agentchat.contrib")
-        raise ImportError("autogen.agentchat.contrib.img_utils not available - install ag2[lmm]")
-    
-    images = []
-    all_messages = sender.chat_messages.get(recipient, [])
-    
-    logger.debug(f"[IMAGE_EXTRACT] Scanning {len(all_messages)} messages from {sender.name} to {recipient.name}")
-    
-    for idx, message in enumerate(reversed(all_messages)):
-        contents = message.get("content", [])
-        
-        # Handle both string and array content formats
-        if isinstance(contents, str):
-            continue
-            
-        if not isinstance(contents, list):
-            logger.warning(f"[IMAGE_EXTRACT] Message {idx} has unexpected content type: {type(contents)}")
-            continue
-        
-        for content_idx, content in enumerate(contents):
-            if isinstance(content, str):
-                continue
-                
-            if not isinstance(content, dict):
-                continue
-                
-            if content.get("type") == "image_url":
-                img_data = content.get("image_url", {}).get("url")
-                if img_data:
-                    try:
-                        img = img_utils.get_pil_image(img_data)
-                        images.append(img)
-                        logger.info(f"[IMAGE_EXTRACT] Found image in message {idx}, content {content_idx}")
-                    except Exception as img_err:
-                        logger.warning(f"[IMAGE_EXTRACT] Failed to load image from message {idx}: {img_err}")
-    
-    if not images:
-        logger.error(f"[IMAGE_EXTRACT] No images found in {len(all_messages)} messages")
-        raise ValueError("No image data found in conversation history")
-    
-    logger.info(f"[IMAGE_EXTRACT] Successfully extracted {len(images)} images")
-    return images
 

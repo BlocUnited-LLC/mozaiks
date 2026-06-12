@@ -2,16 +2,17 @@ from __future__ import annotations
 
 """Platform composition host layered on top of mozaiksai.hosts.runtime."""
 
-from copy import deepcopy
-from contextlib import asynccontextmanager
+import asyncio
+import inspect
 import json
 import os
 import re
-import asyncio
-import inspect
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
+from typing import Any
 from uuid import uuid4
 
 import yaml
@@ -19,12 +20,11 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from mozaiksai.hosts import runtime as runtime_app
-from mozaiksai.version import __version__ as _API_VERSION
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.admin.registry import build_admin_shell_routes, load_admin_registry
 from mozaiksai.core.auth import (
-    UserPrincipal,
     WS_CLOSE_POLICY_VIOLATION,
+    UserPrincipal,
     authenticate_websocket_with_path_binding,
     optional_user,
     require_any_auth,
@@ -32,37 +32,42 @@ from mozaiksai.core.auth import (
 )
 from mozaiksai.core.auth.dependencies import (
     validate_path_app_id,
+)
+from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal as _validate_user_id_against_principal,
 )
-from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
-from mozaiksai.core.observability.performance_manager import get_performance_manager
-from mozaiksai.core.runtime.app.loader import AppLoadError, AppLoader
+from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.profile.discovery import load_profile_panels
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
+from mozaiksai.core.ports.entitlement import EntitlementPort
+from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
+from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.extensions import (
-    mount_declared_routers,
     mount_module_routers,
-    start_declared_services,
     start_module_services,
     stop_services,
 )
-from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 from mozaiksai.core.runtime.persistence import (
-    apply_database_indexes,
-    apply_data_migrations,
     DatabaseStartupPolicyError,
+    apply_data_migrations,
+    apply_database_indexes,
     get_database_startup_policy,
     load_data_migrations,
 )
-from mozaiksai.core.session.launcher import create_routed_chat_session, launch_transition, validate_context_for_workflow
+from mozaiksai.core.session.launcher import (
+    create_routed_chat_session,
+    launch_transition,
+    validate_context_for_workflow,
+)
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots, resolve_active_app_root
+from mozaiksai.hosts import runtime as runtime_app
 from mozaiksai.resources import resolve_factory_app_root, resolve_factory_brand_root
-from mozaiksai.core.admin.registry import load_admin_registry, build_admin_shell_routes
-from mozaiksai.core.profile.discovery import load_profile_panels
-
+from mozaiksai.version import __version__ as _API_VERSION
 
 app = runtime_app.app
 persistence_manager = runtime_app.persistence_manager
@@ -70,6 +75,7 @@ logger = get_workflow_logger("platform_app")
 
 executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
+app.state.subscriptions_config = None
 _runtime_services: list[Any] = []
 
 
@@ -115,13 +121,13 @@ def _resolve_default_brand_root() -> Path:
 _NON_RUNNABLE_WORKFLOW_IDS = {"extended_orchestration"}
 
 
-def _get_ordered_workflow_names() -> List[str]:
+def _get_ordered_workflow_names() -> list[str]:
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
     return get_platform_hooks().call_workflow_ordering(sorted(workflow_manager.get_all_workflow_names()))
 
 
-def _get_configured_entry_point() -> Optional[str]:
+def _get_configured_entry_point() -> str | None:
     app_root = resolve_app_root()
     ai_path = app_root / "config" / "ai.json"
 
@@ -134,7 +140,7 @@ def _get_configured_entry_point() -> Optional[str]:
         return None
 
 
-def _is_runnable_workflow_name(workflow_name: Optional[str], ordered_names: Optional[List[str]] = None) -> bool:
+def _is_runnable_workflow_name(workflow_name: str | None, ordered_names: list[str] | None = None) -> bool:
     name = str(workflow_name or "").strip()
     if not name:
         return False
@@ -144,7 +150,7 @@ def _is_runnable_workflow_name(workflow_name: Optional[str], ordered_names: Opti
     return any(name.lower() == loaded.lower() for loaded in names)
 
 
-def _resolve_requested_workflow_name(requested_workflow_name: Optional[str]) -> str:
+def _resolve_requested_workflow_name(requested_workflow_name: str | None) -> str:
     ordered_names = _get_ordered_workflow_names()
     if not ordered_names:
         raise HTTPException(status_code=503, detail="No runnable workflows are currently loaded.")
@@ -173,6 +179,7 @@ async def _platform_startup() -> None:
     logger.info("DATABASE_STARTUP_POLICY: policy=%s app_root=%s", database_startup_policy, app_root)
     try:
         load_result = await AppLoader.load(str(app_root))
+        app.state.subscriptions_config = load_result.subscriptions_config
         if load_result.data_contract:
             index_app_id = (
                 load_result.data_contract.get("app_id")
@@ -245,9 +252,9 @@ async def _platform_startup() -> None:
 
             async def invoke_capability(
                 capability_id: str,
-                source_event: Dict[str, Any],
-                subscription: Dict[str, Any],
-            ) -> Dict[str, Any]:
+                source_event: dict[str, Any],
+                subscription: dict[str, Any],
+            ) -> dict[str, Any]:
                 return await _invoke_workflow_capability(
                     capability_id=capability_id,
                     source_event=source_event,
@@ -264,7 +271,17 @@ async def _platform_startup() -> None:
             module_event_router.register(dispatcher)
             app.state.module_event_router = module_event_router
 
-            module_executor = ModuleExecutor(event_emitter=dispatcher.emit)
+            entitlement_checker: EntitlementPort | None = None
+            if load_result.subscriptions_config is not None:
+                entitlement_checker = ConfiguredEntitlementAdapter(
+                    config=load_result.subscriptions_config,
+                )
+                logger.info("ENTITLEMENT_ADAPTER_READY: configured subscriptions adapter wired")
+
+            module_executor = ModuleExecutor(
+                event_emitter=dispatcher.emit,
+                entitlement_checker=entitlement_checker,
+            )
             for loaded_module in load_result.modules:
                 module_executor.register(
                     loaded_module.name,
@@ -277,6 +294,7 @@ async def _platform_startup() -> None:
                     ),
                     action_permissions=loaded_module.action_permissions_map,
                     action_schemas=loaded_module.action_schemas_map,
+                    action_entitlements=loaded_module.action_entitlement_map,
                 )
             executor_registry.register(module_executor)
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
@@ -343,14 +361,14 @@ PROFILE_SHELL_ROUTE = {
 }
 
 
-def _append_page_once(pages: List[dict], page: dict) -> None:
+def _append_page_once(pages: list[dict], page: dict) -> None:
     path = page.get("path")
     if not isinstance(path, str) or any(existing.get("path") == path for existing in pages):
         return
     pages.append(page)
 
 
-def _normalize_shell_surface(surface: Optional[str]) -> str:
+def _normalize_shell_surface(surface: str | None) -> str:
     candidate = str(surface or "platform").strip().lower()
     return candidate if candidate in {"platform", "studio"} else "platform"
 
@@ -1067,7 +1085,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     except Exception as exc:
         logger.warning("[shell-config] Could not read shell config: %s", exc)
 
-    pages: List[dict] = []
+    pages: list[dict] = []
     for loader, label in (
         (_load_ui_route_manifest_pages, "UI route manifest pages"),
         (_load_page_schema_routes, "page schema routes"),
@@ -1159,7 +1177,7 @@ async def get_shell_config():
 
 @app.get("/api/me")
 async def get_current_user_profile(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
@@ -1169,7 +1187,7 @@ async def get_current_user_profile(
 @app.put("/api/me")
 async def update_current_user_profile(
     body: ProfileUpdateRequest,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
@@ -1197,17 +1215,37 @@ async def update_current_user_profile(
 
 @app.get("/api/me/preferences")
 async def get_current_user_preferences(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
     return await _load_account_preferences(app_id=resolved_app_id, user_id=user_id)
 
 
+@app.get("/api/me/usage")
+async def get_current_user_usage(
+    app_id: str | None = None,
+    limit: int = 500,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return user-scoped token usage and app-declared subscription limits."""
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    from mozaiksai.core.usage import get_runtime_usage_ledger
+
+    bounded_limit = max(1, min(int(limit or 1), 1000))
+    ledger = get_runtime_usage_ledger()
+    usage = await ledger.query_usage(app_id=resolved_app_id, user_id=user_id, limit=bounded_limit)
+    subscriptions = getattr(app.state, "subscriptions_config", None)
+    return {
+        **usage,
+        "subscription_usage": _serialize_subscription_usage_limits(subscriptions),
+    }
+
+
 @app.put("/api/me/preferences")
 async def update_current_user_preferences(
     body: ProfilePreferencesUpdateRequest,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
@@ -1234,7 +1272,7 @@ async def update_current_user_preferences(
 
 @app.get("/api/me/profile-panels")
 async def get_profile_panels(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     """Return module-declared profile panels, each hydrated with live action data.
@@ -1283,7 +1321,7 @@ async def get_profile_panels(
     return {"panels": hydrated}
 
 
-def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional[dict]:
+def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> dict | None:
     if not isinstance(entry, dict):
         return None
     path = entry.get("path")
@@ -1329,7 +1367,7 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> Optional
     return page
 
 
-def _coerce_requires_role(value: Any) -> Optional[str]:
+def _coerce_requires_role(value: Any) -> str | None:
     """Normalize route-role metadata without treating it as security enforcement.
 
     Current shell route metadata is single-role only. If route or page schema
@@ -1363,7 +1401,7 @@ def _normalize_route_requires_role_meta(meta: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _load_ui_route_manifest_pages(app_root: Path) -> List[dict]:
+def _load_ui_route_manifest_pages(app_root: Path) -> list[dict]:
     manifest_path = (app_root / "ui" / "route_manifest.json").resolve()
     if manifest_path is None:
         return []
@@ -1373,7 +1411,7 @@ def _load_ui_route_manifest_pages(app_root: Path) -> List[dict]:
     entries = raw.get("pages") if isinstance(raw, dict) else []
     if not isinstance(entries, list):
         return []
-    pages: List[dict] = []
+    pages: list[dict] = []
     for index, entry in enumerate(entries):
         page = _normalize_shell_page_entry(entry, order_fallback=index)
         if page:
@@ -1381,12 +1419,12 @@ def _load_ui_route_manifest_pages(app_root: Path) -> List[dict]:
     return pages
 
 
-def _load_page_schema_routes(app_root: Path) -> List[dict]:
+def _load_page_schema_routes(app_root: Path) -> list[dict]:
     pages_dir = app_root / "ui" / "pages"
     if not pages_dir.exists():
         return []
 
-    candidates: List[tuple[Path, str]] = []
+    candidates: list[tuple[Path, str]] = []
     for child in sorted(pages_dir.iterdir(), key=lambda item: item.name.lower()):
         if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
             candidates.append((child, child.stem))
@@ -1398,7 +1436,7 @@ def _load_page_schema_routes(app_root: Path) -> List[dict]:
             elif page_yml.exists():
                 candidates.append((page_yml, child.name))
 
-    pages: List[dict] = []
+    pages: list[dict] = []
     for index, (page_path, default_name) in enumerate(candidates):
         raw = yaml.safe_load(page_path.read_text(encoding="utf-8")) or {}
         if not isinstance(raw, dict):
@@ -1438,7 +1476,7 @@ def _load_page_schema_routes(app_root: Path) -> List[dict]:
     return pages
 
 
-def _load_workflow_entrypoint_pages(app_root: Path) -> List[dict]:
+def _load_workflow_entrypoint_pages(app_root: Path) -> list[dict]:
     from mozaiksai.core.workflow.pack.config import list_entrypoints, load_global_pack_graph
 
     _ = app_root
@@ -1451,7 +1489,7 @@ def _load_workflow_entrypoint_pages(app_root: Path) -> List[dict]:
         for transition in getattr(pack, "transitions", [])
         if getattr(transition, "ui", None) is not None and transition.ui.shell_mode
     }
-    pages: List[dict] = []
+    pages: list[dict] = []
     for index, entry in enumerate(list_entrypoints(pack)):
         raw_entry = entry.model_dump(exclude_none=True)
         transition_id = raw_entry.get("transition")
@@ -1468,8 +1506,8 @@ def _load_workflow_entrypoint_pages(app_root: Path) -> List[dict]:
     return pages
 
 
-def _dedupe_and_sort_pages(pages: List[dict]) -> List[dict]:
-    by_path: Dict[str, dict] = {}
+def _dedupe_and_sort_pages(pages: list[dict]) -> list[dict]:
+    by_path: dict[str, dict] = {}
     for page in pages:
         path = page.get("path")
         if isinstance(path, str) and path not in by_path:
@@ -1553,7 +1591,7 @@ async def _account_preferences_collection():
 def _resolve_profile_scope(
     principal: UserPrincipal,
     *,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
 ) -> tuple[str, str]:
     return resolve_scope_from_principal(
         principal,
@@ -1561,6 +1599,42 @@ def _resolve_profile_scope(
         default_user_id=_DEFAULT_PROFILE_USER_ID,
         default_app_id=_resolve_default_app_id(),
     )
+
+
+def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
+    if config is None:
+        return {
+            "schema_version": None,
+            "default_plan_id": None,
+            "plans": [],
+            "source": "none",
+        }
+    plans: list[dict[str, Any]] = []
+    for plan in getattr(config, "plans", []) or []:
+        limits = []
+        for limit in getattr(plan, "usage_limits", []) or []:
+            limits.append(
+                {
+                    "meter_id": limit.meter_id,
+                    "label": limit.label or limit.meter_id,
+                    "unit": limit.unit,
+                    "monthly_limit": limit.monthly_limit,
+                    "capability_id": limit.capability_id,
+                }
+            )
+        plans.append(
+            {
+                "plan_id": plan.plan_id,
+                "label": plan.label,
+                "usage_limits": limits,
+            }
+        )
+    return {
+        "schema_version": getattr(config, "schema_version", None),
+        "default_plan_id": getattr(config, "default_plan_id", None),
+        "plans": plans,
+        "source": "app_config_subscriptions",
+    }
 
 
 async def _ensure_account_profile(
@@ -1628,12 +1702,12 @@ async def _load_account_preferences(*, app_id: str, user_id: str) -> dict[str, A
 
 
 class ProfileUpdateRequest(BaseModel):
-    display_name: Optional[str] = Field(default=None, description="Preferred user-facing display name")
-    avatar_url: Optional[str] = Field(default=None, description="Optional avatar image URL")
+    display_name: str | None = Field(default=None, description="Preferred user-facing display name")
+    avatar_url: str | None = Field(default=None, description="Optional avatar image URL")
 
 
 class ProfilePreferencesUpdateRequest(BaseModel):
-    settings: Dict[str, Any] = Field(default_factory=dict, description="App-scoped account preference map")
+    settings: dict[str, Any] = Field(default_factory=dict, description="App-scoped account preference map")
 
 
 def _resolve_pages_dir() -> Path:
@@ -1700,7 +1774,7 @@ def _load_pack_graph_or_404():
     return pack
 
 
-def _load_workflow_capability_routes(app_root: Path) -> Dict[str, List[Dict[str, Any]]]:
+def _load_workflow_capability_routes(app_root: Path) -> dict[str, list[dict[str, Any]]]:
     """Index workflow trigger declarations by public capability id."""
     workflows_dir = next(
         (root for root in candidate_app_workflows_roots(app_root) if root.exists()),
@@ -1709,7 +1783,7 @@ def _load_workflow_capability_routes(app_root: Path) -> Dict[str, List[Dict[str,
     if not workflows_dir.exists():
         return {}
 
-    routes: Dict[str, List[Dict[str, Any]]] = {}
+    routes: dict[str, list[dict[str, Any]]] = {}
     for workflow_dir in sorted(workflows_dir.iterdir(), key=lambda item: item.name.lower()):
         if not workflow_dir.is_dir():
             continue
@@ -1745,7 +1819,7 @@ def _load_workflow_capability_routes(app_root: Path) -> Dict[str, List[Dict[str,
                 routes.setdefault(capability_id, []).append(route)
     return routes
 
-def _trigger_capability_ids(trigger: Dict[str, Any]) -> List[str]:
+def _trigger_capability_ids(trigger: dict[str, Any]) -> list[str]:
     capability_ids = trigger.get("capability_ids")
     if isinstance(capability_ids, list):
         results = [str(item).strip() for item in capability_ids if str(item).strip()]
@@ -1758,13 +1832,13 @@ def _trigger_capability_ids(trigger: Dict[str, Any]) -> List[str]:
 async def _invoke_workflow_capability(
     *,
     capability_id: str,
-    source_event: Dict[str, Any],
-    subscription: Dict[str, Any],
-    routes: Dict[str, List[Dict[str, Any]]],
-    event_emitter: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
-    create_session: Optional[Callable[..., Any]] = None,
+    source_event: dict[str, Any],
+    subscription: dict[str, Any],
+    routes: dict[str, list[dict[str, Any]]],
+    event_emitter: Callable[[str, dict[str, Any]], Any] | None = None,
+    create_session: Callable[..., Any] | None = None,
     auto_start: bool = True,
-)-> Dict[str, Any]:
+)-> dict[str, Any]:
     route = _select_workflow_capability_route(
         capability_id=capability_id,
         source_event_type=str(source_event.get("type") or "").strip(),
@@ -1853,8 +1927,8 @@ def _select_workflow_capability_route(
     *,
     capability_id: str,
     source_event_type: str,
-    routes: Dict[str, List[Dict[str, Any]]],
-) -> Optional[Dict[str, Any]]:
+    routes: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any] | None:
     candidates = routes.get(capability_id) or []
     for route in candidates:
         event_type = route.get("event_type")
@@ -1869,11 +1943,11 @@ def _select_workflow_capability_route(
 def _build_workflow_trigger_context(
     *,
     capability_id: str,
-    source_event: Dict[str, Any],
-    trigger: Dict[str, Any],
-) -> Dict[str, Any]:
+    source_event: dict[str, Any],
+    trigger: dict[str, Any],
+) -> dict[str, Any]:
     payload = source_event.get("payload") if isinstance(source_event.get("payload"), dict) else {}
-    context: Dict[str, Any] = {
+    context: dict[str, Any] = {
         "source_event": source_event,
         "event_payload": payload,
         "triggered_event_type": source_event.get("type"),
@@ -1888,7 +1962,7 @@ def _build_workflow_trigger_context(
     return context
 
 
-def _resolve_event_context_value(value: Any, source_event: Dict[str, Any]) -> Any:
+def _resolve_event_context_value(value: Any, source_event: dict[str, Any]) -> Any:
     if not isinstance(value, str):
         return value
     text = value.strip()
@@ -1917,7 +1991,7 @@ async def _start_workflow_background_if_available(
     workflow_id: str,
     app_id: str,
     user_id: str,
-    trigger: Dict[str, Any],
+    trigger: dict[str, Any],
     auto_start: bool,
 ) -> bool:
     if not auto_start:
@@ -1951,7 +2025,7 @@ async def _maybe_await(result: Any) -> Any:
     return result
 
 
-def _extract_bearer_token(request: Request) -> Optional[str]:
+def _extract_bearer_token(request: Request) -> str | None:
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     if not auth_header:
         return None
@@ -1968,9 +2042,9 @@ async def _execute_module_action(
     module_name: str,
     action_name: str,
     request: Request,
-    principal: Optional[UserPrincipal],
-    params: Dict[str, Any],
-    context_overrides: Optional[Dict[str, Any]] = None,
+    principal: UserPrincipal | None,
+    params: dict[str, Any],
+    context_overrides: dict[str, Any] | None = None,
 ) -> Any:
     if not _MODULE_NAME_RE.fullmatch(module_name):
         raise HTTPException(status_code=400, detail="Invalid module name")
@@ -2045,7 +2119,7 @@ async def execute_module_action_get(
     module_name: str,
     action_name: str,
     request: Request,
-    principal: Optional[UserPrincipal] = Depends(optional_user),
+    principal: UserPrincipal | None = Depends(optional_user),
 ):
     reserved_keys = {"app_id", "user_id", "tenant_id", "correlation_id", "auth_token"}
     params = {key: value for key, value in request.query_params.items() if key not in reserved_keys}
@@ -2063,9 +2137,9 @@ async def execute_module_action_post(
     module_name: str,
     action_name: str,
     request: Request,
-    principal: Optional[UserPrincipal] = Depends(optional_user),
+    principal: UserPrincipal | None = Depends(optional_user),
 ):
-    body: Dict[str, Any] = {}
+    body: dict[str, Any] = {}
     if request.headers.get("content-type", "").lower().startswith("application/json"):
         try:
             parsed = await request.json()
@@ -2115,21 +2189,21 @@ async def get_transition_by_id(transition_id: str):
 
 class TransitionResolveRequest(BaseModel):
     transition_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
-    option_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
-    journey_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
-    context_variables: Dict[str, Any] = Field(default_factory=dict)
-    app_id: Optional[str] = None
-    user_id: Optional[str] = None
+    option_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    journey_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
+    context_variables: dict[str, Any] = Field(default_factory=dict)
+    app_id: str | None = None
+    user_id: str | None = None
 
 
 def resolve_scope_from_principal(
     principal: UserPrincipal,
     *,
-    app_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    default_user_id: Optional[str] = None,
+    app_id: str | None = None,
+    user_id: str | None = None,
+    default_user_id: str | None = None,
     default_app_id: str = "default",
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     effective_user_id = user_id
     if principal.user_id == "anonymous" and not effective_user_id:
         effective_user_id = str(default_user_id or "").strip() or None
@@ -2223,8 +2297,8 @@ class PendingDecisionActionPayload(BaseModel):
     action_id: str
     label: str
     action_type: str = "run_workflow"
-    workflow_id: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    workflow_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SessionPendingDecisionRequest(BaseModel):
@@ -2233,21 +2307,21 @@ class SessionPendingDecisionRequest(BaseModel):
     message: str
     rationale: str
     confidence: float = 0.0
-    recommended_workflow_id: Optional[str] = None
+    recommended_workflow_id: str | None = None
     selected_paths: list[str] = Field(default_factory=list)
-    clarification_question: Optional[str] = None
-    change_request_id: Optional[str] = None
-    revision_id: Optional[str] = None
+    clarification_question: str | None = None
+    change_request_id: str | None = None
+    revision_id: str | None = None
     requires_confirmation: bool = False
     trigger_source: str = "refinement"
-    requested_workflow_id: Optional[str] = None
-    journey_id: Optional[str] = None
-    context_variables: Dict[str, Any] = Field(default_factory=dict)
-    trigger_payload: Dict[str, Any] = Field(default_factory=dict)
+    requested_workflow_id: str | None = None
+    journey_id: str | None = None
+    context_variables: dict[str, Any] = Field(default_factory=dict)
+    trigger_payload: dict[str, Any] = Field(default_factory=dict)
     actions: list[PendingDecisionActionPayload] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    workflow_id: Optional[str] = None
-    chat_id: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    workflow_id: str | None = None
+    chat_id: str | None = None
 
 
 @app.post("/api/session/decisions/pending")
@@ -2255,7 +2329,11 @@ async def mark_session_pending_decision(
     body: SessionPendingDecisionRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    from mozaiksai.core.session import PendingDecisionAction, PendingHarnessDecision, get_session_router
+    from mozaiksai.core.session import (
+        PendingDecisionAction,
+        PendingHarnessDecision,
+        get_session_router,
+    )
 
     snapshot = await get_session_router().mark_pending_harness_decision(
         app_id=principal.app_id,
@@ -2297,7 +2375,7 @@ async def mark_session_pending_decision(
 
 class SessionPendingDecisionResolveRequest(BaseModel):
     decision_id: str
-    action_id: Optional[str] = None
+    action_id: str | None = None
     accepted: bool = True
 
 
@@ -2398,7 +2476,7 @@ async def start_chat(
             }
 
     chat_id = str(uuid4())
-    extra_fields: Dict[str, Any] = {}
+    extra_fields: dict[str, Any] = {}
     if client_request_id:
         extra_fields["client_request_id"] = client_request_id
     if trigger_meta:
@@ -2443,12 +2521,6 @@ async def start_chat(
         )
     except Exception as exc:
         logger.debug("session router bind skipped for %s: %s", chat_id, exc)
-
-    try:
-        perf_mgr = await get_performance_manager()
-        await perf_mgr.record_workflow_start(chat_id, app_id, workflow_name, user_id)
-    except Exception as exc:
-        logger.debug("perf_start skipped %s: %s", chat_id, exc)
 
     try:
         cache_seed = await persistence_manager.get_or_assign_cache_seed(chat_id, app_id)
@@ -2615,7 +2687,7 @@ async def websocket_endpoint(
         return
 
     active_chat_id = chat_id
-    session_state_payload: Optional[Dict[str, Any]] = None
+    session_state_payload: dict[str, Any] | None = None
     try:
         from mozaiksai.core.session import get_session_router
 
@@ -2666,14 +2738,17 @@ async def websocket_endpoint(
             coll = await runtime_app._chat_coll()
             chat_doc = await coll.find_one(
                 {"_id": active_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
-                {"status": 1, "last_sequence": 1, "messages": {"$slice": 1}},
+                {"status": 1},
             )
             if not chat_doc:
                 return
             if int(chat_doc.get("status", -1)) != 0:
                 return
-            last_sequence = int(chat_doc.get("last_sequence", 0) or 0)
-            if last_sequence > 0 or bool(chat_doc.get("messages")):
+            run_history = await runtime_app.persistence_manager.load_run_history(
+                chat_id=active_chat_id,
+                app_id=app_id,
+            )
+            if run_history:
                 return
 
             local_transport = runtime_app.simple_transport
@@ -2735,6 +2810,8 @@ async def websocket_endpoint(
                 logger.debug("Failed to backfill chat session for %s: %s", active_chat_id, create_err)
 
         try:
+            from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
+
             cache_seed = await persistence_manager.get_or_assign_cache_seed(active_chat_id, app_id)
         except Exception as seed_err:
             cache_seed = None
@@ -2752,20 +2829,26 @@ async def websocket_endpoint(
             last_artifact = None
             created_at_iso = None
             doc = None
+            run_history_count = None
             try:
                 if coll is not None:
                     doc = await coll.find_one(
                         {"_id": active_chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
-                        {"last_artifact": 1, "created_at": 1, "status": 1, "last_sequence": 1},
+                        {"workflow_ui_state.last_artifact": 1, "created_at": 1, "status": 1},
                     )
                     if doc:
-                        last_artifact = doc.get("last_artifact")
+                        last_artifact = extract_last_artifact(doc)
                         created_at = doc.get("created_at")
                         if created_at:
                             try:
                                 created_at_iso = created_at.isoformat()
                             except Exception:
                                 created_at_iso = str(created_at)
+                        run_history = await runtime_app.persistence_manager.load_run_history(
+                            chat_id=active_chat_id,
+                            app_id=app_id,
+                        )
+                        run_history_count = len(run_history)
             except Exception as artifact_err:
                 logger.debug("last_artifact fetch failed for chat_meta %s: %s", active_chat_id, artifact_err)
 
@@ -2781,7 +2864,7 @@ async def websocket_endpoint(
                     "chat_exists": chat_exists_flag,
                     "last_artifact": last_artifact,
                     "status": doc.get("status") if doc else None,
-                    "last_sequence": doc.get("last_sequence") if doc else None,
+                    "run_history_count": run_history_count,
                     "created_at": created_at_iso,
                     "session_state": session_state_payload,
                 },
@@ -2817,11 +2900,11 @@ async def websocket_endpoint(
 async def upload_chat_file(
     request: Request,
     file: UploadFile = File(...),
-    appId: Optional[str] = Form(None),
+    appId: str | None = Form(None),
     userId: str = Form(...),
     chatId: str = Form(...),
     intent: str = Form("context"),
-    bundle_path: Optional[str] = Form(None),
+    bundle_path: str | None = Form(None),
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     _ = request
@@ -2846,7 +2929,7 @@ async def upload_chat_file_scoped(
     file: UploadFile = File(...),
     chatId: str = Form(...),
     intent: str = Form("context"),
-    bundle_path: Optional[str] = Form(None),
+    bundle_path: str | None = Form(None),
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
@@ -2867,8 +2950,8 @@ async def _handle_chat_upload(
     user_id: str,
     chat_id: str,
     intent: str,
-    bundle_path: Optional[str],
-) -> Dict[str, Any]:
+    bundle_path: str | None,
+) -> dict[str, Any]:
     if not app_id or not user_id or not chat_id:
         raise HTTPException(status_code=400, detail="app_id, user_id, and chat_id are required")
 
@@ -2940,7 +3023,7 @@ async def list_chats(
 ):
     try:
         coll = await runtime_app._chat_coll()
-        query: Dict[str, Any] = {"workflow_name": workflow_name, **build_app_scope_filter(app_id)}
+        query: dict[str, Any] = {"workflow_name": workflow_name, **build_app_scope_filter(app_id)}
         if principal.user_id != "anonymous":
             query["user_id"] = principal.user_id
         docs = await coll.find(query).sort("created_at", -1).to_list(length=20)
@@ -2950,7 +3033,7 @@ async def list_chats(
         raise HTTPException(status_code=500, detail="Failed to list chats") from exc
 
 
-def _is_ask_carrier_session(session: Dict[str, Any] | None) -> bool:
+def _is_ask_carrier_session(session: dict[str, Any] | None) -> bool:
     if not isinstance(session, dict):
         return False
     return str(session.get("transport_purpose") or "").strip().lower() == "ask_carrier"
@@ -2969,7 +3052,7 @@ async def chat_exists(
 ):
     try:
         coll = await runtime_app._chat_coll()
-        query: Dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
+        query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
         if principal.user_id != "anonymous":
             query["user_id"] = principal.user_id
         doc = await coll.find_one(query, {"_id": 1, "transport_purpose": 1})
@@ -2989,6 +3072,7 @@ async def list_user_sessions(
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
+        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
 
         coll = await runtime_app._chat_coll()
         sessions = await coll.find({
@@ -3011,7 +3095,7 @@ async def list_user_sessions(
                 "workflow_name": session.get("workflow_name"),
                 "created_at": session.get("created_at").isoformat() if session.get("created_at") else None,
                 "last_updated_at": session.get("last_updated_at").isoformat() if session.get("last_updated_at") else None,
-                "last_artifact": session.get("last_artifact"),
+                "last_artifact": extract_last_artifact(session),
             })
         return {"sessions": result, "count": len(result)}
     except Exception as exc:
@@ -3028,6 +3112,7 @@ async def get_most_recent_workflow_session(
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
+        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
 
         coll = await runtime_app._chat_coll()
         sessions = await coll.find({
@@ -3052,7 +3137,7 @@ async def get_most_recent_workflow_session(
             "workflow_name": recent.get("workflow_name"),
             "created_at": recent.get("created_at").isoformat() if recent.get("created_at") else None,
             "last_updated_at": recent.get("last_updated_at").isoformat() if recent.get("last_updated_at") else None,
-            "last_artifact": recent.get("last_artifact"),
+            "last_artifact": extract_last_artifact(recent),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch most recent session: {exc}") from exc
@@ -3067,6 +3152,7 @@ async def get_oldest_workflow_session(
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
+        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
 
         coll = await runtime_app._chat_coll()
         sessions = await coll.find({
@@ -3091,7 +3177,7 @@ async def get_oldest_workflow_session(
             "workflow_name": oldest.get("workflow_name"),
             "created_at": oldest.get("created_at").isoformat() if oldest.get("created_at") else None,
             "last_updated_at": oldest.get("last_updated_at").isoformat() if oldest.get("last_updated_at") else None,
-            "last_artifact": oldest.get("last_artifact"),
+            "last_artifact": extract_last_artifact(oldest),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch oldest session: {exc}") from exc
@@ -3102,7 +3188,7 @@ async def delete_user_sessions(
     app_id: str,
     user_id: str,
     status: str = "in_progress",
-    workflow_name: Optional[str] = None,
+    workflow_name: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
@@ -3110,7 +3196,7 @@ async def delete_user_sessions(
         from mozaiksai.core.data.models import WorkflowStatus
 
         normalized_status = str(status or "in_progress").strip().lower()
-        query: Dict[str, Any] = {"user_id": user_id, **build_app_scope_filter(app_id)}
+        query: dict[str, Any] = {"user_id": user_id, **build_app_scope_filter(app_id)}
         if workflow_name:
             query["workflow_name"] = str(workflow_name).strip()
         if normalized_status in {"in_progress", "active", "open"}:
@@ -3149,7 +3235,7 @@ async def delete_general_chats(
         from mozaiksai.core.data.models import WorkflowStatus
 
         normalized_status = str(status or "all").strip().lower()
-        query: Dict[str, Any] = {"user_id": user_id, **build_app_scope_filter(app_id)}
+        query: dict[str, Any] = {"user_id": user_id, **build_app_scope_filter(app_id)}
         if normalized_status in {"in_progress", "active", "open"}:
             query["status"] = int(WorkflowStatus.IN_PROGRESS)
         elif normalized_status in {"completed", "done", "closed"}:
@@ -3223,12 +3309,12 @@ async def notifications_count_fallback(
         return {"count": 0, "unread_count": 0}
 
 
-def _notification_query_for_principal(principal: UserPrincipal) -> Dict[str, Any]:
-    query: Dict[str, Any] = {"status": "unread"}
+def _notification_query_for_principal(principal: UserPrincipal) -> dict[str, Any]:
+    query: dict[str, Any] = {"status": "unread"}
     if principal.app_id:
         query["app_id"] = principal.app_id
 
-    visibility: List[Dict[str, Any]] = [{"actor.id": principal.user_id}]
+    visibility: list[dict[str, Any]] = [{"actor.id": principal.user_id}]
     roles = [role for role in principal.roles if role]
     if roles:
         visibility.append({"audience.roles": {"$in": roles}})
@@ -3237,9 +3323,9 @@ def _notification_query_for_principal(principal: UserPrincipal) -> Dict[str, Any
     return query
 
 
-def _notification_visibility_filter(principal: UserPrincipal) -> List[Dict[str, Any]]:
+def _notification_visibility_filter(principal: UserPrincipal) -> list[dict[str, Any]]:
     """Return the $or visibility filter for platform_notifications queries."""
-    visibility: List[Dict[str, Any]] = [{"actor.id": principal.user_id}]
+    visibility: list[dict[str, Any]] = [{"actor.id": principal.user_id}]
     roles = [role for role in principal.roles if role]
     if roles:
         visibility.append({"audience.roles": {"$in": roles}})
@@ -3250,7 +3336,7 @@ def _notification_visibility_filter(principal: UserPrincipal) -> List[Dict[str, 
 # Fields excluded from all notification list responses.
 # source_event stores the full event envelope which may contain provider IDs
 # (e.g. stripe_payment_intent_id). It must never be returned to callers.
-_NOTIFICATION_SAFE_PROJECTION: Dict[str, int] = {
+_NOTIFICATION_SAFE_PROJECTION: dict[str, int] = {
     "_id": 0,
     "source_event": 0,   # may contain Stripe/provider IDs — never returned to callers
     "tenant_id": 0,      # internal platform scope
@@ -3263,7 +3349,7 @@ _NOTIFICATION_SAFE_PROJECTION: Dict[str, int] = {
 async def list_notifications(
     status: str = "all",
     limit: int = 50,
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """
@@ -3280,7 +3366,7 @@ async def list_notifications(
         app_id: explicit app scope override for Studio use
     """
     bounded_limit = max(1, min(int(limit), 200))
-    query: Dict[str, Any] = {}
+    query: dict[str, Any] = {}
     if status in ("unread", "read"):
         query["status"] = status
 
@@ -3321,7 +3407,7 @@ async def mark_notification_read(
         from mozaiksai.core.core_config import get_mongo_client
 
         collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        match_query: Dict[str, Any] = {
+        match_query: dict[str, Any] = {
             "notification_id": notification_id,
             "$or": _notification_visibility_filter(principal),
         }
@@ -3334,7 +3420,7 @@ async def mark_notification_read(
 
 @app.post("/api/notifications/mark-all-read")
 async def mark_all_notifications_read(
-    app_id: Optional[str] = None,
+    app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Mark all visible unread notifications as read for the authenticated principal."""
@@ -3342,7 +3428,7 @@ async def mark_all_notifications_read(
         from mozaiksai.core.core_config import get_mongo_client
 
         collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        query: Dict[str, Any] = {"status": "unread"}
+        query: dict[str, Any] = {"status": "unread"}
         effective_app_id = app_id or (principal.app_id if principal.app_id else None)
         if effective_app_id:
             query["app_id"] = effective_app_id
@@ -3451,16 +3537,24 @@ async def chat_meta(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     try:
+        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
+
         has_children = False
 
         coll = await runtime_app._chat_coll()
-        projection = {"cache_seed": 1, "last_artifact": 1, "status": 1, "last_sequence": 1, "_id": 1, "workflow_name": 1}
-        query: Dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
+        projection = {"cache_seed": 1, "workflow_ui_state.last_artifact": 1, "status": 1, "_id": 1, "workflow_name": 1}
+        query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
         if principal.user_id != "anonymous":
             query["user_id"] = principal.user_id
         doc = await coll.find_one(query, projection)
         if not doc:
             return {"exists": False}
+
+        run_history = await runtime_app.persistence_manager.load_run_history(
+            chat_id=chat_id,
+            app_id=app_id,
+        )
+        run_history_count = len(run_history)
 
         artifact_instance_id = None
         artifact_state = None
@@ -3483,8 +3577,8 @@ async def chat_meta(
             "has_children": has_children,
             "cache_seed": doc.get("cache_seed"),
             "status": doc.get("status"),
-            "last_sequence": doc.get("last_sequence"),
-            "last_artifact": doc.get("last_artifact"),
+            "run_history_count": run_history_count,
+            "last_artifact": extract_last_artifact(doc),
             "artifact_instance_id": artifact_instance_id,
             "artifact_state": artifact_state,
             "app_id": app_id,

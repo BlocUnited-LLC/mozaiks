@@ -234,7 +234,7 @@ def _integration_surface_entries(files: dict[str, str]) -> list[dict[str, str]]:
 
 def _database_surface_entries(files: dict[str, str]) -> list[dict[str, str]]:
     def _is_database_surface(filename: str) -> bool:
-        return filename == "config/data.json" or _matches_any(filename, ("config/data_migrations/*.json",))
+        return filename == "data/contract.json" or _matches_any(filename, ("data/migrations/*.json",))
 
     return _code_file_list(files, predicate=_is_database_surface)
 
@@ -491,13 +491,13 @@ def _data_contract_validation(
     *,
     required: bool,
 ) -> RefinementValidationItemResult:
-    filename = "config/data.json"
+    filename = "data/contract.json"
     content = files.get(filename)
     if content is None:
         return _result(
             name="data_contract_validation",
             status="skipped" if not required else "warning",
-            reason="config/data.json was not present in the staged workspace.",
+            reason="data/contract.json was not present in the staged workspace.",
         )
 
     try:
@@ -519,7 +519,7 @@ def _data_contract_validation(
     return _result(
         name="data_contract_validation",
         status="passed",
-        reason="config/data.json is valid JSON.",
+        reason="data/contract.json is valid JSON.",
         artifacts=[filename],
     )
 
@@ -530,12 +530,12 @@ def _migration_plan_validation(
     required: bool,
 ) -> RefinementValidationItemResult:
     entries = _database_surface_entries(files)
-    migration_entries = [entry for entry in entries if entry["filename"] != "config/data.json"]
+    migration_entries = [entry for entry in entries if entry["filename"] != "data/contract.json"]
     if not migration_entries:
         return _result(
             name="migration_plan_validation",
             status="skipped" if not required else "warning",
-            reason="No config/data_migrations/*.json files were present in the staged workspace.",
+            reason="No data/migrations/*.json files were present in the staged workspace.",
         )
 
     warnings: list[str] = []

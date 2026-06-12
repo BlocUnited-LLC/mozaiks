@@ -466,51 +466,22 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # UNIFIED USER MESSAGE INGESTION
     # ==================================================================================
     async def process_incoming_user_message(self, *, chat_id: str, user_id: Optional[str], content: str, source: str = 'ws') -> None:
-        """Persist and forward a free-form user message into the active workflow orchestration.
+        """Forward a free-form user message into the active workflow orchestration.
 
         This is used by both WebSocket (user.input.submit without request_id) and
-        HTTP input endpoint. It appends the message to persistence so that future
-        resume operations have it, and (if an orchestration is already running)
-        attempts to surface it to the user proxy agent if available.
+        HTTP input endpoint. AG2 persists canonical run input when the resumed or
+        newly started workflow executes, so transport only emits the local UI echo
+        here instead of shadow-writing a separate chat-session message row.
         """
         if not content:
             return
-        index: Optional[int] = None
+        _ = user_id
+        _ = source
         try:
-            from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-            pm = getattr(self, '_persistence_manager', None)
-            if not pm:
-                pm = AG2PersistenceManager()
-                self._persistence_manager = pm
-            coll = await pm._coll()  # type: ignore[attr-defined]
-            now_dt = datetime.now(timezone.utc)
-            bump = await coll.find_one_and_update(
-                {"_id": chat_id},
-                {"$inc": {"last_sequence": 1}, "$set": {"last_updated_at": now_dt}},
-                return_document=ReturnDocument.AFTER,
-            )
-            seq = int(bump.get('last_sequence', 1)) if bump else 1
-            index = seq - 1  # zero-based index for UI
-            msg_doc = {
-                'role': 'user',
-                'name': 'user',
-                'content': content,
-                'timestamp': now_dt,
-                'event_type': 'message.created',
-                'sequence': seq,
-                'source': source,
-            }
-            await coll.update_one({"_id": chat_id}, {"$push": {"messages": msg_doc}})
-        except Exception as e:
-            # Persistence failure should not block UI emission; fall back to in-memory sequence
-            logger.error(f"Failed to persist user message for {chat_id}: {e}")
-            try:
-                # Use transport sequence counter (converted to zero-based)
-                seq_fallback = self._get_next_sequence(chat_id)
-                index = max(0, seq_fallback - 1)
-            except Exception:
-                index = 0
-        # Always emit event (best-effort) even if persistence failed
+            seq = self._get_next_sequence(chat_id)
+            index = max(0, seq - 1)
+        except Exception:
+            index = 0
         try:
             await self.send_event_to_ui({'kind': 'text', 'agent': 'user', 'content': content, 'index': index}, chat_id)
         except Exception as emit_err:
@@ -534,23 +505,6 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         applied[k] = v
                     except Exception as ce:
                         logger.debug(f"Context set failed for {k}: {ce}")
-                # Persist a lightweight snapshot of changed keys ONLY
-                try:
-                    from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-                    pm = getattr(self, '_persistence_manager', None) or AG2PersistenceManager()
-                    self._persistence_manager = pm
-                    coll = await pm._coll()  # type: ignore[attr-defined]
-                    now = datetime.now(timezone.utc)
-                    snapshot_doc = {
-                        'role': 'system',
-                        'name': 'context',
-                        'content': {'updated': applied, 'component_id': component_id, 'action_type': action_type},
-                        'timestamp': now,
-                        'event_type': 'context.updated',
-                    }
-                    await coll.update_one({"_id": chat_id, "app_id": app_id}, {"$push": {"messages": snapshot_doc}, "$set": {"last_updated_at": now}})
-                except Exception as pe:
-                    logger.debug(f"Context snapshot persistence failed: {pe}")
             # Emit acknowledgement event
             await self.send_event_to_ui({
                 'kind': 'component_action_ack',
@@ -701,21 +655,6 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         logger.info(f"🚫 [TRANSPORT] Filtered out event from agent '{agent_name}' for chat {chat_id} (visual_agents gate, should_show_to_user=False)")
                         return
                 
-            # Record performance metrics for tool calls (best-effort)
-            try:
-                et_name = type(event).__name__
-                if any(token in et_name for token in ("Tool", "Function", "Call")):
-                    tool_name = getattr(event, "tool_name", None)
-                    if isinstance(tool_name, str) and tool_name.strip():
-                        try:
-                            from mozaiksai.core.observability.performance_manager import get_performance_manager
-                            perf = await get_performance_manager()
-                            await perf.record_tool_call(chat_id or "unknown", tool_name.strip(), True)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
             # Check for suppression flag from derived context hooks
             if envelope and isinstance(envelope, dict):
                 data_payload = envelope.get('data')

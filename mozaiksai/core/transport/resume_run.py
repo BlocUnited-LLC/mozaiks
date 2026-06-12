@@ -39,7 +39,7 @@ class AgentRunResumer:
         doc = await self._fetch_chat_doc(
             chat_id,
             app_id,
-            projection={"status": 1, "messages": 1, "workflow_name": 1, "user_id": 1},
+            projection={"status": 1, "workflow_name": 1, "user_id": 1},
         )
         if not doc:
             self.logger.debug("[AUTO_RESUME] No persisted chat found for %s", chat_id)
@@ -66,7 +66,8 @@ class AgentRunResumer:
             self.logger.warning("[AUTO_RESUME] Status guard failed for %s: %s", chat_id, exc)
             return None
 
-        messages: List[Dict[str, Any]] = doc.get("messages", []) or []
+        pm = self._get_persistence_manager()
+        messages: List[Dict[str, Any]] = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
         if not messages:
             self.logger.debug("[AUTO_RESUME] No messages to replay for %s", chat_id)
             return None
@@ -102,9 +103,10 @@ class AgentRunResumer:
         doc = await self._fetch_chat_doc(
             chat_id,
             app_id,
-            projection={"status": 1, "messages": 1, "workflow_name": 1, "user_id": 1},
+            projection={"status": 1, "workflow_name": 1, "user_id": 1},
         )
-        messages: List[Dict[str, Any]] = doc.get("messages", []) or []
+        pm = self._get_persistence_manager()
+        messages: List[Dict[str, Any]] = await pm.load_run_history(chat_id=chat_id, app_id=app_id)
         status = doc.get("status", "unknown")
         workflow_name = doc.get("workflow_name")
         workflow_startup_mode = self._resolve_startup_mode(workflow_startup_mode, workflow_name)
@@ -198,6 +200,10 @@ class AgentRunResumer:
             return {"last_index": start_index - 1, "replayed_messages": 0}
 
         normalized_startup_mode = str(workflow_startup_mode or "").strip().lower()
+        tool_call_state_by_index = await self._load_tool_call_state_by_message_index(
+            chat_id=chat_id,
+            app_id=app_id,
+        )
         replayed_messages: List[Dict[str, Any]] = []
         last_index = start_index - 1
         for offset, message in enumerate(slice_messages):
@@ -241,9 +247,14 @@ class AgentRunResumer:
                     should_skip = True
             
             if not should_skip:
-                replayed_messages.append(message)
+                replay_message = self._decorate_message_with_tool_call_state(
+                    message=message,
+                    index=absolute_index,
+                    tool_call_state_by_index=tool_call_state_by_index,
+                )
+                replayed_messages.append(replay_message)
                 await send_event(
-                    self._build_text_event(message=message, index=absolute_index, chat_id=chat_id),
+                    self._build_text_event(message=replay_message, index=absolute_index, chat_id=chat_id),
                     chat_id,
                 )
             last_index = absolute_index
@@ -438,6 +449,70 @@ class AgentRunResumer:
         if resume_state is not None:
             boundary["resume_state"] = resume_state
         return boundary
+
+    async def _load_tool_call_state_by_message_index(
+        self,
+        *,
+        chat_id: str,
+        app_id: Optional[str],
+    ) -> Dict[int, Dict[str, Any]]:
+        if not app_id:
+            return {}
+        try:
+            pm = self._get_persistence_manager()
+            loader = getattr(pm, "get_workflow_tool_call_states", None)
+            if loader is None:
+                return {}
+            states = await loader(chat_id=chat_id, app_id=app_id)
+            indexed: Dict[int, Dict[str, Any]] = {}
+            for state in states or []:
+                if not isinstance(state, dict):
+                    continue
+                message_index = state.get("message_index")
+                if not isinstance(message_index, int) or message_index < 0:
+                    continue
+                normalized_state = self._normalize_tool_call_state(state)
+                existing = indexed.get(message_index)
+                if existing is None:
+                    indexed[message_index] = normalized_state
+                    continue
+                existing_stamp = str(existing.get("completed_at") or existing.get("responded_at") or existing.get("timestamp") or "")
+                normalized_stamp = str(
+                    normalized_state.get("completed_at")
+                    or normalized_state.get("responded_at")
+                    or normalized_state.get("timestamp")
+                    or ""
+                )
+                if normalized_stamp >= existing_stamp:
+                    indexed[message_index] = normalized_state
+            return indexed
+        except Exception as exc:
+            self.logger.debug("[AUTO_RESUME] Failed to load workflow UI state for %s: %s", chat_id, exc)
+            return {}
+
+    def _normalize_tool_call_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = self._json_safe(dict(state))
+        normalized.pop("message_index", None)
+        normalized.pop("updated_at", None)
+        return normalized
+
+    def _decorate_message_with_tool_call_state(
+        self,
+        *,
+        message: Dict[str, Any],
+        index: int,
+        tool_call_state_by_index: Dict[int, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        tool_call_state = tool_call_state_by_index.get(index)
+        if not tool_call_state:
+            return message
+
+        decorated = dict(message)
+        metadata = decorated.get("metadata")
+        next_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        next_metadata["tool_call"] = dict(tool_call_state)
+        decorated["metadata"] = next_metadata
+        return decorated
 
     def _sanitize_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         return {

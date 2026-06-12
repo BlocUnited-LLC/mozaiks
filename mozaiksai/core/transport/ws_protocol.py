@@ -103,25 +103,25 @@ class WebSocketProtocolMixin:
             for message in messages_to_send:
                 try:
                     # Check if message is already in proper format for WebSocket
-                    if isinstance(message, dict) and 'type' in message and 'data' in message:
+                    if isinstance(message, dict) and "type" in message and "data" in message:
                         # Ensure the 'data' payload is JSON-serializable (may contain AG2 objects)
                         try:
                             safe_message = message.copy()
-                            safe_message['data'] = self._serialize_ag2_events(message['data'])
+                            safe_message["data"] = self._serialize_ag2_events(message["data"])
 
                             # Extract agent name from data payload and add to top-level envelope for frontend attribution
-                            if isinstance(safe_message.get('data'), dict):
-                                agent_from_data = safe_message['data'].get('agent') or safe_message['data'].get('sender')
+                            if isinstance(safe_message.get("data"), dict):
+                                agent_from_data = safe_message["data"].get("agent") or safe_message["data"].get("sender")
                                 if agent_from_data and isinstance(agent_from_data, str):
-                                    safe_message['agent'] = agent_from_data
-                                elif 'agent' not in safe_message:
+                                    safe_message["agent"] = agent_from_data
+                                elif "agent" not in safe_message:
                                     # Fallback to generic if no agent in data
-                                    safe_message['agent'] = 'Agent'
+                                    safe_message["agent"] = "Agent"
 
-                            if safe_message.get('type') == 'chat.tool_call':
-                                payload_obj = safe_message.get('data', {}).get('payload', {})
+                            if safe_message.get("type") == "chat.tool_call":
+                                payload_obj = safe_message.get("data", {}).get("payload", {})
                                 payload_keys = list(payload_obj.keys()) if isinstance(payload_obj, dict) else []
-                                logger.info('PROTOCOL payload keys before send: %s', payload_keys[:12])
+                                logger.info("PROTOCOL payload keys before send: %s", payload_keys[:12])
                             await websocket.send_json(safe_message)
                             logger.info(f"[PROTOCOL] WebSocket send_json completed for envelope type={safe_message.get('type')}, chat_id={chat_id}")
                         except Exception:
@@ -144,7 +144,7 @@ class WebSocketProtocolMixin:
                         break
                     logger.error(f"Failed to send queued message to {chat_id}: {e}. Will retry shortly.")
                     # Re-queue remaining (including current) for retry
-                    remaining = [message] + messages_to_send[messages_to_send.index(message)+1:]
+                    remaining = [message] + messages_to_send[messages_to_send.index(message) + 1 :]
                     self._message_queues[chat_id] = remaining + self._message_queues.get(chat_id, [])
                     # Schedule a retry flush with small backoff
                     self._schedule_flush_retry(chat_id)
@@ -188,7 +188,7 @@ class WebSocketProtocolMixin:
                 # Send ping
                 ping_data = {
                     "type": "ping",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
 
                 try:
@@ -217,6 +217,7 @@ class WebSocketProtocolMixin:
 
     async def _auto_resume_if_needed(self, chat_id: str, websocket: "WebSocket", app_id: Optional[str]) -> None:
         """Automatically restore chat history for IN_PROGRESS chats on WebSocket connection."""
+        _ = websocket
         try:
             if not app_id:
                 logger.debug(f"[AUTO_RESUME] No app_id for {chat_id}, skipping auto-resume")
@@ -230,6 +231,7 @@ class WebSocketProtocolMixin:
                 if workflow_name:
                     try:
                         from mozaiksai.core.workflow.workflow_manager import workflow_manager
+
                         config = workflow_manager.get_config(workflow_name)
                         workflow_startup_mode = config.get("workflow_startup_mode", "AgentDriven")
                         logger.debug(f"[AUTO_RESUME] Retrieved workflow_startup_mode={workflow_startup_mode} for workflow={workflow_name}")
@@ -237,42 +239,53 @@ class WebSocketProtocolMixin:
                         logger.warning(f"[AUTO_RESUME] Failed to get workflow config: {cfg_err}")
 
             from mozaiksai.core.transport.resume_run import AgentRunResumer
+
             resumer = AgentRunResumer()
 
             async def send_event_wrapper(event_dict: Dict[str, Any], target_chat_id: Optional[str]) -> None:
                 """Wrapper to convert resume events to transport format."""
+                _ = target_chat_id
                 if not isinstance(event_dict, dict):
                     return
 
                 kind = event_dict.get("kind")
                 if kind == "text":
                     # Convert to chat.text format
-                    await self._queue_message_with_backpressure(chat_id, {
-                        "type": "chat.text",
-                        "data": {
-                            "index": event_dict.get("index", 0),
-                            "content": event_dict.get("content", ""),
-                            "role": event_dict.get("role", "user"),
-                            "agent": event_dict.get("agent", "user"),
-                            "sender": event_dict.get("agent", "user"),
-                            "replay": event_dict.get("replay", True),
-                            "timestamp": event_dict.get("timestamp"),
-                            "metadata": event_dict.get("metadata"),
-                        }
-                    })
+                    await self._queue_message_with_backpressure(
+                        chat_id,
+                        {
+                            "type": "chat.text",
+                            "data": {
+                                "index": event_dict.get("index", 0),
+                                "content": event_dict.get("content", ""),
+                                "role": event_dict.get("role", "user"),
+                                "agent": event_dict.get("agent", "user"),
+                                "sender": event_dict.get("agent", "user"),
+                                "replay": event_dict.get("replay", True),
+                                "timestamp": event_dict.get("timestamp"),
+                                "metadata": event_dict.get("metadata"),
+                            },
+                        },
+                    )
                 elif kind == "resume_boundary":
                     # Convert boundary to transport format
                     boundary = {k: v for k, v in event_dict.items() if k != "kind"}
-                    await self._queue_message_with_backpressure(chat_id, {
-                        "type": "chat.resume_boundary",
-                        "data": boundary
-                    })
+                    await self._queue_message_with_backpressure(
+                        chat_id,
+                        {
+                            "type": "chat.resume_boundary",
+                            "data": boundary,
+                        },
+                    )
                 elif kind == "awaiting_reply":
                     awaiting = {k: v for k, v in event_dict.items() if k != "kind"}
-                    await self._queue_message_with_backpressure(chat_id, {
-                        "type": "chat.awaiting_reply",
-                        "data": awaiting,
-                    })
+                    await self._queue_message_with_backpressure(
+                        chat_id,
+                        {
+                            "type": "chat.awaiting_reply",
+                            "data": awaiting,
+                        },
+                    )
 
             # Call the resumer with workflow_startup_mode filtering
             await resumer.auto_resume_if_needed(
@@ -337,16 +350,15 @@ class WebSocketProtocolMixin:
 
             pm = pm_factory()
             coll = await pm._coll()
+            if app_id:
+                run_history = await pm.load_run_history(chat_id=chat_id, app_id=str(app_id))
+                if run_history:
+                    return
 
-            # One-time send per chat, only before any transcript exists.
+            # One-time send per chat, only before any AG2 run history exists.
             query: Dict[str, Any] = {
                 "_id": chat_id,
                 "user_id": user_id,
-                "$or": [
-                    {"last_sequence": {"$exists": False}},
-                    {"last_sequence": 0},
-                ],
-                "messages.0": {"$exists": False},
             }
             if not ignore_sent_guard:
                 query["userdriven_bootstrap_sent"] = {"$ne": True}
@@ -371,18 +383,16 @@ class WebSocketProtocolMixin:
             if not claimed:
                 return
 
-            # Persist the bootstrap prompt so reconnect/resume can replay it.
-            # This keeps startup behavior deterministic across refreshes.
+            # Persist the bootstrap prompt as an AG2 assistant event so replay comes
+            # from the run stream rather than a separate chat-session message row.
             try:
                 if app_id:
-                    await pm.persist_initial_messages(
+                    await pm.append_run_assistant_message(
                         chat_id=chat_id,
                         app_id=str(app_id),
-                        messages=[{
-                            "role": "assistant",
-                            "name": bootstrap_agent,
-                            "content": prompt,
-                        }],
+                        content=prompt,
+                        agent_name=bootstrap_agent,
+                        metadata={"source": "orchestrator.initial_message_to_user"},
                     )
             except Exception as persist_err:
                 logger.warning("[USERDRIVEN] Failed to persist bootstrap prompt for %s: %s", chat_id, persist_err)
@@ -414,119 +424,6 @@ class WebSocketProtocolMixin:
             logger.info("[USERDRIVEN] Emitted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
         except Exception as e:
             logger.warning("[USERDRIVEN] Failed bootstrap emit for chat %s: %s", chat_id, e)
-
-    async def _emit_persisted_userdriven_bootstrap_if_needed(
-        self,
-        chat_id: str,
-        user_id: str,
-        workflow_name: Optional[str],
-        app_id: Optional[str],
-        *,
-        session_dedupe_token: Optional[str] = None,
-    ) -> bool:
-        """Re-emit a previously persisted bootstrap prompt for bootstrap-only chats.
-
-        This is a narrow fallback for UserDriven workflows where the transcript already
-        contains the initial assistant prompt but the frontend currently has no visible
-        workflow messages to render.
-        """
-        if not workflow_name:
-            return False
-
-        try:
-            conn_meta = self.connections.get(chat_id) or {}
-            if conn_meta.get("userdriven_bootstrap_visible"):
-                return False
-
-            if session_dedupe_token:
-                seen_tokens = getattr(self, "_userdriven_persisted_bootstrap_session_seen", None)
-                if seen_tokens is None:
-                    seen_tokens = set()
-                    self._userdriven_persisted_bootstrap_session_seen = seen_tokens
-                if session_dedupe_token in seen_tokens:
-                    return False
-
-            from mozaiksai.core.workflow.workflow_manager import workflow_manager
-
-            cfg = workflow_manager.get_config(str(workflow_name)) or {}
-            workflow_startup_mode = str(cfg.get("workflow_startup_mode", "AgentDriven")).strip().lower()
-            if workflow_startup_mode != "userdriven":
-                return False
-
-            pm_factory = getattr(self, "_get_or_create_persistence_manager", None)
-            if not callable(pm_factory):
-                return False
-
-            pm = pm_factory()
-            coll = await pm._coll()
-            query: Dict[str, Any] = {
-                "_id": chat_id,
-                "user_id": user_id,
-            }
-            if app_id:
-                query["app_id"] = app_id
-
-            doc = await coll.find_one(query, {"messages": 1, "userdriven_bootstrap_sent": 1})
-            if not doc or not doc.get("userdriven_bootstrap_sent"):
-                return False
-
-            messages = doc.get("messages") or []
-            if not isinstance(messages, list) or not messages:
-                return False
-
-            # Only use this fallback before the user has engaged the workflow.
-            has_user_message = any(isinstance(msg, dict) and str(msg.get("role") or "").lower() == "user" for msg in messages)
-            if has_user_message:
-                return False
-
-            first_message = messages[0] if isinstance(messages[0], dict) else None
-            if not first_message:
-                return False
-
-            role = str(first_message.get("role") or "").lower()
-            content = str(first_message.get("content") or "").strip()
-            if role != "assistant" or not content:
-                return False
-
-            bootstrap_agent = (
-                str(first_message.get("agent_name") or first_message.get("name") or cfg.get("initial_agent") or "Assistant").strip()
-                or "Assistant"
-            )
-            timestamp = first_message.get("timestamp")
-            if isinstance(timestamp, datetime):
-                timestamp = timestamp.isoformat()
-
-            await self._queue_message_with_backpressure(
-                chat_id,
-                {
-                    "type": "chat.text",
-                    "data": {
-                        "content": content,
-                        "agent": bootstrap_agent,
-                        "sender": bootstrap_agent,
-                        "role": "assistant",
-                        "timestamp": timestamp,
-                        "source": "orchestrator.initial_message_to_user",
-                        "ui_visibility": "default",
-                        "metadata": {
-                            "source": "orchestrator.initial_message_to_user",
-                            "workflow_startup_mode": "UserDriven",
-                            "pre_workflow": True,
-                            "persisted_bootstrap": True,
-                        },
-                    },
-                },
-            )
-            await self._flush_message_queue(chat_id)
-            if chat_id in self.connections:
-                self.connections[chat_id]["userdriven_bootstrap_visible"] = True
-            if session_dedupe_token:
-                self._userdriven_persisted_bootstrap_session_seen.add(session_dedupe_token)
-            logger.info("[USERDRIVEN] Re-emitted persisted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
-            return True
-        except Exception as e:
-            logger.warning("[USERDRIVEN] Failed persisted bootstrap fallback for chat %s: %s", chat_id, e)
-            return False
 
     # ==================================================================================
     # CONNECTION CLEANUP

@@ -124,6 +124,7 @@ class AgentSpec(DeclarativeModel):
     max_consecutive_auto_reply: int = 2
     structured_outputs_required: bool = False
     image_generation_enabled: bool = False
+    sandbox_shell: bool = False
 
     @field_validator("name")
     @classmethod
@@ -164,13 +165,15 @@ class AgentsConfig(DeclarativeModel):
         return self
 
 
-class HandoffRuleSpec(DeclarativeModel):
+class TransitionRuleSpec(DeclarativeModel):
     source_agent: str
     target_agent: str
-    handoff_type: Literal["after_work", "condition"]
-    condition: Optional[str] = None
-    condition_type: Optional[Literal["expression", "context_expression", "context"]] = None
-    condition_scope: Optional[str] = None
+    transition_type: Literal["after_turn", "condition"]
+    condition_type: Optional[Literal["context_equals", "context_expression", "tool_called"]] = None
+    condition_key: Optional[str] = None
+    condition_value: Optional[Any] = None
+    context_expression: Optional[str] = None
+    tool_name: Optional[str] = None
     transition_target: Optional[str] = None
 
     @field_validator("source_agent", "target_agent")
@@ -178,23 +181,72 @@ class HandoffRuleSpec(DeclarativeModel):
     def _validate_agent_refs(cls, value: Any, info):  # type: ignore[no-untyped-def]
         return _required_text(value, field_name=info.field_name)
 
-    @field_validator("condition", "condition_scope", "transition_target", mode="before")
+    @field_validator("condition_type", mode="before")
+    @classmethod
+    def _normalize_condition_type(cls, value: Any) -> Optional[str]:
+        text = _optional_text(value)
+        return text.lower() if text else None
+
+    @field_validator("condition_key", "context_expression", "tool_name", "transition_target", mode="before")
     @classmethod
     def _normalize_optional_text(cls, value: Any) -> Optional[str]:
         return _optional_text(value)
 
     @model_validator(mode="after")
-    def _validate_condition_shape(self) -> "HandoffRuleSpec":
-        if self.handoff_type == "condition" and not self.condition:
+    def _validate_condition_shape(self) -> "TransitionRuleSpec":
+        if self.transition_type == "after_turn":
+            if (
+                self.condition_type
+                or self.condition_key
+                or self.condition_value is not None
+                or self.context_expression
+                or self.tool_name
+            ):
+                raise ValueError(
+                    f"transition rule '{self.source_agent} -> {self.target_agent}' with "
+                    "transition_type='after_turn' must not declare condition fields"
+                )
+            return self
+
+        if not self.condition_type:
             raise ValueError(
-                f"handoff rule '{self.source_agent} -> {self.target_agent}' with handoff_type='condition' "
-                "requires a non-empty condition"
+                f"transition rule '{self.source_agent} -> {self.target_agent}' with transition_type='condition' "
+                "requires condition_type"
             )
+        if self.condition_type == "context_equals":
+            if not self.condition_key:
+                raise ValueError(
+                    f"transition rule '{self.source_agent} -> {self.target_agent}' with "
+                    "condition_type='context_equals' requires condition_key"
+                )
+            if self.tool_name:
+                raise ValueError("condition_type='context_equals' must not declare tool_name")
+            if self.context_expression:
+                raise ValueError("condition_type='context_equals' must not declare context_expression")
+        if self.condition_type == "context_expression":
+            if not self.context_expression:
+                raise ValueError(
+                    f"transition rule '{self.source_agent} -> {self.target_agent}' with "
+                    "condition_type='context_expression' requires context_expression"
+                )
+            if self.condition_key or self.condition_value is not None or self.tool_name:
+                raise ValueError(
+                    "condition_type='context_expression' must not declare condition_key, "
+                    "condition_value, or tool_name"
+                )
+        if self.condition_type == "tool_called":
+            if not self.tool_name:
+                raise ValueError(
+                    f"transition rule '{self.source_agent} -> {self.target_agent}' with "
+                    "condition_type='tool_called' requires tool_name"
+                )
+            if self.condition_key or self.condition_value is not None or self.context_expression:
+                raise ValueError("condition_type='tool_called' must not declare context condition fields")
         return self
 
 
-class HandoffsConfig(DeclarativeModel):
-    handoff_rules: List[HandoffRuleSpec] = Field(default_factory=list)
+class TransitionGraphConfig(DeclarativeModel):
+    transition_rules: List[TransitionRuleSpec] = Field(default_factory=list)
 
 
 class ContextTriggerMatchSpec(DeclarativeModel):
@@ -238,7 +290,7 @@ class ContextTriggerSpec(DeclarativeModel):
 
 
 class ContextVariableSourceSpec(DeclarativeModel):
-    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file"]
+    type: Literal["config", "data_reference", "data_entity", "computed", "state", "external", "file", "build_context"]
     env_var: Optional[str] = None
     default: Optional[Any] = None
     required: Optional[bool] = None
@@ -583,20 +635,26 @@ class ToolsConfig(DeclarativeModel):
     lifecycle_tools: List[LifecycleToolSpec] = Field(default_factory=list)
 
 
-class HookSpec(DeclarativeModel):
-    hook_type: Literal["update_agent_state"]
-    hook_agent: str
-    filename: str
+class PromptMiddlewareSpec(DeclarativeModel):
+    agent: str
+    filename: Optional[str] = None
     function: str
 
-    @field_validator("hook_agent", "filename", "function")
+    @field_validator("agent", "function")
     @classmethod
     def _required_fields(cls, value: Any, info):  # type: ignore[no-untyped-def]
         return _required_text(value, field_name=info.field_name)
 
+    @field_validator("filename")
+    @classmethod
+    def _optional_filename(cls, value: Any):  # type: ignore[no-untyped-def]
+        if value is None:
+            return None
+        return _required_text(value, field_name="filename")
 
-class HooksConfig(DeclarativeModel):
-    hooks: List[HookSpec] = Field(default_factory=list)
+
+class MiddlewareConfig(DeclarativeModel):
+    prompt_middleware: List[PromptMiddlewareSpec] = Field(default_factory=list)
 
 
 class UIConfig(DeclarativeModel):
@@ -823,16 +881,16 @@ def parse_agents_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     return {"agents": agents_map}
 
 
-def parse_handoffs_config(raw: Dict[str, Any]) -> Dict[str, Any]:
-    return _validate_config(HandoffsConfig, raw, "handoffs.yaml")
+def parse_transition_graph_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_config(TransitionGraphConfig, raw, "transition_graph.yaml")
 
 
 def parse_tools_config(raw: Dict[str, Any]) -> Dict[str, Any]:
     return _validate_config(ToolsConfig, raw, "tools.yaml")
 
 
-def parse_hooks_config(raw: Dict[str, Any]) -> Dict[str, Any]:
-    return _validate_config(HooksConfig, raw, "hooks.yaml")
+def parse_middleware_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+    return _validate_config(MiddlewareConfig, raw, "middleware.yaml")
 
 
 def parse_ui_config(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -854,11 +912,11 @@ def parse_context_variables_config(raw: Dict[str, Any]) -> Dict[str, Any]:
 __all__ = [
     "parse_orchestrator_config",
     "parse_agents_config",
-    "parse_handoffs_config",
+    "parse_transition_graph_config",
     "parse_context_variables_config",
     "parse_structured_outputs_config",
     "parse_tools_config",
     "parse_ui_config",
-    "parse_hooks_config",
+    "parse_middleware_config",
     "parse_a2a_config",
 ]

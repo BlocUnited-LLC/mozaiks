@@ -1,37 +1,72 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .contracts import ControlPlaneToolDefinition
 
+ControlPlaneCheckpointMode = Literal["ag2_structured_agent", "deterministic_handler"]
+ControlPlaneCheckpointEvent = Literal[
+    "request_submitted",
+    "route_requested",
+    "decision_requested",
+    "scope_requested",
+    "contract_surface_requested",
+    "coding_requested",
+]
+ControlPlaneOutputContract = Literal[
+    "ChangeClassifierResult",
+    "ScopeProposal",
+    "ContractSurfaceClassification",
+    "CodingWorkerPlan",
+]
 
-class ControlPlaneProfileInfo(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+AG2_CHECKPOINT_OUTPUT_CONTRACTS: dict[ControlPlaneCheckpointEvent, ControlPlaneOutputContract] = {
+    "request_submitted": "ChangeClassifierResult",
+    "scope_requested": "ScopeProposal",
+    "contract_surface_requested": "ContractSurfaceClassification",
+    "coding_requested": "CodingWorkerPlan",
+}
 
-    id: str = Field(min_length=1)
-    display_name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-
-
-class ControlPlaneHarnessManifest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    implementation: str = Field(min_length=1)
-    supported_trigger_sources: list[str] = Field(default_factory=list)
+CHECKPOINT_IDS: dict[ControlPlaneCheckpointEvent, str] = {
+    "request_submitted": "request_intake",
+    "route_requested": "refinement_route",
+    "decision_requested": "decision",
+    "scope_requested": "scope_selection",
+    "contract_surface_requested": "contract_surface_planning",
+    "coding_requested": "coding_refinement",
+}
 
 
 class ControlPlaneCheckpointManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(min_length=1)
-    event: str = Field(min_length=1)
-    entrypoint: str = Field(min_length=1)
-    prompt_id: Optional[str] = None
+    event: ControlPlaneCheckpointEvent
+    prompt_id: str | None = None
     tool_ids: list[str] = Field(default_factory=list)
     ui_tool_ids: list[str] = Field(default_factory=list)
+
+    @property
+    def id(self) -> str:
+        return CHECKPOINT_IDS[self.event]
+
+    @property
+    def mode(self) -> ControlPlaneCheckpointMode:
+        return "ag2_structured_agent" if self.event in AG2_CHECKPOINT_OUTPUT_CONTRACTS else "deterministic_handler"
+
+    @property
+    def output_contract(self) -> ControlPlaneOutputContract | None:
+        return AG2_CHECKPOINT_OUTPUT_CONTRACTS.get(self.event)
+
+    @model_validator(mode="after")
+    def _validate_mode_contract(self) -> ControlPlaneCheckpointManifest:
+        if self.mode == "ag2_structured_agent" and not self.prompt_id:
+            raise ValueError(f"{self.event} checkpoints must declare prompt_id")
+        if self.mode == "deterministic_handler" and self.prompt_id:
+            raise ValueError(f"{self.event} checkpoints must not declare prompt_id")
+        return self
 
 
 class ControlPlaneChangeRouteManifest(BaseModel):
@@ -61,7 +96,7 @@ class ControlPlaneArtifactRoutingManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     artifact_kind: str = Field(min_length=1)
-    label: Optional[str] = None
+    label: str | None = None
     routes: ControlPlaneArtifactChangeRoutesManifest
 
     @field_validator("artifact_kind")
@@ -88,7 +123,7 @@ class ControlPlaneRoutingManifest(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def _unique_artifact_kinds(self) -> "ControlPlaneRoutingManifest":
+    def _unique_artifact_kinds(self) -> ControlPlaneRoutingManifest:
         artifact_kinds = [artifact.artifact_kind for artifact in self.artifacts]
         if len(artifact_kinds) != len(set(artifact_kinds)):
             raise ValueError("control_plane.yaml routing.artifacts artifact_kind values must be unique")
@@ -99,13 +134,11 @@ class ControlPlaneManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["mozaiks.control_plane"]
-    profile: ControlPlaneProfileInfo
-    harness: ControlPlaneHarnessManifest
     routing: ControlPlaneRoutingManifest = Field(default_factory=ControlPlaneRoutingManifest)
     checkpoints: list[ControlPlaneCheckpointManifest] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _unique_checkpoints(self) -> "ControlPlaneManifest":
+    def _unique_checkpoints(self) -> ControlPlaneManifest:
         checkpoint_ids = [checkpoint.id for checkpoint in self.checkpoints]
         if len(checkpoint_ids) != len(set(checkpoint_ids)):
             raise ValueError("control_plane.yaml checkpoint ids must be unique")
@@ -129,7 +162,7 @@ class ControlPlanePromptsManifest(BaseModel):
     prompts: list[ControlPlanePromptDefinition] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _unique_prompt_ids(self) -> "ControlPlanePromptsManifest":
+    def _unique_prompt_ids(self) -> ControlPlanePromptsManifest:
         prompt_ids = [prompt.id for prompt in self.prompts]
         if len(prompt_ids) != len(set(prompt_ids)):
             raise ValueError("prompts.yaml prompt ids must be unique")
@@ -143,7 +176,7 @@ class ControlPlaneToolsManifest(BaseModel):
     tools: list[ControlPlaneToolDefinition] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _unique_tool_ids(self) -> "ControlPlaneToolsManifest":
+    def _unique_tool_ids(self) -> ControlPlaneToolsManifest:
         tool_ids = [tool.id for tool in self.tools]
         if len(tool_ids) != len(set(tool_ids)):
             raise ValueError("tools.yaml tool ids must be unique")
@@ -158,7 +191,7 @@ class ControlPlaneScopePolicyManifest(BaseModel):
     overflow_behavior: Literal["clarify", "workflow"] = "clarify"
 
     @model_validator(mode="after")
-    def _validate_thresholds(self) -> "ControlPlaneScopePolicyManifest":
+    def _validate_thresholds(self) -> ControlPlaneScopePolicyManifest:
         if self.auto_apply_max_paths > self.max_selected_paths:
             raise ValueError("scope.auto_apply_max_paths must be <= scope.max_selected_paths")
         return self
@@ -180,31 +213,31 @@ class LoadedControlPlanePack(BaseModel):
     tools: ControlPlaneToolsManifest
     policies: ControlPlanePoliciesManifest = Field(default_factory=ControlPlanePoliciesManifest)
 
-    def prompt_by_id(self, prompt_id: str) -> Optional[ControlPlanePromptDefinition]:
+    def prompt_by_id(self, prompt_id: str) -> ControlPlanePromptDefinition | None:
         for prompt in self.prompts.prompts:
             if prompt.id == prompt_id:
                 return prompt
         return None
 
-    def tool_by_id(self, tool_id: str) -> Optional[ControlPlaneToolDefinition]:
+    def tool_by_id(self, tool_id: str) -> ControlPlaneToolDefinition | None:
         for tool in self.tools.tools:
             if tool.id == tool_id:
                 return tool
         return None
 
-    def checkpoint_by_id(self, checkpoint_id: str) -> Optional[ControlPlaneCheckpointManifest]:
+    def checkpoint_by_id(self, checkpoint_id: str) -> ControlPlaneCheckpointManifest | None:
         for checkpoint in self.manifest.checkpoints:
             if checkpoint.id == checkpoint_id:
                 return checkpoint
         return None
 
-    def checkpoint_by_event(self, event_name: str) -> Optional[ControlPlaneCheckpointManifest]:
+    def checkpoint_by_event(self, event_name: str) -> ControlPlaneCheckpointManifest | None:
         for checkpoint in self.manifest.checkpoints:
             if checkpoint.event == event_name:
                 return checkpoint
         return None
 
-    def routing_for_artifact(self, artifact_kind: str) -> Optional[ControlPlaneArtifactRoutingManifest]:
+    def routing_for_artifact(self, artifact_kind: str) -> ControlPlaneArtifactRoutingManifest | None:
         requested = str(artifact_kind or "").strip().lower()
         artifacts = list(self.manifest.routing.artifacts)
         for candidate in [requested, str(self.manifest.routing.default_artifact_kind or "").strip().lower()]:

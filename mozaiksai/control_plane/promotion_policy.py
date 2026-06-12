@@ -177,7 +177,7 @@ def _required_artifacts_for(*, lane: str, path: str) -> list[str]:
     if lane == "experience_design":
         return ["experience_spec"]
     if _matches_any(path, _DATA_MODEL_BACKEND_PATTERNS):
-        return ["config/data.json", "config/data_migrations/*.json"]
+        return ["data/contract.json", "data/migrations/*.json"]
     return []
 
 
@@ -190,12 +190,12 @@ def _has_required_artifact_evidence(required_artifacts: list[str], artifact_name
             if any("experience_spec" in artifact for artifact in artifact_names):
                 return True
             return False
-        if required_lower == "config/data.json":
-            if any("data_contract" in artifact or artifact == "config/data.json" for artifact in artifact_names):
+        if required_lower == "data/contract.json":
+            if any("data_contract" in artifact or artifact == "data/contract.json" for artifact in artifact_names):
                 continue
             return False
-        if required_lower == "config/data_migrations/*.json":
-            if any("data_migrations/" in artifact for artifact in artifact_names):
+        if required_lower == "data/migrations/*.json":
+            if any("data/migrations/" in artifact for artifact in artifact_names):
                 continue
             return False
     return True

@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from importlib import import_module
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .executor import ControlPlaneToolExecutor
 from .loader import load_selected_control_plane_pack
 from .schema import ControlPlaneCheckpointManifest, LoadedControlPlanePack
+
+CONTROL_PLANE_HARNESS_ENTRYPOINT = (
+    "mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness"
+)
+
+CHECKPOINT_HANDLER_ENTRYPOINTS: dict[str, str] = {
+    "request_submitted": "mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier",
+    "route_requested": "mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver",
+    "decision_requested": "mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy",
+    "scope_requested": "mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer",
+    "contract_surface_requested": "mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner",
+    "coding_requested": "mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker",
+}
 
 
 class ControlPlaneHandlerResolutionError(RuntimeError):
@@ -36,7 +50,7 @@ class ControlPlaneCheckpointRuntime:
     def tool_executor(self) -> ControlPlaneToolExecutor:
         return self._tool_executor
 
-    def checkpoint(self, event_name: str) -> Optional[ControlPlaneCheckpointManifest]:
+    def checkpoint(self, event_name: str) -> ControlPlaneCheckpointManifest | None:
         return self.pack.checkpoint_by_event(event_name)
 
     def has_checkpoint(self, event_name: str) -> bool:
@@ -54,8 +68,13 @@ class ControlPlaneCheckpointRuntime:
         checkpoint = self.checkpoint(event_name)
         if checkpoint is None:
             return None
+        entrypoint = CHECKPOINT_HANDLER_ENTRYPOINTS.get(checkpoint.event)
+        if entrypoint is None:
+            raise ControlPlaneHandlerResolutionError(
+                f"No runtime handler is registered for control-plane checkpoint event '{checkpoint.event}'."
+            )
         instance = instantiate_control_plane_handler(
-            checkpoint.entrypoint,
+            entrypoint,
             pack_loader=self._pack_loader,
             tool_executor=self._tool_executor,
             **dependencies,
@@ -126,9 +145,8 @@ def build_selected_control_plane_harness(
         pack=pack,
         tool_executor=ControlPlaneToolExecutor(pack_loader=pack_loader),
     )
-    harness_manifest = pack.manifest.harness
     return instantiate_control_plane_handler(
-        harness_manifest.implementation,
+        CONTROL_PLANE_HARNESS_ENTRYPOINT,
         checkpoint_runtime=checkpoint_runtime,
         pack_loader=pack_loader,
         tool_executor=checkpoint_runtime.tool_executor,

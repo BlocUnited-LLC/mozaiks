@@ -10,6 +10,7 @@ from uuid import uuid4
 from pymongo import ReturnDocument
 
 from mozaiksai.core.core_config import get_mongo_client
+from mozaiksai.core.runtime.app.paths import APP_DATA_MIGRATIONS_DIR
 
 from .indexes import DatabaseIndexApplyError, _normalize_index_spec
 from .mongo import MongoPersistenceContext
@@ -67,13 +68,13 @@ def _require_operations(value: Any, path: str) -> list[Any]:
 
 
 def load_data_migrations(app_root: Path) -> list[DatabaseMigration]:
-    """Load app/config/data_migrations/*.json in filename order."""
+    """Load app data migrations in filename order."""
 
-    migrations_dir = Path(app_root) / "config" / "data_migrations"
+    migrations_dir = Path(app_root) / APP_DATA_MIGRATIONS_DIR
     if not migrations_dir.exists():
         return []
     if not migrations_dir.is_dir():
-        raise DatabaseMigrationError("config/data_migrations must be a directory")
+        raise DatabaseMigrationError(f"{APP_DATA_MIGRATIONS_DIR} must be a directory")
 
     migrations: list[DatabaseMigration] = []
     for path in sorted(migrations_dir.glob("*.json"), key=lambda item: item.name.lower()):
@@ -411,7 +412,8 @@ async def _apply_operation(
                 normalized = _normalize_index_spec(index_spec, f"{path}.index")
             except DatabaseIndexApplyError as exc:
                 raise DatabaseMigrationError(str(exc)) from exc
-            await collection.ensure_indexes([normalized])
+            index_dict: dict[str, Any] = {"keys": normalized.keys, "name": normalized.name, **normalized.options}
+            await collection.ensure_indexes([index_dict])
     except Exception as exc:
         message = (
             f"Migration {migration_id!r} for app_id={app_id!r} failed at operation "

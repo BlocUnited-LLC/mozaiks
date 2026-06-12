@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,14 +30,13 @@ from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plan
 from mozaiksai.control_plane.contracts import (
     CONTRACT_SURFACE_CANONICAL_PATHS,
     CONTRACT_SURFACE_DEPENDENCY_ORDER,
-    ContractSurfaceKind,
     ContractSurfacePlan,
     ContractSurfaceUpdate,
 )
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
-from mozaiksai.core.capabilities import get_general_capability_service
+from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 
 from .refinement_router import RefinementRequest, RefinementRoutingDecision
 
@@ -84,7 +83,7 @@ class _ContractSurfaceClassification(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     requires_schema_migration: bool = False
     fallback_to_workflow: bool = False
-    fallback_reason: Optional[str] = None
+    fallback_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -120,12 +119,12 @@ class ContractSurfacePlanner:
     def __init__(
         self,
         *,
-        capability_service: Any = None,
+        agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
         pack_loader: Any = load_selected_control_plane_pack,
         tool_executor: Any = None,
     ) -> None:
-        self._service = capability_service or get_general_capability_service()
+        self._agent_runner = agent_runner or AG2StructuredAgentRunner()
         self._config_loader = config_loader
         self._pack_loader = pack_loader
         self._tool_executor = tool_executor or ControlPlaneToolExecutor(pack_loader=pack_loader)
@@ -192,17 +191,12 @@ class ContractSurfacePlanner:
         )
 
         try:
-            response = await self._service.generate_json_completion(
+            classification = await self._agent_runner.run(
+                agent_name="ContractSurfacePlanner",
                 system_prompt=prompt.content,
                 user_prompt=user_prompt,
-                app_id=str(refinement_request.app_id or "").strip() or None,
-                user_id=str(refinement_request.user_id or "").strip() or None,
-                ui_context={"surface": "contract_surface_planner"},
                 llm_config=llm_config,
-                temperature=0.1,
-            )
-            classification = _ContractSurfaceClassification.model_validate(
-                response.get("parsed") or {}
+                response_schema=_ContractSurfaceClassification,
             )
         except Exception as exc:
             _logger.warning("Contract surface classification failed: %s", exc)

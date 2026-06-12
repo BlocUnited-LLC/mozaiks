@@ -159,8 +159,8 @@ def neutral_manifest() -> list[dict[str, Any]]:
     return [
         {"path": "app.json"},
         {"path": "config/shell.json"},
-        {"path": "config/data.json"},
-        {"path": "config/data_migrations/001_initial.json"},
+        {"path": "data/contract.json"},
+        {"path": "data/migrations/001_initial.json"},
         {"path": "config/integrations.json"},
         {"path": "docs/integrations.md"},
         {"path": "services/integrations/analytics_provider_client.py"},

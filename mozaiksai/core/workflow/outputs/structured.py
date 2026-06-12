@@ -322,9 +322,10 @@ def supports_provider_response_format(model_cls: type[BaseModel]) -> tuple[bool,
 
 
 def _build_field(field_kwargs: Dict[str, Any]) -> Any:
-    if 'default' in field_kwargs:
+    if 'default' in field_kwargs and field_kwargs["default"] is not None:
         default = field_kwargs.pop('default')
         return Field(default, **field_kwargs)
+    field_kwargs.pop("default", None)
     return Field(..., **field_kwargs)
 
 

@@ -95,7 +95,7 @@ def _materialize_app_schema_file_map(payload: Dict[str, Any]) -> Dict[str, str]:
         "theme_config_patch": "brand/theme_config.json",
         "shell_config": "config/shell.json",
         "asset_manifest": "config/asset_manifest.json",
-        "data_contract": "config/data.json",
+        "data_contract": "data/contract.json",
     }
     for key, path in optional_json_outputs.items():
         value = payload.get(key)
