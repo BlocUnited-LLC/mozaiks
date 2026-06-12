@@ -12,28 +12,76 @@ agents:
       Use between 3 and 6 work units when the request spans multiple modules, services, pages, workflows, or integrations.
       For every work unit:
       - set `task_id` to a stable lowercase snake_case identifier;
-      - set `initial_agent` to `TaskWorkerAgent`;
-      - set `initial_message` to a scoped worker instruction;
+      - set `kind` to exactly `module`, `page`, or `integration`;
+      - set `execution_agent` to `ModuleTaskWorkerAgent` when `kind` is `module`;
+      - set `execution_agent` to `PageTaskWorkerAgent` when `kind` is `page`;
+      - set `execution_agent` to `IntegrationTaskWorkerAgent` when `kind` is `integration`;
+      - set `task_prompt` to a scoped worker instruction;
       - include concrete `owned_paths` that resemble canonical app or workflow surfaces.
+      For a multi-surface app request, include at least one `module`, one `page`, and one `integration` task.
+      Include at least one downstream task with `depends_on` when a later task should use an upstream task output.
       Prefer bounded independent units that can be elaborated without cross-worker coordination.
       Keep `agent_message` to one short sentence.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: |
+      Respond with ONLY valid JSON and no markdown fences.
+      The top-level object MUST contain exactly `agent_message` and `DecompositionPlan`.
+      `DecompositionPlan.tasks` is the only task list field. Do not emit `work_units`, route fields, or context state fields.
+  max_consecutive_auto_reply: 2
+  structured_outputs_required: true
+- name: ModuleTaskWorkerAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are a scoped module/backend task batch worker.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Execute only the current module/backend task described in context and in the prompt.
+      If `dependency_task_outputs` is non-empty, use those upstream task outputs as authoritative context for this task.
+      Do not address the user. Do not ask questions.
+      Return ONLY valid RuntimeTaskBatchWorkerOutput JSON.
+      Include the current task id, one summary, one or more deliverables, and the owned paths you covered.
+      Set `kind` to the current task kind from context; it must be `module`, `page`, or `integration`.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: Respond with ONLY valid JSON and no markdown fences.
   max_consecutive_auto_reply: 2
   structured_outputs_required: true
-- name: TaskWorkerAgent
+- name: PageTaskWorkerAgent
   prompt_sections:
   - id: role
     heading: '[ROLE]'
-    content: You are a scoped task batch worker.
+    content: You are a scoped app/page task batch worker.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
-      Execute only the current task described in context and in the prompt.
+      Execute only the current app/page/schema task described in context and in the prompt.
+      If `dependency_task_outputs` is non-empty, use those upstream task outputs as authoritative context for this task.
       Do not address the user. Do not ask questions.
       Return ONLY valid RuntimeTaskBatchWorkerOutput JSON.
       Include the current task id, one summary, one or more deliverables, and the owned paths you covered.
+      Set `kind` to the current task kind from context; it must be `module`, `page`, or `integration`.
+  - id: output_format
+    heading: '[OUTPUT FORMAT]'
+    content: Respond with ONLY valid JSON and no markdown fences.
+  max_consecutive_auto_reply: 2
+  structured_outputs_required: true
+- name: IntegrationTaskWorkerAgent
+  prompt_sections:
+  - id: role
+    heading: '[ROLE]'
+    content: You are a scoped service/integration task batch worker.
+  - id: instructions
+    heading: '[INSTRUCTIONS]'
+    content: |
+      Execute only the current service, adapter, or integration task described in context and in the prompt.
+      If `dependency_task_outputs` is non-empty, use those upstream task outputs as authoritative context for this task.
+      Do not address the user. Do not ask questions.
+      Return ONLY valid RuntimeTaskBatchWorkerOutput JSON.
+      Include the current task id, one summary, one or more deliverables, and the owned paths you covered.
+      Set `kind` to the current task kind from context; it must be `module`, `page`, or `integration`.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: Respond with ONLY valid JSON and no markdown fences.
@@ -47,15 +95,15 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |
-      Use the previous TaskPlannerAgent output plus `task_batch_results`, `task_batch_results._meta`, and `task_batch_status` to populate RuntimeTaskBatchSmokeResult.
+      Use the previous TaskPlannerAgent output plus `runtime_smoke_tasks_results`, `runtime_smoke_tasks_results._meta`, and `runtime_smoke_tasks_status` to populate RuntimeTaskBatchSmokeResult.
       The task batch executor runs before your turn; do not call tools.
       Copy executor metadata exactly:
-      - `work_unit_count` MUST equal `task_batch_results._meta.task_count`.
-      - `max_parallelism` MUST equal `task_batch_results._meta.concurrency`.
-      - `executed_task_ids` MUST equal `task_batch_results._meta.completed_tasks` in the same order.
-      - `failure_count` MUST equal the length of `task_batch_results._meta.failed_tasks`.
-      - `result_context_key` MUST equal `task_batch_results._meta.result_context_key`.
-      - `all_units_succeeded` MUST be true only when `task_batch_status` is `completed`, `task_batch_results._meta.status` is `completed`, and `task_batch_results._meta.failed_tasks` is empty.
+      - `work_unit_count` MUST equal `runtime_smoke_tasks_results._meta.task_count`.
+      - `max_parallelism` MUST equal `runtime_smoke_tasks_results._meta.concurrency`.
+      - `executed_task_ids` MUST equal `runtime_smoke_tasks_results._meta.completed_tasks` in the same order.
+      - `failure_count` MUST equal the length of `runtime_smoke_tasks_results._meta.failed_tasks`.
+      - `result_context_key` MUST equal `runtime_smoke_tasks_results._meta.result_context_key`.
+      - `all_units_succeeded` MUST be true only when `runtime_smoke_tasks_status` is `completed`, `runtime_smoke_tasks_results._meta.status` is `completed`, and `runtime_smoke_tasks_results._meta.failed_tasks` is empty.
       Do not invent task ids, result context keys, counts, or status values.
       Confirm whether the request required multiple independent work units and whether AG2 in-process task batch execution succeeded.
       Keep `agent_message` to one short sentence.

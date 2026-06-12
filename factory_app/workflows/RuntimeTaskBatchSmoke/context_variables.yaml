@@ -1,11 +1,11 @@
 definitions:
-  task_batch_results:
+  runtime_smoke_tasks_results:
     type: object
     description: Aggregated worker outputs from workflow-local task batch execution.
     source:
       type: computed
       default: {}
-  task_batch_status:
+  runtime_smoke_tasks_status:
     type: string
     description: Aggregate status emitted by the task batch executor.
     source:
@@ -35,11 +35,37 @@ definitions:
     source:
       type: computed
       default: null
+  task_batch_route_ready:
+    type: boolean
+    description: Enables deterministic context-equals routing from the planner to synthesis.
+    source:
+      type: state
+      default: true
+  task_batch_route_mode:
+    type: string
+    description: Routing mode for this smoke workflow.
+    source:
+      type: state
+      default: task_batch
 
 agents:
   TaskPlannerAgent:
-    variables: []
-  TaskWorkerAgent:
+    variables:
+    - task_batch_route_ready
+    - task_batch_route_mode
+  ModuleTaskWorkerAgent:
+    variables:
+    - task_run_mode
+    - current_task_batch_id
+    - current_task_id
+    - current_task
+  PageTaskWorkerAgent:
+    variables:
+    - task_run_mode
+    - current_task_batch_id
+    - current_task_id
+    - current_task
+  IntegrationTaskWorkerAgent:
     variables:
     - task_run_mode
     - current_task_batch_id
@@ -47,5 +73,6 @@ agents:
     - current_task
   SynthesisAgent:
     variables:
-    - task_batch_results
-    - task_batch_status
+    - runtime_smoke_tasks_results
+    - runtime_smoke_tasks_status
+    - task_batch_route_mode

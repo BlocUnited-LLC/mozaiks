@@ -486,6 +486,25 @@ agents:
       Add config variables for any env-var-backed settings.
       Add computed variables for business-logic outputs.
       If the workflow itself uses task_batches.yaml, add the conveyor result/status keys derived from the conveyor id: `${id}_results` and `${id}_status`.
+      context_variables.yaml must use exactly these top-level keys:
+      - `definitions`: mapping of variable name to `{type, description, source}`
+      - `agents`: mapping of agent name to `{variables: [...]}`
+      Never emit a top-level `variables` key.
+
+      Example:
+      ```yaml
+      definitions:
+        tenant_id:
+          type: string
+          description: Tenant scope.
+          source:
+            type: state
+            default: null
+      agents:
+        PlannerAgent:
+          variables:
+            - tenant_id
+      ```
 
       ## STEP 5: Plan Structured Outputs
 
@@ -546,6 +565,8 @@ agents:
       task_batches.yaml. The decomposition agent's structured output model must
       include `DecompositionPlan.tasks[]`; each runtime task chooses an
       `execution_agent`, includes `task_prompt`, and may include `depends_on`.
+      `failure_policy` must be exactly one of `fail_batch`,
+      `continue_with_available`, or `collect_errors`; never emit `retry`.
 
       ## STEP 7: Assemble Output
 
@@ -619,6 +640,9 @@ agents:
         context_expression, or tool_called transitions
       - transition_graph.yaml transition rules are flat mappings, never nested
         under transition type names
+      - context_variables.yaml uses top-level definitions and agents, never variables
+      - task_batches.yaml failure_policy is fail_batch, continue_with_available,
+        or collect_errors
       - middleware.yaml and ui_config.yaml are present even when they contain only
         empty/default declarations
       - tools.yaml entries have matching workflow-local tools/<name>.py files

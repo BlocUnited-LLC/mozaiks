@@ -49,7 +49,7 @@ def _planner_user_intent(messages: list[dict[str, Any]]) -> str:
             payload = json.loads(content)
         except json.JSONDecodeError:
             continue
-        plan = payload.get("RuntimeTaskBatchPlan")
+        plan = payload.get("DecompositionPlan")
         if isinstance(plan, dict):
             intent = str(plan.get("user_intent") or "").strip()
             if intent:
@@ -58,7 +58,7 @@ def _planner_user_intent(messages: list[dict[str, Any]]) -> str:
 
 
 def _build_result_payload(context_variables: Any, messages: list[dict[str, Any]]) -> dict[str, Any] | None:
-    results = _context_get(context_variables, "task_batch_results", {})
+    results = _context_get(context_variables, "runtime_smoke_tasks_results", {})
     if not isinstance(results, dict):
         return None
     meta = results.get("_meta")
@@ -69,8 +69,8 @@ def _build_result_payload(context_variables: Any, messages: list[dict[str, Any]]
     failed_tasks = [str(task_id) for task_id in _as_list(meta.get("failed_tasks"))]
     task_count = _as_int(meta.get("task_count"))
     concurrency = _as_int(meta.get("concurrency"))
-    result_context_key = str(meta.get("result_context_key") or "task_batch_results")
-    batch_status = str(_context_get(context_variables, "task_batch_status", "") or "")
+    result_context_key = str(meta.get("result_context_key") or "runtime_smoke_tasks_results")
+    batch_status = str(_context_get(context_variables, "runtime_smoke_tasks_status", "") or "")
     meta_status = str(meta.get("status") or "")
     all_units_succeeded = (
         batch_status == "completed"

@@ -1,5 +1,0 @@
-hooks:
-- hook_type: update_agent_state
-  hook_agent: SynthesisAgent
-  filename: hook_task_batch_synthesis.py
-  function: inject_task_batch_synthesis_context

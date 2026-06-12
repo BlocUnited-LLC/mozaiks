@@ -750,6 +750,14 @@ async def run_live_agentgenerator_pack_smoke(
 
         metadata_agents = await create_agents(workflow_name, context_variables=context, cache_seed=None)
         expected_workflow_names = [str(item["name"]) for item in context["workflows_spec"]]
+        expected_metadata = [
+            {
+                "id": str(item["name"]),
+                "startup_mode": (item.get("context_variables") or {}).get("expected_workflow_startup_mode"),
+                "depends_on": list(item.get("depends_on") or []),
+            }
+            for item in context["workflows_spec"]
+        ]
         metadata_result = await AG2TaskBatchRunner().run(
             AG2TaskBatchRunnerRequest(
                 workflow_name=workflow_name,
@@ -763,7 +771,9 @@ async def run_live_agentgenerator_pack_smoke(
                     "Generate PackMetadata for the completed workflow_bundle_results in context. "
                     f"Pack name must be {context['pack_name']!r}. "
                     f"Workflow ids must exactly match: {', '.join(expected_workflow_names)}. "
-                    "Do not use placeholder or example workflow names."
+                    "Use these exact startup modes and dependencies: "
+                    f"{json.dumps(expected_metadata, sort_keys=True)}. "
+                    "Do not use placeholder or example workflow names. Do not infer dependencies."
                 ),
                 context_variables=context,
                 structured_registry={"PackMetadataAgent": structured_registry["PackMetadataAgent"]},
