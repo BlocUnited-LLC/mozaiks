@@ -207,6 +207,12 @@ definitions:
       type: config
       env_var: MONETIZATION_ENABLED
       default: false
+  builder_options:
+    type: object
+    description: Optional app-agnostic builder UI option payload carried through workflow sequences.
+    source:
+      type: state
+      default: null
   coding_participation:
     type: string
     description: Build participation mode selected at the transition checkpoint after theme capture.

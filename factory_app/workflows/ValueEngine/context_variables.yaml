@@ -26,6 +26,12 @@ definitions:
       type: config
       env_var: MONETIZATION_ENABLED
       default: false
+  builder_options:
+    type: object
+    description: Optional app-agnostic builder UI option payload carried through workflow sequences.
+    source:
+      type: state
+      default: null
 
 # ============================================================================
 # STATE - Workflow orchestration triggers
@@ -209,6 +215,12 @@ definitions:
   concept_blueprint:
     type: object
     description: The structured Concept Blueprint created by GapAnalysisAgent and saved via save_value_manifest.
+    source:
+      type: computed
+      default: null
+  feature_decomposition:
+    type: object
+    description: Semantic feature decomposition produced by GapAnalysisAgent for downstream build planning context.
     source:
       type: computed
       default: null

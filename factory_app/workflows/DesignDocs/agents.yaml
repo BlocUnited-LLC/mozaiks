@@ -220,22 +220,13 @@ agents:
                 "id": "summary",
                 "primitive": "SummaryStrip",
                 "intent": "Compact summary with only decision-critical metrics",
-                "config_hint": {
-                  "items": [
-                    { "label": "Total Users", "value_key": "total_users" },
-                    { "label": "Monthly Revenue", "value_key": "monthly_revenue" }
-                  ]
-                }
+                "config_hint": "{\"items\": [{\"label\": \"Total Users\", \"value_key\": \"total_users\"}, {\"label\": \"Monthly Revenue\", \"value_key\": \"monthly_revenue\"}]}"
               },
               {
                 "id": "activity-table",
                 "primitive": "DataTable",
                 "intent": "Recent activity log, read-only, no selection needed",
-                "config_hint": {
-                  "columns": ["id", "action", "user", "created_at"],
-                  "api_endpoint": "/api/activity",
-                  "selection": "none"
-                }
+                "config_hint": "{\"columns\": [\"id\", \"action\", \"user\", \"created_at\"], \"api_endpoint\": \"/api/activity\", \"selection\": \"none\"}"
               }
             ]
           },
@@ -249,17 +240,13 @@ agents:
                 "id": "user-list",
                 "primitive": "DataTable",
                 "intent": "Paginated sortable user table with row actions",
-                "config_hint": {
-                  "columns": ["id", "name", "email", "role", "created_at"],
-                  "api_endpoint": "/api/users",
-                  "selection": "single"
-                }
+                "config_hint": "{\"columns\": [\"id\", \"name\", \"email\", \"role\", \"created_at\"], \"api_endpoint\": \"/api/users\", \"selection\": \"single\"}"
               },
               {
                 "id": "create-user-modal",
                 "primitive": "Modal",
                 "intent": "Form modal for creating a new user",
-                "config_hint": { "title": "Add User", "size": "medium" }
+                "config_hint": "{\"title\": \"Add User\", \"size\": \"medium\"}"
               }
             ]
           }
@@ -273,7 +260,7 @@ agents:
       - `brand_direction` is a compact brand and experience posture summary.
       - Every page must have `name`, `route`, `layout`, `intent`, and `sections[]`.
       - Every section must declare `id`, `primitive`, `intent`, and `config_hint`.
-      - `config_hint` must include all required fields for the primitive (see AppPlanAgent's required-fields rules).
+      - `config_hint` is a JSON-encoded string or null. When non-null, JSON-encode the partial primitive config scaffold including all required fields for the primitive (see AppPlanAgent's required-fields rules). Example: `"{\"columns\": [\"id\", \"name\"], \"api_endpoint\": \"/api/users\"}"`.
       - `api_endpoint` values in config_hint must match the Backend doc's API surface.
       - Prefer `Modal` sections for secondary create/edit/drill-in interactions.
       - Do not describe the same editor twice as both inline form and modal unless the page truly needs side-by-side editing.
@@ -306,7 +293,7 @@ agents:
                   "id": "summary",
                   "primitive": "SummaryStrip",
                   "intent": "Key metrics at a glance",
-                  "config_hint": { "items": [{ "label": "Total Users", "value_key": "total_users" }] }
+                  "config_hint": "{\"items\": [{\"label\": \"Total Users\", \"value_key\": \"total_users\"}]}"
                 }
               ]
             }

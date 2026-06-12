@@ -83,16 +83,12 @@ models:
         type: bool
         description: True when the field must exist on inserted records.
       default:
-        type: union
-        variants:
-        - str
-        - int
-        - float
-        - bool
-        - list
-        - dict
-        - 'null'
-        description: Optional default value applied when a record omits the field.
+        type: optional_str
+        description: >
+          JSON-encoded default value applied when a record omits the field,
+          or null. Scalar defaults may be encoded directly as a string
+          ("true", "0", "pending"); complex defaults must be JSON-encoded.
+          Must be null or a valid JSON string.
       enum:
         type: optional_list
         items: str
@@ -297,11 +293,13 @@ models:
         type: str
         description: What this section exists to let the user do or see.
       config_hint:
-        type: union
-        variants:
-        - dict
-        - 'null'
-        description: Partial primitive config scaffold with required fields populated. Null when config is entirely context-dependent.
+        type: optional_str
+        description: >
+          JSON-encoded partial primitive config scaffold with required fields
+          populated, or null when config is entirely context-dependent.
+          Must be null or a valid JSON object string matching the primitive's
+          required fields. AppPlanAgent and AppSchemaAgent decode this at
+          generation time.
 
   UIPage:
     type: model
@@ -365,5 +363,5 @@ models:
         description: Canonical typed surface realization contract mirrored into the saved backend and ui_schema docs.
       data_contract:
         type: DataContractBundle
-        description: Canonical typed database ownership and migration contract persisted separately and staged as config/data.json in generated app bundles.
+        description: Canonical typed database ownership and migration contract persisted separately and staged as data/contract.json in generated app bundles.
 

@@ -6,7 +6,7 @@ from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
 
 async def present_review_summary(context_variables: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Auto-invoked on ReviewAgent's first turn.
+    """Called by ReviewAgent on its first turn.
 
     Reads build validation context from context_variables and emits an
     AppReviewSummary UI surface artifact in the chat.

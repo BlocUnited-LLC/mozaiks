@@ -2,7 +2,7 @@ agents:
   - name: ReviewAgent
     description: >
       Presents the app build summary as an in-chat artifact and manages
-      the promote-or-revise HITL decision. On first turn, auto-invokes
+      the promote-or-revise HITL decision. On first turn, calls
       present_review_summary to surface the AppReviewSummary artifact.
       After that, waits for the user to either click Promote (handled
       client-side via the module action) or type a revision request

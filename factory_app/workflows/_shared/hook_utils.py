@@ -1,13 +1,29 @@
 """
-Shared utilities for factory workflow update_agent_state hooks.
+Shared utilities for factory workflow prompt middleware functions.
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FACTORY_BUILD_CONTEXT_ROOT = _REPO_ROOT / "factory_app" / "build_context"
+
+
+def workflow_context_path(workflow_name: str, *relative_parts: str) -> Path:
+    """Return a path inside a workflow's factory-owned build context."""
+
+    workflow = str(workflow_name or "").strip()
+    if not workflow:
+        raise ValueError("workflow_name is required")
+    parts = [str(part).strip() for part in relative_parts if str(part).strip()]
+    if not parts:
+        raise ValueError("at least one relative build-context path part is required")
+    return _FACTORY_BUILD_CONTEXT_ROOT / workflow / Path(*parts)
 
 
 def update_agent_section(agent: Any, header: str, body: str) -> None:
@@ -57,4 +73,5 @@ def update_agent_section(agent: Any, header: str, body: str) -> None:
         )
 
 
-__all__ = ["update_agent_section"]
+__all__ = ["update_agent_section", "workflow_context_path"]
+

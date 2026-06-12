@@ -1,0 +1,6 @@
+transition_rules:
+- source_agent: DesignDocsAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+

@@ -39,6 +39,13 @@ definitions:
       type: state
       default: false
 
+  builder_options:
+    type: object
+    description: Optional app-agnostic builder UI option payload carried through workflow sequences.
+    source:
+      type: state
+      default: null
+
   app_name:
     type: string
     description: Known app display name if available upstream.

@@ -1,0 +1,12 @@
+transition_rules:
+- source_agent: ReviewAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: review_complete
+  condition_value: true
+  transition_target: TerminateTarget
+- source_agent: ReviewAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget

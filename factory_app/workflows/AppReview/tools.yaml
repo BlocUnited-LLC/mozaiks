@@ -3,11 +3,11 @@ tools:
   file: tools/present_review_summary.py
   function: present_review_summary
   description: >
-    Auto-invoked on ReviewAgent's first turn. Reads build validation
-    context from context_variables and emits an AppReviewSummary
-    agentic UI artifact in the chat surface.
+    Called by ReviewAgent on its first turn. Reads build validation context
+    from context_variables and emits an AppReviewSummary agentic UI artifact
+    in the chat surface.
   tool_type: UI_Surface
-  auto_tool_call: true
+  auto_tool_call: false
   ui:
     component: AppReviewSummary
     mode: artifact

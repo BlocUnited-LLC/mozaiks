@@ -1,7 +1,7 @@
 """
 Hook: Inject AI Pack Surface Context
 
-Fires as an update_agent_state hook on DesignDocsAgent.
+Fires as an prompt middleware function on DesignDocsAgent.
 
 When the concept_blueprint includes AI-native capability packs
 (ai_review_pack, ai_analysis_pack, ai_extraction_pack), this hook injects an
@@ -191,7 +191,7 @@ def inject_ai_pack_surface_context(
     messages: List[Dict[str, Any]],
 ) -> None:
     """
-    update_agent_state hook for DesignDocsAgent.
+    prompt middleware function for DesignDocsAgent.
 
     Detects AI-native capability packs in concept_blueprint.capability_pack_hints.
     When found, injects [AI PACK SURFACE DECLARATIONS] with guidance on creating
@@ -228,3 +228,4 @@ def inject_ai_pack_surface_context(
 
 
 __all__ = ["inject_ai_pack_surface_context"]
+

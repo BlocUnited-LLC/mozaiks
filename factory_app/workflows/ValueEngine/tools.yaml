@@ -56,19 +56,19 @@ lifecycle_tools:
     description: Create a hosted build-registry record at pipeline start so the Apps directory shows the app as in-progress immediately.
   - trigger: on_start
     agent: null
-    file: tools/platform/build_lifecycle.py
+    file: ../_shared/platform/build_lifecycle.py
     function: emit_build_started
     description: Notify platform build tracking when workflow run starts.
     tool_type: Agent_Tool
   - trigger: on_complete
     agent: null
-    file: tools/platform/build_lifecycle.py
+    file: ../_shared/platform/build_lifecycle.py
     function: emit_build_completed
     description: Notify platform build tracking when workflow run completes.
     tool_type: Agent_Tool
   - trigger: on_fail
     agent: null
-    file: tools/platform/build_lifecycle.py
+    file: ../_shared/platform/build_lifecycle.py
     function: emit_build_failed
     description: Notify platform build tracking when workflow run fails.
     tool_type: Agent_Tool
