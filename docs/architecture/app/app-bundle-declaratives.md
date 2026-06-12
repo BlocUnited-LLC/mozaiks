@@ -25,6 +25,27 @@ admin config, and theme config. When an app needs durable runtime secrets,
 `app/config/secrets.yaml` declares the secret provider/vault policy, env
 handles, and secret names only. It must never contain raw credential values.
 
+`app/config/subscriptions.yaml` is the canonical generated-app SaaS plan
+catalog. Present only in apps that sell their own plans or need end-user
+feature gates. It declares each plan_id, its label, and the capability_ids it
+grants. When the app also declares `assignment_store`, the platform loads it at
+startup and wires the OSS `ConfiguredEntitlementAdapter` into
+`ModuleExecutor`; the adapter reads the configured app data alias for active
+subscription assignment state. Non-SaaS apps omit this file; all entitlement
+gates pass unconditionally via `NoOpEntitlementAdapter`. Schema:
+`mozaiks.subscriptions.v1`.
+
+Plans may also declare `usage_limits` for meters such as `ai_tokens`. These
+limits are deterministic app intent used by profile, admin, billing, and
+MozaiksPay facade surfaces. Token measurements themselves come from runtime
+AG2 beta usage middleware and `/api/me/usage` or `/api/admin/usage`; generated
+modules must not create a second token ledger.
+
+This file does not control whether the workspace is allowed to use a hosted
+operator pack such as MozaiksPay. Hosted pack access is enforced by the hosted
+product that provides the pack. Generated app subscription config only controls
+the generated app's own users, plans, usage limits, and feature gates.
+
 ### `app/ui/pages/`
 
 Schema-driven app pages rendered by the app UI surface.

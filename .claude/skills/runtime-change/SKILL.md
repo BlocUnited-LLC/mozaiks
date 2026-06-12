@@ -30,7 +30,7 @@ Inspect first:
 - `docs/architecture/app/platform-authoring.md` when app loading, shell, route ownership, or module dispatch changes
 - `docs/architecture/modules-systems/module-system.md` when module contracts or module runtime composition change
 - `docs/architecture/foundations/events-and-data/persistence-and-artifact-storage.md` when `ctx.persistence`, data contract, indexes, or migrations change
-- `factory_app/workflows/AppGenerator/tools/file_contracts.yaml` when generated app or module contracts depend on the runtime behavior
+- `factory_app/build_context/AppGenerator/file_contracts.yaml` when generated app or module contracts depend on the runtime behavior
 - the owning runtime file and its narrowest test slice before editing:
   - `mozaiksai/hosts/runtime.py` + `tests/test_runtime_websocket_contract.py` or `tests/test_auth_oidc_discovery.py`
   - `mozaiksai/hosts/platform.py` + `tests/test_platform_ai_config_resolution.py`, `tests/test_platform_layout.py`, or `tests/test_platform_shell_p0_fixes.py`
@@ -64,7 +64,7 @@ Runtime change checklist:
 1. Name the affected runtime primitive or primitives: `Application`, `Run`, `ExecutionWorker`, `ExecutionEngine`, `Event`.
 2. Identify the smallest owning layer: runtime, platform, factory, hosted, or module code.
 3. Check whether the change alters declarative contracts such as `module.yaml`, `contracts/reactions.yaml`, `contracts/notifications.yaml`, `runtime_extensions.yaml`, `app.json`, `shell.json`, or `config/ai.json`.
-4. Check whether `factory_app/workflows/AppGenerator/tools/file_contracts.yaml` or generated-app fixtures assume the current behavior.
+4. Check whether `factory_app/build_context/AppGenerator/file_contracts.yaml` or generated-app fixtures assume the current behavior.
 5. Update loader or host code, docs, and tests together when a contract changes.
 6. Preserve multi-tenant safety, engine-agnostic behavior, observability, runtime events, and token accounting.
 7. Prefer replacement over retention shims unless the task explicitly asks to preserve an existing app surface.
@@ -88,7 +88,7 @@ Common runtime areas:
   - Keep entrypoints module-local under `backend.*` and contract-bound.
 - Persistence, data contract, indexes, and migrations:
   - Inspect `mozaiksai/core/runtime/persistence/**`, `tests/test_runtime_persistence_module_injection.py`, and the relevant `tests/test_runtime_persistence_*.py` slice.
-  - If generated module behavior changes, also inspect `factory_app/workflows/AppGenerator/tools/file_contracts.yaml` and `tests/test_appgenerator_persistence_alignment.py`.
+  - If generated module behavior changes, also inspect `factory_app/build_context/AppGenerator/file_contracts.yaml` and `tests/test_appgenerator_persistence_alignment.py`.
 - WebSocket and session transport:
   - Inspect `mozaiksai/hosts/runtime.py`, `mozaiksai/core/transport/websocket.py`, and `tests/test_runtime_websocket_contract.py`.
   - Preserve resume, buffering, heartbeat, and input or resume semantics.
@@ -127,4 +127,8 @@ Return:
 4. AppGenerator or generated-app dependency impact
 5. tests required or run
 6. compatibility or rollout risk
+
+
+
+
 

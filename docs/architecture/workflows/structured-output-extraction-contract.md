@@ -288,10 +288,10 @@ ExampleWorkflow/
 ├── orchestrator.yaml           # workflow_startup_mode, initial_agent
 ├── agents.yaml                 # Agents with structured_outputs_required
 ├── structured_outputs.yaml     # ExampleDecomposition, ExamplePresentation models
-├── handoffs.yaml              # Agent-to-agent routing
+├── transition_graph.yaml              # Agent-to-agent routing
 ├── tools.yaml                 # auto_tool_call tools
 ├── context_variables.yaml     # State definitions
-├── hooks.yaml                 # Optional hooks
+├── middleware.yaml                 # Optional hooks
 ├── ui_config.yaml             # visual_agents
 ├── extended_orchestration/
 │   └── task_batches.yaml      # task batch config (optional)
@@ -317,5 +317,6 @@ Key validation models:
 - [workflow-authoring-contracts.md](workflow-authoring-contracts.md)
 - `mozaiksai/core/events/auto_tool_handler.py`
 - `mozaiksai/core/workflow/outputs/structured.py`
+
 
 

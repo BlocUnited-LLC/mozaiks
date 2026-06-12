@@ -24,13 +24,13 @@ Those are Mozaiks layers that exist before a workflow starts.
 | --- | --- | --- |
 | `orchestrator.yaml` | pattern, turns, startup behavior | mostly AG2-native |
 | `agents.yaml` | agent roster and prompts | AG2-native with Mozaiks composition helpers |
-| `handoffs.yaml` | routing rules inside the workflow | AG2-native |
+| `transition_graph.yaml` | routing rules inside the workflow | AG2 beta WorkflowAdapter / TransitionGraph |
 | `context_variables.yaml` | workflow state bindings | AG2-native container plus Mozaiks adapters |
 | `tools.yaml` | tool declarations | AG2 tool calling plus Mozaiks wrappers |
-| `hooks.yaml` | lifecycle and hook registration | AG2-native hooks plus Mozaiks convenience |
+| `middleware.yaml` | prompt injection declarations | Mozaiks declarations compiled to AG2 beta middleware |
 | `structured_outputs.yaml` | typed runtime validation | Mozaiks layer |
 | `ui_config.yaml` | frontend exposure metadata | frontend-only |
-| `extended_orchestration/task_batches.yaml` | workflow-local task batch input | Mozaiks orchestration layer |
+| `extended_orchestration/task_batches.yaml` | workflow-local deterministic task DAG contract | Mozaiks contract layer executed through AG2 where possible |
 
 ## Native or Near-Native Mappings
 
@@ -49,27 +49,51 @@ Canonical startup key is `workflow_startup_mode` (`AgentDriven`, `UserDriven`,
 
 `orchestration_pattern` is metadata describing the selected AG2 Network
 patternbook label. The runtime does not route from this string; it routes from
-the compiled `handoffs.yaml` transition graph.
+the compiled `transition_graph.yaml` transition graph.
 
 ### `agents.yaml`
 
 Each agent entry becomes an AG2 agent definition after prompt composition and
 tool binding.
 
-### `handoffs.yaml`
+### `transition_graph.yaml`
 
-Maps to AG2 beta Network transition conditions and targets.
+Maps to AG2 beta Network transition conditions and targets. Mozaiks compiles
+the rules into a `TransitionGraph`; turn-to-turn routing is resolved through
+AG2 beta `WorkflowAdapter`.
 
 Runtime compilation rules:
 
-- unconditional `after_work` rules compile to `FromSpeaker`
-- deterministic context expressions compile to Mozaiks AG2 condition objects
+- unconditional `after_turn` rules compile to `FromSpeaker`
+- `condition_type: context_equals` rules compile to a source-scoped adapter over
+  AG2 `ContextEquals`
+- `condition_type: context_expression` rules compile to a source-scoped custom
+  AG2 beta `TransitionCondition` that evaluates AG2's `ContextExpression`
+  syntax against workflow context state
+- `condition_type: tool_called` rules compile to a source-scoped adapter over
+  AG2 `ToolCalled`
 - `target_agent: user` pauses the run for user input
 - `target_agent: terminate` compiles to `TerminateTarget`
-- `condition_type: llm` and `condition_type: string_llm` are invalid
 
 LLM classification belongs before routing: a control-plane route, agent tool, or
 structured output sets context state; the graph then routes deterministically.
+
+Termination is declarative. A workflow bundle ends through
+`transition_graph.yaml`, usually by routing the final agent to:
+
+```yaml
+- source_agent: FinalAgent
+  target_agent: terminate
+  transition_type: after_turn
+  transition_target: TerminateTarget
+```
+
+The runtime does not inspect message text for completion and does not use a
+separate Python termination handler. During execution, Mozaiks resolves the next
+speaker through AG2 beta `WorkflowAdapter`; when that resolution returns AG2
+`TerminateTarget`, the turn loop reports `run_completed=true` and the runtime
+marks the app-scoped `ChatSessions` run as completed. `max_turns` remains a
+safety cap, not the primary happy-path completion mechanism.
 
 ### `context_variables.yaml`
 
@@ -113,16 +137,17 @@ tools:
 lifecycle_tools: []
 ```
 
-### `hooks.yaml`
+### `middleware.yaml`
 
-Maps to AG2 hook registration and workflow lifecycle integration.
+Maps to Mozaiks prompt-injection declarations. Runtime registration is AG2 beta
+agent middleware, not the old AG2 hook registration style. Lifecycle behavior belongs
+in `tools.yaml` `lifecycle_tools`.
 
 Canonical shape:
 
 ```yaml
-hooks:
-  - hook_type: update_agent_state
-    hook_agent: AgentName
+prompt_middleware:
+  - agent: AgentName
     filename: hook_file.py
     function: update_state
 ```
@@ -166,7 +191,10 @@ Used for:
 - bounding concurrency, retries, timeouts, dependencies, and failure policy
 - declaring the result context key consumed by later workflow agents
 
-These are workflow-runtime features around AG2, not AG2-native concepts.
+The typed DAG contract is Mozaiks-owned because AG2 `Task` does not assign,
+dependency-sort, or merge artifact work. Worker execution, task lifecycle
+observation, and network turn handling should use AG2 Network/Task primitives
+where practical. See [AG2 Execution Alignment Plan](ag2-execution-alignment-plan.md).
 
 **Minimal task batch authored form:**
 
@@ -243,6 +271,4 @@ Use `*.yaml` declaratives in workflow bundles.
 - [workflow-architecture.md](workflow-architecture.md)
 - [../foundations/events-and-data/event-system.md](../foundations/events-and-data/event-system.md)
 - [../foundations/core-product-app-bundle-boundary.md](../foundations/core-product-app-bundle-boundary.md)
-
-
 

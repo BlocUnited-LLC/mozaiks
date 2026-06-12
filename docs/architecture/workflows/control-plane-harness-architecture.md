@@ -28,8 +28,7 @@ Examples:
 In the first-party builder experience today, this refinement loop is driven by
 startup declared through `app/config/ai.json`, control-plane runtime policy in
 `control_plane/config/runtime.yaml`, and the selected
-`control_plane/config/control_plane.yaml` pack. Do not document a dedicated `RefinementWorkflow`
-unless the runtime actually introduces one.
+`control_plane/config/control_plane.yaml` pack. Do not document a dedicated `RefinementWorkflow` unless the runtime actually introduces one.
 
 Those requests need:
 
@@ -40,6 +39,149 @@ Those requests need:
 - clear user-facing decisions
 
 That is the control plane.
+
+---
+
+## Two Paths: Factory vs. Harness
+
+**First-time builds** bypass the control plane entirely. They enter through
+`extension_registry.json` workflow sequences directly:
+
+```
+User starts a new build
+  → extension_registry.json  "build" sequence
+  → ValueEngine → ThemeCapture → DesignDocs → AgentGenerator → AppGenerator
+```
+
+**Refinements** (user already has a built artifact and wants to change it)
+enter the control plane:
+
+```
+User submits a change request on an existing artifact
+  → Control Plane
+  → checkpoint: classify the change
+  → checkpoint: route to a workflow_sequence
+  → checkpoint: decide — direct code edit or factory re-run?
+
+  Path A — small targeted change (patch):
+    → scope_selection    find which files to touch
+    → coding_refinement  write the scoped change
+    [AppGenerator never runs]
+
+  Path B — bigger change (design / feature / core):
+    → contract_surface_planning   map request to contract surfaces
+    → launch workflow_sequence    re-enter factory at the right stage
+    [AppGenerator runs as part of the sequence]
+```
+
+The control plane does not replace the factory. It routes to it.
+
+---
+
+## Checkpoint Chain
+
+Checkpoints are triggered by events, not by agent turns. Each checkpoint is a
+discrete unit of work with a declared handler and optional LLM backing.
+
+### Full sequence (patch path — direct code edit)
+
+```
+request_submitted        LLM classifies: patch / design / feature / core
+        │
+route_requested          deterministic: {artifact_kind, change_class} → workflow_sequence
+        │
+decision_requested       deterministic: direct edit eligible? → auto_patch | workflow_reentry | ...
+        │
+scope_requested          LLM selects files to touch using context graph + artifact workspace
+        │
+coding_requested         LLM writes scoped code change against selected files
+```
+
+### Sequence for design / feature (contract surface path)
+
+```
+request_submitted        classify → design or feature
+        │
+route_requested          → workflow_sequence e.g. "app_revision"
+        │
+decision_requested       → workflow_reentry
+        │
+contract_surface_requested   LLM maps request to contract surfaces needing update
+        │
+workflow re-entry        launch selected workflow_sequence from extension_registry.json
+```
+
+### Checkpoint reference
+
+| Checkpoint | Event | Handler type | What it does |
+|---|---|---|---|
+| `request_intake` | `request_submitted` | LLM | Classifies change as patch / design / feature / core. Reads artifact state and staleness. |
+| `refinement_route` | `route_requested` | Deterministic | Maps `{artifact_kind, change_class}` to a `workflow_sequence` name from the routing table. |
+| `decision` | `decision_requested` | Deterministic | Decides outcome: `auto_patch`, `workflow_reentry`, `core_restart`, `clarify_scope`, or `fallback_workflow`. |
+| `scope_selection` | `scope_requested` | LLM | Proposes which files to touch using context graph and artifact workspace catalog. |
+| `contract_surface_planning` | `contract_surface_requested` | LLM | Maps a broader request to specific Mozaiks contract surfaces before workflow re-entry. |
+| `coding_refinement` | `coding_requested` | LLM | Writes the scoped code change against the selected files. |
+
+---
+
+## Routing Table
+
+The routing table in `control_plane.yaml` maps each combination of artifact
+kind and change class to a named `workflow_sequence`. The sequence name is
+resolved from `extension_registry.json` — the control plane declares the
+target name only; the sequence declares which workflows run and in what order.
+
+```
+control_plane.yaml                        extension_registry.json
+────────────────────────────────────      ──────────────────────────────────────────
+{artifact_kind: app_bundle}
+  patch   → workflow_sequence: app_revision        steps: [AppGenerator]
+  design  → workflow_sequence: app_surface_revision steps: [DesignDocs, AppGenerator]
+  feature → workflow_sequence: app_revision        steps: [AppGenerator]
+  core    → workflow_sequence: full_rebuild         steps: [ValueEngine, ThemeCapture,
+                                                            DesignDocs, AgentGenerator,
+                                                            AppGenerator]
+
+{artifact_kind: design_docs}
+  patch   → workflow_sequence: design_patch        steps: [DesignDocs]
+  design  → workflow_sequence: design_revision     steps: [DesignDocs]
+  feature → workflow_sequence: design_revision     steps: [DesignDocs]
+  core    → workflow_sequence: full_rebuild
+
+{artifact_kind: workflow_bundle}
+  patch   → workflow_sequence: workflow_patch      steps: [AgentGenerator]
+  design  → workflow_sequence: workflow_revision   steps: [AgentGenerator]
+  feature → workflow_sequence: workflow_revision   steps: [AgentGenerator]
+  core    → workflow_sequence: full_rebuild
+
+{artifact_kind: concept}
+  patch   → workflow_sequence: concept_patch       steps: [ValueEngine]
+  design  → workflow_sequence: full_rebuild
+  feature → workflow_sequence: full_rebuild
+  core    → workflow_sequence: conceptual_replan   steps: [ValueEngine, ThemeCapture,
+                                                            DesignDocs, AgentGenerator,
+                                                            AppGenerator]
+                                                   (with carry_forward context)
+```
+
+The control plane does not declare `affected_workflows` or
+`affected_declarative_families`. Those are owned by the sequence in
+`extension_registry.json`.
+
+### Staleness-aware classification
+
+The classifier reads `get_stale_artifact_families` before finalising the change
+class. If an upstream artifact family is stale relative to the target, the
+classifier upgrades the class so the chosen route covers the stale upstream:
+
+```
+User wants: app_bundle patch
+But: design_docs is stale
+→ classifier upgrades to "design" so the route runs DesignDocs first
+```
+
+This prevents the factory from re-running AppGenerator on top of stale
+upstream artifacts.
 
 ## Ownership Model
 

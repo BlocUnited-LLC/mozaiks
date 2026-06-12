@@ -76,10 +76,6 @@ If a new contract is introduced, update all affected layers together:
 - docs
 - tests
 
-## Rules
-
-Scoped rules live in `.claude/rules/`. Apply them when working in their target directories.
-
 ## Clean Code Standard
 
 Avoid "AI slop":
@@ -97,6 +93,43 @@ Prefer:
 - small, named abstractions with clear ownership
 - removing drift at the source
 
+## AG2 Ownership Boundary
+
+Mozaiks uses AG2 as the long-term agentic backbone. Do not recreate an
+agentic framework inside Mozaiks when AG2 already owns the primitive or is the
+right upstream home for it. See
+[docs/architecture/workflows/ag2-ownership-boundary.md](docs/architecture/workflows/ag2-ownership-boundary.md)
+for the durable architecture contract and upgrade watchpoints.
+
+AG2 should own agentic execution mechanics wherever practical:
+
+- agent primitives, model calls, tools, middleware, and task execution
+- multi-agent network behavior, hubs, agent clients, channels, adapters, and
+  workflow state progression
+- task observation, task lifecycle events, delegation mechanics, and agent
+  runtime observability primitives
+
+Mozaiks should own deterministic product and runtime contracts around AG2:
+
+- declarative workflow files, structured-output contracts, and validation
+- canonical generated app/workflow/module artifact shapes
+- app/runtime persistence, transport integration, tenant/session boundaries,
+  and Studio/platform lifecycle concerns
+- factory control-plane policies and deterministic decomposition contracts
+  that describe what work must be done before AG2 agents execute it
+
+When AG2 does not provide a required capability, first analyze AG2's current
+APIs, docs, and source shape. Implement the smallest Mozaiks-owned layer that
+fits inside AG2's framework, preferably behind `mozaiksai.core.adapters` or a
+similarly narrow boundary. Document every intentional divergence from AG2 so it
+can be revisited when AG2 updates, and raise upstream issues or proposals when
+the missing capability belongs in AG2 rather than Mozaiks.
+
+Do not introduce Mozaiks-owned replacements for AG2 hubs, agent clients,
+network adapters, task observation streams, delegation engines, or generic
+agent scheduling unless AG2 has no usable path and the custom boundary is
+explicitly documented.
+
 ## Canonical Repo Boundary
 
 Canonical ownership:
@@ -109,6 +142,8 @@ Canonical ownership:
 | `mozaiksai.hosts.bootstrap` | Repo-local path defaults (CWD-relative; no-ops when not in repo checkout) |
 | `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
 | `factory_app/workflows/` | Factory layer — shared builder/generator workflows (AppGenerator, AgentGenerator, DesignDocs, ValueEngine) |
+| `factory_app/workflows/{WorkflowName}/*.yaml` | Factory layer — workflow-owned prompt/catalog context consumed by that workflow |
+| `factory_app/workflows/_shared/` | Factory layer — shared prompt/catalog helpers consumed by multiple factory workflows |
 | `factory_app/control_plane/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
 | `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
@@ -124,8 +159,68 @@ Canonical target:
 - shared generation core lives outside any individual app workspace
 - app workspaces keep app bundle files under `app/` and app-local workflows at
   the workspace root under `workflows/`
+- workspace build contexts, when present, live beside `app/` under
+  `build_context/{context_name}/`; they are launch-time build input registries
+  for operator/product-specific build input, not generated app runtime output
 - app-owned service implementations live at `app/services/`
 - hosted product workspaces should consume that same contract from their own repos
+
+## Build Context Packs Rule
+
+Build-time intelligence uses named build contexts. The OSS factory, hosted
+products, and customer workspaces use the same shape:
+`build_context/{context_name}/context.yaml` plus files explicitly declared in
+`context.yaml` `assets[]`.
+
+- `context.yaml` is a registry. It declares `context_id`,
+  `applies_to_workflows`, `assets[]`, optional `pack:` metadata, and optional
+  `projections.context_variables`.
+- Build-context files are consumed only when declared in `assets[]`; folder
+  names are organization, not policy. Factory catalog YAMLs should sit directly
+  beside `context.yaml` unless a real grouping need exists.
+- Factory catalogs live under `factory_app/build_context/{context_name}/` and
+  are declared as `assets[]` with `kind: catalog`, not beside runtime workflow
+  YAML.
+- Workflow hooks/tools stay under `factory_app/workflows/.../tools/` and read
+  factory catalogs through
+  `factory_app.workflows._shared.hook_utils.workflow_context_path()`.
+- Do not recreate `factory_app/workflows/_shared/catalogs/`. Catalog contents
+  belong in `factory_app/build_context/{context_name}/`; workflow
+  tools may contain workflow-specific renderers over those catalogs.
+- `context_variables.yaml` declares runtime/session state. Large static prompt
+  catalogs are injected by deterministic hooks; do not stuff them into context
+  variables.
+- Reusable OSS build packs are named build contexts. `context.yaml` owns the
+  pack descriptor through a `pack:` section plus capabilities and facades. It
+  should be useful LLM/build context, not a placeholder
+  manifest or generated build plan.
+- Pack-specific agent instructions are `assets[]` with `kind: contract`. Keep
+  contract YAML typed: use rule lists such as `selection_rules`,
+  `required_outputs`, `forbidden_outputs`, `runtime_boundaries`, and `facades`;
+  do not use narrative top-level prose.
+- Deterministic generated files are `assets[]` with `kind: templates`. The
+  template directory mirrors the canonical generated app tree. Store generated
+  module templates under
+  `templates/modules/...`, service/client templates under
+  `templates/services/...`, page templates under `templates/ui/...`, and config
+  templates under `templates/config/...`.
+  YAML files there are generated app declaratives, not build-context contracts.
+- App or hosted-product build contexts live at workspace root `build_context/`,
+  beside `app/` and `workflows/`, using the same named-context shape.
+- Runtime launch context may be enriched through
+  `MOZAIKS_LAUNCH_CONTEXT_PROVIDER=mozaiksai.core.session.build_context:merge_build_context`.
+- Context `context.yaml` must project only declared workflow
+  `context_variables`; it is not routing authority, secret storage, generated
+  app runtime code, Python resolver code, or a place to hide product-specific
+  logic in OSS.
+
+Examples:
+
+- `factory_app/build_context/AppGenerator/file_contracts.yaml`
+- `factory_app/build_context/AgentGenerator/ag2_network_patterns.yaml`
+- `factory_app/build_context/Communications/context.yaml`
+- `workspace/build_context/mozaikspay/context.yaml`
+- `workspace/build_context/mozaikspay/contract.yaml`
 
 ## Contributor Guidance Operating System
 
@@ -189,12 +284,13 @@ When working in or generating modules:
 
 App-owned runtime secret output is names-first, not value-first:
 
-- `config/secrets.yaml` is the optional canonical generated contract for
+- `security/secrets.yaml` is the optional canonical generated contract for
   app-owned secret provider/vault policy, env handles, and secret names.
 - It must never contain raw API keys, tokens, passwords, connection strings,
   private keys, webhook secrets, or other credential values.
-- Provider-neutral secret resolution belongs in `app/services/security/`; provider
-  secret manager mechanics belong in `app/services/adapters/secrets/`.
+- Secret policy belongs in `app/security/`; provider-neutral resolution and
+  supported secret manager mechanics belong in the OSS `mozaiksai.core.secrets`
+  runtime primitive.
 - Connector/API-key collection during workflows must store raw credential values
   only through the configured secret backend. App artifacts should carry safe
   metadata and secret references, not raw values.
@@ -204,9 +300,9 @@ App-owned runtime secret output is names-first, not value-first:
 AppGenerator persistence output is data-contract-first, not runtime-DB-first:
 
 - `data_contract` is the canonical generated data planning object.
-- Generated app bundles write it to `config/data.json`.
+- Generated app bundles write it to `data/contract.json`.
 - Additive refinement plans belong under
-  `config/data_migrations/{migration_id}.json`.
+  `data/migrations/{migration_id}.json`.
 - Persistent modules use `backend/repo.py`, `backend/policy.py`, and
   `backend/schemas.py`; do not generate `backend/models.py` or
   `backend/models/*.py`.
@@ -217,11 +313,14 @@ AppGenerator persistence output is data-contract-first, not runtime-DB-first:
 - Runtime injects `ctx.persistence` into `ModuleContext` when `app_id` exists.
   Generated `backend/repo.py` must use
   `ctx.persistence.collection(module_id, entity_name)`.
-- `config/data.json` also covers cross-module aggregate ownership and explicit
+- `data/contract.json` also covers cross-module aggregate ownership and explicit
   existing database integration when needed.
-- Optional data-contract helper code belongs under `app/services/data/` with generic
-  names. Do not generate app-specific hosted or host-internal helper names for
+- External database provider mechanics, when explicitly required, belong under
+  `app/services/adapters/database/`. Do not generate `app/services/data/` for
   customer apps.
+- Do not generate Python helper files under `data/` or `security/`. Those app
+  planes are declarative: data contracts/migrations and names-only secret
+  policy.
 - `ctx.db` remains absent and non-canonical; generated code must not require or
   emit it.
 
@@ -313,12 +412,12 @@ When working in or generating workflows:
   workflows/{workflow_name}/
   ├── orchestrator.yaml           ← required: bootstrap, entry point, constraints
   ├── agents.yaml                 ← required: agent roster and prompts
-  ├── handoffs.yaml               ← required: agent routing and transitions
+  ├── transition_graph.yaml               ← required: agent routing and transitions
   ├── context_variables.yaml      ← required: initial/default shared state schema
   ├── structured_outputs.yaml     ← required: output models + agent→model registry
   ├── tools.yaml                  ← required: tool bindings + UI metadata
   ├── ui_config.yaml              ← required: `visual_agents` contract for websocket-visible agents
-  ├── hooks.yaml                  ← optional: lifecycle hooks
+  ├── middleware.yaml                  ← optional: lifecycle hooks
   ├── extended_orchestration/
   │   └── task_batches.yaml       ← optional: workflow-local AG2 task batch config
   ├── tools/
@@ -328,7 +427,7 @@ When working in or generating workflows:
       └── components/
   ```
 - `ui_config.yaml` must declare `visual_agents`. Only agents listed there have messages and UI-bearing outputs streamed through the websocket to the user-facing UI.
-- `hooks.yaml` and `extended_orchestration/task_batches.yaml` are canonical workflow surfaces when lifecycle hooks or workflow-local task batches are needed.
+- `middleware.yaml` and `extended_orchestration/task_batches.yaml` are canonical workflow surfaces when lifecycle hooks or workflow-local task batches are needed.
 - Treat workflow YAMLs as structured-output-first contracts. They should map cleanly to strict models that generators can emit and runtime code can validate deterministically.
 - Tools stay dumb. Reasoning belongs in prompts and structured outputs, not in Python tool code.
 
@@ -364,5 +463,3 @@ When adding code, decide placement in this order:
 7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
 
 Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.
-
-

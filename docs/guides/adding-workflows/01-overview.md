@@ -34,9 +34,9 @@ workflows/{WorkflowName}/
 ├── agents.yaml
 ├── structured_outputs.yaml
 ├── tools.yaml
-├── handoffs.yaml
+├── transition_graph.yaml
 ├── ui_config.yaml
-├── hooks.yaml
+├── middleware.yaml
 ├── extended_orchestration/
 │   └── task_batches.yaml
 ├── tools/
@@ -46,7 +46,7 @@ workflows/{WorkflowName}/
     └── components/
 ```
 
-`hooks.yaml`, `extended_orchestration/`, workflow tools, and workflow UI are
+`middleware.yaml`, `extended_orchestration/`, workflow tools, and workflow UI are
 included only when the workflow needs them.
 
 ## Recommended Order
@@ -56,7 +56,7 @@ included only when the workflow needs them.
 3. Define `structured_outputs.yaml`: strict output models for generator agents.
 4. Define `agents.yaml`: conversational agents gather context; generator agents emit typed output.
 5. Define `tools.yaml`: bind dumb tools and optional UI emission.
-6. Define `handoffs.yaml`: deterministic routing between agents and the user.
+6. Define `transition_graph.yaml`: deterministic routing between agents and the user through AG2 beta WorkflowAdapter.
 7. Define `ui_config.yaml`: list visual agents that should stream to the UI.
 
 ## Contract Snippets
@@ -158,32 +158,37 @@ them as contract references, not as full workflow examples.
     Put reasoning instructions in prompts. Put auto-tool behavior in `tools.yaml`,
     not in `agents.yaml`.
 
-=== "handoffs.yaml"
+=== "transition_graph.yaml"
 
     ```yaml
-    handoff_rules:
+    transition_rules:
       - source_agent: user
         target_agent: IntakeAgent
-        handoff_type: condition
-        condition_type: expression
-        condition: ${intake_complete} == false
+        transition_type: condition
+        condition_type: context_equals
+        condition_key: intake_complete
+        condition_value: false
         transition_target: AgentTarget
 
       - source_agent: IntakeAgent
         target_agent: GeneratorAgent
-        handoff_type: condition
-        condition_type: expression
-        condition: ${intake_complete} == true
+        transition_type: condition
+        condition_type: context_equals
+        condition_key: intake_complete
+        condition_value: true
         transition_target: AgentTarget
 
       - source_agent: GeneratorAgent
         target_agent: user
-        handoff_type: after_work
+        transition_type: after_turn
         transition_target: RevertToUserTarget
     ```
 
-    Handoffs should describe deterministic routing. Avoid broad "do whatever is
-    best next" conditions.
+    Handoffs should describe deterministic routing. The runtime compiles these
+    rules to a `TransitionGraph` and resolves each turn through AG2 beta
+    `WorkflowAdapter`. Use `context_equals`, `context_expression`, or
+    `tool_called` conditions and put same-source condition routes before
+    fallback `after_turn` routes.
 
 === "tools.yaml"
 
@@ -308,5 +313,6 @@ workflow UI folder.
 - [Workflow Architecture](../../architecture/workflows/workflow-architecture.md)
 - [Workflow Authoring Contracts](../../architecture/workflows/workflow-authoring-contracts.md)
 - [Workflow Task Batches](../../architecture/mozaiksai/task-batches.md)
+
 
 

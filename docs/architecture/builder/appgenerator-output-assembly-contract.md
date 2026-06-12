@@ -99,7 +99,7 @@ Two artifacts handle visual and behavioral customization:
 - `shell_config` → shell behavior only: header logo/actions, canonical `shortcuts`, `navigation.policy`, non-page-owned `navigation.items`, and `chrome` mode overrides
 
 `shell_preset_hint` is not an artifact. It is prompt-time AppGenerator guidance
-from `factory_app/workflows/AppGenerator/tools/shell_presets.yaml`. AppSchemaAgent
+from `factory_app/build_context/AppGenerator/shell_presets.yaml`. AppSchemaAgent
 uses it to choose page `navigation`, page `shell_mode`, and whether a compact
 `shell_config` override is necessary. The preset id is never written into the
 generated app bundle.
@@ -151,7 +151,7 @@ hosted_analytics
 ```
 
 The pack descriptor may provide `surfaces`, `supported_domains`, `branding`,
-`generation_rules`, `supersedes`, `adapter_template`, and `capability_source`.
+`generation_rules`, `adapter_template`, and `capability_source`.
 Those fields are planning metadata. They do not authorize generated pages to
 call hosted service internals directly.
 
@@ -182,7 +182,7 @@ Rules:
 
 - Always emits `overview` and `settings` app-scope pages
 - Includes additional **standard** pages (`users`, `billing`, `usage`, `activity`, `operations`, `integrations`, `support`) based on `app_build_plan.capability_packs` entity domains and `auth_strategy`
-- Includes **hosted-only** pages (e.g. `hosting`) only when `available_hosted_packs` is non-empty and contains the relevant pack id — never in OSS or self-hosted contexts
+- Includes **operator-only** pages (e.g. `hosting`) only when `capability_packs` is non-empty and contains the relevant pack id — never in plain OSS contexts without workspace build context
 - Uses `scope: app` for all generated app pages; workspace-scope pages only for hosted operator contexts
 - Hosted global operator registries belong to hosted product workspaces and must not be emitted into standard generated app bundles
 - Page ids must cover every entity domain that `ConfigMiddlewareAgent` assigns module admin panels to
@@ -192,7 +192,7 @@ Rules:
 
 | Page id | Inclusion condition | Path |
 |---|---|---|
-| `hosting` | `available_hosted_packs` contains `hosting` or `deployment` | `/apps/:appId/hosting` |
+| `hosting` | `capability_packs` contains `hosting` or `deployment` | `/apps/:appId/hosting` |
 
 Add new hosted-only pages here when a hosted capability pack introduces a new operator surface. Do not add them to the standard inclusion rules.
 
@@ -354,5 +354,9 @@ Do not:
 
 Without this split, AppGenerator either under-specifies visual/media control or mixes styling, shell behavior, and asset inventory.
 The contract above keeps bundle generation deterministic, keeps ThemeCapture reusable, and gives the runtime a stable set of artifacts to consume.
+
+
+
+
 
 

@@ -21,7 +21,8 @@ mozaiks/                           # Canonical Mozaiks repo
 │   │   ├── config/
 │   │   ├── modules/
 │   │   └── ui/
-│   ├── control_plane/             # First-party builder/reference app control-plane pack
+│   ├── build_context/             # Factory-owned build-time prompt/catalog context
+│   ├── control_plane/             # Declarative builder harness pack (Studio-owned)
 │   │   ├── config/                # control_plane.yaml, tools.yaml, policies.yaml
 │   │   ├── prompts/               # System prompt files per checkpoint
 │   │   └── tools/                 # Context-loading Python tool implementations
@@ -60,20 +61,23 @@ my-app/
 │   ├── modules/
 │   ├── brand/
 │   └── services/
-├── control_plane/                 # optional app-local harness pack
-│   ├── config/
-│   ├── prompts/
-│   └── tools/
-└── workflows/
+├── workflows/
+└── build_context/
+    └── {context_name}/
+        ├── manifest.yaml
+        ├── catalogs/
+        └── packs/
 ```
 
 - The first-party factory layer lives under `factory_app/`
 - Hosted product workspaces consume the same self-contained app-root contract
-- `app/config/ai.json` is the canonical app-level AI startup contract for `ask`, `chat`, and `workflows`
-- `control_plane/config/runtime.yaml` is the optional app-local control-plane runtime policy contract
-- `control_plane/config/control_plane.yaml` is the optional app-local declarative harness manifest
-- `app/config/data.json` is the canonical app data contract
+- `app/config/ai.json` is the canonical app-level AI boot contract, including optional `control_plane` settings for builder-session harnesses and future coding-agent refinement workers
+- `app/data/contract.json` is the canonical app data contract
 - `app/services/` is the canonical app-owned service implementation lane
+- `build_context/`, when present, is workspace-level declarative build-time
+  prompt/context input. Each named context declares the workflows it applies to
+  in `manifest.yaml` and may provide `catalogs/` and `packs/`; it is not
+  generated app runtime output.
 
 ## What Mozaiks Is
 
@@ -198,6 +202,8 @@ See [docs/architecture/modules-systems/framework-capability-classification.md](d
 
 **Owns:**
 - Shared builder/generator workflows: `AppGenerator`, `AgentGenerator`, `DesignDocs`, `ValueEngine`
+- Factory-owned workflow catalogs under `factory_app/workflows/{WorkflowName}/`
+  or `factory_app/workflows/_shared/`
 - Control plane declarative pack: checkpoints, classifier prompts, routing policies, context-loading tools
 - Workflow prompts, agent rosters, structured output models, and tool bindings for generation
 - Artifact assembly: module contract generation, page schema generation, workflow bundle generation
@@ -224,6 +230,8 @@ Quality gates:
 
 **Key files:**
 - `factory_app/workflows/` — shared builder/generator workflow root
+- `factory_app/workflows/{WorkflowName}/*.yaml` — workflow-owned prompt/catalog context
+- `factory_app/workflows/_shared/` — shared factory prompt/catalog helpers
 - `factory_app/control_plane/` — declarative builder harness pack
 - `mozaiksai/control_plane/` — harness runtime implementation (mounted by Studio host)
 
@@ -284,7 +292,7 @@ Shared factory workflows live in `factory_app/workflows/`. A running host resolv
 - Product/app hosts use workspace-root `workflows/` when present
 - Build is coordinated by `workflow_sequences` in `factory_app/workflows/extended_orchestration/extension_registry.json`; `ValueEngine`, `ThemeCapture`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` are individual workflows inside those sequences
 - `ExistingAppDiscovery` belongs to the brownfield adoption sequence rather than the default greenfield build path
-- Refinement today is checkpoint/control-plane re-entry driven by `app/config/ai.json` startup plus `factory_app/control_plane/config/runtime.yaml` policy and `factory_app/control_plane/config/control_plane.yaml`, not a dedicated `RefinementWorkflow`
+- Refinement today is checkpoint/control-plane re-entry driven by `app/config/ai.json` plus `factory_app/control_plane/config/control_plane.yaml`, not a dedicated `RefinementWorkflow`
 
 `AppGenerator` and `AgentGenerator` write all output into `MOZAIKS_GENERATED_ARTIFACTS_PATH` (defaults to `generated/`). Promotion is the only path from `generated/` into an active app root.
 
@@ -352,13 +360,7 @@ A core distinction the harness enforces is **refinement vs revision**:
 
 Without this distinction, every user request either re-runs the full workflow unnecessarily or patches blindly without considering downstream impact. The harness is what makes the system behave like a coherent runtime rather than a sequence of isolated group chats.
 
-The control-plane contract is **app-local**, not Studio-private. Studio
-dogfoods it through `factory_app/control_plane/`, and generated app workspaces
-may stage the same contract under `control_plane/config/` when they need
-harnessed lifecycle/refinement/session routing. `app/config/ai.json` remains
-the startup contract for `ask`, `chat`, and `workflows`; control-plane runtime
-policy lives in `control_plane/config/runtime.yaml`; the declarative harness
-manifest lives in `control_plane/config/control_plane.yaml`.
+The control plane is **Studio-owned**. It is mounted by `mozaiksai.hosts.studio` at startup and is NOT loaded by generated app workspaces or `mozaiksai.hosts.platform`. An `app/config/ai.json` may declare a `control_plane` key for future support, but today only the Studio host activates the harness.
 
 ### How It Differs From Other Routing Mechanisms
 
@@ -373,12 +375,11 @@ The control plane does not execute business logic. It classifies intent and rout
 
 ### Directory Structure
 
-**Declarative pack (first-party builder/reference app example):**
+**Declarative pack (Studio-owned):**
 
 ```text
 factory_app/control_plane/
 ├── config/
-│   ├── runtime.yaml         # Enabled/profile/llm profiles/capability policy
 │   ├── control_plane.yaml   # Checkpoints, classifier config, routing rules
 │   ├── tools.yaml           # Tool bindings for context-loading tools
 │   └── policies.yaml        # Artifact-specific routing policies per change class
@@ -511,7 +512,7 @@ App workspaces and generated app output must not bundle their own copies of Reac
 **Key responsibilities:**
 - Run AI workflow executions with AG2 beta agents and transition graphs
 - Stream events to frontend via WebSocket
-- Persist workflow-run metadata to MongoDB and AG2 run history through a persistent per-run stream
+- Persist chat sessions to MongoDB
 - Handle tool calls from agents
 - Manage workflow state (in-progress, completed)
 - Token accounting and observability
@@ -622,7 +623,7 @@ workspace/
 ├── app/
 │   ├── app.json                    # App identity + startup intent + admins bootstrap
 │   ├── config/
-│   │   ├── ai.json                 # Runtime startup for ask/chat/workflows
+│   │   ├── ai.json                 # LLM provider, model, optional control_plane key
 │   │   ├── shell.json              # Header/footer/profile/notification chrome
 │   │   ├── data.json               # Unified data contract
 │   │   ├── secrets.yaml            # Names-only secret contract
@@ -635,14 +636,6 @@ workspace/
 │   │       ├── runtime_extensions.yaml
 │   │       └── backend/
 │   │           ├── handler.py
-├── control_plane/
-│   ├── config/
-│   │   ├── runtime.yaml            # Optional app-local control-plane runtime policy
-│   │   ├── control_plane.yaml      # Optional app-local control-plane manifest
-│   │   ├── tools.yaml
-│   │   └── policies.yaml
-│   ├── prompts/
-│   └── tools/
 │   │           ├── service.py
 │   │           ├── repo.py
 │   │           ├── policy.py
@@ -665,10 +658,10 @@ workspace/
         ├── agents.yaml
         ├── context_variables.yaml
         ├── structured_outputs.yaml
-        ├── handoffs.yaml
+        ├── transition_graph.yaml
         ├── tools.yaml
         ├── ui_config.yaml
-        ├── hooks.yaml
+        ├── middleware.yaml
         ├── tools/
         └── ui/
 ```
@@ -696,8 +689,6 @@ Every bundle (module, workflow, page) declares a `visibility`: `public` (all use
 
 ### Workflow
 A multi-agent AI conversation executed by AG2. Declared in workspace-root `workflows/` for app-owned workflows, or `factory_app/workflows/` for shared builder workflows. Declares `events.emits` (what its tools publish) and `triggers` (what external events start or resume it).
-
-Current runtime note: one workflow run owns one persistent AG2 `MemoryStream` keyed by `app_id + chat_id`. `ChatSessions` stores run metadata and projections such as status, usage, artifacts, and session/journey linkage; AG2 run-stream history is the canonical execution record used for resume and replay.
 
 ### Lifecycle Tools (`lifecycle_tools` in `tools.yaml`)
 
@@ -837,5 +828,6 @@ These invariants guide every implementation decision in this repo.
 | change classification | intent class assigned by the control plane classifier: `patch` (small fix), `design` (visual/structural), `feature` (new capability), `core` (architectural) |
 | `factory_app/control_plane/` | declarative builder harness pack: checkpoint config, classifier prompts, routing policies, and context-loading tool implementations |
 | `mozaiksai/control_plane/` | runtime implementation of the control plane harness: `ControlPlaneHarness`, classifier, checkpoint evaluation, and router |
+
 
 

@@ -10,5 +10,5 @@ pack ownership, or AppGenerator module planning.
 | --- | --- |
 | [Module System](module-system.md) | Canonical module shape, actions, capabilities, and contracts |
 | [Module Authoring Patterns](module-authoring-patterns.md) | Practical authoring order and backend split |
-| [Capability Pack Model](capability-pack-model.md) | Build-time generation packs and ownership classes |
+| [AppGenerator Capability Planning](appgenerator-capability-planning.md) | AppBuildPlan capability grouping and ownership classes |
 | [Framework Capability Classification](framework-capability-classification.md) | Universal, framework, hosted, generated, and external capability classes |

@@ -217,7 +217,7 @@ Implemented greenfield helper behavior:
 - create a deterministic `AppContextGraph` from generated bundle manifest paths
   and, when manifest content is available, from lightweight structured files
   such as `ui/route_manifest.json`, page YAML, `modules/*/module.yaml`,
-  `config/data.json`, and workflow YAML
+  `data/contract.json`, and workflow YAML
 - add source-backed graph edges for route-to-page rendering, page-to-component
   rendering, page-to-module calls, module-to-integration usage, explicit
   module-to-data read/write intent, workflow-to-module dependencies, and

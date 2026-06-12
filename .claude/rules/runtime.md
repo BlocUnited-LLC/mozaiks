@@ -33,7 +33,6 @@ Keep the runtime:
 Do not:
 - hardcode workflows or product behavior into runtime internals
 - add compatibility layers, aliases, or fallback adapters unless explicitly requested
-- build new logic on obsolete workflow or groupchat abstractions
 - weaken logging, metrics, execution events, or token accounting without an explicit reason
 
 ## Working Style

@@ -56,7 +56,7 @@ Keep these distinct:
 - `workflow_sequence` / `workflow_sequences[]` = cross-workflow rebuild or revision route
 - `transitions[]` = route-time user choice or deterministic context seed
 - `entrypoints[]` = external route entry into a sequence or transition
-- `handoffs.yaml` = workflow-local AG2 agent routing
+- `transition_graph.yaml` = workflow-local AG2 agent routing
 - `routing.artifacts[]` = artifact-kind ownership and change-class routing in `control_plane.yaml`
 - `checkpoints[]` = control-plane decision points above workflows and above workflow-local handoffs
 
@@ -106,3 +106,4 @@ Return:
 3. workflow sequence affected
 4. checkpoint/re-entry behavior
 5. tests required/run
+

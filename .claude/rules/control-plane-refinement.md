@@ -44,7 +44,7 @@ Keep these mechanisms distinct:
 - `workflow_sequence` / `workflow_sequences[]` = cross-workflow re-entry or rebuild path
 - `transitions[]` = route-time user choice or deterministic context seed
 - `entrypoints[]` = external route entry into a sequence or transition
-- `handoffs.yaml` = workflow-local agent routing
+- `transition_graph.yaml` = workflow-local agent routing
 - `routing.artifacts[]` = artifact ownership and change-class routing
 - `checkpoints[]` = control-plane decision points above workflows
 
@@ -62,3 +62,4 @@ Keep these mechanisms distinct:
 In reviews and final reports, include the `Control-Plane / Refinement Impact`
 section from `.claude/rules/testing.md` when checkpoint routing, change
 classification, artifact routing, or re-entry behavior changes.
+

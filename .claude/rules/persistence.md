@@ -16,9 +16,9 @@ artifacts, or module persistence boundaries.
 ## Canonical Persistence Artifacts
 
 - `data_contract` is the canonical planning object.
-- Generated app bundles persist it as `config/data.json`.
+- Generated app bundles persist it as `data/contract.json`.
 - Additive revisions belong under
-  `config/data_migrations/{migration_id}.json`.
+  `data/migrations/{migration_id}.json`.
 
 ## Module Persistence Boundary
 

@@ -1,6 +1,6 @@
 # Context Graph and Code Intelligence
 
-Status: Active Architecture
+Status: Active Architecture (Still WIP)
 
 The Context Graph is Mozaiks' canonical code-context intelligence layer. It
 captures app, artifact, file, symbol, contract, provenance, and advisory
@@ -465,6 +465,54 @@ For broader impact:
 python -m pytest tests/test_scope_proposer.py tests/test_coding_worker.py -q
 python -m pytest tests/test_app_context_models.py tests/test_app_context_architecture_contract.py -q
 ```
+
+## Post-Generation Contract Integrity
+
+The Context Graph is the right layer for detecting structural issues in generated
+code after artifacts are written. This is distinct from the contract completeness
+checks that run against `BuildPlan` before generation — those operate on declared
+intent. Post-generation integrity operates on what was actually written.
+
+The graph already maps:
+
+- declared module actions → handler symbol implementations (`implements_capability`)
+- declared page/view addresses → page component or schema files
+- declared events → producer modules and subscriber reactions
+- declared integrations → client files under `services/integrations/`
+
+These relationships let the control plane answer questions that no amount of
+prompt engineering can answer reliably:
+
+- Is every declared action actually implemented in a handler?
+- Does every view address resolve to a generated file?
+- Are there imports in generated code that reference paths which were never written?
+- Does every declared event have at least one reaction or subscriber registered?
+
+These checks are deterministic graph queries — no LLM involved. They run against
+the `AppContextGraph` built from the generated artifact workspace after the build
+completes and before promotion.
+
+When a check fails it surfaces as a graph annotation on the affected node with
+`risk_level: high` and a `purpose` describing the gap. The control plane can
+surface this as a targeted revision — "ServiceAgent did not implement
+`tasks.archive_task`" — rather than asking the user to discover it at runtime.
+
+This is where the code intelligence layer and the build factory layer connect:
+the factory declares contracts, generates to those contracts, and the graph
+validates that the generated code actually honors them.
+
+### Current gap
+
+Post-generation integrity checks are not yet implemented as first-class graph
+queries. The wiring validation today runs as middleware hooks that inspect
+generated files directly. The target state is for those checks to be graph
+queries against the post-build `AppContextGraph`, making them:
+
+- domain-agnostic (any domain's generated files can be indexed and checked)
+- reusable across initial build and refinement runs
+- available to Studio's inspection UX as annotated graph nodes
+
+This is tracked as open work below.
 
 ## Open Work
 

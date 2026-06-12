@@ -12,9 +12,9 @@ Typical triggers:
 - AppGenerator agents or prompts
 - `AppBuildPlan` shape or validation
 - `structured_outputs.yaml`
-- `tools/file_contracts.yaml`
-- `tools/domain_catalogs.yaml`
-- `tools/module_archetypes.yaml`
+- `factory_app/build_context/AppGenerator/file_contracts.yaml`
+- `factory_app/build_context/AppGenerator/domain_catalogs.yaml`
+- `factory_app/build_context/AppGenerator/module_archetypes.yaml`
 - `tools/app_build_plan.py`
 - `tools/assemble_app_tasks.py`
 - shared generated UI contract checks used by AppGenerator
@@ -27,15 +27,23 @@ Inspect first:
 
 - `factory_app/workflows/AppGenerator/agents.yaml`
 - `factory_app/workflows/AppGenerator/structured_outputs.yaml`
-- `factory_app/workflows/AppGenerator/hooks.yaml`
-- `factory_app/workflows/AppGenerator/handoffs.yaml`
+- `factory_app/workflows/AppGenerator/middleware.yaml`
+- `factory_app/workflows/AppGenerator/transition_graph.yaml`
 - `factory_app/workflows/AppGenerator/context_variables.yaml`
-- `factory_app/workflows/AppGenerator/tools/file_contracts.yaml`
-- `factory_app/workflows/AppGenerator/tools/domain_catalogs.yaml`
-- `factory_app/workflows/AppGenerator/tools/module_archetypes.yaml`
+- `factory_app/build_context/AppGenerator/file_contracts.yaml`
+- `factory_app/build_context/AppGenerator/domain_catalogs.yaml`
+- `factory_app/build_context/AppGenerator/module_archetypes.yaml`
 - `factory_app/workflows/AppGenerator/tools/app_build_plan.py`
 - `factory_app/workflows/AppGenerator/tools/assemble_app_tasks.py`
 - `factory_app/workflows/_shared/generated_ui_contract.py`
+
+Catalog placement rule:
+
+- AppGenerator prompt catalogs live only under `factory_app/build_context/AppGenerator/`.
+- AppGenerator runtime workflow files live under `factory_app/workflows/AppGenerator/`.
+- Hooks resolve factory build-context paths through `factory_app.workflows._shared.hook_utils.workflow_context_path()`.
+- Do not recreate `factory_app/workflows/_shared/catalogs/`.
+- Do not add static prompt catalog values to `context_variables.yaml`; context variables are runtime/session state.
 - the narrowest relevant AppGenerator tests before editing:
   - `tests/test_appgenerator_module_contracts.py`
   - `tests/test_appgenerator_canonical_generation.py`
@@ -54,7 +62,7 @@ Core truth:
 - It does not own product strategy, concept formation, brand discovery, or workflow generation.
 - It emits canonical app workspace artifacts.
 - It must respect the canonical app structure and the platform's current runtime contracts.
-- It must respect `tools/file_contracts.yaml`.
+- It must respect `factory_app/build_context/AppGenerator/file_contracts.yaml`.
 - It must not invent runtime contracts unsupported by the platform.
 - It must not generate hosted product internals.
 - It should keep persistent app UI schema-first unless the bounded custom route contract is explicitly required.
@@ -79,28 +87,28 @@ Common change types:
    - inspect `app_build_plan.py`, `structured_outputs.yaml`, and the nearest build-plan tests together
    - preserve the boundary between plan validation, task ownership, and runtime behavior
 2. File contract changes:
-   - inspect `file_contracts.yaml` plus the nearest canonical generation and helper-contract tests
+   - inspect `factory_app/build_context/AppGenerator/file_contracts.yaml` plus the nearest canonical generation and helper-contract tests
    - keep owned paths, output families, and hard constraints aligned with current runtime and loader truth
 3. Module generation changes:
-   - inspect `structured_outputs.yaml`, `file_contracts.yaml`, `module_archetypes.yaml`, and module contract tests together
+   - inspect `structured_outputs.yaml`, `factory_app/build_context/AppGenerator/file_contracts.yaml`, `factory_app/build_context/AppGenerator/module_archetypes.yaml`, and module contract tests together
    - preserve `module.yaml` plus `contracts/` ownership and the canonical backend layer split
 4. Page or UI generation changes:
    - inspect `agents.yaml`, `structured_outputs.yaml`, `assemble_app_tasks.py`, and `factory_app/workflows/_shared/generated_ui_contract.py`
    - keep persistent pages declarative by default and custom routes bounded by the typed contract
 5. Data contract generation changes:
-   - inspect `structured_outputs.yaml`, `file_contracts.yaml`, and persistence tests together
-   - keep `config/data.json` and `config/data_migrations/{migration_id}.json` as the canonical output family
+   - inspect `structured_outputs.yaml`, `factory_app/build_context/AppGenerator/file_contracts.yaml`, and persistence tests together
+   - keep `data/contract.json` and `data/migrations/{migration_id}.json` as the canonical output family
 6. Hosted-pack or external-adapter generation changes:
-   - inspect `file_contracts.yaml`, hosted-pack rules, and hosted-pack smoke tests together
+   - inspect `factory_app/build_context/AppGenerator/file_contracts.yaml`, hosted-pack rules, and hosted-pack smoke tests together
    - preserve the app-owned facade module pattern and thin adapter boundary
 7. Assembly or template behavior:
    - inspect `assemble_app_tasks.py`, `assembly_phase.py`, and the nearest assembly or validation tests
    - keep assembly as artifact composition, not a place to invent new contracts
 8. Generated UI quality gates:
-   - inspect `hooks.yaml`, `tools.yaml`, `factory_app/workflows/_shared/generated_ui_contract.py`, and UI quality tests together
+   - inspect `middleware.yaml`, `tools.yaml`, `factory_app/workflows/_shared/generated_ui_contract.py`, and UI quality tests together
    - keep shared UI quality standards aligned with the frontend rules
 9. Prompt or hook changes:
-   - inspect `agents.yaml`, `hooks.yaml`, the injected contract contexts, and prompt-drift tests together
+   - inspect `agents.yaml`, `middleware.yaml`, the injected contract contexts, and prompt-drift tests together
    - do not weaken canonical file, schema, or boundary guidance in prompts
 10. Test fixture updates:
    - update the narrowest fixture or contract slice that actually changed
@@ -148,4 +156,9 @@ Return:
 4. runtime/platform contract impact
 5. tests required or run
 6. contract drift risk
+
+
+
+
+
 

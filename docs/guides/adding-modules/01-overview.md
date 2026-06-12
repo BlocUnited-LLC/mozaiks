@@ -30,7 +30,7 @@ app/modules/{name}/
 │   ├── notifications.yaml   ← notification rules per event
 │   ├── settings.yaml        ← user-configurable settings schema
 │   ├── admin.yaml           ← optional feature panels for the framework admin shell
-│   └── entitlements.yaml    ← capability gates per plan or role
+│   └── profile.yaml         ← optional user profile page panels
 ├── runtime_extensions.yaml  ← only for raw webhook routers or background workers
 └── backend/
     ├── __init__.py
@@ -268,4 +268,4 @@ declared section. They are not Studio app portfolio pages.
 
 - [Module System](../../architecture/modules-systems/module-system.md)
 - [Module Authoring Patterns](../../architecture/modules-systems/module-authoring-patterns.md)
-- [Capability Pack Model](../../architecture/modules-systems/capability-pack-model.md)
+- [AppGenerator Capability Planning](../../architecture/modules-systems/appgenerator-capability-planning.md)

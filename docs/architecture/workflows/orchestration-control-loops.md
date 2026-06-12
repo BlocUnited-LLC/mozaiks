@@ -65,7 +65,7 @@ This loop does not own:
 - preview approval policy
 - coding-agent file repair policy
 
-`factory_app/workflows/*/orchestrator.yaml`, `agents.yaml`, `handoffs.yaml`, and
+`factory_app/workflows/*/orchestrator.yaml`, `agents.yaml`, `transition_graph.yaml`, and
 `extended_orchestration/task_batches.yaml` all belong to this loop.
 
 ### 2. Builder session loop
@@ -394,5 +394,6 @@ Relevant repo-local builder docs:
 - [Builder Execution Model](../builder/builder-execution-model.md)
 - [App Builder Architecture](../builder/app-builder-architecture.md)
 - [App Planning Contracts](../builder/app-planning-contracts.md)
+
 
 

@@ -1,7 +1,7 @@
 # AgentGenerator Output Assembly Contract
 
 **Status:** CANONICAL — describes what actually exists
-**Last verified:** 2026-05-31
+**Last verified:** 2026-06-12
 **Source files:**
 - `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
 - `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
@@ -20,8 +20,8 @@
 
 AgentGenerator uses the **task batch pattern**:
 
-1. `PackBuildCoordinator` collects the user's workflow pack specification into `pack_spec` (context variable)
-2. The `workflow_bundle_tasks` task batch fires — one `WorkflowBundleBuilderAgent` instance per workflow in the pack, running in parallel
+1. `PackBuildCoordinator` collects the user's workflow pack specification into `workflows_spec` (context variable)
+2. The `workflow_generation_tasks` task batch fires — one `WorkflowBundleBuilderAgent` instance per workflow in the pack, running in parallel
 3. Each worker emits a `WorkflowBundleBuilderOutput` with a `files` list of `CodeFile` entries
 4. The runtime collects all results into `context_variables["workflow_bundle_results"]`, keyed by task_id
 5. `generate_and_download` reads `workflow_bundle_results`, writes each bundle to disk, zips them, and presents the download UI
@@ -46,18 +46,19 @@ step copies them into an active app root's `workflows/` directory.
 | `PatternAgent` | Selects orchestration pattern; output available to `WorkflowBundleBuilderAgent` via context |
 | `PackBuildCoordinator` | Interviews the user, populates `pack_spec`, seeds the task batch |
 | `WorkflowBundleBuilderAgent` | Task batch worker — generates all YAML and code files for one workflow bundle |
-| `DownloadCenterAgent` | Triggers `generate_and_download` after the task batch completes |
+| `PackMetadataAgent` | Produces pack-level `extension_registry.json` metadata after workflow bundles complete |
+| `DownloadAgent` | Triggers `generate_and_download` after pack metadata is ready |
 
 ---
 
-## Task Batch: `workflow_bundle_tasks`
+## Task Batch: `workflow_generation_tasks`
 
 Declared in `extended_orchestration/task_batches.yaml`.
 
 ```yaml
 source:
   kind: context_variable
-  path: pack_spec.workflows
+  path: workflows_spec
   task_model: WorkflowInPack
 worker:
   mode: ag2_agent
@@ -68,7 +69,7 @@ result:
   status_key: workflow_bundle_status
 ```
 
-Each task receives one `WorkflowInPack` entry from `pack_spec.workflows`.
+Each task receives one `WorkflowInPack` entry from `workflows_spec`.
 The runtime injects it as `context_variables["structured_output"]` for the worker.
 
 ---
@@ -84,7 +85,7 @@ files:
     content: "..."
   - filename: agents.yaml
     content: "..."
-  - filename: handoffs.yaml
+  - filename: transition_graph.yaml
     content: "..."
   - filename: context_variables.yaml
     content: "..."
@@ -92,7 +93,7 @@ files:
     content: "..."
   - filename: tools.yaml
     content: "..."
-  - filename: hooks.yaml
+  - filename: middleware.yaml
     content: "..."
   - filename: ui_config.yaml
     content: "..."
@@ -141,7 +142,7 @@ Reads `workflow_bundle_results` directly from context. For each bundle entry:
 2. `_build_pack_zip(bundle_dirs, output_path)` — zips all workflow directories into a single archive
 3. `use_ui_tool("DownloadCenter", ...)` — presents the download UI to the user
 
-No MongoDB scraping. No `create_workflow_files()` assembly step.
+Assembly reads task-batch structured outputs directly from runtime context.
 
 ### Files Written
 
@@ -150,11 +151,11 @@ $MOZAIKS_GENERATED_ARTIFACTS_PATH/workflows/{app_id}/
 ├── {WorkflowName}/
 │   ├── orchestrator.yaml
 │   ├── agents.yaml
-│   ├── handoffs.yaml
+│   ├── transition_graph.yaml
 │   ├── context_variables.yaml
 │   ├── structured_outputs.yaml
 │   ├── tools.yaml
-│   ├── hooks.yaml
+│   ├── middleware.yaml
 │   ├── ui_config.yaml
 │   ├── extended_orchestration/
 │   │   └── task_batches.yaml   ← if workflow uses task batches
@@ -187,9 +188,9 @@ Functions exported:
 | Function | Purpose |
 |----------|---------|
 | `promote_generated_workflow(source_dir, target_root)` | Copy a generated workflow into the active workflows root |
-| `_normalize_handoff_rules(raw_rules)` | Normalize handoff rule list; rejects LLM-evaluated conditions |
+| `_normalize_transition_rules(raw_rules)` | Normalize transition rule list; rejects LLM-evaluated conditions |
 | `_normalize_tools_manifest(output, wf_logger)` | Normalize tools + lifecycle_tools with UI realization stamps |
-| `_normalize_visual_agents(value, startup_mode)` | Normalize visual_agents list per startup_mode |
+| `_normalize_visual_agents(value, workflow_startup_mode)` | Normalize visual_agents list per workflow_startup_mode |
 | `_collect_ui_code_files(output, tools_config, wf_logger)` | Collect UIFileGenerator output, skip shipped primitives, synthesize barrel |
 | `_normalize_runtime_extensions(extensions, workflow_name, wf_logger)` | Keep extensions workflow-local |
 | `_normalize_orchestrator_triggers(triggers, wf_logger)` | Validate trigger types against declared schema |
@@ -199,19 +200,21 @@ for what a well-formed bundle looks like.
 
 ---
 
-## What Does NOT Exist
+## Current Boundaries
 
-| Concept | Reality |
-|---------|---------|
-| `gather_latest_agent_jsons()` | Removed — was MongoDB scraping; replaced by task batch result collection |
-| `create_workflow_files()` | Removed — was the old per-agent-output assembly function |
-| `ContextVariablesAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
-| `HandoffsAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
-| `AgentsAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
-| `ToolsManagerAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
-| `OrchestratorAgent` | Removed — its work is done inline by `WorkflowBundleBuilderAgent` |
-| `DownloadAgent` | Replaced by `DownloadCenterAgent` |
-| Sequential 18-agent chain | Replaced by 4-agent workflow with parallel task batch workers |
+AgentGenerator's runtime path is a compact task-batch workflow:
+
+- `PatternAgent` selects the workflow topology and AG2 network pattern.
+- `ProjectOverviewAgent` presents the generated-workflow plan for review.
+- `PackBuildCoordinator` triggers `workflow_generation_tasks`.
+- `WorkflowBundleBuilderAgent` workers generate complete workflow bundles in parallel.
+- `PackMetadataAgent` generates pack-level routing metadata.
+- `DownloadAgent` packages the generated artifacts.
+
+Bundle assembly is context-first: generated workflow files come from
+`workflow_bundle_results`, and pack metadata comes from the current structured
+outputs. Runtime loading still requires explicit promotion into an active
+workspace workflow root.
 
 ---
 
@@ -223,3 +226,4 @@ for what a well-formed bundle looks like.
 - `factory_app/workflows/AgentGenerator/tools/workflow_converter.py` — normalization utilities
 - `factory_app/workflows/AgentGenerator/extended_orchestration/task_batches.yaml` — task batch config
 - `factory_app/workflows/AgentGenerator/structured_outputs.yaml` — `WorkflowBundleBuilderOutput` model
+

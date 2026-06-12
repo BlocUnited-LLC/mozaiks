@@ -43,10 +43,10 @@ and additive migration application.
 Current truth:
 
 - `data_contract` is the canonical generated database planning object.
-- `AppGenerator` writes that object to `config/data.json` when it is
+- `AppGenerator` writes that object to `data/contract.json` when it is
   present.
 - additive refinement plans may be staged under
-  `config/data_migrations/{migration_id}.json`.
+  `data/migrations/{migration_id}.json`.
 - generated modules use `backend/schemas.py` for typed document/request shapes;
   `backend/models.py` and `backend/models/*.py` are not canonical outputs.
 - `backend/repo.py` owns persistence operations and should be derived from
@@ -54,9 +54,9 @@ Current truth:
 - the OSS runtime injects `ctx.persistence` into module actions when an `app_id`
   is available; generated repo code uses
   `ctx.persistence.collection(module_id, entity_name)`.
-- the OSS runtime loads promoted `config/data.json` as app metadata.
+- the OSS runtime loads promoted `data/contract.json` as app metadata.
   It applies declared collection indexes idempotently at platform startup.
-  It loads `config/data_migrations/*.json` and applies only supported
+  It loads `data/migrations/*.json` and applies only supported
   additive operations with migration history. Destructive migrations are not
   supported.
 - the OSS runtime does not inject `ctx.db` into module actions.
@@ -158,14 +158,14 @@ artifacts.
 The canonical staged artifact path should be:
 
 ```text
-generated/apps/{app_id}/{build_id}/app/config/data.json
+generated/apps/{app_id}/{build_id}/app/data/contract.json
 ```
 
 If the run is a refinement and a migration is needed, `AppGenerator` should
 also stage:
 
 ```text
-generated/apps/{app_id}/{build_id}/app/config/data_migrations/{migration_id}.json
+generated/apps/{app_id}/{build_id}/app/data/migrations/{migration_id}.json
 ```
 
 This replaces the older idea of writing migrations under
@@ -179,18 +179,18 @@ bundle.
 
 The promoted app root should contain:
 
-- `config/data.json`
-- optional `config/data_migrations/*.json`
+- `data/contract.json`
+- optional `data/migrations/*.json`
 
 ## Canonical Data Contract Artifact
 
 The canonical artifact is `data_contract`.
 
 It should be stored in persistence and also written to the staged app bundle as
-`config/data.json`.
+`data/contract.json`.
 
 Hosted product/platform workspaces must keep product-owned collection metadata
-outside `app/config/data.json`. That path is reserved for generated
+outside `app/data/contract.json`. That path is reserved for generated
 app persistence intent consumed by the OSS runtime. Do not place hosted
 collection aliases, proprietary hosted collection names, or host-system
 authority records in generated-app data contract.
@@ -415,14 +415,14 @@ data migration artifact.
 
 It should:
 
-- load `config/data.json`
+- load `data/contract.json`
 - ensure declared indexes exist
-- load any pending `config/data_migrations/*.json`
+- load any pending `data/migrations/*.json`
 - record applied migration ids
 - reject blocked/destructive operations unless explicitly approved by policy
 
-Current implementation status: runtime loads `config/data.json`,
-ensures declared indexes exist, loads `config/data_migrations/*.json`, and
+Current implementation status: runtime loads `data/contract.json`,
+ensures declared indexes exist, loads `data/migrations/*.json`, and
 records migration state in `mozaiksai.AppDatabaseMigrations`. Supported
 migration operations are limited to `ensure_collection` and `ensure_index`.
 Runtime does not mutate existing documents, apply destructive changes, execute
@@ -513,8 +513,8 @@ Generated app persistence is now supported end to end for module-owned business
 data. The canonical generated artifacts are:
 
 ```text
-config/data.json
-config/data_migrations/{migration_id}.json
+data/contract.json
+data/migrations/{migration_id}.json
 modules/{module_id}/backend/repo.py
 modules/{module_id}/backend/policy.py
 modules/{module_id}/backend/schemas.py
@@ -533,7 +533,7 @@ At runtime, `ModuleContext` exposes `ctx.persistence` when the module request ha
 an `app_id`. `ctx.db` is not injected and is not canonical. Generated
 `backend/repo.py` is the only generated backend layer that should touch
 persistence, and it should use `ctx.persistence.collection(module_id,
-entity_name)` with values that match `config/data.json`. Generated
+entity_name)` with values that match `data/contract.json`. Generated
 module code must not call `get_mongo_client()` or hardcode database names.
 
 Layer responsibilities:
@@ -547,12 +547,12 @@ Layer responsibilities:
 
 Runtime app loading behavior:
 
-- missing `config/data.json` is allowed for non-persistent apps.
-- valid `config/data.json` is loaded and indexed by
+- missing `data/contract.json` is allowed for non-persistent apps.
+- valid `data/contract.json` is loaded and indexed by
   `(module_id, entity_name)`.
 - invalid JSON or invalid shape fails app load.
 - declared indexes are applied idempotently.
-- additive migration files are loaded from `config/data_migrations/*.json`.
+- additive migration files are loaded from `data/migrations/*.json`.
 - migration states are recorded in `mozaiksai.AppDatabaseMigrations`.
 - supported migration operations are `ensure_collection` and `ensure_index`.
 - destructive migrations and arbitrary migration code are not supported.
@@ -675,8 +675,8 @@ These are known inconsistencies in the current system:
    - unify `ValueManifests` vs `Concepts`
 2. Introduce `data_contract` as a typed `DesignDocs` artifact.
 3. Persist it to `mozaiksai.DataContracts`.
-4. Write `config/data.json` during `AppGenerator`.
-5. Move migration output to `config/data_migrations/`.
+4. Write `data/contract.json` during `AppGenerator`.
+5. Move migration output to `data/migrations/`.
 6. Persist migration docs to `mozaiksai.DatabaseMigrations`.
 7. Keep generated `repo.py` guidance aligned with `ctx.persistence`.
 8. Exercise a persistent generated app smoke test.

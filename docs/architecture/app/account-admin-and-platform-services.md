@@ -66,8 +66,8 @@ Modules can extend these deterministic systems through explicit contracts.
   feature flags.
 - `modules/{module}/contracts/reactions.yaml` declares event reactions owned by
   the module.
-- `modules/{module}/contracts/entitlements.yaml` declares plan, role, or usage
-  gates when entitlement runtime support exists.
+- `modules/{module}/contracts/profile.yaml` declares user profile page panels
+  for user-scoped summary data.
 - `modules/{module}/contracts/notifications.yaml` declares notification intents
   per event.
 - `modules/{module}/contracts/admin.yaml` declares feature-owned admin panels
@@ -86,7 +86,7 @@ Use the canonical `handler.py`, `service.py`, `repo.py`, `policy.py`, and
 | Profile | `/profile` via `ProfilePage` | `GET/PUT /api/me` | none today | workflows, generated page bundles |
 | Preferences | `/profile` preferences section | `GET/PUT /api/me/preferences` | `modules/{module}/contracts/settings.yaml` when settings runtime support exists | workflow prompts |
 | Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/contracts/notifications.yaml` | workflows as source of truth |
-| Subscriptions and entitlements | profile badges, billing/admin views, and gated capability behavior | app backend entitlement state | billing/subscription modules plus `modules/{module}/contracts/entitlements.yaml` | capability-pack generation |
+| Subscriptions and entitlements | profile badges, billing/admin views, and gated capability behavior | app backend entitlement state | billing/subscription modules | capability-pack generation |
 | Admin | generated-app admin route family via `AdminPortal`; Studio Admin Portal uses `/apps` | framework admin shell plus same-host admin APIs, `app/app.json` `admins`, and optional app-backend admin APIs | `modules/{module}/contracts/admin.yaml` | custom admin page generation |
 
 ## Profile
@@ -146,8 +146,6 @@ extension points, not standalone app packs that every product must reinvent.
 
 - entitlement state stays deterministic and backend-owned
 - user-visible tier/status may appear in profile or admin views
-- module contracts use `contracts/entitlements.yaml` to declare feature-level
-  gates when entitlement runtime support exists
 - billing/subscription behavior belongs in deterministic billing/subscription
   modules and hosted capabilities, not in event reaction contracts
 

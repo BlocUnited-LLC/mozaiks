@@ -147,6 +147,6 @@ Prohibited uses:
 ## Cross References
 
 - [Module System](module-system.md)
-- [Capability Pack Model](capability-pack-model.md)
+- [AppGenerator Capability Planning](appgenerator-capability-planning.md)
 - [Platform Authoring](../app/platform-authoring.md)
 

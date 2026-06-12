@@ -13,7 +13,7 @@ model. If you are evaluating Mozaiks runtime differentiators first, start with
 - [Workflow Task Batches](task-batches.md)
 - [Universal Orchestrator](universal-orchestrator.md)
 - [Pack Graph Semantics](pack-graph-semantics.md)
-- [Handoff Condition Scope](handoff-condition-scope.md)
+- [Handoff Context Conditions](handoff-context-conditions.md)
 
 ## UI and Interaction
 

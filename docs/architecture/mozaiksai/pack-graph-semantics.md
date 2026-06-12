@@ -19,7 +19,7 @@ This is a **v3 schema**: there are no `nodes`/`edges` and no alternate historica
 ### Chat Session (run instance)
 - Identified by `chat_id`
 - Represents one run of a workflow type
-- Stores status (`IN_PROGRESS` / `COMPLETED`) and transcript/artifacts
+- Stores status (`IN_PROGRESS` / `COMPLETED`) and run metadata/artifacts; AG2 run history is persisted separately
 
 ### Scope (isolation boundary)
 - Identified by `app_id` in HTTP/WS APIs

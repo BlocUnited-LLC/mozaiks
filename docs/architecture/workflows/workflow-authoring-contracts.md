@@ -11,12 +11,12 @@ At minimum, a workflow should include:
 
 - `orchestrator.yaml`
 - `agents.yaml`
-- `handoffs.yaml`
+- `transition_graph.yaml`
 - `context_variables.yaml`
 - `structured_outputs.yaml`
 - `tools.yaml`
 - `ui_config.yaml`
-- `hooks.yaml`
+- `middleware.yaml`
 
 `extended_orchestration/task_batches.yaml` is optional and required only when
 the workflow uses workflow-local AG2 task batches.
@@ -29,12 +29,12 @@ the workflow uses workflow-local AG2 task batches.
 workflows/{workflow_name}/
   orchestrator.yaml
   agents.yaml
-  handoffs.yaml
+  transition_graph.yaml
   context_variables.yaml
   structured_outputs.yaml
   tools.yaml
   ui_config.yaml
-  hooks.yaml
+  middleware.yaml
   extended_orchestration/
     task_batches.yaml     # task batch config (only when needed)
   tools/
@@ -143,7 +143,7 @@ Rules:
 - `workflow_name` must match directory name.
 - `orchestration_pattern` should be the selected AG2 Network patternbook label
   when known, or `ag2_network` for generic runtime workflows. It is metadata;
-  routing still comes from `handoffs.yaml`.
+  routing still comes from `transition_graph.yaml`.
 - `workflow_startup_mode` must be one of:
   - `AgentDriven`
   - `UserDriven`
@@ -171,30 +171,42 @@ Rules:
   - `system_message`.
 - Auto-tool execution is derived from tools.yaml (agents with `auto_tool_call: true` tools); agents.yaml does not define a matching field.
 
-### `handoffs.yaml`
+### `transition_graph.yaml`
 
 ```yaml
-handoff_rules:
+transition_rules:
   - source_agent: user
     target_agent: ExampleHostAgent
-    handoff_type: condition
-    condition_type: expression
-    condition: ${intake_complete} == false
+    transition_type: condition
+    condition_type: context_equals
+    condition_key: intake_complete
+    condition_value: false
     transition_target: AgentTarget
   - source_agent: ExampleHostAgent
     target_agent: user
-    handoff_type: after_work
+    transition_type: after_turn
     transition_target: RevertToUserTarget
 ```
 
 Rules:
-- `handoff_type` is `after_work` or `condition`.
-- `condition` is required when `handoff_type: condition`.
-- `condition_type` is deterministic: `expression`, `context_expression`, or
-  `context`. LLM intent classification belongs in the control plane before a
-  workflow run is started or resumed.
-- AgentGenerator derives pattern-specific handoff rules from
-  `factory_app/workflows/_shared/patternbook/ag2_network_patterns.yaml`.
+- `transition_type` is `after_turn` or `condition`.
+- `condition_type` is `context_equals`, `context_expression`, or `tool_called` when
+  `transition_type: condition`.
+- `context_equals` routes require `condition_key` and `condition_value`; they
+  compile to a source-scoped AG2 `ContextEquals` condition.
+- `context_expression` routes require `context_expression` using AG2
+  `ContextExpression` syntax over declared `${context_variable}` references;
+  they compile to a registered AG2 beta `TransitionCondition`.
+- `tool_called` routes require `tool_name`; they compile to a source-scoped AG2
+  `ToolCalled` condition.
+- Same-source condition rules must appear before fallback `after_turn` rules
+  because AG2 evaluates lower priority first.
+- LLM intent classification belongs in the control plane before a workflow run
+  is started or resumed.
+- The runtime compiles these rules into an AG2 beta `TransitionGraph` and
+  resolves each turn through `WorkflowAdapter`.
+- AgentGenerator derives pattern-specific transition rules from
+  `factory_app/build_context/AgentGenerator/ag2_network_patterns.yaml`.
 
 ### `context_variables.yaml`
 
@@ -231,6 +243,16 @@ agents:
 Rules:
 - `definitions` must be a mapping (`name -> definition`), not a list.
 - `agents` must be a mapping (`agent_name -> {variables: [...]}`), not a list.
+- `context_variables.yaml` is the declaration layer for workflow state. At
+  runtime, AG2 `WorkflowState.context_vars` is the live state used for routing.
+- Agent prompts and structured outputs own semantic reasoning. Context
+  variables declare the typed state and artifact values that reasoning produces.
+- Every `agents.<Agent>.variables[]` entry must reference a declared
+  `definitions` key.
+- Every `transition_graph.yaml` `condition_key` and every `${...}` reference in
+  `context_expression` must reference a declared `definitions` key.
+- Every task-batch `result.context_key` and `result.status_key`, including
+  conveyor-derived `${id}_results` and `${id}_status`, must be declared.
 - Valid trigger types for `state` variables:
   - `agent_text`
   - `user_text`
@@ -243,6 +265,7 @@ Rules:
   - `state`
   - `external`
   - `file`
+  - `build_context`
 
 ### `structured_outputs.yaml`
 
@@ -363,20 +386,19 @@ visual_agents:
   - user
 ```
 
-### `hooks.yaml`
+### `middleware.yaml`
 
 ```yaml
-hooks:
-  - hook_type: update_agent_state
-    hook_agent: JokeWriterAgent
+prompt_middleware:
+  - agent: JokeWriterAgent
     filename: hook_inject_preferences.py
     function: inject_preferences
 ```
 
 Rules:
-- Valid `hook_type` value: `update_agent_state`.
-- Hooks are prompt-injection hooks. Use lifecycle tools for side effects and
-  structured outputs/runtime validators for output validation.
+- Prompt middleware declarations are compiled to AG2 beta middleware.
+- Use lifecycle tools for side effects and structured outputs/runtime
+  validators for output validation.
 
 ## Guardrails
 
@@ -388,5 +410,4 @@ Rules:
   `factory_app/workflows/_shared/`, but generated workflow packs must not emit
   or depend on that path.
 - Keep app-backend CRUD policy outside workflow declaratives.
-
 

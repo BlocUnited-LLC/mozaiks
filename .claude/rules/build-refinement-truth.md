@@ -21,7 +21,7 @@ refinement behavior.
   `AppContextVersion` artifact kinds. The target canonical substrate for both
   greenfield and brownfield apps is `AppContextVersion`. See
   `docs/architecture/foundations/app-context-and-brownfield-adoption.md`.
-- Keep these mechanisms distinct: `handoffs.yaml` for workflow-local agent
+- Keep these mechanisms distinct: `transition_graph.yaml` for workflow-local agent
   routing, `workflow_sequences[]` for cross-workflow build/revision sequencing,
   `transitions[]` for routed entry and user choice flows, and `task_batches.yaml`
   for bounded workflow-local parallel task work.
@@ -32,4 +32,5 @@ refinement behavior.
 - If module event/reaction docs differ from the current implementation, direct
   contributors to inspect the module loader and tests and follow the implemented
   runtime truth for that change.
+
 

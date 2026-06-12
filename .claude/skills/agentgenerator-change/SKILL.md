@@ -13,7 +13,7 @@ Typical triggers:
 - agent or workflow bundle structured outputs
 - generated workflow scaffolds
 - generated agent prompts
-- generated `handoffs.yaml`, `tools.yaml`, `structured_outputs.yaml`, or `context_variables.yaml`
+- generated `transition_graph.yaml`, `tools.yaml`, `structured_outputs.yaml`, or `context_variables.yaml`
 - universal prompt injection
 - MCP or tool capability injection
 - workflow or agent safety rules
@@ -24,12 +24,12 @@ Inspect first:
 
 - `factory_app/workflows/AgentGenerator/agents.yaml`
 - `factory_app/workflows/AgentGenerator/structured_outputs.yaml`
-- `factory_app/workflows/AgentGenerator/hooks.yaml`
-- `factory_app/workflows/AgentGenerator/handoffs.yaml`
+- `factory_app/workflows/AgentGenerator/middleware.yaml`
+- `factory_app/workflows/AgentGenerator/transition_graph.yaml`
 - `factory_app/workflows/AgentGenerator/tools.yaml`
 - `factory_app/workflows/AgentGenerator/context_variables.yaml`
 - `factory_app/workflows/AgentGenerator/tools/hook_universal_prompts.py`
-- capability-hook files if they exist in this workflow later, such as `hook_mcp_capabilities.py` or `hook_agent_capabilities.py`
+- capability-hook files if they exist in this workflow later, such as `hook_mcp_capabilities.py` or `agent_capabilities.py`
 - `factory_app/workflows/AgentGenerator/tools/tool_planning.py`
 - `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
 - `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
@@ -75,7 +75,7 @@ Common change types:
    - inspect `structured_outputs.yaml` plus the workflow authoring contract docs and converter tests
    - keep field names and enums aligned with current loader expectations
 3. Universal prompt hook changes:
-   - inspect `hook_universal_prompts.py`, `hooks.yaml`, and tests that validate prompt or UI-safety guidance
+   - inspect `hook_universal_prompts.py`, `middleware.yaml`, and tests that validate prompt or UI-safety guidance
    - keep universal behavior separate from file-generation or pattern-specific hooks
 4. MCP or tool capability hook changes:
    - inspect `tool_planning.py`, `tools.yaml`, and any capability hook files if present
@@ -84,7 +84,7 @@ Common change types:
    - inspect `workflow_converter.py`, `generate_and_download.py`, and workflow authoring contract docs together
    - keep generated bundle files workflow-local and contract-bound
 6. Handoff generation changes:
-   - inspect `handoffs.yaml`, converter tests, and authoring docs together
+   - inspect `transition_graph.yaml`, converter tests, and authoring docs together
    - preserve workflow-local handoff semantics and exact cross-reference names
 7. Tool generation changes:
    - inspect `tools.yaml`, `tool_planning.py`, and workflow UI contract tests together
@@ -136,4 +136,5 @@ Return:
 4. universal prompts or hooks affected
 5. tests required or run
 6. contract drift risk
+
 

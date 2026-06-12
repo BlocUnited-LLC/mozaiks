@@ -296,41 +296,44 @@ MigrationPhase:
 ## Handoffs
 
 ```yaml
-handoff_rules:
+transition_rules:
   # Intake → Planner on scope confirmation
   - source_agent: IntakeAgent
     target_agent: PlannerAgent
-    handoff_type: condition
-    condition_type: expression
-    condition: ${last_message_text} == 'NEXT'
+    transition_type: condition
+    condition_type: context_equals
+    condition_key: intake_confirmed
+    condition_value: true
     transition_target: AgentTarget
 
   # Intake waits for operator between turns
   - source_agent: IntakeAgent
     target_agent: user
-    handoff_type: after_work
+    transition_type: after_turn
     transition_target: RevertToUserTarget
 
   # Planner → Output when proposal is ready
   - source_agent: PlannerAgent
     target_agent: OutputAgent
-    handoff_type: condition
-    condition_type: expression
-    condition: ${last_message_text} == 'NEXT'
+    transition_type: condition
+    condition_type: context_equals
+    condition_key: proposal_ready
+    condition_value: true
     transition_target: AgentTarget
 
   # Output → user to present the proposal
   - source_agent: OutputAgent
     target_agent: user
-    handoff_type: after_work
+    transition_type: after_turn
     transition_target: RevertToUserTarget
 
   # Operator terminates session
   - source_agent: user
     target_agent: terminate
-    handoff_type: condition
-    condition_type: expression
-    condition: ${proposal_review_complete} == true
+    transition_type: condition
+    condition_type: context_equals
+    condition_key: proposal_review_complete
+    condition_value: true
     transition_target: TerminateTarget
 ```
 
@@ -368,6 +371,26 @@ definitions:
     source:
       type: state
       default: null
+
+  proposal_ready:
+    type: boolean
+    description: True once PlannerAgent has completed the proposal plan.
+    source:
+      type: state
+      default: false
+      triggers:
+        - type: agent_text
+          agent: PlannerAgent
+          ui_hidden: true
+          match:
+            equals: NEXT
+
+  proposal_review_complete:
+    type: boolean
+    description: True once the operator completes the proposal review.
+    source:
+      type: state
+      default: false
 ```
 
 ---
@@ -421,3 +444,4 @@ issued, dependency released):
 - [ ] `next_step` field guides operator to the downstream execution workflow
 - [ ] `README.md` states "PLAN ONLY" and "no action is executed by this workflow"
 - [ ] No provider secrets or credentials in any workflow YAML file
+

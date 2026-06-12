@@ -16,14 +16,14 @@ Modules support workflows — they provide the action surface that AI agents cal
 
 ```text
 app/modules/{name}/
-├── module.yaml              ← required: identity, actions, capabilities
+├── module.yaml              ← required: identity, permissions, actions; optional: capabilities[]
 ├── contracts/               ← optional companion manifests
 │   ├── events.yaml          ← domain events this module may publish
 │   ├── reactions.yaml       ← event reactions owned by this module
 │   ├── notifications.yaml   ← notification rules derived from events
 │   ├── settings.yaml        ← user/app settings schema
 │   ├── admin.yaml           ← admin panels (omit if none)
-│   └── entitlements.yaml    ← optional plan/role/usage gates
+│   └── profile.yaml         ← optional user profile page panels
 ├── runtime_extensions.yaml  ← optional: api_router / startup_service
 └── backend/
     ├── __init__.py
@@ -41,6 +41,12 @@ under `contracts/` only when the module needs them.
 Use `contracts/reactions.yaml` as the canonical event-reaction contract.
 The runtime rejects `contracts/subscriptions.yaml`; module changes must author
 `contracts/reactions.yaml`.
+
+For SaaS apps: set `actions[].entitlement_gate` to a `capability_id` string on
+user-facing actions that require an active plan grant. `ModuleExecutor` checks
+`EntitlementPort` before dispatch and returns `ENTITLEMENT_REQUIRED` on denial.
+Non-SaaS apps use `NoOpEntitlementAdapter` — no configuration needed. Never set
+`entitlement_gate` on `admin_internal` actions.
 
 Event/reaction contract summary:
 
@@ -395,7 +401,7 @@ class {Name}Repo:
 ```
 
 `repo.py` must use `ctx.persistence.collection(module_id, entity_name)` with
-module/entity values that match `app/config/data.json`. Do not use
+module/entity values that match `app/data/contract.json`. Do not use
 `ctx.db`, do not call `get_mongo_client()`, and do not hardcode database names.
 
 ### 12. Write `backend/service.py`

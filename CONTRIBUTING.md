@@ -43,7 +43,7 @@ If scope spans layers or the right owner is unclear, start with the
 - `ValueEngine`, `ThemeCapture`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` have separate responsibilities inside those sequences.
 - `ExistingAppDiscovery` belongs to the brownfield flow.
 - Refinement today is checkpoint and control-plane re-entry driven by `app/config/ai.json` startup plus `control_plane/config/runtime.yaml` runtime policy and the selected `control_plane/config/control_plane.yaml` pack, not a dedicated `RefinementWorkflow`.
-- `workflow_sequence` is not a human-in-the-loop handoff. Keep sequences, transitions, entrypoints, and workflow-local `handoffs.yaml` separate.
+- `workflow_sequence` is not a human-in-the-loop handoff. Keep sequences, transitions, entrypoints, and workflow-local `transition_graph.yaml` separate.
 
 ## Final Report Requirements
 
@@ -102,3 +102,4 @@ pip install -e .[dev]
 ## Security
 
 Do not commit secrets, production tokens, or private keys.
+

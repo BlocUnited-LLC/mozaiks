@@ -13,13 +13,13 @@ Inspect first:
 - `docs/architecture/orchestration-and-decomposition.md`
 - `docs/architecture/workflows/control-plane-harness-architecture.md` when
   sequence ids are referenced by control-plane routes
-- the `orchestrator.yaml` and `handoffs.yaml` files of each affected workflow
+- the `orchestrator.yaml` and `transition_graph.yaml` files of each affected workflow
 
 Keep these distinct:
 
 - `workflow_sequence` / `workflow_sequences[]` = cross-workflow build or revision journey
 - `transitions[]` = user choice or deterministic context seed
-- `handoffs.yaml` = agent routing inside one workflow
+- `transition_graph.yaml` = agent routing inside one workflow
 - `entrypoints[]` = external route entry into a sequence or transition
 
 Current build truth:
@@ -44,3 +44,4 @@ Return:
 5. downstream artifacts affected
 6. tests required/run
 7. rollback risk
+

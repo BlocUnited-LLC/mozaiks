@@ -105,16 +105,20 @@ Canonical target shape:
 
 ```text
 my-app/
-└── app/
-    ├── app.json
-    ├── config/
-    ├── ui/
-   │   ├── pages/
-   │   ├── route_manifest.json
-   │   └── index.js
-    ├── workflows/
-    ├── modules/
-    └── brand/
+├── app/
+│   ├── app.json
+│   ├── config/
+│   ├── ui/
+│   │   ├── pages/
+│   │   ├── route_manifest.json
+│   │   └── index.js
+│   ├── modules/
+│   └── brand/
+├── workflows/
+└── build_context/
+    └── {context_name}/
+        ├── context.yaml
+        └── files declared by context.yaml assets[]
 ```
 
 Rules:
@@ -122,6 +126,9 @@ Rules:
 - `ui/` and `brand/` belong inside the active app root
 - the workspace is self-contained
 - app behavior is declared and extended inside that workspace
+- build contexts, when present, live at workspace root
+  `build_context/{context_name}/`; files are consumed only when declared in
+  `context.yaml` `assets[]`
 - promotion lands validated artifacts into that workspace
 
 ### 5. Hosted product workspace
@@ -135,16 +142,20 @@ Canonical target:
 
 ```text
 hosted-product/
-└── app/
-    ├── app.json
-    ├── config/
-    ├── ui/
-   │   ├── pages/
-   │   ├── route_manifest.json
-   │   └── index.js
-    ├── workflows/
-    ├── modules/
-    └── brand/
+├── app/
+│   ├── app.json
+│   ├── config/
+│   ├── ui/
+│   │   ├── pages/
+│   │   ├── route_manifest.json
+│   │   └── index.js
+│   ├── modules/
+│   └── brand/
+├── workflows/
+└── build_context/
+    └── {context_name}/
+        ├── context.yaml
+        └── files declared by context.yaml assets[]
 ```
 
 Current implemented state in this repo:

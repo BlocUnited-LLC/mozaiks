@@ -26,6 +26,7 @@ factory workflows.
 This repo is the canonical runtime/platform/factory repo.
 
 - `factory_app/workflows/` and `factory_app/control_plane/` are the Factory layer — the shared builder/generator workflows, agent configs, and control plane pack.
+- Factory-owned workflow catalogs live directly under `factory_app/workflows/{WorkflowName}/` or `factory_app/workflows/_shared/`. Generated app bundles do not contain them.
 - `factory_app/app/` is the Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host.
 - `factory_app/app/ui/pages/custom/studio/` contains the Studio management UI.
 - `factory_app/app/admin/` is the admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files.
@@ -40,6 +41,9 @@ Canonical target:
 - shared generation core lives outside app workspaces
 - app workspaces keep app bundle files under `app/` and app-local workflows at
   the workspace root under `workflows/`
+- workspace build contexts, when present, live at workspace root
+  `build_context/{context_name}/` and project operator/product-specific build
+  input into declared workflow context variables
 - app-owned service implementations live at `app/services/`
 - hosted product workspaces should consume that same contract from their own repos
 
@@ -70,6 +74,45 @@ This repo is **not in production**. Optimize for the cleanest canonical implemen
 - When a contract changes, update the runtime, generators, docs, and tests together.
 
 If a stale implementation conflicts with a clean architecture, prefer the clean replacement unless the user explicitly asks for preserving an existing app contract.
+
+## AG2 Ownership Boundary
+
+Mozaiks uses AG2 as the long-term backbone for agentic execution. Do not build
+a parallel agent framework in this repo when AG2 already owns the concept or is
+the right upstream home for it. See
+[docs/architecture/workflows/ag2-ownership-boundary.md](docs/architecture/workflows/ag2-ownership-boundary.md)
+for the durable architecture contract and upgrade watchpoints.
+
+AG2 should own:
+
+- agent primitives, model calls, tools, middleware, and task execution
+- multi-agent network mechanics, Hub/AgentClient behavior, channels, adapters,
+  and workflow state progression
+- task delegation, task lifecycle observation, event mirroring, and generic
+  agent runtime observability
+
+Mozaiks should own:
+
+- declarative workflow contracts and strict structured-output validation
+- canonical generated app, workflow, module, page, persistence, and secret
+  artifact shapes
+- app/runtime persistence, transport integration, tenant/session boundaries,
+  Studio/platform lifecycle, and artifact promotion
+- deterministic factory control-plane policy and decomposition contracts that
+  define what work must be executed by AG2 agents
+
+When a needed capability is missing from AG2, inspect AG2's current docs, APIs,
+and source direction before adding runtime code here. Keep Mozaiks custom logic
+as a small adapter or contract layer around AG2, document the divergence, and
+track it as an AG2 compatibility watchpoint. If the missing capability is
+generic agent orchestration rather than Mozaiks-specific contract enforcement,
+prefer communicating the need upstream to the AG2 team instead of growing a
+permanent Mozaiks substitute.
+
+Do not introduce Mozaiks-owned replacements for AG2 Hub, AgentClient, network
+adapters, task streams, task observation, delegation engines, or generic
+agent scheduling unless there is no viable AG2-aligned implementation path and
+the boundary is documented before or with the code change.
 
 ## Release Hold
 
@@ -152,15 +195,21 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | If you're adding... | Put it in... |
 |---------------------|--------------|
 | Shared/factory AI workflow logic | `factory_app/workflows/{name}/` |
+| Factory workflow-owned prompt catalogs | `factory_app/build_context/{context_name}/context.yaml` `assets[]` with `kind: catalog` |
+| Factory build-context path helper | `factory_app/workflows/_shared/hook_utils.py` |
+| OSS reusable build pack | `factory_app/build_context/{context_name}/context.yaml` with `pack:` and explicit `assets[]` |
+| App/workspace build context | `build_context/{context_name}/` beside the active `app/` root |
 | App-local AI workflow logic | `workflows/{name}/` beside the active `app/` root |
 | Deterministic module (CRUD/actions) | `app/modules/{name}/` in an app workspace |
 | App-owned external client | `app/services/integrations/{service}_client.py` in an app workspace |
 | App-owned provider adapter | `app/services/adapters/{area}/{provider}.py` in an app workspace |
 | App-specific auth provider mechanic | `app/services/adapters/auth/{provider}.py` in an app workspace |
-| Provider-neutral auth/secret helper | `app/services/security/` in an app workspace |
-| App-specific secret manager adapter | `app/services/adapters/secrets/{provider}.py` in an app workspace |
-| Secret management contract, names only | `app/config/secrets.yaml` in an app workspace |
-| Data-contract helper | `app/services/data/` when declared by `app/config/data.json` |
+| Secret manager provider support | OSS `mozaiksai.core.secrets`; app workspaces declare names in `app/security/secrets.yaml` |
+| Secret management contract, names only | `app/security/secrets.yaml` in an app workspace |
+| SaaS plan/tier catalog (subscriptions) | `app/config/subscriptions.yaml` in an app workspace |
+| Entitlement grant adapter (SaaS only) | `app/services/adapters/entitlements/grant_adapter.py` in an app workspace |
+| Data contract and migrations | `app/data/contract.json`, `app/data/migrations/` in an app workspace |
+| External database adapter | `app/services/adapters/database/{provider}.py` in an app workspace |
 | Multi-module page | `app/ui/pages/{name}.yaml` in an app workspace |
 | Runtime infrastructure | `mozaiksai/core/` |
 | Framework backend adapter | `mozaiksai/core/adapters/` |
@@ -203,8 +252,7 @@ modules/{module_id}/
 │   ├── notifications.yaml   ← notification rules per event
 │   ├── settings.yaml        ← user-facing preferences schema
 │   ├── admin.yaml           ← module admin panels mounted inside /admin
-│   ├── profile.yaml         ← optional: user profile panel declarations
-│   └── entitlements.yaml    ← optional capability entitlements
+│   └── profile.yaml         ← optional: user profile panel declarations
 ├── runtime_extensions.yaml  ← optional: api_router / startup_service
 └── backend/
     ├── __init__.py
@@ -222,9 +270,9 @@ modules/{module_id}/
 Generated app persistence is expressed as staged data-contract artifacts:
 
 - `data_contract` is the canonical machine-readable planning object.
-- `AppGenerator` writes it to `config/data.json` when present.
+- `AppGenerator` writes it to `data/contract.json` when present.
 - additive refinement migrations are staged under
-  `config/data_migrations/{migration_id}.json`.
+  `data/migrations/{migration_id}.json`.
 - generated modules use `backend/schemas.py` for typed document/request shapes,
   `backend/repo.py` for persistence operations, and `backend/policy.py` for
   scoping helpers.
@@ -313,12 +361,12 @@ active `app/` root.
 workflows/{WorkflowName}/
 ├── orchestrator.yaml       # Workflow bootstrap config
 ├── agents.yaml             # Agent roster and prompts
-├── handoffs.yaml           # Agent-to-agent routing
+├── transition_graph.yaml           # Agent-to-agent routing
 ├── structured_outputs.yaml # Typed outputs + registry
 ├── tools.yaml              # Tool bindings + UI metadata
 ├── context_variables.yaml  # Shared workflow state
 ├── ui_config.yaml          # Frontend exposure metadata (visual_agents)
-├── hooks.yaml              # Lifecycle hooks (optional)
+├── middleware.yaml              # Lifecycle hooks (optional)
 ├── extended_orchestration/ # Task batch contracts (optional)
 │   └── task_batches.yaml
 ├── tools/                  # Python tool implementations
@@ -425,6 +473,10 @@ The tool receives already-reasoned data and just persists/emits it.
 | AI runtime | `mozaiksai` — workflow execution layer |
 | app backend | deterministic app service hosted by `mozaiksai.hosts.platform`, generated module handlers, or an optional external/generated backend |
 | AppBackendPort | generic contract for runtime ↔ backend communication |
+| EntitlementPort | generic contract for capability entitlement checks at module action dispatch time; default is no-op (non-SaaS apps unaffected) |
+| entitlement_gate | optional `ActionDef` field — capability_id the executor checks via `EntitlementPort` before dispatching the action |
+| subscriptions.yaml | SaaS-only plan catalog at `app/config/subscriptions.yaml` — declares plan_ids and the capability_ids each plan grants; loaded at startup and passed to `EntitlementAdapter` |
+| EntitlementAdapter | app-owned `EntitlementPort` implementation at `app/services/adapters/entitlements/grant_adapter.py` — one canonical class name and constructor across all apps; internal grant strategy is app-owned |
 | app_backend_url | optional base URL of an external/generated backend for split deployments |
 | module | self-contained deterministic capability unit declared in an app workspace `modules/` root or a generated app bundle |
 | module.yaml | handler/action manifest — identity, capabilities, and action definitions; event declarations live in `events.yaml` |
@@ -455,5 +507,4 @@ When adding code, decide placement in this order:
 7. Is this filesystem scaffolding, process management, or terminal diagnostics? → **CLI**.
 
 Key: a feature is not CLI just because it runs locally. If it is management UI, it belongs in Studio. If it is generic intent routing across execution contexts, it belongs in the harness implementation. If it is builder-specific policy, it belongs in the factory harness pack.
-
 

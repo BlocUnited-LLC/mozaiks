@@ -13,14 +13,14 @@ Inspect first:
 - `AGENTS.md`
 - `docs/architecture/builder/data-contract-and-revision-contract.md`
 - `docs/architecture/foundations/events-and-data/persistence-and-artifact-storage.md`
-- `factory_app/workflows/AppGenerator/tools/file_contracts.yaml` when generator
+- `factory_app/build_context/AppGenerator/file_contracts.yaml` when generator
   file families or backend defaults are involved
 
 Current persistence truth:
 
 - `data_contract` is the canonical planning object
-- `config/data.json` is the exported app artifact
-- `config/data_migrations/{migration_id}.json` is the additive migration artifact
+- `data/contract.json` is the exported app artifact
+- `data/migrations/{migration_id}.json` is the additive migration artifact
 - generated module repo code uses `ModuleContext.persistence` as `ctx.persistence`
 - `ctx.db` is absent and non-canonical
 - `backend/repo.py`, `backend/policy.py`, and `backend/schemas.py` are the
@@ -29,7 +29,7 @@ Current persistence truth:
 Companion routing:
 
 - Add `runtime-change` when `ModuleContext.persistence`, runtime persistence injection, or runtime persistence behavior changes.
-- Add `appgenerator-change` when generated `data.json`, `config/data_migrations/{migration_id}.json`, or generated module persistence output changes.
+- Add `appgenerator-change` when generated `data/contract.json`, `data/migrations/{migration_id}.json`, or generated module persistence output changes.
 
 Do not reintroduce:
 
@@ -47,3 +47,7 @@ Return:
 4. Persistence artifacts affected
 5. Tests required/run
 6. Compatibility risk
+
+
+
+

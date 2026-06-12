@@ -58,7 +58,7 @@ coordinates them.
   classification result for refinement re-entry.
 - Does not stream workflow state across processes. Streaming is a transport/observability
   concern. Add it later if cross-process live coordination becomes necessary.
-- Does not own agent routing. Agent handoffs live in `handoffs.yaml`.
+- Does not own agent routing. Agent handoffs live in `transition_graph.yaml`.
 
 ---
 
@@ -586,3 +586,4 @@ platform workflow directory.
 4. **Transition declarations**: `GlobalPackGraph` now uses `entrypoints[]` for
    shell entry routes and `transitions[]` for router decisions. Sequence metadata
    does not own entry UI.
+

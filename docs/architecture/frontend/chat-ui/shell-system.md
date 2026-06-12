@@ -82,7 +82,7 @@ font decisions. Visual rendering of those variants is brand-driven.
 
 ## Shell Presets
 
-`factory_app/workflows/AppGenerator/tools/shell_presets.yaml` is prompt-time
+`factory_app/build_context/AppGenerator/shell_presets.yaml` is prompt-time
 guidance for generated apps. It is not loaded by the runtime and is not copied
 into app bundles.
 
@@ -272,5 +272,9 @@ profile-menu controls.
 
 AppGenerator may point a shell action at an AgentGenerator entrypoint route, but
 it should not duplicate the entrypoint as a separate page.
+
+
+
+
 
 

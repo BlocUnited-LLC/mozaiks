@@ -27,13 +27,49 @@ This project follows a practical pre-1.0 changelog format:
   used the `@wrap_event` decorator, which was removed in the AG2 beta. The single
   call site in `orchestration_patterns.py` was guarded by a silent `except Exception`
   and had no actual subscribers; removed together with the try/except guard.
-- Removed stale AG2 groupchat guidance block (including a private local machine path)
-  from `AGENTS.md`, `ARCHITECTURE.md`, and `CLAUDE.md` — groupchat removal is
-  complete and the private path was never appropriate in OSS docs.
 - Deleted `tests/test_realtime_token_logger.py` and `tests/test_mozaiks_event_handler.py`
   alongside their subject modules.
 
 ### Added
+
+- **`EntitlementPort`** — new runtime port (`mozaiksai/core/ports/entitlement.py`)
+  that gives the platform a deterministic enforcement hook for SaaS feature gating.
+  `ModuleExecutor` checks `ActionDef.entitlement_gate` before dispatching any action
+  that declares one. `NoOpEntitlementAdapter` (the default) grants every capability —
+  non-SaaS apps are completely unaffected. SaaS apps wire an app-owned adapter
+  (`app/services/adapters/entitlements/grant_adapter.py`) that queries their plan/grant
+  store or hosted entitlements service.
+
+- **`ActionDef.entitlement_gate`** — new optional field on module action declarations.
+  Set to a `capability_id` string (e.g. `"wallet.view"`) to gate the action behind an
+  active plan grant. Never set on `admin_internal` actions. The `ModuleLoader` reads and
+  validates it; `ModuleExecutor` enforces it at dispatch time with error code
+  `ENTITLEMENT_REQUIRED`. `ModuleDefinition.action_entitlement_map` exposes the full
+  module→action→capability_id index.
+
+- **`factory_app/capability_packs/public/entitlements/manifest.yaml`** — closes the
+  broken reference in `capability_routing.yaml`. This manifest declares what AppGenerator
+  generates for SaaS apps: facade `entitlements` module (`get_status`,
+  `list_granted_capabilities`), billing event reactions, admin panel, and
+  `services/adapters/entitlements/grant_adapter.py`. For self-hosted (no hosted billing),
+  it also governs generation of app-owned `billing` and `entitlement_grants` modules.
+
+- **`pack_overlay` task contract** added to `file_contracts.yaml` — canonical file
+  boundaries and hard constraints for AppGenerator's framework pack wiring tasks.
+  `ConfigMiddlewareAgent` gained Mode C guidance covering the full entitlements pack
+  overlay output (facade module, billing reactions, grant adapter, self-hosted modules).
+
+- `contracts/profile.yaml` is now a first-class AppGenerator output. AppGenerator
+  gained three typed structured-output models (`ModuleProfileField`,
+  `ModuleProfilePanel`, `ModuleProfileManifest`) and a `profile_yaml` field on
+  `ModuleContractBundle`. `ConfigMiddlewareAgent` now has explicit authoring
+  guidance (step 9a) covering when to emit, kind rules (`metrics`, `list`,
+  `component`), field type constraints, action binding, and hard exclusions
+  (`form` kind, admin-only actions, secrets). All four module archetypes
+  (`standard`, `messaging`, `workflow`, `transactional`) list `profile.yaml` in
+  their optional YAML family. The runtime's module contract codegen already
+  materialises `contracts/profile.yaml` — this change closes the generation-side
+  gap.
 
 - `docs/architecture/app/control-plane-pack.md` — canonical reference for
   app-local control plane packs. Covers when to use a pack, the full file
@@ -95,6 +131,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Renamed internal platform reaction event type from `platform.subscription.{kind}_requested`
+  to `platform.reaction.{kind}_dispatched` in `module_event_router.py`. The previous name
+  was misleading — it described the reaction routing mechanism but looked like a SaaS
+  billing subscription event. Also renamed the `subscription_id` payload field to
+  `reaction_id`. No change in behavior; this was internal platform event naming only.
+
+- Tightened five `schema_version` fields in AppGenerator `structured_outputs.yaml`
+  from `type: str` to `type: literal` with their correct values
+  (`mozaiks.events.v1`, `mozaiks.reactions.v1`, `mozaiks.notifications.v1`,
+  `mozaiks.settings.v1`, `mozaiks.admin.v2`). Wrong schema versions now fail at
+  structured-output parse time rather than at runtime module loader validation.
+- Fixed `overflow_behavior` in `ControlPlaneScopePolicies` — valid runtime values
+  are `clarify` and `workflow`; the previously declared `fail` literal was rejected
+  by the runtime loader.
+
 - Fixed `DatabaseAgent` OUTPUT FORMAT example, which contained a `"{...}"`
   placeholder as the `data_contract_json` file content. The LLM was copying
   this literally, writing `{...}` into `config/data.json` for all generated
@@ -110,6 +161,22 @@ This project follows a practical pre-1.0 changelog format:
 - Fixed live control-plane classifier calls against models that only support
   the provider default temperature. `SimpleLLMCapabilityService` now omits the
   `temperature` field for JSON completions when no explicit value is configured.
+- Fixed three stale test assertions in `test_module_contract_quality_gate.py`
+  and `test_module_runtime_quality_gate.py` that checked the removed `condition`
+  string field instead of `condition_value`.
+
+### Removed
+
+- Retired `MozaiksContextExpression` / `evaluate_context_expression`. All
+  workflow transition conditions now use AG2-native `ContextEquals` and
+  `ToolCalled`, wrapped by `SourceScopedContextEquals` and
+  `SourceScopedToolCalled` registered via `register_condition()`. The `${var}`
+  expression syntax raises `WorkflowGraphCompileError` with a migration hint.
+  The old `condition` string field also raises `WorkflowGraphCompileError` via
+  a stale-field guard. A hygiene scan in `test_workflow_network_graph.py`
+  prevents regressions across all factory workflow `transition_graph.yaml` files.
+- Deleted `mozaiksai/core/workflow/execution/stream_bridge.py` — dead code
+  (`_MozaiksStreamForwarder`, `attach_stream_forwarder`) with no runtime callers.
 
 ## 0.1.7 - 2026-05-27
 
@@ -336,7 +403,7 @@ This project follows a practical pre-1.0 changelog format:
 - `ExistingAppDiscovery` workflow now detects storage patterns (mongodb, sql, file_store, redis), external connectors, and Mozaiks vocabulary/authorship signals during preload — improving adoption-level recommendations for `native_migration` and `ecosystem` paths.
 - Added `ModuleDecomposerAgent` to `ExistingAppDiscovery`: produces a `ModuleDecompositionPlan` (modules, workflows, pages, adapters) when adoption level is `ecosystem` or `native_migration`.
 - `ExistingAppAugmentationArtifact` now carries `module_decomposition_plan` (serialized JSON); `save_existing_app_artifacts` writes the plan to `generated/existing_app_discovery/{chat_id}/` for downstream AppGenerator consumption.
-- `handoffs.yaml` now routes conditionally: `ecosystem`/`native_migration` goes through `ModuleDecomposerAgent` before the assembler; `embed`/`bridge` skip directly to assembly.
+- `transition_graph.yaml` now routes conditionally: `ecosystem`/`native_migration` goes through `ModuleDecomposerAgent` before the assembler; `embed`/`bridge` skip directly to assembly.
 - Added three generic infrastructure probe adapters to `mozaiksai/core/adapters/`: `dns_probe` (A/AAAA via stdlib, MX/NS/CNAME/TXT via optional dnspython), `tls_probe` (cert expiry, SANs, issuer, protocol via stdlib ssl), and `http_health` (status, latency, redirect chain, content metadata via httpx). All are provider-neutral with no required credentials.
 
 ### Changed
@@ -402,3 +469,4 @@ This project follows a practical pre-1.0 changelog format:
 - Initial public PyPI release of the Mozaiks OSS framework.
 - Packaged CLI entrypoint with `mozaiks --version`.
 - Tag-driven GitHub Actions release flow for building, smoke-testing, creating a GitHub release, and publishing to PyPI.
+

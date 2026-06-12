@@ -8,8 +8,8 @@ runtime surfaces:
   state.
 - `OrchestrationPort` starts, resumes, or cancels a concrete workflow run.
   In the current runtime, `resume` means Mozaiks re-enters a persisted
-  chat/run after restoring runtime-owned state; it is not an AG2-native
-  `Hub.resume()` call.
+  chat/run after restoring runtime-owned session routing plus AG2 run-stream
+  state; it is not an AG2-native `Hub.resume()` call.
 
 There is no global agent mesh and no workflow-local router that owns product
 intent. Workflow-local handoffs stay inside one workflow bundle and compile to
@@ -49,21 +49,24 @@ Current implementation note:
 
 - `SessionRouter.resolve_resume(...)` decides which persisted chat/run should
   continue for the app/user scope.
-- `ChatSessions` stores transcript and runtime usage state for that concrete
-  chat/run.
+- `ChatSessions` stores run metadata, usage state, artifact projection, and
+  session/journey correlation for that concrete chat/run.
+- AG2 run history is the canonical execution-state record for one workflow run,
+  stored through a persistent `MemoryStream` backed by runtime-owned stream
+  storage keyed per `app_id + chat_id`.
 - `OrchestrationPort.resume(...)` re-enters the workflow using that persisted
-  runtime state.
+  AG2 run history plus runtime-managed session routing state.
 - This is separate from control-plane resume, which is builder-session
   continuity over artifacts, checkpoints, and routing decisions.
 
 Workflow bundles own local execution structure:
 
 - `agents.yaml`
-- `handoffs.yaml`
+- `transition_graph.yaml`
 - `context_variables.yaml`
 - `tools.yaml`
 - `structured_outputs.yaml`
-- `hooks.yaml`
+- `middleware.yaml`
 - `ui_config.yaml`
 
 ## Routing Rules
@@ -75,7 +78,7 @@ Use the smallest routing layer that owns the decision:
 | Which active session should receive this event? | `SessionRouter` |
 | Is this a refinement, patch, rebuild, or new build? | Control plane |
 | Which workflow sequence should execute? | `extension_registry.json` + control-plane route |
-| Which agent speaks next inside one workflow? | `handoffs.yaml` compiled to AG2 `TransitionGraph` |
+| Which agent speaks next inside one workflow? | `transition_graph.yaml` compiled to AG2 `TransitionGraph` |
 | Which UI state should the websocket show? | Runtime transport + `ui_config.yaml` |
 
 Do not encode product-level route decisions in workflow-local handoffs. A
@@ -85,8 +88,9 @@ in the control plane before the workflow run is started or resumed.
 
 For AG2 beta specifically, be careful with the word `resume`: AG2 Hub/network
 durability is a lower-level engine concern. Mozaiks may map to that boundary in
-the future, but the current implementation restores runtime-owned persisted chat
-state first and then re-enters the workflow through `OrchestrationPort`.
+the future, but the current implementation restores runtime-owned session
+routing state plus persistent AG2 run-stream history first and then re-enters
+the workflow through `OrchestrationPort`.
 
 ## AG2 Beta Mapping
 
@@ -96,10 +100,12 @@ runtime objects:
 | Mozaiks contract | AG2 beta runtime object |
 | --- | --- |
 | `agents.yaml` | `Agent` registration |
-| `handoffs.yaml` | `TransitionGraph` |
+| `transition_graph.yaml` | `TransitionGraph` |
 | `context_variables.yaml` | workflow context variables |
 | `tools.yaml` | agent tools and typed routing outputs |
+| run persistence | persistent `MemoryStream` + runtime AG2 stream storage |
 | runtime events | AG2 stream events normalized into Mozaiks domain events |
 
 This keeps generator output deterministic while allowing the AG2 execution
 backend to evolve underneath `OrchestrationPort`.
+

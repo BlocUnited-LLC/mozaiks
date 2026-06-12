@@ -36,7 +36,7 @@ It does not decide how a workflow decomposes its internal task work.
 
 ### 2. Workflow-Local AG2 Routing
 
-Workflow-local agent movement belongs in `handoffs.yaml`, compiled to an AG2
+Workflow-local agent movement belongs in `transition_graph.yaml`, compiled to an AG2
 Network `TransitionGraph`.
 
 It answers:
@@ -53,6 +53,13 @@ bundles.
 
 Short parallel agent work belongs in `extended_orchestration/task_batches.yaml`.
 This is the default decomposition primitive for factory artifact generation.
+
+Mozaiks task batches are not the same contract as AG2 `Task` lifecycle tracking
+or AG2 sub-agent delegation. AG2 owns the mechanics of agent execution,
+tool-calling, streams, and optional task lifecycle events. Mozaiks task batches
+own deterministic artifact-build decomposition: typed task specs, dependency
+ordering, file ownership, bounded concurrency, result collection, and the single
+workflow-context merge surface that downstream agents consume.
 
 Use this for:
 
@@ -75,6 +82,53 @@ planner agent emits typed task specs
 
 The LLM may plan the tasks, but Python owns validation, concurrency bounds, and
 merge shape. Shared artifact state still belongs to Mozaiks.
+
+### 3a. Decomposition Taxonomy
+
+Generated workflows should declare a task batch when all of these are true:
+
+- one planner/coordinator agent can emit a typed list of work items;
+- each item has a stable `task_id`;
+- each item maps to one worker agent and one seed prompt;
+- dependencies can be represented as `depends_on` task ids;
+- each item owns a bounded output surface such as file paths, report sections,
+  review findings, extracted records, or generated workflow bundle files;
+- all item results can be merged through one declared `result.context_key`.
+
+Do not use task batches when:
+
+- the work needs independent durable sessions or user-visible workflow runs;
+- the next step depends on free-form LLM choice after every worker result;
+- multiple workers are expected to edit the same file without a deterministic
+  merge contract;
+- the work is a small linear conversation that fits normal `transition_graph.yaml`
+  routing.
+
+The planner output should carry the decomposition, not the runtime graph. For
+generated app and workflow builders, the planner model should expose a list such
+as `build_tasks[]`, `work_units[]`, `review_items[]`, or
+`workflow_bundle_tasks[]`. A save/materialization tool then validates that list
+and writes the concrete context variable referenced by `task_batches.yaml`.
+
+### 3b. Required Task-Spec Families
+
+Every task-batch item needs a harness-visible base contract:
+
+| Field | Purpose |
+| --- | --- |
+| `task_id` | Stable id used for dependency tracking and result identity. |
+| `initial_agent` | Worker agent that executes this item. |
+| `initial_message` | Seed prompt passed to the worker. |
+| `owned_paths` or equivalent ownership field | Output surface this task exclusively owns. |
+| `depends_on` | Task ids that must complete before this task can run. |
+| `acceptance_criteria` | Concrete checks the worker must satisfy. |
+| `context_variables` | Optional item-local context injected into the worker. |
+| `integration_needs` | Optional connector/configuration needs discovered by the item. |
+
+Domain-specific task metadata belongs in a typed pass-through object or task
+model fields consumed by the worker agent. The runtime should not infer product
+meaning from fields such as `task_type`; it should use only the harness-visible
+fields needed to schedule, scope, and validate execution.
 
 ### 4. Control-Plane Routing
 
@@ -128,6 +182,8 @@ batches:
 Meaning:
 
 - `source.path` points to a deterministic list of typed task specs.
+- `trigger_agent` is the agent whose completed turn makes that source available;
+  it does not decide the tasks by itself.
 - `worker.agent_field` and `worker.prompt_field` map each task to an AG2 worker
   call.
 - `execution` is enforced by runtime code, not prompt prose.
@@ -153,6 +209,10 @@ AgentGenerator:
   requires it — as `WorkflowBundleBuilderOutput.files`.
 - Generated workflows author task batches through the builder's structured
   output, not by writing custom orchestration Python.
+- When a generated workflow itself needs large-scale decomposition, AgentGenerator
+  must emit all three pieces together: the planner task-list model, the
+  materialization/save tool that writes the task source context variable, and
+  `extended_orchestration/task_batches.yaml` pointing at that variable.
 
 ## Cross-Workflow Data Transfer
 
@@ -189,9 +249,10 @@ Typed builder contracts anchor the artifact pipeline:
 ## Summary
 
 - Global pack graphs sequence workflows.
-- `handoffs.yaml` controls workflow-local AG2 routing.
+- `transition_graph.yaml` controls workflow-local AG2 routing.
 - `task_batches.yaml` handles short parallel LLM work inside a workflow.
 - The control-plane harness chooses build/refinement/coding routes.
 - Decomposition belongs to typed agent outputs, not runtime graph prose.
 - Cross-workflow carry is explicit persistence plus lifecycle loading.
 - The runtime executes compiled contracts, not natural-language logic.
+

@@ -148,12 +148,12 @@ factory_app/
         │   └── task_batches.yaml
         ├── orchestrator.yaml
         ├── agents.yaml
-        ├── handoffs.yaml
+        ├── transition_graph.yaml
         ├── context_variables.yaml
         ├── structured_outputs.yaml
         ├── tools.yaml
         ├── ui_config.yaml
-        ├── hooks.yaml
+        ├── middleware.yaml
         ├── tools/
         │   └── *.py
         └── ui/
@@ -333,5 +333,6 @@ Add a `.dark` class to your root element or use `prefers-color-scheme`:
 Your app now has mozaiksai workflows with the default ChatWidget trigger.
 
 For more advanced trigger options (buttons, routes, backend events, webhooks), see **[Trigger Mechanisms](trigger-mechanisms.md)**.
+
 
 

@@ -21,17 +21,25 @@ Mozaiks persistence is divided into three scopes.
 Framework-owned operational data used by the runtime itself:
 
 - `ChatSessions`
-- `WorkflowStats`
+- `AG2StreamEvents`
+- `AG2StreamHeads`
 - `GeneralChatSessions`
 - `GeneralChatCounters`
+- `RuntimeUsageEvents`
 
-This data supports session continuity, workflow execution state, and runtime
-telemetry.
+This data supports session continuity, workflow execution state, AG2 stream
+replay/resume, and reconnectable UI state.
 
 Current implemented workflow-run persistence contract:
 
 - `ChatSessions` is run metadata and UI-state projection, not canonical execution history.
 - AG2 run history is persisted separately through the AG2 stream storage adapters and is the source of truth for replay/resume.
+- AG2 agent-turn, LLM-call, tool-call, and HITL telemetry is emitted through AG2
+  beta `TelemetryMiddleware` as OpenTelemetry spans.
+- LLM token usage is emitted by Mozaiks AG2 beta usage middleware as
+  `chat.usage_delta` events and stored in `RuntimeUsageEvents`. This ledger is
+  measurement-only. It does not enforce entitlements, quotas, pricing, or
+  hosted billing.
 - Reconnectable workflow UI state lives under `ChatSessions.workflow_ui_state` with:
   - `schema_version`
   - `last_artifact`
@@ -39,6 +47,18 @@ Current implemented workflow-run persistence contract:
   - `tool_calls`
 - On startup, the runtime backfills pre-migration top-level workflow UI fields such as `last_artifact` and `pending_input_request` into `workflow_ui_state` and removes the old top-level fields. Runtime readers should not depend on those pre-migration top-level fields.
 - The current source of truth for this runtime contract is `mozaiksai/core/data/persistence/persistence_manager.py`, `mozaiksai/core/transport/resume_run.py`, `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, and the focused tests `tests/test_persistence_initial_messages.py`, `tests/test_resume_run.py`, `tests/test_runtime_websocket_contract.py`, and `tests/test_platform_chat_meta_contract.py`.
+
+Runtime usage surfaces:
+
+- OSS app creators query `/api/admin/usage` in Studio/Admin for app-scoped or
+  workspace-scoped token totals.
+- Hosted products such as Mozaiks App use the same `/api/admin/usage` route and
+  may also forward summary events to their control plane.
+- Generated app end users query `/api/me/usage` from the profile surface. The
+  response combines measured runtime usage with usage-limit metadata declared
+  in `app/config/subscriptions.yaml` when the app is a SaaS app.
+- MozaiksPay and other billing providers consume these measurements through
+  app-owned facade modules. Runtime usage events are not the billing authority.
 
 ### 2. Builder Artifacts
 
@@ -147,18 +167,18 @@ Database evolution is a first-class generated artifact, not an implicit side
 effect of handler code.
 
 - `DesignDocs` owns the typed `data_contract`
-- `AppGenerator` stages `config/data.json`
-- refinement runs may stage `config/data_migrations/{migration_id}.json`
+- `AppGenerator` stages `data/contract.json`
+- refinement runs may stage `data/migrations/{migration_id}.json`
 - generated module repos use `backend/schemas.py` for typed document shapes and
   `backend/repo.py` for persistence operations
 - the runtime injects `ctx.persistence` into module actions when `app_id` exists;
   generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
   and must not require `ctx.db`
-- the runtime loads `config/data.json` during app load; missing
+- the runtime loads `data/contract.json` during app load; missing
   intent is allowed for non-persistent apps, while invalid JSON or invalid shape
   fails app loading
 - the runtime applies declared indexes idempotently and applies only additive
-  migration files from `config/data_migrations/*.json`
+  migration files from `data/migrations/*.json`
 - migration states are recorded in `mozaiksai.AppDatabaseMigrations`
 
 The target contract is:

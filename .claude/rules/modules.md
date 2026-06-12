@@ -40,8 +40,8 @@ Persistent modules use `backend/repo.py`, `backend/policy.py`, and
 
 - `backend/schemas.py` is the typed shape layer; do not introduce
   `backend/models.py` or `backend/models/*.py`
-- `config/data.json` and
-  `config/data_migrations/{migration_id}.json` are the canonical collection
+- `data/contract.json` and
+  `data/migrations/{migration_id}.json` are the canonical collection
   planning artifacts
 - generated repo code must use `ModuleContext.persistence`
   (`ctx.persistence.collection(module_id, entity_name)`), not `ctx.db`
@@ -112,6 +112,52 @@ usage stats). Do not add profile.yaml to every module.
 - `kind: metrics` and `kind: list` require a non-empty `fields:` list
 - profile panels must not expose admin-only actions or secrets
 - profile panels do not replace or override `/api/me` identity
+
+## Entitlement Gating
+
+`ActionDef.entitlement_gate` is optional. Set it to a capability_id string when
+the action must require an active SaaS plan grant before executing.
+
+- `ModuleExecutor` calls `EntitlementPort.check(capability_id, ...)` before dispatch
+- On denial returns `error_code: ENTITLEMENT_REQUIRED`
+- Non-SaaS apps omit `app/config/subscriptions.yaml` — `NoOpEntitlementAdapter` is wired and all checks pass automatically
+- Only set `entitlement_gate` on public user-facing actions; never on `admin_internal` actions
+- The enforcement mechanism lives in the runtime; generated apps must not re-implement it
+- capability_ids used in `entitlement_gate` MUST appear in `app/config/subscriptions.yaml` under at least one plan
+- For SaaS apps: use the `entitlements` framework_pack. AppGenerator generates:
+  - `app/config/subscriptions.yaml` — the plan catalog (`schema: mozaiks.subscriptions.v1`)
+  - the `entitlements` facade module for UI-facing capability status queries
+  - `services/adapters/entitlements/grant_adapter.py` — one class `EntitlementAdapter(config)`
+    injected into `ModuleExecutor` at platform startup
+
+**Canonical adapter contract (identical across all generated apps):**
+- Path: `app/services/adapters/entitlements/grant_adapter.py`
+- Exported class: `EntitlementAdapter`
+- Constructor: `EntitlementAdapter(config: SubscriptionsConfig | None)`
+- Platform wires: `EntitlementAdapter(config=load_result.subscriptions_config)`
+
+**Runtime enforcement flow:**
+1. Platform loads `subscriptions.yaml` → passes config to `EntitlementAdapter(config=...)`
+2. On action dispatch: executor calls `adapter.check(capability_id, app_id=..., tenant_id=...)`
+3. Adapter resolves grant using its internal strategy → `EntitlementResult`
+4. Internal strategy is app-owned and invisible to the platform:
+   - self-hosted: resolve `plan_id` from billing collection → check `subscriptions.yaml`
+   - grant store: query grant collection directly for `{capability_id, status: active}`
+   - external API: call hosted billing/entitlement service
+
+Example in `module.yaml`:
+```yaml
+actions:
+  - id: list_transactions
+    handler_method: list_transactions
+    entitlement_gate: wallet.view   # must appear in subscriptions.yaml under ≥1 plan
+    permissions: [wallet.read]
+    ...
+```
+
+Do not confuse entitlement gating with:
+- `permissions[]` — auth-level access control (role/permission checks)
+- `contracts/reactions.yaml` — pub/sub event routing (not SaaS subscriptions)
 
 ## Runtime Extensions
 

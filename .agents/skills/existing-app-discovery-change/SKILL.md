@@ -25,7 +25,7 @@ Inspect first:
 - `docs/architecture/orchestration-and-decomposition.md`
 - `factory_app/workflows/ExistingAppDiscovery/agents.yaml`
 - `factory_app/workflows/ExistingAppDiscovery/structured_outputs.yaml`
-- `factory_app/workflows/ExistingAppDiscovery/handoffs.yaml`
+- `factory_app/workflows/ExistingAppDiscovery/transition_graph.yaml`
 - `factory_app/workflows/ExistingAppDiscovery/context_variables.yaml`
 - `factory_app/workflows/ExistingAppDiscovery/tools/preload_discovery_context.py`
 - `factory_app/workflows/ExistingAppDiscovery/tools/save_existing_app_artifacts.py`
@@ -67,7 +67,7 @@ Boundary rules:
 - Use neutral fixture apps in tests.
 - Do not copy existing-app code directly into generated apps as an implicit migration strategy.
 - When old in-flight outputs use `native_migration` adoption level, treat that as retired historical discovery evidence feeding the `AdoptionPlan` / `AppContextVersion` contracts — not as a canonical artifact kind to preserve or extend.
-- Keep `workflow_sequence`, transition routing, and workflow-local `handoffs.yaml` distinct.
+- Keep `workflow_sequence`, transition routing, and workflow-local `transition_graph.yaml` distinct.
 - Do not assume later factory workflows are part of the brownfield path unless `extension_registry.json` and the saved artifact contracts explicitly say so.
 
 Common change types:
@@ -91,14 +91,14 @@ Common change types:
    - keep `embed`, `bridge`, `ecosystem`, and `gradual_modernization` separate
    - do not collapse brownfield adoption into a default rebuild recommendation
 7. Updating gradual modernization outputs:
-   - inspect `structured_outputs.yaml`, `handoffs.yaml`, and the decomposition-related tests
+   - inspect `structured_outputs.yaml`, `transition_graph.yaml`, and the decomposition-related tests
    - `module_decomposition_plan` is workflow-local evidence for `ecosystem` and `gradual_modernization` adoption levels
    - treat it as internal evidence feeding `AdoptionPlan` / `AppContextVersion` contracts, not as a canonical artifact kind to extend
 8. Updating artifact saving:
    - inspect `save_existing_app_artifacts.py` and the artifact contract tests
    - preserve canonical saved fields and artifact-based downstream handoff expectations
 9. Updating brownfield workflow sequence or handoffs:
-   - inspect `extension_registry.json`, `handoffs.yaml`, and the brownfield sequence tests together
+   - inspect `extension_registry.json`, `transition_graph.yaml`, and the brownfield sequence tests together
    - keep route entry, workflow-local agent routing, and downstream artifact consumption as separate layers
 10. Updating tests or fixtures:
    - use neutral host apps and OSS-safe examples
@@ -138,4 +138,5 @@ Return:
 4. artifacts or downstream handoff impact
 5. tests required or run
 6. adoption risk
+
 

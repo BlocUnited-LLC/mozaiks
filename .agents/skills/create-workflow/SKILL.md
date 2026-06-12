@@ -34,7 +34,7 @@ Before writing any files, define the deterministic contract:
 
 Mozaiks has multiple routing layers. Keep them separate:
 
-- `handoffs.yaml` = workflow-local agent routing inside one workflow.
+- `transition_graph.yaml` = workflow-local agent routing inside one workflow.
 - `workflow_sequences[]` in `extended_orchestration/extension_registry.json` = cross-workflow build/revision sequencing.
 - `transitions[]` in `extended_orchestration/extension_registry.json` = user choice and context-seeding routes.
 - `entrypoints[]` in `extended_orchestration/extension_registry.json` = external route entry into a sequence or transition.
@@ -43,7 +43,7 @@ Important:
 
 - A workflow sequence is not a human-in-the-loop handoff mechanism.
 - A transition is not an agent handoff.
-- Do not try to encode build-sequence policy inside `handoffs.yaml`.
+- Do not try to encode build-sequence policy inside `transition_graph.yaml`.
 
 ## Phase 2: Scaffold the Workflow Directory
 
@@ -53,12 +53,12 @@ Start with the canonical file set for the owning workflow root:
 app/workflows/{WorkflowName}/
 ├── orchestrator.yaml
 ├── agents.yaml
-├── handoffs.yaml
+├── transition_graph.yaml
 ├── context_variables.yaml
 ├── structured_outputs.yaml
 ├── tools.yaml
 ├── ui_config.yaml            # include when the workflow has websocket-visible agents or UI artifacts
-├── hooks.yaml                # include when the workflow needs lifecycle hooks
+├── middleware.yaml                # include when the workflow needs lifecycle hooks
 ├── extended_orchestration/
 │   └── task_batches.yaml     # only when the workflow uses task batches
 ├── tools/
@@ -173,22 +173,26 @@ tools:
       mode: artifact
 ```
 
-### 6. `handoffs.yaml`
+### 6. `transition_graph.yaml`
 
 Use this only for workflow-local agent routing.
 
+All conditions must use `condition_type: expression`. LLM classification belongs
+before routing — set context variables in agent tools or structured outputs, then
+route deterministically.
+
 ```yaml
-handoff_rules:
+transition_rules:
   - source_agent: user
     target_agent: ExampleHostAgent
-    handoff_type: condition
-    condition_type: string_llm
-    condition: When the user starts the workflow.
+    transition_type: condition
+    condition_type: expression
+    condition: ${intake_complete} == false
     transition_target: AgentTarget
 
   - source_agent: ExampleHostAgent
     target_agent: user
-    handoff_type: after_work
+    transition_type: after_turn
     transition_target: RevertToUserTarget
 ```
 
@@ -204,9 +208,9 @@ visual_agents:
   - user
 ```
 
-### 8. `hooks.yaml` and `extended_orchestration/task_batches.yaml`
+### 8. `middleware.yaml` and `extended_orchestration/task_batches.yaml`
 
-- Use `hooks.yaml` for lifecycle hook declarations when needed.
+- Use `middleware.yaml` for lifecycle hook declarations when needed.
 - Use `extended_orchestration/task_batches.yaml` only when the workflow needs bounded workflow-local parallel task execution.
 - Do not put workflow sequence routing into task batch config.
 
@@ -243,7 +247,7 @@ Before finishing, verify:
 
 1. `workflow_startup_mode` is used in `orchestrator.yaml`.
 2. `structured_outputs.yaml` uses top-level `registry` and `models`.
-3. `handoffs.yaml` handles only workflow-local routing.
+3. `transition_graph.yaml` handles only workflow-local routing.
 4. Any cross-workflow sequencing or routed entry behavior is authored in
    `extended_orchestration/extension_registry.json`, not in workflow files.
 5. `ui_config.yaml` only exposes agents that should be visible to the UI.
@@ -252,4 +256,5 @@ Before finishing, verify:
 When explaining the result to the user, describe whether the workflow is
 app-owned or factory-owned and call out any required follow-up in
 `extension_registry.json` separately from the workflow bundle itself.
+
 

@@ -22,8 +22,21 @@ The goal is simple:
 The refinement control plane uses `app/config/ai.json` for runtime startup,
 `control_plane/config/runtime.yaml` for control-plane runtime policy, and
 `control_plane/config/control_plane.yaml` for checkpoint and routing
-declarations. The classifier and coding worker do not read workflow-local AG2
-config for this.
+declarations. LLM-backed control-plane checkpoints do not read workflow-local
+AG2 config for this.
+
+The control plane is not an AG2 Network graph and not a single AG2 agent that
+launches workflows by tool call. AG2 owns the model execution inside
+LLM-backed checkpoints. Mozaiks owns the deterministic artifact policy around
+those checkpoints: loading persisted artifact context, validating structured
+checkpoint outputs, deriving route impact, choosing workflow sequence re-entry,
+and deciding whether to launch a workflow, run a scoped worker, or return a
+harness decision to Studio.
+
+LLM-backed control-plane checkpoints should run through the shared AG2 adapter
+`mozaiksai.core.adapters.AG2StructuredAgentRunner` so AG2 execution mechanics
+stay centralized. Routing and artifact lifecycle logic must remain in
+`mozaiksai/control_plane`.
 
 This is a pre-production design. Use the canonical contract instead of retaining
 outdated refinement paths.
@@ -279,8 +292,8 @@ refinements. Generated app persistence changes stay intent-first:
 
 ```text
 data_contract
-  -> config/data.json
-  -> optional config/data_migrations/{migration_id}.json
+  -> data/contract.json
+  -> optional data/migrations/{migration_id}.json
   -> modules/{module_id}/backend/{schemas.py,repo.py,policy.py}
 ```
 
@@ -290,9 +303,9 @@ fields, relations, references, foreign keys, tenant/workspace/owner scoping,
 record archival, soft deletion, renames, type changes, added or removed columns,
 or backfills, the router can add data-model path hints:
 
-- `config/data.json`
-- exact `config/data_migrations/{migration_id}.json` files when present,
-  otherwise the conservative `config/data_migrations/*.json` hint
+- `data/contract.json`
+- exact `data/migrations/{migration_id}.json` files when present,
+  otherwise the conservative `data/migrations/*.json` hint
 - module persistence contract files:
   `modules/{module_id}/module.yaml`, `backend/schemas.py`, `backend/repo.py`,
   and `backend/policy.py`
@@ -382,7 +395,7 @@ Rules:
 - no per-agent hidden model overrides should be added for control-plane or
   refinement lanes
 - raw provider/model config may live inside the central profile registry, but
-  code should pass the resolved `llm_config` to AG2/capability services
+  code should pass the resolved `llm_config` to AG2 checkpoint runners
 - profile tuning and lane-specific model assignment are future empirical work
 
 ### Refinement Smoke Coverage
@@ -473,8 +486,10 @@ Current simplified pack taxonomy:
 Each checkpoint declares:
 
 - `event`
+- `mode`: `ag2_structured_agent` or `deterministic_handler`
 - `entrypoint`
-- optional `prompt_id`
+- `prompt_id` for AG2 structured-agent checkpoints; null for deterministic handlers
+- `output_contract` for AG2 structured-agent checkpoints; null for deterministic handlers
 - optional `tool_ids`
 
 There is no extra user-facing control-plane `components` layer. The pack
@@ -570,6 +585,19 @@ Current default classifier grounding:
   classifier prompt as canonical persisted runtime state
 - this keeps refinement classification above workflow-local AG2 logic and off
   the individual workflow prompt surfaces
+
+Current AG2 checkpoint execution boundary:
+
+- `request_submitted`, `scope_requested`, `contract_surface_requested`, and
+  `coding_requested` model calls run through
+  `mozaiksai.core.adapters.AG2StructuredAgentRunner`
+- AG2 owns the agent turn, middleware, observer, retry, and structured response
+  mechanics for those checkpoints
+- Mozaiks owns checkpoint context assembly, output validation after the AG2
+  call, route selection, deterministic scope policies, surface dependency
+  ordering, artifact persistence, and workflow launch decisions
+- checkpoint prompts and tool ids remain declared in
+  `factory_app/control_plane/config/control_plane.yaml`
 
 Current first-party coding worker path:
 
@@ -1245,7 +1273,7 @@ Rules:
 `AgentGenerator` impact:
 
 - add an equivalent refinement-unit contract for generated workflow bundle parts
-- units should cover files like `agents.yaml`, `handoffs.yaml`, `tools.yaml`, `context_variables.yaml`, `ui/*`, and workflow-local orchestration files
+- units should cover files like `agents.yaml`, `transition_graph.yaml`, `tools.yaml`, `context_variables.yaml`, `ui/*`, and workflow-local orchestration files
 
 ---
 
@@ -2127,7 +2155,7 @@ resolver may copy exactly these relative paths (under `modules/{module_id}/`):
 - `runtime_extensions.yaml` — runtime wiring is always regenerated
 - `.env.example`, `requirements.txt`
 - `ui/route_manifest.json`, `ui/index.js` — custom React routing
-- `config/data.json` and `config/data_migrations/*` — persistence intent
+- `data/contract.json` and `data/migrations/*` — persistence intent
 - `ui/pages/custom/*` — custom React pages
 - `app/services/integrations/*`, `app/services/routes/*` — integration clients and API routes
 - Any path containing `secret`, `credential`, or `password`

@@ -1,4 +1,4 @@
-# Context Variables (Canonical + AgentGenerator Resolution)
+# Context Variables
 
 ## Status
 
@@ -6,7 +6,9 @@ This document defines:
 
 - the runtime context variable contract
 - how values are actually resolved at load time
-- the concrete variable-by-variable acquisition logic for `AgentGenerator`
+- how build context relates to workflow context variables
+- the concrete variable-by-variable acquisition logic for first-party factory
+  workflows where that detail matters
 
 ## Canonical File
 
@@ -46,6 +48,7 @@ Source types supported by runtime:
 - `state`
 - `external`
 - `file`
+- `build_context`
 
 ### `config`
 
@@ -97,6 +100,121 @@ Source types supported by runtime:
   - `yaml`
   - `text`
 - Falls back to default if not required and missing/invalid.
+
+### `build_context`
+
+- Declares a workflow slot that may be populated from active
+  `build_context/{context_name}/context.yaml` files at launch time.
+- Initializes to `None` during normal context variable loading.
+- Receives projected values only when the launch path enables the build-context
+  provider, typically through:
+
+  ```env
+  MOZAIKS_LAUNCH_CONTEXT_PROVIDER=mozaiksai.core.session.build_context:merge_build_context
+  ```
+
+- The provider discovers contexts from `MOZAIKS_BUILD_CONTEXT_PATH`, or from
+  `MOZAIKS_APP_WORKSPACE_PATH/build_context` when an explicit build-context path
+  is not set.
+- Explicit launch context values take precedence over build-context projected
+  values.
+- Build-context values are accepted only as declared workflow context variables.
+  A build context does not get to add arbitrary runtime state to a workflow.
+
+Use `build_context` source variables for small, structured launch-time values
+such as selected pack descriptors, operator capability ids, provider-backed
+capability lists, or typed operator contracts. Do not put large prompt catalogs
+or template contents directly in `context_variables.yaml`.
+
+## Build Context vs. Context Variables
+
+These are separate contracts with one bridge.
+
+`context_variables.yaml` is the workflow ABI. It declares the state shape that
+runtime, tools, transitions, and agents may read or update during a run. It is
+workflow-owned and should stay stable across OSS, Studio, and hosted-product
+deployments.
+
+`build_context/{context_name}/context.yaml` is a build-time input registry. It
+declares reusable or operator-selected assets such as prompt catalogs, typed
+contracts, templates, pack descriptors, and provider-backed capability metadata.
+It can live in the OSS factory or in a hosted/customer workspace beside `app/`
+and `workflows/`.
+
+The bridge is explicit:
+
+1. A workflow declares a variable with `source.type: build_context`.
+2. A build-context registry declares `projections.context_variables`.
+3. The launch provider projects only those declared values into the workflow
+   context before execution.
+
+Prompt-heavy input follows a different path. Catalog assets are declared in
+`context.yaml` `assets[]` and injected by deterministic prompt middleware. They
+should not be copied into mutable workflow state unless a small selected value
+is needed by tools or transitions.
+
+Example:
+
+```yaml
+# workflows/AppGenerator/context_variables.yaml
+definitions:
+  capability_packs:
+    type: array
+    source:
+      type: build_context
+      default: []
+```
+
+```yaml
+# build_context/mozaikspay/context.yaml
+context_id: mozaikspay
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: mozaikspay
+  status: active
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs
+```
+
+## Prompt Projection
+
+Some build-context assets are not runtime variables at all. They are prompt
+inputs for specific agents.
+
+Catalog assets can declare prompt projections:
+
+```yaml
+assets:
+  - path: ag2_network_patterns.yaml
+    kind: catalog
+    projections:
+      - id: ag2_patternbook_summary_for_decomposition
+        records: patterns
+        recipients:
+          - PatternAgent
+        render: summary
+        marker: PATTERN_GUIDANCE_AND_EXAMPLES
+      - id: ag2_selected_pattern_for_bundle_builder
+        records: patterns
+        recipients:
+          - WorkflowBundleBuilderAgent
+        render: selected_record
+        selected_by: current_task.pattern_id
+        record_id_field: id
+        marker: PATTERN_GUIDANCE_AND_EXAMPLES
+```
+
+This lets one agent see a compact catalog summary while a later agent receives
+only the selected record. The selection key lives in normal workflow state; the
+large catalog stays in build context.
 
 ## AgentGenerator Context Variables
 

@@ -44,7 +44,7 @@ Use this section as the web navigation layer for that architecture.
 ## Runtime Authoring Contracts
 
 - [Module System](modules-systems/module-system.md)
-- [Capability Pack Model](modules-systems/capability-pack-model.md)
+- [AppGenerator Capability Planning](modules-systems/appgenerator-capability-planning.md)
 - [Workflow Architecture](workflows/workflow-architecture.md)
 - [Workflow Authoring Contracts](workflows/workflow-authoring-contracts.md)
 - [Orchestration Control Loops](workflows/orchestration-control-loops.md)

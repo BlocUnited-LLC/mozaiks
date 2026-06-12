@@ -29,8 +29,7 @@ app/modules/{module_id}/
 │   ├── notifications.yaml   # Notification rules per event
 │   ├── settings.yaml        # User/app settings schema
 │   ├── admin.yaml           # Admin panels mounted into /admin/*
-│   ├── profile.yaml         # User profile page panels (optional)
-│   └── entitlements.yaml    # Capability entitlements (optional)
+│   └── profile.yaml         # User profile page panels (optional)
 ├── runtime_extensions.yaml  # Optional: api_router / startup_service host hooks
 └── backend/
     ├── __init__.py
@@ -112,7 +111,23 @@ actions:
     output_schema: { type: object, required: [success] }
     permissions: [my_module.manage]
     emits: [domain.my_module.item_created]
+
+# Optional: expose named capabilities for reaction routing and hosted-pack wiring.
+# Omit this section when reactions only target handler_method directly.
+capabilities:
+  - capability_id: my_module.list
+    kind: action      # action | workflow | page | transition | hosted
+    target: list_items
+    title: List Items
+    permissions: [my_module.read]
 ```
+
+`capabilities[]` is optional. Use it when reactions need to route to a
+named capability_id (`target.kind: capability`) or when a hosted pack must
+reference a named integration point. Each entry maps a stable `capability_id`
+to an action, workflow, page, or transition `target`. The runtime validates
+that `capability_id` values are unique within the module and that `target`
+references a declared action.
 
 `actions[].api_surface` is optional descriptive metadata for the intended
 exposure surface of an action. Common values include `public`,
@@ -120,6 +135,38 @@ exposure surface of an action. Common values include `public`,
 metadata for tooling, generated admin surfaces, and planning, but it does not
 replace authorization. Runtime permission checks continue to use
 `actions[].permissions` and the caller's granted permissions.
+
+`actions[].entitlement_gate` is optional. Set it to a `capability_id` string
+when the action belongs to the generated app's own SaaS feature-gate model and
+requires an active plan grant before executing. The `ModuleExecutor` checks
+`EntitlementPort.check(capability_id, ...)` and returns `ENTITLEMENT_REQUIRED`
+on denial. Non-SaaS apps use `NoOpEntitlementAdapter` and are entirely
+unaffected — no configuration needed. Never set `entitlement_gate` on
+`admin_internal` actions.
+
+```yaml
+actions:
+  - id: view_dashboard
+    description: View the analytics dashboard.
+    handler_method: view_dashboard
+    api_surface: public_readonly
+    entitlement_gate: analytics.dashboard   # requires active analytics plan grant
+    permissions: [analytics.read]
+    input_schema: { type: object }
+    output_schema: { type: object, required: [data] }
+```
+
+For SaaS apps, `app/config/subscriptions.yaml` declares the plan catalog and,
+when runtime enforcement needs persisted assignments, an `assignment_store`
+data-contract alias. The platform wires the OSS `ConfiguredEntitlementAdapter`
+at startup and the adapter checks active assignment records before dispatch.
+For non-SaaS apps, no subscription config is needed.
+
+This OSS primitive is not hosted-product licensing. Hosted products such as
+Mozaiks App may decide whether an app/workspace can use a proprietary hosted
+pack such as MozaiksPay, but that operator entitlement is enforced by the
+hosted product and its APIs. Generated apps only use `entitlement_gate` for
+their own end-user feature gates.
 
 ---
 
@@ -136,9 +183,10 @@ replace authorization. Runtime permission checks continue to use
   It uses `schema_version: mozaiks.reactions.v1`, root key `reactions`,
   `event_type` for the incoming event, and nested `target.kind` for routing.
 3. Reaction targets use one of three canonical kinds:
-  `handler` calls `target.handler_method` on this module's handler class,
-  `capability` invokes `target.capability_id`, and `notification` links
-  `target.notification_id` to a rule in `contracts/notifications.yaml`.
+  `handler` calls `target.handler_method` on this module's handler class;
+  `capability` invokes `target.capability_id` (must be declared in the
+  receiving module's `module.yaml capabilities[]` array); and `notification`
+  links `target.notification_id` to a rule in `contracts/notifications.yaml`.
 4. `contracts/notifications.yaml` declares notification rules derived from
   events. It is not a reaction file and should not be confused with
   `contracts/reactions.yaml`.
@@ -403,7 +451,7 @@ Pure data access. No business logic, no events, no validation.
 
 Generated repo code uses `ctx.persistence.collection(module_id, entity_name)`
 with module/entity values aligned to `data_contract` and staged
-`config/data.json`. It must not use `ctx.db`, call
+`data/contract.json`. It must not use `ctx.db`, call
 `get_mongo_client()`, or hardcode database names.
 
 ```python
@@ -419,7 +467,7 @@ class ProjectsRepo:
         return await collection.find_many(query or {}, limit=limit)
 ```
 
-The collection pair must match `config/data.json`, for example
+The collection pair must match `data/contract.json`, for example
 `module_id: projects` and `entity_name: projects`. Non-persistent modules should
 not invent database logic.
 
@@ -529,6 +577,12 @@ Examples: `generic_hosted_analytics`, `managed_search`.
 **Rule:** Generate the integration facade and wiring for the app; the hosted service
 engine lives in the private product repo.
 
+Hosted pack access is operator-managed. The generated app may receive a facade
+module or thin service client for a hosted pack, but it must not copy or enforce
+the hosted product's pack-access entitlement rules. If the generated app is
+itself a SaaS product, its end-user feature gates still use the OSS
+`entitlement_gate` and `EntitlementPort` contract described above.
+
 ### `generated_module`
 
 App-specific deterministic business logic. AppGenerator generates the full module contract
@@ -599,7 +653,7 @@ contract shape. The runtime loader will be updated to support the new paths.
 ## Cross References
 
 - [module-authoring-patterns.md](module-authoring-patterns.md) — backend authoring patterns
-- [capability-pack-model.md](capability-pack-model.md) — reusable capability packs
+- [appgenerator-capability-planning.md](appgenerator-capability-planning.md) — AppGenerator capability planning
 - [../app/canonical-app-structure.md](../app/canonical-app-structure.md) — full app workspace layout
 - [../app/app-bundle-declaratives.md](../app/app-bundle-declaratives.md) — declarative contract reference
 

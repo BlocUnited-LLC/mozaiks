@@ -221,8 +221,8 @@ This phase may write:
 - `ui/index.js`
 - `brand/theme_config.json`
 - `config/shell.json`
-- `config/data.json`
-- optional `config/data_migrations/*.json`
+- `data/contract.json`
+- optional `data/migrations/*.json`
 - generated module files
 - provider-neutral deployment artifacts (optional): `Dockerfile`,
   `docker-compose.yml`, `.github/workflows/deploy.yml`, `env.example`, and

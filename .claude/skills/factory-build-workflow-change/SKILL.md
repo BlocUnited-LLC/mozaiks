@@ -33,18 +33,33 @@ Inspect first:
 - `docs/architecture/workflows/refinement-control-plane.md`
 - the full affected workflow directory, especially:
   - `orchestrator.yaml`
-  - `handoffs.yaml`
+  - `transition_graph.yaml`
   - `agents.yaml`
   - `structured_outputs.yaml`
   - `tools.yaml`
   - `context_variables.yaml`
-  - `hooks.yaml`
+  - `middleware.yaml`
 - the relevant shared workflow surfaces when build lifecycle or shared tools change:
   - `factory_app/workflows/_shared/platform/build_lifecycle.py`
   - any affected `factory_app/workflows/_shared/**` helper
 - generated artifact contracts when AppGenerator or AgentGenerator is affected:
-  - `factory_app/workflows/AppGenerator/tools/file_contracts.yaml`
+  - `factory_app/build_context/AppGenerator/file_contracts.yaml`
   - relevant workflow-converter or materialization contracts
+
+Build input structure:
+
+- Build contexts are named directories with one `context.yaml` registry.
+- `context.yaml` declares explicit `assets[]`; folder names are organization, not policy.
+- Factory prompt catalogs are `assets[]` with `kind: catalog` under `factory_app/build_context/{context_name}/`.
+- Workflow runtime YAML (`agents.yaml`, `context_variables.yaml`, `structured_outputs.yaml`, `middleware.yaml`) stays under `factory_app/workflows/{WorkflowName}/`.
+- Hooks resolve factory build-context paths through `factory_app.workflows._shared.hook_utils.workflow_context_path()`.
+- Do not recreate `factory_app/workflows/_shared/catalogs/`.
+- Do not add one-off catalog family folders such as `patternbook/` for a single workflow unless there is a real organization need and the file is still declared in `assets[]`.
+- Do not put large static prompt catalogs in `context_variables.yaml`; hooks inject them deterministically.
+- Reusable OSS build packs are named build contexts, not placeholder manifests. Add a pack only when `context.yaml` contains a `pack:` descriptor plus useful capabilities/facades and declares real `assets[]`.
+- Pack instructions are `assets[]` with `kind: contract`.
+- Pack template directories are `assets[]` with `kind: templates`; they mirror generated app structure: `templates/modules/...`, `templates/services/...`, `templates/ui/...`, `templates/config/...`. YAML in template assets is generated app declarative output, not a build-context contracts lane.
+- Workspace build contexts use the same named-context shape under workspace-root `build_context/{context_name}/`.
 - the narrowest matching tests before editing:
   - sequence, transition, and entrypoint routing: `tests/test_pack_schema_models.py`, `tests/test_pack_config_paths.py`, `tests/test_existing_app_discovery_contracts.py`
   - build lifecycle hooks: `tests/test_build_lifecycle_hooks.py`
@@ -59,7 +74,7 @@ Build sequence truth:
 - `AppGenerator` is one workflow in the build sequence, not the whole build system
 - `AgentGenerator` is one workflow in the build sequence, not the whole build system
 - `ExistingAppDiscovery` belongs to the brownfield or existing-app adoption sequence
-- `workflow_sequence`, `transitions[]`, `entrypoints[]`, and workflow-local `handoffs.yaml` are different mechanisms with different owners
+- `workflow_sequence`, `transitions[]`, `entrypoints[]`, and workflow-local `transition_graph.yaml` are different mechanisms with different owners
 - `workflow_sequence` auto-advance must not be used as a human review or HITL boundary
 - transition options may switch sequences through `options[].sequence`; that is different from workflow-local agent routing
 
@@ -69,7 +84,7 @@ Boundary rules:
 - Do not make `AppGenerator` own the entire build process.
 - Do not add private hosted-product logic, secrets, or proprietary workflow policy to OSS build workflows.
 - Do not conflate greenfield build journeys with brownfield or existing-app adoption journeys.
-- Do not add `transitions[]` when workflow-local `handoffs.yaml` is sufficient.
+- Do not add `transitions[]` when workflow-local `transition_graph.yaml` is sufficient.
 - Do not add `workflow_sequence` steps for operator-review or HITL checkpoints that should remain explicit surfaced review boundaries.
 - Do not route to workflows that are not declared in the registry.
 - Do not modify generated app file contracts casually; inspect downstream AppGenerator or AgentGenerator contract tests first.
@@ -88,7 +103,7 @@ Common change types:
    - inspect `entrypoints[]`, the target transition, the target sequence, and any shell intent docs or tests
    - keep route entry distinct from journey sequencing and workflow-local handoffs
 4. Changing AppGenerator:
-   - inspect `factory_app/workflows/AppGenerator/` contracts, hooks, and `tools/file_contracts.yaml`
+   - inspect `factory_app/workflows/AppGenerator/` contracts, hooks, and `factory_app/build_context/AppGenerator/file_contracts.yaml`
    - treat AppGenerator as the app-bundle workflow inside the broader build system, not the owner of the entire journey
 5. Changing AgentGenerator:
    - inspect `factory_app/workflows/AgentGenerator/` plus workflow-converter tests and generated workflow artifact expectations
@@ -103,7 +118,7 @@ Common change types:
    - inspect `factory_app/workflows/_shared/platform/build_lifecycle.py` and `tests/test_build_lifecycle_hooks.py`
    - preserve journey-aware payloads, runtime hook kwargs, and sequence-position semantics
 9. Changing shared workflow tools or hooks:
-   - inspect the affected workflow `hooks.yaml` or shared tool file plus the nearest hook or workflow-contract tests
+   - inspect the affected workflow `middleware.yaml` or shared tool file plus the nearest hook or workflow-contract tests
    - keep shared helpers generic; do not bury product-specific policy in shared builder tooling
 
 Focused testing guidance:
@@ -147,4 +162,9 @@ Return:
 4. control-plane or refinement linkage impact
 5. tests required or run
 6. rollback or contract drift risk
+
+
+
+
+
 

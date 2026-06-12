@@ -135,12 +135,12 @@ The current file contract:
 
 - `orchestrator.yaml`
 - `agents.yaml`
-- `handoffs.yaml`
+- `transition_graph.yaml`
 - `context_variables.yaml`
 - `structured_outputs.yaml`
 - `tools.yaml`
 - `ui_config.yaml`
-- `hooks.yaml`
+- `middleware.yaml`
 - `extended_orchestration/task_batches.yaml` — optional workflow-local AG2 task batch contract
 - `tools/*.py`
 - `ui/*`
@@ -172,5 +172,6 @@ Mozaiks should feel like:
 - [../foundations/events-and-data/event-system.md](../foundations/events-and-data/event-system.md)
 - [../app/surface-model.md](../app/surface-model.md)
 - [orchestration-control-loops.md](orchestration-control-loops.md)
+
 
 

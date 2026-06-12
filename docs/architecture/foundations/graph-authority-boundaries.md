@@ -26,7 +26,7 @@ snapshot.
 | Graph | Source of truth | Runtime critical? | FalkorDB role |
 | --- | --- | --- | --- |
 | `artifact_dependency_graph` | `factory_app/workflows/extended_orchestration/extension_registry.json` | Yes, for artifact invalidation and refinement impact | Optional backend mirror |
-| `workflow_sequence` / handoffs | Workflow pack config, `workflow_sequences[]`, workflow `handoffs.yaml`, and loaded AG2 handoff objects | Yes, for workflow sequence routing and agent transitions | Optional backend mirror |
+| `workflow_sequence` / handoffs | Workflow pack config, `workflow_sequences[]`, workflow `transition_graph.yaml`, and loaded AG2 handoff objects | Yes, for workflow sequence routing and agent transitions | Optional backend mirror |
 | Control-plane refinement impact graph | `factory_app/control_plane/config/control_plane.yaml`, artifact metadata, app context policy, and artifact dependency config | Yes, for refinement routing and stale artifact decisions | Optional backend mirror |
 | `AppContextGraph` / Context Graph intelligence layer | Source refs, accepted or staged `ArtifactVersion` records, discovery snapshots, generated bundle files, ownership boundaries, validation evidence, and control-plane app context records | No for runtime execution; yes for LLM context quality, scope selection, impact explanation, and Studio inspection | Preferred optional backend mirror |
 | Module event/reaction/notification graph | Module contracts plus the runtime module event dispatcher | Yes, for module action side effects, event reactions, and notification dispatch | Optional backend mirror |
@@ -133,3 +133,4 @@ Recommended UX:
 Users should not need to understand FalkorDB to build apps. They should see a
 Context Graph capability. Operators can configure FalkorDB as the backing graph
 engine when they want larger-scale graph querying or visualization.
+
