@@ -354,6 +354,38 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- Fixed `F821` undefined-name crashes in `mozaiksai/core/runtime/app/ai_config.py`
+  (missing `from typing import Any`) and
+  `factory_app/workflows/AppGenerator/tools/hook_file_contract_context.py`
+  (missing `from pathlib import Path`). Both were live runtime crashes on any call
+  path that triggered annotation evaluation under a non-postponed context.
+
+- Fixed `supports_provider_response_format` incorrectly returning `True` for
+  `dict[str, Any] | None`-style annotations in
+  `mozaiksai/core/workflow/outputs/structured.py`. Python 3.10+ `X | Y` syntax
+  creates `types.UnionType`, not `typing.Union`, so the previous `origin is Union`
+  guard missed it. Both union origin check sites now use
+  `_UNION_ORIGINS = (Union, types.UnionType)`.
+
+- Fixed `app/services/adapters/` files importing from `app.modules.*`, violating
+  the adapter boundary contract. `dns/azure_dns.py` and `dns/cloudflare.py` now
+  import `DnsRecord`, `DnsZone`, and `ProviderNotConfiguredError` from a new
+  `adapters/dns/schemas.py`; `registrar/godaddy.py` and `registrar/opensrs.py`
+  import from `adapters/registrar/schemas.py`; `deployment/build/github_actions_build.py`
+  imports constants from the co-located `provider_connection_contract.py`. Module
+  backends re-export the exception type from the adapter layer to preserve existing
+  call sites.
+
+- Fixed `BuildIntelligenceService.record_quality_gate_block` — correction records
+  were missing `correction_id`; unknown `gate_type` values were silently accepted
+  instead of returning an error. Fixed `list_builds` and `list_corrections` to
+  strip MongoDB `_id` and undeclared internal fields from serialized responses.
+
+- Fixed `build_intelligence/runtime_extensions.yaml` — schema had extra fields
+  (`id`, `description`, `mount_prefix`, top-level `module_id`) and a dict-form
+  `entrypoint` that `ModuleRuntimeExtensionsManifest` rejects. Corrected to the
+  canonical `entrypoint: backend.telemetry_router:router` / `prefix:` shape.
+
 - Renamed internal platform reaction event type from `platform.subscription.{kind}_requested`
   to `platform.reaction.{kind}_dispatched` in `module_event_router.py`. The previous name
   was misleading — it described the reaction routing mechanism but looked like a SaaS
