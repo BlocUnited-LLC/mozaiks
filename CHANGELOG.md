@@ -416,6 +416,29 @@ This project follows a practical pre-1.0 changelog format:
 - Fixed live control-plane classifier calls against models that only support
   the provider default temperature. `SimpleLLMCapabilityService` now omits the
   `temperature` field for JSON completions when no explicit value is configured.
+
+- Fixed B904 raise-without-from violations: 16 files had `raise X` inside
+  `except` blocks without `from err`. All `except ExceptionType:` bare clauses
+  that needed chaining now bind the exception (`except ExceptionType as exc:`),
+  and the corresponding `raise` uses `raise X from exc`. One syntax error in
+  `registry.py` (misplaced `from exc` inside constructor call) was also repaired.
+
+- Fixed `normalize_app_path` stripping leading dots from dotdir names
+  (`.github/workflows/` → `github/workflows/`). The previous `lstrip("./")` treated
+  `.` and `/` as individual strip characters, incorrectly stripping `.github` to
+  `github`. Now strips `./` and `../` as sequences only, preserving dot-prefixed
+  paths like `.github/`.
+
+- Zero ruff violations (`ruff check . → All checks passed`). Suppressed
+  `E402` (intentional lazy imports) and `B008` (FastAPI `Depends()`) globally
+  in `pyproject.toml`. Fixed: `E722` bare except in `db_manager.py`, `F402`
+  import shadowed by loop var in `connector_health.py`, `UP035`/`F401`
+  obsolete `typing.Dict` in transport handlers, `B017` blind exception in 8
+  subscription loader tests (`Exception` → `ValidationError`), `UP007`/`UP045`
+  `Optional`/`Union` annotations in `structured.py` and tests, `E741` ambiguous
+  variable name `l` → `ln` in 3 test files, `E702`/`E701` multi-statement lines
+  in `logging_config.py`, and `UP007` `EventType` union in
+  `unified_event_dispatcher.py`.
 - Fixed three stale test assertions in `test_module_contract_quality_gate.py`
   and `test_module_runtime_quality_gate.py` that checked the removed `condition`
   string field instead of `condition_value`.
