@@ -143,7 +143,7 @@ def get_auth_adapter(force_provider: str | None = None) -> AuthAdapter:
             f"Failed to configure {provider} auth: {e}",
             500,
             provider,
-        )
+        ) from e
 
     # Log which adapter is being used
     if adapter.is_enabled():

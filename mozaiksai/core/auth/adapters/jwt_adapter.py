@@ -143,10 +143,10 @@ class GenericJWTAdapter(BaseAuthAdapter):
             signing_key = jwks_client.get_signing_key_from_jwt(token)
         except jwt.PyJWKClientError as e:
             logger.warning(f"JWKS error: {e}")
-            raise AuthError("Failed to verify token signature", 401, self.name)
+            raise AuthError("Failed to verify token signature", 401, self.name) from e
         except Exception as e:
             logger.error(f"Unexpected JWKS error: {e}")
-            raise AuthError("Token validation failed", 401, self.name)
+            raise AuthError("Token validation failed", 401, self.name) from e
 
         # Decode and verify
         try:
@@ -173,22 +173,22 @@ class GenericJWTAdapter(BaseAuthAdapter):
                 leeway=self._config.clock_skew_seconds,
                 options=decode_options,
             )
-        except jwt.ExpiredSignatureError:
-            raise AuthError("Token has expired", 401, self.name)
-        except jwt.ImmatureSignatureError:
-            raise AuthError("Token not yet valid", 401, self.name)
-        except jwt.InvalidAudienceError:
-            raise AuthError("Invalid token audience", 401, self.name)
-        except jwt.InvalidIssuerError:
-            raise AuthError("Invalid token issuer", 401, self.name)
-        except jwt.InvalidSignatureError:
-            raise AuthError("Invalid token signature", 401, self.name)
+        except jwt.ExpiredSignatureError as exc:
+            raise AuthError("Token has expired", 401, self.name) from exc
+        except jwt.ImmatureSignatureError as exc:
+            raise AuthError("Token not yet valid", 401, self.name) from exc
+        except jwt.InvalidAudienceError as exc:
+            raise AuthError("Invalid token audience", 401, self.name) from exc
+        except jwt.InvalidIssuerError as exc:
+            raise AuthError("Invalid token issuer", 401, self.name) from exc
+        except jwt.InvalidSignatureError as exc:
+            raise AuthError("Invalid token signature", 401, self.name) from exc
         except jwt.DecodeError as e:
             logger.warning(f"Token decode error: {e}")
-            raise AuthError("Invalid token format", 401, self.name)
+            raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
             logger.error(f"Token validation error: {e}")
-            raise AuthError("Token validation failed", 401, self.name)
+            raise AuthError("Token validation failed", 401, self.name) from e
 
         # Extract claims using configured mappings
         user_claims = self._extract_claims(claims)

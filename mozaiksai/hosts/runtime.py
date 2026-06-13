@@ -452,8 +452,8 @@ async def start_chat(
         parsed = await request.json()
         if isinstance(parsed, dict):
             data = parsed
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
     except Exception:
         data = {}
 
@@ -902,8 +902,8 @@ async def handle_user_input(
 
     try:
         data = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
     message = data.get("message")
     workflow_name = data.get("workflow_name")
@@ -957,8 +957,8 @@ async def handle_component_action(
 
     try:
         data = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
     component_id = data.get("component_id")
     action_type = data.get("action_type")
@@ -988,8 +988,8 @@ async def submit_tool_call_response(
 
     try:
         data = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
 
     event_id = data.get("event_id")
     response_data = data.get("response_data")

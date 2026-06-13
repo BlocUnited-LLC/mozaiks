@@ -137,7 +137,7 @@ class JWTValidator:
             unverified_header = jwt.get_unverified_header(token)
         except jwt.DecodeError as e:
             logger.warning(f"Invalid token header: {e}")
-            raise AuthError("Invalid token format", 401)
+            raise AuthError("Invalid token format", 401) from e
 
         kid = unverified_header.get("kid")
         if not kid:
@@ -149,7 +149,7 @@ class JWTValidator:
             jwk = await jwks_client.get_signing_key(kid)
         except RuntimeError as e:
             logger.error(f"Failed to fetch signing key: {e}")
-            raise AuthError("Unable to validate token signature", 401)
+            raise AuthError("Unable to validate token signature", 401) from e
 
         if not jwk:
             logger.warning(f"Signing key not found: {kid}")
@@ -161,14 +161,14 @@ class JWTValidator:
             public_key = algorithms.RSAAlgorithm.from_jwk(jwk)
         except Exception as e:
             logger.error(f"Failed to load public key from JWK: {e}")
-            raise AuthError("Invalid signing key format", 401)
+            raise AuthError("Invalid signing key format", 401) from e
 
         # Get expected issuer (may trigger discovery fetch)
         try:
             expected_issuer = await self._get_issuer()
         except RuntimeError as e:
             logger.error(f"Failed to get issuer: {e}")
-            raise AuthError("Unable to validate token issuer", 401)
+            raise AuthError("Unable to validate token issuer", 401) from e
 
         # Decode and verify token
         try:
@@ -189,22 +189,22 @@ class JWTValidator:
                     "require": ["exp", "iss", "aud"],
                 },
             )
-        except jwt.ExpiredSignatureError:
-            raise AuthError("Token has expired", 401)
-        except jwt.ImmatureSignatureError:
-            raise AuthError("Token not yet valid", 401)
-        except jwt.InvalidAudienceError:
-            raise AuthError("Invalid token audience", 401)
-        except jwt.InvalidIssuerError:
-            raise AuthError("Invalid token issuer", 401)
-        except jwt.InvalidSignatureError:
-            raise AuthError("Invalid token signature", 401)
+        except jwt.ExpiredSignatureError as exc:
+            raise AuthError("Token has expired", 401) from exc
+        except jwt.ImmatureSignatureError as exc:
+            raise AuthError("Token not yet valid", 401) from exc
+        except jwt.InvalidAudienceError as exc:
+            raise AuthError("Invalid token audience", 401) from exc
+        except jwt.InvalidIssuerError as exc:
+            raise AuthError("Invalid token issuer", 401) from exc
+        except jwt.InvalidSignatureError as exc:
+            raise AuthError("Invalid token signature", 401) from exc
         except jwt.DecodeError as e:
             logger.warning(f"Token decode error: {e}")
-            raise AuthError("Invalid token", 401)
+            raise AuthError("Invalid token", 401) from e
         except Exception as e:
             logger.error(f"Unexpected token validation error: {e}")
-            raise AuthError("Token validation failed", 401)
+            raise AuthError("Token validation failed", 401) from e
 
         # Extract user claims
         user_id = claims.get(self._config.user_id_claim)

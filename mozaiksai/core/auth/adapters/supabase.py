@@ -124,18 +124,18 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
                 },
             )
             return claims
-        except jwt.ExpiredSignatureError:
-            raise AuthError("Token has expired", 401, self.name)
-        except jwt.InvalidAudienceError:
-            raise AuthError("Invalid token audience", 401, self.name)
-        except jwt.InvalidSignatureError:
-            raise AuthError("Invalid token signature", 401, self.name)
+        except jwt.ExpiredSignatureError as exc:
+            raise AuthError("Token has expired", 401, self.name) from exc
+        except jwt.InvalidAudienceError as exc:
+            raise AuthError("Invalid token audience", 401, self.name) from exc
+        except jwt.InvalidSignatureError as exc:
+            raise AuthError("Invalid token signature", 401, self.name) from exc
         except jwt.DecodeError as e:
             logger.warning(f"Token decode error: {e}")
-            raise AuthError("Invalid token format", 401, self.name)
+            raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
             logger.error(f"Token validation error: {e}")
-            raise AuthError("Token validation failed", 401, self.name)
+            raise AuthError("Token validation failed", 401, self.name) from e
 
     async def _validate_with_jwks(self, token: str) -> dict[str, Any]:
         """Validate using JWKS (RS256)."""
@@ -160,21 +160,21 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
             return claims
         except jwt.PyJWKClientError as e:
             logger.warning(f"JWKS error: {e}")
-            raise AuthError("Failed to verify token signature", 401, self.name)
-        except jwt.ExpiredSignatureError:
-            raise AuthError("Token has expired", 401, self.name)
-        except jwt.InvalidAudienceError:
-            raise AuthError("Invalid token audience", 401, self.name)
-        except jwt.InvalidIssuerError:
-            raise AuthError("Invalid token issuer", 401, self.name)
-        except jwt.InvalidSignatureError:
-            raise AuthError("Invalid token signature", 401, self.name)
+            raise AuthError("Failed to verify token signature", 401, self.name) from e
+        except jwt.ExpiredSignatureError as exc:
+            raise AuthError("Token has expired", 401, self.name) from exc
+        except jwt.InvalidAudienceError as exc:
+            raise AuthError("Invalid token audience", 401, self.name) from exc
+        except jwt.InvalidIssuerError as exc:
+            raise AuthError("Invalid token issuer", 401, self.name) from exc
+        except jwt.InvalidSignatureError as exc:
+            raise AuthError("Invalid token signature", 401, self.name) from exc
         except jwt.DecodeError as e:
             logger.warning(f"Token decode error: {e}")
-            raise AuthError("Invalid token format", 401, self.name)
+            raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
             logger.error(f"Token validation error: {e}")
-            raise AuthError("Token validation failed", 401, self.name)
+            raise AuthError("Token validation failed", 401, self.name) from e
 
     def _extract_claims(self, raw_claims: dict[str, Any]) -> UserClaims:
         """Extract standardized claims from Supabase JWT."""

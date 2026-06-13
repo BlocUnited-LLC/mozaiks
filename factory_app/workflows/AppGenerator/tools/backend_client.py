@@ -69,7 +69,7 @@ class AppGeneratorBackendClient(BackendClient):
                             "contentBase64": base64.b64encode(content).decode('utf-8')
                         })
         except Exception as e:
-            raise RuntimeError(f"Failed to process bundle for export: {e}")
+            raise RuntimeError(f"Failed to process bundle for export: {e}") from e
 
         payload = {
             "repoUrl": None, # Optional if createRepo=true

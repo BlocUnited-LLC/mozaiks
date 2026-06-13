@@ -72,10 +72,10 @@ class DockerSandboxAdapter:
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
+        except TimeoutError as exc:
             proc.kill()
             await proc.communicate()
-            raise RuntimeError(f"Docker command timed out after {timeout}s: {' '.join(args)}")
+            raise RuntimeError(f"Docker command timed out after {timeout}s: {' '.join(args)}") from exc
         rc = int(proc.returncode or 0)
         return rc, stdout_b.decode("utf-8", errors="replace"), stderr_b.decode("utf-8", errors="replace")
 

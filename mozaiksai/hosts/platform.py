@@ -2989,8 +2989,8 @@ async def _handle_chat_upload(
             bundle_path=bundle_path,
             allowed_workflows_env=allowed_raw,
         )
-    except LookupError:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Chat session not found") from exc
     except ValueError as exc:
         message = str(exc)
         if message.startswith("File too large"):

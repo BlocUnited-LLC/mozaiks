@@ -176,7 +176,7 @@ async def _emit_tool_call_core(
         transport = await SimpleTransport.get_instance()
     except Exception as e:
         wf_logger.error(f"❌ [UI_TOOLS] Transport unavailable: {e}")
-        raise UIToolError(f"SimpleTransport not available: {e}")
+        raise UIToolError(f"SimpleTransport not available: {e}") from e
 
     payload_to_send = {
         **payload,
@@ -211,7 +211,7 @@ async def _emit_tool_call_core(
             f"❌ [UI_TOOLS] Failed to emit UI tool event '{event_id}': {e}",
             exc_info=True,
         )
-        raise UIToolError(f"Failed to emit UI tool event: {e}")
+        raise UIToolError(f"Failed to emit UI tool event: {e}") from e
 
 async def _wait_for_tool_call_response_internal(event_id: str, timeout: float | None = None) -> dict[str, Any]:
     from mozaiksai.core.transport.simple_transport import SimpleTransport  # local import
@@ -222,7 +222,7 @@ async def _wait_for_tool_call_response_internal(event_id: str, timeout: float | 
         fut = transport.wait_for_tool_call_response(event_id, timeout=None)  # type: ignore[attr-defined]
         return await fut
     except Exception as e:  # pragma: no cover
-        raise UIToolError(f"UI tool response failure for {event_id}: {e}")
+        raise UIToolError(f"UI tool response failure for {event_id}: {e}") from e
 
 
 def _resolve_ui_tool_owner(
@@ -625,7 +625,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
 
     except Exception as e:  # pragma: no cover
         wf_logger.error(f"❌ UI tool interaction failed for '{tool_name}': {str(e)}")
-        raise UIToolError(f"UI interaction failed: {str(e)}")
+        raise UIToolError(f"UI interaction failed: {str(e)}") from e
     
 __all__ = [
     "emit_ui_surface",

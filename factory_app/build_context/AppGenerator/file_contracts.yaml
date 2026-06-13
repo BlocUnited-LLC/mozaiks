@@ -140,7 +140,7 @@ task_contracts:
 
   service_foundation:
     owner_agent: ConfigMiddlewareAgent
-    summary: App-level service support code and scaffold files for the active app host. Paths are app-bundle-relative and assemble under physical app/services/.
+    summary: App-level service support code for integrations, provider adapters, routes, and names-only secret policy. Paths are app-bundle-relative and assemble under physical app/services/ or app/security/.
     required_outputs: []
     optional_outputs:
       - services/config.py
@@ -155,11 +155,12 @@ task_contracts:
       - Do not generate a standalone platform or alternate host.
       - App-owned support code belongs under app-bundle-relative services/integrations/ for external or hosted API clients, services/adapters/ for provider-specific implementation boundaries, and services/routes/ for app-level routes only when needed; physical generated workspaces place these under app/services/.
       - If app-owned runtime secrets are required, emit security/secrets.yaml as a names-only contract for provider/vault policy, env handles, and secret names. Never emit raw secret values.
-      - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is provider mechanics rather than product state.
+      - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the generated app itself directly owns those provider mechanics rather than consuming a hosted platform capability.
+      - Do not use service_foundation for Mozaiks-hosted deployment, DNS, domain, billing, payment processing, or platform operations. Hosted platform capabilities are consumed through hosted API clients/facade modules and host-owned records; provider adapters stay in the hosted product.
       - services/adapters/ and services/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.
-      - Deployment artifacts generated from this lane must follow the provider-neutral deployment contract.
-      - Deployment artifacts must never include real secrets or provider-tenant identifiers.
-      - Generated CI workflow secret references must stay names-only and be declared through ci_secret_requirements; never emit secret values.
+      - Do not emit Dockerfile, docker-compose.yml, env.example, deployment.manifest.json, .github/workflows/*.yml, or other deployment packaging artifacts from service_foundation.
+      - Deployment packaging artifacts are emitted only by the generate_and_download deployment contract renderer through DownloadRequest deployment_profile/include_* fields.
+      - Generated deployment artifacts must follow the provider-neutral deployment contract, must never include real secrets or provider-tenant identifiers, and generated CI workflow secret references must stay names-only through ci_secret_requirements.
 
   control_plane_pack:
     owner_agent: ControlPlaneAgent

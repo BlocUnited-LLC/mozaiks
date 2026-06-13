@@ -206,12 +206,12 @@ class OIDCDiscoveryClient:
                 )
                 return self._cache
 
-            except TimeoutError:
+            except TimeoutError as exc:
                 logger.error("OIDC discovery fetch timed out")
-                raise RuntimeError("OIDC discovery fetch timed out")
+                raise RuntimeError("OIDC discovery fetch timed out") from exc
             except aiohttp.ClientError as e:
                 logger.error(f"OIDC discovery fetch client error: {e}")
-                raise RuntimeError(f"OIDC discovery fetch failed: {e}")
+                raise RuntimeError(f"OIDC discovery fetch failed: {e}") from e
 
     def clear_cache(self) -> None:
         """Clear the discovery cache (useful for testing)."""

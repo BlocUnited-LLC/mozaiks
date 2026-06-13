@@ -122,7 +122,7 @@ async def _validate_and_attach(
         claims = await adapter.validate_token(token)
     except AuthError as e:
         logger.warning(f"Auth failed ({adapter.name}): {e.message}")
-        raise HTTPException(status_code=e.status_code, detail=e.message)
+        raise HTTPException(status_code=e.status_code, detail=e.message) from e
 
     principal = UserPrincipal.from_claims(claims)
 

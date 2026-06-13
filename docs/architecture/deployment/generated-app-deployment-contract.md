@@ -7,6 +7,11 @@ This document defines the provider-neutral deployment artifact contract for gene
 The OSS `mozaiks` repo owns this contract.
 Hosted-product policy, approvals, provider adapters, and secret orchestration remain outside this repo.
 
+The contract answers "how does this generated app run?" It does not answer
+"where should the hosted product operate it?" or "which provider adapter should
+mutate infrastructure?" Hosted products convert the contract into their own
+records, approvals, provider calls, and status surfaces.
+
 ## Production Boundary
 
 Generated apps use a repo-per-app (workspace-per-app) boundary.
@@ -162,6 +167,10 @@ When deployment artifacts are requested by scaffold/export flags, AppGenerator e
 - `env.example`
 - `deployment.manifest.json`
 
+These artifacts live at the generated app bundle root. They are not emitted
+from `app/services/`, and AppGenerator build tasks must not claim them as
+`service_foundation`, `api_surface`, or helper-file outputs.
+
 When `.github/workflows/deploy.yml` is emitted, the manifest may also carry a
 concrete `ci_secret_requirements` section describing the names-only secret and
 workflow-input contract used by that generated workflow.
@@ -199,6 +208,13 @@ Adapter layers outside AppGenerator handle:
 - persistence of build outputs in host deployment records
 - mapping names-only CI secret requirements to provider-specific secret stores
 
+For Mozaiks-hosted apps, the generated bundle may include `Dockerfile`,
+`env.example`, `.github/workflows/deploy.yml`, and
+`deployment.manifest.json`, but it must not include hosted product provider adapters
+such as DNS, registrar, cloud deployment, wallet, billing, or hosted
+policy implementations. The hosted product owns those adapters and consumes the
+generated contract through platform records/APIs.
+
 ## E2B Role
 
 E2B in AppGenerator is pre-deploy validation/preview only.
@@ -223,3 +239,8 @@ Hosted products (for example `mozaiks-app`) consume this contract but own hosted
 - policy/approval gates
 - provider adapters and defaults
 - deployment status and operations surfaces
+
+App Zero dogfooding follows the same handoff as any tenant app: the
+`mozaiks-app` bundle can be registered and operated through hosted product
+records, but infrastructure changes still flow through the product modules and
+provider adapters rather than direct adapter imports from the app bundle.

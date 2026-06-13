@@ -81,7 +81,10 @@ DISALLOWED_LEGACY_APP_DIR_PREFIXES = frozenset(
 
 
 def normalize_app_path(raw_path: object) -> str:
-    return str(raw_path or "").replace("\\", "/").strip().lstrip("./")
+    s = str(raw_path or "").replace("\\", "/").strip().lstrip("/")
+    while s.startswith("./") or s.startswith("../"):
+        s = s[3:] if s.startswith("../") else s[2:]
+    return s
 
 
 def is_data_migration_path(path: str) -> bool:

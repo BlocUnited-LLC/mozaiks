@@ -155,12 +155,12 @@ class JWKSClient:
 
                 logger.info(f"Loaded {len(self._keys_by_kid)} signing keys from JWKS")
 
-            except TimeoutError:
+            except TimeoutError as exc:
                 logger.error("JWKS fetch timed out")
-                raise RuntimeError("JWKS fetch timed out")
+                raise RuntimeError("JWKS fetch timed out") from exc
             except aiohttp.ClientError as e:
                 logger.error(f"JWKS fetch client error: {e}")
-                raise RuntimeError(f"JWKS fetch failed: {e}")
+                raise RuntimeError(f"JWKS fetch failed: {e}") from e
 
     def clear_cache(self) -> None:
         """Clear the JWKS cache (useful for testing)."""

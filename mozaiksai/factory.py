@@ -183,7 +183,7 @@ def create_mozaiks_app(
             }
         except Exception as e:
             logger.error(f"Failed to start chat: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     # ----- WebSocket endpoint -----
     @runtime_subapp.websocket("/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}")

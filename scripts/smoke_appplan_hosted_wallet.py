@@ -184,8 +184,8 @@ def _call_openai(system_message: str, user_message: str, model: str) -> str:
     """Call OpenAI chat completions API."""
     try:
         from openai import OpenAI  # type: ignore
-    except ImportError:
-        raise ImportError("openai package required: pip install openai")
+    except ImportError as exc:
+        raise ImportError("openai package required: pip install openai") from exc
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
