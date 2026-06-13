@@ -149,7 +149,7 @@ class TestAppPlanAgentLiveRun:
 
     def test_live_run_placeholder(self) -> None:
         """This test is always skipped. See the class docstring."""
-        assert False, "This test must never run in CI — use the smoke script."
+        raise AssertionError("This test must never run in CI — use the smoke script.")
 
 
 # ---------------------------------------------------------------------------

@@ -15,13 +15,13 @@
 # ==============================================================================
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class UIDisplayMode(str, Enum):
+class UIDisplayMode(StrEnum):
     """Canonical display mode for a rendered UI component."""
 
     INLINE = "inline"

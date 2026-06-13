@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -20,7 +20,7 @@ APP_CONTEXT_HIGH_RISK_BLOCK_WARNING = (
 )
 
 
-class AppContextPolicyDecision(str, Enum):
+class AppContextPolicyDecision(StrEnum):
     ALLOW = "allow"
     WARN = "warn"
     BLOCK_REQUIRES_CONTEXT_REFRESH = "block_requires_context_refresh"

@@ -220,6 +220,10 @@ bundle contract.
 Generated app deployment artifacts are standardized by a provider-neutral
 contract in OSS.
 
+Those artifacts describe how the app runs; hosted products consume them into
+host-owned records and execute provider adapters outside the generated app
+bundle.
+
 See:
 
 - [../deployment/generated-app-deployment-contract.md](../deployment/generated-app-deployment-contract.md)

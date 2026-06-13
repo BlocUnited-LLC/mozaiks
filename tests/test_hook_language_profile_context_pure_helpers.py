@@ -160,7 +160,7 @@ class TestBuildBackendBlock:
         block = _build_backend_block({"hard_constraints": ["  ", "real constraint"]})
         assert "real constraint" in block
         lines = block.splitlines()
-        assert not any(l.strip() == "-" for l in lines)
+        assert not any(ln.strip() == "-" for ln in lines)
 
     def test_returns_string(self):
         assert isinstance(_build_backend_block({}), str)

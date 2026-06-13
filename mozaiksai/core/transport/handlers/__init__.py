@@ -18,7 +18,7 @@ Usage:
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 

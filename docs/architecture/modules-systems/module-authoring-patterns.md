@@ -61,14 +61,19 @@ business behavior:
 
 ```text
 app/services/integrations/{service}_client.py  # external or hosted API client
-app/services/adapters/{area}/{provider}.py     # provider implementation boundary
+app/services/adapters/{area}/{provider}.py     # direct app-owned provider boundary
 modules/{module}/backend/service.py           # business action calls the client/adapter
 ```
 
 Typical adapter areas include auth, source_control, deployment, dns, registrar,
-cloud, storage, search, email, and payments. Keep generic runtime auth in the
-framework; use `app/services/adapters/auth/` only for app-specific provider
-mechanics.
+cloud, storage, search, email, and payments when the app itself directly owns
+that provider integration. Keep generic runtime auth in the framework; use
+`app/services/adapters/auth/` only for app-specific provider mechanics.
+
+If the app is hosted through a platform such as `mozaiks-app`, do not copy the
+hosted platform's deployment, DNS, registrar, billing, wallet, or operations
+adapters into the generated app. Use hosted API clients/facade modules and the
+provider-neutral deployment artifact contract instead.
 
 Do not put provider implementation boundaries under `modules/` unless they are
 module-local helper files declared for that module. Do not turn an adapter into

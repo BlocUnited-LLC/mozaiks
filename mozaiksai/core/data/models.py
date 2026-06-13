@@ -14,7 +14,7 @@ ChatSessions Stored Fields (superset; some optional):
 """
 
 from datetime import datetime
-from enum import Enum, IntEnum
+from enum import IntEnum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,7 +27,7 @@ logger = get_workflow_logger("chat_workflow_models")
 # EXACT PYDANTIC MODELS (MATCH SPECIFICATION)
 # ===========================================
 
-class Role(str, Enum):
+class Role(StrEnum):
     user = "user"
     assistant = "assistant"
 

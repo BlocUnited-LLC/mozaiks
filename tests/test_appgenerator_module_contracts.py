@@ -184,6 +184,8 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["ModelOutput"]["fields"]["model_files"]["items"] == "ModelFile"
     assert models["AppBuildPlan"]["fields"]["deployment_targets"]["items"] == "DeployTargetSpec"
     assert models["AppBuildPlan"]["fields"]["deployment_template_manifest"]["variants"] == ["DeploymentTemplateManifest", "null"]
+    assert "deployment.manifest.json" in models["AppBuildTask"]["fields"]["task_type"]["description"]
+    assert "Do not use this model for Dockerfile" in models["BackendFoundationFile"]["fields"]["path"]["description"]
     assert models["DeployTargetSpec"]["fields"]["target_kind"]["values"] == ["container", "compose", "external_adapter"]
     assert models["DeployTargetSpec"]["fields"]["ci_secret_requirements"]["variants"] == ["CiSecretRequirements", "null"]
     assert models["DeploymentTemplateManifest"]["fields"]["ci_secret_requirements"]["variants"] == ["CiSecretRequirements", "null"]
@@ -249,6 +251,11 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "validate_app_build" in source
     assert "passed` or explicit `skipped`" in source
     assert "provider-neutral outputs from the deployment contract" in source
+    assert "Mozaiks-hosted deployment, DNS/domain, billing, wallet, and platform operations" in source
+    assert "Do not generate provider adapters for those operations into a customer app bundle" in source
+    assert "Generated app deployment packaging is not a `service_foundation` or `api_surface` task" in source
+    assert "Do not declare `Dockerfile`, `docker-compose.yml`, `env.example`, `deployment.manifest.json`, or `.github/workflows/*.yml`" in source
+    assert "Do not include this page merely because DownloadAgent will emit provider-neutral deployment artifacts" in source
     assert "Generated artifacts must never commit secrets" in source
     assert "ci_secret_requirements" in source
     assert "pre-deploy validation/preview only" in source

@@ -327,6 +327,8 @@ def test_e2b_is_documented_as_predeploy_validation_only() -> None:
 def test_appgenerator_guidance_mentions_provider_neutral_target_profiles() -> None:
     source = _read("factory_app/workflows/AppGenerator/agents.yaml")
     assert "provider-neutral outputs from the deployment contract" in source
+    assert "how the generated app runs" in source
+    assert "hosted provider adapters" in source
     assert "deployment_profile" in source
     assert "ci_secret_requirements" in source
 
@@ -337,6 +339,18 @@ def test_self_host_docker_compose_path_is_documented() -> None:
     assert "local Docker" in source
     assert "local Compose" in source
     assert "ci_secret_requirements" in source
+    assert "how does this generated app run" in source
+    assert "must not include hosted product provider adapters" in source
+    assert "App Zero dogfooding follows the same handoff" in source
+
+
+def test_canonical_app_structure_documents_deploy_artifact_boundary() -> None:
+    source = _read("docs/architecture/app/canonical-app-structure.md")
+    assert "Dockerfile" in source
+    assert "deployment.manifest.json" in source
+    assert "Root deployment artifacts declare how the app runs" in source
+    assert "AppGenerator build tasks do not own these files" in source
+    assert "must not generate hosted platform provider adapters into customer app bundles" in source
 
 
 def test_build_output_accepts_pending_without_image_ref() -> None:

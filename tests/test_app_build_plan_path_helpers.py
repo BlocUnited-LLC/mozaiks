@@ -38,14 +38,24 @@ Covers:
     - modules/tasks/backend/handler.py → invalid
     - services/random_helper.py → invalid
     - duplicates → deduplicated
+
+  _deployment_contract_artifact_paths:
+    - Dockerfile → returned
+    - deployment.manifest.json → returned
+    - .github/workflows/deploy.yml → returned
+    - app service files → ignored
 """
 from __future__ import annotations
 
+import pytest
+
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
+    _deployment_contract_artifact_paths,
     _invalid_service_foundation_paths,
     _noncanonical_service_paths,
     _normalized_owned_paths,
     _raw_frontend_source_path,
+    _validate_build_tasks,
 )
 
 # ---------------------------------------------------------------------------
@@ -238,3 +248,43 @@ class TestInvalidServiceFoundationPaths:
 
     def test_empty_list_returns_empty(self):
         assert _invalid_service_foundation_paths([]) == []
+
+
+# ---------------------------------------------------------------------------
+# 5. _deployment_contract_artifact_paths
+# ---------------------------------------------------------------------------
+
+class TestDeploymentContractArtifactPaths:
+    def test_deployment_root_files_returned(self):
+        result = _deployment_contract_artifact_paths([
+            "Dockerfile",
+            "deployment.manifest.json",
+            "docker-compose.yml",
+            "env.example",
+        ])
+        assert result == [
+            "Dockerfile",
+            "deployment.manifest.json",
+            "docker-compose.yml",
+            "env.example",
+        ]
+
+    def test_github_workflow_returned(self):
+        result = _deployment_contract_artifact_paths([".github/workflows/deploy.yml"])
+        assert result == [".github/workflows/deploy.yml"]
+
+    def test_app_service_file_ignored(self):
+        result = _deployment_contract_artifact_paths(["services/adapters/dns/provider.py"])
+        assert result == []
+
+    def test_build_tasks_cannot_own_deployment_artifacts(self):
+        task = {
+            "task_id": "deploy_scaffold",
+            "task_type": "service_foundation",
+            "initial_agent": "ConfigMiddlewareAgent",
+            "capability_pack_id": None,
+            "owned_paths": ["Dockerfile", "deployment.manifest.json"],
+        }
+
+        with pytest.raises(ValueError, match="deployment contract artifact"):
+            _validate_build_tasks([task])

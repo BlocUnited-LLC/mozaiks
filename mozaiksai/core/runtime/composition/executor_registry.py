@@ -15,7 +15,7 @@ The Executor protocol defines the minimal interface both implementations
 must satisfy so the runtime's request dispatcher can treat them uniformly.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
 from logs.logging_config import get_workflow_logger
@@ -23,7 +23,7 @@ from logs.logging_config import get_workflow_logger
 logger = get_workflow_logger("executor_registry")
 
 
-class ExecutorType(str, Enum):
+class ExecutorType(StrEnum):
     """Identifies which kind of executor is registered."""
     WORKFLOW = "workflow"  # AI workflow execution
     MODULE = "module"      # CRUD module execution (Phase 2)

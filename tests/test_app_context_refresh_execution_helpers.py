@@ -57,7 +57,7 @@ Covers sync pure helpers NOT covered elsewhere:
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 import pytest
 
@@ -179,7 +179,7 @@ class TestArtifactLifecycleValue:
         assert _artifact_lifecycle_value(FakeEnum()) == "archived"
 
     def test_real_enum_value_extracted(self):
-        class Status(str, Enum):
+        class Status(StrEnum):
             CURRENT = "current"
             ARCHIVED = "archived"
         assert _artifact_lifecycle_value(Status.CURRENT) == "current"

@@ -13,13 +13,13 @@ This is the runtime contract for the composition layer. In Phase 1
 only `ai_only` mode is fully wired. Module and page support land in Phase 2.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ExecutionMode(str, Enum):
+class ExecutionMode(StrEnum):
     """How the runtime should initialize itself for this app.
 
     ai_only       — Only AI workflows. No modules, no app pages.

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class SessionLifecycle(str, Enum):
+class SessionLifecycle(StrEnum):
     INITIAL = "initial"
     ACTIVE = "active"
     AWAITING_TRANSITION = "awaiting_transition"
@@ -15,7 +15,7 @@ class SessionLifecycle(str, Enum):
     STALE = "stale"
 
 
-class SequenceStatus(str, Enum):
+class SequenceStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     STALE = "stale"

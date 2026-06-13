@@ -279,13 +279,20 @@ class KeywordFilter(logging.Filter):
         *,
         min_level: int | None = None,
     ):
-        super().__init__(); self.kw = tuple(k.lower() for k in keywords); self.ex = tuple(k.lower() for k in exclude_keywords); self.min = min_level
+        super().__init__()
+        self.kw = tuple(k.lower() for k in keywords)
+        self.ex = tuple(k.lower() for k in exclude_keywords)
+        self.min = min_level
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
-        if self.min and record.levelno < self.min: return False
-        msg = record.getMessage().lower(); name = record.name.lower()
-        if self.ex and any(k in msg or k in name for k in self.ex): return False
-        if not self.kw: return True
+        if self.min and record.levelno < self.min:
+            return False
+        msg = record.getMessage().lower()
+        name = record.name.lower()
+        if self.ex and any(k in msg or k in name for k in self.ex):
+            return False
+        if not self.kw:
+            return True
         return any(k in msg or k in name for k in self.kw)
 
 # No filters needed for single log file
@@ -384,7 +391,8 @@ def setup_logging(
     Prevents duplicate initialization with global flag.
     """
     global _logging_initialized
-    if _logging_initialized: return
+    if _logging_initialized:
+        return
     _logging_initialized = True
 
     # Optional clearing of existing log files
@@ -438,7 +446,10 @@ def setup_logging(
         backup_count=backup_count
     )
     root.addHandler(file_handler)
-    ch = logging.StreamHandler(); ch.setLevel(getattr(logging, console_level.upper())); ch.setFormatter(console_fmt); root.addHandler(ch)
+    ch = logging.StreamHandler()
+    ch.setLevel(getattr(logging, console_level.upper()))
+    ch.setFormatter(console_fmt)
+    root.addHandler(ch)
     
     # Dedicated handler for agent conversation messages
     agent_conv_file = LOGS_DIR / "agent_conversations.log"
@@ -526,12 +537,18 @@ def get_core_logger(module_name: str) -> logging.Logger:
     return logging.getLogger(logger_name)
 
 # Convenience functions for each core module
-get_data_logger = lambda name="data": logging.getLogger(f"core.data.{name}")
-get_events_logger = lambda name="events": logging.getLogger(f"core.events.{name}")  
-get_observability_logger = lambda name="observability": logging.getLogger(f"core.observability.{name}")
-get_transport_logger = lambda name="transport": logging.getLogger(f"core.transport.{name}")
-get_workflow_logger_detailed = lambda name="workflow": logging.getLogger(f"core.workflow.{name}")
-get_core_config_logger = lambda: logging.getLogger("core.core_config")
+def get_data_logger(name="data"):
+    return logging.getLogger(f"core.data.{name}")
+def get_events_logger(name="events"):
+    return logging.getLogger(f"core.events.{name}")  
+def get_observability_logger(name="observability"):
+    return logging.getLogger(f"core.observability.{name}")
+def get_transport_logger(name="transport"):
+    return logging.getLogger(f"core.transport.{name}")
+def get_workflow_logger_detailed(name="workflow"):
+    return logging.getLogger(f"core.workflow.{name}")
+def get_core_config_logger():
+    return logging.getLogger("core.core_config")
 
 # Context logger -----------------------------------------------------
 class ContextLogger:
@@ -673,7 +690,7 @@ class WorkflowLogger:
         total_tools = sum(len(tools) for tools in agent_tools.values())
         agent_summary = []
         
-        for name, agent in agents.items():
+        for name, _agent in agents.items():
             tool_count = len(agent_tools.get(name, []))
             agent_summary.append(f"{name}({tool_count})")
         

@@ -117,7 +117,7 @@ class TestFormatPreset:
         assert "valid" in result
         # whitespace-only entry not rendered as a dash item
         lines = result.splitlines()
-        dash_lines = [l for l in lines if l.strip().startswith("- ")]
+        dash_lines = [ln for ln in lines if ln.strip().startswith("- ")]
         assert len(dash_lines) == 1
 
     def test_chrome_default_rendered(self):
@@ -245,8 +245,8 @@ class TestBuildShellPresetBody:
         assert "real rule" in result
         # Whitespace-only rule not rendered
         lines = result.splitlines()
-        dash_lines = [l.strip() for l in lines if l.strip().startswith("- ")]
-        assert not any(l == "- " for l in dash_lines)
+        dash_lines = [ln.strip() for ln in lines if ln.strip().startswith("- ")]
+        assert not any(ln == "- " for ln in dash_lines)
 
     def test_empty_rules_list_no_rules_section(self):
         config = {"presets": {"basic": {}}, "rules": []}

@@ -177,7 +177,7 @@ def _literal_metric_value(node: ast.AST, *, trend_context: bool = False) -> bool
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return any(_literal_metric_value(item, trend_context=trend_context) for item in node.elts)
     if isinstance(node, ast.Dict):
-        for key, value in zip(node.keys, node.values):
+        for key, value in zip(node.keys, node.values, strict=False):
             key_text = key.value if isinstance(key, ast.Constant) and isinstance(key.value, str) else ""
             if _literal_metric_value(value, trend_context=trend_context or bool(_TREND_KEY.search(key_text))):
                 return True
@@ -187,7 +187,7 @@ def _literal_metric_value(node: ast.AST, *, trend_context: bool = False) -> bool
 def _static_trend_value(node: ast.AST) -> bool:
     if not isinstance(node, ast.Dict):
         return False
-    for key, value in zip(node.keys, node.values):
+    for key, value in zip(node.keys, node.values, strict=False):
         key_text = key.value if isinstance(key, ast.Constant) and isinstance(key.value, str) else ""
         if not _TREND_KEY.search(key_text):
             continue

@@ -53,7 +53,7 @@ def test_studio_overview_uses_plain_product_terms() -> None:
 
 def test_docs_homepage_uses_plain_summary_language() -> None:
     doc = _read("docs/index.md")
-    normalized = " ".join(doc.split())
+    " ".join(doc.split())
 
     assert "Mozaiks is an open-source AI app factory" in doc
     assert "Install Mozaiks, open Studio, and create your first app in minutes." in doc

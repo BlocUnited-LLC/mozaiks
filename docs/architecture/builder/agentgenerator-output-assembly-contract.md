@@ -144,6 +144,46 @@ Reads `workflow_bundle_results` directly from context. For each bundle entry:
 
 Assembly reads task-batch structured outputs directly from runtime context.
 
+### Workflow Integration Metadata
+
+During bundle assembly, `generate_and_download` derives
+`workflow_integration_metadata` from each generated workflow's
+`orchestrator.yaml`:
+
+- `workflow_name`
+- derived stable `capability_id`
+- `workflow_startup_mode`
+- event triggers from the `triggers[]` block
+
+The normalized metadata is written back to context as:
+
+- `workflow_integration_metadata`
+- `generated_workflow_integrations`
+- `generated_workflow_name`
+- `generated_workflow_capability_id`
+- `generated_workflow_startup_mode`
+- `generated_workflow_trigger_events`
+
+AgentGenerator persists the same metadata on the `workflow_bundle` artifact.
+AppGenerator hydrates it from the latest current `workflow_bundle` artifact
+before agents run, then its deterministic acceptance gate blocks export unless
+the generated app wires the workflow through module capabilities, emitted
+events, and `contracts/reactions.yaml`.
+
+Smoke coverage:
+
+```bash
+python scripts/smoke_factory_artifact_lineage.py
+python scripts/smoke_factory_artifact_lineage.py --real-store
+python scripts/smoke_factory_artifact_lineage.py --real-store --live-agentgenerator --timeout-seconds 600
+```
+
+The first command runs the deterministic in-memory chain. The second uses the
+Mongo-backed `ArtifactStore`. The third runs live AgentGenerator AG2 calls,
+persists the live workflow metadata through the real artifact store, hydrates
+AppGenerator from that `workflow_bundle`, and verifies app acceptance/export and
+runtime loader reaction wiring.
+
 ### Files Written
 
 ```

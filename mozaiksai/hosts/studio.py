@@ -200,7 +200,7 @@ def _strip_shared_root_prefix(entries: list[tuple[str, bytes]]) -> list[tuple[st
     first_segment = split_paths[0][0]
     if not all(parts[0] == first_segment for parts in split_paths):
         return entries
-    return [("/".join(parts[1:]), content) for parts, (_, content) in zip(split_paths, entries)]
+    return [("/".join(parts[1:]), content) for parts, (_, content) in zip(split_paths, entries, strict=False)]
 
 
 def _decode_text_bundle_entries(zip_path: Path) -> tuple[dict[str, str], list[str]]:

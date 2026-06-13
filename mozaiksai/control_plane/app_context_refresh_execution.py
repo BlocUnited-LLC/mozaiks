@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -29,7 +29,7 @@ CONTEXT_REFRESH_TRIGGER_SOURCE = "context_refresh"
 DEFAULT_CONTEXT_REFRESH_REASON = "Refresh app context before retrying high-risk refinement."
 
 
-class ContextRefreshLaunchStatus(str, Enum):
+class ContextRefreshLaunchStatus(StrEnum):
     QUEUED = "queued"
     LAUNCHED = "launched"
     FAILED = "failed"

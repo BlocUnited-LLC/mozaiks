@@ -151,6 +151,9 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "Never store raw API keys" in agents_md
     assert "app/data/contract.json" in agents_md
     assert "workflows/" in agents_md
+    assert "Provider-neutral deployment artifacts" in agents_md
+    assert "deployment.manifest.json" in agents_md
+    assert "Do not copy hosted platform provider adapters" in agents_md
 
     claude_md = (target_dir / "CLAUDE.md").read_text(encoding="utf-8")
     assert "not the Mozaiks framework source repository" in claude_md
@@ -163,6 +166,9 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
     assert "app/security/secrets.yaml" in claude_md
     assert "app/services/data/" not in claude_md
     assert "workflows/<WorkflowName>/" in claude_md
+    assert "Provider-neutral deployment artifacts" in claude_md
+    assert "deployment.manifest.json" in claude_md
+    assert "Do not copy hosted platform provider adapters" in claude_md
 
     expected_rules = {
         "app-bundle.md",

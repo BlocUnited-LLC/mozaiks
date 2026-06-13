@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -34,7 +34,7 @@ OVERRIDABLE_APP_CONTEXT_POLICY_DECISIONS = {
 }
 
 
-class AppContextPolicyOverrideDecision(str, Enum):
+class AppContextPolicyOverrideDecision(StrEnum):
     ALLOW_WITH_WARNING = "allow_with_warning"
     REQUIRE_REFRESH_FIRST = "require_refresh_first"
     REJECT = "reject"

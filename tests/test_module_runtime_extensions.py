@@ -183,7 +183,7 @@ class TestMountModuleRouters:
             result = self._mount(app, [mod])
             assert result == 1
             # Verify router was included
-            routes_prefixes = [str(r.path) for r in app.routes]
+            [str(r.path) for r in app.routes]
             # The app.include_router call itself is the verification; if no exception, it worked
         finally:
             sys.modules.pop(f"{package_root}.backend.router", None)

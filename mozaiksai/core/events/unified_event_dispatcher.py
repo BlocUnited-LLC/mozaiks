@@ -23,7 +23,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Union
+from typing import Any
 
 from logs.logging_config import get_core_logger, get_workflow_logger
 from mozaiksai.core.events.auto_tool_handler import AutoToolEventHandler
@@ -96,7 +96,7 @@ class ToolCallRequestEvent:
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     category: str = field(default="tool_call")
 
-EventType = Union[BusinessLogEvent, ToolCallRequestEvent, DomainEvent]
+EventType = BusinessLogEvent | ToolCallRequestEvent | DomainEvent
 
 class EventHandler(ABC):
     @abstractmethod

@@ -67,6 +67,9 @@ def test_generated_agent_guidance_declares_app_service_support_lane() -> None:
     assert "workflows/" in agents
     assert "business actions, lifecycle state, emitted events, or persistence authority" in agents
     assert "auth/" in agents and "dns/" in agents and "registrar/" in agents and "secrets/" in agents
+    assert "Provider-neutral deployment artifacts" in agents
+    assert "deployment.manifest.json" in agents
+    assert "Do not copy hosted platform provider adapters" in agents
     assert "services/  # optional integrations/adapters/routes support code" in claude
     assert "app/services/integrations/<service>_client.py" in claude
     assert "app/services/adapters/<area>/<provider>.py" in claude
@@ -75,6 +78,9 @@ def test_generated_agent_guidance_declares_app_service_support_lane() -> None:
     assert "app/services/security/" not in claude
     assert "app/security/secrets.yaml" in claude
     assert "workflows/<WorkflowName>/" in claude
+    assert "Provider-neutral deployment artifacts" in claude
+    assert "deployment.manifest.json" in claude
+    assert "Do not copy hosted platform provider adapters" in claude
     assert Path(".claude/skills/add-branding/SKILL.md") in files
     assert "Studio/factory-generated modules and workflows" in claude
     assert "refreshed automatically by workspace commands" in agents

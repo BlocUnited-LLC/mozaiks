@@ -75,7 +75,7 @@ async def save_to_database(
     if app_id:
         try:
             document["app_id"] = ObjectId(app_id)
-        except:
+        except Exception:
             document["app_id"] = app_id
     
     # Add timestamps
@@ -175,7 +175,7 @@ async def load_from_database(
     if app_id:
         try:
             secure_query["app_id"] = ObjectId(app_id)
-        except:
+        except Exception:
             secure_query["app_id"] = app_id
 
     try:
@@ -251,7 +251,7 @@ async def update_in_database(
     if app_id:
         try:
             secure_query["app_id"] = ObjectId(app_id)
-        except:
+        except Exception:
             secure_query["app_id"] = app_id
 
     # Prepare update with timestamp
@@ -328,7 +328,7 @@ async def delete_from_database(
     if app_id:
         try:
             secure_query["app_id"] = ObjectId(app_id)
-        except:
+        except Exception:
             secure_query["app_id"] = app_id
 
     try:

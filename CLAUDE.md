@@ -209,6 +209,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | App-owned external client | `app/services/integrations/{service}_client.py` in an app workspace |
 | App-owned provider adapter | `app/services/adapters/{area}/{provider}.py` in an app workspace |
 | App-specific auth provider mechanic | `app/services/adapters/auth/{provider}.py` in an app workspace |
+| Provider-neutral deployment artifacts | bundle-root `Dockerfile`, `docker-compose.yml`, `env.example`, `deployment.manifest.json`, optional `.github/workflows/deploy.yml` |
 | Secret manager provider support | OSS `mozaiksai.core.secrets`; app workspaces declare names in `app/security/secrets.yaml` |
 | Secret management contract, names only | `app/security/secrets.yaml` in an app workspace |
 | SaaS plan/tier catalog (subscriptions) | `app/config/subscriptions.yaml` in an app workspace |
@@ -297,15 +298,42 @@ emitted events, or persistence authority.
 Use `services/integrations/{pack_id}_client.py` for hosted-pack API clients and
 generate an app-owned facade module when pages or actions need that capability.
 Use `services/adapters/{area}/{provider}.py` for provider mechanics such as SDK
-calls, protocol translation, signing, retries, and response normalization.
+calls, protocol translation, signing, retries, and response normalization only
+when the app itself directly owns that provider integration.
 Common adapter areas include `auth/`, `source_control/`, `deployment/`, `dns/`,
 `registrar/`, `cloud/`, `storage/`, `search/`, `email/`, `database/`,
 `secrets/`, and `payments/`.
+
+Do not generate hosted platform provider adapters into customer app bundles.
+Mozaiks-hosted deployment, DNS/domain, billing, wallet, and platform operations
+are consumed through hosted API clients/facade modules and host-owned records;
+provider adapters stay in the hosted product.
 
 Do not generate `app/services/data/`, `app/services/security/`, or entitlement
 grant adapters. Data contracts live under `app/data/`; secret policy lives at
 `app/security/secrets.yaml`; SaaS plans live in `app/config/subscriptions.yaml`;
 runtime entitlement enforcement is handled by the OSS `ConfiguredEntitlementAdapter`.
+
+## Generated Deployment Artifact Contract
+
+Generated deployment artifacts are provider-neutral app-bundle root files:
+
+- `Dockerfile`
+- `docker-compose.yml`
+- `env.example`
+- `deployment.manifest.json`
+- `.github/workflows/deploy.yml`
+
+These files describe how the app runs and which env/CI secret names are
+expected. They must never contain raw secrets, cloud tenant ids, hosted product
+policy defaults, or provider execution code.
+
+AppBuildPlan build tasks must not own these paths. They are emitted by the
+DownloadAgent through the `generate_and_download` deployment contract renderer
+using `deployment_profile`, `include_dockerfiles`, `include_workflow`, and
+`include_compose`. Hosted products consume the manifest and apply provider
+policy, secret delivery, DNS, and deployment adapters outside the generated app
+bundle.
 
 ## Generated Persistence Contract
 

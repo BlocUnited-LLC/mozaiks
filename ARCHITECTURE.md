@@ -638,10 +638,13 @@ workspace/
 │   ├── config/
 │   │   ├── ai.json                 # LLM provider, model, optional control_plane key
 │   │   ├── shell.json              # Header/footer/profile/notification chrome
-│   │   ├── data.json               # Unified data contract
-│   │   ├── secrets.yaml            # Names-only secret contract
 │   │   ├── integrations.yaml       # External/hosted capability requirements
 │   │   └── targets.json            # Runtime/deployment/domain target intent
+│   ├── data/
+│   │   ├── contract.json           # Unified app data contract
+│   │   └── migrations/             # Additive staged migrations
+│   ├── security/
+│   │   └── secrets.yaml            # Names-only secret contract
 │   ├── modules/
 │   │   └── {module_name}/
 │   │       ├── module.yaml
@@ -663,6 +666,11 @@ workspace/
 │       ├── integrations/
 │       ├── adapters/
 │       └── routes/
+├── Dockerfile                      # Optional provider-neutral packaging artifact
+├── docker-compose.yml              # Optional local/self-host artifact
+├── env.example                     # Optional names-only runtime env contract
+├── deployment.manifest.json        # Optional deployment artifact manifest
+├── .github/workflows/deploy.yml    # Optional names-only CI workflow contract
 └── workflows/
     └── {WorkflowName}/
         ├── orchestrator.yaml
@@ -687,12 +695,20 @@ page-local visual systems.
 contains thin clients for external or hosted APIs. `app/services/adapters/` contains
 provider-specific implementation boundaries such as auth/OIDC/OAuth,
 source-control, deployment, DNS, registrar, cloud, storage, search, email, or
-payment provider mechanics. `app/services/routes/` contains explicit app-level
-routes only when a host or module extension contract requires them. These files
-are not modules: they must not own runtime actions, lifecycle state, emitted
-events, permissions, or persistence authority. Modules own business behavior and
-may call these support files. Generic runtime auth adapters remain framework code
-under `mozaiksai/core/auth/`.
+payment provider mechanics only when the app itself directly owns that provider
+integration. `app/services/routes/` contains explicit app-level routes only when
+a host or module extension contract requires them. These files are not modules:
+they must not own runtime actions, lifecycle state, emitted events, permissions,
+or persistence authority. Modules own business behavior and may call these
+support files. Generic runtime auth adapters remain framework code under
+`mozaiksai/core/auth/`.
+
+Generated deployment artifacts are provider-neutral bundle-root files, not
+`app/services/` support code. AppGenerator emits them through the deployment
+contract renderer when export/scaffold flags request them. Hosted products
+consume the resulting `deployment.manifest.json` and own provider execution,
+secret delivery, DNS, deployment status, and operations records outside the
+generated app bundle.
 
 Every bundle (module, workflow, page) declares a `visibility`: `public` (all users), `internal` (authenticated only), or `admin` (admin only).
 

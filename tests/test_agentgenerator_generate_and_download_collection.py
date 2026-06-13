@@ -30,7 +30,7 @@ class _Context:
 def _make_bundle_results(workflows: list[dict]) -> dict:
     """Build a workflow_bundle_results dict as the task batch executor would."""
     results = {}
-    for i, wf in enumerate(workflows):
+    for _i, wf in enumerate(workflows):
         task_id = wf["workflow_name"].lower().replace(" ", "_")
         results[task_id] = {
             "workflow_name": wf["workflow_name"],

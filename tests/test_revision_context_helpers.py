@@ -50,7 +50,8 @@ class TestLoadPack:
     def test_callable_returning_instance_returned_unchanged(self):
         from mozaiksai.control_plane.loader import load_control_plane_pack
         pack = load_control_plane_pack()
-        loader = lambda: pack
+        def loader():
+            return pack
         result = _load_pack(loader)
         assert result is pack
 
@@ -58,7 +59,8 @@ class TestLoadPack:
         from mozaiksai.control_plane.loader import load_control_plane_pack
         pack = load_control_plane_pack()
         pack_dict = pack.model_dump(mode="python")
-        loader = lambda: pack_dict
+        def loader():
+            return pack_dict
         result = _load_pack(loader)
         assert isinstance(result, LoadedControlPlanePack)
 

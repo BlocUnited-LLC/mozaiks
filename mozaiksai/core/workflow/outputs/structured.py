@@ -6,7 +6,7 @@
 import logging
 import types as _types
 from enum import Enum
-from typing import Any, Literal, Optional, Union, get_args, get_origin
+from typing import Any, Literal, Union, get_args, get_origin
 
 _UNION_ORIGINS = (Union, _types.UnionType) if hasattr(_types, "UnionType") else (Union,)
 
@@ -29,8 +29,8 @@ TYPE_MAP = {
     'string': str,
     'int': int,
     'bool': bool,
-    'optional_str': Optional[str],
-    'Optional[str]': Optional[str],
+    'optional_str': str | None,
+    'Optional[str]': str | None,
     'list': list,
     'List': list,
     'dict': dict[str, Any],
@@ -105,8 +105,8 @@ def _resolve_named_type(
         for resolved_type in resolved_types:
             if resolved_type not in unique_types:
                 unique_types.append(resolved_type)
-        base_type = unique_types[0] if len(unique_types) == 1 else Union[tuple(unique_types)]  # type: ignore[misc]
-        resolved = Optional[base_type] if optional_variant else base_type  # type: ignore[arg-type]
+        base_type = unique_types[0] if len(unique_types) == 1 else Union[tuple(unique_types)]  # type: ignore[misc]  # noqa: UP007
+        resolved = (base_type | None) if optional_variant else base_type  # type: ignore[arg-type]
     else:
         raise ValueError(f"Unsupported alias type: {alias_type}")
 
@@ -223,7 +223,7 @@ def _strictify_response_annotation(annotation: Any) -> Any:
 
     if origin in _UNION_ORIGINS:
         strict_args = tuple(_strictify_response_annotation(arg) for arg in get_args(annotation))
-        return Union[strict_args]  # type: ignore[misc]
+        return Union[strict_args]  # type: ignore[misc]  # noqa: UP007
 
     return annotation
 
@@ -349,7 +349,7 @@ def resolve_field_type(
     if 'default' in field_def:
         field_kwargs['default'] = field_def['default']
     if field_type_str == 'optional_dict':
-        return Optional[dict[str, Any]], _build_field(field_kwargs)  # type: ignore[return-value]
+        return dict[str, Any] | None, _build_field(field_kwargs)  # type: ignore[return-value]
     # Primitive
     if field_type_str in {'list', 'optional_list'}:
         items_type = field_def.get('items')
@@ -361,7 +361,7 @@ def resolve_field_type(
         else:
             raise ValueError("Unsupported list items spec")
         if field_type_str == 'optional_list':
-            return Optional[base], _build_field(field_kwargs)  # type: ignore[return-value]
+            return base | None, _build_field(field_kwargs)  # type: ignore[return-value]
         return base, _build_field(field_kwargs)  # type: ignore[return-value]
     if field_type_str in TYPE_MAP:
         return TYPE_MAP[field_type_str], _build_field(field_kwargs)
@@ -399,9 +399,9 @@ def resolve_field_type(
         for rtype in resolved_types:
             if rtype not in unique_types:
                 unique_types.append(rtype)
-        base_type = unique_types[0] if len(unique_types) == 1 else Union[tuple(unique_types)]  # type: ignore[misc]
+        base_type = unique_types[0] if len(unique_types) == 1 else Union[tuple(unique_types)]  # type: ignore[misc]  # noqa: UP007
         if optional_variant:
-            base_type = Optional[base_type]  # type: ignore[arg-type]
+            base_type = base_type | None  # type: ignore[assignment]
         return base_type, _build_field(field_kwargs)
     # direct model ref
     if field_type_str in available_models or field_type_str in alias_defs:

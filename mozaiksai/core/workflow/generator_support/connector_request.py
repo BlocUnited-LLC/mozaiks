@@ -111,7 +111,7 @@ def _normalize_required_fields(raw: dict[str, Any]) -> list[dict[str, Any]]:
     fields = raw.get("required_fields")
     normalized: list[dict[str, Any]] = []
     if isinstance(fields, list):
-        for index, field in enumerate(fields):
+        for _index, field in enumerate(fields):
             if not isinstance(field, dict):
                 continue
             name = str(field.get("name") or "").strip()

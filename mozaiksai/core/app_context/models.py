@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -11,13 +11,13 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class AppContextMode(str, Enum):
+class AppContextMode(StrEnum):
     GREENFIELD = "greenfield"
     BROWNFIELD = "brownfield"
     HYBRID = "hybrid"
 
 
-class AppContextStaleStatus(str, Enum):
+class AppContextStaleStatus(StrEnum):
     CURRENT = "current"
     STALE = "stale"
     PARTIALLY_STALE = "partially_stale"
@@ -25,7 +25,7 @@ class AppContextStaleStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class AppContextReviewState(str, Enum):
+class AppContextReviewState(StrEnum):
     DRAFT = "draft"
     REVIEW_PENDING = "review_pending"
     APPROVED = "approved"
@@ -33,7 +33,7 @@ class AppContextReviewState(str, Enum):
     ACCEPTED = "accepted"
 
 
-class AppContextPromotionState(str, Enum):
+class AppContextPromotionState(StrEnum):
     NOT_PROMOTED = "not_promoted"
     PR_READY = "pr_ready"
     PROMOTION_READY = "promotion_ready"
@@ -41,7 +41,7 @@ class AppContextPromotionState(str, Enum):
     APPLIED_EXTERNALLY = "applied_externally"
 
 
-class SourceRefKind(str, Enum):
+class SourceRefKind(StrEnum):
     REPO = "repo"
     APP_ROOT = "app_root"
     GENERATED_BUNDLE = "generated_bundle"
@@ -52,7 +52,7 @@ class SourceRefKind(str, Enum):
     EXTERNAL_SYSTEM = "external_system"
 
 
-class OwnershipClass(str, Enum):
+class OwnershipClass(StrEnum):
     READ_ONLY_DISCOVERED = "read_only_discovered"
     GENERATED_OVERLAY = "generated_overlay"
     STAGED_PATCH = "staged_patch"
@@ -60,7 +60,7 @@ class OwnershipClass(str, Enum):
     EXTERNAL_SYSTEM = "external_system"
 
 
-class AllowedOperation(str, Enum):
+class AllowedOperation(StrEnum):
     INSPECT = "inspect"
     INDEX = "index"
     EXPLAIN = "explain"
@@ -73,7 +73,7 @@ class AllowedOperation(str, Enum):
     IGNORE = "ignore"
 
 
-class GraphNodeType(str, Enum):
+class GraphNodeType(StrEnum):
     APP = "app"
     REPO = "repo"
     SOURCE_REF = "source_ref"
@@ -99,7 +99,7 @@ class GraphNodeType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class GraphEdgeType(str, Enum):
+class GraphEdgeType(StrEnum):
     CONTAINS = "contains"
     DECLARES = "declares"
     DEFINES = "defines"
@@ -123,7 +123,7 @@ class GraphEdgeType(str, Enum):
     BLOCKS = "blocks"
 
 
-class IntegrationReadinessStatus(str, Enum):
+class IntegrationReadinessStatus(StrEnum):
     UNKNOWN = "unknown"
     READY = "ready"
     CONFIG_REQUIRED = "config_required"
@@ -132,7 +132,7 @@ class IntegrationReadinessStatus(str, Enum):
     NOT_APPLICABLE = "not_applicable"
 
 
-class AdoptionPath(str, Enum):
+class AdoptionPath(StrEnum):
     OBSERVE = "observe"
     AUGMENT = "augment"
     OVERLAY = "overlay"
@@ -141,7 +141,7 @@ class AdoptionPath(str, Enum):
     DEFER = "defer"
 
 
-class BrownfieldRegistrationStatus(str, Enum):
+class BrownfieldRegistrationStatus(StrEnum):
     PENDING = "pending"
     REGISTERED = "registered"
     NEEDS_REVIEW = "needs_review"

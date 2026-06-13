@@ -640,7 +640,6 @@ class ArtifactStore:
         resolved_app_id = str(coalesce_app_id(app_id=app_id) or "").strip()
         if not resolved_app_id:
             raise ValueError("app_id is required")
-        updates: dict[str, Any] = {"started_at": {"$exists": True}}
         set_doc: dict[str, Any] = {"metadata": dict(metadata or {})} if metadata is not None else {}
         if status is not None:
             set_doc["status"] = status.value

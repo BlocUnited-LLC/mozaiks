@@ -203,7 +203,6 @@ class TestInjectDomainCatalogContext:
             context_variables={"concept_overview": "marketplace"},
         )
         self.mod.inject_domain_catalog_context(agent, [])
-        first = agent.system_message
         self.mod.inject_domain_catalog_context(agent, [])
         second = agent.system_message
         # Section should be replaced, not duplicated

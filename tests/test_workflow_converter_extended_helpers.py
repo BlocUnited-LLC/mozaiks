@@ -366,7 +366,7 @@ class TestBuildWorkflowUiBarrel:
             "AComp": "ui/AComp.jsx",
         })
         lines = result.splitlines()
-        export_lines = [l for l in lines if l.startswith("export")]
+        export_lines = [ln for ln in lines if ln.startswith("export")]
         assert export_lines[0].startswith("export { default as AComp")
         assert export_lines[1].startswith("export { default as ZComp")
 

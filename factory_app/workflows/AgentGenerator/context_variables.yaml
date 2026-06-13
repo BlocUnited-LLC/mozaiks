@@ -464,6 +464,54 @@ definitions:
     source:
       type: state
       default: null
+  workflow_integration_metadata:
+    type: object
+    description: >
+      Canonical normalized handoff metadata derived from generated workflow bundle
+      orchestrator.yaml files. Contains contract_version, bundle_name, workflows[],
+      and primary_workflow. Persisted on workflow_bundle artifacts for AppGenerator.
+    source:
+      type: computed
+      default: null
+  generated_workflow_integrations:
+    type: array
+    description: >
+      Normalized list of generated workflow integrations. Each item carries
+      workflow_name, capability_id, startup_mode, and trigger_events.
+    source:
+      type: computed
+      default: []
+  generated_workflow_name:
+    type: string
+    description: >
+      Canonical name of the primary generated workflow selected for downstream app
+      wiring. Null until workflow bundle assembly succeeds.
+    source:
+      type: computed
+      default: null
+  generated_workflow_capability_id:
+    type: string
+    description: >
+      Stable capability id derived from the primary generated workflow name and used
+      by AppGenerator when routing module reactions to workflow capabilities.
+    source:
+      type: computed
+      default: null
+  generated_workflow_startup_mode:
+    type: string
+    description: >
+      Startup mode declared by the primary generated workflow orchestrator.
+    source:
+      type: computed
+      default: null
+  generated_workflow_trigger_events:
+    type: array
+    description: >
+      Trigger event contracts derived from the primary generated workflow
+      orchestrator triggers block.
+    source:
+      type: computed
+      default: []
 
 agents:
   InterviewAgent:
@@ -552,3 +600,9 @@ agents:
     - pack_partition_reason
     - workflows_spec
     - workflow_bundle_results
+    - workflow_integration_metadata
+    - generated_workflow_integrations
+    - generated_workflow_name
+    - generated_workflow_capability_id
+    - generated_workflow_startup_mode
+    - generated_workflow_trigger_events

@@ -338,6 +338,9 @@ class TestFileContractsIntegrity:
         assert "services/security" not in joined_constraints
         assert "services/routes" in joined_constraints
         assert "raw secret values" in joined_constraints
+        assert "Mozaiks-hosted deployment" in joined_constraints
+        assert "Dockerfile" in joined_constraints
+        assert "generate_and_download" in joined_constraints
 
     def test_module_contract_canonical_downstream_python_unchanged(self):
         data = _load_yaml(_FILE_CONTRACTS)
@@ -349,7 +352,7 @@ class TestFileContractsIntegrity:
 
     def test_no_runtime_code_changed(self):
         """file_contracts.yaml and agents.yaml are generator guidance — not runtime code."""
-        runtime_path = Path(__file__).parent.parent / "mozaiksai"
+        Path(__file__).parent.parent / "mozaiksai"
         # Verify we are not accidentally referencing runtime internals from the contracts
         text = _load_yaml(_FILE_CONTRACTS)
         contracts_str = str(text)

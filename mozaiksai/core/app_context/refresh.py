@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,14 +28,14 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class ContextRefreshScope(str, Enum):
+class ContextRefreshScope(StrEnum):
     DISCOVERY_INDEXING = "discovery_indexing"
     SOURCE_REF_RESCAN = "source_ref_rescan"
     OWNERSHIP_RECHECK = "ownership_recheck"
     INTEGRATION_RECHECK = "integration_recheck"
 
 
-class ContextRefreshResultStatus(str, Enum):
+class ContextRefreshResultStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     NO_CHANGE = "no_change"

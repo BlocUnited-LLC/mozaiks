@@ -310,7 +310,8 @@ When working in or generating app services:
   ```
 - Common adapter areas are `auth/`, `source_control/`, `deployment/`, `dns/`,
   `registrar/`, `cloud/`, `storage/`, `search/`, `email/`, `database/`,
-  `secrets/`, and `payments/`.
+  `secrets/`, and `payments/` when the app itself directly owns that provider
+  integration.
 - `services/integrations/{pack_id}_client.py` is the lane for hosted-pack API
   clients. Pages and app actions should bind to app-owned facade modules, not
   directly to hosted-pack internals.
@@ -318,6 +319,10 @@ When working in or generating app services:
   calls, protocol translation, signing, retries, and response normalization.
   It must not own durable app facts, lifecycle transitions, user-facing actions,
   permissions, emitted events, or persistence authority.
+- Do not generate hosted platform provider adapters into customer app bundles.
+  Mozaiks-hosted deployment, DNS/domain, billing, wallet, and platform
+  operations are consumed through hosted API clients/facade modules and
+  host-owned records; provider adapters stay in the hosted product.
 - `services/routes/` is only for app-level routes required by a host contract or
   explicit integration boundary. Module-local callback routes should normally
   be declared through that module's `runtime_extensions.yaml`.
@@ -332,6 +337,27 @@ When working in or generating app services:
   `app/config/subscriptions.yaml`, assignment state lives in the configured app
   data alias, and runtime enforcement is handled by the OSS
   `ConfiguredEntitlementAdapter`.
+
+## Generated Deployment Artifact Contract
+
+Generated deployment artifacts are provider-neutral app-bundle root files:
+
+- `Dockerfile`
+- `docker-compose.yml`
+- `env.example`
+- `deployment.manifest.json`
+- `.github/workflows/deploy.yml`
+
+These files describe how the app runs and which env/CI secret names are
+expected. They must never contain raw secrets, cloud tenant ids, hosted product
+policy defaults, or provider execution code.
+
+AppBuildPlan build tasks must not own these paths. They are emitted by the
+DownloadAgent through the `generate_and_download` deployment contract renderer
+using `deployment_profile`, `include_dockerfiles`, `include_workflow`, and
+`include_compose`. Hosted products consume the manifest and apply provider
+policy, secret delivery, DNS, and deployment adapters outside the generated app
+bundle.
 
 ## Generated Secret Contract
 

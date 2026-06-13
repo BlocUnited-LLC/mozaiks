@@ -453,7 +453,7 @@ class TestValidatePageBindings:
                 hosted_pack_ids=frozenset({"billing"}),
                 hosted_backing_module_ids=frozenset(),
             )
-            assert False, "Expected ValueError"
+            raise AssertionError("Expected ValueError")
         except ValueError as exc:
             assert "billing" in str(exc)
 
@@ -465,7 +465,7 @@ class TestValidatePageBindings:
                 hosted_pack_ids=frozenset({"billing"}),
                 hosted_backing_module_ids=frozenset({"stripe_backend"}),
             )
-            assert False, "Expected ValueError"
+            raise AssertionError("Expected ValueError")
         except ValueError as exc:
             assert "stripe_backend" in str(exc)
 

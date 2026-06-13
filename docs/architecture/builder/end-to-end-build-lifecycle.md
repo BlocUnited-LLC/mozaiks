@@ -234,6 +234,9 @@ Important rule:
 - the staged bundle is the reviewable build artifact
 - deployment artifacts are deterministic outputs from the provider-neutral
   generated-app deployment contract and must not contain real secrets
+- deployment artifacts are emitted by the download/export deployment renderer,
+  not by `service_foundation`, `api_surface`, or `app/services/adapters/` build
+  tasks
 - workflow UI code generation should stay deterministic: shared shipped workflow
   primitives do not produce workflow-local React files, while genuine
   workflow-local components are staged under the workflow `ui/` tree and get a

@@ -54,13 +54,13 @@ def _configuration_health(record: dict[str, Any], *, checked_by: str) -> dict[st
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
     missing_fields = []
     has_secret = bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
-    for field in fields:
-        if not isinstance(field, dict) or field.get("required") is False:
+    for field_def in fields:
+        if not isinstance(field_def, dict) or field_def.get("required") is False:
             continue
-        name = str(field.get("name") or "").strip()
+        name = str(field_def.get("name") or "").strip()
         if not name:
             continue
-        field_type = _normalize_id(field.get("type"))
+        field_type = _normalize_id(field_def.get("type"))
         if field_type in {"secret", "password", "api_key", "token"}:
             if not has_secret:
                 missing_fields.append(name)

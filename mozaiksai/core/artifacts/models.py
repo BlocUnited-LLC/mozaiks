@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,7 +11,7 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class ArtifactLifecycleStatus(str, Enum):
+class ArtifactLifecycleStatus(StrEnum):
     DRAFT = "draft"
     CURRENT = "current"
     STALE = "stale"
@@ -20,21 +20,21 @@ class ArtifactLifecycleStatus(str, Enum):
     DELETED = "deleted"
 
 
-class ArtifactValidationStatus(str, Enum):
+class ArtifactValidationStatus(StrEnum):
     PENDING = "pending"
     PASSED = "passed"
     FAILED = "failed"
     SKIPPED = "skipped"
 
 
-class ChangeClassification(str, Enum):
+class ChangeClassification(StrEnum):
     PATCH = "patch"
     DESIGN = "design"
     FEATURE = "feature"
     CORE = "core"
 
 
-class RefinementSessionStatus(str, Enum):
+class RefinementSessionStatus(StrEnum):
     PENDING = "pending"
     PROVISIONING = "provisioning"
     RUNNING = "running"

@@ -332,7 +332,7 @@ async def test_generated_output_wins_conflict():
         decisions=[_decision("settings", "reuse")],
         generated_files=generated,
     )
-    result = await _resolve(ctx)
+    await _resolve(ctx)
     # Must not overwrite generated version
     assert ctx["generated_files"]["modules/settings/module.yaml"] == "generated content\n"
 

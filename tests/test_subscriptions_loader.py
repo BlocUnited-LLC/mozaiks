@@ -6,6 +6,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.subscriptions_loader import (
     PlanDef,
@@ -162,7 +163,7 @@ def test_load_assignment_store(tmp_path: Path) -> None:
 
 
 def test_invalid_usage_limit_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         UsageLimitDef.model_validate(
             {
                 "meter_id": "Bad Meter",
@@ -173,14 +174,14 @@ def test_invalid_usage_limit_rejected() -> None:
 
 
 def test_invalid_assignment_store_alias_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         SubscriptionAssignmentStoreDef.model_validate(
             {"data_alias": "Billing Subscriptions"}
         )
 
 
 def test_empty_assignment_store_statuses_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         SubscriptionAssignmentStoreDef.model_validate(
             {"data_alias": "billing.subscriptions", "active_statuses": []}
         )
@@ -192,7 +193,7 @@ def test_empty_assignment_store_statuses_rejected() -> None:
 
 
 def test_duplicate_plan_ids_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         SubscriptionsConfig.model_validate(
             {
                 "schema_version": "mozaiks.subscriptions.v1",
@@ -207,7 +208,7 @@ def test_duplicate_plan_ids_rejected() -> None:
 
 
 def test_default_plan_id_must_reference_declared_plan() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         SubscriptionsConfig.model_validate(
             {
                 "schema_version": "mozaiks.subscriptions.v1",
@@ -221,7 +222,7 @@ def test_default_plan_id_must_reference_declared_plan() -> None:
 
 
 def test_empty_plans_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         SubscriptionsConfig.model_validate(
             {
                 "schema_version": "mozaiks.subscriptions.v1",
@@ -233,7 +234,7 @@ def test_empty_plans_rejected() -> None:
 
 
 def test_invalid_capability_id_format_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         PlanDef.model_validate(
             {
                 "plan_id": "pro",
@@ -244,7 +245,7 @@ def test_invalid_capability_id_format_rejected() -> None:
 
 
 def test_invalid_plan_id_format_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         PlanDef.model_validate(
             {"plan_id": "UPPERCASE", "label": "Bad", "capabilities": []}
         )

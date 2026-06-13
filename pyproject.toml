@@ -92,7 +92,11 @@ version = {attr = "mozaiksai.version.__version__"}
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-ignore = ["E501"]
+ignore = [
+  "E501",   # line too long — handled by formatter
+  "B008",   # function call in default argument — required by FastAPI Depends()
+  "E402",   # module import not at top of file — intentional lazy imports
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

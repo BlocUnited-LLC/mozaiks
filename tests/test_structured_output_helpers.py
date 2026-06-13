@@ -71,7 +71,7 @@ Covers:
 """
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import pytest
 from pydantic import BaseModel
@@ -388,14 +388,14 @@ class TestFindOpenEndedObjectPath:
         assert result == "items[]"
 
     def test_optional_str_returns_none(self):
-        assert _find_open_ended_object_path(Optional[str], path="root") is None
+        assert _find_open_ended_object_path(str | None, path="root") is None
 
     def test_optional_dict_returns_path(self):
-        result = _find_open_ended_object_path(Optional[dict[str, Any]], path="data")
+        result = _find_open_ended_object_path(dict[str, Any] | None, path="data")
         assert result == "data"
 
     def test_union_str_dict_returns_path(self):
-        result = _find_open_ended_object_path(Union[str, dict[str, Any]], path="field")
+        result = _find_open_ended_object_path(str | dict[str, Any], path="field")
         assert result == "field"
 
     def test_pydantic_model_no_dict_fields_returns_none(self):

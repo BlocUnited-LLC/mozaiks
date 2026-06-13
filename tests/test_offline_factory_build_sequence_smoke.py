@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +17,22 @@ from mozaiksai.core.artifacts import (
 from tests.import_utils import import_module_directly
 
 _pack_config = import_module_directly("mozaiksai.core.workflow.pack.config")
+
+
+def _real_factory_lineage_smoke_enabled() -> bool:
+    raw = str(os.getenv("RUN_REAL_FACTORY_ARTIFACT_LINEAGE_SMOKE") or "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _live_real_factory_lineage_smoke_enabled() -> bool:
+    raw = str(os.getenv("RUN_LIVE_REAL_FACTORY_ARTIFACT_LINEAGE_SMOKE") or "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_subprocess_json_payload(stdout: str) -> dict[str, Any]:
+    start = stdout.find("{")
+    assert start >= 0, stdout
+    return json.loads(stdout[start:])
 
 
 class _MemoryArtifactStore:
@@ -169,3 +189,144 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     assert "brand" not in app_inputs
     assert app_call["lifecycle_status"] == ArtifactLifecycleStatus.CURRENT
     assert app_call["validation_status"] == ArtifactValidationStatus.SKIPPED
+
+
+@pytest.mark.asyncio
+async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata() -> None:
+    from scripts.smoke_factory_artifact_lineage import (
+        run_offline_factory_artifact_lineage_smoke,
+    )
+
+    result = await run_offline_factory_artifact_lineage_smoke()
+
+    assert result["success"] is True, result["validation_errors"]
+    assert result["sequence"]["workflow_steps"] == [
+        ["ValueEngine"],
+        ["ThemeCapture"],
+        ["DesignDocs"],
+        ["AgentGenerator"],
+        ["AppGenerator"],
+    ]
+    assert result["artifact_lineage"]["workflow_bundle_inputs"] == {
+        "design_docs": result["artifact_lineage"]["design_docs_id"]
+    }
+    assert result["artifact_lineage"]["app_bundle_inputs"]["design_docs"] == result["artifact_lineage"]["design_docs_id"]
+    assert result["artifact_lineage"]["app_bundle_inputs"]["theme_capture"] == result["artifact_lineage"]["theme_capture_id"]
+    assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["hydration"]["status"] == "hydrated"
+    assert result["hydration"]["source"] == "workflow_bundle_artifact"
+    assert result["workflow_integration_metadata"]["source_artifact_version_id"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert "workflow_integration" in result["appgenerator_acceptance"]["validation_evidence"]["completed"]
+    assert result["export_gate"]["allow_export"] is True
+    assert result["runtime_loader"]["workflow_reaction_loaded"] is True
+
+
+@pytest.mark.asyncio
+async def test_offline_factory_artifact_lineage_smoke_uses_hydrated_primary_workflow_metadata() -> None:
+    from scripts.smoke_factory_artifact_lineage import (
+        run_offline_factory_artifact_lineage_smoke,
+    )
+
+    result = await run_offline_factory_artifact_lineage_smoke(
+        workflow_integration_metadata={
+            "contract_version": "1.0",
+            "bundle_name": "EscalationAutomation",
+            "source": "test_custom_workflow_metadata",
+            "workflows": [
+                {
+                    "workflow_name": "EscalationWorkflow",
+                    "capability_id": "support-escalation-workflow",
+                    "startup_mode": "BackendOnly",
+                    "trigger_events": [
+                        {
+                            "event_type": "domain.support_ticket.escalation_requested",
+                            "capability_id": "support-escalation-workflow",
+                            "description": "Routes escalated support tickets.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert result["success"] is True, result["validation_errors"]
+    assert result["workflow_integration_metadata"]["source"] == "test_custom_workflow_metadata"
+    assert (
+        result["appgenerator_acceptance"]["fixture_workflow_integration"]["workflow_name"]
+        == "EscalationWorkflow"
+    )
+    assert (
+        result["appgenerator_acceptance"]["fixture_workflow_integration"]["capability_id"]
+        == "support-escalation-workflow"
+    )
+    assert "support-escalation-workflow" in result["runtime_loader"]["reaction_capability_ids"]
+
+
+@pytest.mark.skipif(
+    not _real_factory_lineage_smoke_enabled(),
+    reason="Set RUN_REAL_FACTORY_ARTIFACT_LINEAGE_SMOKE=1 to run the Mongo-backed lineage smoke.",
+)
+def test_real_store_factory_artifact_lineage_smoke_hydrates_workflow_metadata() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [sys.executable, "scripts/smoke_factory_artifact_lineage.py", "--real-store"],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    result = _load_subprocess_json_payload(completed.stdout)
+
+    assert result["success"] is True, result["validation_errors"]
+    assert result["mode"] == "real_store"
+    assert result["artifact_lineage"]["workflow_bundle_inputs"] == {
+        "design_docs": result["artifact_lineage"]["design_docs_id"]
+    }
+    assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["hydration"]["status"] == "hydrated"
+    assert result["hydration"]["source"] == "workflow_bundle_artifact"
+    assert result["workflow_integration_metadata"]["source_artifact_version_id"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert "workflow_integration" in result["appgenerator_acceptance"]["validation_evidence"]["completed"]
+    assert result["export_gate"]["allow_export"] is True
+    assert result["runtime_loader"]["workflow_reaction_loaded"] is True
+
+
+@pytest.mark.skipif(
+    not _live_real_factory_lineage_smoke_enabled(),
+    reason=(
+        "Set RUN_LIVE_REAL_FACTORY_ARTIFACT_LINEAGE_SMOKE=1 to run the live "
+        "AgentGenerator plus Mongo-backed lineage smoke."
+    ),
+)
+def test_live_real_store_factory_artifact_lineage_smoke_hydrates_live_workflow_metadata() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/smoke_factory_artifact_lineage.py",
+            "--real-store",
+            "--live-agentgenerator",
+            "--timeout-seconds",
+            "600",
+        ],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=900,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    result = _load_subprocess_json_payload(completed.stdout)
+
+    assert result["success"] is True, result["validation_errors"]
+    assert result["mode"] == "live_real_store"
+    assert result["live_agentgenerator"]["success"] is True
+    assert int((result["live_agentgenerator"]["task_run_trace"] or {}).get("max_overlap") or 0) >= 2
+    assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
+    assert result["hydration"]["status"] == "hydrated"
+    assert result["hydration"]["source"] == "workflow_bundle_artifact"
+    assert result["workflow_integration_metadata"]["source"] == "live_agentgenerator_pack_smoke"
+    assert "workflow_integration" in result["appgenerator_acceptance"]["validation_evidence"]["completed"]
+    assert result["export_gate"]["allow_export"] is True
+    assert result["runtime_loader"]["workflow_reaction_loaded"] is True

@@ -3,7 +3,8 @@
 Mozaiks apps use one workspace shape across generated apps, hosted product apps,
 and first-party dogfood apps. The structure is app-agnostic: app behavior lives
 in modules, app runtime preferences live in config, data and security are
-first-class app planes, implementation support lives in `app/services`, and AI
+first-class app planes, implementation support lives in `app/services`, deploy
+packaging artifacts live at the app bundle root when requested, and AI
 orchestration lives in workflows.
 
 ```text
@@ -47,6 +48,13 @@ workspace/
 │       ├── integrations/
 │       ├── adapters/
 │       └── routes/
+├── Dockerfile                  ← optional provider-neutral packaging artifact
+├── docker-compose.yml          ← optional local/self-host artifact
+├── env.example                 ← optional names-only runtime env contract
+├── deployment.manifest.json    ← optional deployment artifact manifest
+├── .github/
+│   └── workflows/
+│       └── deploy.yml          ← optional names-only CI workflow contract
 ├── workflows/
 ├── build_context/
 │   └── {context_name}/
@@ -70,7 +78,11 @@ workspace/
 - `app/security/` declares names-only secret requirements and vault/provider
   policy.
 - `app/config/` declares runtime preferences such as AI, shell, integrations,
-  targets, and deployment/domain target intent.
+  targets, and deployment/domain target intent. It does not execute deployment
+  operations.
+- Root deployment artifacts declare how the app runs and is packaged. They are
+  provider-neutral handoff artifacts, not hosted provider adapters or product
+  operations code.
 - `workflows/` at the workspace root owns app-local AI workflows.
 - `build_context/` is workspace-level build-time context when the workspace has
     prompt overlays, pack descriptors, service templates, or reusable build-time
@@ -114,13 +126,20 @@ query helpers. `schemas.py` owns typed request, response, and document shapes.
 - `app/services/integrations/` - thin clients for external or hosted APIs.
 - `app/services/adapters/` - provider-specific mechanics for auth, source control,
   deployment, DNS, registrar, cloud, storage, secrets, database, payments, and similar
-  implementation boundaries.
+  implementation boundaries only when the app itself directly owns that provider
+  integration.
 - `app/services/routes/` - app-level routes only when a module extension or host
   contract explicitly requires them.
 
 If a behavior has product state, permissions, user-facing actions, domain events,
 or persistence authority, it belongs in a module. A module may call `app/services/`
 code as an implementation detail.
+
+Mozaiks-hosted platform operations are not copied into a generated app as
+`app/services/adapters/` code. A hosted customer app consumes host APIs and
+host-owned records through generated clients/facade modules; the hosted product
+owns provider adapters for deployment, DNS, registrar, billing, wallet, and
+other operator capabilities.
 
 ## Data And Security Contracts
 
@@ -137,7 +156,9 @@ code as an implementation detail.
 - `app/config/integrations.yaml` declares external services and hosted
   capability requirements.
 - `app/config/targets.json` declares deployment, runtime, domain, DNS, and
-  provider target intent. Provider mechanics live in `app/services/adapters/`.
+  provider target intent. Direct app-owned provider mechanics live in
+  `app/services/adapters/` only when the app itself controls that provider
+  integration. Hosted platform mechanics live in the hosted product.
 - `app/config/subscriptions.yaml` (SaaS apps only) — the canonical generated-app
   plan catalog. Declares plan_ids and the capability_ids each plan grants.
   When `assignment_store` is declared, the OSS `ConfiguredEntitlementAdapter`
@@ -169,6 +190,36 @@ Factory workflows live under `factory_app/workflows/`. Runtime workflow
 resolution selects one root; generated and hosted product apps use
 workspace-root `workflows/`.
 
+## Deployment Artifact Contract
+
+Generated apps can include provider-neutral deployment artifacts when scaffold
+or export flags request them:
+
+```text
+Dockerfile
+docker-compose.yml
+env.example
+deployment.manifest.json
+.github/workflows/deploy.yml
+```
+
+These files answer "how does this app run?" They may declare container ports,
+health paths, required env variable names, CI secret names, workflow inputs, and
+artifact metadata. They must not contain raw secret values, cloud tenant ids,
+provider credentials, hosted product policy defaults, or customer-specific
+provider execution code.
+
+AppGenerator build tasks do not own these files. They are emitted by the
+DownloadAgent through the provider-neutral deployment contract renderer in
+`generate_and_download` when `deployment_profile`, `include_dockerfiles`,
+`include_workflow`, or `include_compose` are requested.
+
+Hosted products such as `mozaiks-app` consume `deployment.manifest.json` and
+related artifacts into app-registry, hosting, deployment, domain, billing, and
+audit records. The hosted product then applies provider-specific policy,
+secrets, CI store writes, DNS changes, and deployment adapters outside the
+generated app bundle.
+
 ## Workspace Build Context Contract
 
 Workspace build contexts live beside `app/`, not inside it:
@@ -196,6 +247,11 @@ AppGenerator emits this canonical structure only. It must not emit app-level
 support code outside `app/services`, data contracts outside `app/data`, or
 secret policy outside `app/security`. `app/services/data/` and
 `app/services/security/` are not canonical app planes.
+
+When deployment artifacts are requested, AppGenerator emits them through the
+deployment artifact contract at the bundle root. It must not model those files
+as `service_foundation`, `api_surface`, or helper build-task outputs, and it
+must not generate hosted platform provider adapters into customer app bundles.
 
 AppGenerator also must not emit `build_context/` into the app bundle. Build
 context is a workspace-level input surface owned by the workspace or factory,

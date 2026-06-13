@@ -37,6 +37,15 @@ _CANONICAL_SERVICE_FILES = frozenset({"services/config.py", "services/admin_conf
 _CANONICAL_SERVICE_PREFIXES = (_INTEGRATIONS_PREFIX, _ADAPTERS_PREFIX, _ROUTES_PREFIX)
 _SERVICE_FOUNDATION_ALLOWED_FILES = frozenset({"services/config.py", APP_SECURITY_SECRETS_PATH})
 _SERVICE_FOUNDATION_ALLOWED_PREFIXES = (_INTEGRATIONS_PREFIX, _ADAPTERS_PREFIX, _ROUTES_PREFIX)
+_DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
+    {
+        "Dockerfile",
+        "deployment.manifest.json",
+        "docker-compose.yml",
+        "env.example",
+    }
+)
+_DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
 _ALLOWED_TASK_TYPES = {
     "service_foundation",
     "module_contract",
@@ -218,6 +227,18 @@ def _invalid_service_foundation_paths(paths: list[str]) -> list[str]:
     return sorted(set(invalid))
 
 
+def _deployment_contract_artifact_paths(paths: list[str]) -> list[str]:
+    invalid: list[str] = []
+    for path in paths:
+        normalized = normalize_app_path(path)
+        if normalized in _DEPLOYMENT_CONTRACT_ARTIFACT_FILES:
+            invalid.append(normalized)
+            continue
+        if any(normalized.startswith(prefix) for prefix in _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES):
+            invalid.append(normalized)
+    return sorted(set(invalid))
+
+
 def _infer_module_id_from_owned_paths(task: dict[str, Any]) -> str | None:
     module_ids: set[str] = set()
     for path in _normalized_owned_paths(task):
@@ -308,7 +329,7 @@ def _merge_persistence_contract_tasks(build_tasks: list[dict[str, Any]]) -> list
         if not isinstance(task, dict):
             continue
         task_type = str(task.get("task_type") or "").strip()
-        task_id = str(task.get("task_id") or "").strip()
+        str(task.get("task_id") or "").strip()
         if task_type == "persistence_contract":
             if not inserted_primary:
                 result.append(primary)
@@ -923,6 +944,18 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], hosted_pack_ids: fr
         owned_paths = _normalized_owned_paths(task)
         surface_kind_raw = task.get("surface_kind")
         normalized_capability_pack_id = str(capability_pack_id or "").strip()
+
+        deployment_artifact_paths = _deployment_contract_artifact_paths(owned_paths)
+        if deployment_artifact_paths:
+            raise ValueError(
+                "Build task "
+                f"'{task_id}' owns deployment contract artifact path(s): "
+                f"{deployment_artifact_paths}. AppBuildPlan build tasks must not own "
+                "Dockerfile, docker-compose.yml, env.example, deployment.manifest.json, "
+                "or .github/workflows/*. Deployment artifacts are emitted by the "
+                "generate_and_download deployment contract renderer through DownloadRequest "
+                "deployment_profile/include_* fields."
+            )
 
         if normalized_capability_pack_id in hosted_pack_ids:
             hosted_module_prefix = f"modules/{normalized_capability_pack_id}/"

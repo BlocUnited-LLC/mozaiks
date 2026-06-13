@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -233,14 +233,14 @@ _DATA_MODEL_DESTRUCTIVE_TERMS = (
 )
 
 
-class ChangeClass(str, Enum):
+class ChangeClass(StrEnum):
     PATCH = "patch"
     DESIGN = "design"
     FEATURE = "feature"
     CORE = "core"
 
 
-class ArtifactKind(str, Enum):
+class ArtifactKind(StrEnum):
     APP_BUNDLE = "app_bundle"
     WORKFLOW_BUNDLE = "workflow_bundle"
     DESIGN_DOCS = "design_docs"

@@ -641,12 +641,16 @@ models:
           app/services/ in generated workspaces.
           These files are not runtime modules and must not own business actions,
           events, lifecycle state, or persistence authority.
+          `service_foundation` must not own provider-neutral deployment artifacts
+          such as Dockerfile, docker-compose.yml, env.example,
+          deployment.manifest.json, or .github/workflows/*. Those are emitted by
+          the deployment contract renderer during download/export.
           `control_plane_pack` is required for surface_kind=control_plane tasks and
           emits an optional app-local control_plane/ harness pack. It must start
           at ControlPlaneAgent — do NOT use service_foundation, api_surface, or
           module_contract for control_plane surfaces.
           surface_kind=external_integration may use `api_surface` for thin
-          clients, `service_foundation` for provider adapters under
+          clients, `service_foundation` for direct app-owned provider adapters under
           services/adapters/, explicit services/routes/, or security/secrets.yaml, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
@@ -1565,7 +1569,7 @@ models:
     fields:
       path:
         type: str
-        description: Concrete app-bundle-relative service foundation file path such as services/config.py, security/secrets.yaml, services/integrations/provider_client.py, services/routes/webhooks.py, or services/adapters/secrets/vault_provider.py. Physical generated workspaces place services/* under app/services/*.
+        description: Concrete app-bundle-relative service foundation file path such as services/config.py, security/secrets.yaml, services/integrations/provider_client.py, services/routes/webhooks.py, or services/adapters/secrets/vault_provider.py. Physical generated workspaces place services/* under app/services/*. Do not use this model for Dockerfile, docker-compose.yml, env.example, deployment.manifest.json, or .github/workflows/* deployment artifacts.
       kind:
         type: literal
         values:

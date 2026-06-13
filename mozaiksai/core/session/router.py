@@ -54,7 +54,7 @@ class SessionRouter:
     async def route_trigger(self, trigger: TriggerInput) -> RoutingDecision:
         app_id = str(trigger.app_id or "").strip()
         user_id = str(trigger.user_id or "").strip()
-        trigger_source = str(trigger.trigger_source or "").strip().lower() or "chat"
+        str(trigger.trigger_source or "").strip().lower() or "chat"
         explicit_journey_id = str(trigger.journey_id or "").strip() or None
         if not app_id or not user_id:
             raise ValueError("app_id and user_id are required")
