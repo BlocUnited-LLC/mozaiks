@@ -147,6 +147,50 @@ class ConfiguredEntitlementAdapter:
         except Exception:
             return EntitlementResult(granted=False, reason="error")
 
+    async def current_plan_id(
+        self,
+        *,
+        app_id: str,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> str | None:
+        """Return the effective active plan id for this scope.
+
+        The default plan is returned when no assignment store exists, no active
+        assignment is found, or the assignment references an unknown plan. This
+        keeps token allowance materialization aligned with capability checks.
+        """
+
+        app_id = str(app_id or "").strip()
+        if not self._config or not app_id:
+            return None
+        store = self._config.assignment_store
+        if store is None:
+            return self._config.default_plan_id
+
+        try:
+            record = await self._find_assignment(
+                store,
+                app_id=app_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            if not record:
+                return self._config.default_plan_id
+
+            status = str(_field_value(record, store.status_field, "") or "").strip().lower()
+            if status not in {s.lower() for s in store.active_statuses}:
+                return self._config.default_plan_id
+
+            parsed_expiry = _parse_datetime(self._expires_at(record, store))
+            if parsed_expiry is not None and parsed_expiry <= datetime.now(UTC):
+                return self._config.default_plan_id
+
+            plan_id = str(_field_value(record, store.plan_id_field, self._config.default_plan_id) or "").strip()
+            return self._config.plan_by_id(plan_id).plan_id
+        except Exception:
+            return self._config.default_plan_id
+
     def _check_default_plan(self, capability_id: str) -> EntitlementResult:
         assert self._config is not None
         capabilities = self._config.capabilities_for_plan(self._config.default_plan_id)

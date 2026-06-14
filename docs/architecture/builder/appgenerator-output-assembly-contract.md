@@ -289,7 +289,26 @@ Rules:
 `generate_and_download` is the bundling tool.
 
 It does not reason about artifact ownership. It packages the materialized file set
-into the downloadable app bundle.
+into the downloadable app bundle after the deterministic app-bundle acceptance
+gate passes.
+
+When AgentGenerator workflow metadata is present, the acceptance gate is
+export-blocking. AppGenerator must wire each generated workflow through:
+
+- `modules/{module}/module.yaml` `capabilities[]` with `kind: workflow`,
+  the AgentGenerator `capability_id`, and the AgentGenerator workflow name as
+  `target`
+- `modules/{module}/contracts/events.yaml` declaring every workflow trigger event
+- `modules/{module}/module.yaml` action `emits[]` for the trigger event that
+  starts the workflow
+- `modules/{module}/contracts/reactions.yaml` routing each trigger event to the
+  AgentGenerator workflow capability id
+
+The gate also blocks semantic drift: trigger-event `capability_id` values must
+match the workflow capability id from AgentGenerator metadata, generated app
+modules must not invent workflow capabilities absent from that metadata, and a
+workflow trigger event must not also route to a different generated workflow
+capability unless that route is declared by the same metadata.
 
 ### 7. AppValidation Strategy
 

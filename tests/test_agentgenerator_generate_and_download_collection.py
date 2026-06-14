@@ -45,6 +45,94 @@ def _make_bundle_results(workflows: list[dict]) -> dict:
     return results
 
 
+def _minimal_workflow_files(
+    workflow_name: str,
+    *,
+    startup_mode: str = "AgentDriven",
+    triggers: list[dict] | None = None,
+    include_task_batches: bool = False,
+) -> list[dict[str, str]]:
+    agents = ["PlannerAgent", "WorkerAgent", "ReviewerAgent"]
+    context_definitions = {
+        "tenant_id": {"type": "string", "source": {"type": "state", "default": None}},
+        "app_id": {"type": "string", "source": {"type": "state", "default": None}},
+        "user_id": {"type": "string", "source": {"type": "state", "default": None}},
+    }
+    if include_task_batches:
+        context_definitions["review_tasks_results"] = {
+            "type": "array",
+            "source": {"type": "state", "default": []},
+        }
+        context_definitions["review_tasks_status"] = {
+            "type": "object",
+            "source": {"type": "state", "default": {}},
+        }
+    files = {
+        "orchestrator.yaml": f"""
+workflow_name: {workflow_name}
+max_turns: 4
+human_in_the_loop: false
+workflow_startup_mode: {startup_mode}
+orchestration_pattern: ag2_network
+initial_agent: PlannerAgent
+initial_message: Run the generated workflow.
+triggers: {triggers or [{"type": "chat", "description": "Start the generated workflow."}]}
+""",
+        "agents.yaml": "\n".join(
+            [
+                "agents:",
+                *[
+                    f"  - name: {agent}\n    system_message: {agent} executes workflow work."
+                    for agent in agents
+                ],
+            ]
+        )
+        + "\n",
+        "transition_graph.yaml": """
+transition_rules:
+  - source_agent: PlannerAgent
+    target_agent: terminate
+    transition_type: after_turn
+""",
+        "context_variables.yaml": (
+            "definitions:\n"
+            + "\n".join(
+                f"  {name}:\n    type: {definition['type']}\n    source:\n"
+                f"      type: {definition['source']['type']}\n"
+                f"      default: {definition['source']['default']!r}"
+                for name, definition in context_definitions.items()
+            )
+            + "\nagents:\n  PlannerAgent:\n    variables:\n      - tenant_id\n      - app_id\n      - user_id\n"
+        ),
+        "structured_outputs.yaml": """
+models: {}
+registry:
+  PlannerAgent: null
+  WorkerAgent: null
+  ReviewerAgent: null
+""",
+        "tools.yaml": "tools: []\nlifecycle_tools: []\n",
+        "middleware.yaml": "prompt_middleware: []\n",
+        "ui_config.yaml": "visual_agents: []\n",
+    }
+    if include_task_batches:
+        files["extended_orchestration/task_batches.yaml"] = """
+version: 1
+conveyors:
+  - id: review_tasks
+    decomposition_agent: PlannerAgent
+    execution_agents:
+      - WorkerAgent
+      - ReviewerAgent
+    concurrency: 2
+    require_owned_paths: false
+"""
+    return [
+        {"filename": filename, "content": content}
+        for filename, content in files.items()
+    ]
+
+
 def test_generate_and_download_writes_bundle_files_and_creates_zip(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -52,10 +140,7 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     bundle_results = _make_bundle_results([
         {
             "workflow_name": "ReviewWorkflow",
-            "files": [
-                {"filename": "orchestrator.yaml", "content": "workflow_name: ReviewWorkflow\n"},
-                {"filename": "agents.yaml", "content": "agents: {}\n"},
-            ],
+            "files": _minimal_workflow_files("ReviewWorkflow"),
         }
     ])
 
@@ -98,6 +183,7 @@ def test_generate_and_download_writes_bundle_files_and_creates_zip(
     )
 
     assert result["status"] == "success"
+    assert context.data["workflow_bundle_validation_status"] == "passed"
     assert len(result["ui_files"]) == 1
     zip_entry = result["ui_files"][0]
     assert zip_entry["type"] == "zip"
@@ -118,15 +204,11 @@ def test_generate_and_download_multi_workflow_pack_zips_all_bundles(
     bundle_results = _make_bundle_results([
         {
             "workflow_name": "OnboardingWorkflow",
-            "files": [
-                {"filename": "orchestrator.yaml", "content": "workflow_name: OnboardingWorkflow\n"},
-            ],
+            "files": _minimal_workflow_files("OnboardingWorkflow"),
         },
         {
             "workflow_name": "NotificationWorkflow",
-            "files": [
-                {"filename": "orchestrator.yaml", "content": "workflow_name: NotificationWorkflow\n"},
-            ],
+            "files": _minimal_workflow_files("NotificationWorkflow"),
         },
     ])
 
@@ -205,7 +287,7 @@ def test_generate_and_download_skips_meta_key(monkeypatch, tmp_path: Path) -> No
     bundle_results = _make_bundle_results([
         {
             "workflow_name": "SimpleWorkflow",
-            "files": [{"filename": "orchestrator.yaml", "content": "workflow_name: SimpleWorkflow\n"}],
+            "files": _minimal_workflow_files("SimpleWorkflow"),
         }
     ])
 
@@ -248,4 +330,167 @@ def test_generate_and_download_skips_meta_key(monkeypatch, tmp_path: Path) -> No
     with zipfile.ZipFile(Path(result["ui_files"][0]["path"])) as zf:
         # _meta key must not produce a directory in the zip
         assert not any("_meta" in n for n in zf.namelist())
+
+
+def test_generate_and_download_blocks_missing_required_workflow_file_before_ui(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    files = [
+        file_entry
+        for file_entry in _minimal_workflow_files("BrokenWorkflow")
+        if file_entry["filename"] != "ui_config.yaml"
+    ]
+    bundle_results = _make_bundle_results([
+        {
+            "workflow_name": "BrokenWorkflow",
+            "files": files,
+        }
+    ])
+    context = _Context(
+        {
+            "chat_id": "chat-blocked-1",
+            "app_id": "app-blocked-1",
+            "user_id": "user-blocked-1",
+            "pack_name": "BrokenWorkflow",
+            "workflow_bundle_results": bundle_results,
+        }
+    )
+    ui_mock = AsyncMock(return_value={"status": "completed", "data": {}, "agentContext": {}})
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui_mock)
+
+    result = asyncio.run(
+        generate_and_download_module.generate_and_download(
+            DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+            agent_message="Done.",
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert context.data["workflow_bundle_validation_status"] == "failed"
+    assert "ui_config.yaml" in "\n".join(result["validation_errors"])
+    ui_mock.assert_not_awaited()
+
+
+def test_generate_and_download_blocks_event_trigger_semantic_drift_before_ui(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    bundle_results = _make_bundle_results([
+        {
+            "workflow_name": "TicketBatchTriageWorkflow",
+            "files": _minimal_workflow_files(
+                "TicketBatchTriageWorkflow",
+                startup_mode="BackendOnly",
+                triggers=[
+                    {
+                        "type": "event",
+                        "event": "domain.support_ticket.batch_requested",
+                        "description": "Trigger for batch requested event.",
+                    }
+                ],
+                include_task_batches=True,
+            ),
+        }
+    ])
+    context = _Context(
+        {
+            "chat_id": "chat-blocked-2",
+            "app_id": "app-blocked-2",
+            "user_id": "user-blocked-2",
+            "pack_name": "TicketBatchTriageWorkflow",
+            "workflow_bundle_results": bundle_results,
+        }
+    )
+    ui_mock = AsyncMock(return_value={"status": "completed", "data": {}, "agentContext": {}})
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui_mock)
+
+    result = asyncio.run(
+        generate_and_download_module.generate_and_download(
+            DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+            agent_message="Done.",
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert context.data["workflow_bundle_validation_status"] == "failed"
+    check_ids = {
+        item["check_id"]
+        for item in context.data["workflow_bundle_semantic_drift"]["workflows"][0]["semantic_drifts"]
+        if item["severity"] == "error"
+    }
+    assert "event_trigger_capability_id_semantic_drift" in check_ids
+    assert "event_trigger_description_semantic_drift" in check_ids
+    ui_mock.assert_not_awaited()
+
+
+def test_generate_and_download_blocks_single_worker_conveyor_before_ui(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    files = _minimal_workflow_files(
+        "TicketBatchTriageWorkflow",
+        startup_mode="BackendOnly",
+        triggers=[
+            {
+                "type": "event",
+                "event": "domain.support_ticket.batch_requested",
+                "capability_id": "ticket-batch-triage-workflow",
+                "description": "Requests parallel support ticket triage for queued tickets.",
+            }
+        ],
+        include_task_batches=True,
+    )
+    for file_entry in files:
+        if file_entry["filename"] == "extended_orchestration/task_batches.yaml":
+            file_entry["content"] = """
+version: 1
+conveyors:
+  - id: review_tasks
+    decomposition_agent: PlannerAgent
+    execution_agents:
+      - WorkerAgent
+    concurrency: 1
+    require_owned_paths: false
+"""
+    bundle_results = _make_bundle_results([
+        {
+            "workflow_name": "TicketBatchTriageWorkflow",
+            "files": files,
+        }
+    ])
+    context = _Context(
+        {
+            "chat_id": "chat-blocked-3",
+            "app_id": "app-blocked-3",
+            "user_id": "user-blocked-3",
+            "pack_name": "TicketBatchTriageWorkflow",
+            "workflow_bundle_results": bundle_results,
+        }
+    )
+    ui_mock = AsyncMock(return_value={"status": "completed", "data": {}, "agentContext": {}})
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui_mock)
+
+    result = asyncio.run(
+        generate_and_download_module.generate_and_download(
+            DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+            agent_message="Done.",
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert any(
+        item["check_id"] == "task_conveyor_parallel_execution_agent_drift"
+        for item in context.data["workflow_bundle_semantic_drift"]["workflows"][0]["semantic_drifts"]
+    )
+    ui_mock.assert_not_awaited()
 

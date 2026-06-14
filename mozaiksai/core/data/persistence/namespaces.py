@@ -20,6 +20,8 @@ class RuntimeCollections:
     GENERAL_CHAT_SESSIONS = "GeneralChatSessions"
     GENERAL_CHAT_COUNTERS = "GeneralChatCounters"
     RUNTIME_USAGE_EVENTS = "RuntimeUsageEvents"
+    RUNTIME_TOKEN_WALLET_BALANCES = "RuntimeTokenWalletBalances"
+    RUNTIME_TOKEN_WALLET_ENTRIES = "RuntimeTokenWalletEntries"
 
 
 class BuilderCollections:

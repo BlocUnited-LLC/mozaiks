@@ -184,9 +184,15 @@ persists the live workflow metadata through the real artifact store, hydrates
 AppGenerator from that `workflow_bundle`, and verifies app acceptance/export and
 runtime loader reaction wiring.
 
-The live AgentGenerator pack smoke also emits a `semantic_drift` report. That
-report is intentionally prompt-oriented: it flags generated workflow YAML that
-loads but no longer preserves the requested workflow meaning, such as event
+`generate_and_download` runs the workflow bundle quality gate before download,
+artifact registration, zip creation, or promotion. The gate writes
+`workflow_bundle_validation_status`, `workflow_bundle_validation_errors`, and
+`workflow_bundle_semantic_drift` to context. Blocking failures return
+`status: blocked`; the generated bundle is not packaged.
+
+The live AgentGenerator pack smoke also emits the same `semantic_drift` report.
+That report is intentionally prompt-oriented: it flags generated workflow YAML
+that loads but no longer preserves the requested workflow meaning, such as event
 triggers with missing `capability_id`, generic trigger descriptions, or conveyor
 workflows that collapse downstream parallel work into one execution agent. Fix
 those failures in AgentGenerator prompt or structured-output contracts first,

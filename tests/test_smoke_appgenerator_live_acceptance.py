@@ -6,6 +6,7 @@ import os
 import pytest
 
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
+from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_export_gate
 from scripts.smoke_appgenerator_live_acceptance import (
     DEFAULT_TRIGGER_EVENT_TYPE,
     DEFAULT_WORKFLOW_CAPABILITY_ID,
@@ -77,6 +78,90 @@ async def test_appgenerator_acceptance_blocks_missing_workflow_reaction() -> Non
         and item["test"] == "workflow_trigger_reaction_declared"
         for item in result["failed_tests"]
     )
+
+
+@pytest.mark.asyncio
+async def test_appgenerator_acceptance_blocks_workflow_trigger_capability_drift() -> None:
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    drifted_trigger_events = [
+        {
+            **integration["trigger_events"][0],
+            "capability_id": "wrong-ticket-workflow",
+        }
+    ]
+    context = SmokeContext(
+        {
+            "workflow_name": "AppGenerator",
+            "app_id": "support-operations-live-acceptance",
+            "chat_id": "test-workflow-trigger-capability-drift",
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": drifted_trigger_events,
+            "app_validation_status": "skipped",
+            "app_validation_strategy_used": "skip",
+        }
+    )
+
+    result = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    gate = resolve_export_gate(context)
+
+    assert result["passed"] is False
+    assert gate["allow_export"] is False
+    assert "workflow_integration" in result["validation_evidence"]["failed"]
+    assert any(
+        item["gate"] == "workflow_integration"
+        and item["test"] == "workflow_trigger_capability_id_mismatch"
+        for item in result["failed_tests"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_appgenerator_acceptance_blocks_invented_workflow_route() -> None:
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    files["modules/support_tickets/module.yaml"] += """
+  - capability_id: wrong-ticket-workflow
+    kind: workflow
+    target: WrongTicketWorkflow
+    title: Wrong generated workflow
+"""
+    files["modules/support_tickets/contracts/reactions.yaml"] += f"""
+  - id: wrong_ticket_workflow_route
+    event_type: {DEFAULT_TRIGGER_EVENT_TYPE}
+    target:
+      kind: capability
+      capability_id: wrong-ticket-workflow
+    description: Drifted route to an invented workflow capability.
+"""
+    context = SmokeContext(
+        {
+            "workflow_name": "AppGenerator",
+            "app_id": "support-operations-live-acceptance",
+            "chat_id": "test-invented-workflow-route",
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+            "app_validation_status": "skipped",
+            "app_validation_strategy_used": "skip",
+        }
+    )
+
+    result = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
+    failed_tests = {
+        item["test"]
+        for item in result["failed_tests"]
+        if item.get("gate") == "workflow_integration"
+    }
+
+    assert result["passed"] is False
+    assert resolve_export_gate(context)["allow_export"] is False
+    assert "workflow_capability_not_in_metadata" in failed_tests
+    assert "workflow_trigger_ambiguous_workflow_reaction" in failed_tests
 
 
 @pytest.mark.skipif(

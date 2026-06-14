@@ -55,6 +55,9 @@ SKIP_FILES = {
     # Smoke scripts assert that generated output does NOT contain the
     # prohibited schema files — the terms appear as negative-assertion strings.
     "scripts/smoke_agentgenerator_live_pack.py",
+    # Quality gate validates that generated bundles do NOT emit stale files
+    # by checking for their presence and flagging them as errors.
+    "factory_app/workflows/AgentGenerator/tools/workflow_quality_gate.py",
 }
 
 TEXT_SUFFIXES = {

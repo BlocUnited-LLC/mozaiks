@@ -131,6 +131,65 @@ def test_load_plan_usage_limits(tmp_path: Path) -> None:
     assert limit.capability_id == "ai.chat"
 
 
+def test_load_token_wallets_and_plan_allowances(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        """
+        schema_version: mozaiks.subscriptions.v1
+        label: Token SaaS
+        default_plan_id: pro
+        token_wallets:
+          - wallet_id: ai_tokens
+            label: AI token balance
+            unit: tokens
+            usage_meter_id: ai_tokens
+            scope: user
+            auto_debit_usage: true
+        plans:
+          - plan_id: pro
+            label: Pro
+            capabilities: [ai.chat]
+            token_allowances:
+              - wallet_id: ai_tokens
+                amount: 100000
+                cadence: monthly
+        """,
+    )
+
+    config = load_subscriptions_config(tmp_path)
+
+    assert config is not None
+    assert config.token_wallets[0].wallet_id == "ai_tokens"
+    assert config.token_wallets[0].auto_debit_usage is True
+    assert config.plans[0].token_allowances[0].amount == 100000
+    assert config.plan_by_id("missing").plan_id == "pro"
+    assert config.token_wallet_by_id("ai_tokens") is config.token_wallets[0]
+
+
+def test_token_allowance_requires_declared_wallet_when_wallets_declared() -> None:
+    with pytest.raises(ValidationError, match="must reference token_wallets"):
+        SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Token SaaS",
+                "default_plan_id": "pro",
+                "token_wallets": [{"wallet_id": "ai_tokens"}],
+                "plans": [
+                    {
+                        "plan_id": "pro",
+                        "label": "Pro",
+                        "token_allowances": [
+                            {
+                                "wallet_id": "other_tokens",
+                                "amount": 100,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+
 def test_load_assignment_store(tmp_path: Path) -> None:
     _write_config(
         tmp_path,

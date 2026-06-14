@@ -30,6 +30,7 @@ from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 from .export_agent_workflow import export_agent_workflow_to_github
 from .workflow_converter import promote_generated_workflow
+from .workflow_quality_gate import run_workflow_bundle_quality_gate
 
 try:
     from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
@@ -405,6 +406,22 @@ async def generate_and_download(
 
     if not bundle_entries:
         return {"status": "error", "message": "No workflow bundles found in workflow_bundle_results"}
+
+    quality_gate = run_workflow_bundle_quality_gate(
+        bundle_entries=bundle_entries,
+        context_variables=context_variables,
+    )
+    if not quality_gate.get("passed"):
+        wf_logger.warning(
+            "Workflow bundle quality gate failed with %d issue(s).",
+            len(quality_gate.get("errors") or []),
+        )
+        return {
+            "status": "blocked",
+            "message": "Workflow bundle quality gate failed; download was not created.",
+            "workflow_bundle_quality_gate": quality_gate,
+            "validation_errors": quality_gate.get("errors") or [],
+        }
 
     # Derive the top-level bundle name (pack name or single workflow name)
     if pack_name and isinstance(pack_name, str) and pack_name.strip():

@@ -1260,6 +1260,49 @@ def validate_workflow_integration_contract(
     declared_events = wiring["declared_events"]
     action_emits = wiring["action_emits"]
     capability_reactions = wiring["capability_reactions"]
+    expected_workflow_pairs: set[tuple[str, str]] = set()
+    expected_capability_ids_by_event: dict[str, set[str]] = {}
+    declared_workflow_capability_ids = {
+        capability["capability_id"]
+        for capability in workflow_capabilities
+        if str(capability.get("capability_id") or "").strip()
+    }
+
+    for workflow in metadata.get("workflows") or []:
+        if not isinstance(workflow, dict):
+            continue
+        workflow_name = str(workflow.get("workflow_name") or "").strip()
+        capability_id = str(workflow.get("capability_id") or "").strip()
+        if not workflow_name or not capability_id:
+            continue
+        expected_workflow_pairs.add((capability_id, workflow_name))
+        for trigger_event in workflow.get("trigger_events") or []:
+            if not isinstance(trigger_event, dict):
+                continue
+            event_type = str(trigger_event.get("event_type") or "").strip()
+            if event_type:
+                expected_capability_ids_by_event.setdefault(event_type, set()).add(capability_id)
+
+    for capability in workflow_capabilities:
+        capability_id = str(capability.get("capability_id") or "").strip()
+        target = str(capability.get("target") or "").strip()
+        if not capability_id or not target:
+            continue
+        if (capability_id, target) not in expected_workflow_pairs:
+            failed_tests.append(
+                {
+                    "test": "workflow_capability_not_in_metadata",
+                    "path": capability.get("path") or "modules/*/module.yaml",
+                    "error": (
+                        f"Workflow capability {capability_id!r} targets {target!r}, but that "
+                        "capability/target pair is not present in AgentGenerator workflow metadata."
+                    ),
+                    "fix_suggestion": (
+                        "Remove invented workflow capabilities, or regenerate from the current "
+                        "AgentGenerator workflow_integration_metadata."
+                    ),
+                }
+            )
 
     for workflow in metadata.get("workflows") or []:
         if not isinstance(workflow, dict):
@@ -1298,6 +1341,23 @@ def validate_workflow_integration_contract(
             event_type = str(trigger_event.get("event_type") or "").strip()
             if not event_type:
                 continue
+            trigger_capability_id = str(trigger_event.get("capability_id") or "").strip()
+            if trigger_capability_id and trigger_capability_id != capability_id:
+                failed_tests.append(
+                    {
+                        "test": "workflow_trigger_capability_id_mismatch",
+                        "path": "workflow_integration_metadata",
+                        "error": (
+                            f"Workflow trigger event {event_type!r} declares capability_id "
+                            f"{trigger_capability_id!r}, but workflow {workflow_name!r} uses "
+                            f"capability_id {capability_id!r}."
+                        ),
+                        "fix_suggestion": (
+                            "Keep trigger_events[].capability_id aligned with the workflow "
+                            "capability_id from AgentGenerator metadata before AppGenerator wiring."
+                        ),
+                    }
+                )
             if event_type not in declared_events:
                 failed_tests.append(
                     {
@@ -1338,6 +1398,29 @@ def validate_workflow_integration_contract(
                         "fix_suggestion": (
                             "Add a reactions[] entry with event_type, target.kind: capability, "
                             f"and target.capability_id: {capability_id}."
+                        ),
+                    }
+                )
+            expected_capability_ids = expected_capability_ids_by_event.get(event_type) or {capability_id}
+            for routed_event, routed_capability_id in sorted(capability_reactions):
+                if routed_event != event_type:
+                    continue
+                if routed_capability_id not in declared_workflow_capability_ids:
+                    continue
+                if routed_capability_id in expected_capability_ids:
+                    continue
+                failed_tests.append(
+                    {
+                        "test": "workflow_trigger_ambiguous_workflow_reaction",
+                        "path": "modules/*/contracts/reactions.yaml",
+                        "error": (
+                            f"Workflow trigger event {event_type!r} is also routed to workflow "
+                            f"capability {routed_capability_id!r}, which is not part of the "
+                            "AgentGenerator metadata for that event."
+                        ),
+                        "fix_suggestion": (
+                            "Route AgentGenerator trigger events only to the workflow capability ids "
+                            "declared in workflow_integration_metadata."
                         ),
                     }
                 )

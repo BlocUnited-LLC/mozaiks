@@ -364,6 +364,7 @@ agents:
         - `event_flows[].producing_action` must name the module action that commits the state before publishing the event.
         - Workflow reactions must reference `workflow_capability_ids`; do not put raw workflow names in event flows or subscriptions.
         - When wiring the AgentGenerator-produced workflow, the `workflow_capability_ids` value must be `generated_workflow_capability_id` from context — never the raw `generated_workflow_name`.
+        - Do not invent extra workflow capability ids or alternate workflow routes. If a workflow trigger event is present in `generated_workflow_trigger_events`, the only workflow capability ids planned for that event must come from the AgentGenerator metadata in context.
         - Workflows may react to domain events and may call module capabilities, but workflows must not directly publish `domain.*` facts.
       12e. **structured contract rule**:
         - Build tasks must describe strict structured-output-first contracts, not loose config blobs.
@@ -1397,6 +1398,7 @@ agents:
       - `app_backend_url`: null = schema-only; non-null = active backend
       - `generated_workflow_capability_id`: stable hyphenated capability id of the AgentGenerator-produced workflow (e.g. `customer-support`). Use this as the target capability id in `contracts/reactions.yaml` workflow reaction entries — never the raw workflow name. Null when no AgentGenerator workflow exists.
       - `generated_workflow_trigger_events`: trigger event contracts from the AgentGenerator workflow's orchestrator.yaml triggers block. Each entry carries an event type (and optional capability_id) that should fire the workflow. Generate one `contracts/reactions.yaml` entry per trigger event routing the matching domain event to the workflow via `generated_workflow_capability_id`. Empty array when no trigger events are declared.
+      - Workflow trigger metadata is authoritative. If a trigger event entry includes `capability_id`, it must match `generated_workflow_capability_id`; do not substitute another id, derive a new id, or add a second workflow capability route for the same trigger event unless that route is present in the upstream workflow metadata.
 
       **Mode B inputs**:
       - `app_build_plan`: backend scope, auth strategy, and integration requirements.
@@ -1426,6 +1428,7 @@ agents:
       6. **events.yaml**: include `schema_version: mozaiks.events.v1` and `events[]`. Generic modules may declare only namespaced `domain.*` events with `version`, `producer`, and `payload_schema`.
       7. **contracts/reactions.yaml**: include `schema_version: mozaiks.reactions.v1` and `reactions[]` for event reactions. Targets are `handler`, `capability`, or `notification`; workflow execution must be reached through a capability id, not a raw workflow name. Handler reactions must use `target.handler_method` referencing a method on `backend/handler.py`.
         - If `generated_workflow_trigger_events` is non-empty, generate one reaction entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
+        - Do not add workflow capability entries or reactions for workflow ids that are absent from `generated_workflow_trigger_events` / `generated_workflow_capability_id`. The acceptance gate blocks invented workflow routes and trigger events routed to the wrong workflow capability.
       8. **notifications.yaml**: include `schema_version: mozaiks.notifications.v1` and one rule per event that warrants a notification. Use `in_app` by default; add `email` only for high-value events. Use `audience.resolver` or `renderer` only when static roles/permissions and plain templates are insufficient, and mirror those entrypoints in `python_stubs`.
       9. **settings.yaml**: include `schema_version: mozaiks.settings.v1`, module-local `settings[]`, and `features[]`. Settings may reference optional Python hooks (`validator`, `on_change`) but must not contain secrets. Every hook reference must be module-local and mirrored in `python_stubs`.
       9a. **profile.yaml** (optional — emit only when warranted): set `profile_yaml` to a `ModuleProfileManifest` object when the module has user-scoped data worth surfacing on the user profile page. Otherwise set `profile_yaml` to null.

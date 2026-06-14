@@ -34,6 +34,17 @@ Example::
             label: AI tokens
             unit: tokens
             monthly_limit: 100000
+        token_allowances:
+          - wallet_id: ai_tokens
+            amount: 100000
+            cadence: monthly
+    token_wallets:
+      - wallet_id: ai_tokens
+        label: AI token balance
+        unit: tokens
+        usage_meter_id: ai_tokens
+        scope: user
+        auto_debit_usage: true
 """
 
 import re
@@ -50,6 +61,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 _PLAN_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 _CAPABILITY_ID_RE = re.compile(r"^[a-z0-9_.]+$")
 _METER_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
+_WALLET_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _DATA_ALIAS_RE = re.compile(r"^[a-z0-9_.-]+$")
 _FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
@@ -106,6 +118,88 @@ class UsageLimitDef(BaseModel):
         return value
 
 
+class TokenWalletDef(BaseModel):
+    """A provider-neutral token wallet exposed by the runtime.
+
+    Wallets define the spendable unit and scope. They do not define payment
+    providers, prices, checkout behavior, or hosted-product monetization.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    wallet_id: str = "ai_tokens"
+    label: str | None = None
+    unit: Literal["tokens", "credits"] = "tokens"
+    usage_meter_id: str | None = "ai_tokens"
+    scope: Literal["user", "tenant"] = "user"
+    auto_debit_usage: bool = False
+    allow_negative_balance: bool = False
+
+    @field_validator("wallet_id")
+    @classmethod
+    def _validate_wallet_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _WALLET_ID_RE.match(value):
+            raise ValueError(
+                f"wallet_id must match [a-z0-9_.-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("usage_meter_id")
+    @classmethod
+    def _validate_usage_meter_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if not _METER_ID_RE.match(value):
+            raise ValueError(
+                f"usage_meter_id must match [a-z0-9_.-]+, got {value!r}"
+            )
+        return value
+
+
+class TokenAllowanceDef(BaseModel):
+    """Token amount granted by a subscription plan.
+
+    Runtime code can materialize these as idempotent wallet allocation entries.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    wallet_id: str = "ai_tokens"
+    amount: int = Field(ge=0)
+    cadence: Literal["monthly", "one_time", "manual"] = "monthly"
+    label: str | None = None
+
+    @field_validator("wallet_id")
+    @classmethod
+    def _validate_wallet_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _WALLET_ID_RE.match(value):
+            raise ValueError(
+                f"wallet_id must match [a-z0-9_.-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
 class PlanDef(BaseModel):
     """A single subscription plan with its granted capabilities."""
 
@@ -116,6 +210,7 @@ class PlanDef(BaseModel):
     description: str | None = None
     capabilities: list[str] = Field(default_factory=list)
     usage_limits: list[UsageLimitDef] = Field(default_factory=list)
+    token_allowances: list[TokenAllowanceDef] = Field(default_factory=list)
 
     @field_validator("plan_id")
     @classmethod
@@ -245,6 +340,7 @@ class SubscriptionsConfig(BaseModel):
     label: str
     default_plan_id: str
     assignment_store: SubscriptionAssignmentStoreDef | None = None
+    token_wallets: list[TokenWalletDef] = Field(default_factory=list)
     plans: list[PlanDef]
 
     @field_validator("label")
@@ -267,6 +363,16 @@ class SubscriptionsConfig(BaseModel):
                 f"default_plan_id {self.default_plan_id!r} must reference a "
                 f"declared plan_id; known plan_ids: {plan_ids}"
             )
+        wallet_ids = [wallet.wallet_id for wallet in self.token_wallets]
+        if len(wallet_ids) != len(set(wallet_ids)):
+            raise ValueError("token_wallet wallet_ids must be unique")
+        declared_wallet_ids = set(wallet_ids)
+        for plan in self.plans:
+            for allowance in plan.token_allowances:
+                if declared_wallet_ids and allowance.wallet_id not in declared_wallet_ids:
+                    raise ValueError(
+                        f"token_allowance wallet_id {allowance.wallet_id!r} must reference token_wallets"
+                    )
         return self
 
     def capabilities_for_plan(self, plan_id: str) -> frozenset[str]:
@@ -284,6 +390,25 @@ class SubscriptionsConfig(BaseModel):
             if plan.plan_id == self.default_plan_id:
                 return frozenset(plan.capabilities)
         return frozenset()
+
+    def plan_by_id(self, plan_id: str | None) -> PlanDef:
+        """Return a declared plan, falling back to the configured default."""
+
+        requested = str(plan_id or "").strip()
+        for plan in self.plans:
+            if plan.plan_id == requested:
+                return plan
+        for plan in self.plans:
+            if plan.plan_id == self.default_plan_id:
+                return plan
+        return self.plans[0]
+
+    def token_wallet_by_id(self, wallet_id: str) -> TokenWalletDef | None:
+        wallet_key = str(wallet_id or "").strip()
+        for wallet in self.token_wallets:
+            if wallet.wallet_id == wallet_key:
+                return wallet
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +456,8 @@ __all__ = [
     "SubscriptionAssignmentStoreDef",
     "SubscriptionsConfig",
     "SubscriptionsLoadError",
+    "TokenAllowanceDef",
+    "TokenWalletDef",
     "UsageLimitDef",
     "load_subscriptions_config",
 ]

@@ -225,6 +225,15 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- AgentGenerator workflow bundle downloads now run a production quality gate before
+  packaging, artifact registration, or promotion, blocking bundles with contract
+  errors or semantic drift such as unresolved event triggers and serial task
+  conveyors.
+
+- AppGenerator app-bundle acceptance now blocks export when workflow integration
+  drifts from AgentGenerator metadata, including mismatched trigger capability
+  IDs, invented workflow capabilities, and ambiguous workflow trigger routing.
+
 - `AgentGenerator` and `AppGenerator` workflow contracts overhauled: removed
   `handoffs.yaml` and `hooks.yaml` (replaced by `transition_graph.yaml` and
   `middleware.yaml`). Static YAML catalogs (`module_archetypes.yaml`,

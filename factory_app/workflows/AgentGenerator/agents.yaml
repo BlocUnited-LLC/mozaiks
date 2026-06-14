@@ -1030,6 +1030,12 @@ agents:
       **Upstream Dependencies**:
       - `workflow_bundle_results`: All WorkflowBundleBuilderAgent outputs from the task batch, keyed by workflow id.
       - `PackMetadata`: Pack graph assembled by PackMetadataAgent.
+      - `workflow_bundle_validation_status`: Set by `generate_and_download`
+        after the workflow quality gate runs. `failed` means packaging was
+        blocked and the workflow bundle must be corrected before download.
+      - `workflow_bundle_semantic_drift`: Prompt-oriented drift report for
+        generated workflow YAML that loads but does not preserve requested
+        workflow meaning.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -1044,6 +1050,9 @@ agents:
 
       1. **Confirm Completion**:
          - Verify `workflow_bundle_results` and `PackMetadata` are present in context.
+         - If `workflow_bundle_validation_status` is `failed`, do not invite
+           download. Summarize that the workflow bundle quality gate blocked
+           packaging and reference `workflow_bundle_validation_errors`.
 
       2. **Emit Output**:
          - Generate `DownloadRequestOutput` JSON with a short invitation message.

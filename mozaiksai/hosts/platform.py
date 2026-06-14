@@ -1260,6 +1260,86 @@ async def get_current_user_usage(
     return {
         **usage,
         "subscription_usage": _serialize_subscription_usage_limits(subscriptions),
+        "token_wallets": await _current_user_token_wallet_summary(
+            subscriptions,
+            app_id=resolved_app_id,
+            user_id=user_id,
+            tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+            ensure_allowances=False,
+        ),
+    }
+
+
+@app.get("/api/me/tokens")
+async def get_current_user_tokens(
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return current user's provider-neutral token wallet balances."""
+
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    subscriptions = getattr(app.state, "subscriptions_config", None)
+    return await _current_user_token_wallet_summary(
+        subscriptions,
+        app_id=resolved_app_id,
+        user_id=user_id,
+        tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+        ensure_allowances=False,
+    )
+
+
+@app.post("/api/me/tokens/sync")
+async def sync_current_user_token_allowances(
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Idempotently materialize current subscription token allowances."""
+
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    subscriptions = getattr(app.state, "subscriptions_config", None)
+    return await _current_user_token_wallet_summary(
+        subscriptions,
+        app_id=resolved_app_id,
+        user_id=user_id,
+        tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+        ensure_allowances=True,
+    )
+
+
+@app.get("/api/me/tokens/ledger")
+async def get_current_user_token_ledger(
+    app_id: str | None = None,
+    wallet_id: str = "ai_tokens",
+    limit: int = 100,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return current user's token wallet ledger entries for one wallet."""
+
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    from mozaiksai.core.tokens.wallet import get_token_wallet_ledger
+
+    subscriptions = getattr(app.state, "subscriptions_config", None)
+    wallet_scope = None
+    if subscriptions is not None:
+        wallet = subscriptions.token_wallet_by_id(wallet_id)
+        wallet_scope = wallet.scope if wallet is not None else None
+    ledger = get_token_wallet_ledger()
+    entries = await ledger.list_entries(
+        app_id=resolved_app_id,
+        wallet_id=wallet_id,
+        user_id=user_id,
+        tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+        preferred_scope=wallet_scope,
+        limit=limit,
+    )
+    return {
+        "app_id": resolved_app_id,
+        "user_id": user_id,
+        "tenant_id": str(principal.tenant_id) if principal.tenant_id else None,
+        "wallet_id": wallet_id,
+        "entries": entries,
+        "count": len(entries),
+        "source": "token_wallet_ledger",
     }
 
 
@@ -1628,6 +1708,7 @@ def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
             "schema_version": None,
             "default_plan_id": None,
             "plans": [],
+            "token_wallets": [],
             "source": "none",
         }
     plans: list[dict[str, Any]] = []
@@ -1643,19 +1724,69 @@ def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
                     "capability_id": limit.capability_id,
                 }
             )
+        token_allowances = [
+            allowance.model_dump()
+            for allowance in getattr(plan, "token_allowances", []) or []
+        ]
         plans.append(
             {
                 "plan_id": plan.plan_id,
                 "label": plan.label,
                 "usage_limits": limits,
+                "token_allowances": token_allowances,
             }
         )
+    token_wallets = [
+        wallet.model_dump()
+        for wallet in getattr(config, "token_wallets", []) or []
+    ]
     return {
         "schema_version": getattr(config, "schema_version", None),
         "default_plan_id": getattr(config, "default_plan_id", None),
         "plans": plans,
+        "token_wallets": token_wallets,
         "source": "app_config_subscriptions",
     }
+
+
+async def _current_user_token_wallet_summary(
+    config: Any,
+    *,
+    app_id: str,
+    user_id: str,
+    tenant_id: str | None = None,
+    ensure_allowances: bool = False,
+) -> dict[str, Any]:
+    if config is None or not getattr(config, "token_wallets", None):
+        return {
+            "wallets": [],
+            "source": "none",
+        }
+
+    from mozaiksai.core.tokens.wallet import get_token_wallet_ledger
+
+    plan_id = getattr(config, "default_plan_id", None)
+    try:
+        adapter = ConfiguredEntitlementAdapter(config=config)
+        resolved_plan_id = await adapter.current_plan_id(
+            app_id=app_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        if resolved_plan_id:
+            plan_id = resolved_plan_id
+    except Exception as exc:
+        logger.debug("TOKEN_WALLET_PLAN_RESOLUTION_SKIPPED: %s", exc)
+
+    ledger = get_token_wallet_ledger()
+    return await ledger.wallet_summaries_for_config(
+        config=config,
+        app_id=app_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        plan_id=plan_id,
+        ensure_allowances=ensure_allowances,
+    )
 
 
 async def _ensure_account_profile(
