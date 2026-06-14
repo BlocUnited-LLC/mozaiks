@@ -30,6 +30,12 @@ from mozaiksai.core.artifacts import ArtifactStore
 from mozaiksai.core.session.model import TriggerInput
 from mozaiksai.core.session.trigger_routing import TriggerRoutingContribution
 
+from mozaiksai.control_plane.metrics import (
+    ControlPlaneBuildTimer,
+    check_token_usage,
+    log_build_outcome,
+)
+
 from .coding_worker import ScopedRefinementCodingWorker, get_coding_worker
 from .contract_surface_planner import ContractSurfacePlanner, get_contract_surface_planner
 from .harness_decision import FirstPartyHarnessDecisionPolicy, get_harness_decision_policy
@@ -151,7 +157,20 @@ class OrchestrationControlHarness:
 
         if not self.enabled():
             raise RuntimeError("Control-plane harness is disabled in app/config/ai.json")
-        return await self._refinement_resolver.route(request)
+        with ControlPlaneBuildTimer(
+            "route_refinement",
+            request_id=request.request_id,
+            app_id=request.app_id,
+        ):
+            decision = await self._refinement_resolver.route(request)
+        log_build_outcome(
+            outcome="ok",
+            request_id=request.request_id,
+            app_id=request.app_id,
+            change_class=decision.change_class,
+            workflow_sequence=decision.workflow_sequence,
+        )
+        return decision
 
     async def prepare_contract_surface_request(
         self,
@@ -322,7 +341,18 @@ class OrchestrationControlHarness:
     async def execute_coding_request(self, request: CodingWorkerRequest) -> CodingWorkerResult:
         if not self.coding_enabled():
             raise RuntimeError("Control-plane coding worker is disabled in app/config/ai.json")
-        return await self._coding_worker.execute(request)
+        with ControlPlaneBuildTimer(
+            "coding_worker",
+            request_id=getattr(request, "app_id", None),
+            app_id=request.app_id,
+        ):
+            result = await self._coding_worker.execute(request)
+        check_token_usage(
+            stage="coding_worker",
+            token_count=getattr(result, "token_count", None),
+            app_id=request.app_id,
+        )
+        return result
 
     async def persist_revision_invalidation(
         self,
