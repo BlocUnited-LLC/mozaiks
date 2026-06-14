@@ -77,7 +77,7 @@ def index_data_contract_by_entity(contract: DataContract | None) -> DataEntityIn
             collection_path = f"{surface_path}.collections[{collection_index}]"
             collection_obj = _require_object(collection, collection_path)
             ownership = collection_obj.get("ownership") if isinstance(collection_obj.get("ownership"), dict) else {}
-            module_id = str(collection_obj.get("module_id") or ownership.get("surface_id") or surface_id).strip()
+            module_id = str(collection_obj.get("module_id") or ownership.get("surface_id") or surface_id).strip()  # type: ignore[union-attr]
             entity_name = str(collection_obj.get("entity_name") or collection_obj.get("name") or "").strip()
             if surface_kind == "module" and not module_id:
                 raise DataContractLoadError(f"{collection_path}.module_id is required")

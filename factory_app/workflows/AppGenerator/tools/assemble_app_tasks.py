@@ -47,7 +47,7 @@ def _apply_planned_page_contracts(
             continue
         for raw_path in task.get("owned_paths") or []:
             path = str(raw_path or "").replace("\\", "/").strip()
-            stem = _page_stem_from_path(path)
+            stem = _page_stem_from_path(path)  # type: ignore[assignment]
             if not stem or stem not in planned_by_stem:
                 continue
             file_map[path] = yaml.safe_dump(
@@ -203,9 +203,9 @@ async def assemble_app_tasks(
             if isinstance(candidate_values, dict):
                 iterable = candidate_values.items()
             elif isinstance(candidate_values, list):
-                iterable = enumerate(candidate_values)
+                iterable = enumerate(candidate_values)  # type: ignore[assignment]
             else:
-                iterable = []
+                iterable = []  # type: ignore[assignment]
             for key, value in iterable:
                 if key in {"_failed", "_meta", "failed_tasks"}:
                     continue
@@ -264,10 +264,10 @@ async def assemble_app_tasks(
                 context_variables.set(
                     "app_task_batch_results_summary",
                     {
-                        "status": meta.get("status") or context_variables.get("app_task_batch_status"),
-                        "task_count": meta.get("task_count"),
-                        "completed_tasks": meta.get("completed_tasks") or [],
-                        "failed_tasks": meta.get("failed_tasks") or [],
+                        "status": meta.get("status") or context_variables.get("app_task_batch_status"),  # type: ignore[union-attr]
+                        "task_count": meta.get("task_count"),  # type: ignore[union-attr]
+                        "completed_tasks": meta.get("completed_tasks") or [],  # type: ignore[union-attr]
+                        "failed_tasks": meta.get("failed_tasks") or [],  # type: ignore[union-attr]
                         "result_keys": [
                             str(key)
                             for key in task_results

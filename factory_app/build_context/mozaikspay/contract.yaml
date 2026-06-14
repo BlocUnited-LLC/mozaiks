@@ -54,9 +54,9 @@ runtime_boundaries:
   - id: entitlements_runtime
     rule: Keep entitlement enforcement on the OSS runtime/module contract path.
   - id: usage_runtime
-    rule: Read runtime token usage through /api/me/usage or /api/admin/usage; do not create a custom token ledger.
+    rule: Read runtime token usage through /api/me/usage or /api/admin/usage; use the OSS token wallet ledger for balances instead of app-local duplicate ledgers.
   - id: plan_limits
-    rule: Use app/config/subscriptions.yaml usage_limits for generated SaaS plan limits.
+    rule: Use app/config/subscriptions.yaml usage_limits, token_wallets, and token_allowances for generated SaaS plan limits and token allowances.
   - id: hosted_internals
     rule: Do not generate hosted service internals, checkout, wallet, settlement logic, private APIs, or provider credentials.
   - id: page_bindings

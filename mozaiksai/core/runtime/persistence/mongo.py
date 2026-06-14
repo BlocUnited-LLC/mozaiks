@@ -68,7 +68,7 @@ class MongoPersistenceCollection:
         query: Query,
         projection: Projection | None = None,
     ) -> Mapping[str, Any] | None:
-        return await self._collection.find_one(self._scoped_query(query), projection)
+        return await self._collection.find_one(self._scoped_query(query), projection)  # type: ignore[no-any-return]
 
     async def find_many(
         self,
@@ -83,7 +83,7 @@ class MongoPersistenceCollection:
         if sort:
             cursor = cursor.sort(list(sort))
         cursor = cursor.limit(safe_limit)
-        return await cursor.to_list(length=safe_limit)
+        return await cursor.to_list(length=safe_limit)  # type: ignore[no-any-return]
 
     async def insert_one(self, document: Mapping[str, Any]) -> Any:
         if "app_id" in document and document["app_id"] != self._app_id:

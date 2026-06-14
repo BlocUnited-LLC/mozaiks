@@ -67,7 +67,7 @@ def _build_error_payload(
 ) -> dict[str, Any]:
     """Normalize ValidationError into a deterministic sentinel payload."""
 
-    error_entries: Iterable[dict[str, Any]] = validation_error.errors()
+    error_entries: Iterable[dict[str, Any]] = validation_error.errors()  # type: ignore[assignment]
     logger = get_workflow_logger(workflow_name="tool_validation")
     logger.warning(
         "[TOOL_VALIDATION] Schema validation failed",
@@ -111,7 +111,7 @@ def validate_tool_call(
     filtered_payload = _filter_payload(raw_payload, model_cls)
 
     try:
-        model_instance = model_cls.model_validate(filtered_payload)
+        model_instance = model_cls.model_validate(filtered_payload)  # type: ignore[attr-defined]
     except ValidationError as err:
         return ValidationOutcome(
             is_valid=False,

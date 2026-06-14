@@ -132,5 +132,5 @@ class AppRegistryRepo:
         for key in ("created_at", "updated_at", "last_status_changed_at"):
             value = normalized.get(key)
             if hasattr(value, "isoformat"):
-                normalized[key] = value.isoformat()
+                normalized[key] = value.isoformat()  # type: ignore[union-attr]
         return normalized

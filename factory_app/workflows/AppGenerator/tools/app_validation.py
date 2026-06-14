@@ -79,6 +79,13 @@ def _is_truthy(value: Any) -> bool:
     return bool(value)
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _extract_code_files(collected: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for _agent_name, data in (collected or {}).items():
@@ -1031,6 +1038,19 @@ def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
         pass
 
 
+def _context_get(context_variables: Any | None, key: str, default: Any = None) -> Any:
+    if context_variables is None:
+        return default
+    if isinstance(context_variables, dict):
+        return context_variables.get(key, default)
+    if not hasattr(context_variables, "get"):
+        return default
+    try:
+        return context_variables.get(key, default)
+    except Exception:
+        return default
+
+
 def _capability_packs_from_context(context_variables: Any | None) -> list[dict[str, Any]]:
     if context_variables is None or not hasattr(context_variables, "get"):
         return []
@@ -1451,6 +1471,89 @@ def validate_workflow_integration_contract(
     }
 
 
+def _workflow_integration_repair_request(failed_tests: list[dict[str, Any]]) -> str:
+    lines = [
+        "Repair the generated app workflow integration contracts only.",
+        "Use AgentGenerator workflow_integration_metadata as the authority.",
+        "Update only the affected module contract YAML files: module.yaml, contracts/events.yaml, and contracts/reactions.yaml.",
+    ]
+    for item in failed_tests:
+        test_id = str(item.get("test") or "workflow_integration")
+        path = str(item.get("path") or "modules/*")
+        error = str(item.get("error") or "Workflow integration contract failed.")
+        fix = str(item.get("fix_suggestion") or "Regenerate the affected workflow integration contract.")
+        lines.append(f"- {test_id} at {path}: {error} Fix: {fix}")
+    return "\n".join(lines)
+
+
+def _prepare_workflow_integration_repair(
+    workflow_integration_result: dict[str, Any],
+    context_variables: Any | None,
+    *,
+    max_attempts: int = 2,
+) -> dict[str, Any]:
+    failed_tests = [
+        item
+        for item in workflow_integration_result.get("failed_tests") or []
+        if isinstance(item, dict)
+    ]
+    if workflow_integration_result.get("passed"):
+        result = {
+            "status": "passed",
+            "repairable": False,
+            "failed_test_count": 0,
+            "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
+            "max_attempts": max_attempts,
+            "repair_request": None,
+        }
+        _context_set(context_variables, "workflow_integration_repair_status", "passed")
+        _context_set(context_variables, "workflow_integration_repair_request", None)
+        _context_set(context_variables, "workflow_integration_repair_result", result)
+        return result
+    if not failed_tests:
+        result = {
+            "status": "not_applicable",
+            "repairable": False,
+            "failed_test_count": 0,
+            "attempt": _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0),
+            "max_attempts": max_attempts,
+            "repair_request": None,
+        }
+        _context_set(context_variables, "workflow_integration_repair_status", "not_applicable")
+        _context_set(context_variables, "workflow_integration_repair_result", result)
+        return result
+
+    prior_attempts = _as_int(_context_get(context_variables, "workflow_integration_repair_count", 0), 0)
+    max_attempts = max(0, _as_int(max_attempts, 2))
+    repair_request = _workflow_integration_repair_request(failed_tests)
+
+    if prior_attempts >= max_attempts:
+        status = "blocked"
+        attempt = prior_attempts
+        repairable = False
+    else:
+        status = "needs_revision"
+        attempt = prior_attempts + 1
+        repairable = True
+
+    result = {
+        "status": status,
+        "repairable": repairable,
+        "failed_test_count": len(failed_tests),
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "repair_request": repair_request,
+        "failed_tests": failed_tests,
+    }
+    _context_set(context_variables, "workflow_integration_repair_status", status)
+    _context_set(context_variables, "workflow_integration_repair_count", attempt)
+    _context_set(context_variables, "workflow_integration_repair_max_attempts", max_attempts)
+    _context_set(context_variables, "workflow_integration_repair_request", repair_request)
+    _context_set(context_variables, "workflow_integration_repair_failed_tests", failed_tests)
+    _context_set(context_variables, "workflow_integration_repair_result", result)
+    return result
+
+
 async def run_app_bundle_acceptance_gate(
     *,
     files: dict[str, str] | None = None,
@@ -1575,6 +1678,11 @@ async def run_app_bundle_acceptance_gate(
         "warnings": warnings,
         **subresults,
     }
+    workflow_integration_repair = _prepare_workflow_integration_repair(
+        workflow_integration_result,
+        context_variables,
+    )
+    result["workflow_integration_repair"] = workflow_integration_repair
 
     _context_set(context_variables, "bundle_scan_passed", bundle_scan_result["passed"])
     _context_set(context_variables, "bundle_scan_result", bundle_scan_result)
@@ -1590,6 +1698,7 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "integration_tests_passed", acceptance_passed)
     _context_set(context_variables, "integration_test_result", {
         **subresults,
+        "workflow_integration_repair": workflow_integration_repair,
         "passed": acceptance_passed,
     })
     _context_set(context_variables, "app_bundle_acceptance_status", result["status"])
@@ -1747,6 +1856,7 @@ async def validate_app_bundle_from_request(
     module_implementation_result = acceptance_result["module_implementation"]
     runtime_quality_result = acceptance_result["module_runtime_quality"]
     workflow_integration_result = acceptance_result["workflow_integration"]
+    workflow_integration_repair = acceptance_result.get("workflow_integration_repair")
     validation_passed = str(validation.get("validation_status") or "").strip().lower() != "failed"
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
     _context_set(context_variables, "integration_tests_passed", combined_passed)
@@ -1757,6 +1867,7 @@ async def validate_app_bundle_from_request(
         "module_implementation": module_implementation_result,
         "module_runtime_quality": runtime_quality_result,
         "workflow_integration": workflow_integration_result,
+        "workflow_integration_repair": workflow_integration_repair,
         "passed": combined_passed,
     }
     _context_set(context_variables, "integration_test_result", integration_test_result)
@@ -1772,6 +1883,7 @@ async def validate_app_bundle_from_request(
         "module_implementation_validation_result": module_implementation_result,
         "module_runtime_quality_result": runtime_quality_result,
         "workflow_integration_validation_result": workflow_integration_result,
+        "workflow_integration_repair": workflow_integration_repair,
         "integration_tests_passed": combined_passed,
     }
 

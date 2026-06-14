@@ -208,7 +208,7 @@ def extract_workflow_integration_metadata_from_bundle_entries(
             event
             for event in (
                 _normalize_trigger_event(item, default_capability_id=capability_id)
-                for item in (orchestrator.get("triggers") if isinstance(orchestrator.get("triggers"), list) else [])
+                for item in (orchestrator.get("triggers") if isinstance(orchestrator.get("triggers"), list) else [])  # type: ignore[union-attr]
             )
             if event is not None
         ]

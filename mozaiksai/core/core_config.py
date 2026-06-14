@@ -74,7 +74,7 @@ def get_secret(name: str) -> str:
         try:
             secret = client.get_secret(name)
             if secret and getattr(secret, "value", None):
-                return secret.value  # type: ignore[attr-defined]
+                return secret.value  # type: ignore[attr-defined,no-any-return]
         except Exception:
             pass
 

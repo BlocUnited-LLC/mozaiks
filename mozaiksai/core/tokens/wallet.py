@@ -104,7 +104,7 @@ def _iso(value: Any) -> str | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             value = value.replace(tzinfo=UTC)
-        return value.astimezone(UTC).isoformat()
+        return value.astimezone(UTC).isoformat()  # type: ignore[no-any-return]
     text = _text(value)
     return text or None
 
@@ -207,6 +207,13 @@ def _scope_for(
 def _entry_id(scope: TokenWalletScope, idempotency_key: str) -> str:
     digest = hashlib.sha256(f"{scope.balance_id}:{idempotency_key}".encode()).hexdigest()
     return f"token_wallet_entry:{digest}"
+
+
+def _idempotency_conflict(existing: dict[str, Any], requested: dict[str, Any]) -> bool:
+    for key in ("balance_id", "operation", "direction", "amount", "signed_amount"):
+        if existing.get(key) != requested.get(key):
+            return True
+    return False
 
 
 def _empty_balance(scope: TokenWalletScope) -> dict[str, Any]:
@@ -358,6 +365,8 @@ class TokenWalletLedger:
 
         balances, entries = await self._collections()
         existing = await entries.find_one({"_id": entry_id}, {"_id": 0})
+        if existing and _idempotency_conflict(existing, entry):
+            raise ValueError("idempotency_key was reused with different token wallet entry data")
         if existing and existing.get("status") in {"applied", "rejected"}:
             balance_doc = await balances.find_one({"_id": scope.balance_id})
             return TokenWalletEntryResult(
@@ -370,6 +379,8 @@ class TokenWalletLedger:
                 await entries.insert_one(entry)
             except DuplicateKeyError:
                 existing = await entries.find_one({"_id": entry_id})
+                if existing and _idempotency_conflict(existing, entry):
+                    raise ValueError("idempotency_key was reused with different token wallet entry data")
                 if existing and existing.get("status") in {"applied", "rejected"}:
                     balance_doc = await balances.find_one({"_id": scope.balance_id})
                     return TokenWalletEntryResult(

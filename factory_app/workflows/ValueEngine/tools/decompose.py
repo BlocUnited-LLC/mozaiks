@@ -19,7 +19,7 @@ try:
     _HAS_PERSISTENCE = True
 except ImportError:
     _HAS_PERSISTENCE = False
-    BuilderArtifactStore = None
+    BuilderArtifactStore = None  # type: ignore[assignment,misc]
 
 
 def _normalize_object_list(value: Any) -> list[dict[str, Any]]:
@@ -109,7 +109,7 @@ async def save_build_plan(
     }
 
     # Persist to MongoDB via mozaiks runtime
-    if _HAS_PERSISTENCE and BuilderArtifactStore:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:  # type: ignore[truthy-function]
         try:
             store = BuilderArtifactStore()
             await store.save_build_plan(app_id=str(app_id), build_plan=build_plan)
@@ -167,7 +167,7 @@ async def get_build_plan(
             return {"success": True, "build_plan": cached}
 
     # Load from MongoDB
-    if _HAS_PERSISTENCE and BuilderArtifactStore:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:  # type: ignore[truthy-function]
         try:
             store = BuilderArtifactStore()
             plan = await store.get_build_plan(app_id=str(app_id))

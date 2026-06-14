@@ -41,7 +41,7 @@ class JWTAdapterConfig:
     scopes_format: str = "space"
 
     # Algorithms to accept
-    algorithms: list[str] = None
+    algorithms: list[str] = None  # type: ignore[assignment]
 
     # Clock skew tolerance in seconds
     clock_skew_seconds: int = 120
@@ -171,7 +171,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
                 audience=self._config.audience if self._config.audience else None,
                 issuer=self._config.issuer if self._config.issuer else None,
                 leeway=self._config.clock_skew_seconds,
-                options=decode_options,
+                options=decode_options,  # type: ignore[arg-type]
             )
         except jwt.ExpiredSignatureError as exc:
             raise AuthError("Token has expired", 401, self.name) from exc

@@ -89,7 +89,7 @@ def resolve_app_validation_strategy(
         return normalized, f"resolved from {source}"
 
     return default_app_validation_strategy(
-        env=env_map,
+        env=env_map,  # type: ignore[arg-type]
         local_available=local_available,
         docker_available=docker_available,
     )

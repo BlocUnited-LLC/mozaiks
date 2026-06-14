@@ -8,6 +8,9 @@ prompt_middleware:
 - agent: PackMetadataAgent
   filename: hook_primitive_catalog.py
   function: inject_primitive_catalog
+- agent: PackMetadataAgent
+  filename: tools/hook_workflow_bundle_repair.py
+  function: merge_repaired_workflow_bundle_results
 - agent: PatternAgent
   function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
 - agent: PatternAgent

@@ -235,7 +235,7 @@ def _derive_module_id_for_page(
     context_variables: Any | None,
 ) -> str | None:
     app_build_plan = _context_get(context_variables, "app_build_plan")
-    modules = []
+    modules = []  # type: ignore[var-annotated]
     if isinstance(app_build_plan, dict):
         modules = app_build_plan.get("modules") or []
     if isinstance(modules, list) and len(modules) == 1 and isinstance(modules[0], dict):
@@ -561,7 +561,7 @@ def _validate_data_contract(data_contract: Any) -> None:
             raise ValueError(f"{path}.alias is required")
         if alias_id in seen_aliases:
             raise ValueError(f"{path}.alias must be unique")
-        seen_aliases.add(alias_id)
+        seen_aliases.add(alias_id)  # type: ignore[arg-type]
         if not _is_non_empty_string(alias.get("collection")):
             raise ValueError(f"{path}.collection is required")
         if not _is_non_empty_string(alias.get("owner_module")):
@@ -628,10 +628,10 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
             )
         if not _is_non_empty_string(entry.get("purpose")):
             raise ValueError(f"{path}.purpose is required")
-        route_ids.add(route_id)
-        route_paths.add(route_path)
-        registry_keys.add(component)
-        route_by_id[route_id] = entry
+        route_ids.add(route_id)  # type: ignore[arg-type]
+        route_paths.add(route_path)  # type: ignore[arg-type]
+        registry_keys.add(component)  # type: ignore[arg-type]
+        route_by_id[route_id] = entry  # type: ignore[index]
 
     file_paths: set[str] = set()
     for index, entry in enumerate(page_files):
@@ -1055,7 +1055,7 @@ def _validate_page_section(section: dict[str, Any], *, path: str, require_id: bo
         raise ValueError(f"{path}.id must be a non-empty string")
 
     primitive = section.get("primitive")
-    validated = validate_page_ui_primitives([primitive], context=f"{path}.primitive")
+    validated = validate_page_ui_primitives([primitive], context=f"{path}.primitive")  # type: ignore[list-item]
     if not validated:
         raise ValueError(f"{path}.primitive is required")
 
@@ -1267,7 +1267,7 @@ def _validate_shell_navigation(shell_config: dict[str, Any] | None) -> None:
 
     policy = navigation.get("policy") if isinstance(navigation.get("policy"), dict) else navigation
     for viewport in ("desktop", "mobile"):
-        value = policy.get(viewport)
+        value = policy.get(viewport)  # type: ignore[union-attr]
         if value is None:
             continue
         if not isinstance(value, dict):
@@ -1276,16 +1276,16 @@ def _validate_shell_navigation(shell_config: dict[str, Any] | None) -> None:
             if value.get(field) is not None and not _is_non_empty_string(value.get(field)):
                 raise ValueError(f"shell_config.navigation.{viewport}.{field} must be a non-empty string")
 
-    max_mobile = policy.get("maxMobileItems")
+    max_mobile = policy.get("maxMobileItems")  # type: ignore[union-attr]
     if max_mobile is not None and (not isinstance(max_mobile, int) or max_mobile < 1 or max_mobile > 5):
         raise ValueError("shell_config.navigation.maxMobileItems must be an integer from 1 to 5")
-    if "max_mobile_items" in policy:
+    if "max_mobile_items" in policy:  # type: ignore[operator]
         raise ValueError("shell_config.navigation.max_mobile_items is not supported; use maxMobileItems")
 
-    auto_from_pages = policy.get("autoFromPages")
+    auto_from_pages = policy.get("autoFromPages")  # type: ignore[union-attr]
     if auto_from_pages is not None and not isinstance(auto_from_pages, bool):
         raise ValueError("shell_config.navigation.autoFromPages must be a boolean")
-    if "auto_from_pages" in policy:
+    if "auto_from_pages" in policy:  # type: ignore[operator]
         raise ValueError("shell_config.navigation.auto_from_pages is not supported; use autoFromPages")
 
     items = navigation.get("items")
@@ -1294,7 +1294,7 @@ def _validate_shell_navigation(shell_config: dict[str, Any] | None) -> None:
     if isinstance(items, dict):
         iterable = items.values()
     elif isinstance(items, list):
-        iterable = items
+        iterable = items  # type: ignore[assignment]
     else:
         raise ValueError("shell_config.navigation.items must be a list or object")
     for item in iterable:

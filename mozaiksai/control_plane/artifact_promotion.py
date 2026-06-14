@@ -569,7 +569,7 @@ async def create_draft_app_bundle_from_staged_refinement(
             )
         except Exception:
             content_ref = None
-            content_backend = None
+            content_backend = None  # type: ignore[assignment]
         else:
             refreshed_metadata = _build_refinement_metadata(
                 plan=plan,

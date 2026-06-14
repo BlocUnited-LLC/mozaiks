@@ -122,7 +122,7 @@ class SessionRegistry:
                 wf.artifact_id = artifact_id
                 wf.last_active = datetime.now(UTC)
                 if auto_activate:
-                    return self.switch_workflow(ws_id, chat_id)
+                    return self.switch_workflow(ws_id, chat_id)  # type: ignore[return-value]
                 return wf
         
         context = WorkflowContext(
@@ -141,7 +141,7 @@ class SessionRegistry:
         )
         
         if auto_activate:
-            return self.switch_workflow(ws_id, chat_id)
+            return self.switch_workflow(ws_id, chat_id)  # type: ignore[return-value]
         
         return context
     

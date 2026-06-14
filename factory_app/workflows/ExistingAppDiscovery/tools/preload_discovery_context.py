@@ -492,7 +492,7 @@ def _parse_package_json(raw_text: str, frameworks: list[str], languages: list[st
         data = json.loads(raw_text)
     except Exception:
         return
-    deps = {}
+    deps = {}  # type: ignore[var-annotated]
     deps.update(data.get("dependencies", {}) or {})
     deps.update(data.get("devDependencies", {}) or {})
     if deps:
@@ -1189,7 +1189,7 @@ def _combine_repo_summaries(*summaries: dict[str, Any]) -> dict[str, Any]:
     return {
         "success": True,
         "source": "multi_repo",
-        "repo_name": " + ".join(repo_names) if repo_names else "existing_app_sources",
+        "repo_name": " + ".join(repo_names) if repo_names else "existing_app_sources",  # type: ignore[arg-type]
         "repo_names": repo_names,
         "languages": languages,
         "frameworks": frameworks,
@@ -1208,7 +1208,7 @@ def _load_spec_from_file(path_value: str) -> dict[str, Any] | None:
         return None
     raw_text = path.read_text(encoding="utf-8")
     try:
-        return json.loads(raw_text)
+        return json.loads(raw_text)  # type: ignore[no-any-return]
     except Exception:
         try:
             parsed = yaml.safe_load(raw_text)
@@ -1225,7 +1225,7 @@ async def _load_spec_from_url(url: str) -> dict[str, Any] | None:
     if resp.status_code != 200:
         return None
     try:
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
     except Exception:
         try:
             parsed = yaml.safe_load(resp.text)

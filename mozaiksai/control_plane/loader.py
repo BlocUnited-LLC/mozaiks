@@ -24,7 +24,7 @@ class ControlPlanePackLoadError(Exception):
     """Raised when a control-plane pack cannot be found or validated."""
 
 
-CONTROL_PLANE_TOOL_TARGETS: set[str] = {"harness", *ControlPlaneCheckpointEvent.__args__}
+CONTROL_PLANE_TOOL_TARGETS: set[str] = {"harness", *ControlPlaneCheckpointEvent.__args__}  # type: ignore[attr-defined]
 
 
 def resolve_factory_control_plane_root() -> Path:

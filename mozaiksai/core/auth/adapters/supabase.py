@@ -114,7 +114,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
         try:
             claims = jwt.decode(
                 token,
-                self._jwt_secret,
+                self._jwt_secret,  # type: ignore[arg-type]
                 algorithms=["HS256"],
                 audience="authenticated",
                 options={

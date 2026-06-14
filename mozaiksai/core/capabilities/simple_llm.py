@@ -303,7 +303,7 @@ class SimpleLLMCapabilityService:
         config_list = llm_config.get("config_list", [])
         for entry in config_list:
             if entry.get("api_key") and entry.get("model"):
-                return entry
+                return entry  # type: ignore[no-any-return]
         raise RuntimeError("No LLM provider available for non-AG2 capability execution")
 
 

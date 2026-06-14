@@ -107,7 +107,7 @@ def compute_connector_health(
             if not has_secret:
                 missing_fields.append(name)
             continue
-        value = public_config.get(name)
+        value = public_config.get(name)  # type: ignore[union-attr]
         if value is None or (isinstance(value, str) and not value.strip()):
             missing_fields.append(name)
 
@@ -116,7 +116,7 @@ def compute_connector_health(
         message = "Connector is missing required configuration."
     elif str(record.get("health_status") or "").strip() in {"healthy", "unhealthy"}:
         status = str(record.get("health_status"))
-        message = str(record.get("health_message") or "").strip() or None
+        message = str(record.get("health_message") or "").strip() or None  # type: ignore[assignment]
     elif fields or record.get("secret_available") or public_config:
         status = "configured"
         message = "Connector has required configuration; no provider validation has run."

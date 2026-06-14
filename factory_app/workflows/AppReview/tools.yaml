@@ -18,9 +18,10 @@ tools:
   file: tools/submit_revision_request.py
   function: submit_revision_request
   description: >
-    Called by ReviewAgent after the user types a revision request or
-    after a successful promotion signal. Sets review_complete=true
-    and stores the user's request text in context_variables for the
-    refinement control plane.
+    Called by ReviewAgent after the user types a non-empty revision request
+    or after a successful promotion signal. Sets review_complete=true,
+    stores the canonical refinement_request metadata in context_variables,
+    and emits the AppReview revision event consumed by Studio's refinement
+    trigger bridge.
   tool_type: Agent_Tool
   auto_tool_call: false

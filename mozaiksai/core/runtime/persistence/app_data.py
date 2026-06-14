@@ -78,7 +78,7 @@ def load_app_data_contract(
     contract_path: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
     path = Path(contract_path).expanduser().resolve() if contract_path else default_data_contract_path(app_root)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
 def aliases_from_data_contract(contract: Mapping[str, Any] | None) -> dict[str, str]:
@@ -238,7 +238,7 @@ def app_data_from_context(
 ) -> AppData:
     existing = getattr(ctx, "app_data", None)
     if existing is not None:
-        return existing
+        return existing  # type: ignore[no-any-return]
 
     resolved_contract = contract if contract is not None else load_app_data_contract(app_root)
     aliases = aliases_from_data_contract(resolved_contract)
@@ -251,7 +251,7 @@ def app_data_from_context(
     if isinstance(persistence, MongoPersistenceContext) or hasattr(persistence, "literal_collection"):
         return AppData(
             aliases=aliases,
-            collection_resolver=persistence.literal_collection,
+            collection_resolver=persistence.literal_collection,  # type: ignore[union-attr]
         )
 
     client = get_mongo_client()

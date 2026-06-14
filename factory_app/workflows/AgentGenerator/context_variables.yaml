@@ -464,6 +464,100 @@ definitions:
     source:
       type: state
       default: null
+  workflow_bundle_validation_status:
+    type: string
+    description: >
+      Production quality gate status set by generate_and_download. passed means
+      the bundle can be packaged; failed means repair or operator review is needed.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_validation_errors:
+    type: array
+    description: Blocking workflow bundle quality gate errors.
+    source:
+      type: computed
+      default: []
+  workflow_bundle_validation_warnings:
+    type: array
+    description: Non-blocking workflow bundle quality gate warnings.
+    source:
+      type: computed
+      default: []
+  workflow_bundle_quality_gate:
+    type: object
+    description: Full workflow bundle quality gate result from generate_and_download.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_semantic_drift:
+    type: object
+    description: Prompt-oriented semantic drift report for generated workflow bundles.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_repair_status:
+    type: string
+    description: >
+      Bounded repair loop status for generated workflow bundles. One of
+      needs_revision | merged | passed | blocked.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_repair_active:
+    type: boolean
+    description: True while a narrowed workflow repair task batch is in progress.
+    source:
+      type: computed
+      default: false
+  workflow_bundle_repair_count:
+    type: integer
+    description: Number of workflow bundle repair attempts already scheduled.
+    source:
+      type: computed
+      default: 0
+  workflow_bundle_repair_max_attempts:
+    type: integer
+    description: Maximum automated workflow bundle repair attempts before blocking.
+    source:
+      type: computed
+      default: 2
+  workflow_bundle_repair_failed_workflows:
+    type: array
+    description: Workflow names selected for the current repair pass.
+    source:
+      type: computed
+      default: []
+  workflow_bundle_repair_request:
+    type: string
+    description: Focused repair instruction generated from quality gate failures.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_repair_result:
+    type: object
+    description: Full repair scheduling result.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_repair_base_results:
+    type: object
+    description: Preserved pre-repair workflow_bundle_results for merge after the repair batch completes.
+    source:
+      type: computed
+      default: null
+  workflow_bundle_repair_original_workflows_spec:
+    type: array
+    description: Original full workflows_spec restored after a narrowed repair batch.
+    source:
+      type: computed
+      default: []
+  workflow_bundle_repair_merge_result:
+    type: object
+    description: Result from merging repaired workflow outputs back into the full bundle set.
+    source:
+      type: computed
+      default: null
   workflow_integration_metadata:
     type: object
     description: >
@@ -562,6 +656,9 @@ agents:
     - pack_name
     - is_multi_workflow
     - workflows_spec
+    - workflow_bundle_repair_status
+    - workflow_bundle_repair_request
+    - workflow_bundle_repair_failed_workflows
   WorkflowBundleBuilderAgent:
     variables:
     - concept_overview
@@ -593,6 +690,8 @@ agents:
     - workflows_spec
     - workflow_bundle_results
     - workflow_bundle_status
+    - workflow_bundle_repair_status
+    - workflow_bundle_repair_merge_result
   DownloadAgent:
     variables:
     - is_multi_workflow
@@ -600,6 +699,14 @@ agents:
     - pack_partition_reason
     - workflows_spec
     - workflow_bundle_results
+    - workflow_bundle_validation_status
+    - workflow_bundle_validation_errors
+    - workflow_bundle_quality_gate
+    - workflow_bundle_semantic_drift
+    - workflow_bundle_repair_status
+    - workflow_bundle_repair_count
+    - workflow_bundle_repair_request
+    - workflow_bundle_repair_result
     - workflow_integration_metadata
     - generated_workflow_integrations
     - generated_workflow_name

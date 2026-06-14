@@ -210,7 +210,7 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
                 required_by={
                     "source": "build_task",
                     "task_id": task_id,
-                    **(need.get("required_by") if isinstance(need.get("required_by"), dict) else {}),
+                    **(need.get("required_by") if isinstance(need.get("required_by"), dict) else {}),  # type: ignore[dict-item]
                 },
             )
     return needs
@@ -236,7 +236,7 @@ def _extract_needs_from_nested(value: Any, *, source: str) -> list[dict[str, Any
                     required_by={
                         "source": source,
                         "path": path,
-                        **(need.get("required_by") if isinstance(need.get("required_by"), dict) else {}),
+                        **(need.get("required_by") if isinstance(need.get("required_by"), dict) else {}),  # type: ignore[dict-item]
                     },
                 )
             for key, child in node.items():
@@ -393,7 +393,7 @@ def _extract_secret_value(entry: dict[str, Any], fields: list[dict[str, Any]]) -
     for field in fields:
         if str(field.get("type") or "").lower() not in SECRET_FIELD_TYPES:
             continue
-        value = submitted.get(field.get("name"))
+        value = submitted.get(field.get("name"))  # type: ignore[arg-type]
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""

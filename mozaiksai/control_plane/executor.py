@@ -40,7 +40,7 @@ def resolve_control_plane_tool_entrypoint(entrypoint: str) -> Callable[..., Any]
         raise ControlPlaneToolExecutionError(
             f"Control-plane tool entrypoint '{entrypoint}' did not resolve to a callable."
         )
-    return tool_callable
+    return tool_callable  # type: ignore[no-any-return]
 
 
 class ControlPlaneToolExecutor:

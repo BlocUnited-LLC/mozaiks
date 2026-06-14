@@ -155,16 +155,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if not self._enabled:
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # Never rate-limit CORS preflight.
         if request.method == "OPTIONS":
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         path = request.url.path
 
         if path in self._excluded_paths:
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         client_key = _get_client_key(request, self._client_header)
 
@@ -220,4 +220,4 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         except Exception:
             pass  # Headers are informational; never fail a request over them.
 
-        return response
+        return response  # type: ignore[no-any-return]

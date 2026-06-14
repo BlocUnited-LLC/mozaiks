@@ -509,7 +509,7 @@ class GlobalPackGraph(BaseModel):
         transition_id_set = set(transition_ids)
         journey_id_set = set(journey_ids)
         for entry in self.workflows:
-            for dependency in entry.dependencies:
+            for dependency in entry.dependencies:  # type: ignore[assignment]
                 dep_id = dependency.id if isinstance(dependency, WorkflowDependency) else str(dependency)
                 dep_id = dep_id.strip()
                 if dep_id and dep_id not in wf_ids:
@@ -618,7 +618,7 @@ class GlobalPackGraph(BaseModel):
                     group_index_by_workflow[workflow_id] = index
             for workflow_id, group_index in group_index_by_workflow.items():
                 entry = workflow_entries[workflow_id]
-                for dependency in entry.dependencies:
+                for dependency in entry.dependencies:  # type: ignore[assignment]
                     if isinstance(dependency, WorkflowDependency):
                         if dependency.gating != "required":
                             continue

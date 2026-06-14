@@ -638,6 +638,44 @@ definitions:
       fields:
       - trigger_events
       default: []
+  workflow_integration_repair_status:
+    type: string
+    description: >
+      Bounded repair status for AgentGenerator-to-AppGenerator workflow wiring.
+      One of not_applicable | needs_revision | passed | blocked.
+    source:
+      type: computed
+      default: null
+  workflow_integration_repair_count:
+    type: integer
+    description: Number of workflow-integration repair passes already scheduled.
+    source:
+      type: computed
+      default: 0
+  workflow_integration_repair_max_attempts:
+    type: integer
+    description: Maximum automated workflow-integration repair attempts before blocking.
+    source:
+      type: computed
+      default: 2
+  workflow_integration_repair_request:
+    type: string
+    description: Focused ConfigMiddlewareAgent repair instruction derived from acceptance gate failures.
+    source:
+      type: computed
+      default: null
+  workflow_integration_repair_failed_tests:
+    type: array
+    description: Raw workflow integration failed tests that caused the repair pass.
+    source:
+      type: computed
+      default: []
+  workflow_integration_repair_result:
+    type: object
+    description: Full workflow integration repair scheduling result.
+    source:
+      type: computed
+      default: null
   interview_complete:
     type: boolean
     description: True once the intake interview has gathered enough non-AI product
@@ -960,6 +998,18 @@ definitions:
   module_implementation_validation_result:
     type: object
     description: Raw module implementation validation payload.
+    source:
+      type: computed
+      default: null
+  workflow_integration_validation_passed:
+    type: boolean
+    description: Set by the deterministic AgentGenerator workflow integration check.
+    source:
+      type: computed
+      default: false
+  workflow_integration_validation_result:
+    type: object
+    description: Raw AgentGenerator workflow integration validation result.
     source:
       type: computed
       default: null
@@ -1288,6 +1338,10 @@ agents:
     - generated_workflow_integrations
     - generated_workflow_capability_id
     - generated_workflow_trigger_events
+    - generated_files
+    - workflow_integration_repair_status
+    - workflow_integration_repair_request
+    - workflow_integration_repair_failed_tests
   AdminRegistryAgent:
     variables:
     - app_build_plan
@@ -1364,24 +1418,11 @@ agents:
     - wiring_validation_result
     - module_implementation_validation_passed
     - module_implementation_validation_result
-  IntegrationTestAgent:
-    variables:
-    - concept_overview
-    - concept_api_endpoints
-    - concept_blueprint
-    - agent_websocket_url
-    - agent_api_url
-    - agent_repo_url
-    - agent_names
-    - tool_names
-    - available_agents
-    - available_tools
-    - integration_tests_passed
-    - integration_test_result
-    - wiring_validation_passed
-    - wiring_validation_result
-    - module_implementation_validation_passed
-    - module_implementation_validation_result
+    - workflow_integration_validation_passed
+    - workflow_integration_validation_result
+    - workflow_integration_repair_status
+    - workflow_integration_repair_request
+    - workflow_integration_repair_result
   DownloadAgent:
     variables:
     - build_registry_id

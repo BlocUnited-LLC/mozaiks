@@ -446,10 +446,10 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
         errors.append("target_kind must be one of: container, compose, external_adapter")
 
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
-    container_port = runtime.get("container_port")
+    container_port = runtime.get("container_port")  # type: ignore[union-attr]
     if not isinstance(container_port, int) or container_port <= 0:
         errors.append("runtime.container_port must be a positive integer")
-    if not str(runtime.get("health_path") or "").startswith("/"):
+    if not str(runtime.get("health_path") or "").startswith("/"):  # type: ignore[union-attr]
         errors.append("runtime.health_path must start with '/'")
 
     outputs = _list_of_str(spec.get("artifact_outputs"))
@@ -459,23 +459,23 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
         errors.append("artifact_outputs must include deployment.manifest.json")
 
     env = spec.get("environment") if isinstance(spec.get("environment"), dict) else {}
-    required_env = _list_of_str(env.get("required_variables"))
-    secret_env = _list_of_str(env.get("secret_variables"))
-    public_env = _list_of_str(env.get("public_variables"))
+    required_env = _list_of_str(env.get("required_variables"))  # type: ignore[union-attr]
+    secret_env = _list_of_str(env.get("secret_variables"))  # type: ignore[union-attr]
+    public_env = _list_of_str(env.get("public_variables"))  # type: ignore[union-attr]
     if not required_env:
         errors.append("environment.required_variables must not be empty")
     if set(secret_env) & set(public_env):
         errors.append("environment.secret_variables and environment.public_variables must not overlap")
 
     image = spec.get("image") if isinstance(spec.get("image"), dict) else {}
-    if not str(image.get("image_name") or "").strip():
+    if not str(image.get("image_name") or "").strip():  # type: ignore[union-attr]
         errors.append("image.image_name is required")
-    if str(image.get("tag_strategy") or "") not in _TAG_STRATEGIES:
+    if str(image.get("tag_strategy") or "") not in _TAG_STRATEGIES:  # type: ignore[union-attr]
         errors.append("image.tag_strategy must be one of: commit_sha, timestamp, manual")
 
     checks = spec.get("checks") if isinstance(spec.get("checks"), dict) else {}
     for key in ("build", "smoke", "health"):
-        if not isinstance(checks.get(key), bool):
+        if not isinstance(checks.get(key), bool):  # type: ignore[union-attr]
             errors.append(f"checks.{key} must be boolean")
 
     provider_profile = spec.get("provider_profile")
@@ -509,12 +509,12 @@ def build_deployment_template_manifest(
         "app_id": str(app_id),
         "deployment_profile": str(deployment_profile or DEFAULT_PROFILE),
         "generated_files": file_paths,
-        "required_env": _list_of_str(env.get("required_variables")),
-        "secret_env": _list_of_str(env.get("secret_variables")),
-        "exposed_ports": [int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)],
+        "required_env": _list_of_str(env.get("required_variables")),  # type: ignore[union-attr]
+        "secret_env": _list_of_str(env.get("secret_variables")),  # type: ignore[union-attr]
+        "exposed_ports": [int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)],  # type: ignore[union-attr]
         "healthcheck": {
-            "path": str(runtime.get("health_path") or DEFAULT_HEALTH_PATH),
-            "port": int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT),
+            "path": str(runtime.get("health_path") or DEFAULT_HEALTH_PATH),  # type: ignore[union-attr]
+            "port": int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT),  # type: ignore[union-attr]
         },
         "ci_workflow": ".github/workflows/deploy.yml" if has_ci_workflow else None,
         "ci_secret_requirements": (
@@ -563,9 +563,9 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
     )
 
     health = manifest.get("healthcheck") if isinstance(manifest.get("healthcheck"), dict) else {}
-    if not str(health.get("path") or "").startswith("/"):
+    if not str(health.get("path") or "").startswith("/"):  # type: ignore[union-attr]
         errors.append("healthcheck.path must start with '/'")
-    if not isinstance(health.get("port"), int):
+    if not isinstance(health.get("port"), int):  # type: ignore[union-attr]
         errors.append("healthcheck.port must be an integer")
 
     status = str(manifest.get("validation_status") or "")
@@ -596,10 +596,10 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
 
 def _render_env_example(spec: dict[str, Any]) -> str:
     env = spec.get("environment") if isinstance(spec.get("environment"), dict) else {}
-    required_env = _list_of_str(env.get("required_variables"))
-    optional_env = _list_of_str(env.get("optional_variables"))
-    secret_env = set(_list_of_str(env.get("secret_variables")))
-    public_env = _list_of_str(env.get("public_variables"))
+    required_env = _list_of_str(env.get("required_variables"))  # type: ignore[union-attr]
+    optional_env = _list_of_str(env.get("optional_variables"))  # type: ignore[union-attr]
+    secret_env = set(_list_of_str(env.get("secret_variables")))  # type: ignore[union-attr]
+    public_env = _list_of_str(env.get("public_variables"))  # type: ignore[union-attr]
 
     lines: list[str] = [
         "# Generated by Mozaiks deployment contract (provider-neutral)",
@@ -631,7 +631,7 @@ def _render_env_example(spec: dict[str, Any]) -> str:
 
 def _render_dockerfile(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
-    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)
+    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
     return "\n".join(
         [
             "FROM python:3.13-slim",
@@ -648,7 +648,7 @@ def _render_dockerfile(spec: dict[str, Any]) -> str:
 
 def _render_compose(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
-    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)
+    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
     return "\n".join(
         [
             "version: '3.9'",
@@ -668,7 +668,7 @@ def _render_compose(spec: dict[str, Any]) -> str:
 
 def _render_workflow(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
-    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)
+    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
     ci_secret_requirements = _normalize_ci_secret_requirements(spec.get("ci_secret_requirements"))
     required_secrets = ci_secret_requirements["required"]
     optional_secrets = ci_secret_requirements["optional"]

@@ -130,7 +130,7 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
                 algorithms=["RS256"],
                 audience=audience,
                 issuer=self._issuer,
-                options=decode_options,
+                options=decode_options,  # type: ignore[arg-type]
             )
         except jwt.PyJWKClientError as e:
             logger.warning(f"JWKS error: {e}")

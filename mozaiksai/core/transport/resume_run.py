@@ -495,7 +495,7 @@ class AgentRunResumer:
         normalized = self._json_safe(dict(state))
         normalized.pop("message_index", None)
         normalized.pop("updated_at", None)
-        return normalized
+        return normalized  # type: ignore[no-any-return]
 
     def _decorate_message_with_tool_call_state(
         self,
@@ -580,7 +580,7 @@ class AgentRunResumer:
         try:
             from mozaiksai.core.session import get_session_router
 
-            return await get_session_router().get_session_snapshot(
+            return await get_session_router().get_session_snapshot(  # type: ignore[no-any-return]
                 app_id=resolved_app_id,
                 user_id=resolved_user_id,
             )

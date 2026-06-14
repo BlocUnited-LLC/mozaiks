@@ -152,7 +152,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         lines.append("")
         lines.append("Plan only with the active AppGenerator task vocabulary:")
         for contract_name in _PLANNING_CONTRACT_ORDER:
-            contract = task_contracts.get(contract_name)
+            contract = task_contracts.get(contract_name)  # type: ignore[union-attr]
             if isinstance(contract, dict):
                 lines.append(_build_contract_block(contract_name, contract))
         return "\n\n".join(lines)
@@ -171,7 +171,7 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
         target_contract_names = ["api_surface", "module_contract"]
 
     for contract_name in target_contract_names:
-        contract = task_contracts.get(contract_name)
+        contract = task_contracts.get(contract_name)  # type: ignore[union-attr]
         if isinstance(contract, dict):
             lines.append("")
             lines.append(_build_contract_block(contract_name, contract))
@@ -208,8 +208,8 @@ def _build_archetype_block(name: str, archetype: dict[str, Any]) -> str:
 
     select_when = [str(item) for item in archetype.get("select_when") or [] if str(item).strip()]
     yaml_family = archetype.get("canonical_yaml_family") if isinstance(archetype.get("canonical_yaml_family"), dict) else {}
-    always = [str(item) for item in yaml_family.get("always") or [] if str(item).strip()]
-    optional = [str(item) for item in yaml_family.get("optional") or [] if str(item).strip()]
+    always = [str(item) for item in yaml_family.get("always") or [] if str(item).strip()]  # type: ignore[union-attr]
+    optional = [str(item) for item in yaml_family.get("optional") or [] if str(item).strip()]  # type: ignore[union-attr]
     python_defaults = [str(item) for item in archetype.get("python_stub_defaults") or [] if str(item).strip()]
     hard_constraints = [str(item) for item in archetype.get("hard_constraints") or [] if str(item).strip()]
 

@@ -187,6 +187,10 @@ class UnifiedEventDispatcher:
 
         self._runtime_usage_ledger = get_runtime_usage_ledger()
         self.register_handler("chat.usage_delta", self._runtime_usage_ledger.record_usage_delta)
+        from mozaiksai.core.tokens.usage_ingest import get_token_wallet_usage_ingest_client
+
+        self._token_wallet_usage_ingest = get_token_wallet_usage_ingest_client()
+        self.register_handler("chat.usage_delta", self._token_wallet_usage_ingest.handle_usage_delta)
 
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
@@ -387,7 +391,7 @@ class UnifiedEventDispatcher:
             agent_name = event_dict.get('agent') or event_dict.get('sender')
             content = event_dict.get('content', '')
             metadata = event_dict.get('metadata') if isinstance(event_dict.get('metadata'), dict) else {}
-            seed_kind = event_dict.get('_mozaiks_seed_kind') or metadata.get('_mozaiks_seed_kind')
+            seed_kind = event_dict.get('_mozaiks_seed_kind') or metadata.get('_mozaiks_seed_kind')  # type: ignore[union-attr]
             
             # Check 0: System resume signals (always suppress)
             if isinstance(content, str) and SYSTEM_RESUME_SIGNAL in content:

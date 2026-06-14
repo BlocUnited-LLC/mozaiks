@@ -795,7 +795,7 @@ class ModuleLoader:
             if not path.exists():
                 continue
             try:
-                parsed[key] = model.model_validate(_load_yaml_file(path))
+                parsed[key] = model.model_validate(_load_yaml_file(path))  # type: ignore[attr-defined]
             except Exception as exc:
                 raise ModuleLoadError(f"Invalid {filename} for {definition.name!r}: {exc}") from exc
 

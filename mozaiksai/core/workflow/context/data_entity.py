@@ -236,7 +236,7 @@ class DataEntityManager:
 
         expected_type = str(spec.get("type") or "").strip().lower()
         checker = _TYPE_CHECKS.get(expected_type)
-        if checker and not isinstance(value, checker):
+        if checker and not isinstance(value, checker):  # type: ignore[arg-type]
             raise ValueError(
                 f"Field '{field_name}' must be of type '{expected_type}', got {type(value).__name__}"
             )

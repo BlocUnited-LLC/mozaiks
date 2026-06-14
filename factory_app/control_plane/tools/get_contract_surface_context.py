@@ -41,11 +41,11 @@ async def get_contract_surface_context(
         return {"present": False, "reason": "missing app_id"}
 
     # Load the artifact workspace to get the file tree.
-    workspace_result = await load_artifact_workspace(
+    workspace_result = await load_artifact_workspace(  # type: ignore[call-arg]
         app_id=app_id,
         artifact_kind=str(context.artifact_kind or "app_bundle").strip(),
         artifact_key=str(context.artifact_key or "").strip() or None,
-        artifact_version_id=artifact_version_id or None,
+        artifact_version_id=artifact_version_id or None,  # type: ignore[arg-type]
         max_file_bytes=8_192,
         include_content=False,
     )
@@ -62,7 +62,7 @@ async def get_contract_surface_context(
     }
 
     try:
-        from mozaiksai.core.app_context.context_graph import load_context_graph_for_artifact
+        from mozaiksai.core.app_context.context_graph import load_context_graph_for_artifact  # type: ignore[attr-defined]
 
         graph: AppContextGraph | None = await load_context_graph_for_artifact(
             app_id=app_id,

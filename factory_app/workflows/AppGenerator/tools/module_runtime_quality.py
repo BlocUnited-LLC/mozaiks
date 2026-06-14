@@ -177,9 +177,9 @@ def _literal_metric_value(node: ast.AST, *, trend_context: bool = False) -> bool
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return any(_literal_metric_value(item, trend_context=trend_context) for item in node.elts)
     if isinstance(node, ast.Dict):
-        for key, value in zip(node.keys, node.values, strict=False):
+        for key, value in zip(node.keys, node.values, strict=False):  # type: ignore[assignment]
             key_text = key.value if isinstance(key, ast.Constant) and isinstance(key.value, str) else ""
-            if _literal_metric_value(value, trend_context=trend_context or bool(_TREND_KEY.search(key_text))):
+            if _literal_metric_value(value, trend_context=trend_context or bool(_TREND_KEY.search(key_text))):  # type: ignore[arg-type]
                 return True
     return False
 
@@ -240,11 +240,11 @@ def _audit_ast(filename: str, content: str) -> list[str]:
                 continue
             if _static_trend_value(child.value):
                 warnings.append(
-                    f"{filename}:{child.lineno}: summary/stat function '{node.name}' returns a static trend/change value."
+                    f"{filename}:{child.lineno}: summary/stat function '{node.name}' returns a static trend/change value."  # type: ignore[attr-defined]
                 )
             if not has_data and _literal_metric_value(child.value):
                 warnings.append(
-                    f"{filename}:{child.lineno}: summary/stat function '{node.name}' returns static metrics without repo/db-backed data access."
+                    f"{filename}:{child.lineno}: summary/stat function '{node.name}' returns static metrics without repo/db-backed data access."  # type: ignore[attr-defined]
                 )
                 break
     return warnings

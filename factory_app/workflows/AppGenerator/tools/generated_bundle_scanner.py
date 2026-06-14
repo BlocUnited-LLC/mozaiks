@@ -154,8 +154,8 @@ def _module_surface_ids(data_contract: dict[str, Any]) -> set[str]:
             if not isinstance(collection, dict):
                 continue
             ownership = collection.get("ownership") if isinstance(collection.get("ownership"), dict) else {}
-            module_id = str(collection.get("module_id") or ownership.get("surface_id") or "").strip()
-            ownership_kind = str(ownership.get("surface_kind") or surface_kind).strip()
+            module_id = str(collection.get("module_id") or ownership.get("surface_id") or "").strip()  # type: ignore[union-attr]
+            ownership_kind = str(ownership.get("surface_kind") or surface_kind).strip()  # type: ignore[union-attr]
             if ownership_kind == "module" and module_id:
                 module_ids.add(module_id)
             elif surface_kind == "module" and surface_id:

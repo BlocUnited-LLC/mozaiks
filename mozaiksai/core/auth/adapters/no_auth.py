@@ -60,7 +60,7 @@ class NoAuthAdapter(BaseAuthAdapter):
             UserClaims with anonymous user data
         """
         return UserClaims(
-            user_id=self._default_user_id,
+            user_id=self._default_user_id,  # type: ignore[arg-type]
             email=self._default_email,
             name="Anonymous User",
             roles=self._default_roles,
@@ -84,7 +84,7 @@ class NoAuthAdapter(BaseAuthAdapter):
             UserClaims with anonymous user data
         """
         return UserClaims(
-            user_id=self._default_user_id,
+            user_id=self._default_user_id,  # type: ignore[arg-type]
             email=self._default_email,
             name="Anonymous User",
             roles=self._default_roles,

@@ -84,14 +84,14 @@ async def launch_context_refresh_plan(
         "context_refresh_plan": refresh_plan.model_dump(mode="json"),
     }
     if request_id:
-        trigger_payload["context_refresh_request_id"] = request_id
+        trigger_payload["context_refresh_request_id"] = request_id  # type: ignore[assignment]
 
     if workflow_launcher is None:
         from mozaiksai.core.session.launcher import launch_routed_workflow
 
         launcher = launch_routed_workflow
     else:
-        launcher = workflow_launcher
+        launcher = workflow_launcher  # type: ignore[assignment]
     try:
         launch = await launcher(
             workflow_id=workflow_id,

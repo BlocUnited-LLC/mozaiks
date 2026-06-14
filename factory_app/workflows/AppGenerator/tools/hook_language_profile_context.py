@@ -75,7 +75,7 @@ def _resolve_pack_id(agent: Any) -> str:
     if callable(getter):
         pack_id = getter("dev_pack_id", None)
         if pack_id and isinstance(pack_id, str) and pack_id.strip():
-            return pack_id.strip()
+            return pack_id.strip()  # type: ignore[no-any-return]
     return _DEFAULT_PACK_ID
 
 

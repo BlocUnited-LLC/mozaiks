@@ -115,7 +115,7 @@ def run_deterministic_staged_coding_worker(
         raise ValueError("staged coding worker request_id must match the refinement plan and staging result")
 
     scoped_changes = build_scoped_changes_from_worker_result(result)
-    return apply_scoped_refinement_changes(plan=plan, staging_result=staging_result, changes=scoped_changes)
+    return apply_scoped_refinement_changes(plan=plan, staging_result=staging_result, changes=scoped_changes)  # type: ignore[arg-type]
 
 
 def run_live_staged_coding_worker(
@@ -134,7 +134,7 @@ def run_live_staged_coding_worker(
         raise ValueError("staged coding worker source must be live_worker or deterministic")
 
     scoped_changes = build_scoped_changes_from_worker_result(result)
-    return apply_scoped_refinement_changes(plan=plan, staging_result=staging_result, changes=scoped_changes)
+    return apply_scoped_refinement_changes(plan=plan, staging_result=staging_result, changes=scoped_changes)  # type: ignore[arg-type]
 
 
 __all__ = [

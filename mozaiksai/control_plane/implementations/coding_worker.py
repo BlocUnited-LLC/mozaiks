@@ -174,7 +174,7 @@ class ScopedRefinementCodingWorker:
 
         return CodingWorkerResult(
             eligible=True,
-            status=status,
+            status=status,  # type: ignore[arg-type]
             plan=resolved_plan,
             applied_files=applied_files,
             validation_result=validation_result,

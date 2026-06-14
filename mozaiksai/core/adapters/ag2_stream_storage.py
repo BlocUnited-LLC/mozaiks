@@ -246,15 +246,15 @@ class MongoAG2StreamStorage(Storage):
         event_module_name = str(doc.get("event_module") or "").strip()
         event_payload = doc.get("event_payload") if isinstance(doc.get("event_payload"), dict) else {}
         if not event_module_name:
-            return UnknownEvent(type_name=event_class_name, data=event_payload)
+            return UnknownEvent(type_name=event_class_name, data=event_payload)  # type: ignore[arg-type]
         try:
             module = import_module(event_module_name)
             event_cls = getattr(module, event_class_name)
             if isinstance(event_cls, type) and issubclass(event_cls, BaseEvent):
-                return event_cls.from_dict(event_payload)
+                return event_cls.from_dict(event_payload)  # type: ignore[arg-type]
         except Exception as exc:  # pragma: no cover
             logger.debug("Failed to restore AG2 event %s from %s: %s", event_class_name, event_module_name, exc)
-        return UnknownEvent(type_name=event_class_name, data=event_payload)
+        return UnknownEvent(type_name=event_class_name, data=event_payload)  # type: ignore[arg-type]
 
 
 __all__ = ["MongoAG2StreamStorage", "stream_id_for_run"]

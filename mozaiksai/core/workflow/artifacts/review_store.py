@@ -188,7 +188,7 @@ async def list_review_artifacts(
             .sort("created_at", -1)
             .limit(resolved_limit)
         )
-        return await cursor.to_list(length=resolved_limit)
+        return await cursor.to_list(length=resolved_limit)  # type: ignore[no-any-return]
     except Exception as exc:
         logger.warning("workflow review artifact list failed collection=%s: %s", collection, exc)
         return []

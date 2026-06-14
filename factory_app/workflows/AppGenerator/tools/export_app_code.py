@@ -265,7 +265,7 @@ async def export_app_code_to_github(
                 branch_name=branch_name,
                 title=pr_title,
                 body=pr_body,
-                changes=patchset.get("changes") if isinstance(patchset.get("changes"), list) else [],
+                changes=patchset.get("changes") if isinstance(patchset.get("changes"), list) else [],  # type: ignore[arg-type]
                 patch_id=str(patch_id) if patch_id else None,
                 user_id=user_id,
             )

@@ -57,7 +57,7 @@ class SourceScopedContextExpression:
 
     def evaluate(self, state: WorkflowState, envelope: Envelope) -> bool:
         return FromSpeaker(self.source_agent_id).evaluate(state, envelope) and bool(
-            self._compiled_expression.evaluate(_MappingContextVariables(state.context_vars))
+            self._compiled_expression.evaluate(_MappingContextVariables(state.context_vars))  # type: ignore[arg-type]
         )
 
 

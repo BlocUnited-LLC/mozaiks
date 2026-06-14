@@ -37,7 +37,7 @@ class UsageIngestClient:
             if enabled is None
             else bool(enabled)
         )
-        self._url = (url or os.getenv("CONTROL_PLANE_USAGE_INGEST_URL", "")).strip()
+        self._url = (url or os.getenv("CONTROL_PLANE_USAGE_INGEST_URL", "")).strip()  # type: ignore[union-attr]
         self._timeout = aiohttp.ClientTimeout(total=float(timeout_sec))
         self._max_attempts = max(1, int(max_attempts))
         self._backoff_base = max(0.05, float(backoff_base_sec))

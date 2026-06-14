@@ -122,7 +122,7 @@ def build_context_graph_scope(
     nodes_by_id = {node.node_id: node for node in graph.nodes}
     for node_id in sorted(related_node_ids):
         node = nodes_by_id.get(node_id)
-        path = str((node.metadata or {}).get("path") or "")
+        path = str((node.metadata or {}).get("path") or "")  # type: ignore[union-attr]
         if node and node.node_type == GraphNodeType.FILE and path and path not in related_file_paths:
             related_file_paths.append(path)
 

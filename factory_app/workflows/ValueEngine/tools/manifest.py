@@ -21,7 +21,7 @@ try:
     _HAS_PERSISTENCE = True
 except ImportError:
     _HAS_PERSISTENCE = False
-    BuilderArtifactStore = None
+    BuilderArtifactStore = None  # type: ignore[assignment,misc]
 
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
@@ -204,7 +204,7 @@ async def save_value_manifest(
     )
 
     # Persist to MongoDB via mozaiks runtime
-    if _HAS_PERSISTENCE and BuilderArtifactStore:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:  # type: ignore[truthy-function]
         try:
             store = BuilderArtifactStore()
             await store.save_concept(
@@ -298,7 +298,7 @@ async def get_value_manifest(
             return {"success": True, "manifest": cached}
 
     # Load from MongoDB
-    if _HAS_PERSISTENCE and BuilderArtifactStore:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:  # type: ignore[truthy-function]
         try:
             store = BuilderArtifactStore()
             concept = await store.get_concept(app_id=str(app_id))

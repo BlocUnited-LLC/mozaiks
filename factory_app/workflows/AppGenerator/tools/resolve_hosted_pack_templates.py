@@ -97,7 +97,7 @@ def resolve_templates_for_pack(
     context_root = pack_source_path.resolve()
     context = _read_pack_context(context_root, pack_id)
     pack = context.get("pack") if isinstance(context.get("pack"), dict) else {}
-    if str(pack.get("status") or "active").strip() != "active":
+    if str(pack.get("status") or "active").strip() != "active":  # type: ignore[union-attr]
         logger.info("Skipping template materialization for inactive pack '%s'", pack_id)
         return []
 

@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from factory_app.workflows.AppReview.tools.review_context import (
+    build_refinement_request_payload,
+    build_revision_event_payload,
+    mark_review_promoted,
+    mark_review_revision_submitted,
+)
+
 
 async def submit_revision_request(
     revision_request: str | None = None,
@@ -23,42 +30,49 @@ async def submit_revision_request(
             promoted successfully, review is complete).
         context_variables: Live AG2 context_variables dict.
     """
-    ctx = context_variables if isinstance(context_variables, dict) else {}
-
-    is_promote = str(action or "").strip().lower() == "promote"
+    ctx = context_variables if context_variables is not None else {}
+    normalized_action = str(action or "").strip().lower() or "revise"
+    if normalized_action not in {"revise", "promote"}:
+        raise ValueError("action must be 'revise' or 'promote'")
+    is_promote = normalized_action == "promote"
     request_text = str(revision_request or "").strip()
 
-    if not is_promote:
-        ctx["revision_submitted"] = True
-        if request_text:
-            ctx["refinement_request"] = request_text
+    if is_promote:
+        mark_review_promoted(ctx)
+        return {
+            "success": True,
+            "action": "promote",
+            "revision_request": None,
+        }
 
-    ctx["review_complete"] = True
+    if not request_text:
+        raise ValueError("revision_request is required when action='revise'")
+
+    refinement_payload = build_refinement_request_payload(ctx, request_text)
+    mark_review_revision_submitted(ctx, refinement_payload)
 
     # Emit a WebSocket event so the frontend can trigger the refinement
-    # control plane. This is a best-effort fire-and-forget — the context
-    # variables above are the canonical state record.
-    if not is_promote and request_text:
-        chat_id = str(ctx.get("chat_id") or "").strip() or None
+    # control plane. Context variables remain the canonical state record.
+    chat_id = None
+    if hasattr(ctx, "get"):
         try:
-            from mozaiksai.core.transport.simple_transport import SimpleTransport
-
-            transport = await SimpleTransport.get_instance()
-            await transport.send_event_to_ui(
-                {
-                    "kind": "chat.revision_requested",
-                    "refinement_request": request_text,
-                    "artifact_kind": "app_bundle",
-                    "source_workflow": "AppReview",
-                },
-                chat_id=chat_id,
-            )
+            chat_id = str(ctx.get("chat_id") or "").strip() or None
         except Exception:
-            # Transport may be unavailable in test environments.
-            pass
+            chat_id = None
+    event_payload = build_revision_event_payload(ctx, request_text)
+    try:
+        from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+        transport = await SimpleTransport.get_instance()
+        await transport.send_event_to_ui(event_payload, chat_id=chat_id)
+        event_emitted = True
+    except Exception:
+        event_emitted = False
 
     return {
         "success": True,
-        "action": "promote" if is_promote else "revise",
-        "revision_request": request_text if not is_promote else None,
+        "action": "revise",
+        "revision_request": request_text,
+        "refinement_request": refinement_payload,
+        "event_emitted": event_emitted,
     }

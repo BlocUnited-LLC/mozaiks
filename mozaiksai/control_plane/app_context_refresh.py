@@ -64,7 +64,7 @@ def build_context_refresh_plan(
 ) -> ContextRefreshPlan:
     """Build a non-mutating plan for refreshing stale app context."""
     policy = _normalize_policy(policy_result)
-    if policy.decision is not AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH:
+    if policy.decision is not AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH:  # type: ignore[union-attr]
         raise ValueError("Context refresh plan requires block_requires_context_refresh policy decision")
 
     refresh_request = (
@@ -82,7 +82,7 @@ def build_context_refresh_plan(
             refresh_scope=refresh_scope,
         )
     )
-    warnings = _plan_warnings(refresh_request=refresh_request, policy_result=policy)
+    warnings = _plan_warnings(refresh_request=refresh_request, policy_result=policy)  # type: ignore[arg-type]
     return ContextRefreshPlan(
         app_id=refresh_request.app_id,
         current_context_version_id=refresh_request.current_context_version_id,

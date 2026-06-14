@@ -54,7 +54,7 @@ def _configuration_health(record: dict[str, Any], *, checked_by: str) -> dict[st
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
     missing_fields = []
     has_secret = bool(record.get("secret_available")) or int(record.get("key_length") or 0) > 0
-    for field_def in fields:
+    for field_def in fields:  # type: ignore[union-attr]
         if not isinstance(field_def, dict) or field_def.get("required") is False:
             continue
         name = str(field_def.get("name") or "").strip()
@@ -65,7 +65,7 @@ def _configuration_health(record: dict[str, Any], *, checked_by: str) -> dict[st
             if not has_secret:
                 missing_fields.append(name)
             continue
-        value = public_config.get(name)
+        value = public_config.get(name)  # type: ignore[union-attr]
         if value is None or (isinstance(value, str) and not value.strip()):
             missing_fields.append(name)
     if missing_fields:
@@ -73,7 +73,7 @@ def _configuration_health(record: dict[str, Any], *, checked_by: str) -> dict[st
         message = "Connector is missing required configuration."
     elif record.get("health_status") in {"healthy", "unhealthy"}:
         status = str(record.get("health_status"))
-        message = record.get("health_message")
+        message = record.get("health_message")  # type: ignore[assignment]
     elif fields or has_secret or public_config:
         status = "configured"
         message = "Connector has required configuration; no provider validation has run."
@@ -249,7 +249,7 @@ async def run_connector_health_check(
         provider_result = await provider.check(
             connector=dict(record),
             secret_reader=secret_reader,
-            public_config=dict(public_config),
+            public_config=dict(public_config),  # type: ignore[arg-type]
             context=context,
         )
         safe_result = provider_result.to_safe_dict()

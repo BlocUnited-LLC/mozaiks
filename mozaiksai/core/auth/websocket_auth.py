@@ -248,7 +248,7 @@ async def require_resource_ownership(
     """
     token_user_id = getattr(websocket.state, "user_id", None)
 
-    if not verify_user_owns_resource(token_user_id, resource_user_id):
+    if not verify_user_owns_resource(token_user_id, resource_user_id):  # type: ignore[arg-type]
         logger.warning(
             f"WebSocket access denied: token user {token_user_id} "
             f"tried to access resource owned by {resource_user_id}"
@@ -294,7 +294,7 @@ async def authenticate_websocket_with_path_user(
         return user
 
     # Authenticate with adapter
-    user = await authenticate_websocket(websocket, access_token=access_token)
+    user = await authenticate_websocket(websocket, access_token=access_token)  # type: ignore[assignment]
 
     if user is None:
         return None  # Already closed by authenticate_websocket

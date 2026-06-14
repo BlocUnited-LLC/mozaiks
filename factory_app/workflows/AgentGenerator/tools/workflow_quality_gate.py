@@ -487,7 +487,7 @@ def validate_agentgenerator_semantic_drift(
             continue
 
         spec_context = spec.get("context_variables") if isinstance(spec.get("context_variables"), dict) else {}
-        expected_human = spec_context.get("expected_human_in_the_loop")
+        expected_human = spec_context.get("expected_human_in_the_loop")  # type: ignore[union-attr]
         if isinstance(expected_human, bool) and orchestrator.get("human_in_the_loop") is not expected_human:
             issue = _issue(
                 check_id="human_in_the_loop_semantic_drift",
@@ -503,9 +503,9 @@ def validate_agentgenerator_semantic_drift(
             errors.append(_issue_summary(workflow_name, issue))
 
         triggers = orchestrator.get("triggers") if isinstance(orchestrator.get("triggers"), list) else []
-        expected_event = str(spec_context.get("expected_event_trigger") or "").strip()
+        expected_event = str(spec_context.get("expected_event_trigger") or "").strip()  # type: ignore[union-attr]
         if expected_event:
-            matching_triggers = [trigger for trigger in triggers if _event_type_from_trigger(trigger) == expected_event]
+            matching_triggers = [trigger for trigger in triggers if _event_type_from_trigger(trigger) == expected_event]  # type: ignore[union-attr]
             if not matching_triggers:
                 issue = _issue(
                     check_id="event_trigger_missing",
@@ -520,9 +520,9 @@ def validate_agentgenerator_semantic_drift(
                 report["semantic_drifts"].append(issue)
                 errors.append(_issue_summary(workflow_name, issue))
         else:
-            matching_triggers = [trigger for trigger in triggers if _event_type_from_trigger(trigger)]
+            matching_triggers = [trigger for trigger in triggers if _event_type_from_trigger(trigger)]  # type: ignore[union-attr]
 
-        explicit_expected_capability_id = str(spec_context.get("expected_workflow_capability_id") or "").strip()
+        explicit_expected_capability_id = str(spec_context.get("expected_workflow_capability_id") or "").strip()  # type: ignore[union-attr]
         expected_capability_id = explicit_expected_capability_id or workflow_name_to_capability_id(workflow_name)
         for matching_trigger in matching_triggers:
             trigger_type = str(matching_trigger.get("type") or "").strip()
@@ -676,10 +676,261 @@ def run_workflow_bundle_quality_gate(
     return result
 
 
+def _workflow_issue_map(quality_gate: dict[str, Any]) -> dict[str, list[str]]:
+    issues: dict[str, list[str]] = {}
+    structure = quality_gate.get("structure") if isinstance(quality_gate, dict) else {}
+    for report in structure.get("workflows") or [] if isinstance(structure, dict) else []:
+        if not isinstance(report, dict):
+            continue
+        workflow_name = str(report.get("workflow_name") or "").strip()
+        if not workflow_name:
+            continue
+        for error in report.get("errors") or []:
+            issues.setdefault(workflow_name, []).append(str(error))
+
+    semantic_drift = quality_gate.get("semantic_drift") if isinstance(quality_gate, dict) else {}
+    for report in semantic_drift.get("workflows") or [] if isinstance(semantic_drift, dict) else []:
+        if not isinstance(report, dict):
+            continue
+        workflow_name = str(report.get("workflow_name") or "").strip()
+        if not workflow_name:
+            continue
+        for item in report.get("semantic_drifts") or []:
+            if not isinstance(item, dict) or item.get("severity") != "error":
+                continue
+            summary = (
+                f"{item.get('check_id')}: expected {item.get('expected')!r}, "
+                f"observed {item.get('observed')!r}; fix: {item.get('fix_suggestion')}"
+            )
+            issues.setdefault(workflow_name, []).append(summary)
+    return issues
+
+
+def _task_id_for_entry(entry: dict[str, Any]) -> str:
+    task_id = str(entry.get("_task_id") or "").strip()
+    if task_id:
+        return task_id
+    workflow_name = str(entry.get("workflow_name") or "").strip()
+    return re.sub(r"[^a-z0-9]+", "_", workflow_name.lower()).strip("_")
+
+
+def _workflow_spec_name(spec: dict[str, Any]) -> str:
+    return str(spec.get("name") or spec.get("workflow_name") or spec.get("id") or "").strip()
+
+
+def _repair_task_id_for_spec(spec: dict[str, Any]) -> str:
+    task_id = str(spec.get("task_id") or "").strip()
+    if task_id:
+        return task_id
+    workflow_name = _workflow_spec_name(spec)
+    return re.sub(r"[^a-z0-9]+", "_", workflow_name.lower()).strip("_")
+
+
+def _build_repair_request(
+    *,
+    workflow_issues: dict[str, list[str]],
+    attempt: int,
+    max_attempts: int,
+) -> str:
+    lines = [
+        f"Workflow bundle quality gate failed. Automated repair attempt {attempt} of {max_attempts}.",
+        "Regenerate only the failed workflow bundle(s). Preserve the original workflow intent.",
+        "Do not simplify the workflow, remove task-batch/conveyor behavior, or invent alternate trigger semantics.",
+    ]
+    for workflow_name, issues in sorted(workflow_issues.items()):
+        lines.append(f"\n{workflow_name}:")
+        for issue in issues:
+            lines.append(f"- {issue}")
+    return "\n".join(lines)
+
+
+def prepare_workflow_bundle_repair(
+    *,
+    quality_gate: dict[str, Any],
+    bundle_entries: list[dict[str, Any]],
+    context_variables: Any | None = None,
+    max_attempts: int = 2,
+) -> dict[str, Any]:
+    """Prepare a bounded AgentGenerator task-batch retry for failed workflows."""
+
+    max_attempts = max(0, int(max_attempts))
+    workflow_issues = _workflow_issue_map(quality_gate)
+    failed_workflows = sorted(workflow_issues)
+    prior_attempts = int(_context_get(context_variables, "workflow_bundle_repair_count", 0) or 0)
+
+    if not failed_workflows:
+        result = {
+            "status": "blocked",
+            "repairable": False,
+            "reason": "quality_gate_failed_without_workflow_issue_mapping",
+            "failed_workflows": [],
+            "attempt": prior_attempts,
+            "max_attempts": max_attempts,
+            "repair_request": None,
+        }
+        _context_set(context_variables, "workflow_bundle_repair_status", result["status"])
+        _context_set(context_variables, "workflow_bundle_repair_result", result)
+        return result
+
+    if prior_attempts >= max_attempts:
+        repair_request = _build_repair_request(
+            workflow_issues=workflow_issues,
+            attempt=prior_attempts,
+            max_attempts=max_attempts,
+        )
+        result = {
+            "status": "blocked",
+            "repairable": False,
+            "reason": "workflow_bundle_repair_attempts_exhausted",
+            "failed_workflows": failed_workflows,
+            "attempt": prior_attempts,
+            "max_attempts": max_attempts,
+            "repair_request": repair_request,
+        }
+        _context_set(context_variables, "workflow_bundle_repair_status", result["status"])
+        _context_set(context_variables, "workflow_bundle_repair_request", repair_request)
+        _context_set(context_variables, "workflow_bundle_repair_failed_workflows", failed_workflows)
+        _context_set(context_variables, "workflow_bundle_repair_result", result)
+        return result
+
+    attempt = prior_attempts + 1
+    repair_request = _build_repair_request(
+        workflow_issues=workflow_issues,
+        attempt=attempt,
+        max_attempts=max_attempts,
+    )
+
+    current_results = _context_get(context_variables, "workflow_bundle_results")
+    current_specs = _context_get(context_variables, "workflows_spec", [])
+    if not _context_get(context_variables, "workflow_bundle_repair_original_workflows_spec"):
+        _context_set(context_variables, "workflow_bundle_repair_original_workflows_spec", current_specs)
+    _context_set(context_variables, "workflow_bundle_repair_base_results", current_results)
+
+    specs_by_name = {
+        _workflow_spec_name(spec): dict(spec)
+        for spec in current_specs
+        if isinstance(spec, dict) and _workflow_spec_name(spec)
+    }
+    entries_by_name = {
+        str(entry.get("workflow_name") or "").strip(): entry
+        for entry in bundle_entries
+        if str(entry.get("workflow_name") or "").strip()
+    }
+
+    repair_specs: list[dict[str, Any]] = []
+    for workflow_name in failed_workflows:
+        spec = dict(specs_by_name.get(workflow_name) or {})
+        if not spec:
+            entry = entries_by_name.get(workflow_name, {})
+            spec = {
+                "name": workflow_name,
+                "workflow_name": workflow_name,
+                "task_id": _task_id_for_entry(entry),
+                "initial_agent": "WorkflowBundleBuilderAgent",
+                "initial_message": f"Regenerate the complete workflow bundle for {workflow_name}.",
+                "context_variables": {},
+            }
+        spec["initial_agent"] = "WorkflowBundleBuilderAgent"
+        spec["repair_attempt"] = attempt
+        original_message = str(spec.get("initial_message") or "").strip()
+        issue_lines = "\n".join(f"- {issue}" for issue in workflow_issues[workflow_name])
+        spec["initial_message"] = (
+            f"{original_message}\n\n"
+            "[WORKFLOW BUNDLE REPAIR REQUEST]\n"
+            f"Repair attempt: {attempt} of {max_attempts}\n"
+            "The previous output failed the production quality gate. Regenerate the entire "
+            "workflow bundle for this workflow and fix every issue below.\n"
+            f"{issue_lines}\n"
+        ).strip()
+        context = spec.get("context_variables") if isinstance(spec.get("context_variables"), dict) else {}
+        context["workflow_bundle_repair_attempt"] = attempt  # type: ignore[index]
+        context["workflow_bundle_repair_issues"] = workflow_issues[workflow_name]  # type: ignore[index]
+        spec["context_variables"] = context
+        repair_specs.append(spec)
+
+    result = {
+        "status": "needs_revision",
+        "repairable": True,
+        "failed_workflows": failed_workflows,
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "repair_request": repair_request,
+        "repair_workflow_count": len(repair_specs),
+    }
+    _context_set(context_variables, "workflow_bundle_repair_status", result["status"])
+    _context_set(context_variables, "workflow_bundle_repair_active", True)
+    _context_set(context_variables, "workflow_bundle_repair_count", attempt)
+    _context_set(context_variables, "workflow_bundle_repair_max_attempts", max_attempts)
+    _context_set(context_variables, "workflow_bundle_repair_failed_workflows", failed_workflows)
+    _context_set(context_variables, "workflow_bundle_repair_request", repair_request)
+    _context_set(context_variables, "workflow_bundle_repair_result", result)
+    _context_set(context_variables, "workflows_spec", repair_specs)
+    return result
+
+
+def merge_workflow_bundle_repair_results(context_variables: Any | None = None) -> dict[str, Any]:
+    """Merge repaired task-batch outputs back into the pre-repair bundle set."""
+
+    if _context_get(context_variables, "workflow_bundle_repair_active") is not True:
+        return {"status": "skipped", "reason": "repair_not_active"}
+    base_results = _context_get(context_variables, "workflow_bundle_repair_base_results")
+    repair_results = _context_get(context_variables, "workflow_bundle_results")
+    if not isinstance(base_results, dict) or not isinstance(repair_results, dict):
+        return {"status": "skipped", "reason": "missing_repair_results"}
+
+    repair_entries = {
+        key: value
+        for key, value in repair_results.items()
+        if isinstance(key, str) and not key.startswith("_") and isinstance(value, dict)
+    }
+    repair_names = {
+        str(value.get("workflow_name") or "").strip()
+        for value in repair_entries.values()
+        if str(value.get("workflow_name") or "").strip()
+    }
+    merged: dict[str, Any] = {}
+    for key, value in base_results.items():
+        if not isinstance(key, str) or key.startswith("_"):
+            continue
+        if not isinstance(value, dict):
+            continue
+        workflow_name = str(value.get("workflow_name") or "").strip()
+        if key in repair_entries or workflow_name in repair_names:
+            continue
+        merged[key] = value
+    merged.update(repair_entries)
+    merged["_meta"] = {
+        **(base_results.get("_meta") if isinstance(base_results.get("_meta"), dict) else {}),  # type: ignore[dict-item]
+        "repair": {
+            "status": "merged",
+            "attempt": _context_get(context_variables, "workflow_bundle_repair_count", 0),
+            "repaired_tasks": sorted(repair_entries),
+            "repaired_workflows": sorted(repair_names),
+        },
+    }
+
+    original_specs = _context_get(context_variables, "workflow_bundle_repair_original_workflows_spec")
+    if isinstance(original_specs, list):
+        _context_set(context_variables, "workflows_spec", original_specs)
+    _context_set(context_variables, "workflow_bundle_results", merged)
+    _context_set(context_variables, "workflow_bundle_repair_active", False)
+    _context_set(context_variables, "workflow_bundle_repair_status", "merged")
+    _context_set(context_variables, "workflow_bundle_repair_merged", True)
+    result = {
+        "status": "merged",
+        "merged_workflow_count": len([key for key in merged if not key.startswith("_")]),
+        "repaired_workflows": sorted(repair_names),
+    }
+    _context_set(context_variables, "workflow_bundle_repair_merge_result", result)
+    return result
+
+
 __all__ = [
     "REQUIRED_WORKFLOW_FILES",
     "expected_workflows_from_context",
     "load_bundle_entries_from_root",
+    "merge_workflow_bundle_repair_results",
+    "prepare_workflow_bundle_repair",
     "run_workflow_bundle_quality_gate",
     "validate_agentgenerator_semantic_drift",
     "validate_workflow_bundle_structure",

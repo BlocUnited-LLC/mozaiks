@@ -789,9 +789,9 @@ def _normalize_page_task_dependencies(build_tasks: list[dict[str, Any]]) -> list
             if not facade_task_id and len(module_contract_task_ids) == 1:
                 facade_task_id = module_contract_task_ids[0]
             if facade_task_id:
-                deps = _normalize_string_list(item.get("depends_on"))
+                deps = _normalize_string_list(item.get("depends_on"))  # type: ignore[assignment]
                 if facade_task_id not in deps:
-                    deps.insert(0, facade_task_id)
+                    deps.insert(0, facade_task_id)  # type: ignore[attr-defined]
                 item["depends_on"] = deps
         normalized.append(item)
     return normalized

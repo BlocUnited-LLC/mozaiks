@@ -14,7 +14,7 @@ class DatabaseStartupPolicyError(ValueError):
 def get_database_startup_policy() -> DatabaseStartupPolicy:
     raw = (os.getenv(DATABASE_STARTUP_POLICY_ENV) or "best_effort").strip().lower()
     if raw in {"best_effort", "required"}:
-        return raw
+        return raw  # type: ignore[return-value]
     raise DatabaseStartupPolicyError(
         f"{DATABASE_STARTUP_POLICY_ENV} must be 'best_effort' or 'required', got {raw!r}"
     )

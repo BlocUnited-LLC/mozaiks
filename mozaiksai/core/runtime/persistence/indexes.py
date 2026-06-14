@@ -131,7 +131,7 @@ def _iter_indexed_collections(contract: DataContract) -> list[_IndexedCollection
                 continue
 
             ownership = collection.get("ownership") if isinstance(collection.get("ownership"), dict) else {}
-            module_id = str(collection.get("module_id") or ownership.get("surface_id") or surface_id).strip()
+            module_id = str(collection.get("module_id") or ownership.get("surface_id") or surface_id).strip()  # type: ignore[union-attr]
             entity_name = str(collection.get("entity_name") or collection.get("name") or "").strip()
             if surface_kind == "module" and not module_id:
                 raise DatabaseIndexApplyError(f"{collection_path}.module_id is required")
@@ -247,7 +247,7 @@ async def apply_database_indexes(
         if not indexed_collection.indexes:
             continue
         if indexed_collection.collection_name:
-            collection = context.literal_collection(indexed_collection.collection_name)
+            collection = context.literal_collection(indexed_collection.collection_name)  # type: ignore[attr-defined]
         else:
             collection = context.collection(indexed_collection.module_id, indexed_collection.entity_name)
         await collection.ensure_indexes([_index_spec_dict(spec) for spec in indexed_collection.indexes])

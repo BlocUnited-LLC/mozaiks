@@ -8,7 +8,7 @@ global_rules:
   - Recommend packs only for capability intent present in the product brief or upstream plan.
   - Do not force a provider when the user names a different provider.
   - If a recommended pack is selected, use app-owned facade modules and thin service clients.
-  - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, and token usage measurement are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
+  - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, token usage measurement, and token wallet accounting are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
 capabilities:
   - id: billing_pack
     label: Billing and Subscriptions
@@ -32,8 +32,8 @@ capabilities:
       - Use the billing_pack capability pack for SaaS monetization, or generate a provider-neutral external_adapter path when the user names a specific provider.
       - Generate app-owned billing facade modules and adapter stubs under services/adapters/payments/.
       - Do not generate provider-specific billing module internals or hosted service code.
-      - Do not generate token metering storage; read measured runtime usage from /api/me/usage or /api/admin/usage.
-      - Use app/config/subscriptions.yaml when a generated SaaS app needs plan quotas and usage limits.
+      - Do not generate custom token metering or balance storage; read measured runtime usage from /api/me/usage or /api/admin/usage and use the OSS token wallet ledger for balances.
+      - Use app/config/subscriptions.yaml when a generated SaaS app needs plan quotas, usage limits, token_wallets, or token_allowances.
       - Pages must bind through app-owned facade modules, not directly to any external billing endpoint.
     alternatives:
       - id: stripe

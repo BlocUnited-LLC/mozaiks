@@ -174,7 +174,7 @@ class OIDCDiscoveryClient:
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
-                        self._discovery_url,
+                        self._discovery_url,  # type: ignore[arg-type]
                         timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         if resp.status != 200:

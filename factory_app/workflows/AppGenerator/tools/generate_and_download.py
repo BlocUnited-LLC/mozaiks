@@ -365,7 +365,7 @@ async def _persist_pending_schema_migration(
             )
         except Exception:
             pass
-    return record
+    return record  # type: ignore[no-any-return]
 
 
 async def _register_greenfield_app_context_for_bundle(
@@ -610,7 +610,7 @@ async def generate_and_download(
 
     wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
     tlog = None
-    if _get_tool_logger:
+    if _get_tool_logger:  # type: ignore[truthy-function]
         try:
             tlog = _get_tool_logger(tool_name="GenerateAndDownloadApp", chat_id=chat_id, app_id=app_id, workflow_name=workflow_name)
         except Exception:
@@ -746,7 +746,7 @@ async def generate_and_download(
     app_dir = base_dir / bundle_name
     app_dir.mkdir(parents=True, exist_ok=True)
 
-    if tlog and _log_tool_event:
+    if tlog and _log_tool_event:  # type: ignore[truthy-function]
         _log_tool_event(tlog, action="write_files", status="start", file_count=len(files_map))
 
     written_paths: list[str] = []

@@ -206,7 +206,7 @@ async def dispatch_completion_webhook(
         try:
             from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
             pm = AG2PersistenceManager()
-            session = await pm.get_chat_session(chat_id)
+            session = await pm.get_chat_session(chat_id)  # type: ignore[attr-defined]
             if session:
                 webhook_url = session.get("webhook_url")
         except Exception as e:

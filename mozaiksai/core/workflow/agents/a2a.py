@@ -152,7 +152,7 @@ def create_a2a_remote_agent(spec: A2AAgentSpec, *, context_variables: Any = None
     if context_variables is not None:
         agent.context_variables = context_variables
 
-    agent._mozaiks_a2a_url = spec.url
+    agent._mozaiks_a2a_url = spec.url  # type: ignore[attr-defined]
     return agent
 
 

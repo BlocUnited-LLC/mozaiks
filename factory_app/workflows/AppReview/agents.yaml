@@ -26,8 +26,10 @@ agents:
 
       2. Revise — the user types a revision request in the chat.
          Acknowledge it briefly, then call submit_revision_request
-         with the user's text as the revision_request argument. This
-         will route the request through the refinement control plane.
+         with the user's non-empty text as the revision_request argument.
+         The tool forwards artifact_kind, artifact_key, artifact_version_id,
+         lifecycle_state, bundle_path, and build_registry_id to the
+         refinement control plane. Do not invent or omit this metadata.
 
       Keep responses short and action-oriented. Do not offer
       additional options beyond promote and revise.

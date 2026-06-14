@@ -118,7 +118,7 @@ def resolve_control_plane_handler_entrypoint(entrypoint: str) -> Callable[..., A
         raise ControlPlaneHandlerResolutionError(
             f"Control-plane handler entrypoint '{entrypoint}' did not resolve to a callable."
         )
-    return handler
+    return handler  # type: ignore[no-any-return]
 
 
 def instantiate_control_plane_handler(entrypoint: str, /, **dependencies: Any) -> Any:

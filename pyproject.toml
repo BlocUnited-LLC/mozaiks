@@ -57,6 +57,8 @@ dev = [
     "pytest-mock>=3.14.0",
     "ruff>=0.1.0",
     "watchdog",
+    "types-PyYAML>=6.0",
+    "mypy>=1.5.0",
 ]
 tracing = [
     "opentelemetry-sdk>=1.27.0",
@@ -107,3 +109,105 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+# Suppress noise that comes from untyped third-party stubs and unannotated
+# function bodies — these are not actionable without touching upstream libs.
+disable_error_code = ["import-untyped", "annotation-unchecked"]
+
+# High-complexity files that use AG2/pydantic dynamic patterns extensively.
+# Suppressed as a baseline; re-enable per-file as typing coverage improves.
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.hosts.platform"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.hosts.studio"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.hosts.runtime"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.transport.ws_protocol"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.transport.workflow_bridge"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.transport.ui_tools"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.transport.simple_transport"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.transport.general_mode"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.workflow.workflow_manager"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.workflow.agents.factory"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.workflow.session_manager"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.workflow.outputs.structured"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.runtime.app.studio_summary"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.runtime.composition.module_event_router"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.runtime.app.entitlements"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.session.router"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.workflow.llm_config"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.workflow.execution.lifecycle"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.app_context.scan_policy"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.admin.router"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.events.auto_tool_handler"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "mozaiksai.core.data.persistence.persistence_manager"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "logs.logging_config"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "factory_app.workflows.AppGenerator.tools.app_validation"
+ignore_errors = true

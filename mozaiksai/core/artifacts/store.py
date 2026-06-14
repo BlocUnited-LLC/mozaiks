@@ -101,7 +101,7 @@ class ArtifactStore:
 
     async def _coll(self, name: str):
         await self._ensure_client()
-        return self.client["mozaiksai"][name]
+        return self.client["mozaiksai"][name]  # type: ignore[index]
 
     async def _next_version_number(self, *, app_id: str, artifact_kind: str, artifact_key: str) -> int:
         counters = await self._coll("ArtifactVersionCounters")
@@ -349,7 +349,7 @@ class ArtifactStore:
         invalidated_ids: list[str] = []
         seen_version_ids: set[str] = set()
         for artifact_kind in target_kinds:
-            artifact_version_id = normalized_refs.get(artifact_kind)
+            artifact_version_id = normalized_refs.get(artifact_kind)  # type: ignore[assignment]
             if not artifact_version_id or artifact_version_id in seen_version_ids:
                 continue
             seen_version_ids.add(artifact_version_id)

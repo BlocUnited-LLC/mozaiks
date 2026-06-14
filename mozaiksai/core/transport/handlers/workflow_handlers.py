@@ -50,7 +50,7 @@ async def handle_switch_workflow(
         logger.info(f"Stored frontend context for {target_chat_id}: {list(frontend_context.keys())}")
 
     # Switch workflow context
-    active_context = session_registry.switch_workflow(ws_id, target_chat_id)
+    active_context = session_registry.switch_workflow(ws_id, target_chat_id)  # type: ignore[arg-type]
     if not active_context:
         # Attempt on-demand session hydration from persistence when registry drifted.
         try:
@@ -62,7 +62,7 @@ async def handle_switch_workflow(
             )
             if doc and doc.get("workflow_name") and doc.get("app_id") and doc.get("user_id"):
                 active_context = session_registry.add_workflow(
-                    ws_id=ws_id,
+                    ws_id=ws_id,  # type: ignore[arg-type]
                     chat_id=target_chat_id,
                     workflow_name=str(doc.get("workflow_name")),
                     app_id=str(doc.get("app_id")),

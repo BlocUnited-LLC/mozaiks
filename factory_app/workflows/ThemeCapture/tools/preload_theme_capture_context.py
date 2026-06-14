@@ -197,7 +197,7 @@ def _infer_appearance(colors: list[str], css_variables: dict[str, str]) -> str |
         css_variables.get("--bg-color"),
         css_variables.get("--surface"),
     ] + colors
-    luminances = [value for value in (_hex_to_luminance(item) for item in candidates) if value is not None]
+    luminances = [value for value in (_hex_to_luminance(item) for item in candidates) if value is not None]  # type: ignore[arg-type]
     if not luminances:
         return None
     return "dark" if (sum(luminances) / len(luminances)) < 0.45 else "light"

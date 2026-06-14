@@ -139,7 +139,7 @@ def build_snapshot_document_from_hashes(
 
 def _file_map(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
-    for item in snapshot.get("files") if isinstance(snapshot.get("files"), list) else []:
+    for item in snapshot.get("files") if isinstance(snapshot.get("files"), list) else []:  # type: ignore[union-attr]
         if isinstance(item, dict) and isinstance(item.get("path"), str):
             out[item["path"]] = item
     return out
@@ -214,7 +214,7 @@ async def persist_snapshot(*, snapshot_doc: dict[str, Any]) -> str:
 
 async def get_snapshot(*, app_id: str, snapshot_id: str) -> dict[str, Any] | None:
     coll = await _collection("CodeSnapshots")
-    return await coll.find_one({"app_id": app_id, "snapshotId": snapshot_id})
+    return await coll.find_one({"app_id": app_id, "snapshotId": snapshot_id})  # type: ignore[no-any-return]
 
 
 async def get_latest_snapshot(*, app_id: str, workflow_type: str) -> dict[str, Any] | None:

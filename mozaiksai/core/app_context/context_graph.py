@@ -1094,7 +1094,7 @@ def _tree_sitter_parser(language: str) -> Any | None:
 
 def _module_available(name: str) -> bool:
     try:
-        return importlib.util.find_spec(name) is not None
+        return importlib.util.find_spec(name) is not None  # type: ignore[attr-defined]
     except Exception:
         return False
 
@@ -1220,7 +1220,7 @@ def _extract_action_ids(data: dict[str, Any]) -> list[str]:
         if isinstance(item, str):
             candidate = item
         elif isinstance(item, dict):
-            candidate = _first_text(item, "id", "name", "action_id")
+            candidate = _first_text(item, "id", "name", "action_id")  # type: ignore[assignment]
         else:
             candidate = None
         if candidate and candidate not in ids:

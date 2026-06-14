@@ -375,6 +375,10 @@ agents:
     content: |-
       1. Read `workflows_spec` from context to count the workflows to be generated.
       2. Read `pack_name` from context.
+      2a. If `workflow_bundle_repair_status == "needs_revision"`, this is a
+          bounded repair pass. `workflows_spec` has already been narrowed to the
+          failed workflows and each worker `initial_message` contains the exact
+          quality-gate failures. Do not re-plan; dispatch only that narrowed set.
       3. Emit PackBuildCoordinatorOutput with:
          - `agent_message`: short confirmation, e.g. "Generating 3 workflow bundles in parallel..."
          - `workflow_count`: length of workflows_spec
@@ -404,6 +408,10 @@ agents:
       You are a WorkflowBundleBuilderAgent — a parallel task batch worker that generates one complete Mozaiks workflow bundle from scratch.
 
       You receive a scoped generation brief (`initial_message`) for ONE workflow. You produce ALL files needed to run that workflow: YAML declarations, Python tool stubs, and optional UI components. Your output is a single WorkflowBundleBuilderOutput containing every file as a CodeFile list.
+      If the scoped brief contains `[WORKFLOW BUNDLE REPAIR REQUEST]`, treat it
+      as authoritative quality-gate feedback for a bounded repair pass. Regenerate
+      the complete workflow bundle for that one workflow and fix every listed
+      issue without changing the requested workflow semantics.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
@@ -421,6 +429,9 @@ agents:
         workflow, including BackendOnly/headless workflows. BackendOnly
         workflows must still emit `ui_config.yaml` with `visual_agents: []`.
         `visual_agents` belongs only in ui_config.yaml, never in orchestrator.yaml.
+      - If you emit `extended_orchestration/task_batches.yaml`,
+        `execution_agents[]` must contain at least two distinct declared agents.
+        Do not repeat the same worker name to satisfy the list.
 
       **Python tool stubs** (under `tools/`):
       - One `.py` file per declared tool function
@@ -694,6 +705,11 @@ agents:
       - `decomposition_agent`
       - `execution_agents[]`
       - optional `concurrency`, `failure_policy`, `retry_limit`, `timeout_seconds`, and `require_owned_paths`
+      - `execution_agents[]` must contain at least two distinct declared agents
+        when the brief asks for conveyor, fan-out, batch, parallel, or downstream
+        specialist work. Do not repeat the same worker name to satisfy the list.
+        Give each execution agent a different role, such as queue triage,
+        priority/risk analysis, enrichment, verification, or synthesis support.
 
       Example:
       ```yaml
@@ -714,6 +730,8 @@ agents:
       task_batches.yaml. The decomposition agent's structured output model must
       include `DecompositionPlan.tasks[]`; each runtime task chooses an
       `execution_agent`, includes `task_prompt`, and may include `depends_on`.
+      Every task `execution_agent` must be one of the distinct
+      `execution_agents[]` declared in task_batches.yaml.
       `failure_policy` must be exactly one of `fail_batch`,
       `continue_with_available`, or `collect_errors`; never emit `retry`.
 
@@ -1036,6 +1054,10 @@ agents:
       - `workflow_bundle_semantic_drift`: Prompt-oriented drift report for
         generated workflow YAML that loads but does not preserve requested
         workflow meaning.
+      - `workflow_bundle_repair_status`: Set by `generate_and_download` when the
+        production quality gate schedules a bounded retry. `needs_revision`
+        routes back to PackBuildCoordinator; `blocked` means attempts are
+        exhausted.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -1053,6 +1075,10 @@ agents:
          - If `workflow_bundle_validation_status` is `failed`, do not invite
            download. Summarize that the workflow bundle quality gate blocked
            packaging and reference `workflow_bundle_validation_errors`.
+         - If `workflow_bundle_repair_status` is `needs_revision`, emit the
+           structured output normally with a concise repair message; the
+           transition graph will route to PackBuildCoordinator instead of the
+           user after this turn.
 
       2. **Emit Output**:
          - Generate `DownloadRequestOutput` JSON with a short invitation message.

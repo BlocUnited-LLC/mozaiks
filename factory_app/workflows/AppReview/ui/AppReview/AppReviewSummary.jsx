@@ -68,12 +68,14 @@ export default function AppReviewSummary({ payload = {} }) {
   }, [payload]);
 
   const validationStatus = payload.app_validation_status || 'skipped';
+  const acceptanceStatus = payload.app_bundle_acceptance_status || null;
   const integrationStatus =
     payload.integration_tests_passed === true
       ? 'passed'
       : payload.integration_tests_passed === false
       ? 'failed'
       : 'skipped';
+  const canPromote = payload.can_promote !== false && Boolean(payload?.build_registry_id);
 
   return (
     <Panel>
@@ -91,6 +93,9 @@ export default function AppReviewSummary({ payload = {} }) {
       )}
 
       <div className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-4 py-1">
+        {acceptanceStatus && (
+          <ValidationRow label="Bundle acceptance" status={acceptanceStatus} />
+        )}
         <ValidationRow label="Build validation" status={validationStatus} />
         <ValidationRow label="Integration checks" status={integrationStatus} />
       </div>
@@ -112,6 +117,13 @@ export default function AppReviewSummary({ payload = {} }) {
         <p className="mb-3 text-sm text-destructive">{error}</p>
       )}
 
+      {!canPromote && !promoted && (
+        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          Build review context is incomplete. Promotion is unavailable until the
+          AppGenerator handoff provides a review-ready bundle.
+        </p>
+      )}
+
       {promoted ? (
         <div className="rounded-lg border border-success/40 bg-success/10 px-4 py-3 text-sm text-success">
           App promoted to active — your build is live.
@@ -120,7 +132,7 @@ export default function AppReviewSummary({ payload = {} }) {
         <>
           <Button
             variant="primary"
-            disabled={promoting}
+            disabled={promoting || !canPromote}
             onClick={handlePromote}
             className="w-full"
           >

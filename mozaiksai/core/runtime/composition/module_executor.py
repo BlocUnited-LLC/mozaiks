@@ -103,7 +103,7 @@ def _validate_schema(value: Any, schema: dict[str, Any]) -> str | None:
         jsonschema.validate(instance=value, schema=schema)
         return None
     except jsonschema.ValidationError as exc:
-        return exc.message
+        return exc.message  # type: ignore[no-any-return]
     except Exception as exc:  # malformed schema — don't crash the executor
         logger.warning("MODULE_SCHEMA_ERROR: could not validate schema: %s", exc)
         return None
@@ -280,7 +280,7 @@ class ModuleExecutor:
                 correlation_id=request.correlation_id,
                 settings=self._settings.get(request.module),
                 persistence=self._build_persistence_context(request),
-                _emit=self._build_context_emitter(request),
+                _emit=self._build_context_emitter(request),  # type: ignore[arg-type]
             )
 
         try:
@@ -366,7 +366,7 @@ class ModuleExecutor:
             if request.user_id:
                 envelope["actor"] = {"type": "user", "id": request.user_id}
 
-            result = self._event_emitter(event_type, envelope)
+            result = self._event_emitter(event_type, envelope)  # type: ignore[misc]
             if inspect.isawaitable(result):
                 await result
 

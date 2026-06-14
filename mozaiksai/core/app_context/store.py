@@ -1589,7 +1589,7 @@ def _add_greenfield_relationship_edges(
     for route in inventory.routes:
         route_node = f"route:{route.surface_id}"
         page_path = route.metadata.get("page_path")
-        page_node = page_node_by_path.get(page_path)
+        page_node = page_node_by_path.get(page_path)  # type: ignore[arg-type]
         if page_node:
             add_edge(
                 _graph_edge(
@@ -1602,7 +1602,7 @@ def _add_greenfield_relationship_edges(
                 )
             )
         component_path = route.metadata.get("component_path")
-        component_node = component_node_by_path.get(component_path)
+        component_node = component_node_by_path.get(component_path)  # type: ignore[arg-type]
         if page_node and component_node:
             add_edge(
                 _graph_edge(

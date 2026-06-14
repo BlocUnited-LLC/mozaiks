@@ -68,7 +68,7 @@ class TaskBatchSource(BaseModel):
         var_name = text[2:-1].strip()
         resolved = context_variables.get(var_name)
         if resolved and isinstance(resolved, str) and resolved.strip():
-            return resolved.strip()
+            return resolved.strip()  # type: ignore[no-any-return]
         return text
 
 
@@ -551,7 +551,7 @@ async def _execute_one_batch(
                         f"task batch {batch.id!r} failed at task {task_id!r}: {outcome}"
                     ) from outcome
                 continue
-            completed[task_id] = outcome
+            completed[task_id] = outcome  # type: ignore[assignment]
 
         if pending:
             context_variables[batch.result.context_key] = _build_batch_outputs(
@@ -806,7 +806,7 @@ def _normalize_owned_page_files_from_plan(
             planned_by_stem.setdefault(stem, page)
 
     for path in owned_page_paths:
-        stem = _page_stem_from_path(path)
+        stem = _page_stem_from_path(path)  # type: ignore[assignment]
         if not stem:
             continue
         planned = planned_by_stem.get(stem)

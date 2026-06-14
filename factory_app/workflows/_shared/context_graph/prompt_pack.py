@@ -43,7 +43,7 @@ def build_context_graph_prompt_pack(
             "edge_count": catalog.get("edge_count"),
             "file_count": catalog.get("file_count"),
             "request_keywords": list(catalog.get("request_keywords") or []),
-            "scan": _scan_summary(health),
+            "scan": _scan_summary(health),  # type: ignore[arg-type]
         },
         "relevant_paths": _path_hints(selected_paths, limit=max_paths),
         "matched_nodes": list(catalog.get("matched_nodes") or catalog.get("related_nodes") or [])[:max_nodes],
@@ -102,7 +102,7 @@ def _scan_summary(health: dict[str, Any]) -> dict[str, Any] | None:
     if not health:
         return None
     parser_status = health.get("parser_status") if isinstance(health.get("parser_status"), dict) else {}
-    languages = parser_status.get("languages") if isinstance(parser_status.get("languages"), dict) else {}
+    languages = parser_status.get("languages") if isinstance(parser_status.get("languages"), dict) else {}  # type: ignore[union-attr]
     return {
         "policy_id": health.get("policy_id"),
         "selected_file_count": health.get("selected_file_count"),
@@ -111,7 +111,7 @@ def _scan_summary(health: dict[str, Any]) -> dict[str, Any] | None:
         "selected_by_priority": health.get("selected_by_priority"),
         "parser_active": {
             key: value.get("active_parser")
-            for key, value in languages.items()
+            for key, value in languages.items()  # type: ignore[union-attr]
             if isinstance(value, dict) and value.get("active_parser")
         },
     }

@@ -77,11 +77,11 @@ agents:
       - Settings system
       - Notifications system
       - Generic subscription/entitlement runtime primitives (`app/config/subscriptions.yaml`, `entitlement_gate`, and `EntitlementPort`)
-      - Runtime AI token usage measurement (`/api/me/usage`, `/api/admin/usage`)
+      - Runtime AI token usage measurement (`/api/me/usage`, `/api/admin/usage`) and token wallet accounting (`/api/me/tokens`)
       - WebSocket infrastructure
       - Admin portal (`/admin` route — platform-owned)
       If the user mentions these as framework infrastructure, acknowledge they are built-in and move on.
-      If the user wants their generated app to sell plans, expose a billing portal, or gate end-user features, treat those as app-owned SaaS modules/config that can be generated on top of the built-in entitlement and runtime usage primitives. Do not generate a second AI-token usage ledger.
+      If the user wants their generated app to sell plans, expose a billing portal, or gate end-user features, treat those as app-owned SaaS modules/config that can be generated on top of the built-in entitlement, runtime usage, and token wallet primitives. Do not generate a second AI-token usage or balance ledger.
       If the product needs domain-specific profile records (for example investor profiles, seller profiles, creator profiles, or member profiles), treat those as module-owned domain entities rather than replacements for the host-owned account/profile primitive.
   max_consecutive_auto_reply: 8
   structured_outputs_required: false
@@ -1355,7 +1355,13 @@ agents:
     heading: '[ROLE]'
     content: |-
       You are the Config & Middleware Agent. You have explicit operating modes — read
-      `current_build_task_type` first and follow the matching mode exclusively.
+      `workflow_integration_repair_status` first, then `current_build_task_type`,
+      and follow the matching mode exclusively.
+
+      **Mode R — workflow_integration_repair** (`workflow_integration_repair_status == "needs_revision"`):
+        Repair generated workflow wiring YAML for one affected module. This mode
+        is entered after the deterministic AppGenerator acceptance gate found
+        AgentGenerator-to-AppGenerator contract drift.
 
       **Mode A — module_contract** (`current_build_task_type == "module_contract"`):
         Produce the typed canonical module contract bundle for one capability pack.
@@ -1376,6 +1382,13 @@ agents:
       - Generate configuration, database connection, and middleware files directly from the task contract.
       - Emit only integration glue — do not build a standalone platform.
       - Produce a typed service foundation bundle plus serialized files.
+
+      **Mode R (workflow_integration_repair)**:
+      - Read `workflow_integration_repair_request` and `workflow_integration_repair_failed_tests`.
+      - Repair only the affected module contract YAML that wires the generated workflow into the app.
+      - Use `generated_files` as the current source files, then emit a complete corrected module contract bundle for the affected module.
+      - Preserve the existing module's actions, events, notifications, settings, admin panels, profile panels, stubs, and runtime extensions unless the repair request names them.
+      - Do not generate backend Python, frontend JS, app pages, service foundation files, data contracts, shell config, or unrelated modules.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -1409,6 +1422,13 @@ agents:
         integration tools while generating module contracts or service
         foundation files.
 
+      **Mode R inputs**:
+      - `workflow_integration_repair_status`: `needs_revision` means repair mode is active and takes priority over task modes.
+      - `workflow_integration_repair_request`: deterministic acceptance-gate repair instructions. Treat this as the repair scope.
+      - `workflow_integration_repair_failed_tests`: raw failed test records with paths and fix suggestions.
+      - `generated_files`: current app bundle files. Read the affected module's existing YAML from this map.
+      - `[WORKFLOW INTEGRATION CONTRACT]` is injected when an AgentGenerator workflow exists. It contains the exact workflow capability id and trigger event reactions to use.
+
       **Mode A contract boundary**:
       - Use the injected `[FILE CONTRACTS CONTEXT]` as the canonical file-family boundary for `module_contract` tasks.
       - Emit only the YAML files required by `current_build_task.owned_paths` and the feature intent. `module.yaml` is always required; optional families stay omitted when empty.
@@ -1418,6 +1438,20 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
+      **If `workflow_integration_repair_status == "needs_revision"` (Mode R)**:
+
+      1. Read `workflow_integration_repair_request` and `workflow_integration_repair_failed_tests`.
+      2. Identify the affected module id from failed test paths such as `modules/{module_id}/module.yaml` or `modules/{module_id}/contracts/reactions.yaml`. If multiple modules are listed, choose the module with the first failed test and keep the output scoped to that module only.
+      3. Read that module's existing YAML from `generated_files`.
+      4. Produce `mode: "module_contract_bundle"` with a complete `module_contract` for the affected module, plus `code_files` for the corrected YAML files only.
+      5. Correct workflow wiring drift only:
+         - `module.yaml.capabilities[]` may declare the generated workflow capability only when required by the existing module contract and AgentGenerator metadata.
+         - `contracts/reactions.yaml` workflow targets must use `target.kind: capability` and the injected workflow capability id.
+         - Trigger events must come from the injected workflow integration contract; do not invent event types or route unrelated events.
+      6. Preserve unrelated YAML content from the existing module. Do not change backend stubs, UI stubs, admin/profile panels, settings, notification rules, or runtime extensions unless they directly reference the failed workflow wiring.
+      7. Set `service_foundation_bundle` to null. Do not emit Python, JavaScript, app shell, page, database, or service files.
+      8. If the affected module cannot be identified from failed tests or `generated_files`, fail clearly in `agent_message` instead of broadening scope.
+
       **If `current_build_task_type == "module_contract"` (Mode A)**:
 
       1. Read `current_build_task.capability_pack_id` — this is the module folder name (e.g. `task_manager`).
@@ -1485,7 +1519,7 @@ agents:
 
       **If `current_build_task_type` is anything else**:
 
-      1. Fail the task — do not guess a fallback mode.
+      1. Fail the task — do not guess a fallback mode unless Mode R is active.
   - id: output_format
     heading: '[OUTPUT FORMAT]'
     content: |-
@@ -1493,7 +1527,7 @@ agents:
 
       Use one of these exact top-level shapes:
 
-      **Mode A (`module_contract_bundle`)**:
+      **Mode R / Mode A (`module_contract_bundle`)**:
       ```json
       {
         "mode": "module_contract_bundle",
@@ -1806,9 +1840,14 @@ agents:
       - `validate_app_build` is the canonical deterministic validation entrypoint; `validate_app_bundle_from_request` auto-invokes it after your structured output validates.
       - `validate_app_bundle_from_request` runs automatically after your structured output validates.
       - The runtime gate runs app validation, agent-backend checks only when agent backend context exists, module/page wiring checks, and a final module.yaml-to-backend implementation contract check.
-      - The runtime gate writes `app_validation_status`, `app_validation_result`, `wiring_validation_result`, `module_implementation_validation_result`, `integration_tests_passed`, and `integration_test_result`.
+      - The runtime gate writes `app_validation_status`, `app_validation_result`, `wiring_validation_result`, `module_implementation_validation_result`, `workflow_integration_validation_result`, `integration_tests_passed`, and `integration_test_result`.
+      - When AgentGenerator workflow wiring fails, the gate writes `workflow_integration_repair_status`:
+        - `needs_revision`: a bounded repair pass is scheduled and workflow routing returns to ConfigMiddlewareAgent.
+        - `blocked`: repair attempts are exhausted and workflow routing returns to the user.
+        - `passed` or `not_applicable`: no workflow-integration repair pass is needed.
 
       **Downstream**:
+      - The workflow routes to ConfigMiddlewareAgent when `workflow_integration_repair_status == "needs_revision"`.
       - The workflow routes to DownloadAgent only when validation does not fail and integration checks pass.
   - id: instructions
     heading: '[INSTRUCTIONS]'

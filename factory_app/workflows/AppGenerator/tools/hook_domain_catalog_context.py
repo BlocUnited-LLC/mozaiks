@@ -76,7 +76,7 @@ def _load_catalog() -> dict[str, Any] | None:
     try:
         import yaml  # type: ignore
         with open(_CATALOG_PATH, encoding="utf-8") as fh:
-            return yaml.safe_load(fh)
+            return yaml.safe_load(fh)  # type: ignore[no-any-return]
     except Exception as exc:
         logger.warning("domain_catalogs.yaml could not be loaded: %s", exc)
         return None

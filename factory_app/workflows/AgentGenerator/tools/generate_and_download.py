@@ -30,7 +30,10 @@ from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 from .export_agent_workflow import export_agent_workflow_to_github
 from .workflow_converter import promote_generated_workflow
-from .workflow_quality_gate import run_workflow_bundle_quality_gate
+from .workflow_quality_gate import (
+    prepare_workflow_bundle_repair,
+    run_workflow_bundle_quality_gate,
+)
 
 try:
     from logs.tools_logs import get_tool_logger as _get_tool_logger  # type: ignore
@@ -364,7 +367,7 @@ async def generate_and_download(
 
     wf_logger = get_workflow_logger(workflow_name=(workflow_name or "AgentGenerator"), chat_id=chat_id, app_id=app_id)
     tlog = None
-    if _get_tool_logger:
+    if _get_tool_logger:  # type: ignore[truthy-function]
         try:
             tlog = _get_tool_logger(
                 tool_name="GenerateAndDownload",
@@ -372,7 +375,7 @@ async def generate_and_download(
                 app_id=app_id,
                 workflow_name=(workflow_name or "AgentGenerator"),
             )
-            if _log_tool_event:
+            if _log_tool_event:  # type: ignore[truthy-function]
                 _log_tool_event(tlog, action="start", status="ok")
         except Exception:
             tlog = None
@@ -412,16 +415,32 @@ async def generate_and_download(
         context_variables=context_variables,
     )
     if not quality_gate.get("passed"):
+        repair_result = prepare_workflow_bundle_repair(
+            quality_gate=quality_gate,
+            bundle_entries=bundle_entries,
+            context_variables=context_variables,
+        )
         wf_logger.warning(
             "Workflow bundle quality gate failed with %d issue(s).",
             len(quality_gate.get("errors") or []),
         )
         return {
             "status": "blocked",
-            "message": "Workflow bundle quality gate failed; download was not created.",
+            "message": (
+                "Workflow bundle quality gate failed; repair has been scheduled."
+                if repair_result.get("status") == "needs_revision"
+                else "Workflow bundle quality gate failed; download was not created."
+            ),
             "workflow_bundle_quality_gate": quality_gate,
+            "workflow_bundle_repair": repair_result,
             "validation_errors": quality_gate.get("errors") or [],
         }
+    if context_variables is not None and hasattr(context_variables, "set"):
+        try:
+            context_variables.set("workflow_bundle_repair_status", "passed")
+            context_variables.set("workflow_bundle_repair_active", False)
+        except Exception:
+            pass
 
     # Derive the top-level bundle name (pack name or single workflow name)
     if pack_name and isinstance(pack_name, str) and pack_name.strip():
@@ -522,7 +541,7 @@ async def generate_and_download(
     }
 
     try:
-        if tlog and _log_tool_event:
+        if tlog and _log_tool_event:  # type: ignore[truthy-function]
             _log_tool_event(tlog, action="emit_ui", status="start", agent_message_id=agent_message_id)
         response = await use_ui_tool(
             tool_id="DownloadCenter",
@@ -531,7 +550,7 @@ async def generate_and_download(
             workflow_name=bundle_name,
         )
         wf_logger.info("📥 Download UI completed with status: %s", response.get("status", "unknown"))
-        if tlog and _log_tool_event:
+        if tlog and _log_tool_event:  # type: ignore[truthy-function]
             _log_tool_event(tlog, action="emit_ui", status="done", result_status=response.get("status", "unknown"))
     except UIToolError:
         raise

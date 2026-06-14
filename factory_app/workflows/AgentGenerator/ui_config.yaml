@@ -2,5 +2,4 @@ visual_agents:
 - InterviewAgent
 - user
 - ProjectOverviewAgent
-- APIKeyAgent
 - DownloadAgent

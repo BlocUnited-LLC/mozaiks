@@ -1,7 +1,8 @@
 """
 validate_wiring - Cross-reference page api_endpoint fields against known module actions.
 
-Runs at IntegrationTestAgent time, after AppSchemaAgent and assembly are complete.
+Runs during the deterministic AppValidationAgent acceptance gate, after
+AppSchemaAgent output and task-batch assembly are complete.
 
 Algorithm
 ---------

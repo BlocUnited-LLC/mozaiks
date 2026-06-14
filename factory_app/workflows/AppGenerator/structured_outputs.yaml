@@ -2650,7 +2650,7 @@ models:
         values:
         - module_contract_bundle
         - service_foundation
-        description: Output mode selected from current_build_task_type.
+        description: Output mode selected from current_build_task_type or a bounded workflow-integration repair pass.
       module_contract:
         type: union
         variants:

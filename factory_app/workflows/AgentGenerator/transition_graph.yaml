@@ -57,6 +57,14 @@ transition_rules:
   transition_target: AgentTarget
 
 - source_agent: DownloadAgent
+  target_agent: PackBuildCoordinator
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_bundle_repair_status
+  condition_value: needs_revision
+  transition_target: AgentTarget
+
+- source_agent: DownloadAgent
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget

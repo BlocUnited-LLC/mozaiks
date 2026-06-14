@@ -171,6 +171,13 @@ transition_rules:
   transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: AppValidationAgent
+  target_agent: ConfigMiddlewareAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_integration_repair_status
+  condition_value: needs_revision
+  transition_target: AgentTarget
+- source_agent: AppValidationAgent
   target_agent: user
   transition_type: condition
   condition_type: context_equals

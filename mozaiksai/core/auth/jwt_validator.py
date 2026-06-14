@@ -174,7 +174,7 @@ class JWTValidator:
         try:
             claims = jwt.decode(
                 token,
-                public_key,
+                public_key,  # type: ignore[arg-type]
                 algorithms=self._config.algorithms,
                 audience=self._config.audience,
                 issuer=expected_issuer,

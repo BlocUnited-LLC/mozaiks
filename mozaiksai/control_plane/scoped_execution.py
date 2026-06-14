@@ -153,15 +153,15 @@ def _apply_change(
     reported_path = relative_path or change.path
     if skip_status is not None:
         return ScopedRefinementChangedFile(path=reported_path, status=skip_status, reason=reason or "Skipped.")
-    if not _change_is_in_scope(path=relative_path, affected_paths=affected_paths, allow_new_files=allow_new_files):
+    if not _change_is_in_scope(path=relative_path, affected_paths=affected_paths, allow_new_files=allow_new_files):  # type: ignore[arg-type]
         return ScopedRefinementChangedFile(
-            path=relative_path,
+            path=relative_path,  # type: ignore[arg-type]
             status="skipped_unsafe",
             reason="Change path is not in affected_bundle_paths.",
         )
     if relative_path not in copied_paths:
         return ScopedRefinementChangedFile(
-            path=relative_path,
+            path=relative_path,  # type: ignore[arg-type]
             status="skipped_missing",
             reason="Affected file was not copied into the staging workspace.",
         )

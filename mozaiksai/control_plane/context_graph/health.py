@@ -55,7 +55,7 @@ def evaluate_context_graph_health(scan_health: dict[str, Any] | None) -> Context
 
     parser_status = health.get("parser_status") if isinstance(health.get("parser_status"), dict) else {}
     parser_warning = _parser_fallback_warning(
-        parser_status=parser_status,
+        parser_status=parser_status,  # type: ignore[arg-type]
         selected_by_extension=selected_by_extension,
     )
     if parser_warning:
@@ -93,8 +93,8 @@ def _parser_fallback_warning(
     if js_like_count <= python_count:
         return None
     languages = parser_status.get("languages") if isinstance(parser_status.get("languages"), dict) else {}
-    javascript = languages.get("javascript") if isinstance(languages.get("javascript"), dict) else {}
-    if str(javascript.get("active_parser") or "") == "regex":
+    javascript = languages.get("javascript") if isinstance(languages.get("javascript"), dict) else {}  # type: ignore[union-attr]
+    if str(javascript.get("active_parser") or "") == "regex":  # type: ignore[union-attr]
         return "context_graph_javascript_parser_fallback"
     return None
 

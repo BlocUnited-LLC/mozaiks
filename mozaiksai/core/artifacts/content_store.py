@@ -154,7 +154,7 @@ class GridFSArtifactContentStore:
         fs = await self._ensure_fs()
         try:
             grid_out = await fs.open_download_stream(ObjectId(content_ref))
-            return await grid_out.read()
+            return await grid_out.read()  # type: ignore[no-any-return]
         except Exception as exc:
             raise ContentNotFoundError(f"GridFS content not found: {content_ref!r}") from exc
 

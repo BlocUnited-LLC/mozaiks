@@ -144,7 +144,7 @@ class AppConnectorStore:
         )
 
         doc = await coll.find_one({"app_id": str(app_id), "service": normalized_service})
-        return self._normalize_doc(doc)
+        return self._normalize_doc(doc)  # type: ignore[return-value]
 
     async def get_connector(self, *, app_id: str, service: str) -> dict[str, Any] | None:
         await self.ensure_indexes()
@@ -157,7 +157,7 @@ class AppConnectorStore:
         coll = await self._collection()
         cursor = coll.find({"app_id": str(app_id)}).sort("updated_at", -1)
         docs = await cursor.to_list(length=None)
-        return [self._normalize_doc(doc) for doc in docs if isinstance(doc, dict)]
+        return [self._normalize_doc(doc) for doc in docs if isinstance(doc, dict)]  # type: ignore[misc]
 
     async def patch_connector(
         self,
@@ -250,7 +250,7 @@ class AppConnectorStore:
         for key in ("created_at", "updated_at"):
             value = normalized.get(key)
             if hasattr(value, "isoformat"):
-                normalized[key] = value.isoformat()
+                normalized[key] = value.isoformat()  # type: ignore[union-attr]
         return normalized
 
 

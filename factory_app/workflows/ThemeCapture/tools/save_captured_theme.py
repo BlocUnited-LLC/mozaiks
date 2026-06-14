@@ -17,7 +17,7 @@ try:
     _HAS_PERSISTENCE = True
 except ImportError:
     _HAS_PERSISTENCE = False
-    BuilderArtifactStore = None
+    BuilderArtifactStore = None  # type: ignore[assignment,misc]
 
 
 def _set_context_value(context_variables: Any | None, key: str, value: Any) -> None:
@@ -65,7 +65,7 @@ async def save_captured_theme(
     persistence_id = str(app_id or identity.get("app_name") or identity.get("name") or "captured-theme")
     now = datetime.now(UTC)
 
-    if _HAS_PERSISTENCE and BuilderArtifactStore:
+    if _HAS_PERSISTENCE and BuilderArtifactStore:  # type: ignore[truthy-function]
         try:
             store = BuilderArtifactStore()
             await store.save_theme_capture(

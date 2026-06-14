@@ -420,8 +420,8 @@ def _api_endpoints(
             method = None
         else:
             endpoint = _as_mapping(item)
-            label = endpoint.get("operation_id") or endpoint.get("name") or endpoint.get("path")
-            location = endpoint.get("path") or endpoint.get("location")
+            label = endpoint.get("operation_id") or endpoint.get("name") or endpoint.get("path")  # type: ignore[assignment]
+            location = endpoint.get("path") or endpoint.get("location")  # type: ignore[assignment]
             method = endpoint.get("method")
         endpoints.append(
             _surface_ref(

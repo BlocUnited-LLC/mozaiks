@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from dataclasses import dataclass
@@ -276,6 +277,25 @@ class RefinementRequest(BaseModel):
     def normalized_artifact_key(self) -> str:
         return str(self.artifact_key or self.artifact_kind).strip() or self.artifact_kind
 
+    @property
+    def request_id(self) -> str:
+        for key in ("request_id", "change_request_id", "revision_id"):
+            value = str(self.extra.get(key) or "").strip()
+            if value:
+                return value
+        seed = "|".join(
+            [
+                str(self.app_id or ""),
+                str(self.user_id or ""),
+                self.artifact_kind,
+                self.normalized_artifact_key(),
+                str(self.artifact_version_id or ""),
+                self.raw_user_request,
+            ]
+        )
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+        return f"ref_{digest}"
+
 
 class ChangeIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -317,6 +337,10 @@ class RefinementRoutingDecision(BaseModel):
     explanation: str = ""
     is_full_restart: bool = False
 
+    @property
+    def change_class(self) -> str:
+        return self.change_intent.change_class.value
+
 
 @dataclass(frozen=True)
 class ArtifactRoutePolicy:
@@ -328,7 +352,7 @@ class ArtifactRoutePolicy:
     core: ControlPlaneChangeRouteManifest
 
     def route_for(self, change_class: ChangeClass) -> ControlPlaneChangeRouteManifest:
-        return getattr(self, change_class.value)
+        return getattr(self, change_class.value)  # type: ignore[no-any-return]
 
 class RefinementTriggerRouteResolver:
     def __init__(self, *, classifier=None, pack_loader=load_selected_control_plane_pack) -> None:
@@ -460,7 +484,7 @@ class RefinementTriggerRouteResolver:
                     if path:
                         entries.append(dict(entry, path=path))
                 else:
-                    path = getattr(entry, "path", None)
+                    path = getattr(entry, "path", None)  # type: ignore[assignment]
                     if path is not None:
                         entries.append({"path": str(path)})
             return entries
@@ -948,7 +972,7 @@ class RefinementTriggerRouteResolver:
             known_module_ids=known_module_ids,
         )
 
-        paths: list[str] = ["data/contract.json"]
+        paths: list[str] = ["data/contract.json"]  # type: ignore[no-redef]
 
         migration_paths = sorted(
             path
@@ -1232,7 +1256,7 @@ class RefinementTriggerRouteResolver:
             return cls._dedupe_paths(sorted(paths, key=cls._module_path_sort_key))
 
         if mentioned_module_ids:
-            paths: list[str] = []
+            paths: list[str] = []  # type: ignore[no-redef]
             for module_id in mentioned_module_ids:
                 paths.extend(
                     [

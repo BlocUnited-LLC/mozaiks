@@ -10,6 +10,52 @@ definitions:
       type: state
       default: null
 
+  app_id:
+    type: string
+    description: >
+      App identifier for the build under review. Passed through to Studio
+      refinement triggers by the chat session.
+    source:
+      type: state
+      default: null
+
+  build_id:
+    type: string
+    description: >
+      Build attempt identifier associated with the staged bundle. Included in
+      refinement metadata for traceability.
+    source:
+      type: state
+      default: null
+
+  artifact_kind:
+    type: string
+    description: >
+      Artifact family under review. AppReview expects app_bundle for generated
+      app reviews.
+    source:
+      type: state
+      default: app_bundle
+
+  artifact_key:
+    type: string
+    description: >
+      Artifact key under review. AppReview uses app_bundle unless a future
+      sequence routes a more specific app-bundle key.
+    source:
+      type: state
+      default: app_bundle
+
+  artifact_version_id:
+    type: string
+    description: >
+      ArtifactVersion id written by AppGenerator when the app bundle is
+      registered. Forwarded with revision requests so the control plane can
+      scope invalidation and coding-worker eligibility to the reviewed bundle.
+    source:
+      type: state
+      default: null
+
   bundle_path:
     type: string
     description: >
@@ -66,6 +112,15 @@ definitions:
       type: state
       default: null
 
+  app_bundle_acceptance_status:
+    type: string
+    description: >
+      Deterministic AppGenerator acceptance gate result for the staged app
+      bundle. Expected AppReview entry value is passed.
+    source:
+      type: state
+      default: null
+
   review_complete:
     type: boolean
     description: >
@@ -92,3 +147,13 @@ definitions:
     source:
       type: state
       default: null
+
+  refinement_request_meta:
+    type: object
+    description: >
+      Canonical refinement_request payload emitted from AppReview, including
+      artifact_kind, artifact_key, artifact_version_id, source_surface, and
+      review bundle metadata under extra.
+    source:
+      type: state
+      default: {}

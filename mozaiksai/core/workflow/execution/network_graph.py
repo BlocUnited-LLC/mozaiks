@@ -112,7 +112,7 @@ def compile_transition_rules_to_graph(
                         f"transition rule {source_name!r} -> {target_name!r} must not mix "
                         "context_equals with context_expression"
                     )
-                when = SourceScopedContextEquals(
+                when = SourceScopedContextEquals(  # type: ignore[assignment]
                     source_agent_id=source_id,
                     key=condition_key,
                     value=condition_value,
@@ -128,7 +128,7 @@ def compile_transition_rules_to_graph(
                         "context_expression with condition_key/condition_value/tool_name"
                     )
                 try:
-                    when = SourceScopedContextExpression(
+                    when = SourceScopedContextExpression(  # type: ignore[assignment]
                         source_agent_id=source_id,
                         expression=context_expression,
                     )
@@ -147,7 +147,7 @@ def compile_transition_rules_to_graph(
                         f"transition rule {source_name!r} -> {target_name!r} must not mix "
                         "tool_called with context condition fields"
                     )
-                when = SourceScopedToolCalled(
+                when = SourceScopedToolCalled(  # type: ignore[assignment]
                     source_agent_id=source_id,
                     tool_name=tool_name,
                 )

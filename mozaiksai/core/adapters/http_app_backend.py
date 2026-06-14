@@ -35,7 +35,7 @@ class HttpAppBackendAdapter:
         internal_api_key: str | None = None,
         timeout: float = 30.0,
     ) -> None:
-        self._base_url = (
+        self._base_url = (  # type: ignore[union-attr]
             base_url
             or os.getenv("MOZAIKS_BACKEND_URL", _DEFAULT_BASE_URL)
         ).rstrip("/")
@@ -107,7 +107,7 @@ class HttpAppBackendAdapter:
         try:
             from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
             dispatcher = get_event_dispatcher()
-            await dispatcher.dispatch(event_type, data)
+            await dispatcher.dispatch(event_type, data)  # type: ignore[arg-type,call-arg]
             logger.debug("Emitted event '%s'", event_type)
             return True
         except Exception as exc:

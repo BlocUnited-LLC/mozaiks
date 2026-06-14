@@ -42,7 +42,7 @@ async def _call_module(action: str, payload: dict) -> dict | None:
         async with httpx.AsyncClient(timeout=5.0) as client:
             res = await client.post(url, json=payload)
             if res.status_code == 200:
-                return res.json()
+                return res.json()  # type: ignore[no-any-return]
     except Exception as exc:
         logger.debug("app_registry module call failed (non-fatal): %s", exc)
     return None

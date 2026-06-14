@@ -107,7 +107,7 @@ def _detect_ai_workflow_surfaces(context_variables: Any) -> list[dict]:
                         "capability_id": trigger_str,
                         "module_id": module_id,
                         "suffix": suffix,
-                        **archetype_info,
+                        **archetype_info,  # type: ignore[dict-item]
                     })
                     break
 

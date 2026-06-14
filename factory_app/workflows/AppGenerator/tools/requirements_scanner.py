@@ -17,7 +17,7 @@ import sys
 try:
     _STDLIB: frozenset[str] = frozenset(sys.stdlib_module_names)  # type: ignore[attr-defined]
 except AttributeError:
-    _STDLIB: frozenset[str] = frozenset({
+    _STDLIB: frozenset[str] = frozenset({  # type: ignore[no-redef]
         "__future__", "abc", "ast", "asyncio", "base64", "builtins", "collections",
         "contextlib", "copy", "dataclasses", "datetime", "enum", "functools", "hashlib",
         "hmac", "http", "importlib", "inspect", "io", "itertools", "json", "logging",

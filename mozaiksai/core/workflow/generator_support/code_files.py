@@ -71,7 +71,7 @@ def _materialize_app_schema_file_map(payload: dict[str, Any]) -> dict[str, str]:
     file_map: dict[str, str] = {}
     default_route = manifest.get("default_route") or "/"
     auth_strategy = manifest.get("auth_strategy")
-    app_json = {
+    app_json = {  # type: ignore[var-annotated]
         "appName": manifest.get("app_name") or manifest.get("name") or "Generated App",
         "startup": {"landing_spot": default_route},
         "targets": {"web": True, "mobile": False},

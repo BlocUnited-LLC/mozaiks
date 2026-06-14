@@ -108,7 +108,7 @@ def create_mozaiks_app(
     transport = SimpleTransport()
     # Ensure orchestration paths that call SimpleTransport.get_instance() use the
     # same transport object as the mounted app websocket endpoint.
-    SimpleTransport._instance = transport
+    SimpleTransport._instance = transport  # type: ignore[assignment]
 
     # Store references on app state
     runtime_subapp.state.persistence = persistence_manager
@@ -153,7 +153,7 @@ def create_mozaiks_app(
         from uuid import uuid4
 
         chat_id = str(uuid4())
-        resolved_app_id = coalesce_app_id(app_id)
+        resolved_app_id = coalesce_app_id(app_id)  # type: ignore[misc]
 
         try:
             coll = await persistence_manager._coll()
@@ -170,7 +170,7 @@ def create_mozaiks_app(
             }
 
             if body.context:
-                doc["initial_context"] = body.context
+                doc["initial_context"] = body.context  # type: ignore[assignment]
 
             await coll.insert_one(doc)
 

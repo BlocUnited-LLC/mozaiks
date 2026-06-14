@@ -933,6 +933,9 @@ models:
         items: str
         description: Allowed AG2 agents that may receive decomposed task prompts.
           Each task item chooses one of these agents through its execution_agent field.
+          Conveyor workflows that represent parallel downstream work must declare
+          at least two distinct execution agent names; repeating the same worker
+          name is semantic drift.
       concurrency:
         type: int
         description: Maximum concurrent AG2 task channels for ready tasks.

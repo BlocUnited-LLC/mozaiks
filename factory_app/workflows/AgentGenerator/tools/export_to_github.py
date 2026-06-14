@@ -102,7 +102,7 @@ class ExportToGitHubTool:
 
         wf_logger = get_workflow_logger(workflow_name=workflow_name, chat_id=chat_id, app_id=app_id)
         tlog = None
-        if _get_tool_logger:
+        if _get_tool_logger:  # type: ignore[truthy-function]
             try:
                 tlog = _get_tool_logger(
                     tool_name="ExportToGitHub",
@@ -158,7 +158,7 @@ class ExportToGitHubTool:
             },
         )
 
-        if tlog and _log_tool_event:
+        if tlog and _log_tool_event:  # type: ignore[truthy-function]
             _log_tool_event(tlog, action="start", status="ok", bundle_bytes=bundle_size)
 
         try:
@@ -183,7 +183,7 @@ class ExportToGitHubTool:
                 await _emit_deployment_event(chat_id=chat_id, status="failed", data={"app_id": app_id, "error": error_msg})
                 return ExportResult(success=False, error=error_msg)
 
-            if tlog and _log_tool_event:
+            if tlog and _log_tool_event:  # type: ignore[truthy-function]
                 _log_tool_event(tlog, action="bundle_extracted", status="ok", file_count=len(files_payload))
 
             # 1) Initial export (repo + commit)
@@ -225,11 +225,11 @@ class ExportToGitHubTool:
                         include_database_uri=True,
                         include_app_api_key=False,
                     )
-                    if tlog and _log_tool_event:
+                    if tlog and _log_tool_event:  # type: ignore[truthy-function]
                         _log_tool_event(tlog, action="repo_secrets", status="ok", repo_full_name=repo_full_name, result=secrets_res)
                 except Exception as sec_exc:
                     wf_logger.warning(f"[EXPORT] Failed to set repository secrets: {sec_exc}")
-                    if tlog and _log_tool_event:
+                    if tlog and _log_tool_event:  # type: ignore[truthy-function]
                         _log_tool_event(tlog, action="repo_secrets", status="error", repo_full_name=repo_full_name, error=str(sec_exc))
 
             # 3) Poll deployment status (GitHub Actions).
@@ -264,7 +264,7 @@ class ExportToGitHubTool:
                         "message": "Deployment completed.",
                     },
                 )
-                if tlog and _log_tool_event:
+                if tlog and _log_tool_event:  # type: ignore[truthy-function]
                     _log_tool_event(
                         tlog,
                         action="completed",
@@ -296,7 +296,7 @@ class ExportToGitHubTool:
 
             error_msg = f"Deployment failed: status={status or 'unknown'} conclusion={conclusion or 'unknown'}"
             await _emit_deployment_event(chat_id=chat_id, status="failed", data={"app_id": app_id, "error": error_msg})
-            if tlog and _log_tool_event:
+            if tlog and _log_tool_event:  # type: ignore[truthy-function]
                 _log_tool_event(tlog, action="failed", status="error", repo_full_name=repo_full_name, error=error_msg)
             return ExportResult(
                 success=False,

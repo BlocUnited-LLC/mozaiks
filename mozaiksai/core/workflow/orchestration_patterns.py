@@ -443,7 +443,7 @@ async def run_workflow_orchestration(
         # 7) Derived context manager
         derived_context_manager: Any | None = None
         try:
-            derived_context_manager = DerivedContextManager(workflow_name, agents, context)
+            derived_context_manager = DerivedContextManager(workflow_name, agents, context)  # type: ignore[misc]
             if derived_context_manager.has_variables():
                 derived_context_manager.seed_defaults()
 

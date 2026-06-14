@@ -189,7 +189,7 @@ def _prepare_promotion_file(
     if relative_path not in copied_paths:
         return (
             RefinementPromotionFile(
-                path=relative_path,
+                path=relative_path,  # type: ignore[arg-type]
                 status="skipped",
                 reason="Affected file was not copied into the staging workspace.",
             ),

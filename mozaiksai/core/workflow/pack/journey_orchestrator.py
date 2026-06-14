@@ -154,7 +154,7 @@ class JourneyOrchestrator:
             return
 
         try:
-            session_registry.complete_workflow(int(ws_id), chat_id)
+            session_registry.complete_workflow(int(ws_id), chat_id)  # type: ignore[arg-type]
         except Exception:
             pass
 
@@ -285,7 +285,7 @@ class JourneyOrchestrator:
             journey_position=next_group_index,
         )
         session_registry.add_workflow(
-            ws_id=int(ws_id),
+            ws_id=int(ws_id),  # type: ignore[arg-type]
             chat_id=primary_chat_id,
             workflow_name=primary_workflow,
             app_id=app_id,
@@ -296,7 +296,7 @@ class JourneyOrchestrator:
             if cid == primary_chat_id:
                 continue
             session_registry.add_workflow(
-                ws_id=int(ws_id),
+                ws_id=int(ws_id),  # type: ignore[arg-type]
                 chat_id=cid,
                 workflow_name=wf,
                 app_id=app_id,

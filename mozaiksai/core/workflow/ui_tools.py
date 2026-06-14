@@ -25,7 +25,7 @@ try:  # Prefer pydantic if available
     from pydantic import BaseModel as _PydanticBase
     BaseModel = _PydanticBase  # type: ignore
 except Exception:  # pragma: no cover
-    class BaseModel:  # minimal fallback
+    class BaseModel:  # type: ignore[no-redef]  # minimal fallback
         def model_dump(self, *a, **k):
             return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
@@ -220,7 +220,7 @@ async def _wait_for_tool_call_response_internal(event_id: str, timeout: float | 
         # Always wait indefinitely for user/UI response; ignore provided timeout to avoid premature cancellations.
         # Explicitly pass timeout=None to ensure no default timeout is applied in the transport layer.
         fut = transport.wait_for_tool_call_response(event_id, timeout=None)  # type: ignore[attr-defined]
-        return await fut
+        return await fut  # type: ignore[no-any-return]
     except Exception as e:  # pragma: no cover
         raise UIToolError(f"UI tool response failure for {event_id}: {e}") from e
 

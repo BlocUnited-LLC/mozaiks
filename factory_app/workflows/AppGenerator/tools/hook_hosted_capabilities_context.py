@@ -74,7 +74,7 @@ def _format_hosted_packs(packs: list[Any]) -> str:
                     (c.get("capability_id") or c) if isinstance(c, dict) else str(c)
                     for c in caps[:4]
                 ]
-                line += f" | capabilities: {', '.join(cap_ids)}"
+                line += f" | capabilities: {', '.join(cap_ids)}"  # type: ignore[arg-type]
             lines.append(line)
         else:
             lines.append(f"  - {pack}")
@@ -362,12 +362,12 @@ def inject_hosted_capabilities_context(
         if _is_empty(capability_packs):
             return
 
-        body = _build_hosted_context_body(capability_packs, operator_contracts)
+        body = _build_hosted_context_body(capability_packs, operator_contracts)  # type: ignore[arg-type]
         update_agent_section(agent, _HOSTED_CAP_HEADER, body)
 
         pack_ids = [
             (p.get("id") or p.get("pack_id") or "?") if isinstance(p, dict) else str(p)
-            for p in capability_packs
+            for p in capability_packs  # type: ignore[union-attr]
         ]
         logger.info(
             "[%s] Injected hosted capabilities context (packs: %s)",

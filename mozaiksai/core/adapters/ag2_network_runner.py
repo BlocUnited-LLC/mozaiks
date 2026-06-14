@@ -91,7 +91,7 @@ class AG2NetworkRunner:
             expectation_sweep_interval=0,
         )
         turn_failure_listener = _TurnFailureListener()
-        hub.register_listener(turn_failure_listener)
+        hub.register_listener(turn_failure_listener)  # type: ignore[arg-type]
         link = LocalLink(hub)
         hub_clients: list[HubClient] = []
         channel_id: str | None = None
@@ -330,7 +330,7 @@ def _install_context_update_handler(*, agent: Any, client: Any) -> None:
                         "delete": list(dict.fromkeys(str(item) for item in merged_delete)),
                     }
                     out_envelope.event_data = event_data
-            return await original_send_envelope(out_envelope)
+            return await original_send_envelope(out_envelope)  # type: ignore[no-any-return]
 
         client.send_envelope = _send_with_context_updates
         try:
