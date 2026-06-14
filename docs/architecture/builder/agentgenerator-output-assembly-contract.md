@@ -184,6 +184,14 @@ persists the live workflow metadata through the real artifact store, hydrates
 AppGenerator from that `workflow_bundle`, and verifies app acceptance/export and
 runtime loader reaction wiring.
 
+The live AgentGenerator pack smoke also emits a `semantic_drift` report. That
+report is intentionally prompt-oriented: it flags generated workflow YAML that
+loads but no longer preserves the requested workflow meaning, such as event
+triggers with missing `capability_id`, generic trigger descriptions, or conveyor
+workflows that collapse downstream parallel work into one execution agent. Fix
+those failures in AgentGenerator prompt or structured-output contracts first,
+then rerun the live smoke.
+
 ### Files Written
 
 ```

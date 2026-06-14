@@ -104,15 +104,12 @@ class _MemoryArtifactStore:
         return artifact
 
 
-def _use_repo_factory_workflows(monkeypatch) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    monkeypatch.setenv("PLATFORM_PATH", str(repo_root / "__no_active_app__"))
-    monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(repo_root / "factory_app" / "workflows"))
-    _pack_config._GLOBAL_CACHE = None
+def _factory_workflows_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "factory_app" / "workflows"
 
 
 @pytest.mark.asyncio
-async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chain(monkeypatch) -> None:
+async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chain() -> None:
     """Offline production smoke for the build journey.
 
     This uses the real factory registry and real summary artifact persistence,
@@ -120,8 +117,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     cross-workflow contract without OpenAI, AG2 model calls, MongoDB, or HTTP.
     """
 
-    _use_repo_factory_workflows(monkeypatch)
-    graph = _pack_config.load_global_pack_graph()
+    graph = _pack_config.load_global_pack_graph(workflows_root=_factory_workflows_root())
     assert graph is not None
 
     build = next(sequence for sequence in graph.journeys if sequence.id == "build")
@@ -150,8 +146,6 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     design_docs = store.seed(app_id=app_id, artifact_kind="design_docs")
     theme_capture = store.seed(app_id=app_id, artifact_kind="theme_capture")
 
-    monkeypatch.setattr("mozaiksai.core.artifacts.summary_artifacts.get_artifact_store", lambda: store)
-
     from factory_app.workflows.AgentGenerator.tools.platform.build_lifecycle import (
         _persist_workflow_bundle_artifact,
     )
@@ -165,6 +159,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         user_id="user_1",
         workflow_name="AgentGenerator",
         build_mode=None,
+        artifact_store=store,
     )
     await _persist_app_bundle_artifact(
         app_id=app_id,
@@ -172,6 +167,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         user_id="user_1",
         workflow_name="AppGenerator",
         build_mode=None,
+        artifact_store=store,
     )
 
     workflow_call = next(call for call in store.create_calls if call["artifact_kind"] == "workflow_bundle")
@@ -322,6 +318,7 @@ def test_live_real_store_factory_artifact_lineage_smoke_hydrates_live_workflow_m
     assert result["success"] is True, result["validation_errors"]
     assert result["mode"] == "live_real_store"
     assert result["live_agentgenerator"]["success"] is True
+    assert result["live_agentgenerator"]["semantic_drift"]["valid"] is True
     assert int((result["live_agentgenerator"]["task_run_trace"] or {}).get("max_overlap") or 0) >= 2
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert result["hydration"]["status"] == "hydrated"

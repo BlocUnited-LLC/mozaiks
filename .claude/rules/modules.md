@@ -124,26 +124,19 @@ the action must require an active SaaS plan grant before executing.
 - Only set `entitlement_gate` on public user-facing actions; never on `admin_internal` actions
 - The enforcement mechanism lives in the runtime; generated apps must not re-implement it
 - capability_ids used in `entitlement_gate` MUST appear in `app/config/subscriptions.yaml` under at least one plan
-- For SaaS apps: use the `entitlements` framework_pack. AppGenerator generates:
-  - `app/config/subscriptions.yaml` — the plan catalog (`schema: mozaiks.subscriptions.v1`)
-  - the `entitlements` facade module for UI-facing capability status queries
-  - `services/adapters/entitlements/grant_adapter.py` — one class `EntitlementAdapter(config)`
-    injected into `ModuleExecutor` at platform startup
-
-**Canonical adapter contract (identical across all generated apps):**
-- Path: `app/services/adapters/entitlements/grant_adapter.py`
-- Exported class: `EntitlementAdapter`
-- Constructor: `EntitlementAdapter(config: SubscriptionsConfig | None)`
-- Platform wires: `EntitlementAdapter(config=load_result.subscriptions_config)`
+- For SaaS apps, AppGenerator may emit `app/config/subscriptions.yaml` as the
+  plan catalog (`schema: mozaiks.subscriptions.v1`) and optional app-owned
+  facade modules for UI-facing capability status queries.
+- Do not generate app-local entitlement adapter files. The platform wires the
+  OSS `ConfiguredEntitlementAdapter` from the loaded subscriptions config.
 
 **Runtime enforcement flow:**
-1. Platform loads `subscriptions.yaml` → passes config to `EntitlementAdapter(config=...)`
-2. On action dispatch: executor calls `adapter.check(capability_id, app_id=..., tenant_id=...)`
-3. Adapter resolves grant using its internal strategy → `EntitlementResult`
-4. Internal strategy is app-owned and invisible to the platform:
-   - self-hosted: resolve `plan_id` from billing collection → check `subscriptions.yaml`
-   - grant store: query grant collection directly for `{capability_id, status: active}`
-   - external API: call hosted billing/entitlement service
+1. Platform loads `app/config/subscriptions.yaml`.
+2. If config is present, platform wires `ConfiguredEntitlementAdapter`; otherwise
+   it wires `NoOpEntitlementAdapter`.
+3. On action dispatch, executor calls `EntitlementPort.check(capability_id, ...)`.
+4. `ConfiguredEntitlementAdapter` checks the app's subscriptions config and any
+   declared assignment store before returning `EntitlementResult`.
 
 Example in `module.yaml`:
 ```yaml

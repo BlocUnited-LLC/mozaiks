@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from mozaiksai.control_plane.artifact_promotion import (
+    AcceptedStagedAppBundleArtifactVersionError,
     DraftAppBundleArtifactVersionError,
+    accept_staged_refinement_artifact_version,
     create_draft_app_bundle_from_staged_refinement,
 )
 from mozaiksai.control_plane.dry_run import (
@@ -181,6 +183,24 @@ class _FakeArtifactStore:
                 }
             )
         return True
+
+    async def accept_artifact_version(self, *, app_id: str, artifact_version_id: str, commit_metadata: dict | None = None):
+        version = None
+        if self.created_version is not None and self.created_version.id == artifact_version_id and self.created_version.app_id == app_id:
+            version = self.created_version
+        elif self.source_version.id == artifact_version_id and self.source_version.app_id == app_id:
+            version = self.source_version
+        if version is None:
+            return None
+        accepted = version.model_copy(
+            update={
+                "lifecycle_status": ArtifactLifecycleStatus.CURRENT,
+                "commit_metadata": commit_metadata or version.commit_metadata,
+            }
+        )
+        if version is self.created_version:
+            self.created_version = accepted
+        return accepted
 
 
 class _FakeGridFSContentStore:
@@ -691,6 +711,150 @@ async def test_failed_validation_maps_to_failed_status(tmp_path: Path) -> None:
 
     assert result.validation_status == ArtifactValidationStatus.FAILED
     assert result.artifact_version.validation_status == ArtifactValidationStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_accept_staged_refinement_artifact_version_promotes_draft_to_current(tmp_path: Path) -> None:
+    app_id = "app_accept_1"
+    source_bundle = tmp_path / "source_bundle"
+    _write_source_bundle(source_bundle)
+    source_zip = tmp_path / "source_bundle.zip"
+    _zip_source_bundle(source_bundle, source_zip)
+
+    staging_root = tmp_path / "staging"
+    plan = _build_plan(request_id="refine_accept_1", app_id=app_id, staging_area=staging_root / "refine_accept_1")
+    source_version = _build_source_version(app_id=app_id, source_zip=source_zip)
+    artifact_store = _FakeArtifactStore(source_version)
+
+    staging_result = create_refinement_staging_workspace(plan, source_bundle_path=source_bundle, staging_root=staging_root)
+    create_refinement_review_record(staging_result)
+    approve_refinement_staging(staging_result.staging_area, reviewer="reviewer_1")
+    review_record = mark_refinement_promotion_ready(staging_result.staging_area, reviewer="reviewer_1")
+    scoped_result = apply_scoped_refinement_changes(
+        plan=plan,
+        staging_result=staging_result,
+        changes=[ScopedRefinementChange(path="ui/pages/dashboard.yaml", new_content="title: Accepted\n", reason="Accept test")],
+    )
+
+    draft_result = await create_draft_app_bundle_from_staged_refinement(
+        plan,
+        staging_result,
+        scoped_result,
+        review_record,
+        ValidationEvidence(completed=["route_component_validation", "ui_theme_primitive_validation"], failed=[], warnings=[], artifacts=[]),
+        artifact_store=artifact_store,
+        source_artifact_version_id=source_version.id,
+        generated_artifacts_root=tmp_path / "generated",
+    )
+    assert draft_result.lifecycle_status == ArtifactLifecycleStatus.DRAFT
+
+    accepted_result = await accept_staged_refinement_artifact_version(
+        app_id=app_id,
+        draft_artifact_version_id=draft_result.artifact_version_id,
+        review_record=review_record,
+        request_id=plan.request_id,
+        artifact_store=artifact_store,
+        accepted_by="reviewer_1",
+    )
+
+    assert accepted_result.lifecycle_status == ArtifactLifecycleStatus.CURRENT
+    assert accepted_result.artifact_kind == "app_bundle"
+    assert accepted_result.request_id == plan.request_id
+    assert accepted_result.accepted_by == "reviewer_1"
+    assert accepted_result.refinement_review_status == "promotion_ready"
+    acceptance = accepted_result.metadata.get("acceptance")
+    assert isinstance(acceptance, dict)
+    assert acceptance["accepted_by"] == "reviewer_1"
+    assert acceptance["request_id"] == plan.request_id
+    assert acceptance["refinement_review_status"] == "promotion_ready"
+
+
+@pytest.mark.asyncio
+async def test_accept_staged_refinement_rejects_non_draft_version(tmp_path: Path) -> None:
+    app_id = "app_accept_2"
+    source_bundle = tmp_path / "source_bundle"
+    _write_source_bundle(source_bundle)
+    source_zip = tmp_path / "source_bundle.zip"
+    _zip_source_bundle(source_bundle, source_zip)
+
+    staging_root = tmp_path / "staging"
+    plan = _build_plan(request_id="refine_accept_2", app_id=app_id, staging_area=staging_root / "refine_accept_2")
+    source_version = _build_source_version(app_id=app_id, source_zip=source_zip)
+    artifact_store = _FakeArtifactStore(source_version)
+
+    staging_result = create_refinement_staging_workspace(plan, source_bundle_path=source_bundle, staging_root=staging_root)
+    create_refinement_review_record(staging_result)
+    approve_refinement_staging(staging_result.staging_area)
+    review_record = mark_refinement_promotion_ready(staging_result.staging_area)
+    scoped_result = apply_scoped_refinement_changes(
+        plan=plan,
+        staging_result=staging_result,
+        changes=[ScopedRefinementChange(path="ui/pages/dashboard.yaml", new_content="title: X\n", reason="x")],
+    )
+
+    draft_result = await create_draft_app_bundle_from_staged_refinement(
+        plan, staging_result, scoped_result, review_record, None,
+        artifact_store=artifact_store,
+        source_artifact_version_id=source_version.id,
+        generated_artifacts_root=tmp_path / "generated",
+    )
+    # Accept once to promote to CURRENT
+    await accept_staged_refinement_artifact_version(
+        app_id=app_id,
+        draft_artifact_version_id=draft_result.artifact_version_id,
+        review_record=review_record,
+        request_id=plan.request_id,
+        artifact_store=artifact_store,
+    )
+    # Second accept must be rejected — version is now CURRENT, not DRAFT
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="DRAFT"):
+        await accept_staged_refinement_artifact_version(
+            app_id=app_id,
+            draft_artifact_version_id=draft_result.artifact_version_id,
+            review_record=review_record,
+            request_id=plan.request_id,
+            artifact_store=artifact_store,
+        )
+
+
+@pytest.mark.asyncio
+async def test_accept_staged_refinement_rejects_request_id_mismatch(tmp_path: Path) -> None:
+    app_id = "app_accept_3"
+    source_bundle = tmp_path / "source_bundle"
+    _write_source_bundle(source_bundle)
+    source_zip = tmp_path / "source_bundle.zip"
+    _zip_source_bundle(source_bundle, source_zip)
+
+    staging_root = tmp_path / "staging"
+    plan = _build_plan(request_id="refine_accept_3", app_id=app_id, staging_area=staging_root / "refine_accept_3")
+    source_version = _build_source_version(app_id=app_id, source_zip=source_zip)
+    artifact_store = _FakeArtifactStore(source_version)
+
+    staging_result = create_refinement_staging_workspace(plan, source_bundle_path=source_bundle, staging_root=staging_root)
+    create_refinement_review_record(staging_result)
+    approve_refinement_staging(staging_result.staging_area)
+    review_record = mark_refinement_promotion_ready(staging_result.staging_area)
+    scoped_result = apply_scoped_refinement_changes(
+        plan=plan,
+        staging_result=staging_result,
+        changes=[ScopedRefinementChange(path="ui/pages/dashboard.yaml", new_content="title: Y\n", reason="y")],
+    )
+
+    draft_result = await create_draft_app_bundle_from_staged_refinement(
+        plan, staging_result, scoped_result, review_record, None,
+        artifact_store=artifact_store,
+        source_artifact_version_id=source_version.id,
+        generated_artifacts_root=tmp_path / "generated",
+    )
+
+    with pytest.raises(AcceptedStagedAppBundleArtifactVersionError, match="request_id mismatch"):
+        await accept_staged_refinement_artifact_version(
+            app_id=app_id,
+            draft_artifact_version_id=draft_result.artifact_version_id,
+            review_record=review_record,
+            request_id="wrong_request_id",
+            artifact_store=artifact_store,
+        )
 
 
 def test_artifact_promotion_module_stays_out_of_conceptual_replan_and_workflow_or_llm_paths() -> None:

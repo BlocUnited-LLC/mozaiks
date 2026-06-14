@@ -58,8 +58,13 @@ async def _persist_app_bundle_artifact(
     user_id: str | None,
     workflow_name: str,
     build_mode: str | None,
+    artifact_store: Any | None = None,
 ) -> None:
-    """Persist a versioned app_bundle summary artifact after AppGenerator completes."""
+    """Persist a versioned app_bundle summary artifact after AppGenerator completes.
+
+    Pass ``artifact_store`` to direct artifact writes to a specific store instance
+    without touching process-level state.
+    """
     from mozaiksai.core.artifacts.summary_artifacts import persist_summary_artifact
 
     resolved_chat_id = (chat_id or "").strip() or None
@@ -76,6 +81,7 @@ async def _persist_app_bundle_artifact(
         author_user_id=(user_id or "").strip() or None,
         revision_mode=build_mode == "revision",
         input_artifact_kinds=("design_docs", "workflow_bundle", "theme_capture"),
+        artifact_store=artifact_store,
     )
 
 

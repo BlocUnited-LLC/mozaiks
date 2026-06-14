@@ -38,9 +38,10 @@ def _workflows_root() -> Path:
     return primary_workflows_root()
 
 
-def get_global_pack_graph_path() -> Path:
+def get_global_pack_graph_path(workflows_root: Path | None = None) -> Path:
     """Resolve the active global extension registry path."""
-    return (_workflows_root() / "extended_orchestration" / "extension_registry.json").resolve()
+    root = workflows_root if workflows_root is not None else _workflows_root()
+    return (root / "extended_orchestration" / "extension_registry.json").resolve()
 
 
 def _load_json_file(path: Path) -> dict[str, Any] | None:
@@ -55,12 +56,16 @@ def _load_json_file(path: Path) -> dict[str, Any] | None:
         raise ValueError(f"Failed loading pack graph {path}: {exc}") from exc
 
 
-def load_global_pack_graph() -> GlobalPackGraph | None:
+def load_global_pack_graph(workflows_root: Path | None = None) -> GlobalPackGraph | None:
     """Load and validate the canonical global pack graph.
+
+    Pass ``workflows_root`` to load from a specific directory without touching
+    environment variables — used by tests and scripts that need the factory pack
+    graph without leaking process-level state.
     """
     global _GLOBAL_CACHE
 
-    path = get_global_pack_graph_path()
+    path = get_global_pack_graph_path(workflows_root)
     if not path.exists():
         return None
 

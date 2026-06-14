@@ -220,6 +220,9 @@ agents:
       - Assigned pattern and what topology it implies (agent archetypes, transition graph shape)
       - Any critical domain constraints from concept_overview or design_surface_map
       - The `workflow_startup_mode` to write in `orchestrator.yaml` (UserDriven / AgentDriven / BackendOnly)
+      - For BackendOnly event-driven workflows, the exact event trigger contract:
+        `type: event`, canonical `event`, stable workflow `capability_id`, and
+        a domain-specific trigger description
       - Whether human-in-the-loop review is needed
       - Key integrations or data sources this workflow owns
 
@@ -414,7 +417,10 @@ agents:
       - `context_variables.yaml` — definitions + agents exposure sections
       - `structured_outputs.yaml` — models + registry (agents → output model)
       - `middleware.yaml` — prompt middleware declarations. Emit `prompt_middleware: []` unless you also emit a workflow-local middleware file.
-      - `ui_config.yaml` — visual_agents list. `visual_agents` belongs only in ui_config.yaml, never in orchestrator.yaml.
+      - `ui_config.yaml` — visual_agents list. This file is required for every
+        workflow, including BackendOnly/headless workflows. BackendOnly
+        workflows must still emit `ui_config.yaml` with `visual_agents: []`.
+        `visual_agents` belongs only in ui_config.yaml, never in orchestrator.yaml.
 
       **Python tool stubs** (under `tools/`):
       - One `.py` file per declared tool function
@@ -665,6 +671,21 @@ agents:
       - orchestrator.yaml `triggers[]` entries may use only runtime-supported keys:
         `type`, `event`, `capability_id`, `endpoint`, `method`, and `description`.
         Do not emit `source`, `topic`, `queue`, or product-specific trigger keys.
+      - For domain/platform/hosted event triggers, emit this exact semantic shape:
+        ```yaml
+        triggers:
+          - type: event
+            event: domain.support_ticket.batch_requested
+            capability_id: ticket-batch-triage-workflow
+            description: Requests parallel support-ticket triage for queued tickets.
+        ```
+        Use the canonical event from the brief or backend design document. Use
+        the stable workflow capability id: kebab-case from `workflow_name` unless
+        the upstream event boundary declares a more specific `capability_id`.
+        Never omit or null `capability_id`; AppGenerator reactions use it as
+        the runtime-resolvable workflow target. The description must preserve
+        domain meaning from the brief. Never emit generic descriptions such as
+        `Trigger for ... event`.
 
       If the workflow requires decomposition fan-out, emit `extended_orchestration/task_batches.yaml` with the canonical conveyor shape:
       - `version: 1`
@@ -780,6 +801,9 @@ agents:
       - orchestrator.yaml does not contain visual_agents
       - orchestrator.yaml triggers use only type, event, capability_id, endpoint,
         method, and description
+      - every event trigger has `type: event`, a canonical domain/platform/hosted
+        `event`, non-null `capability_id`, and a domain-specific description;
+        never emit `Trigger for ... event`
       - transition_graph.yaml uses only after_turn, context_equals,
         context_expression, or tool_called transitions
       - transition_graph.yaml transition rules are flat mappings, never nested
@@ -799,6 +823,9 @@ agents:
         require_owned_paths, and failure_policy
       - middleware.yaml and ui_config.yaml are present even when they contain only
         empty/default declarations
+      - BackendOnly/headless workflows still include ui_config.yaml with
+        `visual_agents: []`; never omit ui_config.yaml because a workflow has no
+        user-facing agents
       - agents.yaml prompt_sections are block-style list items, never inline
         `{id: ...}` mappings, and every agent-level key is aligned under the
         same `- name:` item

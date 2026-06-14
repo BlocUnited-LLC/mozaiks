@@ -93,5 +93,6 @@ def test_live_agentgenerator_to_appgenerator_acceptance_smoke() -> None:
 
     assert result["success"] is True, result.get("validation_errors")
     assert result["live_agentgenerator"]["task_run_trace"]["max_overlap"] >= 2
+    assert result["live_agentgenerator"]["semantic_drift"]["valid"] is True
     assert result["appgenerator_acceptance"]["app_bundle_acceptance_status"] == "passed"
     assert result["appgenerator_acceptance"]["export_gate"]["allow_export"] is True

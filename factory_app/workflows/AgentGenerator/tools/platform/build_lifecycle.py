@@ -109,16 +109,24 @@ async def _persist_workflow_bundle_artifact(
     user_id: str | None,
     workflow_name: str,
     build_mode: str | None,
+    artifact_store: Any | None = None,
+    workflow_integration_metadata: dict[str, Any] | None = None,
 ) -> None:
-    """Persist a versioned workflow_bundle summary artifact after AgentGenerator completes."""
+    """Persist a versioned workflow_bundle summary artifact after AgentGenerator completes.
+
+    Pass ``artifact_store`` to direct artifact writes to a specific store instance
+    without touching process-level state.  Pass ``workflow_integration_metadata``
+    to supply the payload directly and skip the MongoDB chat-context read.
+    """
     from mozaiksai.core.artifacts.summary_artifacts import persist_summary_artifact
 
     resolved_chat_id = (chat_id or "").strip() or None
-    workflow_integration_metadata = (
-        await _read_workflow_integration_metadata(app_id=app_id, chat_id=resolved_chat_id)
-        if resolved_chat_id
-        else None
-    )
+    if workflow_integration_metadata is None:
+        workflow_integration_metadata = (
+            await _read_workflow_integration_metadata(app_id=app_id, chat_id=resolved_chat_id)
+            if resolved_chat_id
+            else None
+        )
     await persist_summary_artifact(
         app_id=app_id,
         artifact_kind="workflow_bundle",
@@ -133,6 +141,7 @@ async def _persist_workflow_bundle_artifact(
         author_user_id=(user_id or "").strip() or None,
         revision_mode=build_mode == "revision",
         input_artifact_kinds=("design_docs",),
+        artifact_store=artifact_store,
     )
 
 

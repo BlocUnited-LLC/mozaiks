@@ -187,10 +187,9 @@ def _json_safe(value: Any) -> Any:
 def _configure_repo_factory_workflows() -> Any:
     from mozaiksai.core.workflow.pack import config as pack_config
 
-    os.environ["PLATFORM_PATH"] = str(REPO_ROOT / "__no_active_app__")
-    os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(REPO_ROOT / "factory_app" / "workflows")
-    pack_config._GLOBAL_CACHE = None
-    return pack_config.load_global_pack_graph()
+    return pack_config.load_global_pack_graph(
+        workflows_root=REPO_ROOT / "factory_app" / "workflows"
+    )
 
 
 def _workflow_integration_metadata() -> dict[str, Any]:
@@ -256,6 +255,7 @@ def _live_agentgenerator_summary(live_result: dict[str, Any]) -> dict[str, Any]:
         "task_batch_meta": live_result.get("task_batch_meta"),
         "task_run_trace": live_result.get("task_run_trace"),
         "validation": live_result.get("validation"),
+        "semantic_drift": live_result.get("semantic_drift"),
         "promotion": live_result.get("promotion"),
         "validation_errors": live_result.get("validation_errors"),
     }
@@ -358,7 +358,6 @@ async def _run_lineage_smoke_with_store(
 
     metadata = workflow_integration_metadata or _workflow_integration_metadata()
 
-    import mozaiksai.core.artifacts.summary_artifacts as summary_artifacts
     from factory_app.workflows.AgentGenerator.tools.platform import (
         build_lifecycle as agent_lifecycle,
     )
@@ -366,28 +365,23 @@ async def _run_lineage_smoke_with_store(
         _persist_app_bundle_artifact,
     )
 
-    original_get_artifact_store = summary_artifacts.get_artifact_store
-    original_read_workflow_metadata = agent_lifecycle._read_workflow_integration_metadata
-    summary_artifacts.get_artifact_store = lambda: store
-    agent_lifecycle._read_workflow_integration_metadata = lambda **_: asyncio.sleep(0, result=metadata)
-    try:
-        await agent_lifecycle._persist_workflow_bundle_artifact(
-            app_id=app_id,
-            chat_id="chat_agentgenerator",
-            user_id="user_1",
-            workflow_name="AgentGenerator",
-            build_mode=None,
-        )
-        await _persist_app_bundle_artifact(
-            app_id=app_id,
-            chat_id="chat_appgenerator",
-            user_id="user_1",
-            workflow_name="AppGenerator",
-            build_mode=None,
-        )
-    finally:
-        summary_artifacts.get_artifact_store = original_get_artifact_store
-        agent_lifecycle._read_workflow_integration_metadata = original_read_workflow_metadata
+    await agent_lifecycle._persist_workflow_bundle_artifact(
+        app_id=app_id,
+        chat_id="chat_agentgenerator",
+        user_id="user_1",
+        workflow_name="AgentGenerator",
+        build_mode=None,
+        artifact_store=store,
+        workflow_integration_metadata=metadata,
+    )
+    await _persist_app_bundle_artifact(
+        app_id=app_id,
+        chat_id="chat_appgenerator",
+        user_id="user_1",
+        workflow_name="AppGenerator",
+        build_mode=None,
+        artifact_store=store,
+    )
 
     current_refs = await store.get_current_artifact_version_refs(app_id=app_id)
     workflow_bundle = await store.get_artifact_version(

@@ -13,6 +13,7 @@ from scripts.smoke_agentgenerator_live_pack import (
     build_seeded_pack_context,
     promote_and_load_generated_workflows,
     run_live_agentgenerator_pack_smoke,
+    validate_agentgenerator_semantic_drift,
     validate_generated_workflow_bundle,
 )
 
@@ -30,8 +31,9 @@ def _write_valid_workflow(
     *,
     startup_mode: str = "AgentDriven",
     visual_agents=None,
+    triggers: list[dict] | None = None,
     include_task_batches: bool = False,
-    ) -> None:
+) -> None:
     workflow_dir.mkdir(parents=True, exist_ok=True)
     context_definitions = {
         "tenant_id": {"type": "string", "source": {"type": "state", "default": "tenant-1"}},
@@ -57,7 +59,7 @@ def _write_valid_workflow(
             "orchestration_pattern": "ag2_network",
             "initial_message": "Run the smoke workflow.",
             "initial_agent": "PlannerAgent",
-            "triggers": [{"type": "chat", "description": "Smoke trigger"}],
+            "triggers": triggers or [{"type": "chat", "description": "Smoke trigger"}],
         },
     )
     _write_yaml(
@@ -66,6 +68,7 @@ def _write_valid_workflow(
             "agents": [
                 {"name": "PlannerAgent", "system_message": "Plan the workflow."},
                 {"name": "WorkerAgent", "system_message": "Execute workflow tasks."},
+                {"name": "AnalysisAgent", "system_message": "Execute specialist analysis tasks."},
             ]
         },
     )
@@ -92,7 +95,7 @@ def _write_valid_workflow(
         workflow_dir / "structured_outputs.yaml",
         {
             "models": {},
-            "registry": {"PlannerAgent": None, "WorkerAgent": None},
+            "registry": {"PlannerAgent": None, "WorkerAgent": None, "AnalysisAgent": None},
         },
     )
     _write_yaml(workflow_dir / "tools.yaml", {"tools": [], "lifecycle_tools": []})
@@ -107,7 +110,7 @@ def _write_valid_workflow(
                     {
                         "id": "triage_tasks",
                         "decomposition_agent": "PlannerAgent",
-                        "execution_agents": ["WorkerAgent"],
+                        "execution_agents": ["WorkerAgent", "AnalysisAgent"],
                         "concurrency": 2,
                         "require_owned_paths": False,
                     }
@@ -131,6 +134,8 @@ def test_build_seeded_pack_context_has_parallel_agentgenerator_work_items() -> N
     assert "ClassifierAgent -> RoutingAgent -> terminate" in routing_spec["initial_message"]
     conveyor_spec = next(item for item in specs if item["name"] == "TicketBatchTriageWorkflow")
     assert conveyor_spec["context_variables"]["expected_task_batch_id"] == "ticket_batch_triage_tasks"
+    assert conveyor_spec["context_variables"]["expected_workflow_capability_id"] == "ticket-batch-triage-workflow"
+    assert "capability_id: ticket-batch-triage-workflow" in conveyor_spec["initial_message"]
     assert "ticket_batch_triage_tasks_results" in conveyor_spec["initial_message"]
     assert "ticket_batch_triage_tasks_status" in conveyor_spec["initial_message"]
 
@@ -150,6 +155,10 @@ def test_workflow_bundle_builder_prompt_forbids_punctuated_yaml_scalars() -> Non
     assert "ticket_triage_tasks_status" in prompt
     assert "Every agent referenced by transition_graph.yaml must be declared" in prompt
     assert "HandlingLaneAgent" in prompt
+    assert "Never omit or null `capability_id`" in prompt
+    assert "Trigger for ... event" in prompt
+    assert "BackendOnly/headless workflows still include ui_config.yaml" in prompt
+    assert "never omit ui_config.yaml" in prompt
     assert "transition_type: after_turn." in prompt
     assert "structured_outputs_required: true." in prompt
     assert "require_owned_paths: false." in prompt
@@ -193,6 +202,132 @@ def test_validate_generated_workflow_bundle_accepts_current_contract(tmp_path: P
             for path in (bundle_root / workflow_name).rglob("*")
             if path.is_file()
         }
+    )
+
+
+def test_validate_agentgenerator_semantic_drift_accepts_domain_event_trigger_contract(tmp_path: Path) -> None:
+    workflow_name = "TicketBatchTriageWorkflow"
+    bundle_root = tmp_path / "bundle"
+    _write_valid_workflow(
+        bundle_root / workflow_name,
+        workflow_name,
+        startup_mode="BackendOnly",
+        visual_agents=None,
+        triggers=[
+            {
+                "type": "event",
+                "event": "domain.support_ticket.batch_requested",
+                "capability_id": "ticket-batch-triage-workflow",
+                "description": "Requests parallel support ticket triage for queued tickets.",
+            }
+        ],
+        include_task_batches=True,
+    )
+    spec = {
+        "name": workflow_name,
+        "description": "Decompose large ticket queues into parallel triage work units.",
+        "context_variables": {
+            "expected_workflow_startup_mode": "BackendOnly",
+            "expected_human_in_the_loop": False,
+            "expected_event_trigger": "domain.support_ticket.batch_requested",
+            "expected_workflow_capability_id": "ticket-batch-triage-workflow",
+            "require_task_batches": True,
+        },
+    }
+
+    drift = validate_agentgenerator_semantic_drift(bundle_root=bundle_root, expected_workflows=[spec])
+
+    assert drift["valid"] is True
+    assert drift["errors"] == []
+
+
+def test_validate_agentgenerator_semantic_drift_rejects_trigger_capability_and_description_drift(
+    tmp_path: Path,
+) -> None:
+    workflow_name = "TicketBatchTriageWorkflow"
+    bundle_root = tmp_path / "bundle"
+    _write_valid_workflow(
+        bundle_root / workflow_name,
+        workflow_name,
+        startup_mode="BackendOnly",
+        visual_agents=None,
+        triggers=[
+            {
+                "type": "event",
+                "event": "domain.support_ticket.batch_requested",
+                "description": "Trigger for batch requested event.",
+            }
+        ],
+        include_task_batches=True,
+    )
+    spec = {
+        "name": workflow_name,
+        "description": "Decompose large ticket queues into parallel triage work units.",
+        "context_variables": {
+            "expected_workflow_startup_mode": "BackendOnly",
+            "expected_human_in_the_loop": False,
+            "expected_event_trigger": "domain.support_ticket.batch_requested",
+            "expected_workflow_capability_id": "ticket-batch-triage-workflow",
+            "require_task_batches": True,
+        },
+    }
+
+    drift = validate_agentgenerator_semantic_drift(bundle_root=bundle_root, expected_workflows=[spec])
+
+    assert drift["valid"] is False
+    check_ids = {
+        item["check_id"]
+        for item in drift["workflows"][0]["semantic_drifts"]
+        if item["severity"] == "error"
+    }
+    assert "event_trigger_capability_id_semantic_drift" in check_ids
+    assert "event_trigger_description_semantic_drift" in check_ids
+    assert "WorkflowBundleBuilderAgent" in drift["errors"][0]
+
+
+def test_validate_agentgenerator_semantic_drift_rejects_single_worker_conveyor(tmp_path: Path) -> None:
+    workflow_name = "TicketBatchTriageWorkflow"
+    bundle_root = tmp_path / "bundle"
+    _write_valid_workflow(
+        bundle_root / workflow_name,
+        workflow_name,
+        startup_mode="BackendOnly",
+        visual_agents=None,
+        triggers=[
+            {
+                "type": "event",
+                "event": "domain.support_ticket.batch_requested",
+                "capability_id": "ticket-batch-triage-workflow",
+                "description": "Requests parallel support ticket triage for queued tickets.",
+            }
+        ],
+        include_task_batches=True,
+    )
+    task_batches_path = bundle_root / workflow_name / "extended_orchestration" / "task_batches.yaml"
+    task_batches = yaml.safe_load(task_batches_path.read_text(encoding="utf-8"))
+    task_batches["conveyors"][0]["execution_agents"] = ["WorkerAgent"]
+    _write_yaml(task_batches_path, task_batches)
+
+    drift = validate_agentgenerator_semantic_drift(
+        bundle_root=bundle_root,
+        expected_workflows=[
+            {
+                "name": workflow_name,
+                "description": "Decompose large ticket queues into parallel triage work units.",
+                "context_variables": {
+                    "expected_human_in_the_loop": False,
+                    "expected_event_trigger": "domain.support_ticket.batch_requested",
+                    "expected_workflow_capability_id": "ticket-batch-triage-workflow",
+                    "require_task_batches": True,
+                },
+            }
+        ],
+    )
+
+    assert drift["valid"] is False
+    assert any(
+        item["check_id"] == "task_conveyor_parallel_execution_agent_drift"
+        for item in drift["workflows"][0]["semantic_drifts"]
     )
 
 
@@ -342,3 +477,5 @@ def test_live_agentgenerator_pack_smoke() -> None:
     assert result["success"] is True, result.get("validation_errors")
     assert result["task_batch_meta"]["task_count"] == 2
     assert result["task_run_trace"]["max_overlap"] >= 2
+    assert result["semantic_drift"]["valid"] is True
+    assert result["semantic_drift"]["errors"] == []

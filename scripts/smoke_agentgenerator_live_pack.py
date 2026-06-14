@@ -21,6 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from factory_app.workflows._shared.workflow_integration import workflow_name_to_capability_id
+
 DEFAULT_WORKFLOW = "AgentGenerator"
 DEFAULT_WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
 DEFAULT_PACK_NAME = "Support Operations Automation"
@@ -35,6 +37,10 @@ REQUIRED_WORKFLOW_FILES = {
     "ui_config.yaml",
 }
 SUPPORTED_TRANSITION_CONDITIONS = {"context_equals", "context_expression", "tool_called"}
+EVENT_PREFIXES = ("domain.", "platform.", "hosted.")
+WORKFLOW_BUNDLE_BUILDER_PROMPT_SURFACE = (
+    "factory_app/workflows/AgentGenerator/agents.yaml#WorkflowBundleBuilderAgent"
+)
 
 
 def _configure_event_loop_policy() -> None:
@@ -118,6 +124,7 @@ def _workflow_generation_prompt(
 ) -> str:
     root_files = ", ".join(sorted(REQUIRED_WORKFLOW_FILES))
     conveyor_id = str(task_batch_id or f"{_pascal_to_snake(workflow_name)}_tasks").strip()
+    capability_id = workflow_name_to_capability_id(workflow_name)
     agent_names = [str(name).strip() for name in required_agent_names or [] if str(name).strip()]
     agent_roster_clause = (
         "Declare these agents exactly in agents.yaml: "
@@ -147,7 +154,11 @@ def _workflow_generation_prompt(
         else "Do not emit extended_orchestration/task_batches.yaml unless the pattern requires it."
     )
     trigger_clause = (
-        f"Declare an orchestrator trigger for {trigger} and keep this workflow backend-only."
+        "Declare this exact orchestrator event trigger and keep this workflow backend-only: "
+        f"`type: event`, `event: {trigger}`, `capability_id: {capability_id}`, "
+        "and a domain-specific `description` that preserves the business meaning "
+        "from the workflow description. Never omit or null capability_id. Never "
+        "emit a generic description like `Trigger for ... event`."
         if trigger
         else "Use a chat or route trigger only if appropriate for the startup mode."
     )
@@ -163,7 +174,8 @@ def _workflow_generation_prompt(
         "transition_graph.yaml must use transition_rules with transition_type=after_turn "
         "or condition_type in context_equals, context_expression, tool_called. Never emit a condition field.\n"
         "middleware.yaml must declare prompt middleware or an empty prompt_middleware list.\n"
-        "ui_config.yaml must declare visual_agents; use null or [] for BackendOnly workflows.\n"
+        "ui_config.yaml is required even for BackendOnly/headless workflows; emit "
+        "`visual_agents: []` for BackendOnly workflows and never omit the file.\n"
         "Do not emit handoffs.yaml, hooks.yaml, app module files, backend/models.py, ctx.db, "
         "runtime infrastructure, or _shared imports.\n"
         f"{trigger_clause}\n"
@@ -241,6 +253,7 @@ def build_seeded_pack_context(*, pack_name: str = DEFAULT_PACK_NAME) -> dict[str
                 "expected_workflow_startup_mode": item["startup_mode"],
                 "expected_human_in_the_loop": bool(item["human_in_the_loop"]),
                 "expected_event_trigger": item.get("trigger"),
+                "expected_workflow_capability_id": workflow_name_to_capability_id(item["name"]),
                 "require_task_batches": bool(item.get("require_task_batches")),
                 "expected_task_batch_id": item.get("task_batch_id"),
             },
@@ -392,6 +405,308 @@ def _read_agent_names(agents_payload: Any) -> list[str]:
             if isinstance(agent, dict) and str(agent.get("name") or "").strip()
         ]
     return []
+
+
+def _event_type_from_trigger(trigger: Any) -> str | None:
+    if not isinstance(trigger, dict):
+        return None
+    for key in ("event", "event_type"):
+        value = str(trigger.get(key) or "").strip()
+        if value.startswith(EVENT_PREFIXES):
+            return value
+    trigger_type = str(trigger.get("type") or "").strip()
+    if trigger_type.startswith(EVENT_PREFIXES):
+        return trigger_type
+    return None
+
+
+def _is_generic_trigger_description(value: Any) -> bool:
+    text = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    if not text:
+        return True
+    if any(marker in text for marker in ("todo", "tbd", "placeholder", "example", "lorem")):
+        return True
+    if text in {
+        "event trigger",
+        "trigger event",
+        "workflow trigger",
+        "start workflow",
+        "starts workflow",
+        "trigger the workflow",
+    }:
+        return True
+    return bool(re.fullmatch(r"trigger for [a-z0-9_. -]+ event\.?", text))
+
+
+def _semantic_tokens(*values: Any) -> set[str]:
+    stop_words = {
+        "after",
+        "agent",
+        "automation",
+        "event",
+        "from",
+        "into",
+        "requested",
+        "requests",
+        "runs",
+        "start",
+        "the",
+        "this",
+        "through",
+        "trigger",
+        "workflow",
+    }
+    tokens: set[str] = set()
+    for value in values:
+        for token in re.split(r"[^a-z0-9]+", str(value or "").lower()):
+            if len(token) >= 4 and token not in stop_words:
+                tokens.add(token)
+    return tokens
+
+
+def _semantic_drift_issue(
+    *,
+    check_id: str,
+    file: str,
+    expected: Any,
+    observed: Any,
+    fix_suggestion: str,
+    severity: str = "error",
+    prompt_surface: str = WORKFLOW_BUNDLE_BUILDER_PROMPT_SURFACE,
+) -> dict[str, Any]:
+    return {
+        "severity": severity,
+        "check_id": check_id,
+        "file": file,
+        "expected": expected,
+        "observed": observed,
+        "prompt_surface": prompt_surface,
+        "fix_suggestion": fix_suggestion,
+    }
+
+
+def _semantic_drift_summary(workflow_name: str, issue: dict[str, Any]) -> str:
+    return (
+        f"{workflow_name}: {issue['check_id']} in {issue['file']}: "
+        f"expected {issue['expected']!r}, observed {issue['observed']!r}; "
+        f"prompt_surface={issue['prompt_surface']}"
+    )
+
+
+def _load_workflow_yaml_payloads(workflow_dir: Path) -> tuple[dict[str, Any], list[str]]:
+    payloads: dict[str, Any] = {}
+    errors: list[str] = []
+    if not workflow_dir.is_dir():
+        return payloads, [f"workflow directory missing: {workflow_dir}"]
+    for path in sorted(workflow_dir.rglob("*.yaml")):
+        relpath = str(path.relative_to(workflow_dir)).replace("\\", "/")
+        try:
+            payloads[relpath] = _yaml_load(path)
+        except Exception as exc:
+            errors.append(f"{relpath} is not valid YAML: {exc}")
+    return payloads, errors
+
+
+def validate_agentgenerator_semantic_drift(
+    *,
+    bundle_root: Path,
+    expected_workflows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Validate generated workflow semantics that are easy for LLM output to drift.
+
+    Runtime contract checks answer "will this load?". Semantic drift checks answer
+    "did the generated bundle preserve the workflow meaning the prompts requested?".
+    """
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    workflow_reports: list[dict[str, Any]] = []
+
+    for spec in expected_workflows:
+        workflow_name = str(spec.get("name") or "").strip()
+        if not workflow_name:
+            continue
+        workflow_dir = bundle_root / workflow_name
+        report: dict[str, Any] = {
+            "workflow_name": workflow_name,
+            "path": str(workflow_dir),
+            "semantic_drifts": [],
+        }
+        workflow_reports.append(report)
+
+        payloads, yaml_errors = _load_workflow_yaml_payloads(workflow_dir)
+        for yaml_error in yaml_errors:
+            issue = _semantic_drift_issue(
+                check_id="workflow_yaml_readable_for_semantic_audit",
+                file="*.yaml",
+                expected="parseable workflow YAML",
+                observed=yaml_error,
+                fix_suggestion=(
+                    "Tighten WorkflowBundleBuilderAgent output instructions so every "
+                    "generated YAML file is complete and parseable before emission."
+                ),
+            )
+            report["semantic_drifts"].append(issue)
+            errors.append(_semantic_drift_summary(workflow_name, issue))
+        if yaml_errors:
+            continue
+
+        orchestrator = payloads.get("orchestrator.yaml")
+        if not isinstance(orchestrator, dict):
+            issue = _semantic_drift_issue(
+                check_id="orchestrator_mapping_required",
+                file="orchestrator.yaml",
+                expected="mapping",
+                observed=type(orchestrator).__name__,
+                fix_suggestion="Ensure WorkflowBundleBuilderAgent always emits orchestrator.yaml as a YAML object.",
+            )
+            report["semantic_drifts"].append(issue)
+            errors.append(_semantic_drift_summary(workflow_name, issue))
+            continue
+
+        spec_context = spec.get("context_variables") if isinstance(spec.get("context_variables"), dict) else {}
+        expected_human = spec_context.get("expected_human_in_the_loop")
+        if isinstance(expected_human, bool) and orchestrator.get("human_in_the_loop") is not expected_human:
+            issue = _semantic_drift_issue(
+                check_id="human_in_the_loop_semantic_drift",
+                file="orchestrator.yaml",
+                expected=expected_human,
+                observed=orchestrator.get("human_in_the_loop"),
+                fix_suggestion=(
+                    "Update WorkflowBundleBuilderAgent prompt handling so the HITL flag from "
+                    "the task brief is copied into orchestrator.yaml without reinterpretation."
+                ),
+            )
+            report["semantic_drifts"].append(issue)
+            errors.append(_semantic_drift_summary(workflow_name, issue))
+
+        expected_event = str(spec_context.get("expected_event_trigger") or "").strip()
+        if expected_event:
+            expected_capability_id = str(
+                spec_context.get("expected_workflow_capability_id")
+                or workflow_name_to_capability_id(workflow_name)
+            ).strip()
+            triggers = orchestrator.get("triggers") if isinstance(orchestrator.get("triggers"), list) else []
+            matching_trigger = next(
+                (trigger for trigger in triggers if _event_type_from_trigger(trigger) == expected_event),
+                None,
+            )
+            if matching_trigger is None:
+                issue = _semantic_drift_issue(
+                    check_id="event_trigger_missing",
+                    file="orchestrator.yaml",
+                    expected=expected_event,
+                    observed=triggers,
+                    fix_suggestion=(
+                        "Make WorkflowBundleBuilderAgent copy the exact event trigger from "
+                        "the generation brief into orchestrator.yaml triggers[]."
+                    ),
+                )
+                report["semantic_drifts"].append(issue)
+                errors.append(_semantic_drift_summary(workflow_name, issue))
+            else:
+                trigger_type = str(matching_trigger.get("type") or "").strip()
+                if trigger_type != "event":
+                    issue = _semantic_drift_issue(
+                        check_id="event_trigger_type_semantic_drift",
+                        file="orchestrator.yaml",
+                        expected="event",
+                        observed=trigger_type,
+                        fix_suggestion=(
+                            "Prompt WorkflowBundleBuilderAgent to emit `type: event` for "
+                            "domain/platform/hosted event triggers."
+                        ),
+                    )
+                    report["semantic_drifts"].append(issue)
+                    errors.append(_semantic_drift_summary(workflow_name, issue))
+
+                observed_capability_id = str(matching_trigger.get("capability_id") or "").strip()
+                if observed_capability_id != expected_capability_id:
+                    issue = _semantic_drift_issue(
+                        check_id="event_trigger_capability_id_semantic_drift",
+                        file="orchestrator.yaml",
+                        expected=expected_capability_id,
+                        observed=observed_capability_id or None,
+                        fix_suggestion=(
+                            "Prompt WorkflowBundleBuilderAgent to include the stable workflow "
+                            "capability_id on every event trigger; AppGenerator reactions use "
+                            "that id as the runtime-resolvable target."
+                        ),
+                    )
+                    report["semantic_drifts"].append(issue)
+                    errors.append(_semantic_drift_summary(workflow_name, issue))
+
+                trigger_description = matching_trigger.get("description")
+                if _is_generic_trigger_description(trigger_description):
+                    issue = _semantic_drift_issue(
+                        check_id="event_trigger_description_semantic_drift",
+                        file="orchestrator.yaml",
+                        expected="domain-specific trigger purpose",
+                        observed=trigger_description,
+                        fix_suggestion=(
+                            "Prompt WorkflowBundleBuilderAgent to preserve business meaning in "
+                            "trigger descriptions instead of emitting generic text such as "
+                            "`Trigger for ... event`."
+                        ),
+                    )
+                    report["semantic_drifts"].append(issue)
+                    errors.append(_semantic_drift_summary(workflow_name, issue))
+                else:
+                    expected_tokens = _semantic_tokens(expected_event, spec.get("description"))
+                    matched_tokens = {
+                        token
+                        for token in expected_tokens
+                        if token in str(trigger_description or "").lower()
+                    }
+                    if expected_tokens and len(matched_tokens) < 2:
+                        issue = _semantic_drift_issue(
+                            check_id="event_trigger_description_domain_token_warning",
+                            file="orchestrator.yaml",
+                            expected=sorted(expected_tokens),
+                            observed=trigger_description,
+                            severity="warning",
+                            fix_suggestion=(
+                                "Consider tightening WorkflowBundleBuilderAgent examples so "
+                                "trigger descriptions retain domain nouns from the brief."
+                            ),
+                        )
+                        report["semantic_drifts"].append(issue)
+                        warnings.append(_semantic_drift_summary(workflow_name, issue))
+
+        requires_task_batches = bool(spec_context.get("require_task_batches"))
+        if requires_task_batches:
+            task_batches = payloads.get("extended_orchestration/task_batches.yaml")
+            conveyors = task_batches.get("conveyors") if isinstance(task_batches, dict) else None
+            if isinstance(conveyors, list):
+                for conveyor in conveyors:
+                    if not isinstance(conveyor, dict):
+                        continue
+                    execution_agents = [
+                        str(agent).strip()
+                        for agent in conveyor.get("execution_agents", [])
+                        if str(agent or "").strip()
+                    ]
+                    if len(set(execution_agents)) < 2:
+                        issue = _semantic_drift_issue(
+                            check_id="task_conveyor_parallel_execution_agent_drift",
+                            file="extended_orchestration/task_batches.yaml",
+                            expected="at least two execution_agents for parallel downstream work",
+                            observed=execution_agents,
+                            fix_suggestion=(
+                                "Prompt WorkflowBundleBuilderAgent to model conveyor workflows "
+                                "as decomposition plus multiple downstream execution agents, not "
+                                "a single serial worker."
+                            ),
+                        )
+                        report["semantic_drifts"].append(issue)
+                        errors.append(_semantic_drift_summary(workflow_name, issue))
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "workflows": workflow_reports,
+    }
 
 
 def validate_generated_workflow_bundle(
@@ -850,6 +1165,10 @@ async def run_live_agentgenerator_pack_smoke(
             bundle_root=bundle_root,
             expected_workflows=context["workflows_spec"],
         )
+        semantic_drift = validate_agentgenerator_semantic_drift(
+            bundle_root=bundle_root,
+            expected_workflows=context["workflows_spec"],
+        )
         promotion = promote_and_load_generated_workflows(
             bundle_root=bundle_root,
             expected_workflows=context["workflows_spec"],
@@ -859,6 +1178,7 @@ async def run_live_agentgenerator_pack_smoke(
         task_meta = (context.get("workflow_bundle_results") or {}).get("_meta")
         validation_errors = []
         validation_errors.extend(validation.get("errors") or [])
+        validation_errors.extend(semantic_drift.get("errors") or [])
         validation_errors.extend(promotion.get("errors") or [])
         if not isinstance(task_meta, dict):
             validation_errors.append("workflow_bundle_results._meta missing")
@@ -927,6 +1247,7 @@ async def run_live_agentgenerator_pack_smoke(
             "task_run_trace": trace.summary(),
             "download_result": download_result,
             "validation": validation,
+            "semantic_drift": semantic_drift,
             "promotion": promotion,
             "validation_errors": validation_errors,
         }
