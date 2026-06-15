@@ -7,7 +7,7 @@
     "created_version_id": "av_refinement_live_worker_smoke_persisted"
   },
   "coding_llm_config": {
-    "model": "gpt-5.2-codex",
+    "model": "gpt-4o",
     "temperature": 0.1
   },
   "coding_worker_result": {
@@ -24,25 +24,28 @@
         "ui/pages/dashboard.yaml"
       ],
       "artifact_kind": "app_bundle",
-      "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpkde7yz1n\\generated_refinements\\refinement-live-worker-smoke\\app_bundle\\app_bundle\\6769c39149dc\\artifact.zip",
+      "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpfc9qwd6l\\generated_refinements\\refinement-live-worker-smoke\\app_bundle\\app_bundle\\a2f6f697e6bf\\artifact.zip",
       "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
       "bundle_mode": "workspace_snapshot",
       "change_class": "patch",
       "selected_file_paths": [],
       "tool_context_loaded": true,
-      "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpkde7yz1n\\generated_refinements\\refinement-live-worker-smoke\\app_bundle\\app_bundle\\6769c39149dc\\workspace"
+      "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmpfc9qwd6l\\generated_refinements\\refinement-live-worker-smoke\\app_bundle\\app_bundle\\a2f6f697e6bf\\workspace"
     },
     "plan": {
       "needs_human_review": false,
       "owned_paths": [
         "ui/pages/dashboard.yaml"
       ],
-      "rationale": "Single text update in specified dashboard YAML to match requested title.",
+      "rationale": "The request was straightforward: change the title in the specified YAML file. The change is isolated to a single line in a single file, which aligns with the request and does not require further validation.",
       "start_preview": false,
-      "summary": "Updated dashboard title to Reports Dashboard.",
-      "updated_files": {
-        "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Reports Dashboard\n"
-      },
+      "summary": "Updated the dashboard title in the YAML file to 'Reports Dashboard'.",
+      "updated_files": [
+        {
+          "content": "page_type: landing\ntitle: Reports Dashboard\n",
+          "path": "ui/pages/dashboard.yaml"
+        }
+      ],
       "validation_commands": [],
       "validation_strategy": "skip"
     },
@@ -69,15 +72,35 @@
     "affected_workflows": [
       "hosted_product"
     ],
+    "app_context_impact_hints": null,
+    "app_context_policy_override": null,
+    "app_context_summary": null,
     "app_id": "refinement-live-worker-smoke",
     "artifact_kind": "app_bundle",
     "change_class": "patch",
+    "context_policy_decision": {
+      "allowed": true,
+      "blocking": false,
+      "decision": "warn",
+      "graph_explanations": [],
+      "graph_warnings": [],
+      "reasons": [
+        "Low-risk refinement may continue with stale or missing app-context evidence."
+      ],
+      "requires_context_refresh": false,
+      "requires_human_override": false,
+      "risk_level": "low",
+      "risky_signals": [],
+      "warnings": [
+        "No current app context version is registered; refinement impact uses route and artifact evidence only."
+      ]
+    },
     "execution_mode": "staged",
     "generated_files_changed": false,
     "human_review_required": false,
     "mutation_allowed": false,
     "next_step": "scoped_patch_candidate",
-    "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001",
+    "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmpfc9qwd6l/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001",
     "profiles": {
       "classifier": "raw_llm_config",
       "codegen": null,
@@ -88,7 +111,7 @@
     "request": "Change the dashboard title to Reports Dashboard.",
     "request_id": "req_refinement_live_worker_001",
     "scope_summary": "Manual live smoke for a dashboard title patch.",
-    "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001",
+    "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmpfc9qwd6l/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001",
     "target_workflow": "hosted_product",
     "validation_plan": {
       "items": [
@@ -113,6 +136,7 @@
       ]
     },
     "warnings": [
+      "No current app context version is registered; refinement impact uses route and artifact evidence only.",
       "Staged mode reserves a metadata path only; no app files are copied or mutated."
     ],
     "workflow_id": "hosted_product",
@@ -124,7 +148,7 @@
   "source_snapshot": {
     "after": {
       "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-      "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+      "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
       "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
       "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
       "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -137,7 +161,7 @@
     },
     "before": {
       "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
-      "services/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
+      "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
       "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
       "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
       "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
@@ -158,8 +182,8 @@
     "changed_files": [
       {
         "path": "ui/pages/dashboard.yaml",
-        "reason": "live worker output for staged refinement smoke",
-        "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmpkde7yz1n/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001/workspace/ui/pages/dashboard.yaml",
+        "reason": "The request was straightforward: change the title in the specified YAML file. The change is isolated to a single line in a single file, which aligns with the...",
+        "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmpfc9qwd6l/.refinement_staging/refinement-live-worker-smoke/req_refinement_live_worker_001/workspace/ui/pages/dashboard.yaml",
         "status": "updated"
       }
     ],
@@ -205,7 +229,7 @@
       {
         "new_content": "page_type: landing\ntitle: Reports Dashboard\n",
         "path": "ui/pages/dashboard.yaml",
-        "reason": "live worker output for staged refinement smoke"
+        "reason": "The request was straightforward: change the title in the specified YAML file. The change is isolated to a single line in a single file, which aligns with the..."
       }
     ],
     "request_id": "req_refinement_live_worker_001",
@@ -213,4 +237,3 @@
     "warnings": []
   }
 }
-

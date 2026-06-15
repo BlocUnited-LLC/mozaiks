@@ -17,6 +17,7 @@ from mozaiksai.control_plane import (
     ControlPlaneToolDefinition,
     ControlPlaneToolResult,
     ControlPlaneToolsManifest,
+    FileUpdate,
     LoadedControlPlanePack,
     ScopedRefinementCodingWorker,
 )
@@ -28,9 +29,12 @@ from mozaiksai.control_plane import (
 _GOOD_PLAN = CodingWorkerPlan(
     summary="Patch the dashboard file.",
     owned_paths=["app/ui/pages/Dashboard.jsx"],
-    updated_files={
-        "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }'
-    },
+    updated_files=[
+        FileUpdate(
+            path="app/ui/pages/Dashboard.jsx",
+            content='export default function Dashboard() { return "patched"; }',
+        )
+    ],
     validation_strategy="local",
     validation_commands=["npm run build"],
     start_preview=False,
@@ -41,7 +45,7 @@ _GOOD_PLAN = CodingWorkerPlan(
 _BAD_PLAN = CodingWorkerPlan(
     summary="Bad edit",
     owned_paths=["app/ui/pages/Other.jsx"],
-    updated_files={"app/ui/pages/Other.jsx": "x"},
+    updated_files=[FileUpdate(path="app/ui/pages/Other.jsx", content="x")],
     validation_strategy="skip",
     validation_commands=[],
     start_preview=False,
@@ -197,7 +201,8 @@ async def test_coding_worker_executes_for_scoped_patch_request(tmp_path: Path) -
     assert result.status == "validated"
     assert result.plan is not None
     assert result.plan.validation_strategy == "local"
-    assert result.plan.updated_files["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
+    updated_dict = {fu.path: fu.content for fu in result.plan.updated_files}
+    assert updated_dict["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.applied_files["app/ui/pages/Dashboard.jsx"].endswith('"patched"; }')
     assert result.validation_result["validation_status"] == "passed"
     assert result.metadata["artifact_version_id"] == "av_child_1"

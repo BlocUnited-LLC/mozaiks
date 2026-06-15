@@ -65,25 +65,25 @@ _VALID_SURFACE_KINDS: set[str] = {
 
 
 class _SurfaceEntry(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     kind: str
     target_id: str
-    target_kind: str = "module"
-    rationale: str = ""
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    generation_hint: str = ""
+    target_kind: str
+    rationale: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    generation_hint: str
 
 
 class _ContractSurfaceClassification(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
-    surfaces: list[_SurfaceEntry] = Field(default_factory=list)
-    summary: str = ""
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    requires_schema_migration: bool = False
-    fallback_to_workflow: bool = False
-    fallback_reason: str | None = None
+    surfaces: list[_SurfaceEntry]
+    summary: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    requires_schema_migration: bool
+    fallback_to_workflow: bool
+    fallback_reason: str | None
 
 
 # ---------------------------------------------------------------------------

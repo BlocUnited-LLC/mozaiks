@@ -137,10 +137,10 @@ def _make_worker_with_mock_llm(llm_responses: list[dict[str, Any]]) -> SurfaceRe
 def test_extract_updated_files_returns_valid_paths():
     result = SurfaceRegenerationWorker._extract_updated_files(
         response={
-            "updated_files": {
-                "modules/projects/module.yaml": "id: projects",
-                "modules/projects/backend/handler.py": "# handler",
-            }
+            "updated_files": [
+                {"path": "modules/projects/module.yaml", "content": "id: projects"},
+                {"path": "modules/projects/backend/handler.py", "content": "# handler"},
+            ]
         },
         allowed_paths={"modules/projects/module.yaml", "modules/projects/backend/handler.py"},
     )
@@ -152,10 +152,10 @@ def test_extract_updated_files_rejects_out_of_scope_path():
     with pytest.raises(ValueError, match="outside declared surface scope"):
         SurfaceRegenerationWorker._extract_updated_files(
             response={
-                "updated_files": {
-                    "modules/projects/module.yaml": "id: projects",
-                    "modules/other/module.yaml": "sneaky",
-                }
+                "updated_files": [
+                    {"path": "modules/projects/module.yaml", "content": "id: projects"},
+                    {"path": "modules/other/module.yaml", "content": "sneaky"},
+                ]
             },
             allowed_paths={"modules/projects/module.yaml"},
         )
@@ -172,14 +172,14 @@ def test_extract_updated_files_raises_on_empty_response():
 def test_extract_updated_files_raises_when_all_paths_out_of_scope():
     with pytest.raises(ValueError):
         SurfaceRegenerationWorker._extract_updated_files(
-            response={"updated_files": {"other/path.py": "content"}},
+            response={"updated_files": [{"path": "other/path.py", "content": "content"}]},
             allowed_paths={"modules/projects/module.yaml"},
         )
 
 
 def test_extract_updated_files_normalizes_backslashes():
     result = SurfaceRegenerationWorker._extract_updated_files(
-        response={"updated_files": {"modules\\projects\\module.yaml": "content"}},
+        response={"updated_files": [{"path": "modules\\projects\\module.yaml", "content": "content"}]},
         allowed_paths={"modules/projects/module.yaml"},
     )
     assert "modules/projects/module.yaml" in result
@@ -248,17 +248,17 @@ async def test_execute_plan_success_two_surfaces():
 
     worker = _make_worker_with_mock_llm([
         {
-            "updated_files": {
-                "modules/projects/backend/schemas.py": "class ExportRequest: ...",
-            },
+            "updated_files": [
+                {"path": "modules/projects/backend/schemas.py", "content": "class ExportRequest: ..."},
+            ],
             "summary": "added ExportRequest",
             "rationale": "new schema",
         },
         {
-            "updated_files": {
-                "modules/projects/module.yaml": "id: projects\nactions:\n- export_projects",
-                "modules/projects/backend/handler.py": "# handler with export",
-            },
+            "updated_files": [
+                {"path": "modules/projects/module.yaml", "content": "id: projects\nactions:\n- export_projects"},
+                {"path": "modules/projects/backend/handler.py", "content": "# handler with export"},
+            ],
             "summary": "added export action",
             "rationale": "new action",
         },
@@ -309,17 +309,17 @@ async def test_execute_plan_later_surface_sees_earlier_file():
     agent_runner = _FakeAgentRunner(
         [
             {
-                "updated_files": {
-                    "modules/tasks/backend/schemas.py": "class CompleteRequest: ...",
-                },
+                "updated_files": [
+                    {"path": "modules/tasks/backend/schemas.py", "content": "class CompleteRequest: ..."},
+                ],
                 "summary": "schema",
                 "rationale": "new schema",
             },
             {
-                "updated_files": {
-                    "modules/tasks/backend/schemas.py": "class CompleteRequest: ...",
-                    "modules/tasks/backend/handler.py": "# handler",
-                },
+                "updated_files": [
+                    {"path": "modules/tasks/backend/schemas.py", "content": "class CompleteRequest: ..."},
+                    {"path": "modules/tasks/backend/handler.py", "content": "# handler"},
+                ],
                 "summary": "handler",
                 "rationale": "new handler",
             },
@@ -377,12 +377,12 @@ async def test_execute_plan_partial_failure():
         agent_runner=_FakeAgentRunner(
             [
                 {
-                    "updated_files": {},
+                    "updated_files": [],
                     "summary": "oops",
                     "rationale": "missing files",
                 },
                 {
-                    "updated_files": {"modules/projects/module.yaml": "id: projects"},
+                    "updated_files": [{"path": "modules/projects/module.yaml", "content": "id: projects"}],
                     "summary": "ok",
                     "rationale": "ok",
                 },
@@ -475,7 +475,7 @@ async def test_execute_plan_propagates_requires_schema_migration():
 
     worker = _make_worker_with_mock_llm([
         {
-            "updated_files": {"modules/orders/backend/schemas.py": "class OrderExport: ..."},
+            "updated_files": [{"path": "modules/orders/backend/schemas.py", "content": "class OrderExport: ..."}],
             "summary": "added schema",
             "rationale": "new export schema",
         }

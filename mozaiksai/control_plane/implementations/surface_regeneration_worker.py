@@ -33,6 +33,7 @@ from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plan
 from mozaiksai.control_plane.contracts import (
     ContractSurfacePlan,
     ContractSurfaceUpdate,
+    FileUpdate,
     SurfaceExecutionRecord,
     SurfacePlanExecutionResult,
 )
@@ -54,7 +55,7 @@ class SurfaceRegenerationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1)
-    updated_files: dict[str, str] = Field(default_factory=dict)
+    updated_files: list[FileUpdate]
     rationale: str = Field(min_length=1)
 
 
@@ -240,19 +241,21 @@ class SurfaceRegenerationWorker:
     ) -> dict[str, str]:
         """Extract and validate updated_files from the LLM response."""
         raw_files = response.get("updated_files")
-        if not isinstance(raw_files, dict) or not raw_files:
+        if not isinstance(raw_files, list) or not raw_files:
             raise ValueError("LLM returned no updated_files for surface regeneration")
 
         result: dict[str, str] = {}
         invalid: list[str] = []
-        for path, content in raw_files.items():
-            safe_path = str(path or "").strip().replace("\\", "/")
+        for entry in raw_files:
+            if not isinstance(entry, dict):
+                continue
+            safe_path = str(entry.get("path") or "").strip().replace("\\", "/")
             if not safe_path:
                 continue
             if safe_path not in allowed_paths:
                 invalid.append(safe_path)
                 continue
-            result[safe_path] = str(content or "")
+            result[safe_path] = str(entry.get("content") or "")
 
         if invalid:
             raise ValueError(
@@ -300,9 +303,9 @@ class SurfaceRegenerationWorker:
             json.dumps(
                 {
                     "summary": "one-line summary of the changes made",
-                    "updated_files": {
-                        "relative/path/to/file.py": "full updated file content here",
-                    },
+                    "updated_files": [
+                        {"path": "relative/path/to/file.py", "content": "full updated file content here"},
+                    ],
                     "rationale": "why these specific changes implement the generation_hint",
                 },
                 indent=2,

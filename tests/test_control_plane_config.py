@@ -26,7 +26,7 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
     assert config.coding.enabled is True
     assert config.coding.llm_profile == "codegen"
     assert config.resolve_capability_llm_config("coding") == {
-        "model": "gpt-5.2-codex",
+        "model": "gpt-4o",
         "temperature": 0.1,
     }
 

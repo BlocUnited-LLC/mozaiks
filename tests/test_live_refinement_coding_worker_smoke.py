@@ -10,6 +10,7 @@ from mozaiksai.control_plane import (
     CodingWorkerPlan,
     CodingWorkerRequest,
     ControlPlaneToolCall,
+    FileUpdate,
     ScopedRefinementCodingWorker,
     StagedCodingWorkerResult,
     dry_run,
@@ -197,9 +198,12 @@ async def test_smoke_artifact_store_records_expected_artifact_save(tmp_path: Pat
     _SMOKE_PLAN = CodingWorkerPlan(
         summary="Patch the dashboard title.",
         owned_paths=["ui/pages/dashboard.yaml"],
-        updated_files={
-            "ui/pages/dashboard.yaml": "page_type: landing\ntitle: Reports Dashboard\n",
-        },
+        updated_files=[
+            FileUpdate(
+                path="ui/pages/dashboard.yaml",
+                content="page_type: landing\ntitle: Reports Dashboard\n",
+            )
+        ],
         validation_strategy="skip",
         validation_commands=[],
         start_preview=False,

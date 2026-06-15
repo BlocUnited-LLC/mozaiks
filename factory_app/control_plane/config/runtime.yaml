@@ -21,19 +21,19 @@ llm_profiles:
     purpose: Plan or replan higher-scope refinement work after routing.
     expected_behavior: structured planning and replanning
     llm_config:
-      model: gpt-5.2-codex
+      model: gpt-4o
       temperature: 0.1
   codegen:
     purpose: Generate scoped code or artifact patches.
     expected_behavior: deterministic code and artifact generation
     llm_config:
-      model: gpt-5.2-codex
+      model: gpt-4o
       temperature: 0.1
   reviewer_validator:
     purpose: Review generated changes and validate contract conformance.
     expected_behavior: strict structured review and validation
     llm_config:
-      model: gpt-5.2-codex
+      model: gpt-4o
       temperature: 0.1
 classifier:
   enabled: true

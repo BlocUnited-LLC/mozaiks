@@ -15,6 +15,7 @@ from mozaiksai.control_plane.contracts import (
     CodingWorkerResult,
     ControlPlaneToolCall,
     ControlPlaneToolContext,
+    FileUpdate,
 )
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
 from mozaiksai.control_plane.loader import load_selected_control_plane_pack
@@ -242,12 +243,14 @@ class ScopedRefinementCodingWorker:
                 owned_paths.append(safe)
                 seen_owned.add(safe)
 
-        updated_files: dict[str, str] = {}
-        for raw_path, content in (plan.updated_files or {}).items():
-            safe = ScopedRefinementCodingWorker._safe_relpath(raw_path)
-            if not safe:
+        seen_updated: set[str] = set()
+        normalized_files: list[FileUpdate] = []
+        for file_update in plan.updated_files or []:
+            safe = ScopedRefinementCodingWorker._safe_relpath(file_update.path)
+            if not safe or safe in seen_updated:
                 continue
-            updated_files[safe] = str(content)
+            normalized_files.append(FileUpdate(path=safe, content=str(file_update.content)))
+            seen_updated.add(safe)
             if safe not in seen_owned:
                 owned_paths.append(safe)
                 seen_owned.add(safe)
@@ -261,18 +264,19 @@ class ScopedRefinementCodingWorker:
         return plan.model_copy(
             update={
                 "owned_paths": owned_paths,
-                "updated_files": updated_files,
+                "updated_files": normalized_files,
                 "validation_commands": commands,
             }
         )
 
     @staticmethod
     def _resolve_updated_files(*, request: CodingWorkerRequest, plan: CodingWorkerPlan) -> dict[str, str]:
-        if not isinstance(plan.updated_files, dict) or not plan.updated_files:
+        if not plan.updated_files:
             raise ValueError("coding worker returned no updated_files for the scoped refinement")
 
-        allowed_paths = {str(path): str(content) for path, content in request.files.items()}
-        invalid_paths = [path for path in plan.updated_files if path not in allowed_paths]
+        files_as_dict = {fu.path: fu.content for fu in plan.updated_files}
+        allowed_paths = set(request.files.keys())
+        invalid_paths = [path for path in files_as_dict if path not in allowed_paths]
         if invalid_paths:
             raise ValueError(
                 "coding worker attempted to edit paths outside the explicit scoped files: "
@@ -280,14 +284,14 @@ class ScopedRefinementCodingWorker:
             )
 
         if plan.owned_paths:
-            outside_owned = [path for path in plan.updated_files if path not in set(plan.owned_paths)]
+            outside_owned = [path for path in files_as_dict if path not in set(plan.owned_paths)]
             if outside_owned:
                 raise ValueError(
                     "coding worker returned updated_files outside the declared owned_paths: "
                     + ", ".join(sorted(outside_owned))
                 )
 
-        return {path: str(content) for path, content in plan.updated_files.items()}
+        return {path: str(content) for path, content in files_as_dict.items()}
 
     @staticmethod
     def _resolve_validation_strategy(raw: str) -> str:
@@ -350,7 +354,8 @@ class ScopedRefinementCodingWorker:
             "",
             "Return a JSON object with this exact shape:",
             (
-                '{"summary":"...","owned_paths":["..."],"updated_files":{"path":"full file content"},'
+                '{"summary":"...","owned_paths":["..."],'
+                '"updated_files":[{"path":"relative/path","content":"full file content"}],'
                 '"validation_strategy":"skip|local|e2b",'
                 '"validation_commands":["..."],"start_preview":false,'
                 '"needs_human_review":false,"rationale":"..."}'

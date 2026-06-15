@@ -134,12 +134,12 @@ class CodingWorkerRequest(BaseModel):
 class ScopeProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    resolution: Literal["scoped_files", "clarify", "workflow"] = "scoped_files"
-    selected_paths: list[str] = Field(default_factory=list)
+    resolution: Literal["scoped_files", "clarify", "workflow"]
+    selected_paths: list[str]
     rationale: str = Field(min_length=1)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    clarification_question: str | None = None
-    signals: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+    clarification_question: str | None
+    signals: list[str]
 
 
 class ContractSurfaceUpdate(BaseModel):
@@ -211,16 +211,30 @@ class HarnessDecision(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class FileUpdate(BaseModel):
+    """A single file path + full updated content pair in an LLM structured output.
+
+    Used instead of ``dict[str, str]`` so that ``updated_files`` can appear in
+    a JSON-schema ``required[]`` array, which OpenAI strict structured-output
+    mode requires for every property.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    content: str
+
+
 class CodingWorkerPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1)
-    owned_paths: list[str] = Field(default_factory=list)
-    updated_files: dict[str, str] = Field(default_factory=dict)
-    validation_strategy: Literal["skip", "local", "e2b"] = "skip"
-    validation_commands: list[str] = Field(default_factory=list)
-    start_preview: bool = False
-    needs_human_review: bool = False
+    owned_paths: list[str]
+    updated_files: list[FileUpdate]
+    validation_strategy: Literal["skip", "local", "e2b"]
+    validation_commands: list[str]
+    start_preview: bool
+    needs_human_review: bool
     rationale: str = Field(min_length=1)
 
 
