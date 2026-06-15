@@ -262,7 +262,7 @@ class UnifiedEventDispatcher:
         try:
             handler = next((h for h in self.handlers if h.can_handle(event)), None)
             if not handler:
-                logger.warning(f"No handler for event category={getattr(event,'category',None)}")
+                logger.warning("No handler for event category=%s", getattr(event,'category',None))
                 self.metrics["events_failed"] += 1
                 return False
             success = await handler.handle(event)
@@ -275,7 +275,7 @@ class UnifiedEventDispatcher:
                 self.metrics["events_failed"] += 1
             dur_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
             if dur_ms > 100:
-                logger.info(f"Slow event dispatch category={getattr(event,'category',None)} dur={dur_ms:.1f}ms")
+                logger.info("Slow event dispatch category=%s dur=%sms", getattr(event,'category',None), dur_ms)
             return success
         except Exception as e:  # pragma: no cover
             logger.error("Dispatch failure: %s", e, exc_info=True)
@@ -463,7 +463,7 @@ class UnifiedEventDispatcher:
                             "timestamp": timestamp
                         }
                 except Exception as e:
-                    logger.debug(f"[USERDRIVEN_TRIGGER] Could not check workflow_startup_mode: {e}")
+                    logger.debug("[USERDRIVEN_TRIGGER] Could not check workflow_startup_mode: %s", e)
 
             if agent_name and isinstance(content, str):
                 # Check 1: UI_HIDDEN triggers (exact match suppression)
@@ -480,7 +480,7 @@ class UnifiedEventDispatcher:
                             "timestamp": timestamp
                         }
                 except Exception as e:
-                    logger.warning(f"⚠️ [UI_HIDDEN] Failed to check hidden triggers: {e}", exc_info=True)
+                    logger.warning("⚠️ [UI_HIDDEN] Failed to check hidden triggers: %s", e, exc_info=True)
                 
                 # Check 2: AUTO_TOOL agent message deduplication
                 # Auto-tool agents emit text (with agent_message) then tool_call (with same agent_message)
@@ -489,7 +489,7 @@ class UnifiedEventDispatcher:
                     auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
                     if agent_name in auto_tool_agents:
                         event_dict['_mozaiks_hide'] = True
-                        logger.info(f"� [AUTO_TOOL_DEDUP] Suppressing text from auto_tool agent {agent_name}: '{content[:100]}'")
+                        logger.info("� [AUTO_TOOL_DEDUP] Suppressing text from auto_tool agent %s: '%s'", agent_name, content[:100])
                         return {
                             "type": f"chat.{base_kind}",
                             "data": event_dict,
@@ -497,7 +497,7 @@ class UnifiedEventDispatcher:
                             "timestamp": timestamp
                         }
                 except Exception as e:
-                    logger.warning(f"⚠️ [AUTO_TOOL_DEDUP] Failed to check auto_tool agents: {e}", exc_info=True)
+                    logger.warning("⚠️ [AUTO_TOOL_DEDUP] Failed to check auto_tool agents: %s", e, exc_info=True)
             
             # Now check other agent flags
             structured_flag = False

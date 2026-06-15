@@ -193,7 +193,7 @@ async def load_from_database(
             if "app_id" in doc and isinstance(doc["app_id"], ObjectId):
                 doc["app_id"] = str(doc["app_id"])
         
-        logger.info(f"📖 Loaded {len(documents)} documents from {db_name}.{coll_name}")
+        logger.info("📖 Loaded %s documents from %s.%s", len(documents), db_name, coll_name)
         
         return {
             "status": "success",
@@ -272,7 +272,7 @@ async def update_in_database(
         else:
             result = await collection.update_one(secure_query, update_doc)
         
-        logger.info(f"✏️ Updated {result.modified_count} documents in {db_name}.{coll_name}")
+        logger.info("✏️ Updated %s documents in %s.%s", result.modified_count, db_name, coll_name)
         
         return {
             "status": "success",
@@ -341,7 +341,7 @@ async def delete_from_database(
         else:
             result = await collection.delete_one(secure_query)
         
-        logger.info(f"🗑️ Deleted {result.deleted_count} documents from {db_name}.{coll_name}")
+        logger.info("🗑️ Deleted %s documents from %s.%s", result.deleted_count, db_name, coll_name)
         
         return {
             "status": "success",

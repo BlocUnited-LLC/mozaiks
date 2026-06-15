@@ -136,19 +136,16 @@ class AppLoader:
             subscriptions_config = load_subscriptions_config(base_path)
             if subscriptions_config is not None:
                 logger.info(
-                    f"SUBSCRIPTIONS_LOADED: {len(subscriptions_config.plans)} plans "
-                    f"({[p.plan_id for p in subscriptions_config.plans]})"
-                )
+                    "SUBSCRIPTIONS_LOADED: %s plans (%s)",
+                    len(subscriptions_config.plans), [p.plan_id for p in subscriptions_config.plans])
         except SubscriptionsLoadError as exc:
             logger.warning(
-                f"SUBSCRIPTIONS_CONFIG_INVALID: {exc} — entitlement enforcement disabled"
-            )
+                "SUBSCRIPTIONS_CONFIG_INVALID: %s — entitlement enforcement disabled", exc)
 
         logger.info(
-            f"APP_LOADED: name={app_def.name!r} version={app_def.version!r} "
-            f"mode={app_def.execution_mode.value} "
-            f"workflows={len(app_def.workflows)} modules={len(app_def.modules)}"
-        )
+            "APP_LOADED: name=%s version=%s mode=%s workflows=%s modules=%s",
+            app_def.name, app_def.version, app_def.execution_mode.value,
+            len(app_def.workflows), len(app_def.modules))
 
         loaded_modules: list[LoadedModule] = []
         failed_module_names: list[str] = []

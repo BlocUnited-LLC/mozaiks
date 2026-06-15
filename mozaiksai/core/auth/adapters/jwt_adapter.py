@@ -142,7 +142,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
             jwks_client = self._get_jwks_client()
             signing_key = jwks_client.get_signing_key_from_jwt(token)
         except jwt.PyJWKClientError as e:
-            logger.warning(f"JWKS error: {e}")
+            logger.warning("JWKS error: %s", e)
             raise AuthError("Failed to verify token signature", 401, self.name) from e
         except Exception as e:
             logger.error("Unexpected JWKS error: %s", e, exc_info=True)
@@ -184,7 +184,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
         except jwt.InvalidSignatureError as exc:
             raise AuthError("Invalid token signature", 401, self.name) from exc
         except jwt.DecodeError as e:
-            logger.warning(f"Token decode error: {e}")
+            logger.warning("Token decode error: %s", e)
             raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
             logger.error("Token validation error: %s", e, exc_info=True)

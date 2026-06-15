@@ -290,7 +290,7 @@ class PersistenceManager:
                 except Exception as migration_err:
                     logger.warning("Workflow UI-state backfill skipped: %s", migration_err)
             except Exception as e:  # pragma: no cover
-                logger.warning(f"Index ensure issue: {e}")
+                logger.warning("Index ensure issue: %s", e)
 
 class AG2PersistenceManager:
     """Runtime persistence for ChatSessions and AG2 run stream history.
@@ -350,7 +350,7 @@ class AG2PersistenceManager:
                 return reused_seed  # normalize to int
             except Exception:
                 logger.debug(
-                    f"[CACHE_SEED] Persisted seed could not be coerced to int (value={doc.get('cache_seed')!r}); will recompute",
+                    "[CACHE_SEED] Persisted seed could not be coerced to int (value=%s); will recompute", doc.get('cache_seed'),
                     extra={"chat_id": chat_id, "app_id": resolved_app_id},
                 )
         # Derive a deterministic 32-bit seed from chat_id (+ app_id if provided)
@@ -370,7 +370,7 @@ class AG2PersistenceManager:
                 },
             )
         except Exception as e:
-            logger.debug(f"Failed to persist cache_seed for chat {chat_id}: {e}")
+            logger.debug("Failed to persist cache_seed for chat %s: %s", chat_id, e)
             logger.debug(
                 "[CACHE_SEED] Proceeding with in-memory seed only (persistence failure)",
                 extra={"chat_id": chat_id, "app_id": resolved_app_id, "seed": seed},
@@ -491,7 +491,7 @@ class AG2PersistenceManager:
                 extra[k] = v
             return extra
         except Exception as e:  # pragma: no cover
-            logger.debug(f"[FETCH_EXTRA_CONTEXT] Failed chat_id={chat_id}: {e}")
+            logger.debug("[FETCH_EXTRA_CONTEXT] Failed chat_id=%s: %s", chat_id, e)
             return {}
 
     async def persist_context_variables(
@@ -546,7 +546,7 @@ class AG2PersistenceManager:
                 {"$set": safe_updates},
             )
         except Exception as e:  # pragma: no cover
-            logger.debug(f"[PERSIST_CONTEXT_VARIABLES] Failed chat_id={chat_id}: {e}")
+            logger.debug("[PERSIST_CONTEXT_VARIABLES] Failed chat_id=%s: %s", chat_id, e)
 
     async def create_general_chat_session(
         self,
@@ -691,7 +691,7 @@ class AG2PersistenceManager:
                 extra={"chat_id": chat_id, "app_id": resolved_app_id, "tool_name": doc.get("tool_name")},
             )
         except Exception as e:  # pragma: no cover
-            logger.debug(f"[LAST_ARTIFACT] Update failed chat_id={chat_id}: {e}")
+            logger.debug("[LAST_ARTIFACT] Update failed chat_id=%s: %s", chat_id, e)
 
     def _run_stream_id(self, *, chat_id: str, app_id: str):
         from mozaiksai.core.adapters.ag2_stream_storage import stream_id_for_run
@@ -938,7 +938,7 @@ class AG2PersistenceManager:
                 result[wf] = {"chat_id": chat_id, "status": normalized}
             return result
         except Exception as e:
-            logger.warning(f"[GET_WORKFLOW_STATUSES] Failed to fetch workflows for app_id={resolved_app_id} user={user_id}: {e}")
+            logger.warning("[GET_WORKFLOW_STATUSES] Failed to fetch workflows for app_id=%s user=%s: %s", resolved_app_id, user_id, e)
             return {}
 
     async def build_pattern_context_from_user(self, *, app_id: str | None = None, user_id: str) -> dict[str, Any]:
@@ -996,7 +996,7 @@ class AG2PersistenceManager:
                     return json.dumps(parsed, ensure_ascii=False)
             return normalized
         except Exception as exc:  # pragma: no cover
-            logger.debug(f"Wrapped content normalization failed: {exc}")
+            logger.debug("Wrapped content normalization failed: %s", exc)
             return text
 
     @staticmethod
@@ -1013,22 +1013,22 @@ class AG2PersistenceManager:
         try:
             if text is None:
                 if agent_name:
-                    logger.info(f"[JSON_PARSE] {agent_name}: text is None")
+                    logger.info("[JSON_PARSE] %s: text is None", agent_name)
                 return None
             if isinstance(text, dict):
                 if agent_name:
-                    logger.info(f"[JSON_PARSE] {agent_name}: already a dict")
+                    logger.info("[JSON_PARSE] %s: already a dict", agent_name)
                 return text
             if isinstance(text, list):
                 if agent_name:
-                    logger.info(f"[JSON_PARSE] {agent_name}: text is a list, returning None")
+                    logger.info("[JSON_PARSE] %s: text is a list, returning None", agent_name)
                 return None
             
             s = AG2PersistenceManager._normalize_wrapped_text_content(text)
             s_strip = s.strip()
             
             if agent_name:
-                logger.info(f"[JSON_PARSE] {agent_name}: original length={len(s)}, stripped length={len(s_strip)}")
+                logger.info("[JSON_PARSE] %s: original length=%s, stripped length=%s", agent_name, len(s), len(s_strip))
             
             # CLEANING STEP 1: Remove Markdown code fences
             if s_strip.startswith("```") and "```" in s_strip[3:]:
@@ -1036,13 +1036,13 @@ class AG2PersistenceManager:
                 end_fence = s_strip.find("```", 3)
                 s_strip = s_strip[3:end_fence].strip()
                 if agent_name:
-                    logger.info(f"[JSON_PARSE] {agent_name}: removed markdown fences, new length={len(s_strip)}")
+                    logger.info("[JSON_PARSE] %s: removed markdown fences, new length=%s", agent_name, len(s_strip))
             
             # CLEANING STEP 2: Remove "json" or "JSON" prefix if present
             if s_strip.lower().startswith("json"):
                 s_strip = s_strip[4:].strip()
                 if agent_name:
-                    logger.info(f"[JSON_PARSE] {agent_name}: removed json prefix")
+                    logger.info("[JSON_PARSE] %s: removed json prefix", agent_name)
             
             # CLEANING STEP 3: Find JSON boundaries (first { or [ to last } or ])
             json_start = s_strip.find("{") if "{" in s_strip else s_strip.find("[")
@@ -1052,7 +1052,7 @@ class AG2PersistenceManager:
                 if json_end != -1:
                     s_strip = s_strip[json_start:json_end + 1]
                     if agent_name:
-                        logger.info(f"[JSON_PARSE] {agent_name}: extracted JSON boundaries, length={len(s_strip)}")
+                        logger.info("[JSON_PARSE] %s: extracted JSON boundaries, length=%s", agent_name, len(s_strip))
             
             # CLEANING STEP 4: Remove trailing commas before closing brackets (invalid JSON)
             import re
@@ -1070,27 +1070,27 @@ class AG2PersistenceManager:
                 brace_idx = s_strip.find("{", idx)
                 if brace_idx == -1:
                     if agent_name:
-                        logger.info(f"[JSON_PARSE] {agent_name}: no opening brace found")
+                        logger.info("[JSON_PARSE] %s: no opening brace found", agent_name)
                     return None
                 try:
                     obj, end_idx = decoder.raw_decode(s_strip, brace_idx)
                     if isinstance(obj, dict):
                         if agent_name:
-                            logger.info(f"[JSON_PARSE] {agent_name}: ✓ Successfully parsed JSON")
+                            logger.info("[JSON_PARSE] %s: ✓ Successfully parsed JSON", agent_name)
                         return obj
                     idx = end_idx
                     continue
                 except json.JSONDecodeError as e:
                     if agent_name and idx == 0:  # Only log first attempt
-                        logger.info(f"[JSON_PARSE] {agent_name}: JSONDecodeError at pos {e.pos}: {e.msg}, content preview: {s_strip[max(0, e.pos-50):e.pos+50]}")
+                        logger.info("[JSON_PARSE] %s: JSONDecodeError at pos %s: %s, content preview: %s", agent_name, e.pos, e.msg, s_strip[max(0, e.pos-50):e.pos+50])
                     idx = brace_idx + 1
                     continue
             if agent_name:
-                logger.info(f"[JSON_PARSE] {agent_name}: exhausted all parse attempts")
+                logger.info("[JSON_PARSE] %s: exhausted all parse attempts", agent_name)
             return None
         except Exception as ex:
             if agent_name:
-                logger.info(f"[JSON_PARSE] {agent_name}: exception during parse: {ex}")
+                logger.info("[JSON_PARSE] %s: exception during parse: %s", agent_name, ex)
             return None
 
     @staticmethod
@@ -1104,7 +1104,7 @@ class AG2PersistenceManager:
             if agent_name == "ToolsManagerAgent":
                 return adjusted
         except Exception as normalize_err:
-            logger.debug(f"[SAVE_EVENT] Structured output normalization skipped agent={agent_name}: {normalize_err}")
+            logger.debug("[SAVE_EVENT] Structured output normalization skipped agent=%s: %s", agent_name, normalize_err)
 
         return adjusted
 
@@ -1121,10 +1121,10 @@ class AG2PersistenceManager:
             raise ValueError("app_id is required")
         try:
             msgs = await self.load_run_history(chat_id=chat_id, app_id=resolved_app_id)
-            logger.info(f"[GATHER_AGENT_JSONS] chat_id={chat_id} app_id={resolved_app_id} msgs_count={len(msgs)}")
+            logger.info("[GATHER_AGENT_JSONS] chat_id=%s app_id=%s msgs_count=%s", chat_id, resolved_app_id, len(msgs))
 
             if not msgs:
-                logger.debug(f"[GATHER_AGENT_JSONS] No AG2 run history for chat_id={chat_id}")
+                logger.debug("[GATHER_AGENT_JSONS] No AG2 run history for chat_id=%s", chat_id)
                 return result
             
             def agent_name_from(m: dict[str, Any]) -> str:
@@ -1134,7 +1134,7 @@ class AG2PersistenceManager:
             
             if agent_names:
                 wanted = {n.strip() for n in agent_names}
-                logger.info(f"[GATHER_AGENT_JSONS] Filtering for specific agents: {wanted}")
+                logger.info("[GATHER_AGENT_JSONS] Filtering for specific agents: %s", wanted)
                 for m in reversed(msgs):
                     if not isinstance(m, dict):
                         continue
@@ -1146,16 +1146,16 @@ class AG2PersistenceManager:
                     structured_output = m.get("structured_output")
                     if isinstance(structured_output, dict):
                         result[nm] = structured_output
-                        logger.info(f"[GATHER_AGENT_JSONS] ✓ Extracted JSON from {nm} (via structured_output field)")
+                        logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via structured_output field)", nm)
                         continue
                     
                     # PRIORITY 2: Try content field
                     js = self._extract_json_from_text(m.get("content"))
                     if js is not None:
                         result[nm] = js
-                        logger.info(f"[GATHER_AGENT_JSONS] ✓ Extracted JSON from {nm} (via content field)")
+                        logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via content field)", nm)
                     else:
-                        logger.warning(f"[GATHER_AGENT_JSONS] ✗ No JSON found in {nm} message")
+                        logger.warning("[GATHER_AGENT_JSONS] ✗ No JSON found in %s message", nm)
                 return result
             
             seen: set[str] = set()
@@ -1172,7 +1172,7 @@ class AG2PersistenceManager:
                 
                 # Log each agent message we encounter
                 content_preview = str(m.get("content", ""))[:100] if m.get("content") else "(empty)"
-                logger.debug(f"[GATHER_AGENT_JSONS] Processing message: role={role} agent={nm} content_preview={content_preview}")
+                logger.debug("[GATHER_AGENT_JSONS] Processing message: role=%s agent=%s content_preview=%s", role, nm, content_preview)
                 
                 # PRIORITY 1: Check structured_output field first (for agents with structured_outputs_required: true)
                 structured_output = m.get("structured_output")
@@ -1180,7 +1180,7 @@ class AG2PersistenceManager:
                     result[nm] = structured_output
                     seen.add(nm)
                     agents_found.append(nm)
-                    logger.info(f"[GATHER_AGENT_JSONS] ✓ Extracted JSON from {nm} (via structured_output field)")
+                    logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via structured_output field)", nm)
                     continue
                 
                 # PRIORITY 2: Try to extract JSON from content field (fallback)
@@ -1189,15 +1189,15 @@ class AG2PersistenceManager:
                     result[nm] = js
                     seen.add(nm)
                     agents_found.append(nm)
-                    logger.info(f"[GATHER_AGENT_JSONS] ✓ Extracted JSON from {nm} (via content field)")
+                    logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via content field)", nm)
                 else:
                     # Log first 500 chars of content for failed extractions
                     content = m.get("content", "")
                     content_sample = str(content)[:500] if content else "(empty)"
-                    logger.debug(f"[GATHER_AGENT_JSONS] ✗ No JSON found in {nm} message (role={role})")
-                    logger.debug(f"[GATHER_AGENT_JSONS]    Content sample: {content_sample}")
+                    logger.debug("[GATHER_AGENT_JSONS] ✗ No JSON found in %s message (role=%s)", nm, role)
+                    logger.debug("[GATHER_AGENT_JSONS]    Content sample: %s", content_sample)
             
-            logger.info(f"[GATHER_AGENT_JSONS] Completed: found {len(result)} agents with valid JSON: {agents_found}")
+            logger.info("[GATHER_AGENT_JSONS] Completed: found %s agents with valid JSON: %s", len(result), agents_found)
             return result
         except Exception as e:  # pragma: no cover
             logger.error("[GATHER_AGENT_JSONS] Failed for chat_id=%s: %s", chat_id, e, exc_info=True)
@@ -1266,7 +1266,7 @@ class AG2PersistenceManager:
                     break
 
             if last_assistant_idx is None:
-                logger.debug(f"[TOOL_CALL_METADATA] No assistant message found in run history for {chat_id}")
+                logger.debug("[TOOL_CALL_METADATA] No assistant message found in run history for %s", chat_id)
                 return
 
             coll = await self._coll()
@@ -1294,11 +1294,9 @@ class AG2PersistenceManager:
 
             if result.modified_count > 0:
                 logger.info(
-                    f"[TOOL_CALL_METADATA] Persisted workflow UI state for message[{last_assistant_idx}] "
-                    f"in {chat_id} (tool={state_doc.get('tool_name')}, event={tool_call_id})"
-                )
+                    "[TOOL_CALL_METADATA] Persisted workflow UI state for message[%s] ", last_assistant_idx)
             else:
-                logger.debug(f"[TOOL_CALL_METADATA] Failed to persist tool-call state in {chat_id}")
+                logger.debug("[TOOL_CALL_METADATA] Failed to persist tool-call state in %s", chat_id)
         except Exception as e:
             logger.error("[TOOL_CALL_METADATA] Failed to attach metadata for %s: %s", chat_id, e, exc_info=True)
 
@@ -1344,14 +1342,12 @@ class AG2PersistenceManager:
 
             if result.modified_count > 0:
                 logger.info(
-                    f"[TOOL_CALL_STATE] Updated tool_call state for event={event_id} "
-                    f"in {chat_id} (completed={completed}, status={status})"
-                )
+                    "[TOOL_CALL_STATE] Updated tool_call state for event=%s in %s (completed=%s, status=%s)",
+                    event_id, chat_id, completed, status)
             else:
                 logger.debug(
-                    f"[TOOL_CALL_STATE] No persisted tool-call state found for event={event_id} "
-                    f"in {chat_id}"
-                )
+                    "[TOOL_CALL_STATE] No persisted tool-call state found for event=%s in %s",
+                    event_id, chat_id)
         except Exception as e:
             logger.error("[TOOL_CALL_STATE] Failed to update tool_call state for %s: %s", chat_id, e, exc_info=True)
 
@@ -1410,7 +1406,7 @@ class AG2PersistenceManager:
                     }
                 }
             )
-            logger.info(f"[PENDING_INPUT] Saved pending input request {request_id} for chat {chat_id}")
+            logger.info("[PENDING_INPUT] Saved pending input request %s for chat %s", request_id, chat_id)
         except Exception as e:
             logger.error("[PENDING_INPUT] Failed to save pending input request for %s: %s", chat_id, e, exc_info=True)
 
@@ -1438,7 +1434,7 @@ class AG2PersistenceManager:
                     },
                 }
             )
-            logger.debug(f"[PENDING_INPUT] Cleared pending input request for chat {chat_id}")
+            logger.debug("[PENDING_INPUT] Cleared pending input request for chat %s", chat_id)
         except Exception as e:
             logger.error("[PENDING_INPUT] Failed to clear pending input request for %s: %s", chat_id, e, exc_info=True)
 

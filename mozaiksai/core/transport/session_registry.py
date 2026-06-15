@@ -117,8 +117,7 @@ class SessionRegistry:
         for wf in self._workflows[ws_id]:
             if wf.chat_id == chat_id:
                 logger.warning(
-                    f"Workflow {chat_id} already exists in session {ws_id}, updating instead"
-                )
+                    "Workflow %s already exists in session %s, updating instead", chat_id, ws_id)
                 wf.artifact_id = artifact_id
                 wf.last_active = datetime.now(UTC)
                 if auto_activate:
@@ -137,8 +136,7 @@ class SessionRegistry:
         self._workflows[ws_id].append(context)
         
         logger.info(
-            f"Added workflow context: {workflow_name} (chat_id={chat_id}) to session {ws_id}"
-        )
+            "Added workflow context: %s (chat_id=%s) to session %s", workflow_name, chat_id, ws_id)
         
         if auto_activate:
             return self.switch_workflow(ws_id, chat_id)  # type: ignore[return-value]
@@ -157,14 +155,14 @@ class SessionRegistry:
             Activated WorkflowContext or None if not found
         """
         if ws_id not in self._workflows:
-            logger.warning(f"Session {ws_id} not found in registry")
+            logger.warning("Session %s not found in registry", ws_id)
             return None
         
         # Pause all workflows in this session
         for wf in self._workflows[ws_id]:
             if wf.status == "active":
                 wf.status = "paused"
-                logger.debug(f"Paused workflow {wf.chat_id}")
+                logger.debug("Paused workflow %s", wf.chat_id)
         
         # Activate target workflow
         for wf in self._workflows[ws_id]:
@@ -172,10 +170,10 @@ class SessionRegistry:
                 wf.status = "active"
                 wf.last_active = datetime.now(UTC)
                 self._active_chat[ws_id] = chat_id
-                logger.info(f"Activated workflow {chat_id} in session {ws_id}")
+                logger.info("Activated workflow %s in session %s", chat_id, ws_id)
                 return wf
         
-        logger.warning(f"Workflow {chat_id} not found or already completed in session {ws_id}")
+        logger.warning("Workflow %s not found or already completed in session %s", chat_id, ws_id)
         return None
     
     def enter_general_mode(self, ws_id: str):
@@ -193,7 +191,7 @@ class SessionRegistry:
                 wf.status = "paused"
         
         self._active_chat[ws_id] = None
-        logger.info(f"Session {ws_id} entered general mode (all workflows paused)")
+        logger.info("Session %s entered general mode (all workflows paused)", ws_id)
     
     def get_active_workflow(self, ws_id: str) -> WorkflowContext | None:
         """
@@ -234,7 +232,7 @@ class SessionRegistry:
         for wf in self._workflows[ws_id]:
             if wf.chat_id == chat_id:
                 wf.status = "completed"
-                logger.info(f"Marked workflow {chat_id} as completed in session {ws_id}")
+                logger.info("Marked workflow %s as completed in session %s", chat_id, ws_id)
                 
                 # If this was the active workflow, clear active state
                 if self._active_chat.get(ws_id) == chat_id:
@@ -253,7 +251,7 @@ class SessionRegistry:
             workflow_count = len(self._workflows[ws_id])
             del self._workflows[ws_id]
             del self._active_chat[ws_id]
-            logger.info(f"Removed session {ws_id} ({workflow_count} workflows)")
+            logger.info("Removed session %s (%s workflows)", ws_id, workflow_count)
     
     def get_workflow_by_chat_id(self, ws_id: str, chat_id: str) -> WorkflowContext | None:
         """

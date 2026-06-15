@@ -228,7 +228,7 @@ class DerivedVariableSpec:
                 try:
                     provider.set(self.name, self.default)  # type: ignore[attr-defined]
                 except Exception as err:  # pragma: no cover
-                    logger.debug(f"Derived variable seed failed: {err}")
+                    logger.debug("Derived variable seed failed: %s", err)
 
     def apply(self, event: TextEvent, providers: Iterable[Any]) -> bool:
         for trigger in self.triggers:
@@ -247,7 +247,7 @@ class DerivedVariableSpec:
                         try:
                             provider.set(self.name, trigger.value)  # type: ignore[attr-defined]
                         except Exception as err:  # pragma: no cover
-                            logger.debug(f"Derived variable update failed: {err}")
+                            logger.debug("Derived variable update failed: %s", err)
                 return True
         return False
 
@@ -277,16 +277,13 @@ class DerivedContextManager:
             self.seed_defaults()
         if self.variables:
             logger.info(
-                f"[DERIVED_CONTEXT] Loaded {len(self.variables)} agent_text state variables: {[v.name for v in self.variables]}"
-            )
+                "[DERIVED_CONTEXT] Loaded %s agent_text state variables: %s", len(self.variables), [v.name for v in self.variables])
         if self.ui_response_bindings:
             logger.info(
-                f"[DERIVED_CONTEXT] Loaded ui_response bindings: {len(self.ui_response_bindings)}"
-            )
+                "[DERIVED_CONTEXT] Loaded ui_response bindings: %s", len(self.ui_response_bindings))
         if self.user_text_bindings:
             logger.info(
-                f"[DERIVED_CONTEXT] Loaded user_text bindings: {len(self.user_text_bindings)}"
-            )
+                "[DERIVED_CONTEXT] Loaded user_text bindings: %s", len(self.user_text_bindings))
         if not self.variables and not self.ui_response_bindings and not self.user_text_bindings:
             logger.debug("[DERIVED_CONTEXT] No triggers configured")
 
@@ -310,7 +307,7 @@ class DerivedContextManager:
             plan = load_context_variables_config(ctx_section)
             return plan.definitions
         except Exception as err:  # pragma: no cover
-            logger.debug(f"Derived context fallback load failed: {err}")
+            logger.debug("Derived context fallback load failed: %s", err)
             return {}
 
     def _load_state_defaults(self, definitions: dict[str, Any]) -> dict[str, Any]:
@@ -355,7 +352,7 @@ class DerivedContextManager:
                             )
                         )
                     except Exception as err:  # pragma: no cover
-                        logger.debug(f"Skipping invalid direct trigger for {name}: {err}")
+                        logger.debug("Skipping invalid direct trigger for %s: %s", name, err)
 
             if not triggers:
                 continue
@@ -447,12 +444,11 @@ class DerivedContextManager:
                         provider.set(binding.variable, value)  # type: ignore[attr-defined]
                         updated = True
                     except Exception as err:  # pragma: no cover
-                        logger.debug(f"[DERIVED_CONTEXT] ui_response update failed: {err}")
+                        logger.debug("[DERIVED_CONTEXT] ui_response update failed: %s", err)
             if updated:
                 updated_vars.append(binding.variable)
                 logger.info(
-                    f"[DERIVED_CONTEXT] {self.workflow_name}: {binding.variable} -> {value!r} (ui_response, tool={normalized_tool})"
-                )
+                    "[DERIVED_CONTEXT] %s: %s -> %s (ui_response, tool=%s)", self.workflow_name, binding.variable, value, normalized_tool)
                 for cb in list(self._listeners):
                     try:
                         cb({"variable": binding.variable, "value": value, "tool": normalized_tool})
@@ -524,12 +520,11 @@ class DerivedContextManager:
                         provider.set(binding.variable, binding.value)  # type: ignore[attr-defined]
                         updated = True
                     except Exception as err:  # pragma: no cover
-                        logger.debug(f"[DERIVED_CONTEXT] user_text update failed: {err}")
+                        logger.debug("[DERIVED_CONTEXT] user_text update failed: %s", err)
             if updated:
                 updated_vars[binding.variable] = binding.value
                 logger.info(
-                    f"[DERIVED_CONTEXT] {self.workflow_name}: {binding.variable} -> {binding.value!r} (user_text)"
-                )
+                    "[DERIVED_CONTEXT] %s: %s -> %s (user_text)", self.workflow_name, binding.variable, binding.value)
                 for cb in list(self._listeners):
                     try:
                         cb({"variable": binding.variable, "value": binding.value, "source": "user_text"})
@@ -563,7 +558,7 @@ class DerivedContextManager:
                     try:
                         provider.set(name, default)  # type: ignore[attr-defined]
                     except Exception as err:  # pragma: no cover
-                        logger.debug(f"Derived variable seed failed: {err}")
+                        logger.debug("Derived variable seed failed: %s", err)
 
     def add_listener(self, callback) -> None:
         if callable(callback):
@@ -574,16 +569,16 @@ class DerivedContextManager:
             return
         for var in self.variables:
             if var.apply(event, self.providers):
-                logger.info(f"[DERIVED_CONTEXT] {self.workflow_name}: {var.name} -> True")
+                logger.info("[DERIVED_CONTEXT] %s: %s -> True", self.workflow_name, var.name)
                 try:
                     snapshot = (
                         self.base_context.to_dict()
                         if hasattr(self.base_context, "to_dict")
                         else getattr(self.base_context, "data", {})
                     )
-                    logger.debug(f"[DERIVED_CONTEXT] base_context snapshot: {snapshot}")
+                    logger.debug("[DERIVED_CONTEXT] base_context snapshot: %s", snapshot)
                 except Exception as ctx_err:  # pragma: no cover
-                    logger.debug(f"[DERIVED_CONTEXT] base_context snapshot unavailable: {ctx_err}")
+                    logger.debug("[DERIVED_CONTEXT] base_context snapshot unavailable: %s", ctx_err)
                 if self._listeners:
                     payload = {"variable": var.name, "value": True}
                     for callback in list(self._listeners):

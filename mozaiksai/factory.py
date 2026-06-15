@@ -70,7 +70,7 @@ def create_mozaiks_app(
     # Resolve paths
     workflow_path = Path(workflow_dir).resolve()
     if not workflow_path.exists():
-        logger.warning(f"Workflow directory does not exist: {workflow_path}")
+        logger.warning("Workflow directory does not exist: %s", workflow_path)
 
     # Set environment variables for the runtime
     os.environ.setdefault("WORKFLOW_DIR", str(workflow_path))

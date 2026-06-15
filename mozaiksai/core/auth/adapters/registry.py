@@ -28,7 +28,7 @@ def register_adapter(name: str, adapter_class: type[BaseAuthAdapter]) -> None:
         register_adapter("my-custom", MyCustomAdapter)
     """
     _adapter_registry[name.lower()] = adapter_class
-    logger.debug(f"Registered auth adapter: {name}")
+    logger.debug("Registered auth adapter: %s", name)
 
 
 def list_adapters() -> list[str]:
@@ -147,9 +147,9 @@ def get_auth_adapter(force_provider: str | None = None) -> AuthAdapter:
 
     # Log which adapter is being used
     if adapter.is_enabled():
-        logger.info(f"Auth adapter configured: {provider}")
+        logger.info("Auth adapter configured: %s", provider)
     else:
-        logger.warning(f"Auth adapter {provider} is not fully configured")
+        logger.warning("Auth adapter %s is not fully configured", provider)
 
     # Cache if not forcing
     if force_provider is None:

@@ -78,7 +78,7 @@ class ExecutorRegistry:
     def register(self, executor: Executor) -> None:
         """Register an executor. Overwrites any existing entry for the same type."""
         self._executors[executor.executor_type] = executor
-        logger.debug(f"EXECUTOR_REGISTERED: type={executor.executor_type.value}")
+        logger.debug("EXECUTOR_REGISTERED: type=%s", executor.executor_type.value)
 
     def get(self, executor_type: ExecutorType) -> Executor | None:
         """Return executor for the given type, or None if not registered."""

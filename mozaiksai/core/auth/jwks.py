@@ -101,7 +101,7 @@ class JWKSClient:
             return key
 
         # Key not found - force refresh in case of key rotation
-        logger.info(f"Key {kid} not found, forcing JWKS refresh")
+        logger.info("Key %s not found, forcing JWKS refresh", kid)
         await self._fetch_keys(force=True)
         return self._keys_by_kid.get(kid)
 
@@ -126,7 +126,7 @@ class JWKSClient:
             jwks_url = await self._get_jwks_url()
             self._resolved_jwks_url = jwks_url
 
-            logger.info(f"Fetching JWKS from {jwks_url}")
+            logger.info("Fetching JWKS from %s", jwks_url)
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
@@ -153,7 +153,7 @@ class JWKSClient:
                     source_url=jwks_url,
                 )
 
-                logger.info(f"Loaded {len(self._keys_by_kid)} signing keys from JWKS")
+                logger.info("Loaded %s signing keys from JWKS", len(self._keys_by_kid))
 
             except TimeoutError as exc:
                 logger.error("JWKS fetch timed out")

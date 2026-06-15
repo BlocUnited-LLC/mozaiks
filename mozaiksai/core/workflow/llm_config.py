@@ -58,7 +58,7 @@ def _attach_autogen_cache(llm_config: dict[str, Any]) -> None:
     try:
         from autogen.cache import Cache  # type: ignore
     except Exception as err:
-        logger.debug(f"[LLM_CONFIG] Autogen cache unavailable; skipping cache attach: {err}")
+        logger.debug("[LLM_CONFIG] Autogen cache unavailable; skipping cache attach: %s", err)
         return
 
     cache_root = (
@@ -70,13 +70,13 @@ def _attach_autogen_cache(llm_config: dict[str, Any]) -> None:
     try:
         Path(cache_root).mkdir(parents=True, exist_ok=True)
     except Exception as mk_err:
-        logger.warning(f"[LLM_CONFIG] Autogen cache disabled (cannot create dir {cache_root!r}): {mk_err}")
+        logger.warning("[LLM_CONFIG] Autogen cache disabled (cannot create dir %s): %s", cache_root, mk_err)
         return
 
     try:
         cache_obj = Cache.disk(cache_seed, str(cache_root))
     except Exception as cache_err:
-        logger.warning(f"[LLM_CONFIG] Autogen cache disabled (failed to init disk cache at {cache_root!r}): {cache_err}")
+        logger.warning("[LLM_CONFIG] Autogen cache disabled (failed to init disk cache at %s): %s", cache_root, cache_err)
         return
 
     config_list = llm_config.get("config_list")
@@ -115,7 +115,7 @@ try:
         _DEFAULT_CACHE_SEED = _env_seed 
 except Exception:
     _DEFAULT_CACHE_SEED = _env_seed
-logger.info(f"LLM_CONFIG_DEFAULT_CACHE_SEED_SELECTED seed={_DEFAULT_CACHE_SEED} randomized={_randomize} env_override={'yes' if _env_seed else 'no'}")
+logger.info("LLM_CONFIG_DEFAULT_CACHE_SEED_SELECTED seed=%s randomized=%s env_override=%s", _DEFAULT_CACHE_SEED, _randomize, 'yes' if _env_seed else 'no')
 
 # Static price map (prompt, completion) USD per 1K tokens (example values)
 PRICE_MAP: dict[str, list[float]] = {
@@ -161,7 +161,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 db = get_mongo_client()[SYSTEM_DATABASE]
                 db_doc = await db[BuilderCollections.LLM_CONFIG].find_one()
             except Exception as e:  # pragma: no cover
-                logger.debug(f"[LLM_CONFIG] Mongo fetch failed, will fallback: {e}")
+                logger.debug("[LLM_CONFIG] Mongo fetch failed, will fallback: %s", e)
 
         if db_doc and isinstance(db_doc, dict):
             # Avoid dumping raw secrets from the DB document
@@ -185,7 +185,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 return out
 
             try:
-                logger.debug(f"[LLM_CONFIG] DB document found: {_redact_mapping(db_doc)}")
+                logger.debug("[LLM_CONFIG] DB document found: %s", _redact_mapping(db_doc))
             except Exception:
                 logger.debug("[LLM_CONFIG] DB document found (redaction failed to serialize)")
             # Expect a shape like: { model: 'gpt-5-nano', price: {...}, ... }
@@ -193,12 +193,12 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
             providers = db_doc.get("providers") or db_doc.get("models") or [db_doc]
             if not isinstance(providers, list):
                 providers = [providers]
-            logger.info(f"[LLM_CONFIG] Processing {len(providers)} providers from DB")
+            logger.info("[LLM_CONFIG] Processing %s providers from DB", len(providers))
             for i, p in enumerate(providers):
                 try:
-                    logger.info(f"[LLM_CONFIG] Processing provider {i}: {_redact_mapping(p)}")
+                    logger.info("[LLM_CONFIG] Processing provider %s: %s", i, _redact_mapping(p))
                 except Exception:
-                    logger.info(f"[LLM_CONFIG] Processing provider {i}: <redaction error>")
+                    logger.info("[LLM_CONFIG] Processing provider %s: <redaction error>", i)
                 # Extract model name with logging for debugging
                 model_lowercase = p.get("model")
                 model_capitalized = p.get("Model")
@@ -206,10 +206,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                 env_default = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")
                 model_name = model_lowercase or model_capitalized or model_name_field or env_default
                 logger.info(
-                    f"[LLM_CONFIG] Model extraction for provider {i}: "
-                    f"model(lowercase)={model_lowercase!r} Model(cap)={model_capitalized!r} "
-                    f"name={model_name_field!r} env_default={env_default!r} -> selected={model_name!r}"
-                )
+                    "[LLM_CONFIG] Model extraction for provider %s: ", i)
                 # First check if API key is in the DB document
                 api_key = p.get("api_key") or p.get("ApiKey") or p.get("OPENAI_API_KEY")
                 if not api_key:
@@ -225,7 +222,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                     if model_name in PRICE_MAP:
                         entry["price"] = PRICE_MAP[model_name]
                 safe_entry = {**entry, "api_key": "***REDACTED***" if entry.get("api_key") else entry.get("api_key")}
-                logger.info(f"[LLM_CONFIG] Created entry {i}: {safe_entry}")
+                logger.info("[LLM_CONFIG] Created entry %s: %s", i, safe_entry)
                 config_list.append(entry)
 
         # Fallback if empty
@@ -249,7 +246,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
 
     _RAW_CONFIG_CACHE["config_list"] = config_list
     _RAW_CONFIG_CACHE["loaded_at"] = time.time()
-    logger.info(f"[LLM_CONFIG] Loaded provider list (count={len(config_list)})")
+    logger.info("[LLM_CONFIG] Loaded provider list (count=%s)", len(config_list))
 
     # -----------------------------
     # Change detection / invalidation
@@ -276,16 +273,15 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
             async with _LLM_LOCK:
                 _LLM_CONFIG_CACHE.clear()
             logger.info(
-                f"[LLM_CONFIG] Provider list change detected (providers_changed={provider_changed} api_keys_changed={keys_changed}); cleared built llm_config cache"
-            )
+                "[LLM_CONFIG] Provider list change detected (providers_changed=%s api_keys_changed=%s); cleared built llm_config cache", provider_changed, keys_changed)
         _LAST_PROVIDER_SIGNATURE = signature
         _LAST_API_KEYS = api_keys_now
     except Exception as sig_err:  # pragma: no cover
-        logger.debug(f"[LLM_CONFIG] Provider signature generation failed (non-fatal): {sig_err}")
+        logger.debug("[LLM_CONFIG] Provider signature generation failed (non-fatal): %s", sig_err)
     # Debug: log each config entry
     for i, entry in enumerate(config_list):
         safe_entry = {**entry, "api_key": "***REDACTED***" if entry.get("api_key") else entry.get("api_key")}
-        logger.info(f"[LLM_CONFIG] config_list[{i}]: {safe_entry}")
+        logger.info("[LLM_CONFIG] config_list[%s]: %s", i, safe_entry)
     return config_list
 
 
@@ -347,7 +343,7 @@ async def get_llm_config(
         try:
             seed_from_extra = int(extra_config["cache_seed"])
         except Exception:
-            logger.debug(f"[LLM_CONFIG] Provided extra_config.cache_seed not coercible to int: {extra_config.get('cache_seed')!r}; falling back to default")
+            logger.debug("[LLM_CONFIG] Provided extra_config.cache_seed not coercible to int: %s; falling back to default", extra_config.get('cache_seed'))
     selected_seed = seed_from_extra if seed_from_extra is not None else _DEFAULT_CACHE_SEED
     seed_origin = "per-chat" if seed_from_extra is not None else "process-default"
     if seed_origin == "process-default":
@@ -381,16 +377,15 @@ async def get_llm_config(
             _LLM_CONFIG_CACHE[cache_key] = copy.deepcopy(llm_config)
 
     logger.debug(
-        f"[LLM_CONFIG] Built config (rf={'yes' if response_format else 'no'}, extras={bool(extra_config)}, cache_key={cache_key})"
-    )
-    logger.debug(f"[LLM_CONFIG] Final llm_config before return: {llm_config}")
+        "[LLM_CONFIG] Built config (rf=%s, extras=%s, cache_key=%s)", 'yes' if response_format else 'no', bool(extra_config), cache_key)
+    logger.debug("[LLM_CONFIG] Final llm_config before return: %s", llm_config)
     
     # Additional safety check - validate the config_list entries before return
     config_list = llm_config.get('config_list', [])
-    logger.debug(f"[LLM_CONFIG] Validating config_list with {len(config_list)} entries")
+    logger.debug("[LLM_CONFIG] Validating config_list with %s entries", len(config_list))
     
     for i, entry in enumerate(config_list):
-        logger.debug(f"[LLM_CONFIG] Checking entry [{i}]: {entry}")
+        logger.debug("[LLM_CONFIG] Checking entry [%s]: %s", i, entry)
         if not isinstance(entry, dict):
             logger.error("[LLM_CONFIG] VALIDATION ERROR: Entry [%d] is not a dict: %s %s", i, type(entry), entry)
             raise ValueError(f"Config entry [{i}] is not a dict: {type(entry)}")
@@ -398,10 +393,10 @@ async def get_llm_config(
             logger.error("[LLM_CONFIG] VALIDATION ERROR: Entry [%d] missing model field: %s", i, entry)
             raise ValueError(f"Config entry [{i}] missing required model field: {entry}")
         else:
-            logger.debug(f"[LLM_CONFIG] Entry [{i}] validation OK: model={entry.get('model')}")
+            logger.debug("[LLM_CONFIG] Entry [%s] validation OK: model=%s", i, entry.get('model'))
     
     # Final check - ensure we don't have any extra config modifications happening
-    logger.debug(f"[LLM_CONFIG] About to return config with config_list length: {len(llm_config.get('config_list', []))}")
+    logger.debug("[LLM_CONFIG] About to return config with config_list length: %s", len(llm_config.get('config_list', [])))
     _attach_autogen_cache(llm_config)
     return None, llm_config
 
@@ -424,7 +419,7 @@ def clear_llm_caches(raw: bool = True, built: bool = True) -> None:
         _LAST_API_KEYS = set()
     if built:
         _LLM_CONFIG_CACHE.clear()
-    logger.info(f"[LLM_CONFIG] Caches cleared raw={raw} built={built}")
+    logger.info("[LLM_CONFIG] Caches cleared raw=%s built=%s", raw, built)
 
 
 __all__ = [

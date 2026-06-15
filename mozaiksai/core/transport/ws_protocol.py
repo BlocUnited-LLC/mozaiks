@@ -65,11 +65,11 @@ class WebSocketProtocolMixin:
 
         queue_size = len(self._message_queues[chat_id])
         if queue_size >= self._max_queue_size:
-            logger.warning(f"Backpressure triggered for {chat_id}: queue size {queue_size}")
+            logger.warning("Backpressure triggered for %s: queue size %s", chat_id, queue_size)
             # Drop oldest messages to make room
             dropped = queue_size - self._max_queue_size + 10  # Keep some buffer
             self._message_queues[chat_id] = self._message_queues[chat_id][dropped:]
-            logger.info(f"Dropped {dropped} queued messages for {chat_id}")
+            logger.info("Dropped %s queued messages for %s", dropped, chat_id)
             return True
         return False
 
@@ -93,7 +93,7 @@ class WebSocketProtocolMixin:
         if chat_id not in self._message_queues or not self._message_queues[chat_id]:
             return
 
-        logger.info(f"[PROTOCOL] Flushing message queue for chat_id={chat_id}, queue_size={len(self._message_queues[chat_id])}")
+        logger.info("[PROTOCOL] Flushing message queue for chat_id=%s, queue_size=%s", chat_id, len(self._message_queues[chat_id]))
 
         if chat_id in self.connections:
             websocket = self.connections[chat_id]["websocket"]
@@ -123,7 +123,7 @@ class WebSocketProtocolMixin:
                                 payload_keys = list(payload_obj.keys()) if isinstance(payload_obj, dict) else []
                                 logger.info("PROTOCOL payload keys before send: %s", payload_keys[:12])
                             await websocket.send_json(safe_message)
-                            logger.info(f"[PROTOCOL] WebSocket send_json completed for envelope type={safe_message.get('type')}, chat_id={chat_id}")
+                            logger.info("[PROTOCOL] WebSocket send_json completed for envelope type=%s, chat_id=%s", safe_message.get('type'), chat_id)
                         except Exception:
                             # Fallback: attempt to serialize whole message as a last resort
                             try:
@@ -177,7 +177,7 @@ class WebSocketProtocolMixin:
         self._heartbeat_tasks[chat_id] = asyncio.create_task(
             self._heartbeat_loop(chat_id, websocket)
         )
-        logger.info(f"Started heartbeat for {chat_id}")
+        logger.info("Started heartbeat for %s", chat_id)
 
     async def _heartbeat_loop(self, chat_id: str, websocket: WebSocket) -> None:
         """Heartbeat loop for detecting silent disconnects."""
@@ -193,14 +193,14 @@ class WebSocketProtocolMixin:
 
                 try:
                     await websocket.send_json(ping_data)
-                    logger.debug(f"Sent ping to {chat_id}")
+                    logger.debug("Sent ping to %s", chat_id)
                 except Exception as e:
-                    logger.warning(f"Heartbeat failed for {chat_id}: {e}")
+                    logger.warning("Heartbeat failed for %s: %s", chat_id, e)
                     # Connection is dead - clean up
                     await self._cleanup_connection(chat_id)
                     break
         except asyncio.CancelledError:
-            logger.debug(f"Heartbeat cancelled for {chat_id}")
+            logger.debug("Heartbeat cancelled for %s", chat_id)
         except Exception as e:
             logger.error("Heartbeat error for %s: %s", chat_id, e, exc_info=True)
 
@@ -209,7 +209,7 @@ class WebSocketProtocolMixin:
         if chat_id in self._heartbeat_tasks:
             self._heartbeat_tasks[chat_id].cancel()
             del self._heartbeat_tasks[chat_id]
-            logger.debug(f"Stopped heartbeat for {chat_id}")
+            logger.debug("Stopped heartbeat for %s", chat_id)
 
     # ==================================================================================
     # AUTO-RESUME ON RECONNECT
@@ -220,7 +220,7 @@ class WebSocketProtocolMixin:
         _ = websocket
         try:
             if not app_id:
-                logger.debug(f"[AUTO_RESUME] No app_id for {chat_id}, skipping auto-resume")
+                logger.debug("[AUTO_RESUME] No app_id for %s, skipping auto-resume", chat_id)
                 return
 
             # Get workflow name and workflow_startup_mode from connection
@@ -234,9 +234,9 @@ class WebSocketProtocolMixin:
 
                         config = workflow_manager.get_config(workflow_name)
                         workflow_startup_mode = config.get("workflow_startup_mode", "AgentDriven")
-                        logger.debug(f"[AUTO_RESUME] Retrieved workflow_startup_mode={workflow_startup_mode} for workflow={workflow_name}")
+                        logger.debug("[AUTO_RESUME] Retrieved workflow_startup_mode=%s for workflow=%s", workflow_startup_mode, workflow_name)
                     except Exception as cfg_err:
-                        logger.warning(f"[AUTO_RESUME] Failed to get workflow config: {cfg_err}")
+                        logger.warning("[AUTO_RESUME] Failed to get workflow config: %s", cfg_err)
 
             from mozaiksai.core.transport.resume_run import AgentRunResumer
 
@@ -298,7 +298,7 @@ class WebSocketProtocolMixin:
             await self._flush_message_queue(chat_id)
 
         except Exception as e:
-            logger.warning(f"[AUTO_RESUME] Failed to auto-resume chat {chat_id}: {e}")
+            logger.warning("[AUTO_RESUME] Failed to auto-resume chat %s: %s", chat_id, e)
 
     async def _emit_userdriven_bootstrap_if_needed(
         self,
@@ -442,4 +442,4 @@ class WebSocketProtocolMixin:
             overflow_counts.pop(chat_id, None)
 
         await self._stop_heartbeat(chat_id)
-        logger.info(f"Cleaned up connection resources for {chat_id}")
+        logger.info("Cleaned up connection resources for %s", chat_id)

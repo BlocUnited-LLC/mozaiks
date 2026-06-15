@@ -190,7 +190,7 @@ async def _require_admin(
 
     # Email allowlist promotion
     if is_admin_by_email(principal.email):
-        logger.debug(f"[admin] email-promoted to admin: {principal.email}")
+        logger.debug("[admin] email-promoted to admin: %s", principal.email)
         principal.roles = list(principal.roles) + ["admin"]
         return principal
 
@@ -215,7 +215,7 @@ async def get_admin_stats(
     try:
         return await _build_persisted_admin_stats(app_id=app_id)
     except Exception as e:
-        logger.warning(f"[admin] stats query failed: {e}")
+        logger.warning("[admin] stats query failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to load persisted admin stats") from e
 
 
@@ -234,7 +234,7 @@ async def get_admin_runs(
     try:
         return await _build_persisted_admin_runs(app_id=app_id, active_only=active_only, limit=limit)
     except Exception as e:
-        logger.warning(f"[admin] runs query failed: {e}")
+        logger.warning("[admin] runs query failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to load persisted admin runs") from e
 
 
@@ -256,7 +256,7 @@ async def get_admin_usage(
         ledger = get_runtime_usage_ledger()
         return await ledger.query_usage(app_id=app_id, user_id=user_id, limit=limit)
     except Exception as e:
-        logger.warning(f"[admin] usage query failed: {e}")
+        logger.warning("[admin] usage query failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to load runtime usage") from e
 
 
@@ -304,7 +304,7 @@ async def get_admin_sessions(
 
         return {"sessions": sessions, "total": len(sessions)}
     except Exception as e:
-        logger.warning(f"[admin] sessions query failed: {e}")
+        logger.warning("[admin] sessions query failed: %s", e)
         return {"sessions": [], "total": 0, "error": str(e)}
 
 

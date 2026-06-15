@@ -187,7 +187,7 @@ def _iter_declared_extensions() -> Iterable[dict[str, Any]]:
         from mozaiksai.core.workflow.paths import resolve_active_app_root
         app_root = resolve_active_app_root()
     except Exception as exc:
-        logger.debug(f"RUNTIME_EXTENSIONS_APP_ROOT_UNAVAILABLE: {exc}")
+        logger.debug("RUNTIME_EXTENSIONS_APP_ROOT_UNAVAILABLE: %s", exc)
         return
 
     modules_dir = app_root / "modules"
@@ -206,7 +206,7 @@ def _iter_declared_extensions() -> Iterable[dict[str, Any]]:
             with open(ext_yaml, encoding="utf-8") as fh:
                 raw = yaml.safe_load(fh) or {}
         except Exception as exc:
-            logger.warning(f"RUNTIME_EXTENSIONS_PARSE_FAILED: {ext_yaml} error={exc}")
+            logger.warning("RUNTIME_EXTENSIONS_PARSE_FAILED: %s error=%s", ext_yaml, exc)
             continue
 
         ext_list = raw.get("extensions")
@@ -236,7 +236,7 @@ def mount_declared_routers(app: FastAPI) -> int:
 
         entrypoint = ext.get("entrypoint")
         if not isinstance(entrypoint, str) or not entrypoint.strip():
-            logger.warning(f"RUNTIME_EXTENSIONS_SKIP_ROUTER: missing entrypoint (module={ext.get('module')})")
+            logger.warning("RUNTIME_EXTENSIONS_SKIP_ROUTER: missing entrypoint (module=%s)", ext.get('module'))
             continue
 
         prefix = ext.get("prefix")
@@ -248,14 +248,13 @@ def mount_declared_routers(app: FastAPI) -> int:
             router = obj() if callable(obj) and not isinstance(obj, APIRouter) else obj
             if not isinstance(router, APIRouter):
                 logger.warning(
-                    f"RUNTIME_EXTENSIONS_SKIP_ROUTER: entrypoint did not return APIRouter: {entrypoint}"
-                )
+                    "RUNTIME_EXTENSIONS_SKIP_ROUTER: entrypoint did not return APIRouter: %s", entrypoint)
                 continue
             app.include_router(router, prefix=prefix)
             mounted += 1
-            logger.info(f"RUNTIME_EXTENSIONS_ROUTER_MOUNTED: {entrypoint} (prefix='{prefix}')")
+            logger.info("RUNTIME_EXTENSIONS_ROUTER_MOUNTED: %s (prefix='%s')", entrypoint, prefix)
         except Exception as exc:
-            logger.warning(f"RUNTIME_EXTENSIONS_ROUTER_FAILED: {entrypoint} error={exc}")
+            logger.warning("RUNTIME_EXTENSIONS_ROUTER_FAILED: %s error=%s", entrypoint, exc)
 
     return mounted
 
@@ -280,7 +279,7 @@ async def start_declared_services() -> list[Any]:
 
         entrypoint = ext.get("entrypoint")
         if not isinstance(entrypoint, str) or not entrypoint.strip():
-            logger.warning(f"RUNTIME_EXTENSIONS_SKIP_SERVICE: missing entrypoint (module={ext.get('module')})")
+            logger.warning("RUNTIME_EXTENSIONS_SKIP_SERVICE: missing entrypoint (module=%s)", ext.get('module'))
             continue
 
         try:
@@ -292,9 +291,9 @@ async def start_declared_services() -> list[Any]:
                 if inspect.isawaitable(res):
                     await res
             started.append(svc)
-            logger.info(f"RUNTIME_EXTENSIONS_SERVICE_STARTED: {entrypoint}")
+            logger.info("RUNTIME_EXTENSIONS_SERVICE_STARTED: %s", entrypoint)
         except Exception as exc:
-            logger.debug(f"RUNTIME_EXTENSIONS_SERVICE_NOT_STARTED: {entrypoint} error={exc}")
+            logger.debug("RUNTIME_EXTENSIONS_SERVICE_NOT_STARTED: %s error=%s", entrypoint, exc)
 
     return started
 
@@ -357,7 +356,7 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
         mgr = get_workflow_manager()
         cfg = mgr.get_config(workflow_name) or {}
     except Exception as exc:
-        logger.debug(f"LIFECYCLE_HOOKS_WORKFLOW_MANAGER_UNAVAILABLE: {exc}")
+        logger.debug("LIFECYCLE_HOOKS_WORKFLOW_MANAGER_UNAVAILABLE: %s", exc)
         return empty_hooks
 
     lifecycle_tools = cfg.get("lifecycle_tools")
@@ -379,9 +378,8 @@ def get_workflow_lifecycle_hooks(workflow_name: str) -> dict[str, Any]:
         function = (entry.get("function") or "").strip()
         if not wf_file or not function:
             logger.warning(
-                f"LIFECYCLE_HOOKS_SKIP: missing file or function for trigger={trigger} "
-                f"(workflow={workflow_name})"
-            )
+                "LIFECYCLE_HOOKS_SKIP: missing file or function for trigger=%s (workflow=%s)",
+                trigger, workflow_name)
             continue
 
         try:

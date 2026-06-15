@@ -133,9 +133,9 @@ class PlatformHookRegistry:
                 obj = _resolve_entrypoint(entry)
                 bundle = obj() if callable(obj) else obj
                 self._register_bundle(bundle, source=entry)
-                logger.info(f"PLATFORM_HOOKS_LOADED: {entry}")
+                logger.info("PLATFORM_HOOKS_LOADED: %s", entry)
             except Exception as exc:
-                logger.warning(f"PLATFORM_HOOKS_LOAD_FAILED: {entry} — {exc}")
+                logger.warning("PLATFORM_HOOKS_LOAD_FAILED: %s — %s", entry, exc)
 
     def _register_bundle(self, bundle: Any, source: str = "") -> None:
         def _get(key: str) -> Any:
@@ -154,7 +154,7 @@ class PlatformHookRegistry:
             val = _get(key)
             if callable(val):
                 target.append(val)
-                logger.debug(f"PLATFORM_HOOKS_REGISTERED: {key!r} from {source!r}")
+                logger.debug("PLATFORM_HOOKS_REGISTERED: %s from %s", key, source)
 
     # ------------------------------------------------------------------
     # Hook callers
@@ -168,10 +168,10 @@ class PlatformHookRegistry:
                 if inspect.isawaitable(res):
                     await res
             except Exception as exc:
-                logger.warning(f"PLATFORM_HOOKS_STARTUP_ERROR: {exc}")
+                logger.warning("PLATFORM_HOOKS_STARTUP_ERROR: %s", exc)
 
         if self._startup_hooks:
-            logger.info(f"PLATFORM_HOOKS: ran {len(self._startup_hooks)} startup hook(s)")
+            logger.info("PLATFORM_HOOKS: ran %s startup hook(s)", len(self._startup_hooks))
 
     async def call_chat_prereqs(
         self,
@@ -196,7 +196,7 @@ class PlatformHookRegistry:
                     if not ok:
                         return False, str(reason) if reason else "Prerequisite not met"
             except Exception as exc:
-                logger.warning(f"PLATFORM_HOOKS_PREREQS_ERROR: {exc}")
+                logger.warning("PLATFORM_HOOKS_PREREQS_ERROR: %s", exc)
         return True, None
 
     async def call_chat_session_fields(
@@ -221,7 +221,7 @@ class PlatformHookRegistry:
                 if isinstance(res, dict):
                     extra.update(res)
             except Exception as exc:
-                logger.warning(f"PLATFORM_HOOKS_SESSION_FIELDS_ERROR: {exc}")
+                logger.warning("PLATFORM_HOOKS_SESSION_FIELDS_ERROR: %s", exc)
         return extra
 
     def call_workflow_ordering(self, workflow_names: list[str]) -> list[str]:
@@ -233,7 +233,7 @@ class PlatformHookRegistry:
                 if isinstance(ordered, list):
                     result = ordered
             except Exception as exc:
-                logger.warning(f"PLATFORM_HOOKS_ORDERING_ERROR: {exc}")
+                logger.warning("PLATFORM_HOOKS_ORDERING_ERROR: %s", exc)
         return result
 
     def call_workflow_name_resolver(
@@ -249,7 +249,7 @@ class PlatformHookRegistry:
                 if isinstance(resolved, str) and resolved.strip():
                     return resolved.strip()
             except Exception as exc:
-                logger.warning(f"PLATFORM_HOOKS_WORKFLOW_NAME_RESOLVER_ERROR: {exc}")
+                logger.warning("PLATFORM_HOOKS_WORKFLOW_NAME_RESOLVER_ERROR: %s", exc)
 
         requested = str(requested_workflow_name or "").strip()
         if not requested:

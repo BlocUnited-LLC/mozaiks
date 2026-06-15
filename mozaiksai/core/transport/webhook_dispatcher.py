@@ -141,35 +141,28 @@ class WebhookDispatcher:
 
                     if response.status_code < 300:
                         logger.info(
-                            f"Webhook delivered successfully to {url} "
-                            f"(chat_id={payload.chat_id}, status={response.status_code})"
-                        )
+                            "Webhook delivered successfully to %s (chat_id=%s, status=%s)",
+                            url, payload.chat_id, response.status_code)
                         return True
 
                     logger.warning(
-                        f"Webhook delivery failed to {url} "
-                        f"(status={response.status_code}, attempt={attempt + 1}/{self.max_retries})"
-                    )
+                        "Webhook delivery failed to %s (status=%s, attempt=%s/%s)",
+                        url, response.status_code, attempt + 1, self.max_retries)
 
             except httpx.TimeoutException:
                 logger.warning(
-                    f"Webhook timeout to {url} "
-                    f"(attempt={attempt + 1}/{self.max_retries})"
-                )
+                    "Webhook timeout to %s (attempt=%s/%s)", url, attempt + 1, self.max_retries)
             except Exception as e:
                 logger.error(
-                    f"Webhook error to {url}: {e} "
-                    f"(attempt={attempt + 1}/{self.max_retries})"
-                )
+                    "Webhook error to %s: %s (attempt=%s/%s)", url, e, attempt + 1, self.max_retries)
 
             # Wait before retry (except on last attempt)
             if attempt < self.max_retries - 1:
                 await asyncio.sleep(self.retry_delay * (attempt + 1))
 
         logger.error(
-            f"Webhook delivery failed after {self.max_retries} attempts to {url} "
-            f"(chat_id={payload.chat_id})"
-        )
+            "Webhook delivery failed after %s attempts to %s (chat_id=%s)",
+            self.max_retries, url, payload.chat_id)
         return False
 
 
@@ -210,10 +203,10 @@ async def dispatch_completion_webhook(
             if session:
                 webhook_url = session.get("webhook_url")
         except Exception as e:
-            logger.debug(f"Could not retrieve webhook_url from session: {e}")
+            logger.debug("Could not retrieve webhook_url from session: %s", e)
 
     if not webhook_url:
-        logger.debug(f"No webhook_url configured for chat_id={chat_id}, skipping notification")
+        logger.debug("No webhook_url configured for chat_id=%s, skipping notification", chat_id)
         return False
 
     dispatcher = get_webhook_dispatcher()

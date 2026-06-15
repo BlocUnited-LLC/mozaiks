@@ -38,7 +38,7 @@ def get_admin_emails() -> list[str]:
         raw: list[str] = config.get("admins") or []
         return [e.lower().strip() for e in raw if isinstance(e, str) and e.strip()]
     except Exception as e:
-        logger.warning(f"[admin] Could not read admins from app.json: {e}")
+        logger.warning("[admin] Could not read admins from app.json: %s", e)
         return []
 
 

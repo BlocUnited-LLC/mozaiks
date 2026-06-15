@@ -295,7 +295,7 @@ def load_agent_tool_functions(
     mapping: dict[str, list[Callable]] = {}
     base_dir = workflow_manager.resolve_workflow_path(workflow_name)
     if base_dir is None:
-        logger.debug(f"[TOOLS] Workflow path not found for '{workflow_name}'")
+        logger.debug("[TOOLS] Workflow path not found for '%s'", workflow_name)
         return mapping
     tools_yaml_path = base_dir / 'tools.yaml'
 
@@ -305,15 +305,15 @@ def load_agent_tool_functions(
             raw = yaml.safe_load(tools_yaml_path.read_text(encoding='utf-8')) or {}
             data = parse_tools_config(raw)
         except Exception as yerr:
-            logger.warning(f"[TOOLS] Failed to parse tools.yaml for '{workflow_name}': {yerr}")
+            logger.warning("[TOOLS] Failed to parse tools.yaml for '%s': %s", workflow_name, yerr)
 
     if not data:
-        logger.debug(f"[TOOLS] No tools.yaml for workflow '{workflow_name}'")
+        logger.debug("[TOOLS] No tools.yaml for workflow '%s'", workflow_name)
         return mapping
 
     entries = data.get('tools', []) or []
     if not isinstance(entries, list):
-        logger.warning(f"[TOOLS] Tool config 'tools' section is not a list in '{workflow_name}'")
+        logger.warning("[TOOLS] Tool config 'tools' section is not a list in '%s'", workflow_name)
         return mapping
     # Discover which agents have structured outputs for schema enforcement
     try:
@@ -329,7 +329,7 @@ def load_agent_tool_functions(
         )
 
     # Disable per-process tool module caching to always load fresh tool code
-    logger.debug(f"[TOOLS][TRACE] Starting tool load for workflow '{workflow_name}' (entries={len(entries)})")
+    logger.debug("[TOOLS][TRACE] Starting tool load for workflow '%s' (entries=%s)", workflow_name, len(entries))
     for idx, tool in enumerate(entries, start=1):
         if not isinstance(tool, dict):
             continue
@@ -347,7 +347,7 @@ def load_agent_tool_functions(
         func_name = tool.get('function')
         agent_field = tool.get('agent')
         if not file_name or not func_name or not agent_field:
-            logger.warning(f"[TOOLS][TRACE] Skipping entry #{idx}: missing one of file/function/agent -> file={file_name} func={func_name} agent={agent_field}")
+            logger.warning("[TOOLS][TRACE] Skipping entry #%s: missing one of file/function/agent -> file=%s func=%s agent=%s", idx, file_name, func_name, agent_field)
             continue
         # Support agent as str or list
         if isinstance(agent_field, (list, tuple)):
@@ -361,7 +361,7 @@ def load_agent_tool_functions(
         candidate_paths = [base_dir / file_name, base_dir_tools / file_name]
         file_path: Path | None = next((p for p in candidate_paths if p.exists()), None)
         if not file_path:
-            logger.warning(f"[TOOLS][TRACE] File not found for entry #{idx}: {file_name} (searched: {candidate_paths})")
+            logger.warning("[TOOLS][TRACE] File not found for entry #%s: %s (searched: %s)", idx, file_name, candidate_paths)
             continue
         # Always load a fresh module instance under an ephemeral name (no sys.modules caching)
         module = None
@@ -373,20 +373,20 @@ def load_agent_tool_functions(
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)  # type: ignore[attr-defined]
-                logger.debug(f"[TOOLS] Loaded module fresh (no cache): {file_path.name}")
+                logger.debug("[TOOLS] Loaded module fresh (no cache): %s", file_path.name)
             else:
-                logger.warning(f"[TOOLS] Could not load spec for {file_path}")
+                logger.warning("[TOOLS] Could not load spec for %s", file_path)
                 continue
         except Exception as imp_err:
-            logger.warning(f"[TOOLS][TRACE] Import failed for {file_path}: {imp_err}")
+            logger.warning("[TOOLS][TRACE] Import failed for %s: %s", file_path, imp_err)
             continue
         try:
             func = getattr(module, func_name)
         except AttributeError:
-            logger.warning(f"[TOOLS][TRACE] Function '{func_name}' missing in {file_path.name}")
+            logger.warning("[TOOLS][TRACE] Function '%s' missing in %s", func_name, file_path.name)
             continue
         if not callable(func):
-            logger.warning(f"[TOOLS][TRACE] Attribute '{func_name}' in {file_path.name} not callable")
+            logger.warning("[TOOLS][TRACE] Attribute '%s' in %s not callable", func_name, file_path.name)
             continue
         
         # AG2-native: No manual context injection needed
@@ -440,8 +440,8 @@ def load_agent_tool_functions(
     # Emit a structured summary for post-mortem debugging
     summary = {agent: [getattr(f, '__name__', '<noname>') for f in funcs] for agent, funcs in mapping.items()}
     total_funcs = sum(len(v) for v in mapping.values())
-    logger.info(f"[TOOLS] Bound {total_funcs} tool functions across {len(mapping)} agents for '{workflow_name}'")
-    logger.debug(f"[TOOLS][TRACE] Tool binding summary for '{workflow_name}': {summary}")
+    logger.info("[TOOLS] Bound %s tool functions across %s agents for '%s'", total_funcs, len(mapping), workflow_name)
+    logger.debug("[TOOLS][TRACE] Tool binding summary for '%s': %s", workflow_name, summary)
     return mapping
 
 def clear_tool_cache(workflow_name: str | None = None) -> int:
@@ -473,13 +473,13 @@ def clear_tool_cache(workflow_name: str | None = None) -> int:
         try:
             del sys.modules[module_name]
             cleared_count += 1
-            logger.debug(f"[TOOLS] Cleared cached module: {module_name}")
+            logger.debug("[TOOLS] Cleared cached module: %s", module_name)
         except KeyError:
             # Module was already removed by another thread
             pass
     
     if cleared_count > 0:
-        logger.info(f"[TOOLS] Cleared {cleared_count} cached tool modules")
+        logger.info("[TOOLS] Cleared %s cached tool modules", cleared_count)
     else:
         logger.debug("[TOOLS] No cached tool modules found to clear")
     

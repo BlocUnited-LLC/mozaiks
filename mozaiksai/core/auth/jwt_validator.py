@@ -136,7 +136,7 @@ class JWTValidator:
         try:
             unverified_header = jwt.get_unverified_header(token)
         except jwt.DecodeError as e:
-            logger.warning(f"Invalid token header: {e}")
+            logger.warning("Invalid token header: %s", e)
             raise AuthError("Invalid token format", 401) from e
 
         kid = unverified_header.get("kid")
@@ -152,7 +152,7 @@ class JWTValidator:
             raise AuthError("Unable to validate token signature", 401) from e
 
         if not jwk:
-            logger.warning(f"Signing key not found: {kid}")
+            logger.warning("Signing key not found: %s", kid)
             raise AuthError("Invalid signing key", 401)
 
         # Build public key from JWK
@@ -200,7 +200,7 @@ class JWTValidator:
         except jwt.InvalidSignatureError as exc:
             raise AuthError("Invalid token signature", 401) from exc
         except jwt.DecodeError as e:
-            logger.warning(f"Token decode error: {e}")
+            logger.warning("Token decode error: %s", e)
             raise AuthError("Invalid token", 401) from e
         except Exception as e:
             logger.error("Unexpected token validation error: %s", e, exc_info=True)
@@ -248,15 +248,13 @@ class JWTValidator:
         if require_scope and self._config.required_scope:
             if not token_claims.has_user_scope:
                 logger.warning(
-                    f"Token missing required scope: {self._config.required_scope}. "
-                    f"Token scopes: {scopes}"
-                )
+                    "Token missing required scope: %s. ", self._config.required_scope)
                 raise AuthError(
                     f"Missing required scope: {self._config.required_scope}",
                     403,
                 )
 
-        logger.debug(f"Token validated for user: {user_id}")
+        logger.debug("Token validated for user: %s", user_id)
         return token_claims
 
 

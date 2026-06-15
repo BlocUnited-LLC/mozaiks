@@ -183,7 +183,7 @@ class ModuleExecutor:
         self._action_permissions[name] = dict(action_permissions or {})
         self._action_schemas[name] = dict(action_schemas or {})
         self._action_entitlements[name] = dict(action_entitlements or {})
-        logger.info(f"MODULE_REGISTERED: {name} ({type(handler).__name__})")
+        logger.info("MODULE_REGISTERED: %s (%s)", name, type(handler).__name__)
 
     def registered_modules(self) -> list[str]:
         return list(self._modules.keys())
@@ -222,9 +222,8 @@ class ModuleExecutor:
             missing = [p for p in required if p not in granted]
             if missing:
                 logger.warning(
-                    f"MODULE_PERMISSION_DENIED: module={request.module} action={request.action} "
-                    f"missing={missing} user={request.user_id}"
-                )
+                    "MODULE_PERMISSION_DENIED: module=%s action=%s missing=%s user=%s",
+                    request.module, request.action, missing, request.user_id)
                 return ModuleResult(
                     success=False,
                     error=f"Permission denied for {request.module}.{request.action}: missing {missing}",
@@ -245,9 +244,8 @@ class ModuleExecutor:
                 )
                 if not ent_result.granted:
                     logger.warning(
-                        f"MODULE_ENTITLEMENT_DENIED: module={request.module} action={request.action} "
-                        f"capability={capability_id} reason={ent_result.reason} user={request.user_id}"
-                    )
+                        "MODULE_ENTITLEMENT_DENIED: module=%s action=%s capability=%s reason=%s user=%s",
+                        request.module, request.action, capability_id, ent_result.reason, request.user_id)
                     return ModuleResult(
                         success=False,
                         error=f"Entitlement required for {request.module}.{request.action}: {capability_id}",
@@ -262,9 +260,8 @@ class ModuleExecutor:
             input_error = _validate_schema(request.params, input_schema)
             if input_error:
                 logger.warning(
-                    f"MODULE_INPUT_INVALID: module={request.module} action={request.action} "
-                    f"error={input_error}"
-                )
+                    "MODULE_INPUT_INVALID: module=%s action=%s error=%s",
+                    request.module, request.action, input_error)
                 return ModuleResult(
                     success=False,
                     error=f"Input validation failed for {request.module}.{request.action}: {input_error}",
@@ -294,20 +291,17 @@ class ModuleExecutor:
                 out_error = _validate_schema(result, output_schema)
                 if out_error:
                     logger.warning(
-                        f"MODULE_OUTPUT_INVALID: module={request.module} action={request.action} "
-                        f"error={out_error}"
-                    )
+                        "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
+                        request.module, request.action, out_error)
 
             logger.debug(
-                f"MODULE_ACTION_OK: module={request.module} action={request.action} "
-                f"app_id={request.app_id}"
-            )
+                "MODULE_ACTION_OK: module=%s action=%s app_id=%s",
+                request.module, request.action, request.app_id)
             return ModuleResult(success=True, data=result)
 
         except TypeError as exc:
             logger.warning(
-                f"MODULE_ACTION_BAD_PARAMS: module={request.module} action={request.action} error={exc}"
-            )
+                "MODULE_ACTION_BAD_PARAMS: module=%s action=%s error=%s", request.module, request.action, exc)
             return ModuleResult(
                 success=False,
                 error=f"Invalid parameters for {request.module}.{request.action}: {exc}",
@@ -315,7 +309,7 @@ class ModuleExecutor:
             )
         except Exception as exc:
             logger.error(
-                f"MODULE_ACTION_ERROR: module={request.module} action={request.action} error={exc}",
+                "MODULE_ACTION_ERROR: module=%s action=%s error=%s", request.module, request.action, exc,
                 exc_info=True,
             )
             return ModuleResult(

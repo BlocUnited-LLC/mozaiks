@@ -121,7 +121,7 @@ async def _validate_and_attach(
     try:
         claims = await adapter.validate_token(token)
     except AuthError as e:
-        logger.warning(f"Auth failed ({adapter.name}): {e.message}")
+        logger.warning("Auth failed (%s): %s", adapter.name, e.message)
         raise HTTPException(status_code=e.status_code, detail=e.message) from e
 
     principal = UserPrincipal.from_claims(claims)
@@ -145,7 +145,7 @@ async def require_user(
     # Auth bypass for local development
     if not is_auth_enabled():
         adapter = get_auth_adapter()
-        logger.debug(f"Auth disabled - using anonymous principal ({adapter.name})")
+        logger.debug("Auth disabled - using anonymous principal (%s)", adapter.name)
         try:
             claims = await adapter.validate_token("")
             principal = UserPrincipal.from_claims(claims)
@@ -287,8 +287,7 @@ def validate_path_app_id(principal: UserPrincipal, path_app_id: str) -> None:
 
     if not principal.validate_app_id(path_app_id):
         logger.warning(
-            f"app_id mismatch: token={principal.app_id}, path={path_app_id}"
-        )
+            "app_id mismatch: token=%s, path=%s", principal.app_id, path_app_id)
         raise HTTPException(
             status_code=403,
             detail="Token app_id does not match request app_id"
@@ -307,8 +306,7 @@ def validate_path_chat_id(principal: UserPrincipal, path_chat_id: str) -> None:
 
     if not principal.validate_chat_id(path_chat_id):
         logger.warning(
-            f"chat_id mismatch: token={principal.chat_id}, path={path_chat_id}"
-        )
+            "chat_id mismatch: token=%s, path=%s", principal.chat_id, path_chat_id)
         raise HTTPException(
             status_code=403,
             detail="Token chat_id does not match request chat_id"

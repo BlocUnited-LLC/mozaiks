@@ -105,7 +105,7 @@ class UIToolsMixin:
         try:
             pm = self._get_or_create_persistence_manager()
         except Exception as pm_err:
-            logger.debug(f"[UI_TOOL] Persistence manager unavailable: {pm_err}")
+            logger.debug("[UI_TOOL] Persistence manager unavailable: %s", pm_err)
             return
 
         try:
@@ -115,7 +115,7 @@ class UIToolsMixin:
                 payload_workflow=payload.get("workflow_name"),
             )
             if not app_id:
-                logger.debug(f"[UI_TOOL] Missing app_id for chat {chat_id}; skipping last_artifact persist")
+                logger.debug("[UI_TOOL] Missing app_id for chat %s; skipping last_artifact persist", chat_id)
                 return
 
             try:
@@ -137,7 +137,7 @@ class UIToolsMixin:
                 artifact=artifact_doc,
             )
         except Exception as persist_err:
-            logger.debug(f"[UI_TOOL] Failed to persist last_artifact for chat {chat_id}: {persist_err}")
+            logger.debug("[UI_TOOL] Failed to persist last_artifact for chat %s: %s", chat_id, persist_err)
 
     # ==================================================================================
     # UI TOOL EVENT EMISSION
@@ -202,7 +202,7 @@ class UIToolsMixin:
                 payload=payload,
             )
         except Exception as persist_exc:
-            logger.debug(f"[UI_TOOL] Persist hook raised for chat {chat_id}: {persist_exc}")
+            logger.debug("[UI_TOOL] Persist hook raised for chat %s: %s", chat_id, persist_exc)
 
         if event_id and bool(awaiting_response):
             self._get_resolved_tool_call_registry().pop(event_id, None)
@@ -319,10 +319,9 @@ class UIToolsMixin:
                     )
                     if updated:
                         logger.info(
-                            f"[UI_TOOL] Applied ui_response triggers: chat={chat_ref} tool={tool_name} vars={updated}"
-                        )
+                            "[UI_TOOL] Applied ui_response triggers: chat=%s tool=%s vars=%s", chat_ref, tool_name, updated)
                 except Exception as trigger_err:
-                    logger.debug(f"[UI_TOOL] ui_response trigger apply failed: {trigger_err}")
+                    logger.debug("[UI_TOOL] ui_response trigger apply failed: %s", trigger_err)
 
         if chat_ref and hasattr(self, "_get_or_create_persistence_manager"):
             try:
@@ -347,7 +346,7 @@ class UIToolsMixin:
                         completed=completed,
                     )
             except Exception as persist_err:
-                logger.debug(f"[UI_TOOL] Failed to persist tool_call response state for {event_id}: {persist_err}")
+                logger.debug("[UI_TOOL] Failed to persist tool_call response state for %s: %s", event_id, persist_err)
 
         if display_mode == "artifact":
             try:
@@ -377,7 +376,7 @@ class UIToolsMixin:
         if future is not None:
             if not future.done():
                 self._complete_tool_call_future(future, response_data)
-                logger.info(f"[UI_TOOL] Submitted response for event {event_id}")
+                logger.info("[UI_TOOL] Submitted response for event %s", event_id)
                 metadata = self._ui_tool_metadata.pop(event_id, None)
                 self._mark_tool_call_response_resolved(event_id)
                 await self._finalize_tool_call_response(
@@ -396,7 +395,7 @@ class UIToolsMixin:
             self._buffered_tool_call_responses[event_id] = response_data
             self._ui_tool_metadata.pop(event_id, None)
             self._mark_tool_call_response_resolved(event_id)
-            logger.info(f"[UI_TOOL] Buffered early response for event {event_id}")
+            logger.info("[UI_TOOL] Buffered early response for event %s", event_id)
             await self._finalize_tool_call_response(
                 event_id=event_id,
                 response_data=response_data,
@@ -405,13 +404,13 @@ class UIToolsMixin:
             return True
         input_request_text = self._coerce_input_request_response_text(response_data)
         if self._has_pending_input_request(event_id):
-            logger.info(f"[UI_TOOL] Routing response-required interaction through submit_user_input for {event_id}")
+            logger.info("[UI_TOOL] Routing response-required interaction through submit_user_input for %s", event_id)
             submitted = await self.submit_user_input(event_id, input_request_text)
             if submitted:
                 self._mark_tool_call_response_resolved(event_id)
             return submitted
 
-        logger.warning(f"[UI_TOOL] No pending event found for {event_id}")
+        logger.warning("[UI_TOOL] No pending event found for %s", event_id)
         return False
 
     def _has_pending_input_request(self, event_id: str) -> bool:

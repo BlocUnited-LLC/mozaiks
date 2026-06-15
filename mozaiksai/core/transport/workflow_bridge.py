@@ -155,7 +155,7 @@ class WorkflowBridgeMixin:
                     create_context_container(initial=persisted_context),
                 )
             except Exception as err:
-                logger.debug(f"[SMART_ROUTING] Failed to build user_text manager for {chat_id}: {err}")
+                logger.debug("[SMART_ROUTING] Failed to build user_text manager for %s: %s", chat_id, err)
                 manager = None
 
         if manager is None or not hasattr(manager, "apply_user_text"):
@@ -164,7 +164,7 @@ class WorkflowBridgeMixin:
         try:
             updated = manager.apply_user_text(candidate)
         except Exception as err:
-            logger.debug(f"[SMART_ROUTING] user_text trigger apply failed for {chat_id}: {err}")
+            logger.debug("[SMART_ROUTING] user_text trigger apply failed for %s: %s", chat_id, err)
             return {}
 
         if updated and persistence_manager is not None:
@@ -175,7 +175,7 @@ class WorkflowBridgeMixin:
                     variables=updated,
                 )
             except Exception as err:
-                logger.debug(f"[SMART_ROUTING] Failed persisting user_text updates for {chat_id}: {err}")
+                logger.debug("[SMART_ROUTING] Failed persisting user_text updates for %s: %s", chat_id, err)
 
         return updated
 
@@ -216,11 +216,11 @@ class WorkflowBridgeMixin:
             if chat_id in self._input_request_registries:
                 active_callbacks = bool(self._input_request_registries[chat_id])
 
-            logger.info(f"[SMART_ROUTING] chat={chat_id} has_registry={has_active_session} has_callbacks={active_callbacks}")
+            logger.info("[SMART_ROUTING] chat=%s has_registry=%s has_callbacks=%s", chat_id, has_active_session, active_callbacks)
 
             if has_active_session and active_callbacks:
                 # Route to existing AG2 session via WebSocket callback mechanism
-                logger.info(f"[SMART_ROUTING] Continuing existing AG2 session for chat {chat_id}")
+                logger.info("[SMART_ROUTING] Continuing existing AG2 session for chat %s", chat_id)
 
                 # Get any available request_id from the registry
                 registry = self._input_request_registries.get(chat_id, {})
@@ -249,13 +249,13 @@ class WorkflowBridgeMixin:
                                     source='http'
                                 )
                             except Exception as persist_err:
-                                logger.debug(f"User message persistence failed (non-fatal): {persist_err}")
+                                logger.debug("User message persistence failed (non-fatal): %s", persist_err)
                         return {"status": "success", "chat_id": chat_id, "message": "Input passed to existing AG2 session.", "route": route}
                     else:
                         logger.warning("[SMART_ROUTING] Failed to submit input to existing session, falling back to new workflow")
 
             # No active session or callback failed - start new workflow
-            logger.info(f"[SMART_ROUTING] Starting new workflow for chat {chat_id}")
+            logger.info("[SMART_ROUTING] Starting new workflow for chat %s", chat_id)
             starting_new_workflow = True
 
             from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
@@ -280,8 +280,7 @@ class WorkflowBridgeMixin:
                         )
                 except Exception as clear_err:
                     logger.debug(
-                        f"[SMART_ROUTING] Failed clearing persisted pending input request for {chat_id}: {clear_err}"
-                    )
+                        "[SMART_ROUTING] Failed clearing persisted pending input request for %s: %s", chat_id, clear_err)
 
             # Only persist and echo user message when starting NEW workflows
             # For existing sessions, the message goes directly to AG2 via callback
@@ -294,7 +293,7 @@ class WorkflowBridgeMixin:
                         user_input=message,
                     )
                 except Exception as trigger_err:
-                    logger.debug(f"[SMART_ROUTING] user_text trigger update skipped for new run {chat_id}: {trigger_err}")
+                    logger.debug("[SMART_ROUTING] user_text trigger update skipped for new run %s: %s", chat_id, trigger_err)
                 try:
                     await self.process_incoming_user_message(
                         chat_id=chat_id,
@@ -303,7 +302,7 @@ class WorkflowBridgeMixin:
                         source='http'
                     )
                 except Exception as persist_err:
-                    logger.debug(f"Early persistence of user message failed (non-fatal): {persist_err}")
+                    logger.debug("Early persistence of user message failed (non-fatal): %s", persist_err)
 
             # Build lifecycle reporting (best-effort; non-blocking).
             if _emit_execution_started is not None:
@@ -502,7 +501,7 @@ class WorkflowBridgeMixin:
             raise
         except Exception as e:
             logger.error(
-                f"Background workflow run failed (workflow={workflow_name} chat={chat_id}): {e}",
+                "Background workflow run failed (workflow=%s chat=%s): %s", workflow_name, chat_id, e,
                 exc_info=True,
             )
             try:
@@ -599,6 +598,6 @@ class WorkflowBridgeMixin:
             event_data["metadata"] = metadata
 
         # Enhanced logging for debugging UI rendering
-        logger.info(f"Sending chat message: kind={event_data['kind']} agent='{agent_name}' content_len={len(message)}")
+        logger.info("Sending chat message: kind=%s agent='%s' content_len=%s", event_data['kind'], agent_name, len(message))
 
         await self.send_event_to_ui(event_data, chat_id)

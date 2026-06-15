@@ -170,7 +170,7 @@ class OIDCDiscoveryClient:
             if not force and self._cache is not None and not self._cache.is_expired():
                 return self._cache
 
-            logger.info(f"Fetching OIDC discovery from {self._discovery_url}")
+            logger.info("Fetching OIDC discovery from %s", self._discovery_url)
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
@@ -180,8 +180,7 @@ class OIDCDiscoveryClient:
                         if resp.status != 200:
                             error_text = await resp.text()
                             logger.error(
-                                f"OIDC discovery fetch failed: {resp.status} {error_text}"
-                            )
+                                "OIDC discovery fetch failed: %s %s", resp.status, error_text)
                             raise RuntimeError(
                                 f"Failed to fetch OIDC discovery: {resp.status}"
                             )
@@ -201,9 +200,7 @@ class OIDCDiscoveryClient:
                 )
 
                 logger.info(
-                    f"OIDC discovery loaded: issuer={document.get('issuer')}, "
-                    f"jwks_uri={document.get('jwks_uri')}"
-                )
+                    "OIDC discovery loaded: issuer=%s, ", document.get('issuer'))
                 return self._cache
 
             except TimeoutError as exc:

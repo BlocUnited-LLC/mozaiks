@@ -768,9 +768,8 @@ class ModuleLoader:
         handler = self._import_handler(name, module_dir, handler_path, class_name, definition)
 
         logger.info(
-            f"MODULE_LOADED: {name!r} v{definition.version} "
-            f"handler={type(handler).__name__} actions={[a.id for a in definition.actions]}"
-        )
+            "MODULE_LOADED: %s v%s handler=%s actions=%s",
+            name, definition.version, type(handler).__name__, [a.id for a in definition.actions])
         return LoadedModule(
             definition=definition,
             handler=handler,

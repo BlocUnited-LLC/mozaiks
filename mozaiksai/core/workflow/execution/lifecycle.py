@@ -90,13 +90,13 @@ class LifecycleToolManager:
 
         base_dir = _primary_workflows_root() / self.workflow_name
         if not base_dir.is_dir():
-            logger.debug(f"[LIFECYCLE] Workflow path not found for '{self.workflow_name}'")
+            logger.debug("[LIFECYCLE] Workflow path not found for '%s'", self.workflow_name)
             self._loaded = True
             return
         tools_yaml_path = base_dir / 'tools.yaml'
 
         if not tools_yaml_path.exists():
-            logger.debug(f"[LIFECYCLE] No tools.yaml for workflow '{self.workflow_name}'")
+            logger.debug("[LIFECYCLE] No tools.yaml for workflow '%s'", self.workflow_name)
             self._loaded = True
             return
 
@@ -106,21 +106,21 @@ class LifecycleToolManager:
                 data = {}
             data = parse_tools_config(data)
         except Exception as err:
-            logger.warning(f"[LIFECYCLE] Failed to parse tools.yaml for '{self.workflow_name}': {err}")
+            logger.warning("[LIFECYCLE] Failed to parse tools.yaml for '%s': %s", self.workflow_name, err)
             self._loaded = True
             return
 
         lifecycle_entries = data.get('lifecycle_tools', [])
         if not isinstance(lifecycle_entries, list):
-            logger.warning(f"[LIFECYCLE] 'lifecycle_tools' is not a list in '{self.workflow_name}'")
+            logger.warning("[LIFECYCLE] 'lifecycle_tools' is not a list in '%s'", self.workflow_name)
             self._loaded = True
             return
 
-        logger.info(f"[LIFECYCLE] Loading {len(lifecycle_entries)} lifecycle tools for '{self.workflow_name}'")
+        logger.info("[LIFECYCLE] Loading %s lifecycle tools for '%s'", len(lifecycle_entries), self.workflow_name)
 
         for idx, entry in enumerate(lifecycle_entries, start=1):
             if not isinstance(entry, dict):
-                logger.warning(f"[LIFECYCLE] Entry {idx} is not a dict, skipping")
+                logger.warning("[LIFECYCLE] Entry %s is not a dict, skipping", idx)
                 continue
 
             # Validate required fields
@@ -130,8 +130,7 @@ class LifecycleToolManager:
 
             if not all([trigger_str, file_name, func_name]):
                 logger.warning(
-                    f"[LIFECYCLE] Entry {idx} missing required fields (trigger/file/function), skipping"
-                )
+                    "[LIFECYCLE] Entry %s missing required fields (trigger/file/function), skipping", idx)
                 continue
 
             # Validate trigger
@@ -139,9 +138,7 @@ class LifecycleToolManager:
                 trigger = LifecycleTrigger(trigger_str)
             except ValueError:
                 logger.warning(
-                    f"[LIFECYCLE] Invalid trigger '{trigger_str}' in entry {idx}, skipping. "
-                    f"Valid: {[t.value for t in LifecycleTrigger]}"
-                )
+                    "[LIFECYCLE] Invalid trigger '%s' in entry %s, skipping. ", trigger_str, idx)
                 continue
 
             agent_name = entry.get('agent')  # Optional, None for chat-level hooks
@@ -150,7 +147,7 @@ class LifecycleToolManager:
             # Load the tool function
             tool_callable = self._load_tool_function(base_dir, file_name, func_name)
             if not tool_callable:
-                logger.warning(f"[LIFECYCLE] Failed to load {func_name} from {file_name}, skipping")
+                logger.warning("[LIFECYCLE] Failed to load %s from %s, skipping", func_name, file_name)
                 continue
 
             # Check if function accepts context_variables parameter
@@ -170,12 +167,10 @@ class LifecycleToolManager:
 
             self.tools[trigger].append(lifecycle_tool)
             logger.info(
-                f"[LIFECYCLE] Registered {func_name} for {trigger.value}"
-                f"{f' (agent={agent_name})' if agent_name else ''} - context_aware={accepts_context}"
-            )
+                "[LIFECYCLE] Registered %s for %s", func_name, trigger.value)
 
         total = sum(len(v) for v in self.tools.values())
-        logger.info(f"[LIFECYCLE] Loaded {total} lifecycle tools for '{self.workflow_name}'")
+        logger.info("[LIFECYCLE] Loaded %s lifecycle tools for '%s'", total, self.workflow_name)
         self._loaded = True
 
     def _load_platform_defaults(self) -> None:
@@ -199,7 +194,7 @@ class LifecycleToolManager:
         file_path: Path | None = next((p for p in candidate_paths if p.exists()), None)
 
         if not file_path:
-            logger.warning(f"[LIFECYCLE] Tool file '{file_name}' not found in workflow '{self.workflow_name}'")
+            logger.warning("[LIFECYCLE] Tool file '%s' not found in workflow '%s'", file_name, self.workflow_name)
             return None
 
         # Load module (ephemeral, no sys.modules caching)
@@ -211,18 +206,18 @@ class LifecycleToolManager:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
         except Exception as err:
-            logger.warning(f"[LIFECYCLE] Failed to import {file_path}: {err}")
+            logger.warning("[LIFECYCLE] Failed to import %s: %s", file_path, err)
             return None
 
         # Get function
         try:
             func = getattr(module, func_name)
         except AttributeError:
-            logger.warning(f"[LIFECYCLE] Function '{func_name}' not found in {file_path}")
+            logger.warning("[LIFECYCLE] Function '%s' not found in %s", func_name, file_path)
             return None
 
         if not callable(func):
-            logger.warning(f"[LIFECYCLE] '{func_name}' in {file_path} is not callable")
+            logger.warning("[LIFECYCLE] '%s' in %s is not callable", func_name, file_path)
             return None
 
         return func
@@ -266,7 +261,7 @@ class LifecycleToolManager:
             try:
                 resolved_trigger = LifecycleTrigger(str(trigger))
             except Exception:
-                logger.debug(f"[LIFECYCLE] Unknown trigger '{trigger}', skipping")
+                logger.debug("[LIFECYCLE] Unknown trigger '%s', skipping", trigger)
                 return
 
         ctx_vars = kwargs.get("context_variables")
@@ -311,7 +306,7 @@ class LifecycleToolManager:
             )
             return
 
-        logger.debug(f"[LIFECYCLE] Trigger '{resolved_trigger.value}' is not supported")
+        logger.debug("[LIFECYCLE] Trigger '%s' is not supported", resolved_trigger.value)
 
     async def _execute_tools(
         self,
@@ -339,9 +334,7 @@ class LifecycleToolManager:
         )
 
         wf_logger.info(
-            f"[LIFECYCLE] Executing {len(tools)} tools for {trigger.value}"
-            f"{f' (agent={agent_name})' if agent_name else ''}"
-        )
+            "[LIFECYCLE] Executing %s tools for %s", len(tools), trigger.value)
 
         # Deterministic contract: execute in declaration order.
         for tool in tools:
@@ -378,9 +371,7 @@ class LifecycleToolManager:
                     kwargs[key] = value
 
             wf_logger.info(
-                f"[LIFECYCLE] Calling {tool_name} for {tool.trigger.value}"
-                f"{f' (agent={tool.agent})' if tool.agent else ''}"
-            )
+                "[LIFECYCLE] Calling %s for %s", tool_name, tool.trigger.value)
 
             # Emit lightweight 'tool_call' event via tools logger (no heavy metrics)
             try:
@@ -411,9 +402,7 @@ class LifecycleToolManager:
 
             elapsed = asyncio.get_event_loop().time() - start_time
             wf_logger.info(
-                f"[LIFECYCLE] ✓ {tool_name} completed in {elapsed:.3f}s"
-                f"{f' -> {result}' if result else ''}"
-            )
+                "[LIFECYCLE] ✓ %s completed in %ss", tool_name, elapsed)
 
             # Emit observability event (optional - can integrate with UnifiedEventDispatcher)
             await self._emit_lifecycle_event(
@@ -433,7 +422,7 @@ class LifecycleToolManager:
         except Exception as err:
             elapsed = asyncio.get_event_loop().time() - start_time
             wf_logger.error(
-                f"[LIFECYCLE] ✗ {tool_name} failed in {elapsed:.3f}s: {err}",
+                "[LIFECYCLE] ✗ %s failed in %ss: %s", tool_name, elapsed, err,
                 exc_info=True,
             )
 
@@ -471,7 +460,7 @@ class LifecycleToolManager:
                 level="INFO" if payload.get('status') == 'success' else "ERROR",
             )
         except Exception as emit_err:
-            wf_logger.debug(f"[LIFECYCLE] Failed to emit event: {emit_err}")
+            wf_logger.debug("[LIFECYCLE] Failed to emit event: %s", emit_err)
 
 
 def get_lifecycle_manager(workflow_name: str) -> LifecycleToolManager:

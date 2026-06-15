@@ -138,7 +138,7 @@ async def authenticate_websocket(
     # Check if auth is enabled
     if not is_auth_enabled():
         # No auth mode - create anonymous user
-        logger.debug(f"Auth disabled - using anonymous WebSocket user (provider: {adapter.name})")
+        logger.debug("Auth disabled - using anonymous WebSocket user (provider: %s)", adapter.name)
         try:
             claims = await adapter.validate_token("")  # NoAuthAdapter ignores token
             user = WebSocketUser.from_claims(claims)
@@ -180,7 +180,7 @@ async def authenticate_websocket(
     try:
         claims = await adapter.validate_token(token)
     except AuthError as e:
-        logger.warning(f"WebSocket auth failed ({adapter.name}): {e.message}")
+        logger.warning("WebSocket auth failed (%s): %s", adapter.name, e.message)
         await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason=e.message)
         return None
     except Exception as e:
@@ -194,7 +194,7 @@ async def authenticate_websocket(
     # Bind to websocket.state for downstream access
     _bind_user_to_websocket(websocket, user)
 
-    logger.debug(f"WebSocket authenticated ({adapter.name}): user_id={user.user_id}")
+    logger.debug("WebSocket authenticated (%s): user_id=%s", adapter.name, user.user_id)
     return user
 
 
@@ -250,9 +250,8 @@ async def require_resource_ownership(
 
     if not verify_user_owns_resource(token_user_id, resource_user_id):  # type: ignore[arg-type]
         logger.warning(
-            f"WebSocket access denied: token user {token_user_id} "
-            f"tried to access resource owned by {resource_user_id}"
-        )
+            "WebSocket access denied: token user %s tried to access resource owned by %s",
+            token_user_id, resource_user_id)
         await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Access denied")
         return False
 
@@ -302,9 +301,8 @@ async def authenticate_websocket_with_path_user(
     # Validate path user_id matches JWT
     if not verify_user_owns_resource(user.user_id, path_user_id):
         logger.warning(
-            f"WebSocket user_id mismatch: JWT user {user.user_id} "
-            f"tried to connect as path user {path_user_id}"
-        )
+            "WebSocket user_id mismatch: JWT user %s tried to connect as path user %s",
+            user.user_id, path_user_id)
         await websocket.close(
             code=WS_CLOSE_POLICY_VIOLATION,
             reason="user_id mismatch"
@@ -353,8 +351,7 @@ async def authenticate_websocket_with_path_binding(
     # Validate app_id binding
     if not user.validate_app_id(path_app_id):
         logger.warning(
-            f"WebSocket app_id mismatch: token={user.app_id}, path={path_app_id}"
-        )
+            "WebSocket app_id mismatch: token=%s, path=%s", user.app_id, path_app_id)
         await websocket.close(
             code=WS_CLOSE_POLICY_VIOLATION,
             reason="app_id mismatch"
@@ -364,8 +361,7 @@ async def authenticate_websocket_with_path_binding(
     # Validate chat_id binding (if path has chat_id and token has chat_id claim)
     if path_chat_id and not user.validate_chat_id(path_chat_id):
         logger.warning(
-            f"WebSocket chat_id mismatch: token={user.chat_id}, path={path_chat_id}"
-        )
+            "WebSocket chat_id mismatch: token=%s, path=%s", user.chat_id, path_chat_id)
         await websocket.close(
             code=WS_CLOSE_POLICY_VIOLATION,
             reason="chat_id mismatch"

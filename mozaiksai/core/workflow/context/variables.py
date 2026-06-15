@@ -346,7 +346,7 @@ async def _load_data_reference_value(
         query = _materialize_query_template(source.query_template, context, app_id)
         projection = {field: 1 for field in (source.fields or [])} or None
         
-        business_logger.info(f"[DATA_REFERENCE] Resolved query for '{name}': query={query}, projection={projection}, app_id={app_id}")
+        business_logger.info("[DATA_REFERENCE] Resolved query for '%s': query=%s, projection=%s, app_id=%s", name, query, projection, app_id)
         
         doc = await adapter.fetch_one(source, query, projection)
 
@@ -361,12 +361,12 @@ async def _load_data_reference_value(
         # If only one field was requested, extract it directly.
         if source.fields and len(source.fields) == 1:
             field_value = doc.get(source.fields[0])
-            business_logger.info(f"Extracted single field '{source.fields[0]}' from document: value={'<present>' if field_value else '<missing>'}")
+            business_logger.info("Extracted single field '%s' from document: value=%s", source.fields[0], '<present>' if field_value else '<missing>')
             coerced = _coerce_value(definition, field_value)
-            business_logger.info(f"After coercion for '{name}': type={type(coerced).__name__}, length={len(str(coerced)) if coerced else 0}")
+            business_logger.info("After coercion for '%s': type=%s, length=%s", name, type(coerced).__name__, len(str(coerced)) if coerced else 0)
             return coerced
 
-        business_logger.info(f"Returning full document for '{name}': keys={list(doc.keys()) if isinstance(doc, dict) else 'not_dict'}")
+        business_logger.info("Returning full document for '%s': keys=%s", name, list(doc.keys()) if isinstance(doc, dict) else 'not_dict')
         return _coerce_value(definition, doc)
     except Exception as err:
         business_logger.error("Failed loading data_reference '%s': %s", name, err, exc_info=True)
@@ -421,7 +421,7 @@ def _load_workflow_plan(workflow_name: str) -> tuple[ContextVariablesPlan, dict[
         if isinstance(context_section, dict):
             raw_section = context_section
     except Exception as err:  # pragma: no cover
-        business_logger.warning(f"Unable to load context config for {workflow_name}: {err}")
+        business_logger.warning("Unable to load context config for %s: %s", workflow_name, err)
 
     plan = load_context_variables_config(raw_section)
     return plan, raw_section
@@ -497,7 +497,7 @@ async def _get_database_schema_async(database_name: str) -> dict[str, Any]:
                 if "app_id" in sample_doc:
                     app_collections.append(collection_name)
             except Exception as err:
-                business_logger.debug(f"Could not analyze {collection_name}: {err}")
+                business_logger.debug("Could not analyze %s: %s", collection_name, err)
                 collection_schemas[collection_name] = {"error": f"Analysis failed: {err}"}
 
         for collection_name, fields in collection_schemas.items():
@@ -533,7 +533,7 @@ async def _get_database_schema_async(database_name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 async def _load_context_async(workflow_name: str, app_id: str | None):
-    business_logger.info(f"Loading context for workflow={workflow_name}")
+    business_logger.info("Loading context for workflow=%s", workflow_name)
     context = _create_minimal_context(workflow_name, app_id)
     internal_app_id = app_id or ""
 
@@ -564,9 +564,9 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
                         first_docs = await _get_all_collections_first_docs(db_name)
                         context.set("collections_first_docs_full", first_docs)
                     except Exception as doc_err:
-                        business_logger.debug(f"collections_first_docs_full attachment failed: {doc_err}")
+                        business_logger.debug("collections_first_docs_full attachment failed: %s", doc_err)
         except Exception as schema_err:  # pragma: no cover
-            business_logger.debug(f"Schema overview skipped: {schema_err}")
+            business_logger.debug("Schema overview skipped: %s", schema_err)
 
     context.set("database_schema_available", schema_capability_enabled)
     context.set("database_schema_db", schema_capability_db)
@@ -585,7 +585,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
             context.set(name, value)
             business_logger.info("Loaded config variable %s", name)
         elif source_type == "data_reference":
-            business_logger.info(f"[DATA_REFERENCE] Loading '{name}' for app_id={internal_app_id}")
+            business_logger.info("[DATA_REFERENCE] Loading '%s' for app_id=%s", name, internal_app_id)
             value = await _load_data_reference_value(
                 name,
                 definition,
@@ -603,7 +603,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
                         workflow_name,
                     )
             context.set(name, value)
-            business_logger.info(f"[DATA_REFERENCE] Loaded '{name}' - type={type(value).__name__}, value_preview={str(value)[:100] if value else 'None'}")
+            business_logger.info("[DATA_REFERENCE] Loaded '%s' - type=%s, value_preview=%s", name, type(value).__name__, str(value)[:100] if value else 'None')
             business_logger.info("Loaded data_reference %s", name)
         elif source_type == "data_entity":
             manager = _create_data_entity_manager(
@@ -669,7 +669,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
     )
     for key in keys:
         try:
-            business_logger.debug(f"    {key} => {context.get(key)}")
+            business_logger.debug("    %s => %s", key, context.get(key))
         except Exception:
             pass
 

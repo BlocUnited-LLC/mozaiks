@@ -95,8 +95,7 @@ class UnifiedWorkflowManager:
         self._load_all_workflows()
         self._initialized = True
         logger.info(
-            f"Initialized unified workflow manager with {len(self._workflows)} workflows"
-        )
+            "Initialized unified workflow manager with %s workflows", len(self._workflows))
 
     # ------------------------- UI TOOLS -------------------------
     def _load_workflow_tools(self, workflow_path: str, *, tools_payload: dict[str, Any] | None = None) -> None:
@@ -117,12 +116,12 @@ class UnifiedWorkflowManager:
                 data = parse_tools_config(raw)
 
             if not data:
-                logger.debug(f"No tools.yaml for workflow {workflow_name}")
+                logger.debug("No tools.yaml for workflow %s", workflow_name)
                 return
             
             entries = data.get('tools', [])
             if not isinstance(entries, list):
-                logger.warning(f"Invalid tools list in workflow {workflow_name}")
+                logger.warning("Invalid tools list in workflow %s", workflow_name)
                 return
 
             ui_ct = 0
@@ -136,7 +135,7 @@ class UnifiedWorkflowManager:
                 file_name = entry.get('file')
                 function = entry.get('function')
                 if not (isinstance(file_name, str) and file_name.strip() and isinstance(function, str) and function.strip()):
-                    logger.warning(f"Skipping tool entry without required 'file' and 'function' fields in workflow '{workflow_name}'")
+                    logger.warning("Skipping tool entry without required 'file' and 'function' fields in workflow '%s'", workflow_name)
                     continue
                 tool_id = function.strip()
 
@@ -258,7 +257,7 @@ class UnifiedWorkflowManager:
                             self._ui_tool_path_cache[module_path] = key
 
             self._ui_loaded_workflows.add(workflow_name)
-            logger.info(f"Tools loaded for {workflow_name}: ui={ui_ct}")
+            logger.info("Tools loaded for %s: ui=%s", workflow_name, ui_ct)
         except Exception as e:  # pragma: no cover
             logger.error("Failed parsing tool config for %s: %s", workflow_name, e, exc_info=True)
 
@@ -296,13 +295,13 @@ class UnifiedWorkflowManager:
     def discover_workflows(self) -> list[str]:
         """Discover all available workflows in the workflows directory."""
         if not self.workflows_base_path.exists():
-            logger.warning(f"Workflows directory not found: {self.workflows_base_path}")
+            logger.warning("Workflows directory not found: %s", self.workflows_base_path)
             return []
 
         workflows = discover_workflow_paths(self.workflows_base_path)
         self._workflow_paths = {name.lower(): path for name, path in workflows.items()}
         for name, path in workflows.items():
-            logger.debug(f"Discovered workflow (orchestrator.yaml): {name} @ {path}")
+            logger.debug("Discovered workflow (orchestrator.yaml): %s @ %s", name, path)
         return list(workflows.keys())
     
     def _load_all_workflows(self) -> None:
@@ -355,7 +354,7 @@ class UnifiedWorkflowManager:
         # Load configuration directly from modular YAML files.
         config = self._load_modular_workflow_config(workflow_path)
         if not config:
-            logger.warning(f"⚠️ Empty config for workflow: {workflow_name}")
+            logger.warning("⚠️ Empty config for workflow: %s", workflow_name)
             config = {}
         self._validate_orchestrator_contract(workflow_name, config)
         validate_workflow_context_contract(
@@ -378,7 +377,7 @@ class UnifiedWorkflowManager:
             has_ui_tools = any(r.get('workflow_name') == workflow_name for r in getattr(self, '_ui_registry', {}).values())
             workflow_info.tools_loaded = has_ui_tools
         except Exception as e:  # pragma: no cover
-            logger.warning(f"Could not load UI tools for {workflow_name}: {e}")
+            logger.warning("Could not load UI tools for %s: %s", workflow_name, e)
 
         # Optional module
         try:
@@ -387,13 +386,13 @@ class UnifiedWorkflowManager:
                 module_path = f"workflows.{workflow_name}"
                 workflow_info.module = importlib.import_module(module_path)
         except ImportError as e:  # pragma: no cover
-            logger.debug(f"No module found for workflow {workflow_name}: {e}")
+            logger.debug("No module found for workflow %s: %s", workflow_name, e)
 
         normalized_name = workflow_name.lower()
         self._workflows[normalized_name] = workflow_info
         self._workflow_paths[normalized_name] = workflow_path
         self._config_cache[normalized_name] = config
-        logger.info(f"Successfully loaded workflow: {workflow_name}")
+        logger.info("Successfully loaded workflow: %s", workflow_name)
         return workflow_info
 
     def resolve_workflow_path(self, workflow_name: str) -> Path | None:
@@ -581,7 +580,7 @@ class UnifiedWorkflowManager:
             if workflow_info.module:
                 try:
                     importlib.reload(workflow_info.module)
-                    logger.info(f"Reloaded workflow module: {workflow_name}")
+                    logger.info("Reloaded workflow module: %s", workflow_name)
                 except Exception as e:
                     logger.error("WORKFLOW_MODULE_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
         
@@ -595,7 +594,7 @@ class UnifiedWorkflowManager:
                 self._ui_registry.pop(k, None)
             self._load_workflow_tools(str(workflow_path))
         except Exception as e:
-            logger.warning(f"Could not reload UI tools for {workflow_name}: {e}")
+            logger.warning("Could not reload UI tools for %s: %s", workflow_name, e)
         
         # Reload the workflow completely
         try:
@@ -615,7 +614,7 @@ class UnifiedWorkflowManager:
         if normalized_name in self._config_cache:
             del self._config_cache[normalized_name]
         
-        logger.info(f"Unloaded workflow: {workflow_name}")
+        logger.info("Unloaded workflow: %s", workflow_name)
     
     def get_workflow_info(self, workflow_name: str) -> dict[str, Any] | None:
         """Get complete information about a loaded workflow"""
@@ -814,14 +813,14 @@ class UnifiedWorkflowManager:
                 path = sibling_app_ai_path
                 app_root = sibling_app_root
             else:
-                logger.info(f"AI config not found, skipping workflow AI metadata: {path}")
+                logger.info("AI config not found, skipping workflow AI metadata: %s", path)
                 return resolve_runtime_ai_config({}, app_root=app_root)
 
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
-                logger.warning(f"AI config must be a JSON object: {path}")
+                logger.warning("AI config must be a JSON object: %s", path)
                 return resolve_runtime_ai_config({}, app_root=app_root)
             return resolve_runtime_ai_config(data, app_root=app_root)
         except Exception as e:
@@ -933,7 +932,7 @@ class UnifiedWorkflowManager:
                 "human_loop": human_loop,
                 "transport": transport,
             }
-            logger.debug(f"Registered workflow handler '{workflow_name}' (transport={transport}, human_loop={human_loop})")
+            logger.debug("Registered workflow handler '%s' (transport=%s, human_loop=%s)", workflow_name, transport, human_loop)
             return func
         return decorator
 
@@ -958,7 +957,7 @@ class UnifiedWorkflowManager:
         # Cache it
         self._handlers[key] = dynamic_handler
         self._handler_metadata.setdefault(key, {"human_loop": self.has_human_in_the_loop(workflow_name), "transport": "websocket"})
-        logger.debug(f"Created dynamic handler for workflow '{workflow_name}'")
+        logger.debug("Created dynamic handler for workflow '%s'", workflow_name)
         return dynamic_handler
 
     def get_workflow_transport(self, workflow_name: str) -> str:

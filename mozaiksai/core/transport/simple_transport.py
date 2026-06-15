@@ -264,7 +264,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                                 user_input=user_input,
                             )
                         except Exception as trigger_err:
-                            logger.debug(f"[INPUT_SUBMIT] user_text trigger update skipped for {chat_id}: {trigger_err}")
+                            logger.debug("[INPUT_SUBMIT] user_text trigger update skipped for %s: %s", chat_id, trigger_err)
                     logger.debug("INPUT_SUBMIT invoking callback request_id=%s chat=%s", input_request_id, chat_id)
                     # Support both async and sync lambdas assigned by AG2
                     result = respond_cb(user_input)
@@ -298,7 +298,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                             app_id=app_id,
                         )
                 except Exception as e:
-                    logger.debug(f"Failed to clear pending input request: {e}")
+                    logger.debug("Failed to clear pending input request: %s", e)
             # Emit chat.input_ack for B9/B10 protocol compliance
             if ack_chat_id:
                 try:
@@ -308,7 +308,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         'corr': input_request_id,
                     }, ack_chat_id)
                 except Exception as e:
-                    logger.warning(f"Failed to emit input_ack: {e}")
+                    logger.warning("Failed to emit input_ack: %s", e)
             return True
         
         logger.warning("[INPUT] No active request found for %s", input_request_id)
@@ -324,11 +324,11 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         normalized_id = str(request_id) if request_id is not None else ""
         if not normalized_id or normalized_id.lower() == "none":
             normalized_id = uuid.uuid4().hex
-            logger.debug(f"Generated fallback input request id {normalized_id} for chat {chat_id}")
+            logger.debug("Generated fallback input request id %s for chat %s", normalized_id, chat_id)
         if chat_id not in self._input_request_registries:
             self._input_request_registries[chat_id] = {}
         self._input_request_registries[chat_id][normalized_id] = respond_cb
-        logger.debug(f"Registered input request {normalized_id} for chat {chat_id}")
+        logger.debug("Registered input request %s for chat %s", normalized_id, chat_id)
         return normalized_id
 
     def consume_recent_input_submit(self, chat_id: str) -> bool:
@@ -384,7 +384,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         
         # If in general mode, show all messages (bypass visual_agents filtering)
         if ws_id and session_registry.is_in_general_mode(ws_id):
-            logger.debug(f"🧠 [GENERAL_MODE] Allowing message from '{agent_name}' (general mode bypass)")
+            logger.debug("🧠 [GENERAL_MODE] Allowing message from '%s' (general mode bypass)", agent_name)
             return True
         
         # If we have workflow type, use visual_agents filtering
@@ -396,13 +396,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
                 # Explicit null is an authoring signal to hide all agent text for this workflow.
                 if has_visual_agents_key and visual_agents is None:
-                    logger.debug(f"🔍 visual_agents=null for {workflow_name}; hiding message from {agent_name}")
+                    logger.debug("🔍 visual_agents=null for %s; hiding message from %s", workflow_name, agent_name)
                     return False
                 
                 # If visual_agents is defined, only show messages from those agents
                 if isinstance(visual_agents, list):
                     if not visual_agents:
-                        logger.debug(f"🔍 visual_agents empty for {workflow_name}; allowing message from {agent_name}")
+                        logger.debug("🔍 visual_agents empty for %s; allowing message from %s", workflow_name, agent_name)
                         return True
                     # Normalize both the agent name and visual_agents list for comparison
                     # This matches the frontend normalization logic in ChatPage.js
@@ -415,7 +415,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     normalized_visual_agents = [normalize_agent(va) for va in visual_agents]
                     
                     is_allowed = normalized_agent in normalized_visual_agents
-                    logger.debug(f"🔍 Backend visual_agents check: '{agent_name}' -> '{normalized_agent}' in {normalized_visual_agents} = {is_allowed}")
+                    logger.debug("🔍 Backend visual_agents check: '%s' -> '%s' in %s = %s", agent_name, normalized_agent, normalized_visual_agents, is_allowed)
                     return is_allowed
             except FileNotFoundError:
                 # If no specific config, default to showing the message
@@ -496,7 +496,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         context.set(k, v)
                         applied[k] = v
                     except Exception as ce:
-                        logger.debug(f"Context set failed for {k}: {ce}")
+                        logger.debug("Context set failed for %s: %s", k, ce)
             # Emit acknowledgement event
             await self.send_event_to_ui({
                 'kind': 'component_action_ack',
@@ -603,7 +603,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             )
             
             if is_ui_tool_event:
-                logger.info(f"🎯 [TRANSPORT] UI tool event detected - bypassing agent visibility filter (component={envelope.get('data', {}).get('component_type')})")
+                logger.info("🎯 [TRANSPORT] UI tool event detected - bypassing agent visibility filter (component=%s)", envelope.get('data', {}).get('component_type'))
 
             # Additional filtering (agent visibility) only for BaseEvent path where needed
             agent_name = None
@@ -703,7 +703,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     return  # noqa: RET504
             # ----------------------------------------------------------------
 
-            logger.info(f"📤 [TRANSPORT] Sending envelope: type={envelope.get('type')}, chat_id={chat_id}")
+            logger.info("📤 [TRANSPORT] Sending envelope: type=%s, chat_id=%s", envelope.get('type'), chat_id)
             try:
                 envelope_type = envelope.get('type') if isinstance(envelope, dict) else None
                 if envelope_type == 'chat.run_complete' and chat_id:
@@ -869,7 +869,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                             overflow,
                             total_overflow,
                         )
-                logger.debug(f"🕑 Buffered pre-connection message for {target_chat_id} (size={len(buf)})")
+                logger.debug("🕑 Buffered pre-connection message for %s (size=%s)", target_chat_id, len(buf))
             return
 
         # Otherwise, broadcast to all connections
@@ -1184,7 +1184,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             return
         
         # Route: other actions (forward to agent as tool_call or handle directly)
-        logger.info(f"🔄 Artifact action {action} received for chat {chat_id}")
+        logger.info("🔄 Artifact action %s received for chat %s", action, chat_id)
         # Future: route to agent or handle other action types
         await websocket.send_json({
             "type": "ack.artifact_action",
@@ -1362,7 +1362,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "active": True,
             "ws_id": ws_id,  # Track WebSocket ID for session switching
         }
-        logger.info(f"🔌 WebSocket connected for chat_id: {chat_id} (ws_id={ws_id})")
+        logger.info("🔌 WebSocket connected for chat_id: %s (ws_id=%s)", chat_id, ws_id)
 
         try:
             session_registry.add_workflow(
@@ -1391,7 +1391,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if chat_id in self._pre_connection_buffers:
             buffered = self._pre_connection_buffers.pop(chat_id)
             if buffered:
-                logger.info(f"📤 Flushing {len(buffered)} pre-connection buffered messages for {chat_id}")
+                logger.info("📤 Flushing %s pre-connection buffered messages for %s", len(buffered), chat_id)
                 for msg in buffered:
                     await self._queue_message_with_backpressure(chat_id, msg)
                 await self._flush_message_queue(chat_id)
@@ -1414,7 +1414,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 try:
                     data = json.loads(msg)
                 except Exception:
-                    logger.debug(f"⚠️ Received non-JSON message on WS chat {chat_id}: {msg[:80]}")
+                    logger.debug("⚠️ Received non-JSON message on WS chat %s: %s", chat_id, msg[:80])
                     continue
                 # H3: Validate message schema
                 if not self._validate_inbound_message(data):
@@ -1436,15 +1436,15 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         except Exception as e:
             close_code = getattr(e, "code", None)
             if isinstance(e, WebSocketDisconnect) and close_code == 1000:
-                logger.info(f"WebSocket closed normally for chat {chat_id}: {e}")
+                logger.info("WebSocket closed normally for chat %s: %s", chat_id, e)
             elif ConnectionClosed and isinstance(e, ConnectionClosed) and close_code == 1000:
-                logger.info(f"WebSocket closed normally for chat {chat_id}: {e}")
+                logger.info("WebSocket closed normally for chat %s: %s", chat_id, e)
             else:
-                logger.warning(f"WebSocket error for chat {chat_id}: {e}")
+                logger.warning("WebSocket error for chat %s: %s", chat_id, e)
         finally:
             # H1-H2: Clean up connection resources (heartbeat, message queues, etc.)
             await self._cleanup_connection(chat_id)
-            logger.info(f"🔌 WebSocket disconnected for chat_id: {chat_id}")
+            logger.info("🔌 WebSocket disconnected for chat_id: %s", chat_id)
 
     # NOTE: Workflow integration methods are provided by WorkflowBridgeMixin:
     # - handle_user_input_from_api
@@ -1504,7 +1504,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 if not workflow_name and doc.get("workflow_name"):
                     workflow_name = doc.get("workflow_name")
         except Exception as ctx_err:
-            logger.debug(f"dY'\" [UI_TOOL] Context lookup failed for chat {chat_id}: {ctx_err}")
+            logger.debug("dY'\" [UI_TOOL] Context lookup failed for chat %s: %s", chat_id, ctx_err)
 
         if chat_id in self.connections:
             conn = self.connections[chat_id]

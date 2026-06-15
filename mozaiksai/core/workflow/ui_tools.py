@@ -186,8 +186,7 @@ async def _emit_tool_call_core(
         "interaction_type": payload.get("interaction_type") or ("ui_tool" if awaiting_response else "ui_surface"),
     }
     chat_logger.info(
-        f"🎯 UI tool event: {tool_id} (event={event_id}, display={display}, payload_keys={list(payload_to_send.keys())[:12]})"
-    )
+        "🎯 UI tool event: %s (event=%s, display=%s, payload_keys=%s)", tool_id, event_id, display, list(payload_to_send.keys())[:12])
     
     # Extract agent_name from payload if not explicitly provided
     if not agent_name and isinstance(payload_to_send, dict):
@@ -204,11 +203,11 @@ async def _emit_tool_call_core(
             agent_name=agent_name,
             awaiting_response=awaiting_response,
         )
-        wf_logger.info(f"✅ [UI_TOOLS] Emitted UI tool event: {event_id}")
+        wf_logger.info("✅ [UI_TOOLS] Emitted UI tool event: %s", event_id)
         return event_id
     except Exception as e:
         wf_logger.error(
-            f"❌ [UI_TOOLS] Failed to emit UI tool event '{event_id}': {e}",
+            "❌ [UI_TOOLS] Failed to emit UI tool event '%s': %s", event_id, e,
             exc_info=True,
         )
         raise UIToolError(f"Failed to emit UI tool event: {e}") from e
@@ -235,9 +234,9 @@ def _resolve_ui_tool_owner(
         tool_record = workflow_manager.get_ui_tool_record(tool_id)
         if tool_record:
             agent_name = tool_record.get("agent")
-            wf_logger.debug(f"🔍 Tool '{tool_id}' owned by agent: {agent_name}")
+            wf_logger.debug("🔍 Tool '%s' owned by agent: %s", tool_id, agent_name)
     except Exception as e:
-        wf_logger.warning(f"⚠️ Failed to resolve tool owner for '{tool_id}': {e}")
+        wf_logger.warning("⚠️ Failed to resolve tool owner for '%s': %s", tool_id, e)
 
     if not agent_name and isinstance(payload, dict):
         agent_name = payload.get("agent_name")
@@ -255,13 +254,13 @@ def _resolve_ui_display(
             tool_record = workflow_manager.get_ui_tool_record(tool_id)
             if tool_record:
                 resolved_display = tool_record.get('mode', 'inline')
-                wf_logger.debug(f"🔍 Auto-resolved display mode for '{tool_id}': {resolved_display}")
+                wf_logger.debug("🔍 Auto-resolved display mode for '%s': %s", tool_id, resolved_display)
             else:
                 resolved_display = 'inline'
-                wf_logger.debug(f"⚠️ No tool record found for '{tool_id}', using default display: inline")
+                wf_logger.debug("⚠️ No tool record found for '%s', using default display: inline", tool_id)
         except Exception as e:
             resolved_display = 'inline'
-            wf_logger.warning(f"⚠️ Failed to resolve display mode for '{tool_id}': {e}, using default: inline")
+            wf_logger.warning("⚠️ Failed to resolve display mode for '%s': %s, using default: inline", tool_id, e)
     return str(resolved_display or "inline")
 
 
@@ -350,9 +349,9 @@ async def use_ui_tool(
                         },
                     ),
                 )
-                wf_logger.debug(f"📌 Attached UI tool metadata for {tool_id} (event={event_id})")
+                wf_logger.debug("📌 Attached UI tool metadata for %s (event=%s)", tool_id, event_id)
         except Exception as meta_err:
-            wf_logger.warning(f"⚠️ Failed to attach UI tool metadata: {meta_err}")
+            wf_logger.warning("⚠️ Failed to attach UI tool metadata: %s", meta_err)
 
     try:
         # Try to log via tools logger (optional import)
@@ -400,9 +399,9 @@ async def use_ui_tool(
                     "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
                 }
                 await transport.send_event_to_ui(completion_event, chat_id=chat_id)
-                wf_logger.debug(f"🧹 Sent completion event for inline tool: {event_id}")
+                wf_logger.debug("🧹 Sent completion event for inline tool: %s", event_id)
             except Exception as vanish_err:
-                wf_logger.warning(f"⚠️ Failed to send completion event for {event_id}: {vanish_err}")
+                wf_logger.warning("⚠️ Failed to send completion event for %s: %s", event_id, vanish_err)
 
             try:
                 from mozaiksai.core.transport.simple_transport import SimpleTransport
@@ -426,9 +425,9 @@ async def use_ui_tool(
                             completed=True,
                         ),
                     )
-                    wf_logger.debug(f"✅ Updated UI tool completion status for {tool_id} (event={event_id})")
+                    wf_logger.debug("✅ Updated UI tool completion status for %s (event=%s)", tool_id, event_id)
             except Exception as persist_err:
-                wf_logger.warning(f"⚠️ Failed to persist UI tool completion: {persist_err}")
+                wf_logger.warning("⚠️ Failed to persist UI tool completion: %s", persist_err)
 
         return resp
     except Exception as e:
@@ -573,7 +572,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
         tool_name = "unknown_tool"
     
     effective_component = tool_config.get('component') or tool_config.get('component_type') or 'inline'
-    wf_logger.info(f"🎯 Processing UI tool '{tool_name}' with component: {effective_component}")
+    wf_logger.info("🎯 Processing UI tool '%s' with component: %s", tool_name, effective_component)
     
     # Extract tool arguments
     content = getattr(tool_call_event, "content", {})
@@ -587,7 +586,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
     # If no arguments are present, avoid emitting UI at this stage.
     # Many UI tools construct their payload inside the tool function itself.
     if not tool_args:
-        wf_logger.info(f"🔇 Orchestrator UI emission suppressed for '{tool_name}' (no args provided in call)")
+        wf_logger.info("🔇 Orchestrator UI emission suppressed for '%s' (no args provided in call)", tool_name)
         return None
     
     # Use configuration-driven component type and display mode
@@ -613,11 +612,11 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
             chat_id=chat_id,
             workflow_name=tool_config.get('workflow_name', 'tool_interaction')
         )
-        wf_logger.info(f"⏳ Waiting for user interaction on tool_call '{tool_call_component}'")
+        wf_logger.info("⏳ Waiting for user interaction on tool_call '%s'", tool_call_component)
 
         # Wait for user response using internal primitive
         response = await _wait_for_tool_call_response_internal(event_id)
-        wf_logger.info(f"✅ Received user response for tool_call '{tool_call_component}'")
+        wf_logger.info("✅ Received user response for tool_call '%s'", tool_call_component)
 
         if isinstance(response, dict) and 'ui_event_id' not in response:
             response['ui_event_id'] = event_id
