@@ -678,6 +678,88 @@ This project follows a practical pre-1.0 changelog format:
   no visibility into the failure cause. Now logs at `ERROR` level with workflow
   name, chat ID, and exception.
 
+- **`logger.error(f"...")` anti-pattern eliminated across workflow and UI layers**
+  — `workflow_manager.py`, `ui_tools.py`, `factory.py`, and `module_loader.py`
+  had `logger.error(f"...{exc}")` calls that evaluated eagerly and lost stack
+  traces. All converted to `logger.error("...", arg, exc_info=True)`. Affected
+  log events: `WORKFLOW_LOAD_FAILED`, `WORKFLOW_LOAD_ALL_FAILED`,
+  `WORKFLOW_MODULE_RELOAD_FAILED`, `WORKFLOW_RELOAD_FAILED`,
+  `AI_CONFIG_READ_FAILED`, `UI_TOOL_INTERACTION_FAILED`, `MODULE_LOAD_FAILED`.
+  Also removed debug emoji prefixes (`❌`, `📈`) from `ui_tools.py` and
+  downgraded a per-tool-call `INFO` to `DEBUG`.
+
+- **325 G004 lazy-logging violations eliminated** — all `logger.xxx(f"...")`
+  f-string calls across 35 `mozaiksai/` files converted to `%`-format lazy
+  interpolation. F-strings inside logging calls evaluate even when the log level
+  suppresses output; `%`-format defers string construction to the log handler.
+  Files affected span admin, auth adapters, data/persistence, events, runtime
+  composition, transport, and all workflow sub-layers.
+
+- **Silent `except Exception: pass` blocks replaced with debug logs** —
+  `orchestration_patterns.py` had 7 bare pass-through swallows in critical
+  paths (frontend context lookup, context injection, agent/context registry
+  stores, derived listener setup, context manager registration, on_fail lifecycle
+  trigger, and error event emission). `auto_tool_handler.py` had 2 inner-loop
+  swallows. `db_manager.py` had 2 collection-drop swallows. All now emit
+  `logger.debug(...)` with event key and cause, making previously invisible
+  failures observable without impacting steady-state performance.
+
+- **`asyncio.create_task()` lifecycle emission errors now surfaced** —
+  `workflow_bridge.py` had 5 bare `asyncio.create_task()` calls for lifecycle
+  event emissions (`_emit_execution_started`, `_emit_execution_completed`,
+  `_emit_execution_failed`, and two `dispatcher.emit("runtime.process_completed")`
+  calls). All now attach `add_done_callback()` that logs at `WARNING` when the
+  task raises, ending the silent discard of lifecycle event failures.
+
+- **Artifact promotion partial-write now raises instead of silently continuing**
+  — when `artifact_store.set_validation_status()` fails after
+  `content_store.put_bundle()` succeeds, the bundle is in the content store but
+  the DB record has stale metadata. Previously this was silently swallowed.
+  Now logs `ARTIFACT_STATUS_UPDATE_FAILED` at `ERROR` level with app ID,
+  artifact ID, content ref, and exception, then re-raises so callers see the
+  failure.
+
+- **Control-plane config disabled state now logged at startup** —
+  `load_control_plane_config()` was silently returning a disabled
+  `ControlPlaneConfig()` when the YAML file existed but failed to parse, making
+  it impossible to distinguish "no config file" from "corrupt config file".
+  Now emits `CONTROL_PLANE_DISABLED` at `WARNING` when a parseable config path
+  exists but yields no valid data, and `CONTROL_PLANE_CONFIG_LOADED` at `INFO`
+  on successful load (with `enabled` flag and path).
+
+### Security
+
+- **WebSocket JWT expiry not enforced on inbound messages** — the runtime
+  `handle_websocket()` validated the auth token only at connection time.
+  Authenticated sessions with expired tokens could continue sending messages
+  indefinitely after token expiry. Fixed by extracting the JWT `exp` claim in
+  `runtime.py` and passing it as `token_exp` to `simple_transport.handle_websocket()`.
+  The inbound message loop now checks `time.time() > token_exp` before each
+  dispatch and closes the connection with WebSocket code 4401 when the token
+  has expired.
+
+- **Duplicate WebSocket connection overwrote active session silently** — when a
+  second connection arrived for the same `chat_id`, the plain dict assignment
+  `self.connections[chat_id] = {...}` replaced the existing entry while the old
+  connection's `finally` block was still running. The `finally` block then
+  deleted the new connection entry, leaving subsequent messages with no routing
+  target. Fixed by evicting the stale connection explicitly before registering
+  the new one: close the stale WebSocket with code 1001, call
+  `_cleanup_connection()`, then proceed with the new registration.
+
+- **Inbound WebSocket messages had no size limit** — the HTTP chat endpoint
+  enforced `_MESSAGE_MAX_CHARS` but the WebSocket path was unbounded, allowing
+  clients to send arbitrarily large payloads that would be parsed and forwarded
+  into the workflow context. Fixed by reading `CHAT_MESSAGE_MAX_CHARS` from the
+  environment in `SimpleTransport.__init__` and rejecting oversized messages with
+  a `MESSAGE_TOO_LARGE` client error before JSON parsing.
+
+- **`_input_request_registries` memory leak on disconnect** — the pending input
+  request registry for a chat session was not cleaned up in `_cleanup_connection()`.
+  Any client that disconnected mid-workflow left its input registry entry in
+  memory indefinitely. Fixed by adding cleanup of `_input_request_registries`
+  in `ws_protocol.py`'s `_cleanup_connection()`.
+
 ### Removed
 
 - Retired `MozaiksContextExpression` / `evaluate_context_expression`. All
