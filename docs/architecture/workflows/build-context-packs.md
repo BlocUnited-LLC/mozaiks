@@ -113,12 +113,13 @@ Required fields:
 
 Optional fields:
 
-- `required_integrations`: connector requirements that selected packs add to
-  AppGenerator integration readiness. Secret fields must be marked
-  `frontend_safe: false`; non-secret provider config such as API base URLs and
-  client ids may be frontend safe.
-
 - `pack`: marks the context as a selectable build pack.
+- `pack.required_integrations`: connector requirements that selected packs add
+  to AppGenerator integration readiness. Declare each requirement as a
+  structured object with `service`, `provider`, `kind`, `purpose`,
+  `required_at`, and `required_fields`. Secret fields must be marked
+  `type: secret` and `frontend_safe: false`; non-secret provider config such as
+  API base URLs and client ids may be frontend safe.
 - `capabilities`, `facades`: structured pack metadata for planning agents.
 - `projections.context_variables`: values projected into workflow launch state.
 - `values`: static provider values used by projection rules.

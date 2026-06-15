@@ -124,6 +124,23 @@ def test_app_plan_agent_prompt_requires_capability_first_planning() -> None:
     assert '\n        "workflows": [' in content
 
 
+def test_docs_do_not_describe_required_integrations_as_string_list() -> None:
+    docs_to_check = [
+        "docs/architecture/app/integrations-workflow.md",
+        "docs/architecture/modules-systems/appgenerator-capability-planning.md",
+        "docs/architecture/workflows/build-context-packs.md",
+        "docs/prism/prism-implementation-design.md",
+    ]
+
+    stale = [
+        path
+        for path in docs_to_check
+        if "required_integrations: str[]" in _read_text(path)
+    ]
+
+    assert stale == []
+
+
 def test_designdocs_context_exposes_captured_theme_config_as_typed_object() -> None:
     context_vars = _read_yaml("factory_app/workflows/DesignDocs/context_variables.yaml")
     definitions = context_vars["definitions"]

@@ -138,6 +138,21 @@ Hosted pack service clients are consumer adapters. For SaaS billing, the
 generated `mozaikspay_client.py` resolves the app-scoped `mozaikspay` connector
 or `MOZAIKSPAY_*` env fallback, calls the public MozaiksPay provider API, and
 does not call hosted product modules such as `hosted_billing` directly.
+Runtime token usage remains local to the generated app runtime: `MOZAIKS_APP_URL`
+or an explicit `runtime_base` connector field points at the generated app's own
+`/api/me/usage` endpoint, while `MOZAIKSPAY_API_BASE` points only at the
+MozaiksPay provider.
+
+Hosted packs declare connector requirements on
+`capability_packs[].required_integrations` as structured objects, not string-only
+service names. Public config such as `api_base` and `client_id` may be
+`frontend_safe: true`; provider secrets such as `client_secret` must be
+`type: secret` and `frontend_safe: false`. Integration readiness uses that
+shape to request missing app-scoped credentials without placing raw values in
+generated artifacts. When a hosted provider can pre-provision credentials, it
+should write the same app-scoped connector record through the generic connector
+store; connector metadata should preserve `service`, `provider`, and
+`integration_id`, while raw secret values remain only in the configured vault.
 
 For MozaiksPay, a generated SaaS app may receive:
 

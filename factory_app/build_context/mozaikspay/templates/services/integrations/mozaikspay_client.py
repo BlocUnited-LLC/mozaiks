@@ -66,7 +66,7 @@ def _clean(value: Any) -> str:
 
 
 def _env_settings() -> MozaiksPayConnectorSettings:
-    api_base = _clean(os.getenv("MOZAIKSPAY_API_BASE")) or _clean(os.getenv("MOZAIKS_APP_URL")) or None
+    api_base = _clean(os.getenv("MOZAIKSPAY_API_BASE")) or None
     runtime_base = _clean(os.getenv("MOZAIKS_APP_URL")) or None
     return MozaiksPayConnectorSettings(
         api_base=api_base,
@@ -76,7 +76,7 @@ def _env_settings() -> MozaiksPayConnectorSettings:
             or _clean(os.getenv("MOZAIKSPAY_API_KEY"))
             or None
         ),
-        runtime_base=runtime_base or api_base,
+        runtime_base=runtime_base,
         source="env",
     )
 
@@ -176,10 +176,11 @@ class MozaiksPayClient:
     async def get_runtime_ai_usage(self, *, limit: int = 500) -> dict[str, Any]:
         """Return OSS runtime AI usage from this generated app's /api/me/usage."""
         settings = await self._settings()
-        runtime_base = (settings.runtime_base or settings.api_base or "").rstrip("/")
+        runtime_base = (settings.runtime_base or "").rstrip("/")
         if not runtime_base:
             raise MozaiksPayConfigurationError(
-                "MOZAIKS_APP_URL is not set. Configure the generated app runtime URL for usage display."
+                "MOZAIKS_APP_URL is not set. Configure the generated app runtime URL for usage display; "
+                "MOZAIKSPAY_API_BASE is only the MozaiksPay provider host."
             )
         bounded_limit = max(1, min(int(limit or 1), 1000))
         return await self._request(

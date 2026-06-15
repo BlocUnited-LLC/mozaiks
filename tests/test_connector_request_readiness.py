@@ -140,8 +140,12 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
     assert payload["integration_requests"][0]["non_secret_fields"][0]["name"] == "sender_domain"
     assert "secret-inline-value" not in repr(payload)
     assert metadata_calls[0]["service"] == "email_provider"
+    assert metadata_calls[0]["provider"] == "email_provider"
+    assert metadata_calls[0]["integration_id"] == "email_provider"
     assert metadata_calls[0]["public_config"] == {"sender_domain": "example.test"}
     assert store_calls[0]["secret_value"] == "secret-inline-value"
+    assert store_calls[0]["provider"] == "email_provider"
+    assert store_calls[0]["integration_id"] == "email_provider"
     assert store_calls[0]["public_config"] == {"sender_domain": "example.test"}
     assert "secret-inline-value" not in repr(result)
 

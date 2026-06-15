@@ -25,6 +25,11 @@ This project follows a practical pre-1.0 changelog format:
   batch generation, workflow export, semantic drift checks, and runtime loader
   promotion.
 
+- **Structured hosted-pack connector requirements** for AppGenerator capability
+  packs. `capability_packs[].required_integrations` now uses a typed connector
+  object with explicit public and secret fields, and hosted pack defaults flow
+  into IntegrationReadinessAgent without losing provider metadata.
+
 - **OSS build telemetry** (`mozaiksai/core/telemetry.py`) — opt-in HMAC-SHA256
   signed, anonymized build telemetry. `build_registry_id` is one-way SHA-256 hashed
   before transmission. Controlled by `MOZAIKS_TELEMETRY_ENDPOINT`,

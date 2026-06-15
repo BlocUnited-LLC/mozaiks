@@ -500,8 +500,28 @@ BuildSurface:
     primary_entities: str[]
     primary_views: str[]           # Replaces primary_pages
     operations: str[]
-    required_integrations: str[]
+    required_integrations: BuildRequiredIntegration[]
     capability_source: str         # generated | hosted_pack | framework | external_adapter
+
+BuildRequiredIntegration:
+  type: model
+  fields:
+    service: str                   # App-scoped connector service id
+    provider: str | null
+    display_name: str | null
+    kind: str                      # api_key | oauth | webhook | hosted_pack | internal_service
+    purpose: str
+    required_at: str               # build_time | validation_time | runtime | deployment | optional
+    required_fields: IntegrationRequiredField[]
+
+IntegrationRequiredField:
+  type: model
+  fields:
+    name: str
+    label: str
+    type: str                      # secret | text | url | select | number | json
+    required: bool
+    frontend_safe: bool            # false for secrets and write-only fields
 
 BuildView:
   type: model

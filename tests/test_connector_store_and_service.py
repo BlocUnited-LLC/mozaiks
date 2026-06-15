@@ -282,6 +282,8 @@ def test_connector_service_uses_vault_backend_when_available(monkeypatch) -> Non
             app_id="app_1",
             user_id="user_1",
             service="payment_provider",
+            provider="stripe",
+            integration_id="stripe_payments",
             secret_value=SECRET_VALUE,
             display_name="Payment Provider",
             public_config={"webhook_url": "https://hooks.example.test/payments"},
@@ -298,8 +300,12 @@ def test_connector_service_uses_vault_backend_when_available(monkeypatch) -> Non
 
     assert stored["success"] is True
     assert stored["provider"] == "fake_vault"
+    assert stored["connector_provider"] == "stripe"
+    assert stored["integration_id"] == "stripe_payments"
     assert status["status"] == "active"
     assert status["connector"]["secret_storage"] == "fake_vault"
+    assert status["connector"]["provider"] == "stripe"
+    assert status["connector"]["integration_id"] == "stripe_payments"
     assert status["connector"]["public_config"] == {"webhook_url": "https://hooks.example.test/payments"}
     assert status["connector"]["health"]["status"] == "configured"
     assert status["connector"]["health"]["missing_fields"] == []

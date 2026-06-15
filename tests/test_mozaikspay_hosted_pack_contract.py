@@ -258,6 +258,12 @@ class TestMozaiksPayClientTemplate:
         assert "get_connector_vault_backend" in content
         assert "/api/modules/hosted_billing" not in content
 
+    def test_runtime_usage_does_not_fall_back_to_provider_api_base(self):
+        content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
+        assert "runtime_base=runtime_base or api_base" not in content
+        assert "settings.runtime_base or settings.api_base" not in content
+        assert "MOZAIKSPAY_API_BASE is only the MozaiksPay provider host" in content
+
     def test_client_has_error_classes(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
         assert "MozaiksPayError" in content

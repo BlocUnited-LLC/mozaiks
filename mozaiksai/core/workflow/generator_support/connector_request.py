@@ -582,6 +582,8 @@ async def request_connector_bundle(
                     app_id=str(app_id),
                     user_id=str(user_id) if user_id else None,
                     service=svc["service"],
+                    provider=svc.get("provider"),
+                    integration_id=svc.get("integration_id"),
                     display_name=svc["display_name"],
                     key_length=key_length,
                     workflow_name=workflow_name,
@@ -608,6 +610,8 @@ async def request_connector_bundle(
                         ttl_days=30,
                         public_config=public_config,
                         required_fields=svc["required_fields"],
+                        provider=svc.get("provider"),
+                        integration_id=svc.get("integration_id"),
                         logger=wf_logger,
                     )
                     connector_stored = bool(stored.get("success"))

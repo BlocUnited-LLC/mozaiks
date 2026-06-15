@@ -30,6 +30,21 @@ def _normalize_service(service: str) -> str:
     return str(service or "").strip().lower().replace(" ", "_")
 
 
+def _connector_identity_fields(
+    *,
+    service: str,
+    provider: str | None = None,
+    integration_id: str | None = None,
+) -> dict[str, str]:
+    normalized_service = _normalize_service(service)
+    normalized_provider = _normalize_service(provider or normalized_service) or normalized_service
+    normalized_integration_id = _normalize_service(integration_id or normalized_provider or normalized_service)
+    return {
+        "provider": normalized_provider,
+        "integration_id": normalized_integration_id or normalized_service,
+    }
+
+
 def _health_supported_for_record(record: dict[str, Any] | None) -> bool:
     if not isinstance(record, dict):
         return False
@@ -268,6 +283,8 @@ async def record_connector_metadata(
     ui_event_id: str | None,
     public_config: dict[str, Any] | None = None,
     required_fields: Sequence[dict[str, Any]] | None = None,
+    provider: str | None = None,
+    integration_id: str | None = None,
     logger: Any | None = None,
     status_reason: str | None = None,
     store: AppConnectorStore | None = None,
@@ -295,6 +312,11 @@ async def record_connector_metadata(
             "submitted_at": now,
         },
         status_reason=status_reason or "Secret captured for the current workflow run only; no vault-backed connector store is configured.",
+        extra_fields=_connector_identity_fields(
+            service=normalized_service,
+            provider=provider,
+            integration_id=integration_id,
+        ),
     )
     if logger:
         logger.info("Saved connector metadata for %s (app %s)", normalized_service, app_id)
@@ -361,6 +383,8 @@ async def store_connector(
     ttl_days: int = 30,
     public_config: dict[str, Any] | None = None,
     required_fields: Sequence[dict[str, Any]] | None = None,
+    provider: str | None = None,
+    integration_id: str | None = None,
     logger: Any | None = None,
     store: AppConnectorStore | None = None,
 ) -> dict[str, Any]:
@@ -376,7 +400,12 @@ async def store_connector(
         ttl_days=ttl_days,
     )
     success = bool(backend_result.get("success"))
-    provider = str(backend_result.get("provider") or "unmanaged")
+    vault_provider = str(backend_result.get("provider") or "unmanaged")
+    identity_fields = _connector_identity_fields(
+        service=normalized_service,
+        provider=provider,
+        integration_id=integration_id,
+    )
     expires_at = backend_result.get("expires_at")
     error = backend_result.get("error")
 
@@ -386,33 +415,34 @@ async def store_connector(
         display_name=display_name,
         user_id=str(user_id) if user_id else None,
         status="active" if success else "metadata_only",
-        secret_storage=provider,
+        secret_storage=vault_provider,
         secret_available=success,
         key_length=len(secret_value or ""),
         expires_at=expires_at,
         public_config=public_config,
         required_fields=_normalize_required_fields(required_fields),
         status_reason=(
-            f"Connector secret persisted via {provider}."
+            f"Connector secret persisted via {vault_provider}."
             if success
             else "Connector metadata saved, but secret storage is not available for the current runtime."
         ),
         extra_fields={
+            **identity_fields,
             "ttl_days_requested": int(ttl_days),
             "last_submitted_at": now.isoformat(),
             "secret_name": backend_result.get("secret_name"),
-            "vault_provider": provider,
+            "vault_provider": vault_provider,
         },
     )
     if logger:
         if success:
-            logger.info("Connector secret persisted for %s on app %s via %s", normalized_service, app_id, provider)
+            logger.info("Connector secret persisted for %s on app %s via %s", normalized_service, app_id, vault_provider)
         else:
             logger.info(
                 "Connector metadata saved for %s on app %s, but secret storage failed via %s: %s",
                 normalized_service,
                 app_id,
-                provider,
+                vault_provider,
                 error,
             )
     return {
@@ -426,7 +456,9 @@ async def store_connector(
         "created_at_utc": now.isoformat(),
         "connector_status": "active" if success else "metadata_only",
         "secret_available": success,
-        "provider": provider,
+        "provider": vault_provider,
+        "connector_provider": identity_fields["provider"],
+        "integration_id": identity_fields["integration_id"],
         "secret_name": backend_result.get("secret_name"),
         "record": record,
         "error": error,

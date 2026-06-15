@@ -6,11 +6,11 @@ create app-owned secret tables, or expose secret values to frontend read APIs.
 
 ## Storage
 
-Connector metadata is app-scoped platform state. It records service id, display
-name, status, public non-secret config, source workflow, and whether a vault
-secret is available. Secret values are stored only through the configured
-connector vault backend. If no vault is configured, metadata can still be saved,
-but the raw secret is not durable.
+Connector metadata is app-scoped platform state. It records service id,
+provider id, integration id, display name, status, public non-secret config,
+source workflow, and whether a vault secret is available. Secret values are
+stored only through the configured connector vault backend. If no vault is
+configured, metadata can still be saved, but the raw secret is not durable.
 
 ## Inline Request
 
@@ -223,4 +223,6 @@ filtered defensively even if malformed connector metadata reaches the frontend.
 build-task `integration_needs`, and task-agent `record_integration_need` calls
 feed the same readiness checkpoint. Agents should declare provider-neutral
 service ids, setup fields, purpose, required lifecycle point, and whether the
-need is optional.
+need is optional. Capability-pack `required_integrations` must be structured
+objects with `required_fields`; they should not be reduced to string service
+names when a pack declares public config and secret fields.
