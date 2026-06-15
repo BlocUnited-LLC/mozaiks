@@ -602,6 +602,59 @@ This project follows a practical pre-1.0 changelog format:
   and `test_module_runtime_quality_gate.py` that checked the removed `condition`
   string field instead of `condition_value`.
 
+- **`exc_info=True` added to `MODULE_LOAD_FAILED` error log** — the module
+  loader now captures full stack traces (not just the message string) when a
+  module fails to load, making root-cause debugging of startup failures
+  significantly easier.
+
+- **`WORKFLOW_BACKGROUND_TASK_FAILED` done_callback on all workflow handler
+  background tasks** — three `asyncio.create_task(_run_workflow_background(...))`
+  calls in `workflow_handlers.py` (switch-workflow auto-start, start-workflow
+  auto-run, and batch auto-run) now attach done_callbacks that log
+  `WORKFLOW_BACKGROUND_TASK_FAILED` at `ERROR` level when the task raises.
+
+- **`HANDOFF_EVENT_EMIT_FAILED` done_callback** — `loop.create_task()` in
+  `handoff_events.py` now logs `HANDOFF_EVENT_EMIT_FAILED` at `WARNING` when
+  the event dispatch coroutine raises.
+
+- **`ADMIN_REGISTRY_LOAD_FAILED` warning on corrupt registry YAML** —
+  `load_admin_registry()` silently returned an empty registry on YAML parse
+  errors; now logs a `WARNING` with path and exception.
+
+- **`CONTENT_STORE_PUT_BUNDLE_FAILED` warning on non-local content store
+  upload failures** — artifact promotion silently set `content_ref = None`
+  when the remote bundle upload failed; now logs a `WARNING` with app ID,
+  artifact ID, backend name, and exception.
+
+- **Debug-only `logger.info` calls removed from hot paths** — three
+  `🔍`-prefixed `logger.info` calls in `unified_event_dispatcher.py` and
+  `simple_transport.py` that fired on every agent message or event were either
+  removed or downgraded to `DEBUG`. These would have flooded production log
+  aggregation at any realistic message throughput.
+
+- **Per-message `INFO` suppression logs downgraded to `DEBUG`** —
+  `SYSTEM_SIGNAL`, `USERDRIVEN_TRIGGER`, and `UI_HIDDEN` suppression logs
+  in the event dispatcher, plus `INPUT_SUBMIT`, visual-agents gate, and
+  `_mozaiks_hide` suppression logs in the transport, now emit at `DEBUG` level
+  instead of `INFO`. Also removed a per-registry loop that dumped all pending
+  input request IDs to info on every input submit call.
+
+- **Per-operation `INFO` logs downgraded to `DEBUG`** — per-document-insert
+  log in `db_manager.py`, per-session-creation and per-artifact-state-update
+  logs in `simple_transport.py` downgraded from `INFO` to `DEBUG`.
+
+- **`AI_CONFIG_LOAD_FAILED` and `CONTROL_PLANE_CONFIG_LOAD_FAILED` warnings**
+  — `load_ai_config_json()` and `load_control_plane_config_yaml()` were
+  silently returning empty dicts on JSON/YAML parse errors, making startup
+  misconfiguration invisible. Both now emit `WARNING` logs with the config
+  path and exception.
+
+- **Stale refinement router artifact lookups now log at DEBUG** — two bare
+  `except Exception: return []` / `return None` blocks in
+  `refinement_router.py` that silently swallowed artifact store lookup errors
+  now log `ARTIFACT_FILES_LOOKUP_FAILED` and `STALE_ARTIFACT_LOOKUP_FAILED`
+  at `DEBUG` level.
+
 ### Removed
 
 - Retired `MozaiksContextExpression` / `evaluate_context_expression`. All
