@@ -212,20 +212,30 @@ def _write_file_map_zip(
     file_map: dict[str, str],
     artifact_path: Path,
 ) -> tuple[list[ArtifactFileManifestEntry], str, int]:
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"WORKSPACE_SNAPSHOT_ZIP_FAILED: could not create snapshot directory {artifact_path.parent} — {exc}"
+        ) from exc
     manifest: list[ArtifactFileManifestEntry] = []
-    with zipfile.ZipFile(artifact_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(file_map):
-            raw = str(file_map[path]).encode("utf-8")
-            archive.writestr(path, raw)
-            manifest.append(
-                ArtifactFileManifestEntry(
-                    path=path,
-                    sha256=hashlib.sha256(raw).hexdigest(),
-                    size_bytes=len(raw),
-                    content_type=mimetypes.guess_type(path)[0] or "text/plain",
+    try:
+        with zipfile.ZipFile(artifact_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(file_map):
+                raw = str(file_map[path]).encode("utf-8")
+                archive.writestr(path, raw)
+                manifest.append(
+                    ArtifactFileManifestEntry(
+                        path=path,
+                        sha256=hashlib.sha256(raw).hexdigest(),
+                        size_bytes=len(raw),
+                        content_type=mimetypes.guess_type(path)[0] or "text/plain",
+                    )
                 )
-            )
+    except OSError as exc:
+        raise RuntimeError(
+            f"WORKSPACE_SNAPSHOT_ZIP_FAILED: could not write snapshot zip at {artifact_path} — {exc}"
+        ) from exc
     bundle = artifact_path.read_bytes()
     return manifest, hashlib.sha256(bundle).hexdigest(), len(bundle)
 
