@@ -321,7 +321,7 @@ class JourneyOrchestrator:
         )
 
         for wf, cid, _created in spawned:
-            transport._background_tasks[cid] = asyncio.create_task(
+            _spawned_task = asyncio.create_task(
                 transport._run_workflow_background(
                     chat_id=cid,
                     workflow_name=wf,
@@ -332,6 +332,17 @@ class JourneyOrchestrator:
                     initial_agent_name_override=None,
                 )
             )
+            _spawned_task.add_done_callback(
+                lambda t, _wf=wf, _cid=cid: logger.error(
+                    "JOURNEY_SPAWNED_WORKFLOW_FAILED workflow=%s chat=%s: %s",
+                    _wf,
+                    _cid,
+                    t.exception(),
+                )
+                if not t.cancelled() and t.exception() is not None
+                else None
+            )
+            transport._background_tasks[cid] = _spawned_task
 
     async def _get_transport_conn(self, chat_id: str) -> tuple[dict[str, Any] | None, Any]:
         try:
