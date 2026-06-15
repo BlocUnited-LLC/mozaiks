@@ -1191,6 +1191,28 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
     return result
 
 
+@app.get("/health")
+async def health_check(request: Request):
+    """Liveness and readiness probe.
+
+    Returns 200 when the platform is healthy and accepting requests.
+    Returns 503 when the platform degraded at startup (e.g. module load failure).
+    This endpoint is intentionally unauthenticated and lightweight.
+    """
+    from mozaiksai.version import __version__
+
+    if getattr(request.app.state, "startup_degraded", False):
+        reason = getattr(request.app.state, "startup_degraded_reason", "unknown")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "version": __version__, "reason": reason},
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"status": "ok", "version": __version__},
+    )
+
+
 @app.get("/api/shell-config")
 async def get_shell_config():
     return await build_shell_config(surface="platform")

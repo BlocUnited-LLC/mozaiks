@@ -40,17 +40,21 @@ async def backend_request(
     Returns:
         JSON string with the backend response.
     """
-    from mozaiksai.core.adapters.http_app_backend import get_app_backend
+    try:
+        from mozaiksai.core.adapters.http_app_backend import get_app_backend
 
-    ctx = context_variables or {}
-    token = ctx.get("auth_token")
+        ctx = context_variables or {}
+        token = ctx.get("auth_token")
 
-    backend = get_app_backend()
-    result = await backend.request(method, path, json_body=payload, user_token=token)
+        backend = get_app_backend()
+        result = await backend.request(method, path, json_body=payload, user_token=token)
 
-    if result.success:
-        return json.dumps({"status": "success", "data": result.data})
-    return json.dumps({"status": "error", "error": result.error})
+        if result.success:
+            return json.dumps({"status": "success", "data": result.data})
+        return json.dumps({"status": "error", "error": result.error})
+    except Exception as exc:
+        logger.error("backend_request tool error %s %s: %s", method, path, exc)
+        return json.dumps({"status": "error", "error": str(exc)})
 
 
 async def emit_event(
@@ -68,15 +72,19 @@ async def emit_event(
     Returns:
         JSON string confirming dispatch status.
     """
-    from mozaiksai.core.adapters.http_app_backend import get_app_backend
+    try:
+        from mozaiksai.core.adapters.http_app_backend import get_app_backend
 
-    ctx = context_variables or {}
-    data = {**(event_data or {}), "app_id": ctx.get("app_id", ""), "user_id": ctx.get("user_id", "")}
+        ctx = context_variables or {}
+        data = {**(event_data or {}), "app_id": ctx.get("app_id", ""), "user_id": ctx.get("user_id", "")}
 
-    backend = get_app_backend()
-    ok = await backend.emit(event_type, data)
+        backend = get_app_backend()
+        ok = await backend.emit(event_type, data)
 
-    return json.dumps({"status": "emitted" if ok else "failed", "event_type": event_type})
+        return json.dumps({"status": "emitted" if ok else "failed", "event_type": event_type})
+    except Exception as exc:
+        logger.error("emit_event tool error %s: %s", event_type, exc)
+        return json.dumps({"status": "failed", "event_type": event_type, "error": str(exc)})
 
 
 async def check_backend_health(
@@ -87,12 +95,16 @@ async def check_backend_health(
     Returns:
         JSON string with health status.
     """
-    from mozaiksai.core.adapters.http_app_backend import get_app_backend
+    try:
+        from mozaiksai.core.adapters.http_app_backend import get_app_backend
 
-    backend = get_app_backend()
-    health = await backend.health()
+        backend = get_app_backend()
+        health = await backend.health()
 
-    return json.dumps({"healthy": health.healthy, "version": health.version})
+        return json.dumps({"healthy": health.healthy, "version": health.version})
+    except Exception as exc:
+        logger.error("check_backend_health tool error: %s", exc)
+        return json.dumps({"healthy": False, "version": "unknown", "error": str(exc)})
 
 
 __all__ = [

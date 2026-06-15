@@ -38,6 +38,41 @@ async def test_studio_shell_config_injects_studio_routes():
     assert studio_pages["/apps"]["meta"]["requiresRole"] == "admin"
 
 
+def test_platform_health_endpoint_returns_200_when_healthy():
+    from fastapi.testclient import TestClient
+
+    from mozaiksai.hosts import studio as studio_app
+
+    studio_app.app.state.startup_degraded = False
+    client = TestClient(studio_app.app, raise_server_exceptions=False)
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert "version" in body
+
+
+def test_platform_health_endpoint_returns_503_when_degraded():
+    from fastapi.testclient import TestClient
+
+    from mozaiksai.hosts import studio as studio_app
+
+    studio_app.app.state.startup_degraded = True
+    studio_app.app.state.startup_degraded_reason = "module load failed"
+    try:
+        client = TestClient(studio_app.app, raise_server_exceptions=False)
+        response = client.get("/health")
+
+        assert response.status_code == 503
+        body = response.json()
+        assert body["status"] == "degraded"
+        assert body["reason"] == "module load failed"
+    finally:
+        studio_app.app.state.startup_degraded = False
+        studio_app.app.state.startup_degraded_reason = None
+
+
 def test_studio_host_composes_platform_host():
     from mozaiksai.hosts import platform as platform_app
     from mozaiksai.hosts import studio as studio_app
