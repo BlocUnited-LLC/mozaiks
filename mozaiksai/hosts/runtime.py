@@ -352,6 +352,7 @@ async def health_readiness(request: Request):
 
     # Platform startup degradation — set when module loading fails unexpectedly.
     startup_degraded = getattr(request.app.state, "startup_degraded", False)
+    failed_module_names: list[str] = getattr(request.app.state, "failed_module_names", [])
     if startup_degraded:
         reason = getattr(request.app.state, "startup_degraded_reason", "unknown")
         checks["app_startup"] = f"degraded: {reason}"
@@ -360,14 +361,14 @@ async def health_readiness(request: Request):
         checks["app_startup"] = "ok"
 
     status_code = 503 if degraded else 200
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "status": "degraded" if degraded else "ready",
-            "timestamp": datetime.now(UTC).isoformat(),
-            "checks": checks,
-        },
-    )
+    body: dict[str, Any] = {
+        "status": "degraded" if degraded else "ready",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "checks": checks,
+    }
+    if failed_module_names:
+        body["failed_modules"] = failed_module_names
+    return JSONResponse(status_code=status_code, content=body)
 
 
 @app.get("/api/health")

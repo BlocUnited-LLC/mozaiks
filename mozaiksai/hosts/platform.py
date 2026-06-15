@@ -79,6 +79,7 @@ app.state.executor_registry = executor_registry
 app.state.subscriptions_config = None
 app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
+app.state.failed_module_names: list[str] = []
 _runtime_services: list[Any] = []
 
 
@@ -316,6 +317,7 @@ async def _platform_startup() -> None:
                 logger.error("PLATFORM_DEGRADED: %s", reason)
                 app.state.startup_degraded = True
                 app.state.startup_degraded_reason = reason
+                app.state.failed_module_names = sorted(load_result.failed_module_names)
 
             # Mount api_router extensions and start startup_service extensions
             # now that module packages are registered in sys.modules.
@@ -324,13 +326,21 @@ async def _platform_startup() -> None:
                 if n:
                     logger.info("MODULE_EXTENSIONS_ROUTERS_MOUNTED: %s router(s)", n)
             except Exception as exc:
-                logger.warning("MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED: %s", exc)
+                reason = f"MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED: {exc}"
+                logger.error(reason)
+                if not app.state.startup_degraded:
+                    app.state.startup_degraded = True
+                    app.state.startup_degraded_reason = reason
 
             try:
                 module_services = await start_module_services(load_result.modules)
                 _runtime_services.extend(module_services)
             except Exception as exc:
-                logger.warning("MODULE_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
+                reason = f"MODULE_EXTENSIONS_SERVICES_NOT_STARTED: {exc}"
+                logger.error(reason)
+                if not app.state.startup_degraded:
+                    app.state.startup_degraded = True
+                    app.state.startup_degraded_reason = reason
 
     except DatabaseStartupError:
         raise
@@ -2195,6 +2205,16 @@ async def _start_workflow_background_if_available(
             initial_agent_name_override=initial_agent if isinstance(initial_agent, str) and initial_agent.strip() else None,
         ),
         name=f"workflow:{workflow_id}:{chat_id}",
+    )
+    task.add_done_callback(
+        lambda t: logger.error(
+            "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
+            workflow_id,
+            chat_id,
+            t.exception(),
+        )
+        if not t.cancelled() and t.exception() is not None
+        else None
     )
     background_tasks = getattr(transport, "_background_tasks", None)
     if isinstance(background_tasks, dict):
