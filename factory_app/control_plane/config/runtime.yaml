@@ -6,7 +6,6 @@ llm_profiles:
     expected_behavior: deterministic structured classification
     llm_config:
       model: gpt-5-nano
-      temperature: 0.0
   impact_analyzer:
     purpose: Support artifact impact analysis and refinement routing decisions.
     expected_behavior: deterministic structured impact analysis

@@ -22,7 +22,6 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
     assert config.classifier.llm_profile == "classifier"
     assert config.resolve_capability_llm_config("classifier") == {
         "model": "gpt-5-nano",
-        "temperature": 0.0,
     }
     assert config.coding.enabled is True
     assert config.coding.llm_profile == "codegen"

@@ -67,14 +67,11 @@ class AG2StructuredAgentRunner:
     ) -> Any:
         if self._agent_factory is not None:
             return self._agent_factory(system_prompt, llm_config)
-        return Agent(
-            agent_name,
-            system_prompt,
-            config=OpenAIConfig(
-                model=llm_config.get("model") or "gpt-4o",
-                temperature=llm_config.get("temperature"),
-            ),
-        )
+        config_kwargs: dict[str, Any] = {"model": llm_config.get("model") or "gpt-4o"}
+        temperature = llm_config.get("temperature")
+        if temperature is not None:
+            config_kwargs["temperature"] = temperature
+        return Agent(agent_name, system_prompt, config=OpenAIConfig(**config_kwargs))
 
 
 __all__ = ["AG2StructuredAgentRunner"]

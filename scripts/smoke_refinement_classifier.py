@@ -21,8 +21,6 @@ from mozaiksai.control_plane import (
     load_control_plane_config,
     load_control_plane_pack,
 )
-from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
-from mozaiksai.core.workflow.llm_config import get_llm_config
 from mozaiksai.core.workflow.pack.config import get_workflow_sequence, load_global_pack_graph
 
 APP_ROOT = REPO_ROOT / "factory_app" / "app"
@@ -164,18 +162,12 @@ def _safe_llm_config(llm_config: dict[str, Any] | None) -> dict[str, Any]:
     return safe
 
 
-async def _provider_available() -> tuple[bool, str]:
-    try:
-        _, llm_config = await get_llm_config(cache=False)
-    except Exception as exc:
-        return False, f"Could not load LLM provider config: {exc}"
-
-    config_list = llm_config.get("config_list") if isinstance(llm_config, dict) else None
-    if not isinstance(config_list, list):
-        return False, "LLM provider config did not include config_list."
-    if any(isinstance(entry, dict) and entry.get("api_key") and entry.get("model") for entry in config_list):
-        return True, "LLM provider config found."
-    return False, "No LLM provider API key is configured. Set OPENAI_API_KEY or configure a provider."
+def _provider_available() -> tuple[bool, str]:
+    import os
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if key:
+        return True, "OPENAI_API_KEY found in environment."
+    return False, "No LLM provider API key is configured. Set OPENAI_API_KEY in your .env or environment."
 
 
 def _git_generated_status() -> list[str] | None:
@@ -231,7 +223,7 @@ async def run_smoke() -> dict[str, Any]:
     control_plane_config = load_control_plane_config(APP_ROOT)
     llm_profile_used = str(control_plane_config.classifier.llm_profile or "raw_llm_config")
     classifier_llm_config = control_plane_config.resolve_capability_llm_config("classifier")
-    provider_ok, provider_message = await _provider_available()
+    provider_ok, provider_message = _provider_available()
     if not provider_ok:
         return {
             "schema_version": "mozaiks.refinement_classifier_smoke.v1",
@@ -245,9 +237,7 @@ async def run_smoke() -> dict[str, Any]:
     def pack_loader():
         return load_control_plane_pack(app_root=APP_ROOT)
 
-    service = SimpleLLMCapabilityService(timeout=60.0)
     classifier = LLMChangeClassifier(
-        capability_service=service,
         config_loader=lambda: control_plane_config,
         pack_loader=pack_loader,
     )
@@ -255,65 +245,62 @@ async def run_smoke() -> dict[str, Any]:
 
     generated_before = _git_generated_status()
     cases: list[dict[str, Any]] = []
-    try:
-        for case in SMOKE_CASES:
-            request = resolver.request_from_payload(
-                payload=_request_payload(case),
-                requested_workflow_id="AppGenerator",
+    for case in SMOKE_CASES:
+        request = resolver.request_from_payload(
+            payload=_request_payload(case),
+            requested_workflow_id="AppGenerator",
+        )
+        if request is None:
+            cases.append(
+                {
+                    "id": case.id,
+                    "label": case.label,
+                    "request": case.request,
+                    "success": False,
+                    "error": "request_from_payload returned None",
+                }
             )
-            if request is None:
-                cases.append(
-                    {
-                        "id": case.id,
-                        "label": case.label,
-                        "request": case.request,
-                        "success": False,
-                        "error": "request_from_payload returned None",
-                    }
-                )
-                continue
+            continue
 
-            decision = await resolver.route(request)
-            paths = list(decision.impact_set.affected_bundle_paths)
-            case_payload = {
-                "id": case.id,
-                "label": case.label,
-                "request": case.request,
-                "allowed_change_classes": list(case.allowed_change_classes),
-                "classifier": {
-                    "change_class": decision.change_intent.change_class.value,
-                    "source": decision.change_intent.source,
-                    "rationale": decision.change_intent.rationale,
-                    "confidence": decision.change_intent.confidence,
-                    "signals": list(decision.change_intent.signals),
-                },
-                "route": {
-                    "workflow_id": decision.workflow_id,
-                    "workflow_sequence": decision.workflow_sequence,
-                    "sequence_exists": _sequence_exists(decision.workflow_sequence),
-                    "affected_workflows": list(decision.impact_set.affected_workflows),
-                },
-                "impact": {
-                    "affected_declarative_families": list(
-                        decision.impact_set.affected_declarative_families
-                    ),
-                    "affected_bundle_paths": paths,
-                    "scope_summary": decision.impact_set.scope_summary,
-                },
-                "llm_profile_used": llm_profile_used,
-            }
-            violations = validate_case(case_payload)
-            case_payload["success"] = not violations
-            case_payload["violations"] = violations
-            cases.append(case_payload)
-    finally:
-        await service.aclose()
+        decision = await resolver.route(request)
+        paths = list(decision.impact_set.affected_bundle_paths)
+        case_payload = {
+            "id": case.id,
+            "label": case.label,
+            "request": case.request,
+            "allowed_change_classes": list(case.allowed_change_classes),
+            "classifier": {
+                "change_class": decision.change_intent.change_class.value,
+                "source": decision.change_intent.source,
+                "rationale": decision.change_intent.rationale,
+                "confidence": decision.change_intent.confidence,
+                "signals": list(decision.change_intent.signals),
+            },
+            "route": {
+                "workflow_id": decision.workflow_id,
+                "workflow_sequence": decision.workflow_sequence,
+                "sequence_exists": _sequence_exists(decision.workflow_sequence),
+                "affected_workflows": list(decision.impact_set.affected_workflows),
+            },
+            "impact": {
+                "affected_declarative_families": list(
+                    decision.impact_set.affected_declarative_families
+                ),
+                "affected_bundle_paths": paths,
+                "scope_summary": decision.impact_set.scope_summary,
+            },
+            "llm_profile_used": llm_profile_used,
+        }
+        violations = validate_case(case_payload)
+        case_payload["success"] = not violations
+        case_payload["violations"] = violations
+        cases.append(case_payload)
 
     generated_after = _git_generated_status()
     payload = {
         "schema_version": "mozaiks.refinement_classifier_smoke.v1",
         "success": False,
-        "control_plane_profile": control_plane_config.profile,
+        "control_plane_profile": control_plane_config.schema_version,
         "llm_profile_used": llm_profile_used,
         "classifier_llm_config": _safe_llm_config(classifier_llm_config),
         "cases": cases,

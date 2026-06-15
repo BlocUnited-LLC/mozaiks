@@ -7,10 +7,11 @@
       ],
       "classifier": {
         "change_class": "design",
-        "confidence": 0.9,
-        "rationale": "The request to change the dashboard experience to highlight reports first indicates a revision in the visual and UX design of the dashboard without altering the overall product concept.",
+        "confidence": 0.75,
+        "rationale": "Requested adjustment is a UX/UI re-prioritization of the dashboard content (highlights reports first) without adding new functionality or changing the product concept, thus a design-level change.",
         "signals": [
-          "visual_redesign"
+          "visual_redesign",
+          "dashboard_priority_change"
         ],
         "source": "llm"
       },
@@ -49,10 +50,12 @@
       ],
       "classifier": {
         "change_class": "feature",
-        "confidence": 0.9,
-        "rationale": "The request to add an 'archive_project' action to the projects module API introduces a new capability to the existing product without altering its fundamental concept or identity.",
+        "confidence": 0.65,
+        "rationale": "Request adds a new archive_project action to the projects module API, expanding the API surface without altering the core product concept. This is an additive capability within the current product direction.",
         "signals": [
-          "new_capability"
+          "new_capability",
+          "api_expansion",
+          "projects_module_extension"
         ],
         "source": "llm"
       },
@@ -94,10 +97,11 @@
       ],
       "classifier": {
         "change_class": "patch",
-        "confidence": 0.9,
-        "rationale": "The request is to change the sync behavior of the analytics_provider connector, which indicates a targeted fix or localized correction within the current artifact boundary without altering the overall product concept.",
+        "confidence": 0.66,
+        "rationale": "Targeted, localized modification to the analytics_provider connector sync behavior within the current app_bundle; does not introduce a new concept or architecture change.",
         "signals": [
-          "bug_fix"
+          "connector_sync_change",
+          "patch"
         ],
         "source": "llm"
       },
@@ -137,10 +141,12 @@
       ],
       "classifier": {
         "change_class": "feature",
-        "confidence": 0.9,
-        "rationale": "The request to add a required project phase field and migrate existing project records introduces new functionality to the app, which aligns with the definition of a feature as an additive capability within the current product direction.",
+        "confidence": 0.62,
+        "rationale": "The request adds a new required field to the project data model and includes a migration for existing records. This is an additive data-model change within the current product direction (no UX/design overhaul or core shift).",
         "signals": [
-          "new_capability"
+          "data_model_change",
+          "schema_migration",
+          "new_field_required"
         ],
         "source": "llm"
       },
@@ -182,8 +188,8 @@
       ],
       "classifier": {
         "change_class": "design",
-        "confidence": 0.9,
-        "rationale": "The request is to change the display of the hosted analytics dashboard, which pertains to visual and UX aspects without altering the product concept.",
+        "confidence": 0.72,
+        "rationale": "The request specifies changes to the hosted analytics dashboard display, which is a UI/UX/visual presentation change within the current app_bundle without altering product concept or adding new capabilities.",
         "signals": [
           "visual_redesign"
         ],
@@ -224,10 +230,9 @@
     }
   ],
   "classifier_llm_config": {
-    "model": "gpt-5-nano",
-    "temperature": 0.0
+    "model": "gpt-5-nano"
   },
-  "control_plane_profile": "default",
+  "control_plane_profile": "mozaiks.control_plane.runtime",
   "generated_files_unchanged": true,
   "generated_status_after": [],
   "generated_status_before": [],
