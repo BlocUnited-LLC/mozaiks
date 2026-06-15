@@ -14,14 +14,12 @@ Covers:
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
-from mozaiksai.core.runtime.app.loader import AppLoadError, AppLoadResult, AppLoader
-from mozaiksai.core.runtime.app.module_loader import ModuleLoadError, ModuleLoader
-
+from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError, AppLoadResult
+from mozaiksai.core.runtime.app.module_loader import ModuleLoader
 
 # ---------------------------------------------------------------------------
 # Helpers
