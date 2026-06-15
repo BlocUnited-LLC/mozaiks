@@ -369,7 +369,7 @@ async def _load_data_reference_value(
         business_logger.info(f"Returning full document for '{name}': keys={list(doc.keys()) if isinstance(doc, dict) else 'not_dict'}")
         return _coerce_value(definition, doc)
     except Exception as err:
-        business_logger.error(f"Failed loading data_reference '{name}': {err}")
+        business_logger.error("Failed loading data_reference '%s': %s", name, err, exc_info=True)
         return None
 
 
@@ -402,7 +402,7 @@ def _create_data_entity_manager(
         )
         return manager
     except Exception as err:
-        business_logger.error(f"Failed creating DataEntityManager for {name}: {err}")
+        business_logger.error("Failed creating DataEntityManager for %s: %s", name, err, exc_info=True)
     return None
 
 
@@ -441,7 +441,7 @@ async def _get_all_collections_first_docs(database_name: str) -> dict[str, Any]:
         try:
             names = await db.list_collection_names()
         except Exception as err:  # pragma: no cover
-            business_logger.error(f"list_collection_names failed for {database_name}: {err}")
+            business_logger.error("list_collection_names failed for %s: %s", database_name, err, exc_info=True)
             return result
         for cname in names:
             try:
@@ -454,7 +454,7 @@ async def _get_all_collections_first_docs(database_name: str) -> dict[str, Any]:
             except Exception as ce:
                 result[cname] = {"_error": str(ce)}
     except Exception as outer:
-        business_logger.error(f"Failed collecting first docs for {database_name}: {outer}")
+        business_logger.error("Failed collecting first docs for %s: %s", database_name, outer, exc_info=True)
     return result
 
 
@@ -522,7 +522,7 @@ async def _get_database_schema_async(database_name: str) -> dict[str, Any]:
             },
         )
     except Exception as err:
-        business_logger.error(f"Database schema loading failed: {err}")
+        business_logger.error("Database schema loading failed: %s", err, exc_info=True)
         schema_info["error"] = f"Could not load schema: {err}"
 
     return schema_info

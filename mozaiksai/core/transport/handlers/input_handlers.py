@@ -61,7 +61,7 @@ async def handle_user_input_submit(
                 "timestamp": utc_timestamp()
             })
         except Exception as general_err:
-            logger.error(f"Failed to process general-mode message for {chat_id}: {general_err}")
+            logger.error("Failed to process general-mode message for %s: %s", chat_id, general_err, exc_info=True)
             await transport._send_ws_error(websocket, "General mode is unavailable right now. Please try again.", "GENERAL_MODE_FAILED")
         return
 
@@ -135,7 +135,7 @@ async def handle_user_input_submit(
             "timestamp": utc_timestamp()
         })
     except Exception as e:
-        logger.error(f"Failed to process free-form user message for {chat_id}: {e}")
+        logger.error("Failed to process free-form user message for %s: %s", chat_id, e, exc_info=True)
         await transport._send_ws_error(websocket, "User message failed", "USER_MESSAGE_FAILED")
 
 
@@ -159,5 +159,5 @@ async def handle_tool_call_response(
             "timestamp": utc_timestamp()
         })
     except Exception as uie:
-        logger.error(f"Failed to process tool call response {event_id}: {uie}")
+        logger.error("Failed to process tool call response %s: %s", event_id, uie, exc_info=True)
         await transport._send_ws_error(websocket, "Tool call response failed", "TOOL_CALL_RESPONSE_FAILED")

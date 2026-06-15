@@ -134,7 +134,7 @@ def create_mozaiks_app(
             summary = workflow_status_summary()
             return {"workflows": summary}
         except Exception as e:
-            logger.error(f"Failed to list workflows: {e}")
+            logger.error("Failed to list workflows: %s", e, exc_info=True)
             return {"workflows": [], "error": str(e)}
 
     # ----- Chat start endpoint -----
@@ -182,7 +182,7 @@ def create_mozaiks_app(
                 "websocket_url": f"/ws/{workflow_name}/{resolved_app_id}/{chat_id}/{body.user_id}",
             }
         except Exception as e:
-            logger.error(f"Failed to start chat: {e}")
+            logger.error("Failed to start chat: %s", e, exc_info=True)
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     # ----- WebSocket endpoint -----

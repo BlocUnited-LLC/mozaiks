@@ -210,7 +210,7 @@ class OIDCDiscoveryClient:
                 logger.error("OIDC discovery fetch timed out")
                 raise RuntimeError("OIDC discovery fetch timed out") from exc
             except aiohttp.ClientError as e:
-                logger.error(f"OIDC discovery fetch client error: {e}")
+                logger.error("OIDC discovery fetch client error: %s", e, exc_info=True)
                 raise RuntimeError(f"OIDC discovery fetch failed: {e}") from e
 
     def clear_cache(self) -> None:

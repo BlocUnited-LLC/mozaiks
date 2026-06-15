@@ -175,7 +175,7 @@ async def _emit_tool_call_core(
         from mozaiksai.core.transport.simple_transport import SimpleTransport
         transport = await SimpleTransport.get_instance()
     except Exception as e:
-        wf_logger.error(f"❌ [UI_TOOLS] Transport unavailable: {e}")
+        wf_logger.error("[UI_TOOLS] Transport unavailable: %s", e, exc_info=True)
         raise UIToolError(f"SimpleTransport not available: {e}") from e
 
     payload_to_send = {
@@ -516,7 +516,7 @@ async def emit_tool_progress_event(
         transport = await SimpleTransport.get_instance()
         wf_logger = get_workflow_logger("tool_progress", chat_id=chat_id)
     except Exception as e:
-        logger.error(f"❌ [TOOL_PROGRESS] Transport unavailable: {e}")
+        logger.error("[TOOL_PROGRESS] Transport unavailable: %s", e, exc_info=True)
         return
     
     # Validate progress percentage
@@ -535,9 +535,9 @@ async def emit_tool_progress_event(
 
     try:
         await transport.send_event_to_ui(normalized, chat_id)
-        wf_logger.info(f"📈 Tool progress: {tool_name} at {progress_percent:.1f}% - {status_message}")
+        wf_logger.debug("Tool progress: %s at %.1f%% - %s", tool_name, progress_percent, status_message)
     except Exception as e:
-        wf_logger.error(f"❌ [TOOL_PROGRESS] Failed to emit progress event: {e}")
+        wf_logger.error("[TOOL_PROGRESS] Failed to emit progress event: %s", e, exc_info=True)
 
 async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str) -> dict[str, Any] | None:
     """
@@ -624,7 +624,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
         return response
 
     except Exception as e:  # pragma: no cover
-        wf_logger.error(f"❌ UI tool interaction failed for '{tool_name}': {str(e)}")
+        wf_logger.error("UI_TOOL_INTERACTION_FAILED tool=%s: %s", tool_name, e, exc_info=True)
         raise UIToolError(f"UI interaction failed: {str(e)}") from e
     
 __all__ = [

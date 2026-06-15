@@ -1200,7 +1200,7 @@ class AG2PersistenceManager:
             logger.info(f"[GATHER_AGENT_JSONS] Completed: found {len(result)} agents with valid JSON: {agents_found}")
             return result
         except Exception as e:  # pragma: no cover
-            logger.error(f"[GATHER_AGENT_JSONS] Failed for chat_id={chat_id}: {e}", exc_info=True)
+            logger.error("[GATHER_AGENT_JSONS] Failed for chat_id=%s: %s", chat_id, e, exc_info=True)
             return result
 
     # UI Tool Persistence -----------------------------------------------
@@ -1300,7 +1300,7 @@ class AG2PersistenceManager:
             else:
                 logger.debug(f"[TOOL_CALL_METADATA] Failed to persist tool-call state in {chat_id}")
         except Exception as e:
-            logger.error(f"[TOOL_CALL_METADATA] Failed to attach metadata for {chat_id}: {e}", exc_info=True)
+            logger.error("[TOOL_CALL_METADATA] Failed to attach metadata for %s: %s", chat_id, e, exc_info=True)
 
     async def update_tool_call_state(
         self,
@@ -1353,7 +1353,7 @@ class AG2PersistenceManager:
                     f"in {chat_id}"
                 )
         except Exception as e:
-            logger.error(f"[TOOL_CALL_STATE] Failed to update tool_call state for {chat_id}: {e}", exc_info=True)
+            logger.error("[TOOL_CALL_STATE] Failed to update tool_call state for %s: %s", chat_id, e, exc_info=True)
 
     # Pending Input Request Persistence ------------------------------------
     async def save_pending_input_request(

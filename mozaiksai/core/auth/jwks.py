@@ -135,7 +135,7 @@ class JWKSClient:
                     ) as resp:
                         if resp.status != 200:
                             error_text = await resp.text()
-                            logger.error(f"JWKS fetch failed: {resp.status} {error_text}")
+                            logger.error("JWKS fetch failed: %s %s", resp.status, error_text)
                             raise RuntimeError(f"Failed to fetch JWKS: {resp.status}")
 
                         data = await resp.json()
@@ -159,7 +159,7 @@ class JWKSClient:
                 logger.error("JWKS fetch timed out")
                 raise RuntimeError("JWKS fetch timed out") from exc
             except aiohttp.ClientError as e:
-                logger.error(f"JWKS fetch client error: {e}")
+                logger.error("JWKS fetch client error: %s", e, exc_info=True)
                 raise RuntimeError(f"JWKS fetch failed: {e}") from e
 
     def clear_cache(self) -> None:

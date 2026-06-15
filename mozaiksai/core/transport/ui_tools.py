@@ -262,7 +262,7 @@ class UIToolsMixin:
         except TimeoutError:
             if not fut.done():
                 fut.set_exception(TimeoutError("UI tool response timed out"))
-            logger.error(f"Tool call response timed out for event {event_id}")
+            logger.error("Tool call response timed out for event %s", event_id)
             raise
         finally:
             instance.pending_tool_call_responses.pop(event_id, None)

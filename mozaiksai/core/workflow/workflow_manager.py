@@ -260,7 +260,7 @@ class UnifiedWorkflowManager:
             self._ui_loaded_workflows.add(workflow_name)
             logger.info(f"Tools loaded for {workflow_name}: ui={ui_ct}")
         except Exception as e:  # pragma: no cover
-            logger.error(f"Failed parsing tool config for {workflow_name}: {e}")
+            logger.error("Failed parsing tool config for %s: %s", workflow_name, e, exc_info=True)
 
 
     def get_ui_tool_record(self, tool_path_or_id: str) -> dict[str, Any] | None:
@@ -319,7 +319,7 @@ class UnifiedWorkflowManager:
                 try:
                     self._load_single_workflow(workflow_name)
                 except Exception as e:
-                    logger.error(f"❌ Failed to load workflow {workflow_name}: {e}")
+                    logger.error("WORKFLOW_LOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
                     # Store error info for debugging
                     workflow_path = self.resolve_workflow_path(workflow_name)
                     self._workflows[workflow_name.lower()] = WorkflowInfo(
@@ -344,7 +344,7 @@ class UnifiedWorkflowManager:
                 logger.info("✅ WORKFLOW_LOAD_OK: %d workflows loaded.", len(ok_names))
 
         except Exception as e:
-            logger.error(f"❌ Critical error loading workflows: {e}")
+            logger.error("WORKFLOW_LOAD_ALL_FAILED: %s", e, exc_info=True)
     
     def _load_single_workflow(self, workflow_name: str) -> WorkflowInfo:
         """Load a single workflow with all its components"""
@@ -583,7 +583,7 @@ class UnifiedWorkflowManager:
                     importlib.reload(workflow_info.module)
                     logger.info(f"Reloaded workflow module: {workflow_name}")
                 except Exception as e:
-                    logger.error(f"Failed to reload workflow module {workflow_name}: {e}")
+                    logger.error("WORKFLOW_MODULE_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
         
         # Reload embedded UI tool metadata
         try:
@@ -602,7 +602,7 @@ class UnifiedWorkflowManager:
             workflow_info = self._load_single_workflow(workflow_name)
             return workflow_info.to_dict()
         except Exception as e:
-            logger.error(f"Failed to reload workflow {workflow_name}: {e}")
+            logger.error("WORKFLOW_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
             return {"error": str(e)}
     
     def unload_workflow(self, workflow_name: str) -> None:
@@ -825,7 +825,7 @@ class UnifiedWorkflowManager:
                 return resolve_runtime_ai_config({}, app_root=app_root)
             return resolve_runtime_ai_config(data, app_root=app_root)
         except Exception as e:
-            logger.error(f"Failed reading AI config {path}: {e}")
+            logger.error("AI_CONFIG_READ_FAILED %s: %s", path, e, exc_info=True)
             return resolve_runtime_ai_config({}, app_root=app_root)
 
     def _load_modular_workflow_config(self, workflow_path: Path) -> dict[str, Any]:

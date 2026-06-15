@@ -142,7 +142,7 @@ class WebSocketProtocolMixin:
                         )
                         self._message_queues.pop(chat_id, None)
                         break
-                    logger.error(f"Failed to send queued message to {chat_id}: {e}. Will retry shortly.")
+                    logger.error("Failed to send queued message to %s: %s. Will retry shortly.", chat_id, e)
                     # Re-queue remaining (including current) for retry
                     remaining = [message] + messages_to_send[messages_to_send.index(message) + 1 :]
                     self._message_queues[chat_id] = remaining + self._message_queues.get(chat_id, [])
@@ -202,7 +202,7 @@ class WebSocketProtocolMixin:
         except asyncio.CancelledError:
             logger.debug(f"Heartbeat cancelled for {chat_id}")
         except Exception as e:
-            logger.error(f"Heartbeat error for {chat_id}: {e}")
+            logger.error("Heartbeat error for %s: %s", chat_id, e, exc_info=True)
 
     async def _stop_heartbeat(self, chat_id: str) -> None:
         """Stop heartbeat task for a connection."""

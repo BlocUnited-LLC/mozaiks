@@ -275,7 +275,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     self._recent_input_submit_chats.add(chat_id)
                     logger.debug("INPUT_SUBMIT callback invoked request_id=%s chat=%s", input_request_id, chat_id)
                 except Exception as e:
-                    logger.error(f"❌ [INPUT] Respond callback failed {input_request_id}: {e}", exc_info=True)
+                    logger.error("[INPUT] Respond callback failed %s: %s", input_request_id, e, exc_info=True)
                 finally:
                     # Remove after use
                     try:
@@ -311,7 +311,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     logger.warning(f"Failed to emit input_ack: {e}")
             return True
         
-        logger.error(f"❌ [INPUT] No active request found for {input_request_id}")
+        logger.warning("[INPUT] No active request found for %s", input_request_id)
         return False
 
     # ------------------------------------------------------------------
@@ -477,7 +477,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         try:
             await self.send_event_to_ui({'kind': 'text', 'agent': 'user', 'content': content, 'index': index}, chat_id)
         except Exception as emit_err:
-            logger.error(f"Failed to emit user message event for {chat_id}: {emit_err}")
+            logger.error("Failed to emit user message event for %s: %s", chat_id, emit_err, exc_info=True)
 
     async def process_component_action(self, *, chat_id: str, app_id: str, component_id: str, action_type: str, action_data: dict) -> dict[str, Any]:
         """Apply a component action to context variables and emit acknowledgement.
@@ -1090,7 +1090,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         user_id = conn_meta.get("user_id")
         
         if not app_id or not user_id:
-            logger.error(f"❌ Missing app_id or user_id for artifact action in chat {chat_id}")
+            logger.error("Missing app_id or user_id for artifact action in chat %s", chat_id)
             return
         
         # Route: launch_workflow (pause current, create new session)
@@ -1323,7 +1323,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         }
         
         await self._broadcast_to_websockets(event_data, chat_id)
-        logger.error(f"❌ Error: {error_message}")
+        logger.error("Error: %s", error_message)
         
     def _get_message_handler(self, mtype: str):
         """Get the handler function for a message type.
@@ -1430,7 +1430,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         await handler(self, data, chat_id, websocket)
                     except Exception as handler_err:
                         error_code = ERROR_CODES.get(mtype, "MESSAGE_HANDLER_FAILED")
-                        logger.error(f"Failed to process {mtype} for chat {chat_id}: {handler_err}")
+                        logger.error("Failed to process %s for chat %s: %s", mtype, chat_id, handler_err, exc_info=True)
                         await self._send_ws_error(websocket, f"{mtype} failed: {str(handler_err)}", error_code)
                 # Unknown message type -> handler is None, ignore silently
         except Exception as e:

@@ -392,10 +392,10 @@ async def get_llm_config(
     for i, entry in enumerate(config_list):
         logger.debug(f"[LLM_CONFIG] Checking entry [{i}]: {entry}")
         if not isinstance(entry, dict):
-            logger.error(f"[LLM_CONFIG] VALIDATION ERROR: Entry [{i}] is not a dict: {type(entry)} {entry}")
+            logger.error("[LLM_CONFIG] VALIDATION ERROR: Entry [%d] is not a dict: %s %s", i, type(entry), entry)
             raise ValueError(f"Config entry [{i}] is not a dict: {type(entry)}")
         elif not entry.get('model'):
-            logger.error(f"[LLM_CONFIG] VALIDATION ERROR: Entry [{i}] missing model field: {entry}")
+            logger.error("[LLM_CONFIG] VALIDATION ERROR: Entry [%d] missing model field: %s", i, entry)
             raise ValueError(f"Config entry [{i}] missing required model field: {entry}")
         else:
             logger.debug(f"[LLM_CONFIG] Entry [{i}] validation OK: model={entry.get('model')}")
