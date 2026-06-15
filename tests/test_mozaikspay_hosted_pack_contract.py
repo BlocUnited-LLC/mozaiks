@@ -51,6 +51,14 @@ def _template_content(path: Path) -> str:
         return ""
 
 
+def _required_integration_fields(requirement: dict) -> set[str]:
+    return {
+        field.get("name")
+        for field in requirement.get("required_fields", [])
+        if isinstance(field, dict)
+    }
+
+
 # ---------------------------------------------------------------------------
 # 1. context.yaml contract
 # ---------------------------------------------------------------------------
@@ -92,6 +100,17 @@ class TestContextYaml:
         portal = next(f for f in ctx["facades"] if f["module_id"] == "billing_portal")
         assert portal["provider_module"] == "mozaikspay"
 
+    def test_context_declares_mozaikspay_connector_requirement(self):
+        ctx = _read_yaml(_CONTEXT_YAML)
+        requirements = ctx.get("required_integrations") or ctx["pack"].get("required_integrations") or []
+        mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
+        assert mozaikspay is not None
+        assert mozaikspay["kind"] == "api_key"
+        assert mozaikspay["provider"] == "mozaikspay"
+        assert _required_integration_fields(mozaikspay) == {"api_base", "client_id", "client_secret"}
+        secret_field = next(field for field in mozaikspay["required_fields"] if field["name"] == "client_secret")
+        assert secret_field["frontend_safe"] is False
+
 
 # ---------------------------------------------------------------------------
 # 2. contract.yaml shape
@@ -131,6 +150,13 @@ class TestContractYaml:
         c = _read_yaml(_CONTRACT_YAML)
         facade_ids = {f["module_id"] for f in c.get("facades", [])}
         assert "billing_portal" in facade_ids
+
+    def test_contract_declares_mozaikspay_connector_requirement(self):
+        c = _read_yaml(_CONTRACT_YAML)
+        requirements = c.get("required_integrations") or []
+        mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
+        assert mozaikspay is not None
+        assert _required_integration_fields(mozaikspay) == {"api_base", "client_id", "client_secret"}
 
 
 # ---------------------------------------------------------------------------
@@ -186,9 +212,7 @@ class TestForbiddenOutputsAbsent:
             if f.suffix not in (".py", ".yaml", ".yml"):
                 continue
             content = _template_content(f)
-            # hosted_billing module endpoint is OK in the client (it's the adapter boundary)
-            # but no template should expose modules/mozaikspay or modules/wallet routes
-            for forbidden in ("/api/modules/mozaikspay", "/api/modules/wallet"):
+            for forbidden in ("/api/modules/mozaikspay", "/api/modules/wallet", "/api/modules/hosted_billing"):
                 if forbidden in content:
                     violations.append(f"{f.relative_to(_PACK_ROOT)!s}: {forbidden}")
         assert violations == [], f"Templates expose forbidden hosted module routes: {violations}"
@@ -202,9 +226,13 @@ class TestMozaiksPayClientTemplate:
     def test_client_template_exists(self):
         assert _CLIENT_TEMPLATE.exists()
 
-    def test_client_uses_env_var_not_hardcoded_url(self):
+    def test_client_uses_connector_or_env_vars_not_hardcoded_url(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
-        assert "MOZAIKS_APP_URL" in content
+        assert "AppConnectorStore" in content
+        assert "get_connector_vault_backend" in content
+        assert "MOZAIKSPAY_API_BASE" in content
+        assert "MOZAIKSPAY_CLIENT_ID" in content
+        assert "MOZAIKSPAY_CLIENT_SECRET" in content
         # Must not hardcode any production or staging URL
         assert "https://api.mozaiks" not in content
 
@@ -219,10 +247,16 @@ class TestMozaiksPayClientTemplate:
         assert "sk_live_" not in content
         assert "sk_test_" not in content
 
-    def test_client_calls_hosted_billing_module_path(self):
+    def test_client_calls_provider_api_path(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
-        # Client is the adapter — it routes through the hosted module endpoint
-        assert "/api/modules/hosted_billing" in content
+        assert "_CONNECTOR_SERVICE = \"mozaikspay\"" in content
+        assert "_PROVIDER_API_PREFIX = \"/api/mozaikspay/v1\"" in content
+        assert "/subscription/status" in content
+        assert "/billing-portal/session" in content
+        assert "X-MozaiksPay-Client-Id" in content
+        assert "get_connector(" in content
+        assert "get_connector_vault_backend" in content
+        assert "/api/modules/hosted_billing" not in content
 
     def test_client_has_error_classes(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")

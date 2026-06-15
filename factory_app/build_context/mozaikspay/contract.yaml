@@ -25,6 +25,30 @@ recommended_domains:
   - usage
   - saas
 
+required_integrations:
+  - service: mozaikspay
+    provider: mozaikspay
+    display_name: MozaiksPay
+    kind: api_key
+    purpose: Connect this generated SaaS app to the hosted MozaiksPay subscription provider.
+    required_at: runtime
+    required_fields:
+      - name: api_base
+        label: MozaiksPay API Base URL
+        type: url
+        required: true
+        frontend_safe: true
+      - name: client_id
+        label: Client ID
+        type: text
+        required: true
+        frontend_safe: true
+      - name: client_secret
+        label: Client Secret
+        type: secret
+        required: true
+        frontend_safe: false
+
 required_outputs:
   - path: services/integrations/mozaikspay_client.py
     owner: templates
@@ -59,6 +83,8 @@ runtime_boundaries:
     rule: Use app/config/subscriptions.yaml usage_limits, token_wallets, and token_allowances for generated SaaS plan limits and token allowances.
   - id: hosted_internals
     rule: Do not generate hosted service internals, checkout, wallet, settlement logic, private APIs, or provider credentials.
+  - id: connector_boundary
+    rule: Generated apps must configure MozaiksPay through the app-scoped connector named mozaikspay or the MOZAIKSPAY_* env fallback; never commit provider credentials.
   - id: page_bindings
     rule: Generated pages must call app-owned billing_portal actions, not hosted backing modules directly.
 

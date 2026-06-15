@@ -333,7 +333,7 @@ agents:
         - Only capability packs with `surface_kind = module` may emit `task_type: module_contract`.
         Capability source rules:
         - `host_universal` capabilities: do NOT scaffold or plan any code — they are already in the platform runtime.
-        - `hosted_pack` capabilities: Do NOT plan a `module_contract` build task for it — meaning for the hosted pack id itself. The hosted product module already exists in the deployed host. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: hosted_pack`; `capability_source` must be present in the AppBuildPlan output and must not be replaced by `pack_type`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for hosted pack template expansion during assembly. When pages or app-owned actions need to call the hosted pack, also plan a generated facade module with its own module id, `surface_kind: module`, and `capability_source: generated_module`; pages bind to that facade module, not the hosted pack id. Every hosted-pack facade module must have the normal generated module task set: `module_contract`, `data_models`, and `business_services`, unless a pack template explicitly supplies a narrower declared output family.
+        - `hosted_pack` capabilities: Do NOT plan a `module_contract` build task for it — meaning for the hosted pack id itself. The hosted product module already exists in the deployed host. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: hosted_pack`; `capability_source` must be present in the AppBuildPlan output and must not be replaced by `pack_type`. Preserve any pack-declared `required_integrations` as structured connector objects with `service`, `provider`, `display_name`, `kind`, `purpose`, `required_at`, and `required_fields`; do not downgrade them to string names. Secret fields must remain `type: "secret"` and `frontend_safe: false`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for hosted pack template expansion during assembly. When pages or app-owned actions need to call the hosted pack, also plan a generated facade module with its own module id, `surface_kind: module`, and `capability_source: generated_module`; pages bind to that facade module, not the hosted pack id. Every hosted-pack facade module must have the normal generated module task set: `module_contract`, `data_models`, and `business_services`, unless a pack template explicitly supplies a narrower declared output family.
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract`, `data_models`, and `business_services` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no hosted business logic. Use app-bundle-relative `services/integrations/{service}_client.py` for external or hosted API clients. Use `services/adapters/{area}/{provider}.py` for provider-specific implementation boundaries only when the generated app itself directly owns that provider integration and modules/workflows call it. Use `services/routes/` for app-level routes only when needed. These assemble into physical `app/services/**` workspace paths. Valid adapter areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is app-owned provider mechanics rather than product state or hosted-platform operations.
         - Mozaiks-hosted deployment, DNS/domain, billing, wallet, and platform operations are hosted platform capabilities. Do not generate provider adapters for those operations into a customer app bundle. The generated app consumes the hosted platform through hosted API clients/facade modules and host-owned records.
@@ -474,6 +474,36 @@ agents:
               "operations": ["send_message", "list_threads", "mark_read"],
               "required_integrations": [],
               "agentic_extensions": ["thread_summary"]
+            },
+            {
+              "capability_pack_id": "hosted_payments",
+              "surface_id": "hosted_payments",
+              "surface_kind": "external_integration",
+              "pack_type": "billing_pack",
+              "label": "Hosted Payments",
+              "summary": "Hosted payment and subscription provider consumed through an app-scoped connector and facade module.",
+              "implementation_mode": "external_integration",
+              "primary_entities": ["Subscription"],
+              "primary_pages": ["Billing"],
+              "operations": ["get_subscription_status", "open_billing_portal"],
+              "required_integrations": [
+                {
+                  "service": "hosted_payments",
+                  "provider": "hosted_payments",
+                  "display_name": "Hosted Payments",
+                  "kind": "api_key",
+                  "purpose": "Connect generated app billing surfaces to the hosted payment provider.",
+                  "required_at": "runtime",
+                  "optional": false,
+                  "required_fields": [
+                    {"name": "api_base", "label": "API Base URL", "type": "url", "required": true, "frontend_safe": true},
+                    {"name": "client_id", "label": "Client ID", "type": "text", "required": true, "frontend_safe": true},
+                    {"name": "client_secret", "label": "Client Secret", "type": "secret", "required": true, "frontend_safe": false}
+                  ]
+                }
+              ],
+              "agentic_extensions": [],
+              "capability_source": "hosted_pack"
             }
           ],
           "pages": [

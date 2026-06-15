@@ -239,6 +239,56 @@ def test_collect_integration_needs_dedupes_task_batch_results() -> None:
     assert len(payment["required_by"]) == 2
 
 
+def test_collect_integration_needs_supports_structured_hosted_pack_requirements() -> None:
+    context = _Context(
+        {
+            "app_build_plan": {
+                "capability_packs": [
+                    {
+                        "capability_pack_id": "mozaikspay",
+                        "capability_source": "hosted_pack",
+                        "required_integrations": [
+                            {
+                                "service": "mozaikspay",
+                                "provider": "mozaikspay",
+                                "display_name": "MozaiksPay",
+                                "kind": "api_key",
+                                "purpose": "Connect to hosted subscriptions.",
+                                "required_at": "runtime",
+                                "required_fields": [
+                                    {"name": "api_base", "type": "url", "frontend_safe": True},
+                                    {"name": "client_id", "type": "text", "frontend_safe": True},
+                                    {"name": "client_secret", "type": "secret", "frontend_safe": False},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+    )
+
+    needs = connector_request.collect_integration_needs(context)
+
+    assert [need["service"] for need in needs] == ["mozaikspay"]
+    need = needs[0]
+    assert need["display_name"] == "MozaiksPay"
+    assert need["provider"] == "mozaikspay"
+    assert {field["name"] for field in need["required_fields"]} == {
+        "api_base",
+        "client_id",
+        "client_secret",
+    }
+
+    payload = connector_request.build_integration_request_payload(
+        services=needs,
+        agent_message_id="request-mozaikspay",
+        context_variables=context,
+    )[0]
+    assert [field["name"] for field in payload["secret_fields"]] == ["client_secret"]
+    assert {field["name"] for field in payload["non_secret_fields"]} == {"api_base", "client_id"}
+
+
 def test_build_integration_request_payload_is_frontend_safe() -> None:
     payload = connector_request.build_integration_request_payload(
         services=[

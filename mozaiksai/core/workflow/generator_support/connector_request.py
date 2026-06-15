@@ -184,11 +184,37 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
         )
 
     for pack in _iter_dicts(app_build_plan.get("capability_packs")):
-        pack_id = pack.get("capability_pack_id")
-        for service in pack.get("required_integrations") or []:
+        pack_id = pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id")
+        for requirement in pack.get("required_integrations") or []:
+            if isinstance(requirement, dict):
+                _append_need(
+                    needs,
+                    service=requirement.get("service") or requirement.get("name"),
+                    display_name=requirement.get("display_name") or requirement.get("name"),
+                    kind=requirement.get("kind") or "api_key",
+                    provider=requirement.get("provider"),
+                    purpose=requirement.get("purpose") or f"Required by capability pack {pack_id}.",
+                    required_at=requirement.get("required_at") or "runtime",
+                    required_fields=(
+                        requirement.get("required_fields")
+                        if isinstance(requirement.get("required_fields"), list)
+                        else None
+                    ),
+                    optional=bool(requirement.get("optional", False)),
+                    required_by={
+                        "source": "capability_pack",
+                        "capability_pack_id": pack_id,
+                        **(
+                            requirement.get("required_by")
+                            if isinstance(requirement.get("required_by"), dict)
+                            else {}
+                        ),
+                    },
+                )
+                continue
             _append_need(
                 needs,
-                service=service,
+                service=requirement,
                 purpose=f"Required by capability pack {pack_id}.",
                 required_at="runtime",
                 required_by={"source": "capability_pack", "capability_pack_id": pack_id},
@@ -275,8 +301,17 @@ def dedupe_integration_needs(needs: Iterable[dict[str, Any]]) -> list[dict[str, 
         existing["optional"] = bool(existing.get("optional")) and bool(need.get("optional", False))
         if not existing.get("purpose") and need.get("purpose"):
             existing["purpose"] = need.get("purpose")
-        if not existing.get("required_fields") and need.get("required_fields"):
-            existing["required_fields"] = _normalize_required_fields(need)
+        next_required_fields = _normalize_required_fields(need) if need.get("required_fields") else []
+        if next_required_fields:
+            existing_fields = existing.get("required_fields") if isinstance(existing.get("required_fields"), list) else []
+            existing_names = {str(field.get("name") or "") for field in existing_fields if isinstance(field, dict)}
+            next_names = {str(field.get("name") or "") for field in next_required_fields if isinstance(field, dict)}
+            if not existing_fields or next_names - existing_names or len(next_required_fields) > len(existing_fields):
+                existing["required_fields"] = next_required_fields
+        if need.get("provider") and existing.get("provider") in {None, "", service}:
+            existing["provider"] = need.get("provider")
+        if need.get("display_name") and existing.get("display_name") in {None, "", display_service(service)}:
+            existing["display_name"] = need.get("display_name")
         if isinstance(need.get("required_by"), dict):
             existing.setdefault("required_by", []).append(need["required_by"])
         current_required_at = str(existing.get("required_at") or "runtime")

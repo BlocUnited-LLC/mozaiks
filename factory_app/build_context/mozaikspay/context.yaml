@@ -10,6 +10,29 @@ pack:
   id: mozaikspay
   status: active
   capability_source: hosted_pack
+  required_integrations:
+    - service: mozaikspay
+      provider: mozaikspay
+      display_name: MozaiksPay
+      kind: api_key
+      purpose: Connect this generated SaaS app to the hosted MozaiksPay subscription provider.
+      required_at: runtime
+      required_fields:
+        - name: api_base
+          label: MozaiksPay API Base URL
+          type: url
+          required: true
+          frontend_safe: true
+        - name: client_id
+          label: Client ID
+          type: text
+          required: true
+          frontend_safe: true
+        - name: client_secret
+          label: Client Secret
+          type: secret
+          required: true
+          frontend_safe: false
 capabilities:
   - capability_id: mozaikspay.billing_portal
     facade_recommended: billing_portal

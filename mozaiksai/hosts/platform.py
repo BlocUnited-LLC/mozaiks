@@ -2250,6 +2250,8 @@ async def _execute_module_action(
         status_code = 404
     elif result.error_code == "PERMISSION_DENIED":
         status_code = 403
+    elif result.error_code == "ENTITLEMENT_REQUIRED":
+        status_code = 402
     elif result.error_code == "INVALID_PARAMS":
         status_code = 400
     else:

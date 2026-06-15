@@ -174,6 +174,17 @@ class TestCapabilitySourceSchema:
         assert "external_integration" in \
             models["AppCapabilityPack"]["fields"]["surface_kind"]["values"]
 
+    def test_required_integrations_use_structured_connector_model(self):
+        models = _read_yaml(
+            "factory_app/workflows/AppGenerator/structured_outputs.yaml"
+        )["models"]
+        requirement = models["AppCapabilityPack"]["fields"]["required_integrations"]
+        assert requirement["items"] == "AppCapabilityRequiredIntegration"
+        fields = models["AppCapabilityRequiredIntegration"]["fields"]
+        assert {"service", "provider", "display_name", "kind", "purpose", "required_at", "required_fields"} <= set(fields)
+        assert fields["required_fields"]["items"] == "AppIntegrationRequiredField"
+        assert "api_key" in fields["kind"]["values"]
+
     def test_appbuildtask_has_capability_pack_id_field(self):
         models = _read_yaml(
             "factory_app/workflows/AppGenerator/structured_outputs.yaml"
@@ -986,6 +997,11 @@ class TestAgentsYamlHostedAdapterGuidance:
     def test_output_format_contains_adapter_task_batch_spec(self):
         assert "current_build_task_type" in self._text
         assert "api_surface" in self._text
+
+    def test_appplanagent_preserves_structured_required_integrations(self):
+        assert "Preserve any pack-declared `required_integrations` as structured connector objects" in self._text
+        assert "\"required_fields\"" in self._text
+        assert "\"frontend_safe\": false" in self._text
 
 
 # ---------------------------------------------------------------------------

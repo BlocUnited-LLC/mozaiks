@@ -62,6 +62,7 @@ Covers:
 from __future__ import annotations
 
 from mozaiksai.core.workflow.generator_support.connector_request import (
+    _extract_needs_from_plan,
     _iter_dicts,
     _normalize_required_fields,
     _split_required_fields,
@@ -286,7 +287,55 @@ class TestIterDicts:
 
 
 # ---------------------------------------------------------------------------
-# 6. dedupe_integration_needs
+# 6. _extract_needs_from_plan
+# ---------------------------------------------------------------------------
+
+class TestExtractNeedsFromPlan:
+    def test_structured_capability_pack_required_integration_preserves_fields(self):
+        plan = {
+            "capability_packs": [
+                {
+                    "capability_pack_id": "mozaikspay",
+                    "required_integrations": [
+                        {
+                            "service": "mozaikspay",
+                            "provider": "mozaikspay",
+                            "display_name": "MozaiksPay",
+                            "kind": "api_key",
+                            "purpose": "Connect generated app facades to hosted MozaiksPay.",
+                            "required_at": "runtime",
+                            "required_fields": [
+                                {"name": "api_base", "type": "url", "frontend_safe": True},
+                                {"name": "client_id", "type": "text", "frontend_safe": True},
+                                {"name": "client_secret", "type": "secret", "frontend_safe": False},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        result = dedupe_integration_needs(_extract_needs_from_plan(plan))
+
+        assert len(result) == 1
+        need = result[0]
+        assert need["service"] == "mozaikspay"
+        assert need["provider"] == "mozaikspay"
+        assert need["display_name"] == "MozaiksPay"
+        assert need["required_at"] == "runtime"
+        assert {field["name"] for field in need["required_fields"]} == {
+            "api_base",
+            "client_id",
+            "client_secret",
+        }
+        client_secret = next(field for field in need["required_fields"] if field["name"] == "client_secret")
+        assert client_secret["type"] == "secret"
+        assert client_secret["frontend_safe"] is False
+        assert need["required_by"] == [{"source": "capability_pack", "capability_pack_id": "mozaikspay"}]
+
+
+# ---------------------------------------------------------------------------
+# 7. dedupe_integration_needs
 # ---------------------------------------------------------------------------
 
 class TestDedupeIntegrationNeeds:
@@ -313,6 +362,31 @@ class TestDedupeIntegrationNeeds:
         needs = [self._need("stripe"), self._need("stripe")]
         result = dedupe_integration_needs(needs)
         assert len(result) == 1
+
+    def test_duplicate_service_prefers_more_complete_metadata_and_fields(self):
+        needs = [
+            self._need(
+                "mozaikspay",
+                required_fields=[{"name": "client_secret", "type": "secret"}],
+            ),
+            self._need(
+                "mozaikspay",
+                provider="mozaikspay",
+                display_name="MozaiksPay",
+                required_fields=[
+                    {"name": "api_base", "type": "url", "frontend_safe": True},
+                    {"name": "client_secret", "type": "secret", "frontend_safe": False},
+                ],
+            ),
+        ]
+
+        result = dedupe_integration_needs(needs)
+
+        assert len(result) == 1
+        need = result[0]
+        assert need["provider"] == "mozaikspay"
+        assert need["display_name"] == "MozaiksPay"
+        assert {field["name"] for field in need["required_fields"]} == {"api_base", "client_secret"}
 
     def test_both_optional_stays_optional(self):
         needs = [

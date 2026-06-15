@@ -111,7 +111,12 @@ def test_agentgenerator_prompts_enforce_workflow_domain_event_boundary() -> None
     assert "Workflows may react to domain events and may call module capabilities" in source
     assert "Do not invent domain events here" in source
     assert "workflows must never publish `domain.*` directly" in source
-    assert "Preserve `capability_id` when `WorkflowStrategy.event_boundary.input_events` declares one." in source
+    assert "from `backend_design_document` and `initial_message` before writing any trigger" in source
+    assert (
+        "Preserve `capability_id` from the trigger contract in your `initial_message` "
+        "when the brief specifies a BackendOnly event-triggered workflow."
+    ) in source
+    assert "WorkflowStrategy.event_boundary.input_events" not in source
     assert "Do not put capability ids into orchestrator.yaml until the runtime trigger contract supports them" not in source
 
 

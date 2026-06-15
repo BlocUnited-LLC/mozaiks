@@ -318,6 +318,51 @@ models:
           Optional connector setup fields. Each item should include name, label,
           type (secret, text, url, select), required, and frontend_safe. Secret
           fields are write-only and must never be returned to generated code.
+  AppCapabilityRequiredIntegration:
+    type: model
+    fields:
+      service:
+        type: str
+        description: Normalized app-scoped connector service id required by the capability pack.
+      provider:
+        type: optional_str
+        description: Provider id used by the backing integration or hosted capability.
+      display_name:
+        type: optional_str
+        description: Human-readable label shown in inline credential prompts and the app-scoped integrations surface.
+      kind:
+        type: literal
+        values:
+        - api_key
+        - oauth
+        - webhook
+        - hosted_pack
+        - internal_service
+        description: Connector/configuration kind needed by this capability pack.
+      purpose:
+        type: str
+        description: Why this capability pack requires the connector.
+      required_at:
+        type: literal
+        values:
+        - build_time
+        - validation_time
+        - runtime
+        - deployment
+        - optional
+        default: runtime
+        description: Earliest lifecycle point where this connector must be configured.
+      optional:
+        type: bool
+        default: false
+        description: Whether the capability can run without this connector.
+      required_fields:
+        type: optional_list
+        items: AppIntegrationRequiredField
+        description: >
+          Connector setup fields. Public fields may be frontend_safe=true; secrets
+          must use type=secret and frontend_safe=false. Raw values never belong in
+          generated artifacts.
   AppEventFlow:
     type: model
     fields:
@@ -539,8 +584,12 @@ models:
         description: Primary actions and behaviors supplied by the pack.
       required_integrations:
         type: optional_list
-        items: str
-        description: External systems or platform services required by the pack.
+        items: AppCapabilityRequiredIntegration
+        description: >
+          Structured app-scoped connector requirements for this pack. Hosted packs
+          must copy pack-declared requirements here instead of downgrading them to
+          string names, so IntegrationReadinessAgent can request exact public and
+          secret fields.
       agentic_extensions:
         type: optional_list
         items: str

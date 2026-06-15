@@ -462,6 +462,75 @@ class TestCreatorDashboardBuildPlan:
         assert cached["capability_packs"][0]["capability_source"] == "hosted_pack"
         assert "Build tasks: 5" in result
 
+    def test_build_plan_carries_hosted_pack_required_integrations_from_context(self) -> None:
+        mod = _load_module(
+            "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+            f"tests.app_build_plan_smoke_integrations.{id({})}",
+        )
+
+        class _Ctx:
+            def __init__(self):
+                self.data: dict[str, Any] = {
+                    "available_hosted_packs": [
+                        {
+                            "id": "mozaikspay",
+                            "capability_source": "hosted_pack",
+                            "required_integrations": [
+                                {
+                                    "service": "mozaikspay",
+                                    "provider": "mozaikspay",
+                                    "kind": "api_key",
+                                    "required_fields": [
+                                        {"name": "api_base", "type": "url", "frontend_safe": True},
+                                        {"name": "client_id", "type": "text", "frontend_safe": True},
+                                        {"name": "client_secret", "type": "secret", "frontend_safe": False},
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                }
+
+            def get(self, key, default=None):
+                return self.data.get(key, default)
+
+            def set(self, key, value):
+                self.data[key] = value
+
+            def __setitem__(self, key, value):
+                self.data[key] = value
+
+        ctx = _Ctx()
+        mod.app_build_plan(
+            AppBuildPlan={
+                **_MINIMAL_PLAN_BASE,
+                "capability_packs": [
+                    {
+                        "capability_pack_id": "mozaikspay",
+                        "capability_source": "hosted_pack",
+                    }
+                ],
+                "build_tasks": [
+                    {
+                        **_CREATOR_DASHBOARD_WALLET_ADAPTER_TASK,
+                        "task_id": "saas.mozaikspay_adapter",
+                        "capability_pack_id": "mozaikspay",
+                        "owned_paths": ["services/integrations/mozaikspay_client.py"],
+                    }
+                ],
+            },
+            context_variables=ctx,
+        )
+
+        pack = ctx.data["app_build_plan"]["capability_packs"][0]
+        requirement = pack["required_integrations"][0]
+        assert requirement["service"] == "mozaikspay"
+        assert {field["name"] for field in requirement["required_fields"]} == {
+            "api_base",
+            "client_id",
+            "client_secret",
+        }
+
     def test_build_plan_rejects_if_wallet_module_contract_added(self) -> None:
         mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",

@@ -394,6 +394,42 @@ def _context_hosted_pack_ids(context_variables: Any | None) -> frozenset[str]:
     return frozenset(pack_ids)
 
 
+def _pack_required_integrations(descriptor: dict[str, Any] | None) -> list[Any]:
+    if not isinstance(descriptor, dict):
+        return []
+    raw = descriptor.get("required_integrations")
+    if isinstance(raw, list):
+        return list(raw)
+    pack = descriptor.get("pack")
+    if isinstance(pack, dict):
+        raw = pack.get("required_integrations")
+        if isinstance(raw, list):
+            return list(raw)
+    return []
+
+
+def _merge_available_pack_defaults(
+    item: dict[str, Any],
+    available: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(available, dict) or not available:
+        return item
+    merged = dict(item)
+    for key in ("capabilities", "facades", "operator_contracts"):
+        if not merged.get(key) and isinstance(available.get(key), list):
+            merged[key] = list(available[key])
+
+    if not merged.get("required_integrations"):
+        required_integrations = _pack_required_integrations(available)
+        if required_integrations:
+            merged["required_integrations"] = required_integrations
+
+    for key in ("pack_source_path", "context_id"):
+        if not merged.get(key) and available.get(key):
+            merged[key] = available[key]
+    return merged
+
+
 def _normalize_capability_pack_sources(
     capability_packs: list[dict[str, Any]],
     *,
@@ -409,6 +445,7 @@ def _normalize_capability_pack_sources(
         pack_type = str(item.get("pack_type") or "").strip()
         available = available_packs.get(pack_id) if pack_id else None
         available_source = str((available or {}).get("capability_source") or "").strip()
+        item = _merge_available_pack_defaults(item, available)
         if not source and (pack_type == "hosted_pack" or available_source == "hosted_pack" or pack_id in context_hosted_pack_ids):
             item["capability_source"] = "hosted_pack"
         if item.get("capability_source") == "hosted_pack":
@@ -475,7 +512,7 @@ def _ensure_hosted_pack_entries(
                     for capability in available.get("capabilities") or []
                     if isinstance(capability, dict) and str(capability.get("capability_id") or "").strip()
                 ],
-                "required_integrations": [],
+                "required_integrations": _pack_required_integrations(available),
                 "agentic_extensions": [],
                 "capability_source": "hosted_pack",
             }

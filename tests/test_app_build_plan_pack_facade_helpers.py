@@ -90,6 +90,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _hosted_backing_module_ids,
     _hosted_facade_route_rules,
     _iter_page_api_endpoints,
+    _merge_available_pack_defaults,
     _pack_facades,
     _pack_id_from_descriptor,
     _selected_hosted_pack_descriptors,
@@ -228,6 +229,36 @@ class TestContextHostedPackIds:
         })
         result = _context_hosted_pack_ids(ctx)
         assert "stripe" in result
+
+
+# ---------------------------------------------------------------------------
+# 3a. _merge_available_pack_defaults
+# ---------------------------------------------------------------------------
+
+class TestMergeAvailablePackDefaults:
+    def test_preserves_structured_required_integrations_from_available_pack(self):
+        item = {"capability_pack_id": "mozaikspay", "capability_source": "hosted_pack"}
+        available = {
+            "id": "mozaikspay",
+            "required_integrations": [
+                {
+                    "service": "mozaikspay",
+                    "provider": "mozaikspay",
+                    "display_name": "MozaiksPay",
+                    "kind": "api_key",
+                    "required_fields": [
+                        {"name": "api_base", "type": "url", "frontend_safe": True},
+                        {"name": "client_secret", "type": "secret", "frontend_safe": False},
+                    ],
+                }
+            ],
+        }
+
+        result = _merge_available_pack_defaults(item, available)
+
+        assert result["required_integrations"] == available["required_integrations"]
+        assert result["required_integrations"][0]["service"] == "mozaikspay"
+        assert result["required_integrations"][0]["required_fields"][1]["name"] == "client_secret"
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,14 @@ def _auth_token_from_ctx(ctx: Any) -> str | None:
     return None
 
 
+def _ctx_scope(ctx: Any) -> dict[str, str | None]:
+    return {
+        "user_id": getattr(ctx, "user_id", None),
+        "tenant_id": getattr(ctx, "tenant_id", None),
+        "workspace_id": getattr(ctx, "workspace_id", None),
+    }
+
+
 class BillingPortalService:
     def __init__(self, mozaikspay_client: MozaiksPayClient | None = None) -> None:
         self._mozaikspay_client = mozaikspay_client
@@ -27,10 +35,13 @@ class BillingPortalService:
     def _client(self, ctx: Any) -> MozaiksPayClient:
         if self._mozaikspay_client is not None:
             return self._mozaikspay_client
-        return MozaiksPayClient(auth_token=_auth_token_from_ctx(ctx))
+        return MozaiksPayClient(
+            auth_token=_auth_token_from_ctx(ctx),
+            app_id=getattr(ctx, "app_id", None),
+        )
 
     async def get_subscription_status(self, ctx: Any) -> dict[str, Any]:
-        raw = await self._client(ctx).get_subscription_status()
+        raw = await self._client(ctx).get_subscription_status_for_scope(**_ctx_scope(ctx))
         return SubscriptionStatus.from_hosted(raw).to_dict()
 
     async def get_usage_status(
@@ -55,7 +66,10 @@ class BillingPortalService:
         return_url: str,
         **_: Any,
     ) -> dict[str, Any]:
-        raw = await self._client(ctx).create_billing_portal_session(return_url=return_url)
+        raw = await self._client(ctx).create_billing_portal_session(
+            return_url=return_url,
+            **_ctx_scope(ctx),
+        )
         return safe_portal_response(raw)
 
     async def handle_subscription_event(

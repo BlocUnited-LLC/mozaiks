@@ -96,6 +96,14 @@ def test_appgenerator_structured_outputs_define_capability_first_build_plan() ->
         models["AppBuildPlan"]["fields"]["capability_packs"]["items"]
         == "AppCapabilityPack"
     )
+    assert "AppCapabilityRequiredIntegration" in models
+    assert (
+        models["AppCapabilityPack"]["fields"]["required_integrations"]["items"]
+        == "AppCapabilityRequiredIntegration"
+    )
+    connector_fields = models["AppCapabilityRequiredIntegration"]["fields"]
+    assert connector_fields["required_fields"]["items"] == "AppIntegrationRequiredField"
+    assert connector_fields["service"]["type"] == "str"
     assert set(models["AppBuildPlan"]["fields"]["brand_intent"]["variants"]) == {"BrandIntent", "null"}
     task_variants = set(models["AppBuildTask"]["fields"]["capability_pack_id"]["variants"])
     assert task_variants == {"str", "null"}
