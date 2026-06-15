@@ -439,6 +439,44 @@ This project follows a practical pre-1.0 changelog format:
   Previously, unhandled exceptions from that task were silently discarded by the
   event loop.
 
+- **Module router/service startup failures now mark platform degraded** —
+  `mount_module_routers()` and `start_module_services()` failures were previously
+  logged at `WARNING` only, allowing the process to boot with silently broken
+  module extensions (causing 404s on mounted routes or missing background
+  services). Both now log at `ERROR` and set `startup_degraded = True`.
+
+- **`/api/health/ready` response includes `failed_modules` list** — when any
+  modules fail to load, the readiness response body now includes a
+  `failed_modules: list[str]` field alongside the existing degraded reason
+  string, allowing programmatic consumers to identify which modules to inspect
+  without parsing the reason string.
+
+- **`app.state.failed_module_names` persisted for structured access** — the list
+  of modules that failed to load at startup is now available on `app.state` for
+  the full lifetime of the process, not just in the startup logs.
+
+- **Dispatch to startup-failed module returns 503 not 404** —
+  `_execute_module_action` now checks `app.state.failed_module_names` before
+  forwarding to the executor. When a request targets a module known to have
+  failed at startup, it returns HTTP 503 with a clear "failed to load at startup"
+  message instead of falling through to the executor's generic `MODULE_NOT_FOUND`
+  (404) response.
+
+- **`WORKSPACE_SNAPSHOT_ZIP_FAILED` error wrapping** — `OSError` exceptions from
+  `mkdir()` and `ZipFile()` in the workspace snapshot writer are now re-raised as
+  `RuntimeError("WORKSPACE_SNAPSHOT_ZIP_FAILED: ...")`, consistent with the same
+  pattern in the coding worker.
+
+- **`asyncio.create_task()` for AgentDriven websocket auto-start logs errors** —
+  `runtime.py` AgentDriven workflow auto-start task now attaches a `done_callback`
+  that logs `AGENTDRIVEN_AUTO_START_FAILED` at `ERROR` level.
+
+- **Context variable persistence errors now logged** — `context/adapter.py`
+  previously swallowed all errors in `persist_context_variables()` fire-and-forget
+  calls with `except Exception: pass`. Errors are now logged at `WARNING` level
+  (`CONTEXT_PERSIST_FAILED` / `CONTEXT_PERSIST_TASK_CREATION_FAILED`), making
+  workflow state drift observable without crashing the runtime.
+
 - Fixed AppReview revision handoff so review-session revisions preserve
   `artifact_key`, `artifact_version_id`, `source_surface`, lifecycle state, and
   staged bundle path when triggering Studio refinement. The AppReview summary
