@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from mozaiksai.core.artifacts.models import (
     ArtifactLifecycleStatus,
@@ -895,7 +898,8 @@ def _load_json_manifest(path: str, manifest_by_path: dict[str, dict[str, Any]]) 
         return None
     try:
         return json.loads(content)
-    except Exception:
+    except Exception as exc:
+        logger.warning("APP_CONTEXT_JSON_MANIFEST_PARSE_FAILED path=%s: %s", path, exc)
         return None
 
 
@@ -905,7 +909,8 @@ def _load_yaml_manifest(path: str, manifest_by_path: dict[str, dict[str, Any]]) 
         return None
     try:
         return yaml.safe_load(content)
-    except Exception:
+    except Exception as exc:
+        logger.warning("APP_CONTEXT_YAML_MANIFEST_PARSE_FAILED path=%s: %s", path, exc)
         return None
 
 

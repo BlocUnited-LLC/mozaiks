@@ -87,7 +87,14 @@ class HttpAppBackendAdapter:
             if 200 <= resp.status_code < 300:
                 try:
                     data = resp.json()
-                except Exception:
+                except Exception as _json_exc:
+                    logger.warning(
+                        "BACKEND_RESPONSE_NON_JSON method=%s path=%s status=%d: %s",
+                        method,
+                        path,
+                        resp.status_code,
+                        _json_exc,
+                    )
                     data = {"raw": resp.text}
                 return BackendResponse(success=True, status_code=resp.status_code, data=data)
             return BackendResponse(

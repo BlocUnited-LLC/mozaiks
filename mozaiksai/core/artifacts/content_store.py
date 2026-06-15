@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import os
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 class ContentNotFoundError(Exception):
@@ -166,7 +169,13 @@ class GridFSArtifactContentStore:
             cursor = fs.find({"_id": ObjectId(content_ref)})
             docs = await cursor.to_list(length=1)
             return bool(docs)
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "CONTENT_STORE_EXISTS_FAILED content_ref=%s: %s — returning False (storage may be unreachable)",
+                content_ref,
+                exc,
+                exc_info=True,
+            )
             return False
 
     async def verify_checksum(self, content_ref: str, sha256: str) -> bool:
@@ -183,7 +192,13 @@ class GridFSArtifactContentStore:
         try:
             await fs.delete(ObjectId(content_ref))
             return True
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "CONTENT_STORE_DELETE_FAILED content_ref=%s: %s — returning False (bundle may remain in storage)",
+                content_ref,
+                exc,
+                exc_info=True,
+            )
             return False
 
 

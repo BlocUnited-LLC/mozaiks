@@ -77,7 +77,12 @@ def _compute_session_runtime_sec(doc: dict[str, Any], *, now: datetime) -> float
             return max(stored_duration, float((completed_at - created_at).total_seconds()))
         if created_at and doc.get("status") == int(WorkflowStatus.IN_PROGRESS):
             return max(stored_duration, float((now - created_at).total_seconds()))
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "SESSION_RUNTIME_COMPUTE_FAILED chat=%s — using stored_duration: %s",
+            doc.get("_id") or doc.get("chat_id"),
+            exc,
+        )
         return stored_duration
     return stored_duration
 

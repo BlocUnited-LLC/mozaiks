@@ -19,7 +19,8 @@ def _json_default(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         try:
             return value.model_dump(mode="python")
-        except Exception:
+        except Exception as exc:
+            logger.warning("ARTIFACT_SUMMARY_SERIALIZE_FAILED type=%s: %s", type(value).__name__, exc)
             return str(value)
     return str(value)
 
