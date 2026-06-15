@@ -89,22 +89,22 @@ class TestUniversalPromptsHostAgnostic:
         )
 
     def test_runtime_context_injected_into_workflow_design_agent(self) -> None:
-        """WorkflowStrategyAgent still receives RUNTIME_CONTEXT after cleanup."""
+        """WorkflowBundleBuilderAgent receives RUNTIME_CONTEXT after cleanup."""
         mod = _load_module(_UNIVERSAL_PROMPTS_PATH, f"test_universal_prompts.{id(object())}")
         agent = _FakeAgent(
-            name="WorkflowStrategyAgent",
+            name="WorkflowBundleBuilderAgent",
             context_variables={},
         )
         mod.inject_universal_prompts(agent, [])
         assert "[MOZAIKS RUNTIME CONTEXT]" in agent.system_message, (
-            "WorkflowStrategyAgent should still receive [MOZAIKS RUNTIME CONTEXT] "
-            "after the proprietary-name cleanup."
+            "WorkflowBundleBuilderAgent should receive [MOZAIKS RUNTIME CONTEXT] "
+            "after the WorkflowStrategyAgent removal."
         )
 
     def test_runtime_context_anti_patterns_still_present(self) -> None:
         """The 'TokenTracker / UsageMonitor' anti-pattern guidance must still exist."""
         mod = _load_module(_UNIVERSAL_PROMPTS_PATH, f"test_universal_prompts_anti.{id(object())}")
-        agent = _FakeAgent(name="WorkflowStrategyAgent", context_variables={})
+        agent = _FakeAgent(name="WorkflowBundleBuilderAgent", context_variables={})
         mod.inject_universal_prompts(agent, [])
         msg = agent.system_message
         assert "TokenTracker" in msg or "UsageMonitor" in msg, (
@@ -114,7 +114,7 @@ class TestUniversalPromptsHostAgnostic:
     def test_runtime_context_no_mozaikspay_in_injected_message(self) -> None:
         """After injection, the system message must not contain MozaiksPay."""
         mod = _load_module(_UNIVERSAL_PROMPTS_PATH, f"test_universal_prompts_inj.{id(object())}")
-        agent = _FakeAgent(name="WorkflowStrategyAgent", context_variables={})
+        agent = _FakeAgent(name="WorkflowBundleBuilderAgent", context_variables={})
         mod.inject_universal_prompts(agent, [])
         assert "MozaiksPay" not in agent.system_message, (
             "Injected RUNTIME_CONTEXT must not contain 'MozaiksPay'."

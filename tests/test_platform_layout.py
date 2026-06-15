@@ -16,13 +16,12 @@ def _load_yaml(app_root: Path, relative_path: str) -> dict:
         return yaml.safe_load(handle) or {}
 
 
-def test_active_mozaiks_app_runtime_families_exist() -> None:
-    app_root = active_app_root()
-    assert (app_root / "app.json").exists()
-    assert (app_root / "brand").is_dir()
-    assert (app_root / "config").is_dir()
-    assert (app_root / "modules").is_dir()
-    assert (app_root / "ui" / "pages").is_dir()
+def test_factory_app_bundle_satisfies_app_runtime_contract() -> None:
+    assert (FACTORY_APP_ROOT / "app.json").exists()
+    assert (FACTORY_APP_ROOT / "brand").is_dir()
+    assert (FACTORY_APP_ROOT / "config").is_dir()
+    assert (FACTORY_APP_ROOT / "modules").is_dir()
+    assert (FACTORY_APP_ROOT / "ui" / "pages").is_dir()
 
 
 def test_factory_app_runtime_families_exist() -> None:
@@ -40,13 +39,22 @@ def test_factory_app_runtime_families_exist() -> None:
     assert (ROOT / "factory_app" / "workflows").is_dir()
 
 
-def test_removed_platform_families_stay_removed() -> None:
-    app_root = active_app_root()
-    assert not (app_root / "automations").exists()
-    assert not (app_root / "components").exists()
+def test_factory_app_bundle_has_no_retired_families() -> None:
+    assert not (FACTORY_APP_ROOT / "automations").exists()
+    assert not (FACTORY_APP_ROOT / "components").exists()
+    assert not (FACTORY_APP_ROOT / "app.yaml").exists()
 
 
-def test_mozaiks_app_workflows_are_local_and_builder_workflows_are_shared() -> None:
+def test_shared_builder_workflows_exist() -> None:
+    """Core shared builder workflows must always be present under factory_app/workflows."""
+    shared_root = ROOT / "factory_app" / "workflows"
+    for workflow_name in ("AppGenerator", "AgentGenerator", "ExistingAppDiscovery"):
+        orchestrator = shared_root / workflow_name / "orchestrator.yaml"
+        assert orchestrator.exists(), f"Expected shared workflow: {workflow_name}"
+
+
+def test_product_workspace_workflows_are_local_and_builder_workflows_are_shared() -> None:
+    """Product workspace app-local workflows must live beside app/, not in factory_app/workflows."""
     app_root = active_app_root()
     workflows_root = app_root.parent / "workflows" if app_root.name == "app" else app_root / "workflows"
     if not (workflows_root / "AppMarketing").is_dir():
@@ -58,9 +66,4 @@ def test_mozaiks_app_workflows_are_local_and_builder_workflows_are_shared() -> N
     assert investor_marketplace["workflow_name"] == "InvestorMarketplace"
     assert app_marketing["workflow_startup_mode"] == "AgentDriven"
     assert investor_marketplace["workflow_startup_mode"] == "AgentDriven"
-
-    shared_root = ROOT / "factory_app" / "workflows"
-    for workflow_name in ("AppGenerator", "AgentGenerator", "ExistingAppDiscovery"):
-        orchestrator = shared_root / workflow_name / "orchestrator.yaml"
-        assert orchestrator.exists(), f"Expected shared workflow: {workflow_name}"
 

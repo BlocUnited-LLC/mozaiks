@@ -8,9 +8,12 @@ import pytest
 
 from tests.import_utils import active_app_root
 
+_ROOT = Path(__file__).resolve().parents[1]
+_FACTORY_APP_ROOT = _ROOT / "factory_app" / "app"
+
 
 def _workspace() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return _ROOT
 
 
 def _read(relative_path: str) -> str:
@@ -25,7 +28,7 @@ def _product_app_root() -> Path:
 
 
 def test_mozaiks_platform_has_platform_scoped_ai_config() -> None:
-    app_root = active_app_root()
+    app_root = _FACTORY_APP_ROOT
     ai_path = app_root / "config" / "ai.json"
     assert ai_path.exists()
 
@@ -55,7 +58,7 @@ def test_shell_config_uses_active_platform_path_first() -> None:
 
 
 def test_mozaiks_platform_app_yaml_is_removed() -> None:
-    app_root = active_app_root()
+    app_root = _FACTORY_APP_ROOT
     assert not (app_root / "app.yaml").exists()
 
 
@@ -146,7 +149,7 @@ def test_mozaiks_platform_shell_config_owns_shell_ui() -> None:
 
 
 def test_mozaiks_platform_theme_config_keeps_chat_ui_only() -> None:
-    app_root = active_app_root()
+    app_root = _FACTORY_APP_ROOT
     data = json.loads((app_root / "brand" / "theme_config.json").read_text(encoding="utf-8"))
     ui = data["ui"]
 
