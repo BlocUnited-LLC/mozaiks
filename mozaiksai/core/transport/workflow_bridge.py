@@ -307,7 +307,7 @@ class WorkflowBridgeMixin:
             # Build lifecycle reporting (best-effort; non-blocking).
             if _emit_execution_started is not None:
                 try:
-                    asyncio.create_task(
+                    _t = asyncio.create_task(
                         _emit_execution_started(
                             app_id=app_id,
                             execution_id=chat_id,
@@ -315,6 +315,11 @@ class WorkflowBridgeMixin:
                             user_id=user_id,
                             workflow_name=workflow_name,
                         )
+                    )
+                    _t.add_done_callback(
+                        lambda t: logger.debug("EXECUTION_STARTED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                        if not t.cancelled() and t.exception() is not None
+                        else None
                     )
                 except Exception:
                     pass
@@ -346,7 +351,7 @@ class WorkflowBridgeMixin:
 
             if _emit_execution_completed is not None and run_status_value == "completed":
                 try:
-                    asyncio.create_task(
+                    _t = asyncio.create_task(
                         _emit_execution_completed(
                             app_id=app_id,
                             execution_id=chat_id,
@@ -354,6 +359,11 @@ class WorkflowBridgeMixin:
                             user_id=user_id,
                             workflow_name=workflow_name,
                         )
+                    )
+                    _t.add_done_callback(
+                        lambda t: logger.debug("EXECUTION_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                        if not t.cancelled() and t.exception() is not None
+                        else None
                     )
                 except Exception:
                     pass
@@ -379,7 +389,7 @@ class WorkflowBridgeMixin:
             if starting_new_workflow and _emit_execution_failed is not None:
                 try:
                     err_details = traceback.format_exc()
-                    asyncio.create_task(
+                    _t = asyncio.create_task(
                         _emit_execution_failed(
                             app_id=app_id,
                             execution_id=chat_id,
@@ -389,6 +399,11 @@ class WorkflowBridgeMixin:
                             message=str(e),
                             details=str(err_details) if isinstance(err_details, str) else None,
                         )
+                    )
+                    _t.add_done_callback(
+                        lambda t: logger.debug("EXECUTION_FAILED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                        if not t.cancelled() and t.exception() is not None
+                        else None
                     )
                 except Exception:
                     pass
@@ -453,7 +468,7 @@ class WorkflowBridgeMixin:
                         )
 
                         dispatcher = get_event_dispatcher()
-                        asyncio.create_task(
+                        _t = asyncio.create_task(
                             dispatcher.emit(
                                 "runtime.process_completed",
                                 {
@@ -464,6 +479,11 @@ class WorkflowBridgeMixin:
                                     "status": run_status,
                                 },
                             )
+                        )
+                        _t.add_done_callback(
+                            lambda t: logger.debug("PROCESS_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                            if not t.cancelled() and t.exception() is not None
+                            else None
                         )
                     except Exception:
                         pass
@@ -476,7 +496,7 @@ class WorkflowBridgeMixin:
                         )
 
                         dispatcher = get_event_dispatcher()
-                        asyncio.create_task(
+                        _t = asyncio.create_task(
                             dispatcher.emit(
                                 "runtime.process_completed",
                                 {
@@ -487,6 +507,11 @@ class WorkflowBridgeMixin:
                                     "status": "failed",
                                 },
                             )
+                        )
+                        _t.add_done_callback(
+                            lambda t: logger.debug("PROCESS_FAILED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                            if not t.cancelled() and t.exception() is not None
+                            else None
                         )
                     except Exception:
                         pass

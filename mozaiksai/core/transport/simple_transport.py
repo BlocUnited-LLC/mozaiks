@@ -738,7 +738,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                                         dispatch_payload[k] = v
                         except Exception:
                             pass
-                        asyncio.create_task(dispatcher.emit(RUNTIME_PROCESS_COMPLETED, dispatch_payload))
+                        _t = asyncio.create_task(dispatcher.emit(RUNTIME_PROCESS_COMPLETED, dispatch_payload))
+                        _t.add_done_callback(
+                            lambda t: logger.debug("RUNTIME_PROCESS_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
+                            if not t.cancelled() and t.exception() is not None
+                            else None
+                        )
             except Exception:
                 pass
         except Exception as e:
