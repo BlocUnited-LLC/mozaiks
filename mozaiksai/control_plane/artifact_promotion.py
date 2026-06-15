@@ -600,16 +600,29 @@ async def create_draft_app_bundle_from_staged_refinement(
                 app_id=resolved_app_id,
                 files_manifest=files_manifest,
             )
-            await artifact_store.set_validation_status(
-                app_id=resolved_app_id,
-                artifact_version_id=artifact_version.id,
-                validation_status=validation_status,
-                commit_metadata={
-                    "message": f"{source_workflow or 'refinement'}: app_bundle draft from staged refinement",
-                    "source_workflow": source_workflow or None,
-                    "metadata": refreshed_metadata,
-                },
-            )
+            try:
+                await artifact_store.set_validation_status(
+                    app_id=resolved_app_id,
+                    artifact_version_id=artifact_version.id,
+                    validation_status=validation_status,
+                    commit_metadata={
+                        "message": f"{source_workflow or 'refinement'}: app_bundle draft from staged refinement",
+                        "source_workflow": source_workflow or None,
+                        "metadata": refreshed_metadata,
+                    },
+                )
+            except Exception as status_exc:
+                # PARTIAL WRITE: bundle was uploaded to the content store but the DB
+                # record could not be updated with content_ref/metadata. The artifact
+                # version remains in DRAFT with stale metadata. Operator action may
+                # be needed to reconcile artifact_version_id=%s.
+                logger.error(
+                    "ARTIFACT_STATUS_UPDATE_FAILED app=%s artifact=%s content_ref=%s: %s — "
+                    "bundle is in content store but DB record has stale metadata",
+                    resolved_app_id, artifact_version.id, content_ref, status_exc,
+                    exc_info=True,
+                )
+                raise
             refreshed = await artifact_store.get_artifact_version(
                 app_id=resolved_app_id,
                 artifact_version_id=artifact_version.id,

@@ -167,5 +167,20 @@ def load_control_plane_config_yaml(app_root: Path | None = None) -> dict[str, An
 def load_control_plane_config(app_root: Path | None = None) -> ControlPlaneConfig:
     raw = load_control_plane_config_yaml(app_root)
     if not isinstance(raw, dict) or not raw:
+        config_path = resolve_control_plane_runtime_config_path(app_root)
+        if config_path.exists():
+            # Config file exists but failed to parse — already logged at WARNING by
+            # load_control_plane_config_yaml. Surface the disabled state here too.
+            logger.warning(
+                "CONTROL_PLANE_DISABLED: config at %s failed to parse — "
+                "control plane running with all features disabled",
+                config_path,
+            )
         return ControlPlaneConfig()
-    return ControlPlaneConfig.model_validate(raw)
+    cfg = ControlPlaneConfig.model_validate(raw)
+    logger.info(
+        "CONTROL_PLANE_CONFIG_LOADED: enabled=%s path=%s",
+        cfg.enabled,
+        resolve_control_plane_runtime_config_path(app_root),
+    )
+    return cfg
