@@ -735,7 +735,7 @@ class ModuleLoader:
                 mod = self.load(name)
                 loaded.append(mod)
             except ModuleLoadError as exc:
-                logger.error(f"MODULE_LOAD_FAILED: {name} — {exc}")
+                logger.error(f"MODULE_LOAD_FAILED: {name} — {exc}", exc_info=True)
                 failed.append(name)
         return loaded, failed
 
