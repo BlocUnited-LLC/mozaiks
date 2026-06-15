@@ -271,6 +271,7 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
             "workflow_name": "AgentGenerator",
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
+            "token_exp": 0,
         }
     ]
     assert harness.added_workflows == [
@@ -569,6 +570,7 @@ async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_cl
             "workflow_name": "AgentGenerator",
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
+            "token_exp": 0,
         }
     ]
     assert harness.transport.ui_events == [
@@ -648,6 +650,7 @@ async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflo
             "workflow_name": "AgentGenerator",
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
+            "token_exp": 0,
         }
     ]
     assert harness.transport.ui_events == [
@@ -753,6 +756,7 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
             "workflow_name": "AgentGenerator",
             "app_id": "app_1",
             "ws_id": harness.transport.handle_websocket_calls[0]["ws_id"],
+            "token_exp": 0,
         }
     ]
     assert harness.transport.ui_events == [

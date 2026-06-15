@@ -143,6 +143,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._heartbeat_tasks: dict[str, asyncio.Task] = {}         # H2
         self._max_queue_size = 100
         self._heartbeat_interval = 120
+        # WebSocket inbound message size limit (bytes). Mirrors the HTTP endpoint guard.
+        # Set CHAT_MESSAGE_MAX_CHARS=0 to disable.
+        try:
+            _ws_max = int(os.environ.get("CHAT_MESSAGE_MAX_CHARS", "8000"))
+        except Exception:
+            _ws_max = 8000
+        self._ws_message_max_chars = _ws_max or 0  # 0 means disabled
 
         # H4: Pre-connection buffering (delivery reliability)
         self._pre_connection_buffers: dict[str, list[dict[str, Any]]] = {}
@@ -1348,17 +1355,31 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         user_id: str,
         workflow_name: str,
         app_id: str | None = None,
-        ws_id: int | None = None
+        ws_id: int | None = None,
+        token_exp: int = 0,
     ) -> None:
         """Handle WebSocket connection for real-time communication with multi-workflow session support"""
         if self._owner_loop is None:
             self._owner_loop = asyncio.get_running_loop()
         await websocket.accept()
-        
+
         # Store ws_id for session registry lookups
         if ws_id is None:
             ws_id = id(websocket)
-        
+
+        # Evict any stale connection for the same chat_id before registering the new one.
+        # Without this, the old receive loop's finally block would delete the new connection
+        # entry and leave the client in a broken state.
+        if chat_id in self.connections:
+            stale = self.connections[chat_id]
+            stale_ws = stale.get("websocket")
+            logger.warning("Evicting stale WebSocket for chat_id=%s (ws_id=%s)", chat_id, stale.get("ws_id"))
+            try:
+                await stale_ws.close(code=1001)
+            except Exception:
+                pass
+            await self._cleanup_connection(chat_id)
+
         self.connections[chat_id] = {
             "websocket": websocket,
             "user_id": user_id,
@@ -1366,6 +1387,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "app_id": app_id,
             "active": True,
             "ws_id": ws_id,  # Track WebSocket ID for session switching
+            "token_exp": token_exp,  # JWT expiry (unix epoch); 0 means no expiry check
         }
         logger.info("🔌 WebSocket connected for chat_id: %s (ws_id=%s)", chat_id, ws_id)
 
@@ -1416,10 +1438,26 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 if not msg:
                     await asyncio.sleep(0.05)
                     continue
+                # Enforce JWT token expiry on each inbound message.
+                _exp = self.connections.get(chat_id, {}).get("token_exp", 0)
+                if _exp and int(__import__("time").time()) > _exp:
+                    logger.warning("WS_TOKEN_EXPIRED chat=%s — closing connection", chat_id)
+                    await self._send_ws_error(websocket, "Session token has expired", "TOKEN_EXPIRED")
+                    await websocket.close(code=4401, reason="Token expired")
+                    break
+                # Guard against oversized messages before JSON parsing.
+                _max = getattr(self, "_ws_message_max_chars", None)
+                if _max and len(msg) > _max:
+                    logger.warning(
+                        "WS_MESSAGE_TOO_LARGE chat=%s size=%d limit=%d — dropping",
+                        chat_id, len(msg), _max,
+                    )
+                    await self._send_ws_error(websocket, "Message exceeds maximum allowed size", "MESSAGE_TOO_LARGE")
+                    continue
                 try:
                     data = json.loads(msg)
                 except Exception:
-                    logger.debug("⚠️ Received non-JSON message on WS chat %s: %s", chat_id, msg[:80])
+                    logger.debug("Received non-JSON message on WS chat %s: %s", chat_id, msg[:80])
                     continue
                 # H3: Validate message schema
                 if not self._validate_inbound_message(data):

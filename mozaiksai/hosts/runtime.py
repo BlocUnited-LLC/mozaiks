@@ -637,6 +637,10 @@ async def websocket_endpoint(
         return
 
     user_id = ws_user.user_id
+    # Store the JWT exp claim so the inbound message loop can enforce token expiry.
+    # Falls back to 0 (no expiry check) when auth is disabled or the token lacks `exp`.
+    _raw_claims = getattr(ws_user, "raw_claims", None) or {}
+    _token_exp: int = int(_raw_claims.get("exp", 0) or 0)
 
     try:
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
@@ -892,6 +896,7 @@ async def websocket_endpoint(
                 workflow_name=resolved_workflow_name,
                 app_id=app_id,
                 ws_id=ws_id,
+                token_exp=_token_exp,
             )
         finally:
             session_registry.remove_session(ws_id)

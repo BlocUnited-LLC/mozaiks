@@ -142,7 +142,7 @@ class WebSocketProtocolMixin:
                         )
                         self._message_queues.pop(chat_id, None)
                         break
-                    logger.error("Failed to send queued message to %s: %s. Will retry shortly.", chat_id, e)
+                    logger.error("Failed to send queued message to %s: %s. Will retry shortly.", chat_id, e, exc_info=True)
                     # Re-queue remaining (including current) for retry
                     remaining = [message] + messages_to_send[messages_to_send.index(message) + 1 :]
                     self._message_queues[chat_id] = remaining + self._message_queues.get(chat_id, [])
@@ -440,6 +440,12 @@ class WebSocketProtocolMixin:
         overflow_counts = getattr(self, "_pre_connection_buffer_overflow_counts", None)
         if isinstance(overflow_counts, dict):
             overflow_counts.pop(chat_id, None)
+
+        # Clear any pending input request callbacks to prevent memory leaks when
+        # the client disconnects mid-workflow while awaiting user input.
+        input_registries = getattr(self, "_input_request_registries", None)
+        if isinstance(input_registries, dict):
+            input_registries.pop(chat_id, None)
 
         await self._stop_heartbeat(chat_id)
         logger.info("Cleaned up connection resources for %s", chat_id)
