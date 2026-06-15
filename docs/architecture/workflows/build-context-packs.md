@@ -76,6 +76,20 @@ pack:
   id: mozaikspay
   status: active
   capability_source: hosted_pack
+  required_integrations:
+    - service: mozaikspay
+      provider: mozaikspay
+      kind: api_key
+      required_fields:
+        - name: api_base
+          type: url
+          frontend_safe: true
+        - name: client_id
+          type: text
+          frontend_safe: true
+        - name: client_secret
+          type: secret
+          frontend_safe: false
 capabilities:
   - capability_id: mozaikspay.billing_portal
     facade_recommended: billing_portal
@@ -98,6 +112,11 @@ Required fields:
 - `assets`: explicit files or directories this context contributes.
 
 Optional fields:
+
+- `required_integrations`: connector requirements that selected packs add to
+  AppGenerator integration readiness. Secret fields must be marked
+  `frontend_safe: false`; non-secret provider config such as API base URLs and
+  client ids may be frontend safe.
 
 - `pack`: marks the context as a selectable build pack.
 - `capabilities`, `facades`: structured pack metadata for planning agents.
@@ -203,6 +222,20 @@ selection_rules:
         - saas billing
         - subscriptions
     action: select_pack
+required_integrations:
+  - service: mozaikspay
+    provider: mozaikspay
+    kind: api_key
+    required_fields:
+      - name: api_base
+        type: url
+        frontend_safe: true
+      - name: client_id
+        type: text
+        frontend_safe: true
+      - name: client_secret
+        type: secret
+        frontend_safe: false
 required_outputs:
   - path: services/integrations/mozaikspay_client.py
     owner: templates
@@ -217,7 +250,7 @@ facades:
 ```
 
 Use bounded fields such as `selection_rules`, `required_outputs`,
-`forbidden_outputs`, `runtime_boundaries`, `facades`, and
+`required_integrations`, `forbidden_outputs`, `runtime_boundaries`, `facades`, and
 `inactive_surfaces`. Do not use top-level narrative fields such as `purpose`,
 `description`, `generation_rules`, or `recommended_facades`.
 

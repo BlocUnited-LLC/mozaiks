@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import os
 import re
 import sys
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
@@ -679,11 +680,13 @@ async def _export_workflow_bundle(
     os.environ["MOZAIKS_GENERATED_ARTIFACTS_PATH"] = str(generated_root)
     try:
         with _patched_download_tool() as download_module:
-            return await download_module.generate_and_download(
-                DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
-                agent_message="Workflow bundle ready.",
-                context_variables=_Context(context),
-            )
+            stdout_buffer = io.StringIO()
+            with redirect_stdout(stdout_buffer):
+                return await download_module.generate_and_download(
+                    DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+                    agent_message="Workflow bundle ready.",
+                    context_variables=_Context(context),
+                )
     finally:
         if old_generated_root is None:
             os.environ.pop("MOZAIKS_GENERATED_ARTIFACTS_PATH", None)

@@ -20,6 +20,11 @@ This project follows a practical pre-1.0 changelog format:
   acceptance gates, export readiness, strict structured-output conformance, and
   runtime module loading.
 
+- **Live AgentGenerator pack smoke** (`scripts/smoke_agentgenerator_live_pack.py`)
+  now emits machine-readable JSON on stdout while still exercising real AG2 task
+  batch generation, workflow export, semantic drift checks, and runtime loader
+  promotion.
+
 - **OSS build telemetry** (`mozaiksai/core/telemetry.py`) — opt-in HMAC-SHA256
   signed, anonymized build telemetry. `build_registry_id` is one-way SHA-256 hashed
   before transmission. Controlled by `MOZAIKS_TELEMETRY_ENDPOINT`,

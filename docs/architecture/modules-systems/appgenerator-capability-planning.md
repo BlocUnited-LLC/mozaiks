@@ -134,6 +134,11 @@ hosted_pack
   -> app/ui/pages/{page}.yaml
 ```
 
+Hosted pack service clients are consumer adapters. For SaaS billing, the
+generated `mozaikspay_client.py` resolves the app-scoped `mozaikspay` connector
+or `MOZAIKSPAY_*` env fallback, calls the public MozaiksPay provider API, and
+does not call hosted product modules such as `hosted_billing` directly.
+
 For MozaiksPay, a generated SaaS app may receive:
 
 ```text
