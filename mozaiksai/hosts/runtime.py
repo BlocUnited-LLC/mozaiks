@@ -693,7 +693,8 @@ async def websocket_endpoint(
                 workflow_name=resolved_workflow_name,
                 persistence=persistence_manager,
             )
-        except Exception:
+        except Exception as prereq_exc:
+            logger.error("WS_PREREQ_VALIDATION_FAILED workflow=%s chat=%s: %s", resolved_workflow_name, chat_id, prereq_exc, exc_info=True)
             await websocket.accept()
             await websocket.send_json(
                 {

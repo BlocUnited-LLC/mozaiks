@@ -1685,7 +1685,8 @@ def _load_app_manifest() -> dict[str, Any]:
         return {}
     try:
         raw = json.loads(app_manifest_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        logger.warning("APP_MANIFEST_LOAD_FAILED %s: %s", app_manifest_path, exc)
         return {}
     return raw if isinstance(raw, dict) else {}
 
