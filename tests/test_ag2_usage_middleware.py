@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from mozaiksai.core.tokens.guard import TokenUsageDecision, TokenUsageDenied
+
 usage_mod = importlib.import_module("mozaiksai.core.usage.middleware")
 
 
@@ -70,3 +72,41 @@ def test_build_ag2_usage_middleware_returns_ag2_middleware():
     assert middleware._cls.__name__ == "MozaiksUsageMiddleware"
     assert middleware._options["agent_name"] == "PlannerAgent"
     assert middleware._options["workflow_name"] == "AppGenerator"
+
+
+@pytest.mark.asyncio
+async def test_ag2_usage_middleware_checks_token_balance_before_llm_call(monkeypatch):
+    class _DenyingGuard:
+        async def check_or_raise(self, **kwargs):  # noqa: ANN003
+            raise TokenUsageDenied(
+                TokenUsageDecision(
+                    allowed=False,
+                    reason="insufficient_balance",
+                    error_code="INSUFFICIENT_TOKENS",
+                    wallet_id="ai_tokens",
+                    balance=0,
+                    required_tokens=kwargs.get("required_tokens"),
+                )
+            )
+
+    monkeypatch.setattr(usage_mod, "TokenUsageGuard", lambda: _DenyingGuard())
+
+    middleware = usage_mod.MozaiksUsageMiddleware(
+        event=SimpleNamespace(),
+        context=SimpleNamespace(),
+        agent_name="PlannerAgent",
+        workflow_name="AppGenerator",
+        context_variables=_ContextBridge(),
+        model_name="gpt-test",
+    )
+    called = False
+
+    async def call_next(events, context):
+        nonlocal called
+        called = True
+        return SimpleNamespace(id="response-1", usage=None)
+
+    with pytest.raises(TokenUsageDenied):
+        await middleware.on_llm_call(call_next, [], SimpleNamespace())
+
+    assert called is False

@@ -97,6 +97,55 @@ archetypes:
       - The service layer enforces transition validation before mutation.
       - Transition events include from_state and to_state when declared.
 
+  event_pipeline:
+    summary: >
+      Deterministic module that drives an automated multi-step pipeline through
+      event reactions and background polling. Use when a customer action starts a
+      chain that spans multiple modules (e.g. domain verification → DNS → SSL → live),
+      each step triggered automatically by the previous step's event rather than by
+      human operators or manual action calls.
+    select_when:
+      - The module owns a multi-step lifecycle where each step emits an event that
+        triggers the next step in a different module.
+      - Background polling is needed to detect external state changes (DNS propagation,
+        certificate issuance, payment confirmation) and advance the pipeline.
+      - Steps must be idempotent and the pipeline must degrade gracefully when
+        provider adapters are not configured.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+        - contracts/events.yaml
+        - contracts/reactions.yaml
+      optional:
+        - runtime_extensions.yaml   # startup_service for background poller
+        - notifications.yaml
+        - settings.yaml
+    backend_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/schemas.py
+      - backend/{poller_name}.py   # startup_service entrypoint for background polling
+    hard_constraints:
+      - Each pipeline step is an internal module action with api_surface=internal and permissions=[].
+        The event bus is the authorization boundary; no user permission is required.
+      - Internal actions must be idempotent — the service layer guards against duplicate
+        activation requests, double-provisioning, and repeated state transitions.
+      - reactions.yaml wires each cross-module event to a handler_method; never call
+        a foreign module's service directly from business logic.
+      - Background pollers use direct motor connection (AsyncIOMotorClient) because they
+        run outside any module request context and cannot use app_data_from_context.
+        Event emission uses the OSS dispatcher singleton (get_event_dispatcher().emit).
+      - Provider adapters are resolved lazily and return None when not configured.
+        The poller and service must return early gracefully rather than crashing.
+      - A stub adapter must accompany every real provider adapter so the pipeline
+        can run locally and in CI without external infrastructure.
+      - URL-shaped values (e.g. hosting_url) must be parsed to extract the hostname
+        before use in DNS records. Never write a URL as a CNAME target.
+      - emits declarations in module.yaml must match events declared in contracts/events.yaml.
+        Cross-module events subscribed to in reactions.yaml are declared by the producing module.
+
   transactional:
     summary: Deterministic module for balances, ledgers, audit trails, or append-only value tracking.
     select_when:

@@ -47,6 +47,25 @@ task_contracts:
       - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
 
+  subscription_config:
+    owner_agent: ConfigMiddlewareAgent
+    summary: >
+      Provider-neutral generated-app SaaS subscription/token contract. Present
+      only when SubscriptionContractDesigner emits contract_required=true.
+    required_outputs:
+      - config/subscriptions.yaml
+    optional_outputs: []
+    hard_constraints:
+      - Generate config/subscriptions.yaml only from SubscriptionContractDesigner subscription_config_file.
+      - Schema version must be mozaiks.subscriptions.v1.
+      - Do not emit modules/{pack_name}/contracts/subscriptions.yaml or any module-local subscriptions.yaml.
+      - Do not emit hosted billing admin actions, payment-provider products, price ids, invoices, checkout internals, or settlement logic in this file.
+      - token_wallets live at the config root and are provider-neutral.
+      - token_allowances live under plans[] and every wallet_id must reference a declared token_wallet.
+      - assignment_store declares where active app-owned subscription assignments are read by ConfiguredEntitlementAdapter.
+      - Generated module actions that require paid access must declare actions[].entitlement_gate with a capability_id granted by at least one plan.
+      - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
+
   module_contract:
     owner_agent: ConfigMiddlewareAgent
     summary: Canonical module contract bundle that declares module behavior before Python or JS implementation.
@@ -281,10 +300,54 @@ backend_helper_files:
       service_class: "{ServiceClass}"
       note: Must be declared in python_stubs. ServiceAgent must not generate it unless declared.
 
+  event_pipeline_conventions:
+    description: >
+      Additional contracts that apply when a module uses the event_pipeline archetype
+      (multi-step pipeline driven by event reactions and background pollers).
+    internal_action_contract:
+      api_surface: internal
+      permissions: "[]  # empty — event bus is the authorization boundary"
+      emits: "must match events declared in this module's contracts/events.yaml"
+      handler_method: "must be declared in reactions.yaml target.handler_method"
+      idempotency: >
+        The service layer must guard against duplicate activation. Check for an
+        existing active record before inserting a new one and return
+        {success: true, skipped: true} rather than an error on duplicates.
+    poller_contract:
+      location: backend/{poller_name}.py
+      entrypoint_format: "backend.{poller_name}:{ServiceClass}"
+      required_methods:
+        - "start() -> None  # sync; creates asyncio task via loop.create_task"
+        - "stop() -> None   # sync; cancels task"
+      db_access: >
+        Must use direct AsyncIOMotorClient(MONGO_URI) — NOT app_data_from_context.
+        Startup services run outside any module request context.
+      event_emission: >
+        Must emit through the OSS runtime event dispatcher singleton, wrapped in
+        try/except with a warning log on failure. Never let an emit failure crash
+        the poller. Do not inline runtime import paths in prompt-time contracts.
+      adapter_resolution: >
+        Resolve provider adapters lazily inside _poll_once(). Return early when
+        the adapter is not configured. Never crash the process on missing config.
+    stub_adapter_contract:
+      location: app/services/adapters/{area}/stub.py
+      required: true
+      activation: "env var e.g. SSL_ADAPTER=stub"
+      purpose: >
+        Enables the full pipeline to run locally and in CI with no external
+        infrastructure. Must implement the same Protocol as the real adapter.
+        May simulate lifecycle progression using in-process state.
+    url_to_hostname_rule: >
+      URL-shaped values (e.g. hosting_url containing https://...) must be parsed
+      to extract the bare hostname before use in DNS records. Never write a URL
+      as a CNAME target. Use urllib.parse.urlparse(url).hostname.
+
   examples:
     - backend/provider_client.py   # external provider client wrapper
     - backend/routes_hooks.py       # api_router entrypoint — custom inbound route mounting
     - backend/event_worker.py      # startup_service entrypoint — background subscriber/worker
     - backend/notification_client.py # module-local wrapper over a notification capability
     - backend/audit_subscriber.py    # startup_service entrypoint for audit event handling
+    - backend/verification_poller.py # startup_service — background DNS/state poller (event_pipeline)
+    - backend/ssl_status_poller.py   # startup_service — background certificate poller (event_pipeline)
 

@@ -128,6 +128,7 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         ["ValueEngine"],
         ["ThemeCapture"],
         ["DesignDocs"],
+        ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
     ]
@@ -138,12 +139,16 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
         "app_review",
         "build_satisfaction_rating",
     ]
-    assert graph.artifact_dependency_graph["workflow_bundle"] == ["design_docs"]
+    assert graph.artifact_dependency_graph["workflow_bundle"] == [
+        "design_docs",
+        "subscription_contract",
+    ]
     assert "workflow_bundle" in graph.artifact_dependency_graph["app_bundle"]
 
     store = _MemoryArtifactStore()
     app_id = "offline-build-sequence-smoke"
     design_docs = store.seed(app_id=app_id, artifact_kind="design_docs")
+    subscription_contract = store.seed(app_id=app_id, artifact_kind="subscription_contract")
     theme_capture = store.seed(app_id=app_id, artifact_kind="theme_capture")
 
     from factory_app.workflows.AgentGenerator.tools.platform.build_lifecycle import (
@@ -175,11 +180,15 @@ async def test_offline_build_sequence_smoke_persists_agent_and_app_artifact_chai
     workflow_bundle = store._versions[("workflow_bundle", "workflow_bundle")][0]
 
     assert workflow_call["source_workflow"] == "AgentGenerator"
-    assert workflow_call["canonical_inputs_version"] == {"design_docs": design_docs.id}
+    assert workflow_call["canonical_inputs_version"] == {
+        "design_docs": design_docs.id,
+        "subscription_contract": subscription_contract.id,
+    }
 
     app_inputs = app_call["canonical_inputs_version"]
     assert app_call["source_workflow"] == "AppGenerator"
     assert app_inputs["design_docs"] == design_docs.id
+    assert app_inputs["subscription_contract"] == subscription_contract.id
     assert app_inputs["theme_capture"] == theme_capture.id
     assert app_inputs["workflow_bundle"] == workflow_bundle.id
     assert "brand" not in app_inputs
@@ -200,13 +209,19 @@ async def test_offline_factory_artifact_lineage_smoke_hydrates_workflow_metadata
         ["ValueEngine"],
         ["ThemeCapture"],
         ["DesignDocs"],
+        ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
     ]
     assert result["artifact_lineage"]["workflow_bundle_inputs"] == {
-        "design_docs": result["artifact_lineage"]["design_docs_id"]
+        "design_docs": result["artifact_lineage"]["design_docs_id"],
+        "subscription_contract": result["artifact_lineage"]["subscription_contract_id"],
     }
     assert result["artifact_lineage"]["app_bundle_inputs"]["design_docs"] == result["artifact_lineage"]["design_docs_id"]
+    assert (
+        result["artifact_lineage"]["app_bundle_inputs"]["subscription_contract"]
+        == result["artifact_lineage"]["subscription_contract_id"]
+    )
     assert result["artifact_lineage"]["app_bundle_inputs"]["theme_capture"] == result["artifact_lineage"]["theme_capture_id"]
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert result["hydration"]["status"] == "hydrated"
@@ -277,7 +292,8 @@ def test_real_store_factory_artifact_lineage_smoke_hydrates_workflow_metadata() 
     assert result["success"] is True, result["validation_errors"]
     assert result["mode"] == "real_store"
     assert result["artifact_lineage"]["workflow_bundle_inputs"] == {
-        "design_docs": result["artifact_lineage"]["design_docs_id"]
+        "design_docs": result["artifact_lineage"]["design_docs_id"],
+        "subscription_contract": result["artifact_lineage"]["subscription_contract_id"],
     }
     assert result["artifact_lineage"]["app_bundle_inputs"]["workflow_bundle"] == result["artifact_lineage"]["workflow_bundle_id"]
     assert result["hydration"]["status"] == "hydrated"

@@ -112,6 +112,15 @@ agents:
 
       **Optional integration context**:
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools` indicate that a separate agent backend already exists and may need to be integrated into the generated app.
+      - `subscription_contract` / `subscription_contract_artifact` contains the
+        provider-neutral SaaS subscription/token contract from
+        SubscriptionContractDesigner when the app sells plans, grants token
+        allowances, gates paid features, or meters generated workflows/actions.
+        Treat it as the source of truth for `config/subscriptions.yaml`,
+        `actions[].entitlement_gate`, usage/billing page requirements, and
+        metering declarations. Copy module/action entitlement gates from
+        `module_contract_updates` exactly; do not invent paid feature ids. Do
+        not implement a custom token ledger or usage ledger.
       - `platform_user_email`: Email of the authenticated platform user. Use this as the initial `admins` entry in `app/app.json` when the generated app needs admin bootstrap access. Non-null when running on the hosted mozaiks.ai platform; null in OSS/self-hosted contexts.
       - `app_backend_url`: Base URL of the active Mozaiks app host for this app. When non-null, generated agents call this URL + the platform module action API to persist data and trigger domain events. Include this in the `module_contract` build task's initial_message so downstream module implementation agents have it.
         - `generated_workflow_name`, `generated_workflow_capability_id`, `generated_workflow_startup_mode`, `generated_workflow_trigger_events`: When these fields are non-null, a workflow bundle was previously generated for this app and must be wired into the build — do not re-derive or invent these values. Use `generated_workflow_capability_id` (not the raw workflow name) in all `workflow_capability_ids` fields. Use `generated_workflow_name` as the direct page-launch `workflow_id` when persistent app pages need to open that workflow. Use `generated_workflow_startup_mode` only to shape launch expectations/copy; the runtime owns who speaks first after session launch. Pass `generated_workflow_trigger_events` in the `module_contract` build task's `initial_message` so ConfigMiddlewareAgent can generate the correct `contracts/reactions.yaml` entries.
@@ -236,6 +245,22 @@ agents:
           Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `data/contract.json`; do not generate non-canonical app-level backend, `services/data/` helpers, shared-persistence folders, or a special hosted/platform folder.
           `config/data.json` is a removed path and must never appear in owned_paths, initial_message, data_contract, database_files, code_files, or task output.
           Each module-local task must set `capability_pack_id` to the module id. For a projects/tasks app, this means separate task trios with literal owned paths under `modules/projects/` and `modules/tasks/`; do not collapse them into one `project_management` module or rename them to `projects_core` / `tasks_core`.
+        - If `subscription_contract.contract_required` is true, include exactly one
+          app-level build task with `task_type: subscription_config`,
+          `capability_pack_id: null`, `surface_id: "subscription_contract"`,
+          `surface_kind: "control_plane"`, `initial_agent: "ConfigMiddlewareAgent"`,
+          and `owned_paths: ["config/subscriptions.yaml"]`. Its
+          `initial_message` must tell ConfigMiddlewareAgent to serialize only
+          `subscription_contract.subscription_config_file` and to emit no module,
+          service, payment-provider, host-owned billing, or token ledger code.
+          Also pass the relevant `module_contract_updates` entries to each
+          affected module_contract task so ConfigMiddlewareAgent can set
+          `actions[].entitlement_gate` on the exact declared actions.
+          Usage/billing page requirements may read the platform-owned endpoints
+          `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`; do
+          not plan generated modules or custom ledgers just to back those pages.
+        - If `subscription_contract.contract_required` is false or absent, do not
+          plan a `subscription_config` task and do not emit config/subscriptions.yaml.
       11a. Treat persistent application UI as schema-first:
         - `AppBuildPlan.pages[]` is the authoritative persistent page inventory. `AppSchemaAgent` enriches and materializes that inventory through the schema lane.
         - Ordinary app pages must compile into `app.json` + `ui/pages/*.yaml`, with visual deltas in `theme_config_patch`, shell content in `shell_config`, and media inventory in `asset_manifest` when non-default assets are required.
@@ -716,6 +741,13 @@ agents:
       - `captured_theme_config`: canonical ThemeCapture output when available. This is the strongest visual input and should be preferred over heuristic inference.
       - `experience_spec_document`: canonical persistent UI intent document from DesignDocs. In the current pipeline this is serialized under `ui_schema`.
       - `frontend_design_document`: free-form frontend design document (fallback context).
+      - `subscription_contract`: provider-neutral subscription/token contract.
+        When it has page_surface_requirements, materialize those pages through
+        the same AppBuildPlan-driven page contract. Runtime account usage/token
+        sections may bind to `/api/me/usage`, `/api/me/tokens`, or
+        `/api/me/tokens/ledger`. Do not create facade modules, custom ledgers,
+        checkout internals, or payment-provider pages unless the app build plan
+        explicitly declares an app-owned payment integration.
 
       **Platform primitive system**:
       The live shipped primitive names are injected at runtime in `[SHIPPED PAGE PRIMITIVES]`.
@@ -725,7 +757,12 @@ agents:
       - Page actions that launch agent sessions must use `action_type: workflow` with `workflow_id` set to the runtime workflow registry id.
       - Page `event_type` values are for `ui.*` primitive reactions only.
       - `DataTable`: sortable, filterable, paginated table. Config: `columns` (strings or column objects), optional `api_endpoint`, optional `data`, `selection` (none|single|multi), `pagination`, `page_size`, `search`, `actions`, `empty`.
-      - `api_endpoint` must be a canonical module action path: `/api/modules/{module_id}/{action_id}`. Do not include query strings or fragments; put limits in `page_size` and put filters/selected row values in `payload`, form state, or the module action input schema.
+      - `api_endpoint` must be either a canonical module action path
+        `/api/modules/{module_id}/{action_id}` or one of the supported
+        platform-owned read endpoints `/api/me/usage`, `/api/me/tokens`, or
+        `/api/me/tokens/ledger`. Do not include query strings or fragments; put
+        limits in `page_size` and put filters/selected row values in `payload`,
+        form state, or the module action input schema.
       - `Form`: declarative form. Config: `fields` [{name, label, type (text|email|password|number|textarea|select|checkbox), required, placeholder, default_value, options}], optional `layout`, `columns`, `submit_label`, `submit_action`, `cancel_action`, `disabled`.
       - `SummaryStrip`: compact page summary. Config: `items` with 1-4 `{label, value?, value_key?, detail?, detail_key?, trend_key?, format?, trend_format?, trend_label?}` entries. Use `value_key` when the section has an `api_endpoint`; use `trend_key` only when the module action output represents a real historical comparison. Do not hard-code live metrics or fake percentage changes.
       - `Metric`: one metric inside a purposeful detail surface. Config: `label`, `value` or `value_key`, optional `detail`/`detail_key`, optional `trend_key`.
@@ -1368,6 +1405,11 @@ agents:
 
       **Mode B — service_foundation** (`current_build_task_type == "service_foundation"` or no task_run_mode):
         Generate app scaffold, configuration, database connection, and middleware files.
+
+      **Mode S — subscription_config** (`current_build_task_type == "subscription_config"`):
+        Materialize provider-neutral `config/subscriptions.yaml` from
+        SubscriptionContractDesigner. Emit no modules, backend Python, services,
+        host-owned billing behavior, payment-provider resources, or ledgers.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
@@ -1383,6 +1425,13 @@ agents:
       - Emit only integration glue — do not build a standalone platform.
       - Produce a typed service foundation bundle plus serialized files.
 
+      **Mode S (subscription_config)**:
+      - Read the injected [SUBSCRIPTION CONTRACT CONTEXT] and `subscription_contract`.
+      - Emit exactly one typed subscription_config_bundle and serialized
+        `config/subscriptions.yaml` file.
+      - The file declares app plans, capabilities, assignment_store,
+        token_wallets, usage_limits, and token_allowances only.
+
       **Mode R (workflow_integration_repair)**:
       - Read `workflow_integration_repair_request` and `workflow_integration_repair_failed_tests`.
       - Repair only the affected module contract YAML that wires the generated workflow into the app.
@@ -1394,9 +1443,10 @@ agents:
     content: |-
       **Task context** (always read first):
       - `task_run_mode`: true when executing a specific build task via task batch execution.
-      - `current_build_task_type`: `module_contract` → Mode A, `service_foundation` → Mode B.
+      - `current_build_task_type`: `module_contract` → Mode A, `service_foundation` → Mode B, `subscription_config` → Mode S.
       - `current_build_task`: full task spec including `capability_pack_id`, `initial_message`, `owned_paths`.
       - `[FILE CONTRACTS CONTEXT]` and `[MODULE ARCHETYPES CONTEXT]` are injected into your system message. Use them as the prompt-time source for file-family boundaries and module.type conventions instead of inventing extra files.
+      - `[SUBSCRIPTION CONTRACT CONTEXT]` is injected when SubscriptionContractDesigner produced a contract. Use it as the source of truth in Mode S and when adding entitlement_gate values in Mode A.
 
       **Mode A inputs** (from `current_build_task.initial_message`):
       - Capability pack name (= `capability_pack_id`)
@@ -1412,6 +1462,10 @@ agents:
       - `generated_workflow_capability_id`: stable hyphenated capability id of the AgentGenerator-produced workflow (e.g. `customer-support`). Use this as the target capability id in `contracts/reactions.yaml` workflow reaction entries — never the raw workflow name. Null when no AgentGenerator workflow exists.
       - `generated_workflow_trigger_events`: trigger event contracts from the AgentGenerator workflow's orchestrator.yaml triggers block. Each entry carries an event type (and optional capability_id) that should fire the workflow. Generate one `contracts/reactions.yaml` entry per trigger event routing the matching domain event to the workflow via `generated_workflow_capability_id`. Empty array when no trigger events are declared.
       - Workflow trigger metadata is authoritative. If a trigger event entry includes `capability_id`, it must match `generated_workflow_capability_id`; do not substitute another id, derive a new id, or add a second workflow capability route for the same trigger event unless that route is present in the upstream workflow metadata.
+      - `subscription_contract.module_contract_updates`: authoritative
+        entitlement-gate updates for module actions. Copy matching
+        `entitlement_gate` values to the exact `actions[].id`; never derive a
+        new capability id from plan labels, route labels, or pricing language.
 
       **Mode B inputs**:
       - `app_build_plan`: backend scope, auth strategy, and integration requirements.
@@ -1459,6 +1513,10 @@ agents:
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
       5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
+         - If `subscription_contract.module_contract_updates` names this
+           module/action, set that action's `entitlement_gate` to the exact
+           update value. Leave `entitlement_gate` null/absent for actions not
+           named by the contract.
       6. **events.yaml**: include `schema_version: mozaiks.events.v1` and `events[]`. Generic modules may declare only namespaced `domain.*` events with `version`, `producer`, and `payload_schema`.
       7. **contracts/reactions.yaml**: include `schema_version: mozaiks.reactions.v1` and `reactions[]` for event reactions. Targets are `handler`, `capability`, or `notification`; workflow execution must be reached through a capability id, not a raw workflow name. Handler reactions must use `target.handler_method` referencing a method on `backend/handler.py`.
         - If `generated_workflow_trigger_events` is non-empty, generate one reaction entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
@@ -1493,13 +1551,13 @@ agents:
            - `backend/schemas.py`
          - Add optional hook files only when the YAML contract references them, such as `backend/settings.py`, `backend/notifications.py`, or `backend/admin.py`.
          - If the module requires an `api_router` runtime extension (e.g. external provider webhooks or inbound notification hooks), also add `backend/router.py`.
-         - If the module requires a `startup_service` runtime extension (e.g. persistent WebSocket or market-feed connection), also add `backend/worker.py`.
+         - If the module requires a `startup_service` runtime extension (e.g. persistent WebSocket, market-feed connection, or background poller for the `event_pipeline` archetype), also add `backend/{worker_or_poller}.py`. For event_pipeline modules, name the file `backend/{domain}_poller.py` and the class `{Domain}Poller`.
          - Every entry must include `path`, `kind`, `purpose`, and `contract_refs`.
          - Type-specific file additions must stay inside `[FILE CONTRACTS CONTEXT]`. Module types do not invent extra YAML families beyond the canonical contract bundle.
       12. Set `js_stubs` only when a declared YAML contract requires frontend customization, such as an admin panel using `renderer: custom_component`. Every entry must include `path`, `surface`, `registry_key`, `purpose`, and `contract_refs`.
       13. Set `runtime_extensions_yaml` only when the module genuinely requires a host-level extension:
          - `api_router`: module needs unauthenticated raw-body routes at the host level (e.g. external webhook receiver or inbound notification handler). Entrypoint must be `backend.router:get_router` within this module.
-         - `startup_service`: module needs a process-lifetime background connection started before requests are served (e.g. WebSocket market feed, persistent broker connection). Entrypoint must be `backend.worker:{ServiceClass}` within this module.
+         - `startup_service`: module needs a process-lifetime background service started before requests are served. Two patterns: (1) persistent connection (WebSocket market feed, broker) — entrypoint `backend.worker:{ServiceClass}`; (2) background poller for event_pipeline archetype (DNS verification, SSL status, payment confirmation) — entrypoint `backend.{domain}_poller:{Domain}Poller`. Pollers must use AsyncIOMotorClient directly (not app_data_from_context) and resolve provider adapters lazily, returning early when unconfigured. A stub adapter must accompany every real provider adapter so the pipeline runs locally without external infrastructure.
          - Entrypoints are module-local only. Do not use `modules.*`, `app.modules.*`, or `mozaiksai.*` import paths in runtime_extensions.yaml.
          - Most modules do NOT need runtime_extensions_yaml. Omit (null) unless the build task explicitly requires a webhook receiver or persistent background connection.
          - When emitted, set `schema_version: mozaiks.runtime_extensions.v1` and populate `extensions[]`.
@@ -1517,6 +1575,25 @@ agents:
       7. Mirror those files into `code_files`.
       8. Set `module_contract` to null in service_foundation mode.
 
+      **If `current_build_task_type == "subscription_config"` (Mode S)**:
+
+      1. Read `subscription_contract.subscription_config_file` from context or the injected [SUBSCRIPTION CONTRACT CONTEXT].
+      2. If `subscription_contract.contract_required` is not true, fail clearly; do not emit an empty or placeholder config.
+      3. Emit `mode: "subscription_config"`.
+      4. Emit `subscription_config_bundle.files` with exactly one file:
+         - `filename: "config/subscriptions.yaml"`
+         - `content`: YAML serialization of subscription_config_file
+      5. The YAML root must contain only OSS subscription config fields:
+         `schema_version`, `label`, `default_plan_id`, `assignment_store`,
+         `token_wallets`, and `plans`.
+      6. Do not emit `contracts/subscriptions.yaml`, module files, backend Python,
+         service adapters, host-owned billing actions, payment-provider product ids,
+         price ids, checkout behavior, invoice logic, or token ledger code.
+         Runtime token usage and wallet reads are platform-owned through
+         `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`.
+      7. Set `module_contract` and `service_foundation_bundle` to null.
+      8. Mirror the same single file into `code_files`.
+
       **If `current_build_task_type` is anything else**:
 
       1. Fail the task — do not guess a fallback mode unless Mode R is active.
@@ -1533,6 +1610,7 @@ agents:
         "mode": "module_contract_bundle",
         "module_contract": { "...": "Must match ModuleContractBundle exactly" },
         "service_foundation_bundle": null,
+        "subscription_config_bundle": null,
         "code_files": [
           { "filename": "modules/{module_id}/module.yaml", "content": "..." }
         ],
@@ -1546,6 +1624,7 @@ agents:
         "mode": "service_foundation",
         "module_contract": null,
         "service_foundation_bundle": { "files": [{ "path": "backend/...", "kind": "...", "purpose": "...", "contract_refs": ["..."], "content": "..." }] },
+        "subscription_config_bundle": null,
         "code_files": [
           { "filename": "backend/...", "content": "..." }
         ],
@@ -1553,7 +1632,31 @@ agents:
       }
       ```
 
-      Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`.
+      **Mode S (`subscription_config`)**:
+      ```json
+      {
+        "mode": "subscription_config",
+        "module_contract": null,
+        "service_foundation_bundle": null,
+        "subscription_config_bundle": {
+          "files": [
+            {
+              "filename": "config/subscriptions.yaml",
+              "content": "schema_version: mozaiks.subscriptions.v1\n..."
+            }
+          ]
+        },
+        "code_files": [
+          {
+            "filename": "config/subscriptions.yaml",
+            "content": "schema_version: mozaiks.subscriptions.v1\n..."
+          }
+        ],
+        "agent_message": "Generated provider-neutral subscription config."
+      }
+      ```
+
+      Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, `BackendFoundationBundle`, and `SubscriptionConfigBundle` in `structured_outputs.yaml`.
 
       **CRITICAL**: Output ONLY the raw JSON object.
   - id: self_validation

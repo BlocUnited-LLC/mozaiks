@@ -614,6 +614,7 @@ models:
       task_type:
         type: literal
         values:
+        - subscription_config
         - service_foundation
         - module_contract
         - persistence_contract
@@ -627,6 +628,8 @@ models:
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
           declarative page/schema bundle and must be paired with AppSchemaAgent.
+          `subscription_config` emits only config/subscriptions.yaml from
+          SubscriptionContractDesigner when contract_required=true.
           `module_contract` emits only module.yaml, contracts/*.yaml, and optional
           runtime_extensions.yaml; it must not own backend/*.py.
           `data_models` emits modules/{module_id}/backend/schemas.py and must start
@@ -1598,6 +1601,15 @@ models:
         type: list
         items: BackendFoundationFile
         description: Typed service foundation files emitted in ConfigMiddleware service_foundation mode.
+  SubscriptionConfigBundle:
+    type: model
+    fields:
+      files:
+        type: list
+        items: CodeFileEntry
+        description: >
+          Serialized subscription contract files emitted in ConfigMiddleware
+          subscription_config mode. Must contain only config/subscriptions.yaml.
   ModelFile:
     type: model
     fields:
@@ -1659,12 +1671,14 @@ models:
         - standard
         - messaging
         - workflow
+        - event_pipeline
         - transactional
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
           standard = request/response CRUD (default).
           messaging = stateful communication with read/unread tracking using canonical module contracts only.
           workflow = named lifecycle/state behavior implemented through canonical module contracts and backend policy helpers.
+          event_pipeline = automated multi-step lifecycle driven by events, reactions, and optional background polling.
           transactional = append-only ledger for value movements.
       description:
         type: str
@@ -2650,6 +2664,7 @@ models:
         values:
         - module_contract_bundle
         - service_foundation
+        - subscription_config
         description: Output mode selected from current_build_task_type or a bounded workflow-integration repair pass.
       module_contract:
         type: union
@@ -2662,11 +2677,17 @@ models:
         variants:
         - BackendFoundationBundle
         - 'null'
-        description: Required in service_foundation mode; null for module_contract_bundle mode.
+        description: Required in service_foundation mode; null for module_contract_bundle and subscription_config modes.
+      subscription_config_bundle:
+        type: union
+        variants:
+        - SubscriptionConfigBundle
+        - 'null'
+        description: Required in subscription_config mode; null for other modes.
       code_files:
         type: list
         items: CodeFileEntry
-        description: Serialized files. In typed modes, these mirror module_contract or service_foundation_bundle.
+        description: Serialized files. In typed modes, these mirror module_contract, service_foundation_bundle, or subscription_config_bundle.
       agent_message:
         type: union
         variants:

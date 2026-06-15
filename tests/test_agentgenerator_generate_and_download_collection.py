@@ -14,6 +14,9 @@ def _load_generate_and_download_module():
 
 
 generate_and_download_module = _load_generate_and_download_module()
+workflow_quality_gate_module = import_module(
+    "factory_app.workflows.AgentGenerator.tools.workflow_quality_gate"
+)
 
 
 class _Context:
@@ -493,4 +496,117 @@ conveyors:
         for item in context.data["workflow_bundle_semantic_drift"]["workflows"][0]["semantic_drifts"]
     )
     ui_mock.assert_not_awaited()
+
+
+def test_generate_and_download_schedules_bounded_repair_for_failed_workflow(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    good_files = _minimal_workflow_files("GoodWorkflow")
+    broken_files = [
+        file_entry
+        for file_entry in _minimal_workflow_files("BrokenWorkflow")
+        if file_entry["filename"] != "ui_config.yaml"
+    ]
+    bundle_results = _make_bundle_results([
+        {"workflow_name": "GoodWorkflow", "files": good_files},
+        {"workflow_name": "BrokenWorkflow", "files": broken_files},
+    ])
+    context = _Context(
+        {
+            "chat_id": "chat-repair-1",
+            "app_id": "app-repair-1",
+            "user_id": "user-repair-1",
+            "pack_name": "RepairPack",
+            "workflow_bundle_results": bundle_results,
+            "workflows_spec": [
+                {
+                    "name": "GoodWorkflow",
+                    "task_id": "goodworkflow",
+                    "initial_agent": "WorkflowBundleBuilderAgent",
+                    "initial_message": "Generate GoodWorkflow.",
+                },
+                {
+                    "name": "BrokenWorkflow",
+                    "task_id": "brokenworkflow",
+                    "initial_agent": "WorkflowBundleBuilderAgent",
+                    "initial_message": "Generate BrokenWorkflow.",
+                },
+            ],
+        }
+    )
+    ui_mock = AsyncMock(return_value={"status": "completed", "data": {}, "agentContext": {}})
+
+    monkeypatch.setenv("MOZAIKS_GENERATED_ARTIFACTS_PATH", str(tmp_path / "generated"))
+    monkeypatch.setattr(generate_and_download_module, "use_ui_tool", ui_mock)
+
+    result = asyncio.run(
+        generate_and_download_module.generate_and_download(
+            DownloadRequest={"confirmation_only": False, "storage_backend": "none"},
+            agent_message="Done.",
+            context_variables=context,
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert result["workflow_bundle_repair"]["status"] == "needs_revision"
+    assert context.data["workflow_bundle_repair_status"] == "needs_revision"
+    assert context.data["workflow_bundle_repair_count"] == 1
+    assert context.data["workflow_bundle_repair_failed_workflows"] == ["BrokenWorkflow"]
+    assert context.data["workflow_bundle_repair_base_results"] == bundle_results
+    assert [item["name"] for item in context.data["workflows_spec"]] == ["BrokenWorkflow"]
+    assert "[WORKFLOW BUNDLE REPAIR REQUEST]" in context.data["workflows_spec"][0]["initial_message"]
+    ui_mock.assert_not_awaited()
+
+
+def test_merge_workflow_bundle_repair_results_preserves_successful_outputs() -> None:
+    base_results = _make_bundle_results([
+        {"workflow_name": "GoodWorkflow", "files": _minimal_workflow_files("GoodWorkflow")},
+        {
+            "workflow_name": "BrokenWorkflow",
+            "files": _minimal_workflow_files("BrokenWorkflow")[:2],
+        },
+    ])
+    repaired_results = _make_bundle_results([
+        {
+            "workflow_name": "BrokenWorkflow",
+            "files": _minimal_workflow_files("BrokenWorkflow"),
+        }
+    ])
+    context = _Context(
+        {
+            "workflow_bundle_repair_active": True,
+            "workflow_bundle_repair_count": 1,
+            "workflow_bundle_repair_base_results": base_results,
+            "workflow_bundle_results": repaired_results,
+            "workflow_bundle_repair_original_workflows_spec": [
+                {"name": "GoodWorkflow"},
+                {"name": "BrokenWorkflow"},
+            ],
+            "workflows_spec": [{"name": "BrokenWorkflow"}],
+        }
+    )
+
+    result = workflow_quality_gate_module.merge_workflow_bundle_repair_results(context)
+
+    assert result["status"] == "merged"
+    assert context.data["workflow_bundle_repair_status"] == "merged"
+    assert context.data["workflow_bundle_repair_active"] is False
+    assert [item["name"] for item in context.data["workflows_spec"]] == [
+        "GoodWorkflow",
+        "BrokenWorkflow",
+    ]
+    merged = context.data["workflow_bundle_results"]
+    merged_workflow_names = {
+        value["workflow_name"]
+        for key, value in merged.items()
+        if not key.startswith("_")
+    }
+    assert merged_workflow_names == {"GoodWorkflow", "BrokenWorkflow"}
+    repaired_entry = next(
+        value
+        for key, value in merged.items()
+        if not key.startswith("_") and value["workflow_name"] == "BrokenWorkflow"
+    )
+    assert len(repaired_entry["files"]) == len(_minimal_workflow_files("BrokenWorkflow"))
 

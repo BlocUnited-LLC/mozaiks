@@ -138,6 +138,8 @@ def test_build_seeded_pack_context_has_parallel_agentgenerator_work_items() -> N
     assert "capability_id: ticket-batch-triage-workflow" in conveyor_spec["initial_message"]
     assert "ticket_batch_triage_tasks_results" in conveyor_spec["initial_message"]
     assert "ticket_batch_triage_tasks_status" in conveyor_spec["initial_message"]
+    assert "distinct declared execution agents" in conveyor_spec["initial_message"]
+    assert "do not repeat the same worker name" in conveyor_spec["initial_message"]
 
 
 def test_workflow_bundle_builder_prompt_forbids_punctuated_yaml_scalars() -> None:
@@ -157,6 +159,8 @@ def test_workflow_bundle_builder_prompt_forbids_punctuated_yaml_scalars() -> Non
     assert "HandlingLaneAgent" in prompt
     assert "Never omit or null `capability_id`" in prompt
     assert "Trigger for ... event" in prompt
+    assert "`execution_agents[]` must contain at least two distinct declared agents" in prompt
+    assert "Do not repeat the same worker name" in prompt
     assert "BackendOnly/headless workflows still include ui_config.yaml" in prompt
     assert "never omit ui_config.yaml" in prompt
     assert "transition_type: after_turn." in prompt

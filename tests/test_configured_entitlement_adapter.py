@@ -231,3 +231,72 @@ async def test_tenant_specific_assignment_is_preferred() -> None:
 
     assert result.granted is True
     assert collection.queries[0]["tenant_id"] == "tenant-1"
+
+
+@pytest.mark.asyncio
+async def test_current_plan_id_uses_active_assignment() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "app_id": "app-1",
+                "tenant_id": None,
+                "workspace_id": None,
+                "plan_id": "pro",
+                "status": "active",
+            }
+        ]
+    )
+    adapter = ConfiguredEntitlementAdapter(
+        config=_config(),
+        collection_resolver=lambda alias: collection,
+    )
+
+    plan_id = await adapter.current_plan_id(app_id="app-1")
+
+    assert plan_id == "pro"
+
+
+@pytest.mark.asyncio
+async def test_current_plan_id_preserves_active_catalog_plan_not_in_static_config() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "app_id": "app-1",
+                "tenant_id": None,
+                "workspace_id": None,
+                "plan_id": "operator_plus",
+                "status": "active",
+            }
+        ]
+    )
+    adapter = ConfiguredEntitlementAdapter(
+        config=_config(),
+        collection_resolver=lambda alias: collection,
+    )
+
+    plan_id = await adapter.current_plan_id(app_id="app-1")
+
+    assert plan_id == "operator_plus"
+
+
+@pytest.mark.asyncio
+async def test_current_plan_id_falls_back_to_default_for_inactive_assignment() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "app_id": "app-1",
+                "tenant_id": None,
+                "workspace_id": None,
+                "plan_id": "pro",
+                "status": "cancelled",
+            }
+        ]
+    )
+    adapter = ConfiguredEntitlementAdapter(
+        config=_config(),
+        collection_resolver=lambda alias: collection,
+    )
+
+    plan_id = await adapter.current_plan_id(app_id="app-1")
+
+    assert plan_id == "free"

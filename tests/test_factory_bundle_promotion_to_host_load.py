@@ -48,7 +48,6 @@ from scripts.smoke_appgenerator_live_acceptance import (
     default_workflow_integration,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

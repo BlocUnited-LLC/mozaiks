@@ -260,7 +260,10 @@ class TestHostedCapabilitiesHook:
                         ],
                         "forbidden_outputs": [{"path_prefix": "modules/testpay/"}],
                         "runtime_boundaries": [
-                            {"id": "usage_runtime", "rule": "Do not create a custom token ledger."}
+                            {
+                                "id": "usage_runtime",
+                                "rule": "Use the OSS token wallet ledger for balances.",
+                            }
                         ],
                         "facades": [
                             {
@@ -279,7 +282,7 @@ class TestHostedCapabilitiesHook:
         assert "select_for_saas_billing" in msg
         assert "services/integrations/testpay_client.py" in msg
         assert "modules/testpay/" in msg
-        assert "Do not create a custom token ledger." in msg
+        assert "Use the OSS token wallet ledger for balances." in msg
         assert "billing_portal wraps testpay" in msg
 
     def test_typed_contracts_only_from_runtime_context_not_oss_defaults(self) -> None:

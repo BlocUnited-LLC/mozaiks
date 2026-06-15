@@ -6,17 +6,15 @@ without any network calls, AG2 dependencies, or live LLMs.
 from __future__ import annotations
 
 import logging
-from unittest.mock import patch
 
 import pytest
 
 from mozaiksai.control_plane.metrics import (
     ControlPlaneBuildTimer,
+    _token_anomaly_threshold,
     check_token_usage,
     log_build_outcome,
-    _token_anomaly_threshold,
 )
-
 
 # ---------------------------------------------------------------------------
 # _token_anomaly_threshold

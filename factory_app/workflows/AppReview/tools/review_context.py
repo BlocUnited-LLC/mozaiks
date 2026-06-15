@@ -108,6 +108,8 @@ def build_review_summary_payload(context_variables: Any | None) -> dict[str, Any
 
     if not build_registry_id:
         promotion_blockers.append("missing_build_registry_id")
+    if not artifact_version_id:
+        promotion_blockers.append("missing_artifact_version_id")
     if lifecycle_state != "review":
         promotion_blockers.append("lifecycle_not_review")
     if app_validation_status is None:

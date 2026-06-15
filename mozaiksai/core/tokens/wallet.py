@@ -22,6 +22,7 @@ from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeC
 from mozaiksai.core.multitenant import coalesce_app_id
 from mozaiksai.core.runtime.app.subscriptions_loader import (
     SubscriptionsConfig,
+    TokenAllowanceDef,
     TokenWalletDef,
 )
 
@@ -380,7 +381,7 @@ class TokenWalletLedger:
             except DuplicateKeyError:
                 existing = await entries.find_one({"_id": entry_id})
                 if existing and _idempotency_conflict(existing, entry):
-                    raise ValueError("idempotency_key was reused with different token wallet entry data")
+                    raise ValueError("idempotency_key was reused with different token wallet entry data") from None
                 if existing and existing.get("status") in {"applied", "rejected"}:
                     balance_doc = await balances.find_one({"_id": scope.balance_id})
                     return TokenWalletEntryResult(
@@ -597,14 +598,45 @@ class TokenWalletLedger:
         config: SubscriptionsConfig,
         app_id: str,
         plan_id: str | None = None,
+        plan_label: str | None = None,
+        token_allowances: list[TokenAllowanceDef | dict[str, Any]] | None = None,
         user_id: str | None = None,
         tenant_id: str | None = None,
         period_start: datetime | None = None,
     ) -> list[TokenWalletEntryResult]:
-        plan = config.plan_by_id(plan_id)
+        plan = None
+        resolved_plan_id = _text(plan_id)
+        resolved_plan_label = _text(plan_label)
+        if token_allowances is None:
+            plan = config.plan_by_id(plan_id)
+            resolved_plan_id = plan.plan_id
+            resolved_plan_label = plan.label
+            allowances = list(plan.token_allowances)
+        else:
+            allowances = [
+                allowance
+                if isinstance(allowance, TokenAllowanceDef)
+                else TokenAllowanceDef.model_validate(allowance)
+                for allowance in token_allowances
+            ]
+            if not resolved_plan_id:
+                plan = config.plan_by_id(None)
+                resolved_plan_id = plan.plan_id
+                resolved_plan_label = resolved_plan_label or plan.label
+            elif not resolved_plan_label:
+                plan = next(
+                    (
+                        candidate
+                        for candidate in config.plans
+                        if candidate.plan_id == resolved_plan_id
+                    ),
+                    None,
+                )
+                resolved_plan_label = plan.label if plan is not None else resolved_plan_id
+
         period = period_start or _now()
         results: list[TokenWalletEntryResult] = []
-        for allowance in plan.token_allowances:
+        for allowance in allowances:
             if allowance.amount <= 0 or allowance.cadence == "manual":
                 continue
             wallet = config.token_wallet_by_id(allowance.wallet_id)
@@ -625,16 +657,16 @@ class TokenWalletLedger:
                     amount=allowance.amount,
                     operation="allocation",
                     idempotency_key=(
-                        f"subscription_allowance:{plan.plan_id}:{allowance.wallet_id}:"
+                        f"subscription_allowance:{resolved_plan_id}:{allowance.wallet_id}:"
                         f"{allowance.cadence}:{period_key}"
                     ),
                     user_id=user_id,
                     tenant_id=tenant_id,
                     preferred_scope=preferred_scope,
                     source="subscription_allowance",
-                    reason=allowance.label or f"{plan.label} allowance",
+                    reason=allowance.label or f"{resolved_plan_label} allowance",
                     metadata={
-                        "plan_id": plan.plan_id,
+                        "plan_id": resolved_plan_id,
                         "cadence": allowance.cadence,
                         "period_key": period_key,
                     },

@@ -275,6 +275,33 @@ definitions:
       fields:
       - surface_map
       default: null
+  subscription_contract:
+    type: object
+    description: >
+      Provider-neutral SubscriptionContractOutput produced by
+      SubscriptionContractDesigner in the current workflow sequence, when present.
+      WorkflowBundleBuilderAgent uses it to declare workflow metering surfaces
+      without implementing a custom token ledger.
+    source:
+      type: state
+      default: null
+  subscription_contract_artifact:
+    type: object
+    description: >
+      Latest persisted subscription_contract summary artifact. Used as a fallback
+      when the current sequence did not carry subscription_contract in state.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: ArtifactVersions
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        artifact_kind: subscription_contract
+        artifact_key: subscription_contract
+        lifecycle_status: current
+      fields:
+      - commit_metadata
+      default: null
   monetization_enabled:
     type: boolean
     description: Flag indicating if monetization features are enabled
@@ -636,6 +663,8 @@ agents:
     - concept_api_endpoints
     - concept_blueprint
     - design_surface_map
+    - subscription_contract
+    - subscription_contract_artifact
     - backend_design_document
     - experience_spec_document
     - monetization_enabled
@@ -665,6 +694,8 @@ agents:
     - concept_api_endpoints
     - concept_blueprint
     - design_surface_map
+    - subscription_contract
+    - subscription_contract_artifact
     - backend_design_document
     - experience_spec_document
     - pack_name

@@ -1,0 +1,180 @@
+definitions:
+  build_mode:
+    type: string
+    description: Build mode for subscription contract generation.
+    source:
+      type: state
+      default: initial
+  revision_scope:
+    type: string
+    description: Revision scope when rerun during refinement.
+    source:
+      type: state
+      default: null
+  change_request_id:
+    type: string
+    description: Stable lineage id for the active revision request.
+    source:
+      type: state
+      default: null
+  revision_id:
+    type: string
+    description: Runtime-generated revision run id.
+    source:
+      type: state
+      default: null
+  artifact_kind:
+    type: string
+    description: Artifact family currently being refined.
+    source:
+      type: state
+      default: null
+  artifact_version_id:
+    type: string
+    description: Artifact version id being refined, if any.
+    source:
+      type: state
+      default: null
+  sequence_status:
+    type: string
+    description: Builder sequence state before this run.
+    source:
+      type: state
+      default: in_progress
+  refinement_request:
+    type: string
+    description: Raw refinement request text when rerun during a revision.
+    source:
+      type: state
+      default: null
+  refinement_request_meta:
+    type: object
+    description: Full typed RefinementRequest payload when present.
+    source:
+      type: state
+      default: null
+  change_intent:
+    type: object
+    description: Control-plane refinement classification.
+    source:
+      type: state
+      default: null
+  impact_set:
+    type: object
+    description: Control-plane downstream impact summary.
+    source:
+      type: state
+      default: null
+  monetization_enabled:
+    type: boolean
+    description: Flag indicating whether monetization is enabled for this build.
+    source:
+      type: config
+      env_var: MONETIZATION_ENABLED
+      default: false
+  builder_options:
+    type: object
+    description: Optional app-agnostic builder UI options.
+    source:
+      type: state
+      default: null
+  concept_overview:
+    type: string
+    description: Project description and overview from ValueEngine.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: BuilderConcepts
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+        - ConceptOverview
+      default: null
+  concept_blueprint:
+    type: object
+    description: Structured ConceptBlueprint from ValueEngine.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: BuilderConcepts
+      query_template:
+        app_id: '{{runtime.app_id}}'
+      fields:
+        - Blueprint
+      default: null
+  backend_design_document:
+    type: string
+    description: Latest backend design document from DesignDocs.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: DesignDocuments
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        kind: backend
+        status: succeeded
+      fields:
+        - content
+      default: null
+  design_surface_map:
+    type: object
+    description: Canonical typed surface realization contract from DesignDocs.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: DesignDocuments
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        kind: backend
+        status: succeeded
+      fields:
+        - surface_map
+      default: null
+  experience_spec:
+    type: object
+    description: Typed ExperienceSpec from DesignDocs.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: DesignDocuments
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        kind: ui_schema
+        status: succeeded
+      fields:
+        - experience_spec
+      default: null
+  subscription_contract:
+    type: object
+    description: SubscriptionContractOutput persisted by this workflow for downstream generator context.
+    source:
+      type: computed
+      default: null
+  subscription_contract_files:
+    type: array
+    description: Code files produced by the subscription contract, usually config/subscriptions.yaml.
+    source:
+      type: computed
+      default: []
+agents:
+  ContractDesignerAgent:
+    variables:
+      - build_mode
+      - revision_scope
+      - change_request_id
+      - revision_id
+      - artifact_kind
+      - artifact_version_id
+      - sequence_status
+      - refinement_request
+      - refinement_request_meta
+      - change_intent
+      - impact_set
+      - monetization_enabled
+      - builder_options
+      - concept_overview
+      - concept_blueprint
+      - backend_design_document
+      - design_surface_map
+      - experience_spec
+      - subscription_contract

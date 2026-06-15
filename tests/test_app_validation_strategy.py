@@ -533,8 +533,11 @@ async def test_validate_app_bundle_from_request_blocks_workflow_integration_fail
     assert result["status"] == "failed"
     assert result["integration_tests_passed"] is False
     assert result["workflow_integration_validation_result"]["passed"] is False
+    assert result["workflow_integration_repair"]["status"] == "needs_revision"
     assert context.get("workflow_integration_validation_passed") is False
+    assert context.get("workflow_integration_repair_status") == "needs_revision"
     assert context.get("integration_test_result")["workflow_integration"]["failed_tests"]
+    assert context.get("integration_test_result")["workflow_integration_repair"]["status"] == "needs_revision"
 
 
 def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:

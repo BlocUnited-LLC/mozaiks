@@ -80,7 +80,12 @@ async def _persist_app_bundle_artifact(
         source_chat_id=resolved_chat_id,
         author_user_id=(user_id or "").strip() or None,
         revision_mode=build_mode == "revision",
-        input_artifact_kinds=("design_docs", "workflow_bundle", "theme_capture"),
+        input_artifact_kinds=(
+            "design_docs",
+            "subscription_contract",
+            "workflow_bundle",
+            "theme_capture",
+        ),
         artifact_store=artifact_store,
     )
 

@@ -339,6 +339,11 @@ class TestEndpointToActionKey:
         assert key == "orders/list_orders"
         assert error is None
 
+    def test_platform_account_usage_endpoint_returns_no_action_key(self):
+        key, error = _endpoint_to_action_key("/api/me/usage")
+        assert key is None
+        assert error is None
+
     def test_module_endpoint_too_many_parts(self):
         key, error = _endpoint_to_action_key("/api/modules/orders/sub/list")
         assert key is None

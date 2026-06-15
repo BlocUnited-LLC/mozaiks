@@ -203,6 +203,22 @@ def _strip_shared_root_prefix(entries: list[tuple[str, bytes]]) -> list[tuple[st
     return [("/".join(parts[1:]), content) for parts, (_, content) in zip(split_paths, entries, strict=False)]
 
 
+def _strip_app_bundle_root_prefix(paths: list[str]) -> dict[str, str]:
+    if not paths:
+        return {}
+    split_paths = [path.split("/") for path in paths]
+    if not split_paths or any(len(parts) < 2 for parts in split_paths):
+        return {path: path for path in paths}
+    first_segment = split_paths[0][0]
+    if not first_segment or not all(parts[0] == first_segment for parts in split_paths):
+        return {path: path for path in paths}
+
+    stripped = ["/".join(parts[1:]) for parts in split_paths]
+    if "app.json" not in stripped:
+        return {path: path for path in paths}
+    return {path: stripped_path for path, stripped_path in zip(paths, stripped, strict=False)}
+
+
 def _decode_text_bundle_entries(zip_path: Path) -> tuple[dict[str, str], list[str]]:
     files: dict[str, str] = {}
     skipped: list[str] = []
@@ -338,7 +354,9 @@ def _restore_bundle_to_target(*, zip_path: Path, target_dir: Path) -> dict[str, 
         if not planned:
             raise HTTPException(status_code=400, detail="Artifact bundle did not contain any restorable files.")
 
+        restore_names = _strip_app_bundle_root_prefix([safe_name for _, safe_name in planned])
         for info, safe_name in planned:
+            safe_name = restore_names.get(safe_name, safe_name)
             destination = (target_root / safe_name).resolve()
             if not destination.is_relative_to(target_root):
                 raise HTTPException(
@@ -1337,13 +1355,21 @@ async def reject_build_artifact_version(
     return {"rejected": True, "app_id": app_id, **payload}
 
 
+class BuildArtifactPromotionRequest(BaseModel):
+    build_registry_id: str | None = Field(
+        default=None,
+        description="Optional app_registry record id to mark active after the artifact is restored.",
+    )
+
+
 @app.post("/api/studio/build/artifacts/{artifact_version_id}/promote")
 async def promote_build_artifact_version(
     artifact_version_id: str,
+    body: BuildArtifactPromotionRequest | None = None,
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
-    app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
+    app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
     if not version:
@@ -1366,6 +1392,33 @@ async def promote_build_artifact_version(
             status_code=400,
             detail="Artifact versions must include a file manifest before promotion.",
         )
+    metadata = _version_metadata(version)
+    promotion_build_registry_id = (
+        str((body.build_registry_id if body is not None else None) or metadata.get("build_registry_id") or "").strip()
+        or None
+    )
+    app_registry_result = None
+    app_registry_service = None
+    if promotion_build_registry_id:
+        app_registry_service = _get_app_registry_service()
+        registry_record = (
+            await app_registry_service.get_app_record(build_registry_id=promotion_build_registry_id)
+        ).get("app")
+        if not registry_record:
+            raise HTTPException(
+                status_code=404,
+                detail=f"App registry record not found: {promotion_build_registry_id}",
+            )
+        if str(registry_record.get("app_id") or "").strip() != app_id:
+            raise HTTPException(
+                status_code=409,
+                detail="App registry record does not match the artifact app id.",
+            )
+        if str(registry_record.get("lifecycle_state") or "").strip() != "review":
+            raise HTTPException(
+                status_code=409,
+                detail="Only app registry records in review can be promoted.",
+            )
     refinement_metadata = _refinement_metadata_from_version(version)
 
     target_dir = _resolve_bundle_restore_target(version)
@@ -1387,6 +1440,14 @@ async def promote_build_artifact_version(
             status=RefinementSessionStatus.PROMOTED,
             ended_at=datetime.now(UTC),
         )
+    if promotion_build_registry_id and app_registry_service is not None:
+        try:
+            app_registry_result = await app_registry_service.promote_build(
+                build_registry_id=promotion_build_registry_id,
+                promoted_by=user_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     payload = await _build_artifact_review_payload(
         app_id=app_id,
@@ -1413,6 +1474,7 @@ async def promote_build_artifact_version(
         "restart_required": True,
         "restored_files": restore_summary["restored"],
         "skipped_files": restore_summary["skipped"],
+        "app_registry": app_registry_result,
         **payload,
     }
 

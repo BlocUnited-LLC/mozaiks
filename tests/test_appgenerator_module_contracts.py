@@ -92,6 +92,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "CiSecretRequirement",
         "CiWorkflowInputRequirement",
         "CiSecretRequirements",
+        "SubscriptionConfigBundle",
         "DeployTargetSpec",
         "DeploymentHealthcheck",
         "DeploymentBuildOutput",
@@ -128,9 +129,14 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["ConfigMiddlewareOutput"]["fields"]["mode"]["values"] == [
         "module_contract_bundle",
         "service_foundation",
+        "subscription_config",
     ]
     assert models["ConfigMiddlewareOutput"]["fields"]["service_foundation_bundle"]["variants"] == [
         "BackendFoundationBundle",
+        "null",
+    ]
+    assert models["ConfigMiddlewareOutput"]["fields"]["subscription_config_bundle"]["variants"] == [
+        "SubscriptionConfigBundle",
         "null",
     ]
     assert models["ControlPlaneOutput"]["fields"]["control_plane_pack"]["type"] == "ControlPlanePackBundle"
@@ -331,7 +337,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
         assert "profile.yaml" in optional_family, f"{archetype_name} archetype missing profile.yaml in optional family"
     assert "Use one of these exact top-level shapes:" in source
     assert "Use one of these exact bounded shapes:" in source
-    assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, and `BackendFoundationBundle` in `structured_outputs.yaml`." in source
+    assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, `BackendFoundationBundle`, and `SubscriptionConfigBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControlPlaneOutput` and `ControlPlanePackBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
 

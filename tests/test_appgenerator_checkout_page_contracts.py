@@ -77,7 +77,7 @@ def _page_bundle_section(text: str) -> str:
     start = text.find("  page_bundle:")
     if start == -1:
         return text
-    next_key = text.find("\n  ", start + 1)
+    next_key = text.find("\n  subscription_config:", start + 1)
     return text[start:next_key] if next_key != -1 else text[start:]
 
 
@@ -183,7 +183,7 @@ class TestFileContractsCheckoutConstraints:
     """file_contracts page_bundle must encode the checkout escape-hatch constraints."""
 
     def _section(self) -> str:
-        return _file_contracts_text()
+        return _page_bundle_section(_file_contracts_text())
 
     def test_custom_route_bundle_required_for_query_param_polling(self):
         """page_bundle hard_constraints must state custom_route_bundle for query-param polling."""
@@ -703,7 +703,7 @@ class TestOSSProprietaryNamesAbsent:
             )
 
     def test_file_contracts_checkout_constraints_have_no_proprietary_names(self):
-        text = _file_contracts_text()
+        text = _page_bundle_section(_file_contracts_text())
         # Check the newly added constraints only (the post-redirect section)
         checkout_section = text[text.find("query params"):]
         for name in _PROPRIETARY_NAMES:

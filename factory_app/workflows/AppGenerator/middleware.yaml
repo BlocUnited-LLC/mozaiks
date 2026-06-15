@@ -44,6 +44,15 @@ prompt_middleware:
 - agent: AppPlanAgent
   function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
 - agent: AppPlanAgent
+  filename: ../_shared/subscription_contract_context.py
+  function: inject_subscription_contract_context
+- agent: AppSchemaAgent
+  filename: ../_shared/subscription_contract_context.py
+  function: inject_subscription_contract_context
+- agent: ConfigMiddlewareAgent
+  filename: ../_shared/subscription_contract_context.py
+  function: inject_subscription_contract_context
+- agent: AppPlanAgent
   filename: hook_hosted_capabilities_context.py
   function: inject_hosted_capabilities_context
 - agent: AppPlanAgent

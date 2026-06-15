@@ -7,7 +7,7 @@ integration using TestClient with a mocked auth adapter.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -16,14 +16,12 @@ from fastapi.testclient import TestClient
 from mozaiksai.core.auth.adapters.base import AuthError, UserClaims
 from mozaiksai.core.auth.dependencies import (
     UserPrincipal,
-    _extract_token,
     require_role,
     require_user,
     validate_path_app_id,
     validate_path_chat_id,
     validate_user_id_against_principal,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

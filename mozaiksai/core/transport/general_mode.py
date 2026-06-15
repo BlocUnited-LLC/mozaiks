@@ -181,13 +181,27 @@ class GeneralModeMixin:
             )
             return
 
-        response = await service.generate_response(
-            prompt=user_message,
-            workflows=workflows_payload,
-            app_id=str(app_id),
-            user_id=str(user_id) if user_id else None,
-            ui_context=ui_context,
-        )
+        try:
+            response = await service.generate_response(
+                prompt=user_message,
+                workflows=workflows_payload,
+                app_id=str(app_id),
+                user_id=str(user_id) if user_id else None,
+                ui_context=ui_context,
+            )
+        except Exception as exc:
+            if exc.__class__.__name__ == "TokenUsageDenied":
+                await self.send_chat_message(
+                    str(exc),
+                    agent_name="System",
+                    chat_id=chat_id,
+                    metadata={
+                        **metadata_base,
+                        "error_code": getattr(getattr(exc, "decision", None), "error_code", None),
+                    },
+                )
+                return
+            raise
 
         assistant_metadata = {
             "source": "general_agent",

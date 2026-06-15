@@ -18,8 +18,9 @@ agents:
       decide what to do next. The user has two paths:
 
       1. Promote — the user clicks the Promote button in the summary
-         artifact. This calls the app_registry.promote_build API
-         directly from the UI. You will see the result in context.
+         artifact. This calls Studio artifact promotion for the reviewed
+         artifact_version_id, restores the artifact into the active app root,
+         and marks the app registry active. You will see the result in context.
          Once promotion is confirmed, say a short success message and
          then call submit_revision_request with action="promote" to
          signal review_complete.

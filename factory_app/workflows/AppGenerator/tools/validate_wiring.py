@@ -1,5 +1,6 @@
 """
-validate_wiring - Cross-reference page api_endpoint fields against known module actions.
+validate_wiring - Cross-reference page api_endpoint fields against known module actions
+and platform-owned read endpoints.
 
 Runs during the deterministic AppValidationAgent acceptance gate, after
 AppSchemaAgent output and task-batch assembly are complete.
@@ -11,10 +12,12 @@ Algorithm
 2. Build a registry of valid "{module_id}/{action_id}" paths from two sources:
      a. context_variables.app_build_plan.capability_packs  (planned actions)
      b. modules/*/module.yaml files on disk in the generated app directory (actual actions)
-3. Cross-reference every referenced endpoint against the registry.
+3. Cross-reference every referenced endpoint against the registry or the small
+   allowlist of platform-owned read endpoints that the page renderer may fetch.
 4. Report:
      wired            — endpoints that resolved correctly
-     orphaned_pages   — endpoints with no matching module action (BLOCKING)
+     platform_endpoints — platform-owned read endpoints that do not map to modules
+     orphaned_pages   — endpoints with no matching module action or platform endpoint (BLOCKING)
      orphaned_actions — module actions with no page referencing them (advisory warning)
 
 The check is only blocking when a module registry is available. If neither
@@ -31,6 +34,12 @@ from urllib.parse import urlsplit
 import yaml
 
 _logger = logging.getLogger("tools.validate_wiring")
+
+PLATFORM_READ_ENDPOINTS = {
+    "/api/me/usage",
+    "/api/me/tokens",
+    "/api/me/tokens/ledger",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -154,10 +163,20 @@ def _extract_endpoint_refs(pages: list[Any]) -> list[tuple[str, str, str]]:
     return results
 
 
+def _endpoint_path(endpoint: str) -> str:
+    return urlsplit(endpoint.strip()).path.strip()
+
+
+def _is_platform_read_endpoint(endpoint: str) -> bool:
+    return _endpoint_path(endpoint) in PLATFORM_READ_ENDPOINTS
+
+
 def _endpoint_to_action_key(endpoint: str) -> tuple[str | None, str | None]:
     """Normalize a page api_endpoint to the module action registry key.
 
-    Canonical app pages call module actions at /api/modules/{module}/{action}.
+    Canonical app pages call module actions at /api/modules/{module}/{action}
+    or read the explicit platform-owned account endpoints listed in
+    PLATFORM_READ_ENDPOINTS.
     Query strings are intentionally rejected because durable page parameters
     belong in page_size, payload, form input, or module action input schemas.
     """
@@ -168,6 +187,8 @@ def _endpoint_to_action_key(endpoint: str) -> tuple[str | None, str | None]:
         return None, "api_endpoint must not include query strings or fragments"
 
     path = parsed.path.strip()
+    if path in PLATFORM_READ_ENDPOINTS:
+        return None, None
     if path.startswith("/api/modules/"):
         parts = path.strip("/").split("/")
         if len(parts) != 4 or parts[0] != "api" or parts[1] != "modules" or not parts[2] or not parts[3]:
@@ -320,9 +341,12 @@ async def validate_wiring(
     endpoint_keys: dict[tuple[str, str, str], str | None] = {}
     invalid_refs: set[tuple[str, str, str]] = set()
     invalid_endpoints: list[dict[str, str]] = []
+    platform_refs: set[tuple[str, str, str]] = set()
     for page_name, section_id, endpoint in endpoint_refs:
         action_key, error = _endpoint_to_action_key(endpoint)
         endpoint_keys[(page_name, section_id, endpoint)] = action_key
+        if _is_platform_read_endpoint(endpoint):
+            platform_refs.add((page_name, section_id, endpoint))
         if action_key:
             referenced_set.add(action_key)
             if "/" in action_key:
@@ -369,11 +393,15 @@ async def validate_wiring(
 
     # ── 3. Cross-reference ────────────────────────────────────────────────
     wired: list[dict[str, str]] = []
+    platform_endpoints: list[dict[str, str]] = []
     orphaned_pages: list[dict[str, str]] = []
 
     for page_name, section_id, endpoint in endpoint_refs:
         action_key = endpoint_keys.get((page_name, section_id, endpoint))
         if (page_name, section_id, endpoint) in invalid_refs:
+            continue
+        if (page_name, section_id, endpoint) in platform_refs:
+            platform_endpoints.append({"page": page_name, "section": section_id, "endpoint": endpoint})
             continue
         if action_key in known_actions:
             wired.append({"page": page_name, "section": section_id, "endpoint": endpoint})
@@ -430,8 +458,9 @@ async def validate_wiring(
                     f"api_endpoint '{item['endpoint']}' which has no matching module action."
                 ),
                 "fix_suggestion": (
-                    f"Either add action '{item['endpoint']}' to the appropriate module.yaml "
-                    "or correct the api_endpoint value in the page schema."
+                    f"Either add action '{item['endpoint']}' to the appropriate module.yaml, "
+                    "use one of the supported platform read endpoints, or correct the "
+                    "api_endpoint value in the page schema."
                 ),
             })
 
@@ -462,8 +491,15 @@ async def validate_wiring(
             f"{len(orphaned_pages)} page endpoint(s) reference unknown module actions."
         )
     elif not no_endpoints and not no_registry:
+        platform_count = len(platform_endpoints)
+        platform_suffix = (
+            f" and {platform_count} platform-owned endpoint(s)"
+            if platform_count
+            else ""
+        )
         message = (
-            f"All {len(wired)} page api_endpoint reference(s) resolve to known module actions."
+            f"All {len(wired)} page api_endpoint reference(s) resolve to known "
+            f"module actions{platform_suffix}."
         )
     else:
         message = "Wiring check passed (advisory — registry or endpoints unavailable)."
@@ -476,11 +512,13 @@ async def validate_wiring(
             "blocking": not no_registry,
             "total_endpoints_referenced": len(endpoint_refs),
             "wired_count": len(wired),
+            "platform_endpoint_count": len(platform_endpoints),
             "invalid_endpoint_count": len(invalid_endpoints),
             "orphaned_page_count": len(orphaned_pages),
             "orphaned_action_count": len(orphaned_actions),
             "module_registry_available": not no_registry,
             "wired": wired,
+            "platform_endpoints": platform_endpoints,
             "invalid_endpoints": invalid_endpoints,
             "orphaned_pages": orphaned_pages,
             "orphaned_actions": orphaned_actions,
@@ -496,6 +534,7 @@ async def validate_wiring(
         "contract_version": "1.0",
         "passed": blocking_pass,
         "wired": wired,
+        "platform_endpoints": platform_endpoints,
         "invalid_endpoints": invalid_endpoints,
         "orphaned_pages": orphaned_pages,
         "orphaned_actions": orphaned_actions,

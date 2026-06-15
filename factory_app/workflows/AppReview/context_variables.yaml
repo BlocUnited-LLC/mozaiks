@@ -5,7 +5,8 @@ definitions:
       ID of the hosted app_registry record for the build being reviewed.
       Passed in from the preceding AppGenerator session via journey context.
       Used by present_review_summary to display the build record and by
-      the Promote action to call app_registry.promote_build.
+      the artifact promotion endpoint to mark the app registry active after
+      the reviewed artifact is restored.
     source:
       type: state
       default: null

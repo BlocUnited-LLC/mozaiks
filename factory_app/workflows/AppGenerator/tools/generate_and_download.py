@@ -490,6 +490,12 @@ async def _register_app_bundle_artifact_version(
         "artifact_path": str(zip_path.resolve()),
         "bundle_name": bundle_name,
     }
+    build_registry_id = _context_get(context_variables, "build_registry_id")
+    if build_registry_id:
+        bundle_content_metadata["build_registry_id"] = str(build_registry_id)
+    build_id = _context_get(context_variables, "build_id")
+    if build_id:
+        bundle_content_metadata["build_id"] = str(build_id)
     # Include the carry-forward preservation report in artifact metadata when present.
     cf_report = None
     if context_variables is not None and hasattr(context_variables, "get"):

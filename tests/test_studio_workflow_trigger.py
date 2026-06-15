@@ -1249,6 +1249,126 @@ def test_studio_trigger_endpoint_reuses_prelaunch_revision_intent_on_confirm(mon
     assert captured_prepare["trigger_payload"]["revision_id"] == persisted_state["active_revision_id"]
 
 
+def test_app_review_revision_trigger_preserves_staged_bundle_context(monkeypatch):
+    from mozaiksai.core.auth import reset_auth_adapter
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+    reset_auth_adapter()
+    sys.modules.pop("factory_app", None)
+
+    from mozaiksai.hosts import studio as studio_app
+
+    staged_bundle_path = "C:/Repos/BlocUnitedRepo/mozaiks/generated/apps/app_1/build_1/app"
+    captured_pending: dict = {}
+    create_calls: list[dict] = []
+
+    async def fail_prepare(**kwargs):  # noqa: ANN003
+        raise AssertionError("workflow launch should not run before AppReview core confirmation")
+
+    async def fail_launch(launch):  # noqa: ANN001
+        raise AssertionError("workflow launch should not run before AppReview core confirmation")
+
+    async def fake_persist_revision_intent(*, trigger, decision, pending_harness_decision=None):  # noqa: ANN001
+        captured_pending.update(
+            {
+                "trigger_source": trigger.trigger_source,
+                "decision_context_seed": dict(decision.context_seed or {}),
+                "trigger_payload": dict(trigger.trigger_payload or {}),
+                "pending_trigger_payload": (
+                    dict(pending_harness_decision.trigger_payload or {})
+                    if pending_harness_decision is not None
+                    else {}
+                ),
+            }
+        )
+        return {
+            "session_id": f"session_router::{trigger.app_id}::{trigger.user_id}",
+            "app_id": trigger.app_id,
+            "user_id": trigger.user_id,
+            "active_change_request_id": "cr_app_review_1",
+            "active_revision_id": "rev_app_review_1",
+        }
+
+    class _ArtifactStore:
+        async def create_change_request(self, **kwargs):
+            create_calls.append(kwargs)
+            return SimpleNamespace(id="cr_app_review_1")
+
+        async def invalidate_artifact_version_refs(self, **kwargs):
+            return [kwargs["artifact_version_refs"]["app_bundle"]]
+
+    monkeypatch.setattr(
+        studio_app,
+        "get_session_router",
+        lambda: SimpleNamespace(persist_revision_intent=fake_persist_revision_intent),
+    )
+    monkeypatch.setattr(studio_app, "prepare_routed_workflow_launch", fail_prepare)
+    monkeypatch.setattr(studio_app, "launch_prepared_workflow", fail_launch)
+    monkeypatch.setattr(studio_app, "get_artifact_store", lambda: _ArtifactStore())
+    monkeypatch.setattr(
+        studio_app.get_orchestration_control_harness()._refinement_resolver,
+        "_classifier",
+        SimpleNamespace(
+            classify=_async_classifier(
+                change_class="core",
+                rationale="Changing the product from CRM to marketplace changes the concept.",
+                confidence=0.95,
+                signals=["concept_shift"],
+            )
+        ),
+    )
+
+    client = TestClient(studio_app.app)
+    response = client.post(
+        "/api/workflows/trigger",
+        json={
+            "trigger_source": "refinement",
+            "app_id": "app_1",
+            "user_id": "demo-user",
+            "trigger_payload": {
+                "refinement_request": {
+                    "artifact_kind": "app_bundle",
+                    "artifact_key": "app_bundle",
+                    "artifact_version_id": "av_review_1",
+                    "raw_user_request": "Turn this into a marketplace instead of a CRM.",
+                    "source_surface": "app_review",
+                    "extra": {
+                        "lifecycle_state": "review",
+                        "bundle_path": staged_bundle_path,
+                        "build_registry_id": "appreg_review_1",
+                        "build_id": "build_review_1",
+                        "app_validation_status": "skipped",
+                        "app_validation_strategy_used": "skip",
+                        "integration_tests_passed": True,
+                    },
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["execution_mode"] == "harness_decision"
+    assert body["workflow_id"] == "ValueEngine"
+    assert body["harness_decision"]["decision_type"] == "core_restart"
+    assert create_calls[0]["artifact_version_id"] == "av_review_1"
+    assert create_calls[0]["refinement_request"]["source_surface"] == "app_review"
+    assert create_calls[0]["refinement_request"]["extra"]["bundle_path"] == staged_bundle_path
+
+    seed = captured_pending["decision_context_seed"]
+    assert seed["artifact_version_id"] == "av_review_1"
+    assert seed["artifact_root"] == staged_bundle_path
+    assert seed["lifecycle_state"] == "review"
+    assert seed["refinement_request_meta"]["source_surface"] == "app_review"
+    assert seed["refinement_request_meta"]["extra"]["build_registry_id"] == "appreg_review_1"
+
+    pending_request = captured_pending["pending_trigger_payload"]["refinement_request"]
+    assert pending_request["artifact_version_id"] == "av_review_1"
+    assert pending_request["source_surface"] == "app_review"
+    assert pending_request["extra"]["bundle_path"] == staged_bundle_path
+
+
 class _ReviewArtifactStore:
     def __init__(
         self,

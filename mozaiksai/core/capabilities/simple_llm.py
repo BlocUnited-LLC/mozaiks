@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.workflow.llm_config import get_llm_config
 
 logger = get_workflow_logger("capabilities.simple_llm")
@@ -21,9 +22,15 @@ class SimpleLLMCapabilityService:
     - Host control planes should provide any capability-specific configuration.
     """
 
-    def __init__(self, *, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        *,
+        timeout: float = 30.0,
+        token_usage_guard: TokenUsageGuard | None = None,
+    ) -> None:
         self._timeout = float(timeout)
         self._client = httpx.AsyncClient(timeout=self._timeout)
+        self._token_usage_guard = token_usage_guard
 
     async def aclose(self) -> None:
         if not self._client.is_closed:
@@ -65,6 +72,15 @@ class SimpleLLMCapabilityService:
         provider = await self._select_provider(llm_config)
         api_key = provider["api_key"]
         model = provider["model"]
+        await (self._token_usage_guard or TokenUsageGuard()).check_or_raise(
+            app_id=app_id,
+            user_id=user_id,
+            required_tokens=self._estimate_required_tokens(
+                messages=messages,
+                llm_config=llm_config,
+                extra_payload=extra_payload,
+            ),
+        )
 
         api_base = provider.get("api_base") or provider.get("base_url")
         api_base = (api_base or os.getenv("CAPABILITY_LLM_API_BASE") or "https://api.openai.com/v1").rstrip("/")
@@ -204,6 +220,24 @@ class SimpleLLMCapabilityService:
             return True
         config_mode = str((llm_config or {}).get("api_mode") or "").strip().lower()
         return config_mode == "responses"
+
+    @staticmethod
+    def _estimate_required_tokens(
+        *,
+        messages: list[dict[str, str]],
+        llm_config: dict[str, Any] | None,
+        extra_payload: dict[str, Any] | None,
+    ) -> int:
+        text = "\n".join(str(message.get("content") or "") for message in messages)
+        input_estimate = max(1, (len(text) + 3) // 4)
+        output_limit = 0
+        for source in (extra_payload or {}, llm_config or {}):
+            for key in ("max_completion_tokens", "max_output_tokens", "max_tokens"):
+                try:
+                    output_limit = max(output_limit, int(source.get(key) or 0))
+                except Exception:
+                    continue
+        return max(1, input_estimate + output_limit)
 
     @staticmethod
     def _messages_to_responses_payload(messages: list[dict[str, str]]) -> tuple[str | None, Any]:

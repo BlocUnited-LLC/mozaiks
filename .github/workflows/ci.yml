@@ -68,11 +68,16 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install linters
-        run: pip install ruff
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
 
       - name: Run ruff
-        run: ruff check mozaiksai/ --select E9,F821 --output-format=github
+        run: ruff check . --output-format=github
+
+      - name: Run mypy
+        run: mypy mozaiksai/ factory_app/ --ignore-missing-imports
 
   frontend:
     runs-on: ubuntu-latest

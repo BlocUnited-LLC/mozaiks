@@ -261,13 +261,13 @@ class TestGenericJWTAdapterConfig:
     def test_validate_token_empty_raises_auth_error(self):
         adapter = _adapter()
         with pytest.raises(AuthError) as exc_info:
-            asyncio.get_event_loop().run_until_complete(adapter.validate_token(""))
+            asyncio.run(adapter.validate_token(""))
         assert exc_info.value.status_code == 401
 
     def test_validate_token_whitespace_raises_auth_error(self):
         adapter = _adapter()
         with pytest.raises(AuthError) as exc_info:
-            asyncio.get_event_loop().run_until_complete(adapter.validate_token("   "))
+            asyncio.run(adapter.validate_token("   "))
         assert exc_info.value.status_code == 401
 
     def test_get_jwks_client_raises_when_url_empty(self):

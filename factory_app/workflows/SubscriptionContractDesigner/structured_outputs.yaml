@@ -1,0 +1,334 @@
+registry:
+  ContractDesignerAgent: SubscriptionContractOutput
+
+models:
+  AssignmentStore:
+    type: model
+    fields:
+      data_alias:
+        type: str
+        description: App data alias containing active subscription assignments.
+      app_id_field:
+        type: str
+        description: Field carrying app scope.
+      tenant_id_field:
+        type: union
+        variants: [str, 'null']
+        description: Field carrying tenant scope, or null.
+      workspace_id_field:
+        type: union
+        variants: [str, 'null']
+        description: Field carrying workspace scope, or null.
+      user_id_field:
+        type: union
+        variants: [str, 'null']
+        description: Field carrying user scope, or null.
+      plan_id_field:
+        type: str
+        description: Field carrying active plan id.
+      status_field:
+        type: str
+        description: Field carrying assignment status.
+      starts_at_field:
+        type: union
+        variants: [str, 'null']
+        description: Field carrying assignment start timestamp, or null.
+      expires_at_field:
+        type: union
+        variants: [str, 'null']
+        description: Field carrying assignment expiration timestamp, or null.
+      capabilities_field:
+        type: union
+        variants: [str, 'null']
+        description: Field carrying granted capabilities, or null.
+      plan_snapshot_field:
+        type: union
+        variants: [str, 'null']
+        description: Field carrying the plan snapshot, or null.
+      active_statuses:
+        type: list
+        items: str
+        description: Status values that count as active.
+
+  TokenWallet:
+    type: model
+    fields:
+      wallet_id:
+        type: str
+        description: Stable wallet id, such as ai_tokens.
+      label:
+        type: union
+        variants: [str, 'null']
+        description: Human-readable wallet label.
+      unit:
+        type: literal
+        values: [tokens, credits]
+        description: Wallet unit.
+      usage_meter_id:
+        type: union
+        variants: [str, 'null']
+        description: Runtime usage meter id that debits this wallet.
+      scope:
+        type: literal
+        values: [user, tenant]
+        description: Wallet scope.
+      auto_debit_usage:
+        type: bool
+        description: Whether runtime usage events auto-debit this wallet.
+      allow_negative_balance:
+        type: bool
+        description: Whether spending may drive balance negative.
+
+  TokenAllowance:
+    type: model
+    fields:
+      wallet_id:
+        type: str
+        description: Declared token wallet id.
+      amount:
+        type: int
+        description: Allowance amount granted by this plan.
+      cadence:
+        type: literal
+        values: [monthly, one_time, manual]
+        description: Allowance materialization cadence.
+      label:
+        type: union
+        variants: [str, 'null']
+        description: Human-readable allowance label.
+
+  UsageLimit:
+    type: model
+    fields:
+      meter_id:
+        type: str
+        description: Meter id displayed or enforced for this plan.
+      label:
+        type: union
+        variants: [str, 'null']
+        description: Human-readable meter label.
+      unit:
+        type: literal
+        values: [tokens, requests, credits]
+        description: Meter unit.
+      monthly_limit:
+        type: union
+        variants: [int, 'null']
+        description: Monthly limit, or null.
+      capability_id:
+        type: union
+        variants: [str, 'null']
+        description: Optional capability this limit corresponds to.
+
+  SubscriptionPlan:
+    type: model
+    fields:
+      plan_id:
+        type: str
+        description: Stable plan id.
+      label:
+        type: str
+        description: Human-readable plan name.
+      description:
+        type: union
+        variants: [str, 'null']
+        description: Short plan description.
+      capabilities:
+        type: list
+        items: str
+        description: Capability ids granted by this plan.
+      usage_limits:
+        type: list
+        items: UsageLimit
+        description: Usage limits declared for this plan.
+      token_allowances:
+        type: list
+        items: TokenAllowance
+        description: Token allowances granted by this plan.
+
+  SubscriptionConfigFile:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values: [mozaiks.subscriptions.v1]
+        description: Subscriptions config schema version.
+      label:
+        type: str
+        description: Catalog label.
+      default_plan_id:
+        type: str
+        description: Default plan id.
+      assignment_store:
+        type: union
+        variants: [AssignmentStore, 'null']
+        description: Assignment store backing EntitlementPort, or null.
+      token_wallets:
+        type: list
+        items: TokenWallet
+        description: Provider-neutral token wallets.
+      plans:
+        type: list
+        items: SubscriptionPlan
+        description: Subscription plans.
+
+  MeteringDeclaration:
+    type: model
+    fields:
+      surface_type:
+        type: literal
+        values: [module_action, workflow]
+        description: Surface being metered.
+      surface_id:
+        type: str
+        description: Module id or workflow name.
+      action_id:
+        type: union
+        variants: [str, 'null']
+        description: Module action id or workflow capability id.
+      wallet_id:
+        type: str
+        description: Token wallet to charge.
+      scope:
+        type: literal
+        values: [user, tenant]
+        description: Metering scope.
+      enforcement:
+        type: literal
+        values: [reserve_then_commit, commit_actual, display_only]
+        description: Intended enforcement behavior.
+      estimate:
+        type: union
+        variants: [int, 'null']
+        description: Estimated tokens to reserve, or null.
+      idempotency_key_source:
+        type: str
+        description: Field/source that yields a stable idempotency key.
+
+  ModuleContractUpdate:
+    type: model
+    fields:
+      module_id:
+        type: str
+        description: Generated app module id.
+      action_id:
+        type: str
+        description: Module action id.
+      entitlement_gate:
+        type: union
+        variants: [str, 'null']
+        description: Capability id to put on actions[].entitlement_gate.
+      metering:
+        type: union
+        variants: [MeteringDeclaration, 'null']
+        description: Optional metering declaration for this module action.
+
+  WorkflowContractUpdate:
+    type: model
+    fields:
+      workflow_name:
+        type: str
+        description: Generated workflow name.
+      capability_id:
+        type: str
+        description: Stable workflow capability id.
+      metering:
+        type: MeteringDeclaration
+        description: Metering declaration for this workflow.
+      notes:
+        type: str
+        description: Implementation notes for AgentGenerator.
+
+  PageSurfaceRequirement:
+    type: model
+    fields:
+      page_id:
+        type: str
+        description: Stable page id.
+      route:
+        type: str
+        description: Suggested route.
+      purpose:
+        type: str
+        description: What this page exposes.
+      required_runtime_endpoints:
+        type: list
+        items: str
+        description: Runtime endpoints the page should consume.
+
+  AppGeneratorInstruction:
+    type: model
+    fields:
+      target:
+        type: literal
+        values: [AppPlanAgent, AppSchemaAgent, ConfigMiddlewareAgent, AgentGenerator]
+        description: Generator agent or workflow that should consume this instruction.
+      instruction:
+        type: str
+        description: Concrete implementation instruction.
+
+  CodeFile:
+    type: model
+    fields:
+      filename:
+        type: str
+        description: App-bundle-relative path to generate.
+      content:
+        type: str
+        description: Complete file contents.
+
+  SubscriptionContractOutput:
+    type: model
+    fields:
+      agent_message:
+        type: str
+        description: Short status message.
+      contract_required:
+        type: bool
+        description: True when the generated app needs app-owned subscription/token contracts.
+      rationale:
+        type: str
+        description: Why the contract is or is not required.
+      app_id:
+        type: union
+        variants: [str, 'null']
+        description: App id if known.
+      app_name:
+        type: str
+        description: App name.
+      subscription_config_file:
+        type: union
+        variants: [SubscriptionConfigFile, 'null']
+        description: app/config/subscriptions.yaml data, or null.
+      metering_declarations:
+        type: list
+        items: MeteringDeclaration
+        description: Metering declarations across module/workflow surfaces.
+      module_contract_updates:
+        type: list
+        items: ModuleContractUpdate
+        description: Module action entitlement/metering updates.
+      workflow_contract_updates:
+        type: list
+        items: WorkflowContractUpdate
+        description: Workflow-level metering updates for AgentGenerator.
+      page_surface_requirements:
+        type: list
+        items: PageSurfaceRequirement
+        description: Usage/billing/profile page requirements.
+      app_generator_instructions:
+        type: list
+        items: AppGeneratorInstruction
+        description: Concrete generator instructions.
+      validation_notes:
+        type: list
+        items: str
+        description: Notes and assumptions for downstream review.
+      forbidden_outputs:
+        type: list
+        items: str
+        description: Outputs that downstream generators must not create.
+      code_files:
+        type: list
+        items: CodeFile
+        description: Generated contract files. The save tool rewrites this list after validation.

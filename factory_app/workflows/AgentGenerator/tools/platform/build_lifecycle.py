@@ -140,7 +140,7 @@ async def _persist_workflow_bundle_artifact(
         source_chat_id=resolved_chat_id,
         author_user_id=(user_id or "").strip() or None,
         revision_mode=build_mode == "revision",
-        input_artifact_kinds=("design_docs",),
+        input_artifact_kinds=("design_docs", "subscription_contract"),
         artifact_store=artifact_store,
     )
 

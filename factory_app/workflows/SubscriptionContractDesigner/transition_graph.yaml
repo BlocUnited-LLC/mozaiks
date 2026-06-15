@@ -1,0 +1,4 @@
+transition_rules:
+  - source_agent: ContractDesignerAgent
+    target_agent: terminate
+    transition_type: after_turn

@@ -14,10 +14,16 @@ prompt_middleware:
 - agent: PatternAgent
   function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
 - agent: PatternAgent
+  filename: ../_shared/subscription_contract_context.py
+  function: inject_subscription_contract_context
+- agent: PatternAgent
   filename: tools/hook_ai_pack_archetype_context.py
   function: inject_ai_pack_archetype_context
 - agent: WorkflowBundleBuilderAgent
   function: mozaiksai.core.workflow.context.projection.inject_build_context_projections
+- agent: WorkflowBundleBuilderAgent
+  filename: ../_shared/subscription_contract_context.py
+  function: inject_subscription_contract_context
 - agent: WorkflowBundleBuilderAgent
   filename: tools/hook_ai_pack_archetype_context.py
   function: inject_ai_pack_archetype_context

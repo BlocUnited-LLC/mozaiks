@@ -207,6 +207,25 @@ async def test_credit_is_idempotent_and_updates_balance_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_idempotency_key_reuse_with_different_amount_is_rejected() -> None:
+    ledger = _ledger()
+    await ledger.credit(
+        app_id="app_1",
+        user_id="user_1",
+        amount=100,
+        idempotency_key="payment:1",
+    )
+
+    with pytest.raises(ValueError, match="idempotency_key was reused"):
+        await ledger.credit(
+            app_id="app_1",
+            user_id="user_1",
+            amount=200,
+            idempotency_key="payment:1",
+        )
+
+
+@pytest.mark.asyncio
 async def test_debit_rejects_when_balance_is_insufficient() -> None:
     ledger = _ledger()
 
@@ -273,6 +292,54 @@ async def test_subscription_allowances_are_monthly_and_idempotent() -> None:
     assert balance["balance"] == 1000
     assert balance["total_allocated"] == 1000
     assert balance["entry_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_subscription_allowances_can_use_assignment_snapshot() -> None:
+    ledger = _ledger()
+    config = _subscriptions_config()
+
+    await ledger.ensure_plan_allowances(
+        config=config,
+        app_id="app_1",
+        plan_id="operator_plus",
+        plan_label="Operator Plus",
+        token_allowances=[
+            {
+                "wallet_id": "ai_tokens",
+                "amount": 2500,
+                "cadence": "monthly",
+                "label": "Operator catalog monthly AI tokens",
+            }
+        ],
+        user_id="user_1",
+        period_start=datetime(2026, 6, 14, tzinfo=UTC),
+    )
+    await ledger.ensure_plan_allowances(
+        config=config,
+        app_id="app_1",
+        plan_id="operator_plus",
+        plan_label="Operator Plus",
+        token_allowances=[
+            {
+                "wallet_id": "ai_tokens",
+                "amount": 2500,
+                "cadence": "monthly",
+                "label": "Operator catalog monthly AI tokens",
+            }
+        ],
+        user_id="user_1",
+        period_start=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+
+    balance = await ledger.query_balance(app_id="app_1", user_id="user_1")
+    assert balance["balance"] == 2500
+    assert balance["total_allocated"] == 2500
+    assert balance["entry_count"] == 1
+
+    entries = await ledger.list_entries(app_id="app_1", user_id="user_1")
+    assert entries[0]["reason"] == "Operator catalog monthly AI tokens"
+    assert entries[0]["metadata"]["plan_id"] == "operator_plus"
 
 
 @pytest.mark.asyncio

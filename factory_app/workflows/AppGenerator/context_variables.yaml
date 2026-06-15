@@ -433,6 +433,34 @@ definitions:
       fields:
       - theme_config
       default: null
+  subscription_contract:
+    type: object
+    description: >
+      Provider-neutral SubscriptionContractOutput produced by
+      SubscriptionContractDesigner in the current workflow sequence, when present.
+      This is the canonical contract for config/subscriptions.yaml, entitlement
+      gates, token wallets, token allowances, generated usage/billing pages, and
+      workflow/module metering declarations.
+    source:
+      type: state
+      default: null
+  subscription_contract_artifact:
+    type: object
+    description: >
+      Latest persisted subscription_contract summary artifact. Used as a fallback
+      when the current sequence did not carry subscription_contract in state.
+    source:
+      type: data_reference
+      database_name: mozaiksai
+      collection: ArtifactVersions
+      query_template:
+        app_id: '{{runtime.app_id}}'
+        artifact_kind: subscription_contract
+        artifact_key: subscription_contract
+        lifecycle_status: current
+      fields:
+      - commit_metadata
+      default: null
   app_backend_url:
     type: string
     description: >
@@ -1182,6 +1210,8 @@ agents:
     - agent_api_url
     - available_agents
     - available_tools
+    - subscription_contract
+    - subscription_contract_artifact
     - interview_complete
   AppPlanAgent:
     variables:
@@ -1215,6 +1245,8 @@ agents:
     - database_design_document
     - experience_spec_document
     - experience_spec
+    - subscription_contract
+    - subscription_contract_artifact
     - agent_websocket_url
     - agent_api_url
     - available_agents
@@ -1240,6 +1272,8 @@ agents:
     - design_surface_map
     - data_contract
     - captured_theme_config
+    - subscription_contract
+    - subscription_contract_artifact
     - app_build_plan
     - app_plan_ready
     - experience_spec_document
@@ -1327,6 +1361,8 @@ agents:
     - data_contract
     - backend_design_document
     - app_build_plan
+    - subscription_contract
+    - subscription_contract_artifact
     - task_run_mode
     - current_build_task
     - current_build_task_id

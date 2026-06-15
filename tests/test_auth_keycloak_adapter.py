@@ -253,14 +253,14 @@ class TestKeycloakAdapterConfig:
         adapter = _adapter()
         import asyncio
         with pytest.raises(AuthError) as exc_info:
-            asyncio.get_event_loop().run_until_complete(adapter.validate_token(""))
+            asyncio.run(adapter.validate_token(""))
         assert exc_info.value.status_code == 401
 
     def test_validate_token_whitespace_only_raises_auth_error(self):
         adapter = _adapter()
         import asyncio
         with pytest.raises(AuthError) as exc_info:
-            asyncio.get_event_loop().run_until_complete(adapter.validate_token("   "))
+            asyncio.run(adapter.validate_token("   "))
         assert exc_info.value.status_code == 401
 
     def test_get_jwks_client_raises_when_not_configured(self):

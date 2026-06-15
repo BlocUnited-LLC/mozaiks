@@ -62,7 +62,9 @@ async def get_contract_surface_context(
     }
 
     try:
-        from mozaiksai.core.app_context.context_graph import load_context_graph_for_artifact  # type: ignore[attr-defined]
+        from mozaiksai.core.app_context.context_graph import (  # type: ignore[attr-defined]
+            load_context_graph_for_artifact,
+        )
 
         graph: AppContextGraph | None = await load_context_graph_for_artifact(
             app_id=app_id,

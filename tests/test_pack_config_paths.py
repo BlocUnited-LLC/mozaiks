@@ -41,6 +41,7 @@ def test_load_global_pack_graph_uses_canonical_file(monkeypatch) -> None:
         "ValueEngine",
         "ThemeCapture",
         "DesignDocs",
+        "SubscriptionContractDesigner",
         "AgentGenerator",
         "AppGenerator",
         "ExistingAppDiscovery",
@@ -281,7 +282,16 @@ def test_conceptual_replan_affected_families_are_complete(monkeypatch) -> None:
     graph = load_global_pack_graph()
     assert graph is not None
     replan = next(s for s in graph.journeys if s.id == "conceptual_replan")
-    expected = {"concept", "brand", "design_docs", "experience_spec", "workflow_bundle", "app_bundle"}
+    expected = {
+        "concept",
+        "build_plan",
+        "brand",
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle",
+    }
     assert set(replan.affected_declarative_families) == expected
 
 
@@ -304,7 +314,16 @@ def test_full_rebuild_sequence_still_valid(monkeypatch) -> None:
     assert graph is not None
     full_rebuild = next((s for s in graph.journeys if s.id == "full_rebuild"), None)
     assert full_rebuild is not None
-    expected_families = {"concept", "brand", "design_docs", "experience_spec", "workflow_bundle", "app_bundle"}
+    expected_families = {
+        "concept",
+        "build_plan",
+        "brand",
+        "design_docs",
+        "experience_spec",
+        "subscription_contract",
+        "workflow_bundle",
+        "app_bundle",
+    }
     assert set(full_rebuild.affected_declarative_families) == expected_families
 
 

@@ -139,8 +139,9 @@ def test_new_app_entry_routes_into_valueengine_first() -> None:
     assert build_journey["steps"][3]["transition"] == "coding_journey_selector"
     assert build_journey["steps"][4]["transition"] == "database_setup_selector"
     assert build_journey["steps"][5]["workflows"] == ["DesignDocs"]
-    assert build_journey["steps"][6]["workflows"] == ["AgentGenerator"]
-    assert build_journey["steps"][7]["workflows"] == ["AppGenerator"]
+    assert build_journey["steps"][6]["workflows"] == ["SubscriptionContractDesigner"]
+    assert build_journey["steps"][7]["workflows"] == ["AgentGenerator"]
+    assert build_journey["steps"][8]["workflows"] == ["AppGenerator"]
 
     transition_map = {item["id"]: item for item in registry["transitions"]}
     app_type_selector = transition_map["app_type_selector"]

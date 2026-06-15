@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import json
 import stat
 import sys
 import zipfile
@@ -42,8 +44,10 @@ def _version(
     validation_status: ArtifactValidationStatus = ArtifactValidationStatus.PASSED,
     refinement_request_id: str | None = None,
     files_manifest: list[dict[str, object]] | None = None,
+    commit_metadata_extra: dict[str, object] | None = None,
 ) -> ArtifactVersionDoc:
     metadata: dict[str, object] = {"artifact_path": str(zip_path)}
+    metadata.update(commit_metadata_extra or {})
     if refinement_request_id is not None:
         metadata["refinement"] = {
             "request_id": refinement_request_id,
@@ -129,6 +133,33 @@ class _PromoteStore:
         return []
 
 
+class _AppRegistryServiceDouble:
+    def __init__(
+        self,
+        *,
+        app_id: str = "app_1",
+        lifecycle_state: str = "review",
+        build_registry_id: str = "appreg_1",
+    ) -> None:
+        self.app = {
+            "build_registry_id": build_registry_id,
+            "app_id": app_id,
+            "lifecycle_state": lifecycle_state,
+            "bundle_path": "generated/apps/app_1/build_1/app",
+        }
+        self.promote_calls: list[dict[str, str | None]] = []
+
+    async def get_app_record(self, *, app_id: str | None = None, build_registry_id: str | None = None):
+        if build_registry_id == self.app["build_registry_id"] or app_id == self.app["app_id"]:
+            return {"app": dict(self.app)}
+        return {"app": None}
+
+    async def promote_build(self, *, build_registry_id: str, promoted_by: str | None):
+        self.promote_calls.append({"build_registry_id": build_registry_id, "promoted_by": promoted_by})
+        self.app = {**self.app, "lifecycle_state": "active"}
+        return {"success": True, "app": dict(self.app)}
+
+
 def _studio_app(monkeypatch):
     monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
@@ -186,7 +217,220 @@ def test_promote_restores_current_app_bundle_from_staged_refinement(monkeypatch,
     assert (runtime_root / "GeneratedApp" / "package.json").read_text(encoding="utf-8") == "{\"name\":\"demo\"}\n"
     assert body["restored_files"] == ["GeneratedApp/package.json", "GeneratedApp/src/App.jsx"]
     assert store.updated_sessions[-1]["status"] == RefinementSessionStatus.PROMOTED
+    assert body["app_registry"] is None
     assert body["review"]["review_status"] == "promoted"
+
+
+def test_promote_restores_artifact_and_marks_app_registry_active(monkeypatch, tmp_path: Path) -> None:
+    bundle_zip = tmp_path / "bundle.zip"
+    _write_bundle_zip(
+        bundle_zip,
+        {
+            "GeneratedApp/src/App.jsx": "export default function App() { return <div>Promoted</div>; }\n",
+        },
+    )
+    version = _version(
+        artifact_version_id="av_registry_1",
+        zip_path=bundle_zip,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        validation_status=ArtifactValidationStatus.PASSED,
+        refinement_request_id="refine_registry",
+        files_manifest=[
+            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 62},
+        ],
+    )
+    runtime_root = tmp_path / "runtime_app"
+    store = _PromoteStore(version)
+    studio_app, client = _promote_client(monkeypatch, runtime_root, store)
+    app_registry = _AppRegistryServiceDouble()
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: app_registry)
+
+    response = client.post(
+        "/api/studio/build/artifacts/av_registry_1/promote?app_id=app_1",
+        json={"build_registry_id": "appreg_1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["promoted"] is True
+    assert body["app_registry"]["success"] is True
+    assert body["app_registry"]["app"]["lifecycle_state"] == "active"
+    assert app_registry.promote_calls == [{"build_registry_id": "appreg_1", "promoted_by": "demo-user"}]
+    assert (runtime_root / "GeneratedApp" / "src" / "App.jsx").exists()
+
+
+def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeypatch, tmp_path: Path) -> None:
+    bundle_zip = tmp_path / "GeneratedApp.zip"
+    bundle_entries = {
+        "GeneratedApp/app.json": json.dumps(
+            {
+                "appId": "app_1",
+                "appName": "Golden Path App",
+                "version": "1.0.0",
+                "startup": {"landing_spot": "/dashboard"},
+            }
+        ),
+        "GeneratedApp/config/ai.json": json.dumps(
+            {
+                "chat": {"chat_startup_mode": "ask"},
+                "workflows": {"entry_point": "SupportWorkflow", "resume_policy": "new"},
+            }
+        ),
+        "GeneratedApp/config/shell.json": json.dumps({"shortcuts": {"header": ["dashboard"]}}),
+        "GeneratedApp/ui/route_manifest.json": json.dumps(
+            {
+                "pages": [
+                    {
+                        "id": "dashboard",
+                        "label": "Dashboard",
+                        "path": "/dashboard",
+                        "component": "SchemaPage",
+                        "schema": "dashboard",
+                        "order": 1,
+                        "requiresAuth": False,
+                        "navigation": {
+                            "scope": "app",
+                            "group": "main",
+                            "icon": "home",
+                            "order": 1,
+                        },
+                    }
+                ]
+            }
+        ),
+        "GeneratedApp/ui/pages/dashboard.yaml": "\n".join(
+            [
+                "name: dashboard",
+                "title: Dashboard",
+                "route: /dashboard",
+                "sections:",
+                "  - id: overview",
+                "    title: Overview",
+                "    layout: stack",
+            ]
+        ),
+        "GeneratedApp/modules/tasks/module.yaml": "\n".join(
+            [
+                "schema_version: mozaiks.module.v1",
+                "module:",
+                "  id: tasks",
+                "  display_name: Tasks",
+                "  version: 1.0.0",
+                "  handler: backend.handler:TasksHandler",
+                "actions:",
+                "  - id: list_tasks",
+                "    description: List tasks.",
+                "    handler_method: list_tasks",
+                "    input_schema:",
+                "      type: object",
+                "      additionalProperties: false",
+                "    output_schema:",
+                "      type: object",
+                "capabilities:",
+                "  - capability_id: tasks.list",
+                "    kind: action",
+                "    target: list_tasks",
+                "    title: List tasks",
+            ]
+        ),
+        "GeneratedApp/modules/tasks/backend/handler.py": "\n".join(
+            [
+                "class TasksHandler:",
+                "    async def list_tasks(self, ctx, payload):",
+                "        return {'tasks': []}",
+                "",
+            ]
+        ),
+        "GeneratedApp/workflows/SupportWorkflow/orchestrator.yaml": "\n".join(
+            [
+                "workflow_name: SupportWorkflow",
+                "workflow_startup_mode: AgentDriven",
+            ]
+        ),
+    }
+    _write_bundle_zip(bundle_zip, bundle_entries)
+    version = _version(
+        artifact_version_id="av_platform_root_1",
+        zip_path=bundle_zip,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        validation_status=ArtifactValidationStatus.PASSED,
+        refinement_request_id="refine_platform_root",
+        files_manifest=[
+            {"path": path, "sha256": f"sha-{index}", "size_bytes": len(content)}
+            for index, (path, content) in enumerate(bundle_entries.items(), start=1)
+        ],
+    )
+    runtime_root = tmp_path / "active_app"
+    store = _PromoteStore(version)
+    studio_app, client = _promote_client(monkeypatch, runtime_root, store)
+    app_registry = _AppRegistryServiceDouble()
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: app_registry)
+
+    response = client.post(
+        "/api/studio/build/artifacts/av_platform_root_1/promote?app_id=app_1",
+        json={"build_registry_id": "appreg_1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["promoted"] is True
+    assert "app.json" in body["restored_files"]
+    assert "GeneratedApp/app.json" not in body["restored_files"]
+    assert (runtime_root / "app.json").exists()
+    assert not (runtime_root / "GeneratedApp" / "app.json").exists()
+
+    from mozaiksai.core.runtime.app.loader import AppLoader
+    from mozaiksai.hosts import platform as platform_app
+
+    loaded = asyncio.run(AppLoader.load(str(runtime_root)))
+    assert loaded.definition.name == "Golden Path App"
+    assert [module.name for module in loaded.modules] == ["tasks"]
+    assert [page.name for page in loaded.definition.pages] == ["dashboard"]
+    assert [workflow.name for workflow in loaded.definition.workflows] == ["SupportWorkflow"]
+
+    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: runtime_root)
+    monkeypatch.setattr(platform_app, "resolve_active_app_root", lambda: runtime_root)
+    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    assert shell["appId"] == "app_1"
+    assert shell["appName"] == "Golden Path App"
+    assert shell["landing_spot"] == "/dashboard"
+    dashboard = next(page for page in shell["pages"] if page["path"] == "/dashboard")
+    assert dashboard["component"] == "SchemaPage"
+    assert dashboard["schema"] == "dashboard"
+    assert dashboard["meta"]["appShell"] is True
+    assert body["app_registry"]["app"]["lifecycle_state"] == "active"
+
+
+def test_promote_rejects_registry_record_not_in_review(monkeypatch, tmp_path: Path) -> None:
+    bundle_zip = tmp_path / "bundle.zip"
+    _write_bundle_zip(
+        bundle_zip,
+        {"GeneratedApp/src/App.jsx": "export default function App() { return <div>Active</div>; }\n"},
+    )
+    version = _version(
+        artifact_version_id="av_registry_active_1",
+        zip_path=bundle_zip,
+        lifecycle_status=ArtifactLifecycleStatus.CURRENT,
+        validation_status=ArtifactValidationStatus.PASSED,
+        files_manifest=[
+            {"path": "GeneratedApp/src/App.jsx", "sha256": "sha-app", "size_bytes": 60},
+        ],
+    )
+    runtime_root = tmp_path / "runtime_app"
+    store = _PromoteStore(version)
+    studio_app, client = _promote_client(monkeypatch, runtime_root, store)
+    app_registry = _AppRegistryServiceDouble(lifecycle_state="active")
+    monkeypatch.setattr(studio_app, "_get_app_registry_service", lambda: app_registry)
+
+    response = client.post(
+        "/api/studio/build/artifacts/av_registry_active_1/promote?app_id=app_1",
+        json={"build_registry_id": "appreg_1"},
+    )
+
+    assert response.status_code == 409
+    assert "records in review" in response.json()["detail"]
+    assert app_registry.promote_calls == []
+    assert not (runtime_root / "GeneratedApp").exists()
 
 
 def test_promote_rejects_draft_app_bundle(monkeypatch, tmp_path: Path) -> None:

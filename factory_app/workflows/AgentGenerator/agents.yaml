@@ -497,6 +497,15 @@ agents:
       - `experience_spec_document`: UI intent — use for agent interaction modes and UI primitive selection.
 
       **Pattern guidance**: Injected at runtime by Mozaiks prompt middleware. Contains the full patternbook entry for your assigned pattern — agent archetypes, AG2 Network primitives, transition graph strategy, required context variables, required tools, and generator notes. Use this as your structural template.
+
+      **Subscription/token contract guidance**: When [SUBSCRIPTION CONTRACT CONTEXT]
+      is injected, preserve its workflow_contract_updates and metering_declarations.
+      Copy workflow ids, wallet ids, enforcement mode, estimates, and idempotency
+      key source exactly from the contract when they apply to this workflow.
+      Generated workflows may declare metering context and idempotency fields,
+      but must not implement reserve/commit logic, a custom token ledger, custom
+      usage ledger, payment checkout, invoices, or hosted billing internals.
+      Token accounting belongs to the OSS runtime token wallet primitives.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-

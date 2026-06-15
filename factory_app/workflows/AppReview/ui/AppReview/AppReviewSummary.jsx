@@ -3,7 +3,7 @@
  *
  * Rendered by WorkflowUIRouter when present_review_summary.py emits a
  * UI_Surface tool call. Receives build validation results via the payload prop
- * and exposes a Promote button that calls app_registry.promote_build directly.
+ * and exposes a Promote button that promotes the reviewed artifact version.
  *
  * This is an agentic UI artifact, not a transition overlay.
  * It lives in the chat surface alongside the ReviewAgent conversation.
@@ -37,6 +37,10 @@ export default function AppReviewSummary({ payload = {} }) {
   const [error, setError] = useState(null);
 
   const handlePromote = useCallback(async () => {
+    if (!payload?.artifact_version_id) {
+      setError('No artifact version available. Cannot promote.');
+      return;
+    }
     if (!payload?.build_registry_id) {
       setError('No build registry ID available. Cannot promote.');
       return;
@@ -50,10 +54,11 @@ export default function AppReviewSummary({ payload = {} }) {
         typeof window !== 'undefined' ? window.__MOZAIKS_ACCESS_TOKEN__ || '' : '';
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(`${apiBase}/api/modules/app_registry/promote_build`, {
+      const appIdQuery = payload?.app_id ? `?app_id=${encodeURIComponent(payload.app_id)}` : '';
+      const res = await fetch(`${apiBase}/api/studio/build/artifacts/${encodeURIComponent(payload.artifact_version_id)}/promote${appIdQuery}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ build_registry_id: payload.build_registry_id }),
+        body: JSON.stringify({ build_registry_id: payload.build_registry_id || null }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -75,7 +80,11 @@ export default function AppReviewSummary({ payload = {} }) {
       : payload.integration_tests_passed === false
       ? 'failed'
       : 'skipped';
-  const canPromote = payload.can_promote !== false && Boolean(payload?.build_registry_id);
+  const canPromote = (
+    payload.can_promote !== false
+    && Boolean(payload?.artifact_version_id)
+    && Boolean(payload?.build_registry_id)
+  );
 
   return (
     <Panel>

@@ -65,6 +65,26 @@ def test_validate_wiring_normalizes_canonical_module_endpoint() -> None:
             "endpoint": "/api/modules/tickets/list_tickets",
         }
     ]
+    assert result["platform_endpoints"] == []
+
+
+def test_validate_wiring_accepts_platform_account_usage_endpoint() -> None:
+    result = asyncio.run(
+        validate_wiring_module.validate_wiring(
+            _context("/api/me/usage")
+        )
+    )
+
+    assert result["passed"] is True
+    assert result["wired"] == []
+    assert result["platform_endpoints"] == [
+        {
+            "page": "Tickets",
+            "section": "ticket-table",
+            "endpoint": "/api/me/usage",
+        }
+    ]
+    assert result["checks"][0]["details"]["platform_endpoint_count"] == 1
 
 
 def test_validate_wiring_rejects_api_endpoint_query_string() -> None:

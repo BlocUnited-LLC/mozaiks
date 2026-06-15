@@ -108,6 +108,8 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     context = _Context(
         {
             "artifact_version_id": "av_parent_1",
+            "build_id": "build_1",
+            "build_registry_id": "appreg_1",
             "app_bundle_acceptance_status": "passed",
             "app_bundle_acceptance_result": {
                 "status": "passed",
@@ -143,6 +145,8 @@ def test_register_app_bundle_artifact_version_sets_context_and_parent(monkeypatc
     assert fake_artifact_store.calls[0]["lifecycle_status"].value == "draft"
     assert fake_artifact_store.calls[0]["validation_status"].value == "passed"
     metadata = fake_artifact_store.calls[0]["commit_metadata"]["metadata"]
+    assert metadata["build_id"] == "build_1"
+    assert metadata["build_registry_id"] == "appreg_1"
     assert metadata["app_bundle_acceptance"]["status"] == "passed"
     assert metadata["validation_evidence"]["failed"] == []
     assert context.data["artifact_version_id"] == "av_bundle_1"

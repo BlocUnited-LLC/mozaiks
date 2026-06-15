@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
+from mozaiksai.core.tokens.guard import TokenUsageDecision, TokenUsageDenied
 
 
 class _FakeResponse:
@@ -28,6 +29,20 @@ class _FakeClient:
 
     async def aclose(self) -> None:
         self.is_closed = True
+
+
+class _DenyingGuard:
+    async def check_or_raise(self, **kwargs):  # noqa: ANN003
+        raise TokenUsageDenied(
+            TokenUsageDecision(
+                allowed=False,
+                reason="insufficient_balance",
+                error_code="INSUFFICIENT_TOKENS",
+                wallet_id="ai_tokens",
+                balance=0,
+                required_tokens=kwargs.get("required_tokens"),
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -134,6 +149,23 @@ async def test_generate_json_completion_omits_temperature_when_not_provided() ->
     payload = service._client.calls[0]["json"]
     assert payload["model"] == "gpt-5"
     assert "temperature" not in payload
+
+
+@pytest.mark.asyncio
+async def test_generate_chat_completion_checks_token_balance_before_http_call() -> None:
+    service = SimpleLLMCapabilityService(token_usage_guard=_DenyingGuard())
+    service._client = _FakeClient({"choices": [{"message": {"content": "never"}}]})
+    service._select_provider = _fake_select_provider  # type: ignore[method-assign]
+
+    with pytest.raises(TokenUsageDenied):
+        await service.generate_chat_completion(
+            messages=[{"role": "user", "content": "spend tokens"}],
+            llm_config={"model": "gpt-5-nano"},
+            app_id="app_1",
+            user_id="user_1",
+        )
+
+    assert service._client.calls == []
 
 
 async def _fake_select_provider(llm_config=None):  # noqa: ANN001

@@ -16,6 +16,7 @@ from autogen.beta.events import BaseEvent, ModelResponse
 from autogen.beta.middleware import BaseMiddleware, LLMCall, Middleware
 
 from logs.logging_config import get_core_logger
+from mozaiksai.core.tokens.guard import TokenUsageGuard
 from mozaiksai.core.tokens.manager import TokenManager
 
 logger = get_core_logger("ag2_usage_middleware")
@@ -85,6 +86,13 @@ class MozaiksUsageMiddleware(BaseMiddleware):
         events: Sequence[BaseEvent],
         context: Context,
     ) -> ModelResponse:
+        await TokenUsageGuard().check_or_raise(
+            app_id=_text(_ctx_get(self._context_variables, "app_id", "")),
+            user_id=_text(_ctx_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
+            tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
+            required_tokens=1,
+        )
+
         started = time.perf_counter()
         response = await call_next(events, context)
         duration = time.perf_counter() - started

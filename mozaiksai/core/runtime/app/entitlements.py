@@ -156,9 +156,10 @@ class ConfiguredEntitlementAdapter:
     ) -> str | None:
         """Return the effective active plan id for this scope.
 
-        The default plan is returned when no assignment store exists, no active
-        assignment is found, or the assignment references an unknown plan. This
-        keeps token allowance materialization aligned with capability checks.
+        The default plan is returned when no assignment store exists or no
+        active assignment is found. Active assignment plan IDs are returned as
+        stored so operator-authored catalogs can snapshot plans that are not in
+        the static app config fallback.
         """
 
         app_id = str(app_id or "").strip()
@@ -187,7 +188,7 @@ class ConfiguredEntitlementAdapter:
                 return self._config.default_plan_id
 
             plan_id = str(_field_value(record, store.plan_id_field, self._config.default_plan_id) or "").strip()
-            return self._config.plan_by_id(plan_id).plan_id
+            return plan_id or self._config.default_plan_id
         except Exception:
             return self._config.default_plan_id
 
