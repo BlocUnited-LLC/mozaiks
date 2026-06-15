@@ -375,8 +375,8 @@ async def _platform_shutdown() -> None:
         return
     try:
         await stop_services(_runtime_services)
-    except Exception:
-        pass
+    except Exception as _shutdown_exc:
+        logger.warning("PLATFORM_RUNTIME_SERVICES_STOP_FAILED: %s", _shutdown_exc)
     _runtime_services = []
 
 
@@ -2876,8 +2876,8 @@ async def websocket_endpoint(
                     },
                     "timestamp": datetime.now(UTC).isoformat(),
                 })
-            except Exception:
-                pass
+            except Exception as _prereq_send_exc:
+                logger.debug("WS_PREREQ_ERROR_SEND_FAILED chat=%s: %s", chat_id, _prereq_send_exc)
             await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Prerequisites not met")
             return
     except Exception as dep_err:
@@ -2894,8 +2894,8 @@ async def websocket_endpoint(
                 },
                 "timestamp": datetime.now(UTC).isoformat(),
             })
-        except Exception:
-            pass
+        except Exception as _err_send_exc:
+            logger.debug("WS_PREREQ_VALIDATION_ERROR_SEND_FAILED chat=%s: %s", chat_id, _err_send_exc)
         await websocket.close(code=1011, reason="Prerequisite validation failed")
         return
 

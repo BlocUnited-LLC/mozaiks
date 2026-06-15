@@ -405,8 +405,8 @@ async def run_workflow_orchestration(
                         context.set(key, ctx_dict[key])
                     elif hasattr(context, "__setitem__"):
                         context[key] = ctx_dict[key]
-                except Exception:
-                    pass
+                except Exception as _ctx_exc:
+                    wf_logger.debug("[%s] CONTEXT_SEED_FAILED key=%s: %s", workflow_name_upper, key, _ctx_exc)
 
         # 6) Create agents
         if agents_factory:
@@ -741,8 +741,8 @@ async def run_workflow_orchestration(
         try:
             if workflow_status_value == 1:
                 await persistence_manager.mark_chat_completed(chat_id, app_id=app_id)
-        except Exception:
-            pass
+        except Exception as _persist_exc:
+            wf_logger.warning("[%s] MARK_CHAT_COMPLETED_FAILED chat=%s: %s", workflow_name_upper, chat_id, _persist_exc)
 
     # Post-run cleanup and final logging
     try:
@@ -782,7 +782,7 @@ async def run_workflow_orchestration(
             keep_dcm = isinstance(stream_state, dict) and stream_state.get("awaiting_user_input")
             if transport and hasattr(transport, "unregister_derived_context_manager") and not keep_dcm:
                 transport.unregister_derived_context_manager(chat_id)
-        except Exception:
-            pass
+        except Exception as _dcm_exc:
+            wf_logger.debug("[%s] DERIVED_CONTEXT_MANAGER_CLEANUP_FAILED chat=%s: %s", workflow_name_upper, chat_id, _dcm_exc)
 
     return result_payload
