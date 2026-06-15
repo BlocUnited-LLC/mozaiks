@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 from mozaiksai.core.workflow.paths import resolve_active_app_root
 from mozaiksai.resources import resolve_factory_app_root
@@ -124,7 +127,8 @@ def load_ai_config_json(app_root: Path | None = None) -> dict[str, Any]:
 
     try:
         data = json.loads(ai_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        logger.warning("AI_CONFIG_LOAD_FAILED %s: %s", ai_path, exc)
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -154,7 +158,8 @@ def load_control_plane_config_yaml(app_root: Path | None = None) -> dict[str, An
 
     try:
         data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        logger.warning("CONTROL_PLANE_CONFIG_LOAD_FAILED %s: %s", config_path, exc)
         return {}
     return data if isinstance(data, dict) else {}
 
