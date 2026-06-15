@@ -469,7 +469,6 @@ class UnifiedEventDispatcher:
                 # Check 1: UI_HIDDEN triggers (exact match suppression)
                 try:
                     hidden_triggers = workflow_manager.get_ui_hidden_triggers(workflow_name)
-                    logger.info(f"🔍 [UI_HIDDEN_DEBUG] Got hidden triggers: {hidden_triggers}")
                     
                     if agent_name in hidden_triggers and content.strip() in hidden_triggers[agent_name]:
                         event_dict['_mozaiks_hide'] = True
@@ -486,10 +485,8 @@ class UnifiedEventDispatcher:
                 # Check 2: AUTO_TOOL agent message deduplication
                 # Auto-tool agents emit text (with agent_message) then tool_call (with same agent_message)
                 # Suppress the text message to avoid duplication in UI
-                logger.info(f"🔍 [AUTO_TOOL_DEBUG] About to check auto_tool agents for agent={agent_name}, workflow_name={workflow_name}")
                 try:
                     auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
-                    logger.info(f"🔍 [AUTO_TOOL_DEBUG] Got auto_tool agents: {auto_tool_agents}, checking if {agent_name} in set")
                     if agent_name in auto_tool_agents:
                         event_dict['_mozaiks_hide'] = True
                         logger.info(f"� [AUTO_TOOL_DEDUP] Suppressing text from auto_tool agent {agent_name}: '{content[:100]}'")

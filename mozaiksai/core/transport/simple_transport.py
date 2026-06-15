@@ -560,14 +560,6 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             if chat_id and chat_id in self.connections:
                 workflow_name = self.connections[chat_id].get('workflow_name')
 
-            # DEBUG: Log what we're processing
-            event_type = type(event).__name__ if hasattr(event, '__class__') else 'dict'
-            if isinstance(event, dict):
-                event_kind = event.get('kind', 'unknown')
-                logger.info(f"🔍 [TRANSPORT] Processing event: type={event_type}, kind={event_kind}, chat_id={chat_id}, dict_keys={list(event.keys()) if isinstance(event, dict) else 'N/A'}")
-            else:
-                logger.info(f"🔍 [TRANSPORT] Processing event: type={event_type}, chat_id={chat_id}")
-
             envelope = dispatcher.build_outbound_event_envelope(
                 raw_event=event,
                 chat_id=chat_id,
@@ -575,10 +567,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 workflow_name=workflow_name,
             )
             if not envelope:
-                logger.warning(f"❌ [TRANSPORT] No envelope created for event type={event_type}")
+                event_kind = event.get('kind', type(event).__name__) if isinstance(event, dict) else type(event).__name__
+                logger.warning("No envelope created for event kind=%s chat=%s", event_kind, chat_id)
                 return
-            
-            logger.info(f"✅ [TRANSPORT] Envelope created successfully: type={envelope.get('type')}, has_data={bool(envelope.get('data'))}")
 
             envelope_type = envelope.get('type') if isinstance(envelope, dict) else None
 
