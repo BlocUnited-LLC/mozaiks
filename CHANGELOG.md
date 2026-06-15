@@ -14,6 +14,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Added
 
+- **Live AppGenerator subscription smoke** (`scripts/smoke_appgenerator_live_subscription.py`)
+  now exercises real ConfigMiddlewareAgent LLM calls for SaaS subscription config
+  and entitlement-gated module contract generation, then validates wiring,
+  acceptance gates, export readiness, and runtime module loading.
+
 - **OSS build telemetry** (`mozaiksai/core/telemetry.py`) — opt-in HMAC-SHA256
   signed, anonymized build telemetry. `build_registry_id` is one-way SHA-256 hashed
   before transmission. Controlled by `MOZAIKS_TELEMETRY_ENDPOINT`,
@@ -239,6 +244,12 @@ This project follows a practical pre-1.0 changelog format:
   for subscription/usage pages. AppGenerator and AgentGenerator prompts now copy
   subscription entitlement and metering declarations exactly instead of inventing
   app-owned ledgers or payment-provider internals.
+
+- AppGenerator `ConfigMiddlewareAgent` now states the exact runtime-valid
+  `ModuleContractBundle`, `module.yaml`, capability, typed schema, and YAML
+  serialization shapes for module contract tasks, closing live semantic drift
+  around missing actions, malformed handler methods, invented events, raw JSON
+  schema maps, and invalid module YAML.
 
 - AgentGenerator and AppGenerator now schedule bounded repair passes for
   quality-gate failures that map to generated workflow bundles or workflow

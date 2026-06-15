@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 from datetime import date, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,8 @@ def _configure_event_loop_policy() -> None:
 def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+    if isinstance(value, Enum):
+        return value.value
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, Path):
@@ -226,7 +229,9 @@ def _module_contract_task() -> dict[str, Any]:
             - reports.view grants list_reports.
             - reports.generate grants generate_report.
             Subscription contract update is authoritative: set generate_report entitlement_gate to reports.generate exactly.
-            No workflow trigger events are present. Emit no backend Python files.
+            No domain events or workflow trigger events are declared for this task; actions[].emits must be empty and events_yaml.events must be empty.
+            module_contract must be a ModuleContractBundle wrapper: put module.yaml fields under module_contract.module_yaml, not directly under module_contract.
+            Emit no backend Python files.
             """
         ).strip(),
         "owned_paths": [
@@ -327,6 +332,67 @@ def _forbidden_drift_errors(files: dict[str, str]) -> list[str]:
             if term in lowered:
                 errors.append(f"{path} contains forbidden provider/runtime drift term {term!r}.")
     return errors
+
+
+def _extract_json_object_from_text(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    stripped = value.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?", "", stripped, flags=re.IGNORECASE).strip()
+        stripped = re.sub(r"```$", "", stripped).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end < start:
+        return {}
+    try:
+        parsed = json.loads(stripped[start : end + 1])
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _coerce_structured_output(content: Any, response_schema: Any) -> dict[str, Any]:
+    if hasattr(content, "model_dump"):
+        return content.model_dump(mode="json")
+    if isinstance(content, dict):
+        try:
+            return response_schema.model_validate(content).model_dump(mode="json")
+        except Exception as exc:
+            raw = dict(content)
+            raw["_schema_validation_error"] = str(exc)
+            return raw
+    parsed = _extract_json_object_from_text(content)
+    if parsed:
+        try:
+            return response_schema.model_validate(parsed).model_dump(mode="json")
+        except Exception as exc:
+            parsed["_schema_validation_error"] = str(exc)
+            return parsed
+    return {}
+
+
+async def _render_agent_system_prompt(agent: Any, context: Any) -> str:
+    class PromptCapture:
+        def __init__(self, name: str, context_variables: Any, base_message: str) -> None:
+            self.name = name
+            self.context_variables = context_variables
+            self.system_message = base_message
+            self._system_message = base_message
+            self._captured: str | None = None
+
+        def update_system_message(self, message: str) -> None:
+            self.system_message = message
+            self._system_message = message
+            self._captured = message
+
+    base_message = str(getattr(agent, "_mozaiks_base_system_message", "") or "")
+    capture = PromptCapture("ConfigMiddlewareAgent", context, base_message)
+    for middleware_fn in getattr(agent, "_mozaiks_prompt_middleware", []) or []:
+        result = middleware_fn(capture, [])
+        if hasattr(result, "__await__"):
+            await result
+    return capture._captured or capture.system_message or base_message
 
 
 def validate_subscription_output(
@@ -456,6 +522,12 @@ def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None,
             errors.append(f"Action {action_id!r} must use handler_method equal to its id.")
         if handler_method and not _PY_IDENTIFIER_RE.match(handler_method):
             errors.append(f"Action {action_id!r} has invalid Python handler_method {handler_method!r}.")
+        for event_type in action.get("emits") or []:
+            event_text = str(event_type or "").strip()
+            if event_text and not event_text.startswith("domain."):
+                errors.append(
+                    f"Action {action_id!r} emits non-canonical event {event_text!r}; generated app events must use domain.*."
+                )
 
     return content, errors
 
@@ -928,14 +1000,17 @@ async def _run_config_task(
     prompt: str,
     timeout_seconds: float,
 ) -> dict[str, Any]:
-    from mozaiksai.core.adapters.ag2_network_runner import (
-        AG2NetworkRunner,
-        AG2NetworkRunnerRequest,
-    )
-    from mozaiksai.core.ports.orchestration import RunStatus
+    from autogen.beta import Agent, MemoryStream
+
     from mozaiksai.core.workflow.agents import create_agents
-    from mozaiksai.core.workflow.agents.factory import ContextVariablesBridge
-    from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+    from mozaiksai.core.workflow.agents.factory import (
+        ContextVariablesBridge,
+        llm_config_to_openai_config,
+    )
+    from mozaiksai.core.workflow.outputs.structured import (
+        get_llm_for_workflow,
+        load_workflow_structured_outputs,
+    )
     from mozaiksai.core.workflow.workflow_manager import initialize_workflows
 
     os.environ["MOZAIKS_WORKFLOWS_PATH"] = str(WORKFLOWS_ROOT)
@@ -945,42 +1020,56 @@ async def _run_config_task(
     context = ContextVariablesBridge(_task_context(task, contract))
     agents = await create_agents("AppGenerator", context_variables=context)
     _models, structured_registry = load_workflow_structured_outputs("AppGenerator")
-    result = await AG2NetworkRunner().run(
-        AG2NetworkRunnerRequest(
-            workflow_name="AppGenerator",
-            chat_id=f"live_subscription_{task['task_id']}",
-            app_id=DEFAULT_APP_ID,
-            agents=agents,
-            transition_rules=[
-                {
-                    "source_agent": "ConfigMiddlewareAgent",
-                    "target_agent": "terminate",
-                    "transition_type": "after_turn",
-                }
-            ],
-            initial_agent_name="ConfigMiddlewareAgent",
-            initial_message=prompt,
-            context_variables=context.to_dict(),
-            structured_registry=structured_registry,
-            max_turns=2,
-            close_timeout_seconds=timeout_seconds,
-        )
+    configured_agent = agents["ConfigMiddlewareAgent"]
+    response_schema = structured_registry["ConfigMiddlewareAgent"]
+    system_prompt = await _render_agent_system_prompt(configured_agent, context)
+    _model_name, llm_config = await get_llm_for_workflow(
+        "AppGenerator",
+        "base",
+        agent_name="ConfigMiddlewareAgent",
     )
-    structured_output = result.structured_outputs[-1] if result.structured_outputs else {}
+    agent = Agent(
+        "ConfigMiddlewareAgent",
+        prompt=system_prompt,
+        config=llm_config_to_openai_config(llm_config),
+    )
+    task_prompt = "\n\n".join(
+        [
+            prompt,
+            "[CURRENT TASK CONTEXT JSON]",
+            json.dumps(_task_context(task, contract), indent=2),
+            "Return only the raw ConfigMiddlewareOutput JSON object.",
+        ]
+    )
+    try:
+        reply = await asyncio.wait_for(
+            agent.ask(
+                task_prompt,
+                stream=MemoryStream(),
+            ),
+            timeout=timeout_seconds,
+        )
+        content = await asyncio.wait_for(reply.content(), timeout=timeout_seconds)
+        structured_output = _coerce_structured_output(content, response_schema)
+        if not structured_output:
+            raise ValueError(f"Unable to parse structured output from {type(content).__name__}: {content!r}")
+        success = True
+        error = None
+    except Exception as exc:
+        structured_output = {}
+        success = False
+        error = str(exc)
+
     return _json_safe(
         {
-            "success": result.status is RunStatus.COMPLETED,
+            "success": success,
             "app_id": DEFAULT_APP_ID,
-            "chat_id": result.chat_id,
-            "event_count": len(result.wal),
-            "observed_event_types": [
-                str(item.get("event_type") or "")
-                for item in result.wal
-                if isinstance(item, dict)
-            ],
+            "chat_id": f"live_subscription_{task['task_id']}",
+            "event_count": None,
+            "observed_event_types": [],
             "structured_output": structured_output,
-            "context_variables": result.context_variables,
-            "error": result.error,
+            "context_variables": context.to_dict(),
+            "error": error,
         }
     )
 

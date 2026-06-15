@@ -1510,14 +1510,31 @@ agents:
 
       1. Read `current_build_task.capability_pack_id` — this is the module folder name (e.g. `task_manager`).
       2. Read `current_build_task.initial_message` for entities, actions, capabilities, events, settings, notifications, reactions, and Python hook needs.
+         - Treat the action list in `current_build_task.initial_message` as a closed contract. Emit every named action exactly once and do not replace it with a smaller, renamed, or reinterpreted action set.
+         - If the task lists `list_*` and mutation/generation actions for the same module, preserve both families. A list/query action is not optional just because a generation or write action is present.
+         - Treat event declarations as explicit only. Do not invent events from action verbs. If `current_build_task.initial_message` does not name event types, set `actions[].emits: []` and `events_yaml.events: []`.
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
-      5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
+         - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
+         - Do not put `schema_version`, `module`, `actions`, or `capabilities` directly under `module_contract`; those belong inside `module_contract.module_yaml`.
+      5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, `event_pipeline`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `event_pipeline` if the module reacts to external or domain events through an automated lifecycle; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
+         - `module_contract.module_yaml` must use the runtime loader shape exactly:
+           - `schema_version: mozaiks.module.v1`
+           - `module`: `{id, display_name, version, type, description, owner, visibility, handler}`
+           - `permissions`: list of `{id, description}` objects
+           - `actions`: list of `{id, description, handler_method, input_schema, output_schema, permissions, emits, entitlement_gate}` objects
+           - `capabilities`: list of `{capability_id, kind, target, title, permissions, input_schema}` objects
+         - `input_schema` and `output_schema` must be typed `JsonSchemaContract` objects, not raw JSON Schema maps. Include `type`, `description`, `required`, `properties`, and `items_type`. `properties` is a list of `{name, type, description, required, enum_values, items_type}` objects, not a dictionary keyed by property name.
+         - Never set an action's `input_schema` or `output_schema` to null. For no-input actions, use `{type: "object", description: "...", required: [], properties: [], items_type: null}`.
+         - `permissions`, `actions`, and `capabilities` are top-level siblings of `module` inside `module_yaml`; never nest them under `module`.
+         - Capabilities do not use `id` or `grants`. For an action capability, set `capability_id` to the public capability id, `kind: "action"`, and `target` to the action id.
+         - `actions[].handler_method` is the Python method name only, not an import path. Use `generate_report`, not `backend.handler:generate_report`. For generated durable modules, the handler method must equal the action id unless `current_build_task.initial_message` explicitly names a different method.
          - If `subscription_contract.module_contract_updates` names this
            module/action, set that action's `entitlement_gate` to the exact
            update value. Leave `entitlement_gate` null/absent for actions not
            named by the contract.
       6. **events.yaml**: include `schema_version: mozaiks.events.v1` and `events[]`. Generic modules may declare only namespaced `domain.*` events with `version`, `producer`, and `payload_schema`.
+         - Bare event names such as `reports.generated` are invalid. Use `domain.reports.generated` only when that event was explicitly named by the task.
       7. **contracts/reactions.yaml**: include `schema_version: mozaiks.reactions.v1` and `reactions[]` for event reactions. Targets are `handler`, `capability`, or `notification`; workflow execution must be reached through a capability id, not a raw workflow name. Handler reactions must use `target.handler_method` referencing a method on `backend/handler.py`.
         - If `generated_workflow_trigger_events` is non-empty, generate one reaction entry per trigger event that routes the matching domain event to the workflow capability using `generated_workflow_capability_id` as the target. Do not use the raw workflow name — the capability id is the stable platform-resolvable identifier.
         - Do not add workflow capability entries or reactions for workflow ids that are absent from `generated_workflow_trigger_events` / `generated_workflow_capability_id`. The acceptance gate blocks invented workflow routes and trigger events routed to the wrong workflow capability.
@@ -1562,6 +1579,7 @@ agents:
          - Most modules do NOT need runtime_extensions_yaml. Omit (null) unless the build task explicitly requires a webhook receiver or persistent background connection.
          - When emitted, set `schema_version: mozaiks.runtime_extensions.v1` and populate `extensions[]`.
       14. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths. Include `modules/{capability_pack_id}/runtime_extensions.yaml` in code_files only when `runtime_extensions_yaml` is non-null.
+         - YAML `code_files[].content` must be valid YAML serialized from the same typed object. Preserve indentation under `module:`, `permissions:`, `actions:`, and `capabilities:`; do not flatten nested fields or emit list item markers outside their parent list.
       15. Set `service_foundation_bundle` to null in module_contract mode.
 
       **If `current_build_task_type == "service_foundation"` (Mode B)**:
@@ -1608,7 +1626,87 @@ agents:
       ```json
       {
         "mode": "module_contract_bundle",
-        "module_contract": { "...": "Must match ModuleContractBundle exactly" },
+        "module_contract": {
+          "module_id": "reports",
+          "module_yaml": {
+            "schema_version": "mozaiks.module.v1",
+            "module": {
+              "id": "reports",
+              "display_name": "Reports",
+              "version": "1.0.0",
+              "type": "standard",
+              "description": "Report generation and history.",
+              "owner": "app",
+              "visibility": "private",
+              "handler": "backend.handler:ReportsModule"
+            },
+            "permissions": [
+              { "id": "reports.view", "description": "View reports." },
+              { "id": "reports.generate", "description": "Generate reports." }
+            ],
+            "actions": [
+              {
+                "id": "generate_report",
+                "description": "Generate a report.",
+                "handler_method": "generate_report",
+                "input_schema": {
+                  "type": "object",
+                  "description": "Report generation request.",
+                  "required": ["topic"],
+                  "properties": [
+                    {
+                      "name": "topic",
+                      "type": "string",
+                      "description": "Report topic.",
+                      "required": true,
+                      "enum_values": [],
+                      "items_type": null
+                    }
+                  ],
+                  "items_type": null
+                },
+                "output_schema": {
+                  "type": "object",
+                  "description": "Generated report response.",
+                  "required": ["report_id"],
+                  "properties": [
+                    {
+                      "name": "report_id",
+                      "type": "string",
+                      "description": "Generated report id.",
+                      "required": true,
+                      "enum_values": [],
+                      "items_type": null
+                    }
+                  ],
+                  "items_type": null
+                },
+                "permissions": [],
+                "emits": [],
+                "entitlement_gate": "reports.generate"
+              }
+            ],
+            "capabilities": [
+              {
+                "capability_id": "reports.generate",
+                "kind": "action",
+                "target": "generate_report",
+                "title": "Generate reports",
+                "permissions": [],
+                "input_schema": null
+              }
+            ]
+          },
+          "events_yaml": { "schema_version": "mozaiks.events.v1", "events": [] },
+          "reactions_yaml": { "schema_version": "mozaiks.reactions.v1", "reactions": [] },
+          "notifications_yaml": { "schema_version": "mozaiks.notifications.v1", "notifications": [] },
+          "settings_yaml": { "schema_version": "mozaiks.settings.v1", "settings": [], "features": [] },
+          "admin_yaml": { "schema_version": "mozaiks.admin.v2", "panels": [], "hooks": [] },
+          "profile_yaml": null,
+          "python_stubs": [],
+          "js_stubs": [],
+          "runtime_extensions_yaml": null
+        },
         "service_foundation_bundle": null,
         "subscription_config_bundle": null,
         "code_files": [

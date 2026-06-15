@@ -216,6 +216,17 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "current_build_task_type == \"subscription_config\"" in agents_text
     assert "module_contract_updates" in agents_text
     assert "set that action's `entitlement_gate` to the exact" in agents_text
+    assert "Treat the action list in `current_build_task.initial_message` as a closed contract" in agents_text
+    assert "Use `generate_report`, not `backend.handler:generate_report`" in agents_text
+    assert "Do not invent events from action verbs" in agents_text
+    assert "`module_contract` must be a `ModuleContractBundle` wrapper" in agents_text
+    assert "`module_contract.module_yaml` must use the runtime loader shape exactly" in agents_text
+    assert "`input_schema` and `output_schema` must be typed `JsonSchemaContract` objects" in agents_text
+    assert "`properties` is a list of `{name, type, description, required, enum_values, items_type}`" in agents_text
+    assert "Never set an action's `input_schema` or `output_schema` to null" in agents_text
+    assert "`permissions`, `actions`, and `capabilities` are top-level siblings" in agents_text
+    assert "Capabilities do not use `id` or `grants`" in agents_text
+    assert "YAML `code_files[].content` must be valid YAML serialized from the same typed object" in agents_text
     assert "/api/me/usage" in agents_text
     assert "/api/me/tokens" in agents_text
 
