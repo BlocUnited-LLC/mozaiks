@@ -321,8 +321,8 @@ class WorkflowBridgeMixin:
                         if not t.cancelled() and t.exception() is not None
                         else None
                     )
-                except Exception:
-                    pass
+                except Exception as _ev_exc:
+                    logger.debug("EXECUTION_STARTED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
 
             # Launch orchestration via OrchestrationPort (engine-agnostic).
             # A missing message plus an explicit initial-agent override means the
@@ -490,8 +490,8 @@ class WorkflowBridgeMixin:
                             if not t.cancelled() and t.exception() is not None
                             else None
                         )
-                    except Exception:
-                        pass
+                    except Exception as _ev_exc:
+                        logger.debug("PROCESS_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
                     return result
                 except Exception:
                     # Emit failed run_complete before re-raising so listeners can react
@@ -518,8 +518,8 @@ class WorkflowBridgeMixin:
                             if not t.cancelled() and t.exception() is not None
                             else None
                         )
-                    except Exception:
-                        pass
+                    except Exception as _ev_exc:
+                        logger.debug("PROCESS_FAILED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
                     raise
         except asyncio.CancelledError:
             # Treat cancellation as an explicit pause request (adapter-driven).
@@ -585,8 +585,8 @@ class WorkflowBridgeMixin:
                 ctx = session_registry.get_workflow_by_chat_id(ws_id, chat_id)
                 if ctx and getattr(ctx, "status", None) != "completed":
                     ctx.status = "paused"
-        except Exception:
-            pass
+        except Exception as _pause_exc:
+            logger.debug("WORKFLOW_PAUSE_REGISTRY_FAILED chat=%s: %s", chat_id, _pause_exc)
 
         # Emit a lightweight runtime event for observability.
         try:
@@ -598,8 +598,8 @@ class WorkflowBridgeMixin:
                     "runtime.workflow_paused",
                     {"chat_id": chat_id, "reason": str(reason)},
                 )
-        except Exception:
-            pass
+        except Exception as _emit_exc:
+            logger.debug("WORKFLOW_PAUSED_EMIT_FAILED chat=%s: %s", chat_id, _emit_exc)
 
         task.cancel()
         return True

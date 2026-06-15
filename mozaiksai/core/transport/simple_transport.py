@@ -722,8 +722,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     conn = self.connections.get(chat_id)
                     if isinstance(conn, dict):
                         conn["ui_run_complete_sent"] = True
-            except Exception:
-                pass
+            except Exception as _rc_exc:
+                logger.debug("RUN_COMPLETE_REGISTRY_UPDATE_FAILED chat=%s: %s", chat_id, _rc_exc)
             await self._broadcast_to_websockets(envelope, chat_id)
 
             # Runtime hook: surface run completion to the unified dispatcher so
@@ -743,16 +743,16 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                                     v = conn.get(k)
                                     if v is not None and k not in dispatch_payload:
                                         dispatch_payload[k] = v
-                        except Exception:
-                            pass
+                        except Exception as _conn_exc:
+                            logger.debug("RUNTIME_PROCESS_COMPLETED_PAYLOAD_ENRICH_FAILED chat=%s: %s", chat_id, _conn_exc)
                         _t = asyncio.create_task(dispatcher.emit(RUNTIME_PROCESS_COMPLETED, dispatch_payload))
                         _t.add_done_callback(
                             lambda t: logger.debug("RUNTIME_PROCESS_COMPLETED_EMIT_FAILED chat=%s: %s", chat_id, t.exception())
                             if not t.cancelled() and t.exception() is not None
                             else None
                         )
-            except Exception:
-                pass
+            except Exception as _dispatch_exc:
+                logger.debug("RUNTIME_PROCESS_COMPLETED_HOOK_FAILED chat=%s: %s", chat_id, _dispatch_exc)
         except Exception as e:
             logger.error("Failed to serialize or send UI event: %s", e, exc_info=True)
 
