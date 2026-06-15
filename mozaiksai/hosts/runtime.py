@@ -45,6 +45,7 @@ from mozaiksai.core.core_config import close_mongo_client, get_mongo_client
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
+from mozaiksai.core.startup.validation import run_startup_checks
 from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import (
@@ -258,6 +259,8 @@ async def _runtime_startup() -> None:
     if mongo_client is None:
         mongo_client = get_mongo_client()
     await mongo_client.admin.command("ping")
+
+    await run_startup_checks()
 
     status = workflow_status_summary()
     startup_time_ms = (datetime.now(UTC) - startup_start).total_seconds() * 1000
