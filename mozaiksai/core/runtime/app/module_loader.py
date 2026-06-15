@@ -716,9 +716,19 @@ class ModuleLoader:
                 names.append(child.name)
         return names
 
-    async def load_all(self, module_names: list[str] | None = None) -> list[LoadedModule]:
-        """Load named modules, or discover all when no list is provided."""
-        loaded = []
+    async def load_all(
+        self,
+        module_names: list[str] | None = None,
+    ) -> tuple[list[LoadedModule], list[str]]:
+        """Load named modules, or discover all when no list is provided.
+
+        Returns:
+            Tuple of (loaded_modules, failed_module_names).  Both lists are
+            non-empty only when some but not all modules succeeded.  Callers
+            that only need the module list can unpack via ``loaded, _ = ...``.
+        """
+        loaded: list[LoadedModule] = []
+        failed: list[str] = []
         names = module_names if module_names is not None else self.discover_module_names()
         for name in names:
             try:
@@ -726,7 +736,8 @@ class ModuleLoader:
                 loaded.append(mod)
             except ModuleLoadError as exc:
                 logger.error(f"MODULE_LOAD_FAILED: {name} — {exc}")
-        return loaded
+                failed.append(name)
+        return loaded, failed
 
     def load(self, name: str) -> LoadedModule:
         """Load a single canonical module by folder name."""

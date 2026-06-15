@@ -58,12 +58,14 @@ class AppLoadResult:
         data_contract:        Parsed data contract, or None
         data_entities_by_key: Data entities indexed by (module_id, entity_name)
         subscriptions_config: Parsed subscriptions config, or None for non-SaaS apps
+        failed_module_names:  Names of modules that failed to load — empty on full success
     """
     definition: AppDefinition
     modules: list[LoadedModule] = field(default_factory=list)
     data_contract: dict[str, Any] | None = None
     data_entities_by_key: dict[tuple[str, str], dict[str, Any]] = field(default_factory=dict)
     subscriptions_config: SubscriptionsConfig | None = None
+    failed_module_names: list[str] = field(default_factory=list)
 
 
 class AppLoader:
@@ -149,12 +151,23 @@ class AppLoader:
         )
 
         loaded_modules: list[LoadedModule] = []
+        failed_module_names: list[str] = []
         if module_names:
-            loaded_modules = await module_loader.load_all(module_names)
-            logger.info(
-                f"MODULES_LOADED: {len(loaded_modules)}/{len(module_names)} "
-                f"({[m.name for m in loaded_modules]})"
-            )
+            loaded_modules, failed_module_names = await module_loader.load_all(module_names)
+            if failed_module_names:
+                logger.warning(
+                    "MODULE_LOAD_PARTIAL: %d/%d failed: %s — platform degraded for those modules",
+                    len(failed_module_names),
+                    len(module_names),
+                    ", ".join(sorted(failed_module_names)),
+                )
+            else:
+                logger.info(
+                    "MODULES_LOADED: %d/%d (%s)",
+                    len(loaded_modules),
+                    len(module_names),
+                    ", ".join(m.name for m in loaded_modules),
+                )
 
         return AppLoadResult(
             definition=app_def,
@@ -162,6 +175,7 @@ class AppLoader:
             data_contract=data_contract,
             data_entities_by_key=data_entities_by_key,
             subscriptions_config=subscriptions_config,
+            failed_module_names=failed_module_names,
         )
 
     @classmethod

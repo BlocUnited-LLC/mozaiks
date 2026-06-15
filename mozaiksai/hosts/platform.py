@@ -308,6 +308,15 @@ async def _platform_startup() -> None:
             executor_registry.register(module_executor)
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
 
+            if load_result.failed_module_names:
+                reason = (
+                    f"MODULE_LOAD_PARTIAL: {len(load_result.failed_module_names)} module(s) failed to load: "
+                    + ", ".join(sorted(load_result.failed_module_names))
+                )
+                logger.error("PLATFORM_DEGRADED: %s", reason)
+                app.state.startup_degraded = True
+                app.state.startup_degraded_reason = reason
+
             # Mount api_router extensions and start startup_service extensions
             # now that module packages are registered in sys.modules.
             try:
@@ -2950,7 +2959,17 @@ async def websocket_endpoint(
         except Exception as exc:
             logger.error("Auto-start failed for %s/%s: %s", workflow_name, active_chat_id, exc)
 
-    asyncio.create_task(_auto_start_if_needed())
+    _task = asyncio.create_task(_auto_start_if_needed())
+    _task.add_done_callback(
+        lambda t: logger.error(
+            "Auto-start task raised unexpected error for %s/%s: %s",
+            workflow_name,
+            active_chat_id,
+            t.exception(),
+        )
+        if not t.cancelled() and t.exception() is not None
+        else None
+    )
 
     try:
         has_children = False
