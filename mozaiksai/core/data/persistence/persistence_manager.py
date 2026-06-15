@@ -436,7 +436,7 @@ class AG2PersistenceManager:
             session_doc = dual_write_app_scope(session_doc, resolved_app_id)
             await coll.insert_one(session_doc)
         except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to create chat session {chat_id}: {e}")
+            logger.error("Failed to create chat session %s: %s", chat_id, e, exc_info=True)
 
     async def fetch_chat_session_extra_context(
         self,
@@ -639,7 +639,7 @@ class AG2PersistenceManager:
             }})
             return res.modified_count > 0
         except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to mark chat {chat_id} as completed: {e}")
+            logger.error("Failed to mark chat %s as completed: %s", chat_id, e, exc_info=True)
             return False
 
     async def update_last_artifact(

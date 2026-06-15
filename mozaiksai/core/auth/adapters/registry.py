@@ -138,7 +138,7 @@ def get_auth_adapter(force_provider: str | None = None) -> AuthAdapter:
     try:
         adapter = adapter_class()
     except Exception as e:
-        logger.error(f"Failed to instantiate {provider} adapter: {e}")
+        logger.error("Failed to instantiate %s adapter: %s", provider, e, exc_info=True)
         raise AuthError(
             f"Failed to configure {provider} auth: {e}",
             500,

@@ -125,7 +125,7 @@ async def save_to_database(
         }
         
     except Exception as e:
-        logger.error(f"❌ Database save failed: {e}")
+        logger.error("Database save failed: %s", e, exc_info=True)
         return {"status": "error", "message": f"Save failed: {e}"}
 
 async def load_from_database(
@@ -205,7 +205,7 @@ async def load_from_database(
         }
         
     except Exception as e:
-        logger.error(f"❌ Database load failed: {e}")
+        logger.error("Database load failed: %s", e, exc_info=True)
         return {"status": "error", "message": f"Load failed: {e}"}
 
 async def update_in_database(
@@ -284,7 +284,7 @@ async def update_in_database(
         }
         
     except Exception as e:
-        logger.error(f"❌ Database update failed: {e}")
+        logger.error("Database update failed: %s", e, exc_info=True)
         return {"status": "error", "message": f"Update failed: {e}"}
 
 async def delete_from_database(
@@ -352,7 +352,7 @@ async def delete_from_database(
         }
         
     except Exception as e:
-        logger.error(f"❌ Database delete failed: {e}")
+        logger.error("Database delete failed: %s", e, exc_info=True)
         return {"status": "error", "message": f"Delete failed: {e}"}
 
 def _get_database_config(workflow_name: str | None, database_name: str | None, collection_name: str | None) -> dict[str, str]:

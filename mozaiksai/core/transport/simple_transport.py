@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 import re
-import traceback
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -508,7 +507,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             }, chat_id)
             return {'applied': applied, 'component_id': component_id, 'action_type': action_type}
         except Exception as e:
-            logger.error(f"Component action processing failed for {chat_id}: {e}")
+            logger.error("Component action processing failed for %s: %s", chat_id, e, exc_info=True)
             raise
         
     # ==================================================================================
@@ -743,7 +742,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             except Exception:
                 pass
         except Exception as e:
-            logger.error(f"❌ Failed to serialize or send UI event: {e}\n{traceback.format_exc()}")
+            logger.error("Failed to serialize or send UI event: %s", e, exc_info=True)
 
     def _extract_clean_content(self, message: str | dict[str, Any] | Any) -> str:
         """Instance wrapper around the module-level cleaner."""
@@ -1262,7 +1261,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 (summary.get("total_messages") if isinstance(summary, dict) else None),
             )
         except Exception as e:
-            logger.error(f"❌ Resume failed chat={chat_id}: {e}")
+            logger.error("Resume failed chat=%s: %s", chat_id, e, exc_info=True)
             raise
 
     def _validate_inbound_message(self, message_data: dict) -> bool:

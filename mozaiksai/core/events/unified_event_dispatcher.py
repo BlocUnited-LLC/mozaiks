@@ -278,7 +278,7 @@ class UnifiedEventDispatcher:
                 logger.info(f"Slow event dispatch category={getattr(event,'category',None)} dur={dur_ms:.1f}ms")
             return success
         except Exception as e:  # pragma: no cover
-            logger.error(f"Dispatch failure: {e}")
+            logger.error("Dispatch failure: %s", e, exc_info=True)
             self.metrics["events_failed"] += 1
             return False
 

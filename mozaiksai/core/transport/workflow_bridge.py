@@ -376,7 +376,7 @@ class WorkflowBridgeMixin:
             }
 
         except Exception as e:
-            logger.error(f"User input handling failed for chat {chat_id}: {e}\n{traceback.format_exc()}")
+            logger.error("User input handling failed for chat %s: %s", chat_id, e, exc_info=True)
             if starting_new_workflow and _emit_execution_failed is not None:
                 try:
                     err_details = traceback.format_exc()

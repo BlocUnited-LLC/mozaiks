@@ -148,7 +148,7 @@ class JWTValidator:
         try:
             jwk = await jwks_client.get_signing_key(kid)
         except RuntimeError as e:
-            logger.error(f"Failed to fetch signing key: {e}")
+            logger.error("Failed to fetch signing key: %s", e, exc_info=True)
             raise AuthError("Unable to validate token signature", 401) from e
 
         if not jwk:
@@ -160,14 +160,14 @@ class JWTValidator:
             from jwt import algorithms
             public_key = algorithms.RSAAlgorithm.from_jwk(jwk)
         except Exception as e:
-            logger.error(f"Failed to load public key from JWK: {e}")
+            logger.error("Failed to load public key from JWK: %s", e, exc_info=True)
             raise AuthError("Invalid signing key format", 401) from e
 
         # Get expected issuer (may trigger discovery fetch)
         try:
             expected_issuer = await self._get_issuer()
         except RuntimeError as e:
-            logger.error(f"Failed to get issuer: {e}")
+            logger.error("Failed to get issuer: %s", e, exc_info=True)
             raise AuthError("Unable to validate token issuer", 401) from e
 
         # Decode and verify token
@@ -203,7 +203,7 @@ class JWTValidator:
             logger.warning(f"Token decode error: {e}")
             raise AuthError("Invalid token", 401) from e
         except Exception as e:
-            logger.error(f"Unexpected token validation error: {e}")
+            logger.error("Unexpected token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401) from e
 
         # Extract user claims
