@@ -863,7 +863,7 @@ async def websocket_endpoint(
         if startup_mode == "agentdriven" and run_history_count == 0:
             conn = simple_transport.connections.setdefault(resolved_chat_id, {})
             conn["autostarted"] = True
-            asyncio.create_task(
+            _agent_start_task = asyncio.create_task(
                 simple_transport.handle_user_input_from_api(
                     chat_id=resolved_chat_id,
                     user_id=user_id,
@@ -871,6 +871,16 @@ async def websocket_endpoint(
                     message=None,
                     app_id=app_id,
                 )
+            )
+            _agent_start_task.add_done_callback(
+                lambda t: logger.error(
+                    "AGENTDRIVEN_AUTO_START_FAILED workflow=%s chat=%s: %s",
+                    resolved_workflow_name,
+                    resolved_chat_id,
+                    t.exception(),
+                )
+                if not t.cancelled() and t.exception() is not None
+                else None
             )
 
         try:

@@ -15,8 +15,11 @@ Returned object supports:
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class _RuntimeContextVariables:
@@ -43,15 +46,32 @@ class _RuntimeContextVariables:
                 from mozaiksai.core.data.persistence.persistence_manager import (
                     AG2PersistenceManager,
                 )
-                # Fire and forget persistence to avoid blocking
+                # Fire and forget persistence to avoid blocking the runtime call path.
+                # Errors are logged at WARNING so operators can detect persistence drift
+                # without crashing the active workflow.
                 pm = AG2PersistenceManager()
-                asyncio.create_task(pm.persist_context_variables(
+                _task = asyncio.create_task(pm.persist_context_variables(
                     chat_id=self._chat_id,
                     app_id=self._app_id,
-                    variables=self._data
+                    variables=self._data,
                 ))
-            except Exception:
-                pass # Fail silently on persistence to not break runtime flow
+                _task.add_done_callback(
+                    lambda t: logger.warning(
+                        "CONTEXT_PERSIST_FAILED chat=%s app=%s: %s",
+                        self._chat_id,
+                        self._app_id,
+                        t.exception(),
+                    )
+                    if not t.cancelled() and t.exception() is not None
+                    else None
+                )
+            except Exception as exc:
+                logger.warning(
+                    "CONTEXT_PERSIST_TASK_CREATION_FAILED chat=%s app=%s: %s",
+                    self._chat_id,
+                    self._app_id,
+                    exc,
+                )
 
     def remove(self, key: str) -> bool:
         removed = self._data.pop(key, None)

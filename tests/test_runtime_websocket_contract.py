@@ -162,7 +162,7 @@ def _patch_runtime_websocket_harness(
 
     def fake_create_task(coro):  # noqa: ANN001
         scheduled_coroutines.append(coro)
-        return SimpleNamespace(cancel=lambda: None)
+        return SimpleNamespace(cancel=lambda: None, add_done_callback=lambda cb: None)
 
     monkeypatch.setattr(runtime_app, "_chat_coll", fake_chat_coll)
     monkeypatch.setattr(runtime_app, "simple_transport", transport)
