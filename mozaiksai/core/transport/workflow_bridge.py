@@ -365,8 +365,8 @@ class WorkflowBridgeMixin:
                         if not t.cancelled() and t.exception() is not None
                         else None
                     )
-                except Exception:
-                    pass
+                except Exception as _ev_exc:
+                    logger.debug("EXECUTION_COMPLETED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
 
             await self._emit_synthetic_run_complete_if_needed(
                 chat_id=chat_id,
@@ -405,21 +405,26 @@ class WorkflowBridgeMixin:
                         if not t.cancelled() and t.exception() is not None
                         else None
                     )
-                except Exception:
-                    pass
+                except Exception as _ev_exc:
+                    logger.debug("EXECUTION_FAILED_EMIT_TASK_FAILED chat=%s: %s", chat_id, _ev_exc)
             # Clear stuck REVISING state so the next refinement request can route correctly.
             if app_id and user_id:
                 try:
                     from mozaiksai.core.session.router import get_session_router
-                    asyncio.create_task(
+                    _rev_task = asyncio.create_task(
                         get_session_router().fail_active_revision(
                             app_id=app_id,
                             user_id=user_id,
                             workflow_id=workflow_name,
                         )
                     )
-                except Exception:
-                    pass
+                    _rev_task.add_done_callback(
+                        lambda t: logger.debug("REVISION_FAIL_TASK_FAILED app=%s workflow=%s: %s", app_id, workflow_name, t.exception())
+                        if not t.cancelled() and t.exception() is not None
+                        else None
+                    )
+                except Exception as _rev_exc:
+                    logger.debug("REVISION_FAIL_TASK_CREATE_FAILED app=%s workflow=%s: %s", app_id, workflow_name, _rev_exc)
             await self.send_error(
                 error_message=f"An internal error occurred: {e}",
                 error_code="WORKFLOW_EXECUTION_FAILED",

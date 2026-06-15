@@ -452,11 +452,19 @@ async def run_workflow_orchestration(
                         var_name = payload.get("variable")
                         value = payload.get("value")
                         if var_name and transport:
-                            asyncio.create_task(transport.send_event_to_ui({
+                            _ui_task = asyncio.create_task(transport.send_event_to_ui({
                                 "kind": "context_update",
                                 "variable": var_name,
                                 "value": value,
                             }, chat_id))
+                            _ui_task.add_done_callback(
+                                lambda t, _v=var_name: wf_logger.debug(
+                                    "[%s] DERIVED_CONTEXT_UI_EMIT_FAILED var=%s: %s",
+                                    workflow_name_upper, _v, t.exception(),
+                                )
+                                if not t.cancelled() and t.exception() is not None
+                                else None
+                            )
                     except Exception as _dl_err:
                         wf_logger.debug("[%s] Derived context listener error var=%s: %s", workflow_name_upper, payload.get("variable"), _dl_err)
 

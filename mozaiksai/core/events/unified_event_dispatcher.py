@@ -507,30 +507,30 @@ class UnifiedEventDispatcher:
                 try:
                     cfg = workflow_manager.get_agent_structured_outputs_config(workflow_name)
                     structured_flag = cfg.get(agent_name, False)
-                except Exception:
-                    pass
+                except Exception as _sc_err:
+                    logger.debug("AGENT_FLAG_LOOKUP_FAILED structured workflow=%s agent=%s: %s", workflow_name, agent_name, _sc_err)
                 try:
                     visual_agents = workflow_manager.get_visual_agents(workflow_name)
                     visual_flag = agent_name in visual_agents
-                except Exception:
-                    pass
+                except Exception as _va_err:
+                    logger.debug("AGENT_FLAG_LOOKUP_FAILED visual workflow=%s agent=%s: %s", workflow_name, agent_name, _va_err)
                 try:
                     ui_tools = workflow_manager.get_ui_tools(workflow_name)
                     tool_agent_flag = any(
                         tool.get('agent') == agent_name or tool.get('caller') == agent_name
                         for tool in ui_tools.values()
                     )
-                except Exception:
-                    pass
-            
+                except Exception as _ut_err:
+                    logger.debug("AGENT_FLAG_LOOKUP_FAILED ui_tools workflow=%s agent=%s: %s", workflow_name, agent_name, _ut_err)
+
             event_dict['is_structured_capable'] = structured_flag
             event_dict['is_visual'] = visual_flag
             event_dict['is_tool_agent'] = tool_agent_flag
             if get_sequence_cb and chat_id:
                 try:
                     event_dict['sequence'] = get_sequence_cb(chat_id)
-                except Exception:
-                    pass
+                except Exception as _seq_err:
+                    logger.debug("SEQUENCE_CB_FAILED chat=%s: %s", chat_id, _seq_err)
         if kind == 'agent_output_validated' and isinstance(event_dict, dict):
             if 'structured_data' in event_dict:
                 event_dict['structured_data'] = serialize_event_content(event_dict['structured_data'])
