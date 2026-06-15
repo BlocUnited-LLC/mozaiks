@@ -655,6 +655,29 @@ This project follows a practical pre-1.0 changelog format:
   now log `ARTIFACT_FILES_LOOKUP_FAILED` and `STALE_ARTIFACT_LOOKUP_FAILED`
   at `DEBUG` level.
 
+- **`exc_info=True` added to all critical `logger.error()` calls** — a sweep
+  across auth, persistence, transport, and event dispatch layers fixed
+  `logger.error(f"...{e}")` calls that were logging exception messages as
+  strings without capturing stack traces. Affected: `auth/websocket_auth.py`,
+  `auth/adapters/jwt_adapter.py`, `auth/adapters/keycloak.py`,
+  `auth/adapters/supabase.py`, `auth/adapters/registry.py`,
+  `auth/jwt_validator.py`, `data/persistence/persistence_manager.py`,
+  `data/persistence/db_manager.py`, `events/unified_event_dispatcher.py`,
+  `transport/simple_transport.py`, and `transport/workflow_bridge.py`. Also
+  removed an unused `import traceback` from `simple_transport.py` and cleaned
+  up emoji prefixes from `db_manager.py` error logs.
+
+- **`APP_MANIFEST_LOAD_FAILED` warning on corrupt app manifest** — platform
+  host `_load_app_manifest()` was silently returning empty dict when
+  `app.json` was corrupt or malformed; now emits a `WARNING` log with path
+  and exception so startup misconfiguration is visible.
+
+- **`WS_PREREQ_VALIDATION_FAILED` error log in runtime websocket handler** —
+  the runtime WebSocket endpoint caught prerequisite validation exceptions and
+  sent a `chat.error` to the client but logged nothing, leaving operators with
+  no visibility into the failure cause. Now logs at `ERROR` level with workflow
+  name, chat ID, and exception.
+
 ### Removed
 
 - Retired `MozaiksContextExpression` / `evaluate_context_expression`. All
