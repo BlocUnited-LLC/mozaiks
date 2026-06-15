@@ -2254,6 +2254,13 @@ async def _execute_module_action(
     if not _MODULE_NAME_RE.fullmatch(action_name):
         raise HTTPException(status_code=400, detail="Invalid action name")
 
+    failed_at_startup: list[str] = getattr(request.app.state, "failed_module_names", [])
+    if module_name in failed_at_startup:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Module '{module_name}' failed to load at startup. Check platform logs for details.",
+        )
+
     module_executor = executor_registry.module_executor
     if module_executor is None:
         raise HTTPException(
