@@ -19,7 +19,12 @@ def _run_async_fire_and_forget(coro: Any) -> None:
         loop = None
 
     if loop and loop.is_running():
-        loop.create_task(coro)
+        _t = loop.create_task(coro)
+        _t.add_done_callback(
+            lambda t: log.warning("HANDOFF_EVENT_EMIT_FAILED: %s", t.exception())
+            if not t.cancelled() and t.exception() is not None
+            else None
+        )
         return
 
     # Fallback: run in a new loop (no active loop in this thread)

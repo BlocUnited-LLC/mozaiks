@@ -504,7 +504,8 @@ class RefinementTriggerRouteResolver:
                 app_id=request.app_id,
                 artifact_version_id=request.artifact_version_id,
             )
-        except Exception:
+        except Exception as exc:
+            _logger.debug("ARTIFACT_FILES_LOOKUP_FAILED app=%s artifact=%s: %s", request.app_id, request.artifact_version_id, exc)
             return []
         if artifact is None:
             return []
@@ -1342,7 +1343,8 @@ class RefinementTriggerRouteResolver:
             )
             store = ArtifactStore()
             stale = await store.get_stale_artifact_families(app_id=request.app_id)
-        except Exception:
+        except Exception as exc:
+            _logger.debug("STALE_ARTIFACT_LOOKUP_FAILED app=%s: %s", request.app_id, exc)
             return None
         if not stale:
             return None

@@ -122,7 +122,7 @@ async def handle_switch_workflow(
                 )
 
                 if status == 0 and not run_history:
-                    transport._background_tasks[target_chat_id_str] = asyncio.create_task(
+                    _t = asyncio.create_task(
                         transport._run_workflow_background(
                             chat_id=target_chat_id_str,
                             workflow_name=str(active_context.workflow_name),
@@ -133,6 +133,15 @@ async def handle_switch_workflow(
                         ),
                         name=f"workflow:{active_context.workflow_name}:{target_chat_id_str}",
                     )
+                    _t.add_done_callback(
+                        lambda t, _wf=str(active_context.workflow_name), _cid=target_chat_id_str: logger.error(
+                            "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
+                            _wf, _cid, t.exception(),
+                        )
+                        if not t.cancelled() and t.exception() is not None
+                        else None
+                    )
+                    transport._background_tasks[target_chat_id_str] = _t
     except Exception as native_start_err:
         logger.warning(
             "UserDriven auto-start failed for chat %s (ws_id=%s): %s",
@@ -316,7 +325,7 @@ async def handle_start_workflow(
 
     # Auto-run if requested
     if auto_run:
-        transport._background_tasks[new_chat_id] = asyncio.create_task(
+        _wf_task = asyncio.create_task(
             transport._run_workflow_background(
                 chat_id=new_chat_id,
                 workflow_name=str(resolved_workflow),
@@ -328,6 +337,15 @@ async def handle_start_workflow(
             ),
             name=f"workflow:{resolved_workflow}:{new_chat_id}",
         )
+        _wf_task.add_done_callback(
+            lambda t, _wf=str(resolved_workflow), _cid=new_chat_id: logger.error(
+                "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
+                _wf, _cid, t.exception(),
+            )
+            if not t.cancelled() and t.exception() is not None
+            else None
+        )
+        transport._background_tasks[new_chat_id] = _wf_task
 
 
 async def handle_start_workflow_batch(
@@ -453,7 +471,7 @@ async def handle_start_workflow_batch(
         })
 
         if auto_run:
-            transport._background_tasks[new_chat_id] = asyncio.create_task(
+            _batch_task = asyncio.create_task(
                 transport._run_workflow_background(
                     chat_id=new_chat_id,
                     workflow_name=str(resolved_workflow),
@@ -465,6 +483,15 @@ async def handle_start_workflow_batch(
                 ),
                 name=f"workflow:{resolved_workflow}:{new_chat_id}",
             )
+            _batch_task.add_done_callback(
+                lambda t, _wf=str(resolved_workflow), _cid=new_chat_id: logger.error(
+                    "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
+                    _wf, _cid, t.exception(),
+                )
+                if not t.cancelled() and t.exception() is not None
+                else None
+            )
+            transport._background_tasks[new_chat_id] = _batch_task
 
     # Summary ack
     await websocket.send_json({

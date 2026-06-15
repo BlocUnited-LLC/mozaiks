@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import mimetypes
 import os
 import re
 import zipfile
+
+logger = logging.getLogger(__name__)
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -567,7 +570,15 @@ async def create_draft_app_bundle_from_staged_refinement(
                 app_id=resolved_app_id,
                 artifact_version_id=artifact_version.id,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "CONTENT_STORE_PUT_BUNDLE_FAILED app=%s artifact=%s backend=%s: %s",
+                resolved_app_id,
+                artifact_version.id,
+                content_backend,
+                exc,
+                exc_info=True,
+            )
             content_ref = None
             content_backend = None  # type: ignore[assignment]
         else:

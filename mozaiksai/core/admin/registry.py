@@ -10,11 +10,14 @@ Schema version: mozaiks.admin.registry.v1
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 ADMIN_REGISTRY_SCHEMA_VERSION = "mozaiks.admin.registry.v1"
 
@@ -95,7 +98,8 @@ def load_admin_registry(app_root: Path) -> AdminRegistry:
     try:
         raw = yaml.safe_load(registry_path.read_text(encoding="utf-8")) or {}
         return AdminRegistry.model_validate(raw)
-    except Exception:
+    except Exception as exc:
+        logger.warning("ADMIN_REGISTRY_LOAD_FAILED %s: %s", registry_path, exc, exc_info=True)
         return AdminRegistry()
 
 
