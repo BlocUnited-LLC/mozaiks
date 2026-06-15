@@ -317,5 +317,6 @@ async def test_coding_worker_surfaces_artifact_persistence_errors(tmp_path: Path
         )
     )
 
-    assert result.status == "validated"
-    assert result.metadata["artifact_persistence_error"] == "artifact store unavailable"
+    assert result.status == "failed"
+    assert result.error is not None and "ARTIFACT_PERSISTENCE_FAILED" in result.error
+    assert "ARTIFACT_PERSISTENCE_FAILED" in result.metadata["artifact_persistence_error"]

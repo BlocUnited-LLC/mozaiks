@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 import zipfile
+
+logger = logging.getLogger(__name__)
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -158,6 +161,7 @@ class ScopedRefinementCodingWorker:
         }
         if isinstance((request.metadata or {}).get("scope_proposal"), dict):
             metadata["scope_proposal"] = dict(request.metadata["scope_proposal"])
+        persistence_error: str | None = None
         if status == "validated":
             try:
                 metadata.update(
@@ -171,7 +175,15 @@ class ScopedRefinementCodingWorker:
                     )
                 )
             except Exception as exc:
-                metadata["artifact_persistence_error"] = str(exc)
+                persistence_error = f"ARTIFACT_PERSISTENCE_FAILED: {exc}"
+                metadata["artifact_persistence_error"] = persistence_error
+                logger.error(
+                    "CODING_WORKER_PERSISTENCE_FAILED app=%s: %s",
+                    request.app_id,
+                    exc,
+                    exc_info=True,
+                )
+                status = "failed"
 
         return CodingWorkerResult(
             eligible=True,
@@ -180,7 +192,8 @@ class ScopedRefinementCodingWorker:
             applied_files=applied_files,
             validation_result=validation_result,
             metadata=metadata,
-            error=(validation_result or {}).get("errors", [None])[0] if status == "failed" else None,
+            error=persistence_error
+            or ((validation_result or {}).get("errors", [None])[0] if status == "failed" else None),
         )
 
     def _load_config(self) -> ControlPlaneConfig:
@@ -398,9 +411,14 @@ class ScopedRefinementCodingWorker:
             written_paths.append(safe)
 
         zip_path = bundle_root / "artifact.zip"
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            for rel_path in sorted(written_paths):
-                zipf.write(workspace_dir / rel_path, arcname=rel_path)
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                for rel_path in sorted(written_paths):
+                    zipf.write(workspace_dir / rel_path, arcname=rel_path)
+        except OSError as exc:
+            raise RuntimeError(
+                f"ARTIFACT_ZIP_FAILED: could not create artifact bundle at {zip_path} — {exc}"
+            ) from exc
 
         zip_bytes = zip_path.read_bytes()
         zip_sha = hashlib.sha256(zip_bytes).hexdigest()

@@ -435,11 +435,13 @@ async def test_artifact_store_fields_match_promotion_contract(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_broken_artifact_store_surfaces_error_without_failing_status(tmp_path: Path) -> None:
-    """Artifact store failure must not change the coding result status.
+async def test_broken_artifact_store_sets_failed_status_and_surfaces_error(tmp_path: Path) -> None:
+    """Artifact store failure must flip the coding result to 'failed'.
 
     The worker validates and writes files successfully, then fails to persist.
-    Result.status must remain 'validated' with the error recorded in metadata.
+    Result.status becomes 'failed' so the control plane does not treat this as
+    a successful validated artifact.  The persistence error is recorded in both
+    result.error and result.metadata so operators can diagnose the root cause.
     """
 
     class _BrokenStore:
@@ -472,11 +474,15 @@ async def test_broken_artifact_store_surfaces_error_without_failing_status(tmp_p
         )
     )
 
-    # Status is still validated — the code change was correct
-    assert result.status == "validated"
-    # Error is surfaced in metadata, not as a status change
-    assert result.metadata["artifact_persistence_error"] == "artifact store unavailable"
-    # applied_files still carries the generated content
+    # Status is failed — artifact was not persisted despite valid code change
+    assert result.status == "failed"
+    # Error identifies persistence as the failure cause
+    assert result.error is not None
+    assert "ARTIFACT_PERSISTENCE_FAILED" in result.error
+    assert "artifact store unavailable" in result.error
+    # Metadata also carries the raw error for diagnostics
+    assert "ARTIFACT_PERSISTENCE_FAILED" in result.metadata["artifact_persistence_error"]
+    # applied_files still carries the generated content for inspection
     assert result.applied_files[_DASHBOARD_PATH] == _DASHBOARD_UPDATED
 
 
