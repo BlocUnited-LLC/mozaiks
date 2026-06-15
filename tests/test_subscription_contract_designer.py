@@ -223,10 +223,13 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "`module_contract.module_yaml` must use the runtime loader shape exactly" in agents_text
     assert "`input_schema` and `output_schema` must be typed `JsonSchemaContract` objects" in agents_text
     assert "`properties` is a list of `{name, type, description, required, enum_values, items_type}`" in agents_text
+    assert "Every `JsonSchemaProperty` must include all six fields" in agents_text
     assert "Never set an action's `input_schema` or `output_schema` to null" in agents_text
     assert "`permissions`, `actions`, and `capabilities` are top-level siblings" in agents_text
     assert "Capabilities do not use `id` or `grants`" in agents_text
     assert "YAML `code_files[].content` must be valid YAML serialized from the same typed object" in agents_text
+    assert "must be indented inside that action's `actions:` list item" in agents_text
+    assert "Always include `agent_message` as a required top-level string in every mode" in agents_text
     assert "/api/me/usage" in agents_text
     assert "/api/me/tokens" in agents_text
 

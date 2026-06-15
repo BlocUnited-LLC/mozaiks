@@ -372,6 +372,16 @@ def _coerce_structured_output(content: Any, response_schema: Any) -> dict[str, A
     return {}
 
 
+def _structured_output_errors(output: dict[str, Any], *, mode_label: str) -> list[str]:
+    errors: list[str] = []
+    schema_error = output.get("_schema_validation_error")
+    if schema_error:
+        errors.append(f"{mode_label} structured output failed ConfigMiddlewareOutput validation: {schema_error}")
+    if "agent_message" not in output:
+        errors.append(f"{mode_label} output must include required top-level agent_message.")
+    return errors
+
+
 async def _render_agent_system_prompt(agent: Any, context: Any) -> str:
     class PromptCapture:
         def __init__(self, name: str, context_variables: Any, base_message: str) -> None:
@@ -399,7 +409,7 @@ def validate_subscription_output(
     output: dict[str, Any],
     contract: dict[str, Any],
 ) -> tuple[str | None, list[str]]:
-    errors: list[str] = []
+    errors: list[str] = _structured_output_errors(output, mode_label="subscription_config")
     if output.get("mode") != "subscription_config":
         errors.append(f"Expected subscription_config mode, got {output.get('mode')!r}.")
     if output.get("module_contract") is not None:
@@ -466,7 +476,7 @@ def _module_yaml_from_output(output: dict[str, Any], files: dict[str, str]) -> s
 
 
 def validate_module_contract_output(output: dict[str, Any]) -> tuple[str | None, list[str]]:
-    errors: list[str] = []
+    errors: list[str] = _structured_output_errors(output, mode_label="module_contract_bundle")
     if output.get("mode") != "module_contract_bundle":
         errors.append(f"Expected module_contract_bundle mode, got {output.get('mode')!r}.")
     if output.get("service_foundation_bundle") is not None:

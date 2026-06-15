@@ -37,6 +37,31 @@ def test_module_contract_validator_requires_exact_entitlement_gate() -> None:
     assert any("reports.generate" in error for error in errors)
 
 
+def test_module_contract_validator_rejects_structured_output_schema_drift() -> None:
+    output = deterministic_module_contract_output()
+    output.pop("agent_message")
+    output["_schema_validation_error"] = "agent_message field required"
+
+    _content, errors = validate_module_contract_output(output)
+
+    assert errors
+    assert any("structured output failed ConfigMiddlewareOutput validation" in error for error in errors)
+    assert any("agent_message" in error for error in errors)
+
+
+def test_module_contract_validator_rejects_action_field_indentation_drift() -> None:
+    output = deterministic_module_contract_output()
+    output["code_files"][0]["content"] = output["code_files"][0]["content"].replace(
+        "    entitlement_gate: reports.generate",
+        "entitlement_gate: reports.generate",
+    )
+
+    _content, errors = validate_module_contract_output(output)
+
+    assert errors
+    assert any("not valid YAML" in error for error in errors)
+
+
 @pytest.mark.asyncio
 async def test_deterministic_subscription_smoke_validates_acceptance_loader_and_wiring() -> None:
     payload = await run_deterministic_appgenerator_subscription_smoke()

@@ -17,7 +17,8 @@ This project follows a practical pre-1.0 changelog format:
 - **Live AppGenerator subscription smoke** (`scripts/smoke_appgenerator_live_subscription.py`)
   now exercises real ConfigMiddlewareAgent LLM calls for SaaS subscription config
   and entitlement-gated module contract generation, then validates wiring,
-  acceptance gates, export readiness, and runtime module loading.
+  acceptance gates, export readiness, strict structured-output conformance, and
+  runtime module loading.
 
 - **OSS build telemetry** (`mozaiksai/core/telemetry.py`) — opt-in HMAC-SHA256
   signed, anonymized build telemetry. `build_registry_id` is one-way SHA-256 hashed
@@ -464,6 +465,32 @@ This project follows a practical pre-1.0 changelog format:
   declared fields as truly required in generated Pydantic models. This restores
   provider-enforced `response_format` compatibility for live AG2 workflow runs
   such as `RuntimeTaskBatchSmoke` and related planner-driven smokes.
+
+- Fixed OpenAI strict structured-output mode compatibility for all control-plane
+  response schemas. `CodingWorkerPlan`, `SurfaceRegenerationResponse`,
+  `ScopeProposal`, `_SurfaceEntry`, and `_ContractSurfaceClassification` had
+  fields with defaults that caused those fields to be excluded from Pydantic's
+  `required[]`, violating the strict-mode requirement that every property appear
+  in `required`. All defaults stripped; every property is now required. Introduced
+  `FileUpdate(path, content)` model replacing `dict[str, str]` for the
+  `updated_files` field — `dict[str, str]` generates
+  `"additionalProperties": {"type": "string"}` which strict mode rejects;
+  `list[FileUpdate]` generates an array of objects with `additionalProperties: false`.
+
+- Fixed `codegen`, `planner_replanner`, and `reviewer_validator` LLM profiles in
+  `factory_app/control_plane/config/runtime.yaml` — previously set to
+  `gpt-5.2-codex`, which is a completions-only model that returns a 404 from
+  `/v1/chat/completions`. Changed to `gpt-4o` with `temperature: 0.1`.
+
+- Fixed stale `WorkflowStrategyAgent` references in AgentGenerator.
+  `WorkflowStrategyAgent` was replaced by `PatternAgent` in a prior refactor but
+  two stale references remained: (1) `WorkflowBundleBuilderAgent` EVENT BOUNDARY
+  RULES referenced `WorkflowStrategy.event_boundary.input_events`, a context
+  variable that no longer exists; replaced with `backend_design_document` and the
+  `initial_message` trigger contract. (2) `hook_universal_prompts.py`
+  `workflow_design_agents` named `WorkflowStrategyAgent`, so the `RUNTIME_CONTEXT`
+  injection never fired for any live agent; replaced with `WorkflowBundleBuilderAgent`.
+
 - Fixed live control-plane classifier calls against models that only support
   the provider default temperature. `SimpleLLMCapabilityService` now omits the
   `temperature` field for JSON completions when no explicit value is configured.
