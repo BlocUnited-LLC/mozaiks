@@ -292,6 +292,13 @@ It does not reason about artifact ownership. It packages the materialized file s
 into the downloadable app bundle after the deterministic app-bundle acceptance
 gate passes.
 
+Download archives may include a single top-level folder named for the bundle
+such as `GeneratedApp/`. Studio artifact promotion treats that folder as a zip
+transport wrapper only when stripping it reveals an app-root bundle containing
+`app.json`. The promoted active app root must contain `app.json`, `config/`,
+`modules/`, `ui/`, and other app-bundle families directly; it must not require
+the platform host to look under `GeneratedApp/`.
+
 When AgentGenerator workflow metadata is present, the acceptance gate is
 export-blocking. AppGenerator must wire each generated workflow through:
 
@@ -309,6 +316,23 @@ match the workflow capability id from AgentGenerator metadata, generated app
 modules must not invent workflow capabilities absent from that metadata, and a
 workflow trigger event must not also route to a different generated workflow
 capability unless that route is declared by the same metadata.
+
+When workflow integration fails, the acceptance gate writes a bounded repair
+contract before export can proceed:
+
+- `workflow_integration_repair_status`
+- `workflow_integration_repair_count`
+- `workflow_integration_repair_request`
+- `workflow_integration_repair_failed_tests`
+- `workflow_integration_repair_result`
+
+`needs_revision` routes back to `ConfigMiddlewareAgent`, which runs in
+workflow-integration repair mode. That mode emits only corrected module contract
+YAML for the affected module, using AgentGenerator workflow metadata and the
+injected `[WORKFLOW INTEGRATION CONTRACT]` as authority. It must not regenerate
+backend Python, frontend code, pages, data contracts, service foundation files,
+or unrelated modules. After the configured attempt limit, the status becomes
+`blocked` and the workflow returns to the user.
 
 ### 7. AppValidation Strategy
 

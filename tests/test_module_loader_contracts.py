@@ -166,6 +166,23 @@ def test_module_loader_loads_canonical_contract(tmp_path: Path) -> None:
     assert type(loaded.handler).__name__ == "TasksModule"
 
 
+@pytest.mark.parametrize("module_type", ["standard", "messaging", "workflow", "event_pipeline", "transactional"])
+def test_module_loader_accepts_canonical_module_type(tmp_path: Path, module_type: str) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_yaml = module_dir.joinpath("module.yaml")
+    module_yaml.write_text(
+        module_yaml.read_text(encoding="utf-8").replace(
+            "  version: 1.0.0\n",
+            f"  version: 1.0.0\n  type: {module_type}\n",
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    assert loaded.definition.module.type == module_type
+
+
 def test_module_loader_loads_action_api_surface_metadata(tmp_path: Path) -> None:
     module_dir = _write_canonical_module(tmp_path)
     module_yaml = module_dir.joinpath("module.yaml")

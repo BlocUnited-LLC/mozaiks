@@ -183,10 +183,15 @@ Workflow ownership:
 2. `DesignDocs`
    - final `surface_map`
    - ownership/event/page boundary decisions
-3. `AgentGenerator`
+3. `SubscriptionContractDesigner`
+   - generic SaaS subscription/token contract
+   - `config/subscriptions.yaml` intent when the generated app sells plans
+   - module entitlement gates and workflow metering declarations
+   - no-op contract for non-SaaS apps
+4. `AgentGenerator`
    - workflow-only surfaces
    - `workflow_stages`, tools, workflow-local UI
-4. `AppGenerator`
+5. `AppGenerator`
    - app schema
    - module/control-plane/integration build tasks
    - layered module backend contracts
@@ -221,6 +226,8 @@ This phase may write:
 - `ui/index.js`
 - `brand/theme_config.json`
 - `config/shell.json`
+- `config/subscriptions.yaml` when `SubscriptionContractDesigner` produced a
+  required SaaS subscription/token contract
 - `data/contract.json`
 - optional `data/migrations/*.json`
 - generated module files
@@ -249,8 +256,9 @@ This phase pauses the build sequence for user review before promotion.
 Owned by:
 
 - the `app_review` transition in `extension_registry.json` (build sequence terminal step)
-- `AppReviewScreen` UI component
-- `app_registry` module (`promote_build` action)
+- `AppReview` workflow and the `AppReviewSummary` in-chat UI artifact
+- Studio artifact promotion endpoint
+- `app_registry` module lifecycle update
 - refinement control plane (revision path)
 
 Responsibilities:
@@ -258,17 +266,27 @@ Responsibilities:
 - surface build output summary, validation strategy used, and integration check results
 - show sandbox preview URL when E2B or local npm validation ran
 - present Promote and Revise paths to the user
-- on Promote: call `app_registry.promote_build`, transition `lifecycle_state` from `review` to `active`
+- on Promote: call Studio artifact promotion for `artifact_version_id`, restore
+  the reviewed bundle into the active app root, and transition
+  `lifecycle_state` from `review` to `active`
 - on Revise: accept user revision request via chat, route through the refinement
   control plane, operate on the staged `generated/` bundle path (not the active workspace)
 
 How the pause works:
 
 - `AppGenerator` terminates its AG2 session after writing the bundle and calling `update_build_status(status="review")`
-- `AppGenerator` sets `lifecycle_state=review` and `bundle_path` in AG2 context_variables before terminating
-- the build sequence advances to the `app_review` transition, which renders `AppReviewScreen`
-- `AppReviewScreen` is the HITL boundary — the user decides to promote or request revisions
-- revision requests re-enter the refinement router with `artifact_root` set to the staged bundle path
+- `AppGenerator` sets `lifecycle_state=review`, `bundle_path`, and
+  `artifact_version_id` in AG2 context_variables before terminating
+- the build sequence advances to the `app_review` chat-session transition,
+  which starts the `AppReview` workflow
+- `ReviewAgent` presents the `AppReviewSummary` artifact as the HITL boundary;
+  the user decides to promote or request revisions from that chat session
+- revision requests re-enter the refinement router with `artifact_key`,
+  `artifact_version_id`, `source_surface=app_review`, and staged-bundle
+  metadata so `artifact_root` can be set to the generated bundle path
+- when the refinement router returns a confirmation or clarification decision,
+  the chat shell renders the existing pending harness decision panel in-place;
+  workflow launches only proceed after the user selects a decision action
 
 App lifecycle state:
 
@@ -284,9 +302,22 @@ Canonical frontend/workflow UI smoke targets:
 Important rule:
 
 - canonical review/promotion must flow through the `app_review` transition and
-  `app_registry.promote_build`, not through ad hoc CLI commands or side effects
+  Studio artifact promotion endpoint, not through ad hoc CLI commands or side effects
+- Studio artifact promotion validates the matching `app_registry` record is in
+  `review`, restores the reviewed artifact version, and then invokes the module
+  lifecycle update to mark the app `active`
+- AppGenerator download zips may contain a single top-level bundle folder such
+  as `GeneratedApp/`; promotion strips that wrapper only when it reveals an
+  app-root bundle containing `app.json`, so the active root receives
+  `app.json`, `config/`, `modules/`, and `ui/` directly
 - revision requests from `app_review` operate on the staged `generated/` bundle,
   not the active workspace; `artifact_root` in the context seed is the guard for this
+- AppReview revision payloads must preserve `artifact_key`, `artifact_version_id`,
+  `source_surface`, lifecycle state, and `bundle_path`; dropping those fields
+  causes the control plane to lose reviewed-bundle provenance
+- AppReview-triggered `harness_decision` responses must be surfaced through the
+  shared pending harness decision UI; they must not be silently ignored by the
+  websocket bridge
 
 Canonical frontend/workflow UI smoke targets:
 
@@ -343,9 +374,12 @@ Promotion target:
 
 Current implementation:
 
-- `app_registry.promote_build` module action — enforces `review → active` state guard,
-  emits `domain.app_registry.app_promoted`
-- called by `AppReviewScreen` when the user clicks Promote
+- Studio `/api/studio/build/artifacts/{artifact_version_id}/promote` endpoint -
+  restores the accepted app-bundle artifact version into the active app root
+- `app_registry.promote_build` module action - enforces the `review -> active`
+  state guard and emits `domain.app_registry.app_promoted`
+- called by the `AppReviewSummary` in-chat artifact with both
+  `artifact_version_id` and `build_registry_id` when the user clicks Promote
 
 Important rule:
 

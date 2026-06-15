@@ -2800,6 +2800,12 @@ const ChatPage = () => {
         const detail = data.data || data;
         const revisionText = detail.refinement_request || '';
         const artifactKind = detail.artifact_kind || 'app_bundle';
+        const artifactKey = detail.artifact_key || artifactKind;
+        const artifactVersionId = detail.artifact_version_id || null;
+        const sourceSurface = detail.source_surface || 'app_review';
+        const requestExtra = (
+          detail.extra && typeof detail.extra === 'object' && !Array.isArray(detail.extra)
+        ) ? detail.extra : {};
         if (!revisionText) return;
         const resolvedAppId = (
           appId ||
@@ -2810,6 +2816,21 @@ const ChatPage = () => {
           'default'
         );
         const resolvedUserId = user?.id || user?.user_id || user?.email || null;
+        const refinementRequest = {
+          raw_user_request: revisionText,
+          artifact_kind: artifactKind,
+          artifact_key: artifactKey,
+          source_surface: sourceSurface,
+        };
+        if (artifactVersionId) {
+          refinementRequest.artifact_version_id = artifactVersionId;
+        }
+        if (Object.keys(requestExtra).length > 0) {
+          refinementRequest.extra = requestExtra;
+        }
+        const triggerPayload = {
+          refinement_request: refinementRequest,
+        };
         fetch('/api/workflows/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2817,12 +2838,7 @@ const ChatPage = () => {
             trigger_source: 'refinement',
             app_id: resolvedAppId,
             user_id: resolvedUserId,
-            trigger_payload: {
-              refinement_request: {
-                raw_user_request: revisionText,
-                artifact_kind: artifactKind,
-              },
-            },
+            trigger_payload: triggerPayload,
           }),
         })
           .then(async (res) => {
@@ -2838,9 +2854,29 @@ const ChatPage = () => {
               setActiveWorkflowName(triggerData.workflow_id);
               setConversationMode('workflow');
               setWorkflowCompleted(false);
+              setPendingHarnessDecision(null);
+              setPendingHarnessDecisionError(null);
+              return;
             }
-            // harness_decision and coding_worker modes surface through the
-            // existing refinement decision UI — no in-place session switch needed.
+            if (triggerData.execution_mode === 'harness_decision') {
+              const nextDecision = buildPendingHarnessDecision(
+                triggerData.harness_decision,
+                {
+                  trigger_source: triggerData.trigger_source || 'refinement',
+                  requested_workflow_id: triggerData.requested_workflow_id || triggerData.workflow_id || null,
+                  recommended_workflow_id: triggerData.workflow_id || null,
+                  journey_id: triggerData.journey_id || null,
+                  context_variables: {},
+                  trigger_payload: triggerPayload,
+                },
+              );
+              setPendingHarnessDecision(nextDecision);
+              setPendingHarnessDecisionError(
+                nextDecision ? null : 'Refinement requires a decision, but the decision payload was incomplete.'
+              );
+              setLoading(false);
+              setPendingWorkflowReply(null);
+            }
           })
           .catch((err) => {
             console.error('[ChatPage] revision trigger error:', err);
@@ -2889,7 +2925,7 @@ const ChatPage = () => {
       default:
         return;
     }
-  }, [currentChatId, currentWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision]);
+  }, [currentChatId, currentWorkflowName, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, extractAgentName, isSidePanelOpen, showInitSpinner, setLayoutMode, isMobileView, mobileDrawerState, setConversationMode, setActiveGeneralChatId, setGeneralChatSummary, hydrateGeneralTranscript, refreshGeneralSessions, setActiveChatId, setActiveWorkflowName, setCurrentChatId, applyArtifactUpdateForAction, updateArtifactPayload, applySessionStatePendingHarnessDecision, buildPendingHarnessDecision]);
   useEffect(() => {
     handleIncomingRef.current = handleIncoming;
   }, [handleIncoming]);

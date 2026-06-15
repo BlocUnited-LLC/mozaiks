@@ -39,7 +39,22 @@ Plans may also declare `usage_limits` for meters such as `ai_tokens`. These
 limits are deterministic app intent used by profile, admin, billing, and
 MozaiksPay facade surfaces. Token measurements themselves come from runtime
 AG2 beta usage middleware and `/api/me/usage` or `/api/admin/usage`; generated
-modules must not create a second token ledger.
+modules must not create a second usage ledger.
+
+Plans may also declare provider-neutral `token_allowances`, and apps may declare
+`token_wallets` at the same config root. The runtime materializes allowances
+into the OSS token wallet ledger and can debit those wallets from measured
+usage when a wallet opts into `auto_debit_usage`. This is token accounting, not
+payment processing: payment providers, checkout, invoices, and settlement remain
+app-owned or hosted-product behavior.
+
+During factory builds, `SubscriptionContractDesigner` is the generic workflow
+that decides whether this file is needed and emits the provider-neutral
+subscription contract artifact. `AppGenerator` may then materialize exactly
+`config/subscriptions.yaml` from that artifact and add matching
+`actions[].entitlement_gate` values, usage/billing page requirements, and
+workflow metering declarations. Non-SaaS apps produce a no-op subscription
+contract and must not emit this file.
 
 This file does not control whether the workspace is allowed to use a hosted
 operator pack such as MozaiksPay. Hosted pack access is enforced by the hosted

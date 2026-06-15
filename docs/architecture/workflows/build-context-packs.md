@@ -210,7 +210,7 @@ forbidden_outputs:
   - path_prefix: modules/mozaikspay/
 runtime_boundaries:
   - id: usage_runtime
-    rule: Read runtime token usage through platform usage APIs; do not create a custom token ledger.
+    rule: Read runtime token usage through platform usage APIs; use the OSS token wallet ledger for balances.
 facades:
   - module_id: billing_portal
     provider_module: mozaikspay

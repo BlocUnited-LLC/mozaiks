@@ -220,6 +220,69 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "/api/me/tokens" in agents_text
 
 
+def test_app_build_plan_accepts_subscription_config_task() -> None:
+    from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+
+    class Context:
+        def __init__(self) -> None:
+            self.data = {}
+
+        def set(self, key: str, value) -> None:
+            self.data[key] = value
+
+        def get(self, key: str, default=None):
+            return self.data.get(key, default)
+
+    context = Context()
+    result = app_build_plan(
+        AppBuildPlan={
+            "agent_message": "Plan ready.",
+            "app_kind": "saas",
+            "pages": [
+                {
+                    "name": "Usage",
+                    "route": "/usage",
+                    "purpose": "Review usage and token balances.",
+                }
+            ],
+            "entities": [],
+            "roles": ["user"],
+            "auth_strategy": "basic",
+            "service_scope": [],
+            "frontend_scope": [],
+            "capability_packs": [],
+            "external_integrations": [],
+            "agent_backend_required": False,
+            "build_tasks": [
+                {
+                    "task_id": "task_subscription_config",
+                    "task_type": "subscription_config",
+                    "capability_pack_id": None,
+                    "surface_id": "subscription_contract",
+                    "surface_kind": "control_plane",
+                    "execution_target": "app_bundle",
+                    "initial_agent": "ConfigMiddlewareAgent",
+                    "description": "Emit provider-neutral subscription config.",
+                    "initial_message": "Serialize subscription_contract.subscription_config_file only.",
+                    "owned_paths": ["config/subscriptions.yaml"],
+                    "depends_on": [],
+                    "acceptance_criteria": [
+                        "config/subscriptions.yaml exists and contains no provider internals."
+                    ],
+                }
+            ],
+            "generation_order": ["task_subscription_config"],
+        },
+        context_variables=context,
+    )
+
+    assert "Task batch items: 1" in result
+    assert context.get("app_plan_ready") is True
+    task = context.get("app_task_batch_items")[0]
+    assert task["current_build_task_type"] == "subscription_config"
+    assert task["current_build_task"]["owned_paths"] == ["config/subscriptions.yaml"]
+
+
 def test_agentgenerator_preserves_workflow_metering_contract_without_runtime_logic() -> None:
     agents_text = (WORKFLOWS_ROOT / "AgentGenerator" / "agents.yaml").read_text(encoding="utf-8")
 

@@ -134,6 +134,9 @@ Human-in-the-loop decision points for multi-step workflows.
 | `GET` | `/api/me/preferences` | User preferences |
 | `PUT` | `/api/me/preferences` | Update user preferences |
 | `GET` | `/api/me/usage` | Token usage ledger for the current user |
+| `GET` | `/api/me/tokens` | Token wallet balances for the current user |
+| `POST` | `/api/me/tokens/sync` | Idempotently materialize current subscription token allowances |
+| `GET` | `/api/me/tokens/ledger` | Token wallet ledger entries for the current user |
 | `GET` | `/api/me/profile-panels` | Module-declared profile panel contributions |
 
 ---

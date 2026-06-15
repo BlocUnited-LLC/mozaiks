@@ -234,6 +234,27 @@ This project follows a practical pre-1.0 changelog format:
   drifts from AgentGenerator metadata, including mismatched trigger capability
   IDs, invented workflow capabilities, and ambiguous workflow trigger routing.
 
+- AppGenerator page wiring validation now recognizes the platform-owned
+  `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger` read endpoints
+  for subscription/usage pages. AppGenerator and AgentGenerator prompts now copy
+  subscription entitlement and metering declarations exactly instead of inventing
+  app-owned ledgers or payment-provider internals.
+
+- AgentGenerator and AppGenerator now schedule bounded repair passes for
+  quality-gate failures that map to generated workflow bundles or workflow
+  integration YAML, keeping retries scoped to the failed artifact instead of
+  restarting broad generation.
+
+- Factory workflow validation now covers every workflow directory and registry
+  sequence reference, including required declarative files, transition graph
+  compilation, middleware import resolution, structured-output registry agents,
+  and visual agent declarations. AppReview now ships the required
+  `structured_outputs.yaml` contract.
+
+- AgentGenerator conveyor workflow guidance now requires distinct downstream
+  execution agents, and the live AgentGenerator pack smoke can exercise bounded
+  workflow-bundle repair passes before retrying packaging.
+
 - `AgentGenerator` and `AppGenerator` workflow contracts overhauled: removed
   `handoffs.yaml` and `hooks.yaml` (replaced by `transition_graph.yaml` and
   `middleware.yaml`). Static YAML catalogs (`module_archetypes.yaml`,
@@ -362,6 +383,16 @@ This project follows a practical pre-1.0 changelog format:
   agent-callable tools.
 
 ### Fixed
+
+- Fixed AppReview revision handoff so review-session revisions preserve
+  `artifact_key`, `artifact_version_id`, `source_surface`, lifecycle state, and
+  staged bundle path when triggering Studio refinement. The AppReview summary
+  now exposes promotion readiness from deterministic build context instead of
+  allowing promotion with incomplete handoff metadata, promotes the reviewed
+  artifact version through Studio before activating the app registry record,
+  restores generated app zips as a loadable active app root even when the zip
+  contains a single `GeneratedApp/` wrapper, and confirmation-required refinement
+  routes now surface through the shared pending harness decision UI.
 
 - Fixed `F821` undefined-name crashes in `mozaiksai/core/runtime/app/ai_config.py`
   (missing `from typing import Any`) and

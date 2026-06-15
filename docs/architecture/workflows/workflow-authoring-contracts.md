@@ -16,10 +16,12 @@ At minimum, a workflow should include:
 - `structured_outputs.yaml`
 - `tools.yaml`
 - `ui_config.yaml`
-- `middleware.yaml`
 
 `extended_orchestration/task_batches.yaml` is optional and required only when
 the workflow uses workflow-local AG2 task batches.
+
+`middleware.yaml` is optional and should be present only when the workflow uses
+prompt middleware.
 
 `a2a.yaml` is optional.
 
@@ -34,7 +36,7 @@ workflows/{workflow_name}/
   structured_outputs.yaml
   tools.yaml
   ui_config.yaml
-  middleware.yaml
+  middleware.yaml             # prompt middleware config (only when needed)
   extended_orchestration/
     task_batches.yaml     # task batch config (only when needed)
   tools/

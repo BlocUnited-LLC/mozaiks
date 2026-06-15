@@ -265,7 +265,7 @@ async def _seed_summary_artifacts(
     *,
     app_id: str,
     artifact_store: Any,
-) -> tuple[ArtifactVersionDoc, ArtifactVersionDoc]:
+) -> tuple[ArtifactVersionDoc, ArtifactVersionDoc, ArtifactVersionDoc]:
     design_docs = await persist_summary_artifact(
         app_id=app_id,
         artifact_kind="design_docs",
@@ -274,6 +274,21 @@ async def _seed_summary_artifacts(
         source_workflow="DesignDocs",
         source_chat_id="chat_designdocs",
         author_user_id="user_1",
+        artifact_store=artifact_store,
+    )
+    subscription_contract = await persist_summary_artifact(
+        app_id=app_id,
+        artifact_kind="subscription_contract",
+        artifact_key="subscription_contract",
+        summary_payload={
+            "contract_required": False,
+            "rationale": "No generated-app SaaS subscription contract required.",
+            "code_files": [],
+        },
+        source_workflow="SubscriptionContractDesigner",
+        source_chat_id="chat_subscriptioncontractdesigner",
+        author_user_id="user_1",
+        input_artifact_kinds=("concept", "build_plan", "design_docs"),
         artifact_store=artifact_store,
     )
     theme_capture = await persist_summary_artifact(
@@ -286,7 +301,7 @@ async def _seed_summary_artifacts(
         author_user_id="user_1",
         artifact_store=artifact_store,
     )
-    return design_docs, theme_capture
+    return design_docs, subscription_contract, theme_capture
 
 
 def _write_files(root: Path, files: dict[str, str]) -> None:
@@ -345,6 +360,7 @@ async def _run_lineage_smoke_with_store(
     store: Any,
     mode: str,
     design_docs: ArtifactVersionDoc,
+    subscription_contract: ArtifactVersionDoc,
     theme_capture: ArtifactVersionDoc,
     workflow_integration_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -453,6 +469,7 @@ async def _run_lineage_smoke_with_store(
         ["ValueEngine"],
         ["ThemeCapture"],
         ["DesignDocs"],
+        ["SubscriptionContractDesigner"],
         ["AgentGenerator"],
         ["AppGenerator"],
     ]
@@ -467,15 +484,23 @@ async def _run_lineage_smoke_with_store(
         errors.append(f"Unexpected build workflow steps: {workflow_steps!r}.")
     if transition_steps != expected_transition_steps:
         errors.append(f"Unexpected build transition steps: {transition_steps!r}.")
-    if graph.artifact_dependency_graph.get("workflow_bundle") != ["design_docs"]:
-        errors.append("workflow_bundle dependency graph no longer depends only on design_docs.")
+    if graph.artifact_dependency_graph.get("workflow_bundle") != [
+        "design_docs",
+        "subscription_contract",
+    ]:
+        errors.append("workflow_bundle dependency graph does not match subscription contract dependency.")
     if "workflow_bundle" not in graph.artifact_dependency_graph.get("app_bundle", []):
         errors.append("app_bundle dependency graph does not include workflow_bundle.")
-    if workflow_call["canonical_inputs_version"] != {"design_docs": design_docs.id}:
-        errors.append("workflow_bundle canonical inputs did not resolve design_docs.")
+    if workflow_call["canonical_inputs_version"] != {
+        "design_docs": design_docs.id,
+        "subscription_contract": subscription_contract.id,
+    }:
+        errors.append("workflow_bundle canonical inputs did not resolve design_docs and subscription_contract.")
     app_inputs = dict(app_call["canonical_inputs_version"])
     if app_inputs.get("design_docs") != design_docs.id:
         errors.append("app_bundle canonical inputs did not resolve design_docs.")
+    if app_inputs.get("subscription_contract") != subscription_contract.id:
+        errors.append("app_bundle canonical inputs did not resolve subscription_contract.")
     if app_inputs.get("theme_capture") != theme_capture.id:
         errors.append("app_bundle canonical inputs did not resolve theme_capture.")
     if app_inputs.get("workflow_bundle") != workflow_bundle.id:
@@ -510,6 +535,7 @@ async def _run_lineage_smoke_with_store(
             },
             "artifact_lineage": {
                 "design_docs_id": design_docs.id,
+                "subscription_contract_id": subscription_contract.id,
                 "theme_capture_id": theme_capture.id,
                 "workflow_bundle_id": workflow_bundle.id,
                 "app_bundle_id": app_bundle.id,
@@ -542,6 +568,15 @@ async def run_offline_factory_artifact_lineage_smoke(
         artifact_kind="design_docs",
         summary_payload={"surface_map": {"surfaces": [{"surface_id": "support_tickets"}]}},
     )
+    subscription_contract = store.seed(
+        app_id=app_id,
+        artifact_kind="subscription_contract",
+        summary_payload={
+            "contract_required": False,
+            "rationale": "No generated-app SaaS subscription contract required.",
+            "code_files": [],
+        },
+    )
     theme_capture = store.seed(
         app_id=app_id,
         artifact_kind="theme_capture",
@@ -552,6 +587,7 @@ async def run_offline_factory_artifact_lineage_smoke(
         store=store,
         mode="memory",
         design_docs=design_docs,
+        subscription_contract=subscription_contract,
         theme_capture=theme_capture,
         workflow_integration_metadata=workflow_integration_metadata,
     )
@@ -585,7 +621,7 @@ async def _run_real_store_factory_artifact_lineage_smoke(
         client = get_mongo_client()
         await client.admin.command("ping")
         await _cleanup_real_store_app_id(resolved_app_id)
-        design_docs, theme_capture = await _seed_summary_artifacts(
+        design_docs, subscription_contract, theme_capture = await _seed_summary_artifacts(
             app_id=resolved_app_id,
             artifact_store=store,
         )
@@ -594,6 +630,7 @@ async def _run_real_store_factory_artifact_lineage_smoke(
             store=store,
             mode=mode,
             design_docs=design_docs,
+            subscription_contract=subscription_contract,
             theme_capture=theme_capture,
             workflow_integration_metadata=workflow_integration_metadata,
         )

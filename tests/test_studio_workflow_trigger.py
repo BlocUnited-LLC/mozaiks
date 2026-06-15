@@ -554,6 +554,12 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                 "plan": {
                     "summary": "Patch the dashboard component.",
                     "owned_paths": ["app/ui/pages/Dashboard.jsx"],
+                    "updated_files": [
+                        {
+                            "path": "app/ui/pages/Dashboard.jsx",
+                            "content": "export default function Dashboard() {}",
+                        }
+                    ],
                     "validation_strategy": "skip",
                     "validation_commands": [],
                     "start_preview": False,
@@ -632,7 +638,12 @@ def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch)
                 "plan": {
                     "summary": "Patch the dashboard component.",
                     "owned_paths": ["app/ui/pages/Dashboard.jsx"],
-                    "updated_files": {},
+                    "updated_files": [
+                        {
+                            "path": "app/ui/pages/Dashboard.jsx",
+                            "content": "export default function Dashboard() {}",
+                        }
+                    ],
                     "validation_strategy": "skip",
                     "validation_commands": [],
                     "start_preview": False,
@@ -720,9 +731,12 @@ def test_studio_trigger_endpoint_can_auto_scope_before_coding_worker(monkeypatch
                 "plan": {
                     "summary": "Patch the dashboard component.",
                     "owned_paths": ["app/ui/pages/Dashboard.jsx"],
-                    "updated_files": {
-                        "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }'
-                    },
+                    "updated_files": [
+                        {
+                            "path": "app/ui/pages/Dashboard.jsx",
+                            "content": 'export default function Dashboard() { return "patched"; }',
+                        }
+                    ],
                     "validation_strategy": "skip",
                     "validation_commands": [],
                     "start_preview": False,
@@ -867,10 +881,16 @@ def test_studio_trigger_endpoint_can_confirm_proposed_multi_file_scope(monkeypat
                         "app/ui/pages/Dashboard.jsx",
                         "app/ui/components/ExportPanel.jsx",
                     ],
-                    "updated_files": {
-                        "app/ui/pages/Dashboard.jsx": 'export default function Dashboard() { return "patched"; }',
-                        "app/ui/components/ExportPanel.jsx": 'export function ExportPanel() { return "patched"; }',
-                    },
+                    "updated_files": [
+                        {
+                            "path": "app/ui/pages/Dashboard.jsx",
+                            "content": 'export default function Dashboard() { return "patched"; }',
+                        },
+                        {
+                            "path": "app/ui/components/ExportPanel.jsx",
+                            "content": 'export function ExportPanel() { return "patched"; }',
+                        },
+                    ],
                     "validation_strategy": "skip",
                     "validation_commands": [],
                     "start_preview": False,

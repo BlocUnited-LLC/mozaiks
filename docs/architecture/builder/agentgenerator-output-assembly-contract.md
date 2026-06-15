@@ -1,7 +1,7 @@
 # AgentGenerator Output Assembly Contract
 
 **Status:** CANONICAL — describes what actually exists
-**Last verified:** 2026-06-12
+**Last verified:** 2026-06-14
 **Source files:**
 - `factory_app/workflows/AgentGenerator/tools/generate_and_download.py`
 - `factory_app/workflows/AgentGenerator/tools/workflow_converter.py`
@@ -190,13 +190,28 @@ artifact registration, zip creation, or promotion. The gate writes
 `workflow_bundle_semantic_drift` to context. Blocking failures return
 `status: blocked`; the generated bundle is not packaged.
 
+When blocking failures map to specific workflows, `generate_and_download`
+schedules a bounded repair pass instead of broad regeneration. It writes
+`workflow_bundle_repair_status: needs_revision`, increments
+`workflow_bundle_repair_count`, preserves the full pre-repair
+`workflow_bundle_results`, narrows `workflows_spec` to the failed workflow
+specs, and routes back to `PackBuildCoordinator`. Each repaired worker receives
+the exact quality-gate failures in its scoped `initial_message`. After the
+repair task batch completes, `PackMetadataAgent` merges repaired workflow
+outputs back into the preserved successful bundle outputs before metadata and
+packaging run again. After the configured attempt limit, the status becomes
+`blocked` and the workflow returns to the user.
+
 The live AgentGenerator pack smoke also emits the same `semantic_drift` report.
 That report is intentionally prompt-oriented: it flags generated workflow YAML
 that loads but no longer preserves the requested workflow meaning, such as event
 triggers with missing `capability_id`, generic trigger descriptions, or conveyor
-workflows that collapse downstream parallel work into one execution agent. Fix
-those failures in AgentGenerator prompt or structured-output contracts first,
-then rerun the live smoke.
+workflows that collapse downstream parallel work into one execution agent.
+Conveyor workflows that represent heavy downstream work must declare at least
+two distinct execution agents in `extended_orchestration/task_batches.yaml`;
+repeating the same worker name is semantic drift. Fix those failures in
+AgentGenerator prompt or structured-output contracts first, then rerun the live
+smoke.
 
 ### Files Written
 

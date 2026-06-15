@@ -274,9 +274,19 @@ When working in or generating modules:
   layer or referenced by `runtime_extensions.yaml`.
 - `runtime_extensions.yaml` is optional. Use `api_router` only for module-local
   external callback routes, and `startup_service` only for process-lifetime
-  module services such as audit/event subscribers. Do not use runtime extensions
-  for generic business logic, persistence, auth/scope helpers, transport
-  infrastructure, or workflow orchestration.
+  module services such as audit/event subscribers or background pollers.
+  Two `startup_service` patterns: (1) persistent connection workers (WebSocket,
+  broker); (2) background pollers for the `event_pipeline` archetype — use when
+  the module needs to detect external state changes (DNS propagation, certificate
+  issuance, payment confirmation) and advance a multi-step pipeline automatically.
+  Pollers must use `AsyncIOMotorClient` directly (not `app_data_from_context`),
+  resolve adapters lazily, and be accompanied by a stub adapter so the pipeline
+  runs locally without external infrastructure.
+  Internal actions that are only triggered by event reactions must use
+  `api_surface: internal` and `permissions: []` — the event bus is the
+  authorization boundary.
+  Do not use runtime extensions for generic business logic, persistence,
+  auth/scope helpers, transport infrastructure, or workflow orchestration.
 - App modules publish `domain.*` events. Hosted product modules use `hosted.*`.
   Workflow starts/resumes are resolved by runtime/platform trigger contracts, not by
   hardcoded workflow names in module code.

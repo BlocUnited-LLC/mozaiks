@@ -133,7 +133,9 @@ def _workflow_generation_prompt(
         "Emit extended_orchestration/task_batches.yaml using the canonical version: 1 "
         "conveyors[] shape, with a decomposition_agent, execution_agents[], and "
         "DecompositionPlan.tasks[] in structured_outputs.yaml. Include at least two "
-        "execution agents that can be selected by tasks. "
+        "distinct declared execution agents that can be selected by tasks; do not "
+        "repeat the same worker name in execution_agents[]. Give each execution "
+        "agent a separate specialist role for the downstream parallel work. "
         f"Use conveyor id exactly `{conveyor_id}`. Because that id materializes "
         "runtime state, context_variables.yaml must declare "
         f"`{conveyor_id}_results` with type array and source.state default [] plus "
@@ -744,109 +746,138 @@ async def run_live_agentgenerator_pack_smoke(
         )
 
         _, structured_registry = load_workflow_structured_outputs(workflow_name)
-        agents = await create_agents(workflow_name, context_variables=context, cache_seed=None)
-        if not agents:
-            raise RuntimeError("AgentGenerator created no AG2 agents")
 
-        expected_workflow_names = [str(item["name"]) for item in context["workflows_spec"]]
-        expected_workflow_count = len(expected_workflow_names)
-        coordinator_result = await AG2TaskBatchRunner().run(
-            AG2TaskBatchRunnerRequest(
-                workflow_name=workflow_name,
-                batch_id="live_agentgenerator_pack_boundary",
-                task_id="pack_build_coordinator",
-                chat_id=chat_id,
-                app_id=app_id,
-                agent_name="PackBuildCoordinator",
-                agent=agents["PackBuildCoordinator"],
-                prompt=(
-                    "The workflow plan has been approved. "
-                    f"The authoritative workflows_spec contains exactly {expected_workflow_count} workflows: "
-                    f"{', '.join(expected_workflow_names)}. "
-                    f"Emit workflow_count={expected_workflow_count} and start parallel workflow bundle generation."
-                ),
-                context_variables=context,
-                structured_registry={"PackBuildCoordinator": structured_registry["PackBuildCoordinator"]},
-                timeout_seconds=120,
+        async def _run_generation_batch(batch_label: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+            batch_agents = await create_agents(workflow_name, context_variables=context, cache_seed=None)
+            if not batch_agents:
+                raise RuntimeError("AgentGenerator created no AG2 agents")
+
+            expected_names = [str(item["name"]) for item in context["workflows_spec"]]
+            expected_count = len(expected_names)
+            coordinator_result = await AG2TaskBatchRunner().run(
+                AG2TaskBatchRunnerRequest(
+                    workflow_name=workflow_name,
+                    batch_id=f"live_agentgenerator_pack_boundary_{batch_label}",
+                    task_id=f"pack_build_coordinator_{batch_label}",
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    agent_name="PackBuildCoordinator",
+                    agent=batch_agents["PackBuildCoordinator"],
+                    prompt=(
+                        "The workflow plan has been approved. "
+                        f"The authoritative workflows_spec contains exactly {expected_count} workflows: "
+                        f"{', '.join(expected_names)}. "
+                        f"Emit workflow_count={expected_count} and start parallel workflow bundle generation."
+                    ),
+                    context_variables=context,
+                    structured_registry={"PackBuildCoordinator": structured_registry["PackBuildCoordinator"]},
+                    timeout_seconds=120,
+                )
             )
-        )
-        if coordinator_result.status is not RunStatus.COMPLETED:
-            raise RuntimeError(f"PackBuildCoordinator failed: {coordinator_result.error}")
-        coordinator_output = coordinator_result.output if isinstance(coordinator_result.output, dict) else {}
-        if int(coordinator_output.get("workflow_count") or 0) != expected_workflow_count:
-            raise RuntimeError(
-                "PackBuildCoordinator workflow_count did not match workflows_spec length: "
-                f"{coordinator_output!r}"
+            if coordinator_result.status is not RunStatus.COMPLETED:
+                raise RuntimeError(f"PackBuildCoordinator failed: {coordinator_result.error}")
+            coordinator_payload = coordinator_result.output if isinstance(coordinator_result.output, dict) else {}
+            if int(coordinator_payload.get("workflow_count") or 0) != expected_count:
+                raise RuntimeError(
+                    "PackBuildCoordinator workflow_count did not match workflows_spec length: "
+                    f"{coordinator_payload!r}"
+                )
+
+            task_batches_config = load_task_batches_config(workflow_name, workflows_root=workflows_root)
+            if task_batches_config is None:
+                raise RuntimeError("AgentGenerator task_batches.yaml did not load")
+            for batch in task_batches_config.batches:
+                batch.execution.retry_limit = 0
+
+            trace = TaskRunTrace()
+            with _trace_task_batch_runner(trace):
+                batch_payload = await execute_task_batches_for_trigger(
+                    workflow_name=workflow_name,
+                    trigger_agent="PackBuildCoordinator",
+                    batches_config=task_batches_config,
+                    agents=batch_agents,
+                    context_variables=context,
+                    structured_output=coordinator_payload,
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    user_id=user_id,
+                    transport=None,
+                    wf_logger=None,
+                    fresh_agents_per_task=True,
+                )
+
+            if context.get("workflow_bundle_status") != "completed":
+                raise RuntimeError(f"workflow_bundle_status={context.get('workflow_bundle_status')!r}")
+            return coordinator_payload, batch_payload or {}, trace.summary()
+
+        async def _run_pack_metadata(batch_label: str) -> tuple[dict[str, Any], list[str]]:
+            metadata_agents = await create_agents(workflow_name, context_variables=context, cache_seed=None)
+            expected_specs = context.get("workflows_spec") or []
+            if context.get("workflow_bundle_repair_active") is True:
+                original_specs = context.get("workflow_bundle_repair_original_workflows_spec")
+                if isinstance(original_specs, list) and original_specs:
+                    expected_specs = original_specs
+            expected_names = [str(item["name"]) for item in expected_specs]
+            expected_metadata_payload = [
+                {
+                    "id": str(item["name"]),
+                    "startup_mode": (item.get("context_variables") or {}).get("expected_workflow_startup_mode"),
+                    "depends_on": list(item.get("depends_on") or []),
+                }
+                for item in expected_specs
+            ]
+            metadata_result = await AG2TaskBatchRunner().run(
+                AG2TaskBatchRunnerRequest(
+                    workflow_name=workflow_name,
+                    batch_id=f"live_agentgenerator_pack_boundary_{batch_label}",
+                    task_id=f"pack_metadata_{batch_label}",
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    agent_name="PackMetadataAgent",
+                    agent=metadata_agents["PackMetadataAgent"],
+                    prompt=(
+                        "Generate PackMetadata for the completed workflow_bundle_results in context. "
+                        f"Pack name must be {context['pack_name']!r}. "
+                        f"Workflow ids must exactly match: {', '.join(expected_names)}. "
+                        "Use these exact startup modes and dependencies: "
+                        f"{json.dumps(expected_metadata_payload, sort_keys=True)}. "
+                        "Do not use placeholder or example workflow names. Do not infer dependencies."
+                    ),
+                    context_variables=context,
+                    structured_registry={"PackMetadataAgent": structured_registry["PackMetadataAgent"]},
+                    timeout_seconds=180,
+                )
             )
+            if metadata_result.status is not RunStatus.COMPLETED:
+                raise RuntimeError(f"PackMetadataAgent failed: {metadata_result.error}")
+            metadata_payload = metadata_result.output if isinstance(metadata_result.output, dict) else {}
+            if not metadata_payload.get("PackMetadata"):
+                raise RuntimeError("PackMetadataAgent completed without PackMetadata structured output")
+            context["PackMetadata"] = metadata_payload["PackMetadata"]
+            return metadata_payload, expected_names
 
-        task_batches_config = load_task_batches_config(workflow_name, workflows_root=workflows_root)
-        if task_batches_config is None:
-            raise RuntimeError("AgentGenerator task_batches.yaml did not load")
-        for batch in task_batches_config.batches:
-            batch.execution.retry_limit = 0
+        coordinator_output, batch_results, initial_trace = await _run_generation_batch("initial")
+        metadata_output, expected_workflow_names = await _run_pack_metadata("initial")
 
-        trace = TaskRunTrace()
-        with _trace_task_batch_runner(trace):
-            batch_results = await execute_task_batches_for_trigger(
-                workflow_name=workflow_name,
-                trigger_agent="PackBuildCoordinator",
-                batches_config=task_batches_config,
-                agents=agents,
-                context_variables=context,
-                structured_output=coordinator_output,
-                chat_id=chat_id,
-                app_id=app_id,
-                user_id=user_id,
-                transport=None,
-                wf_logger=None,
-                fresh_agents_per_task=True,
-            )
-
-        if context.get("workflow_bundle_status") != "completed":
-            raise RuntimeError(f"workflow_bundle_status={context.get('workflow_bundle_status')!r}")
-
-        metadata_agents = await create_agents(workflow_name, context_variables=context, cache_seed=None)
-        expected_workflow_names = [str(item["name"]) for item in context["workflows_spec"]]
-        expected_metadata = [
-            {
-                "id": str(item["name"]),
-                "startup_mode": (item.get("context_variables") or {}).get("expected_workflow_startup_mode"),
-                "depends_on": list(item.get("depends_on") or []),
-            }
-            for item in context["workflows_spec"]
-        ]
-        metadata_result = await AG2TaskBatchRunner().run(
-            AG2TaskBatchRunnerRequest(
-                workflow_name=workflow_name,
-                batch_id="live_agentgenerator_pack_boundary",
-                task_id="pack_metadata",
-                chat_id=chat_id,
-                app_id=app_id,
-                agent_name="PackMetadataAgent",
-                agent=metadata_agents["PackMetadataAgent"],
-                prompt=(
-                    "Generate PackMetadata for the completed workflow_bundle_results in context. "
-                    f"Pack name must be {context['pack_name']!r}. "
-                    f"Workflow ids must exactly match: {', '.join(expected_workflow_names)}. "
-                    "Use these exact startup modes and dependencies: "
-                    f"{json.dumps(expected_metadata, sort_keys=True)}. "
-                    "Do not use placeholder or example workflow names. Do not infer dependencies."
-                ),
-                context_variables=context,
-                structured_registry={"PackMetadataAgent": structured_registry["PackMetadataAgent"]},
-                timeout_seconds=180,
-            )
-        )
-        if metadata_result.status is not RunStatus.COMPLETED:
-            raise RuntimeError(f"PackMetadataAgent failed: {metadata_result.error}")
-        metadata_output = metadata_result.output if isinstance(metadata_result.output, dict) else {}
-        if not metadata_output.get("PackMetadata"):
-            raise RuntimeError("PackMetadataAgent completed without PackMetadata structured output")
-        context["PackMetadata"] = metadata_output["PackMetadata"]
-
+        repair_attempts: list[dict[str, Any]] = []
         download_result = await _export_workflow_bundle(context=context, generated_root=generated_root)
-        if download_result.get("status") != "success":
-            raise RuntimeError(f"generate_and_download failed: {download_result}")
+        while download_result.get("status") != "success":
+            repair_result = download_result.get("workflow_bundle_repair")
+            if not isinstance(repair_result, dict) or repair_result.get("status") != "needs_revision":
+                raise RuntimeError(f"generate_and_download failed: {download_result}")
+            attempt = int(repair_result.get("attempt") or len(repair_attempts) + 1)
+            coordinator_repair, batch_repair, repair_trace = await _run_generation_batch(f"repair_{attempt}")
+            metadata_output, expected_workflow_names = await _run_pack_metadata(f"repair_{attempt}")
+            repair_attempts.append(
+                {
+                    "repair_result": repair_result,
+                    "coordinator_output": coordinator_repair,
+                    "task_batch_result_ids": sorted((batch_repair or {}).keys()),
+                    "task_run_trace": repair_trace,
+                    "merge_result": context.get("workflow_bundle_repair_merge_result"),
+                }
+            )
+            download_result = await _export_workflow_bundle(context=context, generated_root=generated_root)
 
         bundle_root = generated_root / "workflows" / app_id
         validation = validate_generated_workflow_bundle(
@@ -878,7 +909,7 @@ async def run_live_agentgenerator_pack_smoke(
                 )
             if int(task_meta.get("concurrency") or 0) < 2:
                 validation_errors.append(f"task batch concurrency too low: {task_meta.get('concurrency')!r}")
-            if trace.summary()["max_overlap"] < 2:
+            if int(initial_trace.get("max_overlap") or 0) < 2:
                 validation_errors.append("task batch worker AG2 calls did not overlap")
 
         metadata_graph = ((metadata_output.get("PackMetadata") or {}).get("workflow_graph") or {})
@@ -932,7 +963,8 @@ async def run_live_agentgenerator_pack_smoke(
             "metadata_output": metadata_output,
             "task_batch_result_ids": sorted((batch_results or {}).keys()),
             "task_batch_meta": task_meta,
-            "task_run_trace": trace.summary(),
+            "task_run_trace": initial_trace,
+            "repair_attempts": repair_attempts,
             "download_result": download_result,
             "validation": validation,
             "semantic_drift": semantic_drift,

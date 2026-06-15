@@ -47,6 +47,7 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
 _ALLOWED_TASK_TYPES = {
+    "subscription_config",
     "service_foundation",
     "module_contract",
     "persistence_contract",
@@ -58,6 +59,7 @@ _ALLOWED_TASK_TYPES = {
     "control_plane_pack",
 }
 _CANONICAL_INITIAL_AGENTS = {
+    "subscription_config": "ConfigMiddlewareAgent",
     "service_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
     "persistence_contract": "DatabaseAgent",
@@ -69,7 +71,7 @@ _CANONICAL_INITIAL_AGENTS = {
 }
 _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
     "external_integration": frozenset({"api_surface", "service_foundation", "agent_backend_integration"}),
-    "control_plane": frozenset({"control_plane_pack"}),
+    "control_plane": frozenset({"control_plane_pack", "subscription_config"}),
     "ui_only": frozenset({"page_bundle"}),
 }
 _SHARED_OWNED_PATHS = frozenset({"app.json"})

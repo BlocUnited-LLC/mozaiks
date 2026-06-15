@@ -107,6 +107,7 @@ class ModuleIdentity(ModuleContractModel):
     id: str
     display_name: str | None = None
     version: str = "1.0.0"
+    type: Literal["standard", "messaging", "workflow", "event_pipeline", "transactional"] = "standard"
     description: str | None = None
     owner: str | None = None
     visibility: str | None = None

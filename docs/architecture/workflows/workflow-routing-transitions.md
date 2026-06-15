@@ -155,6 +155,12 @@ a button-driven confirm/cancel overlay.
 The canonical example is `app_review`, which launches the `AppReview` workflow
 so the ReviewAgent can present a build summary artifact in chat and the user
 can type revision requests or click Promote without a blocking screen.
+Revision events emitted from this chat session must carry the reviewed
+`artifact_key`, `artifact_version_id`, `source_surface=app_review`,
+`lifecycle_state`, and staged `bundle_path` so the refinement control plane
+routes against the reviewed bundle rather than an ambient app workspace.
+If the trigger response is `harness_decision`, the chat shell must feed it into
+the shared pending harness decision UI before launching any downstream workflow.
 
 ## Dependencies
 
