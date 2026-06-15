@@ -340,8 +340,8 @@ async def run_workflow_orchestration(
         try:
             if transport and hasattr(transport, "connections") and chat_id in transport.connections:
                 frontend_context = transport.connections[chat_id].get("frontend_context")
-        except Exception:
-            pass
+        except Exception as _fe_err:
+            wf_logger.debug("[%s] frontend_context lookup failed: %s", workflow_name_upper, _fe_err)
 
         context: Any = None
         if context_factory:
@@ -362,8 +362,8 @@ async def run_workflow_orchestration(
                         context.set(prefixed, value)
                     elif hasattr(context, "__setitem__"):
                         context[prefixed] = value
-                except Exception:
-                    pass
+                except Exception as _ctx_err:
+                    wf_logger.debug("[%s] frontend_context inject failed key=%s: %s", workflow_name_upper, prefixed, _ctx_err)
 
         try:
             if context is not None:
@@ -437,8 +437,8 @@ async def run_workflow_orchestration(
             if transport and hasattr(transport, "connections") and chat_id in transport.connections:
                 transport.connections[chat_id]["agents"] = agents
                 transport.connections[chat_id]["context"] = ctx_dict
-        except Exception:
-            pass
+        except Exception as _conn_err:
+            wf_logger.debug("[%s] Failed to store agents/context in connection registry: %s", workflow_name_upper, _conn_err)
 
         # 7) Derived context manager
         derived_context_manager: Any | None = None
@@ -457,8 +457,8 @@ async def run_workflow_orchestration(
                                 "variable": var_name,
                                 "value": value,
                             }, chat_id))
-                    except Exception:
-                        pass
+                    except Exception as _dl_err:
+                        wf_logger.debug("[%s] Derived context listener error var=%s: %s", workflow_name_upper, payload.get("variable"), _dl_err)
 
                 derived_context_manager.add_listener(_derived_listener)
             else:
@@ -470,8 +470,8 @@ async def run_workflow_orchestration(
         if derived_context_manager and transport and hasattr(transport, "register_derived_context_manager"):
             try:
                 transport.register_derived_context_manager(chat_id, derived_context_manager)
-            except Exception:
-                pass
+            except Exception as _dcm_reg_err:
+                wf_logger.debug("[%s] Failed to register derived context manager: %s", workflow_name_upper, _dcm_reg_err)
 
         try:
             from .agents.transition_graph import wire_transition_graph_with_debugging
@@ -712,22 +712,22 @@ async def run_workflow_orchestration(
                     workflow_name=workflow_name,
                     error=str(e),
                 )
-            except Exception:
-                pass
+            except Exception as _lc_err:
+                wf_logger.debug("[%s] on_fail lifecycle trigger failed: %s", workflow_name_upper, _lc_err)
         try:
             await transport.send_event_to_ui(
                 {"kind": "error", "workflow": workflow_name, "chat_id": chat_id, "message": str(e), "error": str(e), "status": "failed"},
                 chat_id,
             )
-        except Exception:
-            pass
+        except Exception as _ev_err:
+            wf_logger.debug("[%s] Failed to emit error event: %s", workflow_name_upper, _ev_err)
         try:
             await transport.send_event_to_ui(
                 {"kind": "run_complete", "workflow": workflow_name, "chat_id": chat_id, "run_completed": False, "awaiting_user_input": False, "status": "failed", "reason": "failed", "error": str(e)},
                 chat_id,
             )
-        except Exception:
-            pass
+        except Exception as _rc_err:
+            wf_logger.debug("[%s] Failed to emit run_complete event: %s", workflow_name_upper, _rc_err)
         raise
     finally:
         try:

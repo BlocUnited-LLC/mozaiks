@@ -157,8 +157,8 @@ class AutoToolEventHandler:
                     for key, value in container.data.items():
                         try:
                             pattern_context_ref.set(key, value)
-                        except Exception:
-                            pass
+                        except Exception as _set_err:
+                            logger.debug("[AUTO_TOOL] Context write-back failed key=%s: %s", key, _set_err)
                     logger.debug("[AUTO_TOOL] Wrote back %d context keys to pattern context after %s execution", len(container.data), binding.tool_name)
                 except Exception as wb_err:
                     logger.debug("[AUTO_TOOL] Failed to write back context changes to pattern: %s", wb_err)
@@ -364,8 +364,8 @@ class AutoToolEventHandler:
                     if value is not None:
                         try:
                             container.set(key, value)
-                        except Exception:
-                            pass
+                        except Exception as _cs_err:
+                            logger.debug("[AUTO_TOOL] Container seed failed key=%s: %s", key, _cs_err)
                 kwargs["context_variables"] = container
         return kwargs
 

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
@@ -13,6 +14,8 @@ from bson import ObjectId
 
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.core_config import get_mongo_client
+
+_logger = logging.getLogger(__name__)
 
 
 class DatabaseManagerError(Exception):
@@ -112,8 +115,8 @@ async def save_to_database(
                 saves.append(save_record)
                 context_variables.set('database_saves', saves)
                 context_variables.set('last_save', save_record)
-            except Exception:
-                pass  # Context variables are optional
+            except Exception as _cv_err:
+                _logger.debug("Context variable update failed (optional): %s", _cv_err)
         
         return {
             "status": "success",
@@ -383,8 +386,8 @@ def _get_database_config(workflow_name: str | None, database_name: str | None, c
                         "database_name": resolved_db,
                         "collection_name": resolved_collection
                     }
-        except Exception:
-            pass
+        except Exception as _wf_cfg_err:
+            _logger.debug("Workflow config lookup failed during db resolution: %s", _wf_cfg_err)
     
     # Fallback validation
     if not database_name or not collection_name:
