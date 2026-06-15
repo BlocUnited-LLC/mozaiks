@@ -149,7 +149,8 @@ async def require_user(
         try:
             claims = await adapter.validate_token("")
             principal = UserPrincipal.from_claims(claims)
-        except Exception:
+        except Exception as _anon_exc:
+            logger.debug("AUTH_ADAPTER_EMPTY_TOKEN_FAILED adapter=%s — using anonymous fallback: %s", adapter.name, _anon_exc)
             principal = UserPrincipal(
                 user_id="anonymous",
                 email=None,

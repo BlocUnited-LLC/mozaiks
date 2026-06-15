@@ -540,8 +540,8 @@ class WorkflowBridgeMixin:
                     error_code="WORKFLOW_BACKGROUND_FAILED",
                     chat_id=chat_id,
                 )
-            except Exception:
-                pass
+            except Exception as _send_exc:
+                logger.debug("WORKFLOW_BACKGROUND_ERROR_SEND_FAILED chat=%s: %s", chat_id, _send_exc)
         finally:
             # Drop task handle
             try:
@@ -556,8 +556,8 @@ class WorkflowBridgeMixin:
                     was_cancelled = bool(task and task.cancelled())
                     if not was_cancelled and run_status_value == "completed":
                         session_registry.complete_workflow(ws_id, chat_id)
-            except Exception:
-                pass
+            except Exception as _reg_exc:
+                logger.debug("SESSION_REGISTRY_COMPLETE_FAILED ws_id=%s chat=%s: %s", ws_id, chat_id, _reg_exc)
 
     # ==================================================================================
     # WORKFLOW PAUSE/RESUME

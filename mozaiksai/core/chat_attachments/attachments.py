@@ -11,6 +11,7 @@ or included in deliverables.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -124,8 +127,8 @@ async def handle_chat_upload(
                 maybe = close()
                 if asyncio.iscoroutine(maybe):
                     await maybe
-        except Exception:
-            pass
+        except Exception as _close_exc:
+            logger.warning("ATTACHMENT_FILE_CLOSE_FAILED: %s", _close_exc)
 
     attachment_doc: dict[str, Any] = {
         "attachment_id": attachment_id,
@@ -199,7 +202,13 @@ async def iter_bundle_attachment_files(
             if size > max_bytes:
                 continue
             raw = await asyncio.to_thread(fpath.read_bytes)
-        except Exception:
+        except Exception as _read_exc:
+            logger.warning(
+                "BUNDLE_ATTACHMENT_READ_FAILED path=%s rel=%s — skipping: %s",
+                stored_path,
+                rel_path,
+                _read_exc,
+            )
             continue
 
         out.append((rel_path, raw))

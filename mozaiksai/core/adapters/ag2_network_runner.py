@@ -8,9 +8,12 @@ validated declarations and already constructed AG2 agents.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from autogen.beta.knowledge import MemoryKnowledgeStore
 from autogen.beta.network import (
@@ -162,6 +165,8 @@ class AG2NetworkRunner:
             )
             for task in pending:
                 task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
             if failure_task in done:
                 failure = failure_task.result()
                 wal = await hub.read_wal(channel.channel_id)
@@ -242,8 +247,24 @@ class AG2NetworkRunner:
             )
         finally:
             for hub_client in reversed(hub_clients):
-                await hub_client.close()
-            await hub.close()
+                try:
+                    await hub_client.close()
+                except Exception as _hc_exc:
+                    logger.warning(
+                        "AG2_HUB_CLIENT_CLOSE_FAILED workflow=%s chat=%s: %s",
+                        request.workflow_name,
+                        request.chat_id,
+                        _hc_exc,
+                    )
+            try:
+                await hub.close()
+            except Exception as _hub_exc:
+                logger.warning(
+                    "AG2_HUB_CLOSE_FAILED workflow=%s chat=%s: %s",
+                    request.workflow_name,
+                    request.chat_id,
+                    _hub_exc,
+                )
 
     @staticmethod
     def _validate_request(request: AG2NetworkRunnerRequest, initial_agent_name: str) -> str | None:

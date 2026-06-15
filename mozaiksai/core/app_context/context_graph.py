@@ -13,6 +13,7 @@ import ast
 import hashlib
 import importlib
 import json
+import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -21,6 +22,8 @@ from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     AppContextGraph,
@@ -1086,7 +1089,8 @@ def _tree_sitter_parser(language: str) -> Any | None:
             parser.set_language(language_obj)
         else:
             parser.language = language_obj
-    except Exception:
+    except Exception as _ts_exc:
+        logger.warning("TREE_SITTER_PARSER_INIT_FAILED language=%s — disabling for this process: %s", language, _ts_exc)
         _TREE_SITTER_LANGUAGES[language] = None
         return None
     return parser

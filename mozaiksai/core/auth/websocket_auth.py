@@ -142,8 +142,9 @@ async def authenticate_websocket(
         try:
             claims = await adapter.validate_token("")  # NoAuthAdapter ignores token
             user = WebSocketUser.from_claims(claims)
-        except Exception:
+        except Exception as _anon_exc:
             # Fallback if adapter doesn't support empty token
+            logger.debug("WS_AUTH_ADAPTER_EMPTY_TOKEN_FAILED adapter=%s — using anonymous fallback: %s", adapter.name, _anon_exc)
             user = WebSocketUser(
                 user_id="anonymous",
                 email=None,

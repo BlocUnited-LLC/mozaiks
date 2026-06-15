@@ -191,6 +191,10 @@ class SimpleLLMCapabilityService:
             try:
                 resolved_temperature = float(llm_config["temperature"])
             except Exception:
+                logger.warning(
+                    "LLM_CONFIG_INVALID_TEMPERATURE: %r — ignoring, using API default",
+                    llm_config["temperature"],
+                )
                 resolved_temperature = None
         response = await self.generate_chat_completion(
             messages=[
