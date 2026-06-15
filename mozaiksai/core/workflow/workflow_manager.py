@@ -310,11 +310,11 @@ class UnifiedWorkflowManager:
         try:
             self._ai_config = self._load_ai_config()
             workflow_names = self.discover_workflows()
-            
+
             if not workflow_names:
                 logger.warning("⚠️ No workflows found in the workflows directory")
                 return
-            
+
             for workflow_name in workflow_names:
                 try:
                     self._load_single_workflow(workflow_name)
@@ -329,7 +329,20 @@ class UnifiedWorkflowManager:
                         status="error",
                         error=str(e)
                     )
-                    
+
+            # Emit a startup summary so partial-load degradation is visible in logs.
+            ok_names = [n for n, w in self._workflows.items() if w.status != "error"]
+            err_names = [n for n, w in self._workflows.items() if w.status == "error"]
+            if err_names:
+                logger.warning(
+                    "⚠️ WORKFLOW_LOAD_DEGRADED: %d/%d workflows loaded. Failed: %s",
+                    len(ok_names),
+                    len(ok_names) + len(err_names),
+                    ", ".join(sorted(err_names)),
+                )
+            else:
+                logger.info("✅ WORKFLOW_LOAD_OK: %d workflows loaded.", len(ok_names))
+
         except Exception as e:
             logger.error(f"❌ Critical error loading workflows: {e}")
     
