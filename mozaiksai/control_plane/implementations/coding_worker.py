@@ -387,8 +387,14 @@ class ScopedRefinementCodingWorker:
             if not safe:
                 continue
             out_path = workspace_dir / safe
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(str(content), encoding="utf-8")
+            try:
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(str(content), encoding="utf-8")
+            except OSError as exc:
+                raise RuntimeError(
+                    f"STAGING_WRITE_FAILED: could not write '{safe}' to staging workspace "
+                    f"at {workspace_dir} — {exc}"
+                ) from exc
             written_paths.append(safe)
 
         zip_path = bundle_root / "artifact.zip"
