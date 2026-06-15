@@ -145,7 +145,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
             logger.warning(f"JWKS error: {e}")
             raise AuthError("Failed to verify token signature", 401, self.name) from e
         except Exception as e:
-            logger.error(f"Unexpected JWKS error: {e}")
+            logger.error("Unexpected JWKS error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
 
         # Decode and verify
@@ -187,7 +187,7 @@ class GenericJWTAdapter(BaseAuthAdapter):
             logger.warning(f"Token decode error: {e}")
             raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
-            logger.error(f"Token validation error: {e}")
+            logger.error("Token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
 
         # Extract claims using configured mappings

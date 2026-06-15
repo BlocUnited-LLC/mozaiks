@@ -134,7 +134,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
             logger.warning(f"Token decode error: {e}")
             raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
-            logger.error(f"Token validation error: {e}")
+            logger.error("Token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
 
     async def _validate_with_jwks(self, token: str) -> dict[str, Any]:
@@ -173,7 +173,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
             logger.warning(f"Token decode error: {e}")
             raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
-            logger.error(f"Token validation error: {e}")
+            logger.error("Token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
 
     def _extract_claims(self, raw_claims: dict[str, Any]) -> UserClaims:

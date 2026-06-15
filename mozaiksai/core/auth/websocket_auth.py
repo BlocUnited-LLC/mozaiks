@@ -184,7 +184,7 @@ async def authenticate_websocket(
         await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason=e.message)
         return None
     except Exception as e:
-        logger.error(f"WebSocket auth error ({adapter.name}): {e}")
+        logger.error("WebSocket auth error (%s): %s", adapter.name, e, exc_info=True)
         await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Authentication failed")
         return None
 

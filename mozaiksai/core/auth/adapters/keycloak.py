@@ -147,7 +147,7 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
             logger.warning(f"Token decode error: {e}")
             raise AuthError("Invalid token format", 401, self.name) from e
         except Exception as e:
-            logger.error(f"Token validation error: {e}")
+            logger.error("Token validation error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
 
         return self._extract_claims(claims)

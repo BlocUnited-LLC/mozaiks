@@ -609,7 +609,7 @@ class AG2PersistenceManager:
 
             return {"chat_id": general_chat_id, "label": label, "sequence": seq}
         except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to create general chat session for app_id={resolved_app_id}, user={user_id}: {e}")
+            logger.error("Failed to create general chat session app_id=%s user=%s: %s", resolved_app_id, user_id, e, exc_info=True)
             raise
 
     async def mark_chat_completed(self, chat_id: str, app_id: str | None = None) -> bool:
@@ -1241,7 +1241,7 @@ class AG2PersistenceManager:
             )
             return states
         except Exception as e:
-            logger.error(f"[TOOL_CALL_STATE] Failed to load workflow UI state for {chat_id}: {e}")
+            logger.error("[TOOL_CALL_STATE] Failed to load workflow UI state for %s: %s", chat_id, e, exc_info=True)
             return []
 
     async def attach_tool_call_metadata(
@@ -1412,7 +1412,7 @@ class AG2PersistenceManager:
             )
             logger.info(f"[PENDING_INPUT] Saved pending input request {request_id} for chat {chat_id}")
         except Exception as e:
-            logger.error(f"[PENDING_INPUT] Failed to save pending input request for {chat_id}: {e}")
+            logger.error("[PENDING_INPUT] Failed to save pending input request for %s: %s", chat_id, e, exc_info=True)
 
     async def clear_pending_input_request(
         self,
@@ -1440,7 +1440,7 @@ class AG2PersistenceManager:
             )
             logger.debug(f"[PENDING_INPUT] Cleared pending input request for chat {chat_id}")
         except Exception as e:
-            logger.error(f"[PENDING_INPUT] Failed to clear pending input request for {chat_id}: {e}")
+            logger.error("[PENDING_INPUT] Failed to clear pending input request for %s: %s", chat_id, e, exc_info=True)
 
     async def get_pending_input_request(
         self,
@@ -1464,7 +1464,7 @@ class AG2PersistenceManager:
             )
             return extract_pending_input_request(doc)
         except Exception as e:
-            logger.error(f"[PENDING_INPUT] Failed to get pending input request for {chat_id}: {e}")
+            logger.error("[PENDING_INPUT] Failed to get pending input request for %s: %s", chat_id, e, exc_info=True)
             return None
 
 
