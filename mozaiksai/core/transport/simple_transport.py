@@ -176,6 +176,11 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             max_parallel = 4
         self._workflow_spawn_semaphore = asyncio.Semaphore(max(1, max_parallel))
 
+        try:
+            self._max_connections = int(os.environ.get("MOZAIKS_MAX_WS_CONNECTIONS", "500"))
+        except Exception:
+            self._max_connections = 500
+
         # Usage emission broadcast (measurement only; no billing enforcement).
         try:
             from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
@@ -1361,6 +1366,19 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         """Handle WebSocket connection for real-time communication with multi-workflow session support"""
         if self._owner_loop is None:
             self._owner_loop = asyncio.get_running_loop()
+
+        # Reject new connections when at capacity (excludes same-chat_id reconnects
+        # which evict the stale slot rather than consuming a new one).
+        if chat_id not in self.connections and len(self.connections) >= self._max_connections:
+            logger.warning(
+                "WS_CONNECTION_LIMIT_REACHED limit=%d chat=%s user=%s — rejecting",
+                self._max_connections,
+                chat_id,
+                user_id,
+            )
+            await websocket.close(code=1008, reason="Server connection limit reached")
+            return
+
         await websocket.accept()
 
         # Store ws_id for session registry lookups

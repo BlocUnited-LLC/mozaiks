@@ -159,10 +159,35 @@ class AG2NetworkRunner:
             failure_task = asyncio.create_task(
                 turn_failure_listener.wait_for_failure(channel.channel_id)
             )
-            done, pending = await asyncio.wait(
-                {close_task, failure_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            # Belt-and-suspenders outer timeout: close_task already has
+            # close_timeout_seconds, but failure_task has no deadline of its own.
+            # An extra 30s gives both tasks time to settle before we force cleanup.
+            _outer_timeout = (request.close_timeout_seconds or 120.0) + 30.0
+            try:
+                done, pending = await asyncio.wait_for(
+                    asyncio.wait({close_task, failure_task}, return_when=asyncio.FIRST_COMPLETED),
+                    timeout=_outer_timeout,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "AG2_RUNNER_OUTER_TIMEOUT workflow=%s chat=%s timeout=%.0fs — cancelling",
+                    request.workflow_name,
+                    request.chat_id,
+                    _outer_timeout,
+                )
+                for task in [close_task, failure_task]:
+                    task.cancel()
+                await asyncio.gather(close_task, failure_task, return_exceptions=True)
+                wal = await hub.read_wal(channel.channel_id) if channel_id else []
+                return AG2NetworkRunnerResult(
+                    status=RunStatus.PAUSED,
+                    workflow_name=request.workflow_name,
+                    chat_id=request.chat_id,
+                    app_id=request.app_id,
+                    channel_id=channel_id,
+                    wal=[_envelope_to_dict(envelope) for envelope in wal],
+                    error=f"workflow timed out after {_outer_timeout:.0f}s (outer guard)",
+                )
             for task in pending:
                 task.cancel()
             if pending:
