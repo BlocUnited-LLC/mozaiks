@@ -45,3 +45,10 @@ def test_invalid_module_name_returns_400_regardless_of_failed_list() -> None:
     resp = client.get("/api/modules/../evil/action")
     assert resp.status_code in {400, 404, 422}
     assert "failed to load at startup" not in str(resp.json())
+
+
+def test_post_dispatch_to_startup_failed_module_returns_503() -> None:
+    client = _client(failed_module_names=["tasks"])
+    resp = client.post("/api/modules/tasks/create", json={"params": {}})
+    assert resp.status_code == 503
+    assert "failed to load at startup" in resp.json().get("detail", "")
