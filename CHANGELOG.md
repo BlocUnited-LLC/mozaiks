@@ -406,6 +406,39 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Partial module load now surfaces as `startup_degraded`** — when one or more
+  declared modules fail to load, `mozaiksai/hosts/platform.py` now sets
+  `app.state.startup_degraded = True` with a `MODULE_LOAD_PARTIAL` reason string.
+  The `/api/health/ready` endpoint returns HTTP 503 in this state, so load
+  balancers and health checks detect a degraded startup without the process
+  crashing. Previously the platform silently continued with a partial module set
+  and returned 200.
+
+- **`ModuleLoader.load_all()` returns `(loaded, failed_names)` tuple** — the
+  return type changed from `list[LoadedModule]` to
+  `tuple[list[LoadedModule], list[str]]`. Callers that previously discarded
+  failures silently now receive the list of failed module IDs. `AppLoadResult`
+  gains a `failed_module_names: list[str]` field that propagates the set of
+  modules that could not be loaded.
+
+- **Coding worker sets `status="failed"` on artifact persistence error** — when
+  `_persist_validated_artifact()` raises, the control-plane coding worker now
+  flips `status` to `"failed"` and sets `result.error` to
+  `ARTIFACT_PERSISTENCE_FAILED: <cause>`. Previously the status remained
+  `"validated"` even though no artifact record existed in the store, masking the
+  failure as a success.
+
+- **Zipfile creation errors wrapped as `ARTIFACT_ZIP_FAILED`** — `OSError`
+  exceptions from `zipfile.ZipFile` construction in the coding worker are now
+  re-raised as `RuntimeError("ARTIFACT_ZIP_FAILED: ...")` with a clear path and
+  cause, instead of propagating a bare OS error.
+
+- **`asyncio.create_task()` for workflow auto-start now logs unexpected errors**
+  — the fire-and-forget `_auto_start_if_needed()` task in `platform.py` now
+  attaches a `done_callback` that logs any unexpected exception at `ERROR` level.
+  Previously, unhandled exceptions from that task were silently discarded by the
+  event loop.
+
 - Fixed AppReview revision handoff so review-session revisions preserve
   `artifact_key`, `artifact_version_id`, `source_surface`, lifecycle state, and
   staged bundle path when triggering Studio refinement. The AppReview summary
