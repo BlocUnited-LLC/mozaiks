@@ -181,7 +181,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             logger.debug("Usage event handler registration skipped", exc_info=True)
 
         self._initialized = True
-        logger.info("🚀 SimpleTransport singleton initialized")
+        logger.info("SimpleTransport singleton initialized")
         
     async def _handle_usage_delta_event(self, payload: dict[str, Any]) -> None:
         chat_id = payload.get("chat_id")
@@ -1098,10 +1098,10 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if action == "launch_workflow":
             target_workflow = payload.get("workflow_name")
             if not target_workflow:
-                logger.warning("⚠️ Missing workflow_name in launch_workflow action")
+                logger.warning("Missing workflow_name in launch_workflow action")
                 return
             
-            logger.info(f"🚀 Launching workflow {target_workflow} from chat {chat_id}")
+            logger.info("Launching workflow %s from chat %s", target_workflow, chat_id)
             
         # Route workflow start through SessionRouter so dependency reroutes are consistent
             from mozaiksai.core.session import TriggerInput, get_session_router
@@ -1142,7 +1142,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 new_session["_id"], artifact["_id"], app_id
             )
             
-            logger.info(f"✅ Created new session {new_session['_id']} with artifact {artifact['_id']}")
+            logger.debug("Created new session %s with artifact %s", new_session['_id'], artifact['_id'])
             
             # Notify frontend to navigate to new chat
             await websocket.send_json({
@@ -1163,14 +1163,14 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if action == "update_state" and artifact_id:
             state_updates = payload.get("state_updates", {})
             if not state_updates:
-                logger.warning("⚠️ Empty state_updates in update_state action")
+                logger.warning("Empty state_updates in update_state action")
                 return
             
             await session_manager.update_artifact_state(
                 artifact_id, app_id, state_updates
             )
             
-            logger.info(f"✅ Updated artifact state for {artifact_id}: {list(state_updates.keys())}")
+            logger.debug("Updated artifact state for %s: %s", artifact_id, list(state_updates.keys()))
             
             # Broadcast state update to all connections for this artifact
             await websocket.send_json({

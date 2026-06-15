@@ -96,7 +96,7 @@ async def save_to_database(
         result = await collection.insert_one(document)
         inserted_id = str(result.inserted_id)
         
-        logger.info(f"💾 Document saved to {db_name}.{coll_name}: {inserted_id}")
+        logger.debug("Document saved to %s.%s: %s", db_name, coll_name, inserted_id)
         
         # Update context variables if available
         if context_variables:
