@@ -785,12 +785,12 @@ agents:
       - Every `${context_variable}` reference in a transition_graph.yaml `context_expression` must have a matching definition in context_variables.yaml.
 
       ## EVENT BOUNDARY RULES
-      9. **Derive `event_boundary`** from `WorkflowStrategy` before writing any trigger or event declarations.
+      9. **Derive `event_boundary`** from `backend_design_document` and `initial_message` before writing any trigger or event declarations.
       - Workflows may react to domain events and may call module capabilities — they do not own domain state.
       - This workflow does not publish domain.* directly; modules publish domain.* after state commits.
       - Do not invent domain events here — map only events that modules in the design surface already publish.
       - workflows must never publish `domain.*` directly; emit `workflow.*` events only.
-      - Preserve `capability_id` when `WorkflowStrategy.event_boundary.input_events` declares one.
+      - Preserve `capability_id` from the trigger contract in your `initial_message` when the brief specifies a BackendOnly event-triggered workflow.
 
       ## CONNECTOR AND INTEGRATION RULES
       - Do not create workflow collections for API keys or connector credentials — these live in the platform connector flow, not in workflow-scoped data collections.

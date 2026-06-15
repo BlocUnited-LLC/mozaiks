@@ -285,9 +285,9 @@ def inject_universal_prompts(agent, messages: list[dict[str, Any]], run_context:
         # Agents that design workflow structure - might accidentally create
         # UserProxy, persistence, or token tracking agents
         workflow_design_agents = {
-            "WorkflowStrategyAgent",
+            "WorkflowBundleBuilderAgent",
         }
-        
+
         if agent_name in workflow_design_agents and "[MOZAIKS RUNTIME CONTEXT]" not in system_message:
             system_message += f"\n\n{RUNTIME_CONTEXT}"
             sections_added.append("RUNTIME_CONTEXT")
