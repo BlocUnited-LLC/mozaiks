@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -180,10 +181,33 @@ class WebSocketProtocolMixin:
         logger.info("Started heartbeat for %s", chat_id)
 
     async def _heartbeat_loop(self, chat_id: str, websocket: WebSocket) -> None:
-        """Heartbeat loop for detecting silent disconnects."""
+        """Heartbeat loop for detecting silent disconnects.
+
+        Sends a JSON ping every `_heartbeat_interval` seconds. Also enforces
+        an idle timeout: if the client has not sent any message (including a
+        pong) for `_heartbeat_idle_timeout` seconds, the connection is treated
+        as dead and cleaned up. Set `_heartbeat_idle_timeout` to 0 to disable.
+        """
         try:
             while chat_id in self.connections:
                 await asyncio.sleep(self._heartbeat_interval)
+
+                # Check idle timeout — if client has been silent too long,
+                # treat the connection as a half-open TCP socket and close it.
+                idle_timeout = getattr(self, "_heartbeat_idle_timeout", 0)
+                if idle_timeout:
+                    conn = self.connections.get(chat_id)
+                    if isinstance(conn, dict):
+                        last_recv = conn.get("last_received_at", 0)
+                        if last_recv and (time.time() - last_recv) > idle_timeout:
+                            logger.warning(
+                                "WS_IDLE_TIMEOUT chat=%s idle_seconds=%.0f limit=%d — closing",
+                                chat_id,
+                                time.time() - last_recv,
+                                idle_timeout,
+                            )
+                            await self._cleanup_connection(chat_id)
+                            break
 
                 # Send ping
                 ping_data = {

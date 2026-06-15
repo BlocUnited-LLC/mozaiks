@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -180,6 +181,14 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             self._max_connections = int(os.environ.get("MOZAIKS_MAX_WS_CONNECTIONS", "500"))
         except Exception:
             self._max_connections = 500
+
+        # Idle connection timeout: how long a client can be silent before the
+        # heartbeat considers it dead. Set to 0 to disable idle detection.
+        # Clients should send pong (any message) within heartbeat_interval seconds.
+        try:
+            self._heartbeat_idle_timeout = int(os.environ.get("MOZAIKS_WS_IDLE_TIMEOUT", "360"))
+        except Exception:
+            self._heartbeat_idle_timeout = 360
 
         # Usage emission broadcast (measurement only; no billing enforcement).
         try:
@@ -1406,6 +1415,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "active": True,
             "ws_id": ws_id,  # Track WebSocket ID for session switching
             "token_exp": token_exp,  # JWT expiry (unix epoch); 0 means no expiry check
+            "last_received_at": time.time(),  # Updated on every inbound message for idle detection
         }
         logger.info("🔌 WebSocket connected for chat_id: %s (ws_id=%s)", chat_id, ws_id)
 
@@ -1456,9 +1466,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 if not msg:
                     await asyncio.sleep(0.05)
                     continue
+                # Update last-received timestamp for idle connection detection.
+                _conn = self.connections.get(chat_id)
+                if isinstance(_conn, dict):
+                    _conn["last_received_at"] = time.time()
                 # Enforce JWT token expiry on each inbound message.
                 _exp = self.connections.get(chat_id, {}).get("token_exp", 0)
-                if _exp and int(__import__("time").time()) > _exp:
+                if _exp and int(time.time()) > _exp:
                     logger.warning("WS_TOKEN_EXPIRED chat=%s — closing connection", chat_id)
                     await self._send_ws_error(websocket, "Session token has expired", "TOKEN_EXPIRED")
                     await websocket.close(code=4401, reason="Token expired")
