@@ -247,17 +247,11 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         
         This method is called by the API endpoint when the frontend submits user input.
         """
-        logger.info(f"🔍 [INPUT_SUBMIT] Looking for request_id={input_request_id} in {len(self._input_request_registries)} chat registries")
-        for cid, reg in self._input_request_registries.items():
-            logger.info(f"  📋 [INPUT_SUBMIT] chat={cid} has {len(reg)} pending requests: {list(reg.keys())}")
-        
         # First try orchestration registry respond callback(s)
         handled = False
         ack_chat_id = None
         for chat_id, reg in list(self._input_request_registries.items()):
             respond_cb = reg.get(input_request_id)
-            if respond_cb:
-                logger.info(f"✅ [INPUT_SUBMIT] Found callback for {input_request_id} in chat {chat_id}")
             if respond_cb:
                 try:
                     if user_input and user_input != SYSTEM_RESUME_SIGNAL:
@@ -272,7 +266,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                             )
                         except Exception as trigger_err:
                             logger.debug(f"[INPUT_SUBMIT] user_text trigger update skipped for {chat_id}: {trigger_err}")
-                    logger.info(f"🚀 [INPUT_SUBMIT] Invoking respond callback with user_input='{user_input[:50]}...'")
+                    logger.debug("INPUT_SUBMIT invoking callback request_id=%s chat=%s", input_request_id, chat_id)
                     # Support both async and sync lambdas assigned by AG2
                     result = respond_cb(user_input)
                     if asyncio.iscoroutine(result):
@@ -280,7 +274,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     handled = True
                     ack_chat_id = chat_id
                     self._recent_input_submit_chats.add(chat_id)
-                    logger.info(f"✅ [INPUT] Respond callback invoked for request {input_request_id} (chat {chat_id})")
+                    logger.debug("INPUT_SUBMIT callback invoked request_id=%s chat=%s", input_request_id, chat_id)
                 except Exception as e:
                     logger.error(f"❌ [INPUT] Respond callback failed {input_request_id}: {e}", exc_info=True)
                 finally:
@@ -618,9 +612,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 agent_name = event.sender.name  # type: ignore
             if not skip_visibility_filter and agent_name and not self.should_show_to_user(agent_name, chat_id):
                 if _downgrade_to_trace(agent=str(agent_name)):
-                    logger.info(f"[TRANSPORT] Downgraded non-visual message from '{agent_name}' to trace for chat {chat_id}")
+                    logger.debug("TRANSPORT downgraded non-visual message agent=%s chat=%s", agent_name, chat_id)
                 else:
-                    logger.info(f"🚫 [TRANSPORT] Filtered out AG2 event from agent '{agent_name}' for chat {chat_id} (should_show_to_user=False)")
+                    logger.debug("TRANSPORT filtered AG2 event agent=%s chat=%s (not visual)", agent_name, chat_id)
                     return
 
             # Apply visibility filtering for dict events (post-envelope) as well
@@ -642,16 +636,16 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         agent_name = event.get('sender') or event.get('agent') or event.get('agent_name')
                 if not skip_visibility_filter and agent_name and not self.should_show_to_user(agent_name, chat_id):
                     if _downgrade_to_trace(agent=str(agent_name)):
-                        logger.info(f"[TRANSPORT] Downgraded non-visual message from '{agent_name}' to trace for chat {chat_id}")
+                        logger.debug("TRANSPORT downgraded non-visual message agent=%s chat=%s", agent_name, chat_id)
                     else:
-                        logger.info(f"🚫 [TRANSPORT] Filtered out event from agent '{agent_name}' for chat {chat_id} (visual_agents gate, should_show_to_user=False)")
+                        logger.debug("TRANSPORT filtered event agent=%s chat=%s (visual_agents gate)", agent_name, chat_id)
                         return
-                
+
             # Check for suppression flag from derived context hooks
             if envelope and isinstance(envelope, dict):
                 data_payload = envelope.get('data')
                 if isinstance(data_payload, dict) and data_payload.get('_mozaiks_hide'):
-                    logger.info(f"🚫 [TRANSPORT] Suppressing hidden message (derived context trigger) for chat {chat_id}: {data_payload.get('content', 'no content')[:100]}")
+                    logger.debug("TRANSPORT suppressing hidden message chat=%s", chat_id)
                     return
 
             # ----------------------------------------------------------------

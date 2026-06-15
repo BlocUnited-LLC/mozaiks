@@ -396,7 +396,7 @@ class UnifiedEventDispatcher:
             # Check 0: System resume signals (always suppress)
             if isinstance(content, str) and SYSTEM_RESUME_SIGNAL in content:
                 event_dict['_mozaiks_hide'] = True
-                logger.info(f"🚫 [SYSTEM_SIGNAL] Suppressing internal resume signal from {agent_name}")
+                logger.debug("[SYSTEM_SIGNAL] Suppressing internal resume signal from %s", agent_name)
                 return {
                     "type": f"chat.{base_kind}",
                     "data": event_dict,
@@ -455,7 +455,7 @@ class UnifiedEventDispatcher:
                     # Suppress if userdriven mode AND sender looks like a user proxy
                     if workflow_startup_mode == "userdriven" and sender_lower in {"user", "userproxy", "chat_manager", "manager"}:
                         event_dict['_mozaiks_hide'] = True
-                        logger.info(f"🚫 [USERDRIVEN_TRIGGER] Suppressing synthetic '.' trigger from {agent_name} (workflow_startup_mode={workflow_startup_mode})")
+                        logger.debug("[USERDRIVEN_TRIGGER] Suppressing synthetic '.' trigger from %s (startup_mode=%s)", agent_name, workflow_startup_mode)
                         return {
                             "type": f"chat.{base_kind}",
                             "data": event_dict,
@@ -472,7 +472,7 @@ class UnifiedEventDispatcher:
                     
                     if agent_name in hidden_triggers and content.strip() in hidden_triggers[agent_name]:
                         event_dict['_mozaiks_hide'] = True
-                        logger.info(f"🚫 [UI_HIDDEN] Suppressing hidden trigger: agent={agent_name}, content='{content.strip()}'")
+                        logger.debug("[UI_HIDDEN] Suppressing hidden trigger agent=%s", agent_name)
                         return {
                             "type": f"chat.{base_kind}",
                             "data": event_dict,
