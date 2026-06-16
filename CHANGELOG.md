@@ -760,6 +760,76 @@ This project follows a practical pre-1.0 changelog format:
   memory indefinitely. Fixed by adding cleanup of `_input_request_registries`
   in `ws_protocol.py`'s `_cleanup_connection()`.
 
+- **Silent `except Exception: pass` blocks replaced in bridge and dispatcher** —
+  `workflow_bridge.py` had 8 bare pass swallows across lifecycle emission task
+  creation, `fail_active_revision` fire-and-forget, pause-workflow registry
+  cleanup, and session-registry complete calls. `unified_event_dispatcher.py` had
+  4 bare pass swallows in per-event agent-flag enrichment (structured/visual/
+  ui_tools/sequence flag lookup). All now emit `logger.debug(...)` with event key
+  and cause so previously invisible failures are observable in debug log streams.
+
+- **Silent failures surfaced in AG2 runner, attachments, auth, and LLM config** —
+  `ag2_network_runner.py`: hub client and hub `close()` calls in the cleanup
+  `finally` block now log `WARNING` on failure; cancelled pending tasks are now
+  awaited with `return_exceptions=True` to prevent use-after-close races with the
+  hub. `chat_attachments/attachments.py`: file-close and bundle-read errors log
+  `WARNING` instead of silently continuing. `auth/dependencies.py` and
+  `auth/websocket_auth.py`: adapter exception in no-auth mode logs `DEBUG` before
+  falling back to the anonymous user. `capabilities/simple_llm.py`: invalid
+  temperature in `llm_config` logs `WARNING` and falls back to API default instead
+  of crashing or silently using an unvalidated value.
+
+- **Silent failures surfaced in content store, app context, and admin** —
+  `artifacts/content_store.py`: `exists()` and `delete()` now log `ERROR` with
+  `exc_info=True` when GridFS queries fail, preventing a DB outage from
+  masquerading as "content not found" or "content deleted". `app_context/store.py`:
+  JSON and YAML manifest parse failures now log `WARNING` instead of returning
+  empty objects silently. `admin/router.py`: session runtime computation failure
+  logs `WARNING` and falls back to stored duration. `app_context/context_graph.py`:
+  tree-sitter parser init failure logs `WARNING` when permanently disabling the
+  parser for the process lifetime.
+
+- **Remaining bare `except Exception: pass` blocks replaced in transport layer** —
+  `simple_transport.py` had 6 bare pass swallows: 3 in run-complete event
+  enrichment and 3 in `RUNTIME_PROCESS_COMPLETED` hook. All replaced with
+  `logger.debug(...)`. `orchestration_patterns.py`: 4 additional bare passes in
+  derived-context seed, `mark_chat_completed` persistence, derived-context manager
+  cleanup, and the `_derived_listener` UI emit task were replaced with debug/warning
+  logs and a `done_callback`.
+
+- **Platform shutdown and orchestration cleanup observability** —
+  `hosts/platform.py`: runtime-services stop failure at shutdown now logs
+  `WARNING`; two WebSocket prerequisite error-message send failures log `DEBUG`
+  instead of silently swallowing. `orchestration_patterns.py`: fire-and-forget UI
+  emit task in `_derived_listener` now attaches a `done_callback` that logs the
+  exception at `DEBUG` when the task raises.
+
+- **`http_app_backend.py` and `summary_artifacts.py` non-JSON response warnings**
+  — `HttpAppBackendAdapter` now logs `WARNING` when a 2xx response body fails JSON
+  decode (previously silently fell back to `{"raw": ...}`). `summary_artifacts.py`
+  logs `WARNING` when Pydantic `model_dump` fails during artifact JSON
+  serialization.
+
+- **WebSocket connection limit (`MOZAIKS_MAX_WS_CONNECTIONS`)** — `SimpleTransport`
+  now reads `MOZAIKS_MAX_WS_CONNECTIONS` (default 500) from the environment and
+  rejects new connections with WebSocket close code 1008 when the limit is reached.
+  Reconnect storms from misbehaving clients can no longer grow `self.connections`
+  without bound.
+
+- **AG2 runner outer timeout guard** — `ag2_network_runner.py`'s `asyncio.wait()`
+  call had no native deadline; a hung `failure_task` could block the runner
+  indefinitely. Added an `asyncio.wait_for(..., timeout=close_timeout + 30s)` outer
+  guard that cancels both tasks and returns `RunStatus.PAUSED` with an explanatory
+  error when the deadline is exceeded.
+
+- **WebSocket idle timeout (`MOZAIKS_WS_IDLE_TIMEOUT`) detects half-open TCP
+  connections** — heartbeat `send_json` can succeed on half-open TCP connections
+  because the OS kernel buffers absorb the bytes before the remote end's failure
+  is detected. `SimpleTransport` now tracks `last_received_at` on every inbound
+  message. The `ws_protocol.py` heartbeat loop reads `MOZAIKS_WS_IDLE_TIMEOUT`
+  (default 360 s) and closes the connection when no message has been received
+  within the idle window, cleaning up the slot for a reconnect.
+
 ### Removed
 
 - Retired `MozaiksContextExpression` / `evaluate_context_expression`. All
