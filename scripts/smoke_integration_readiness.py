@@ -33,16 +33,22 @@ class Context:
 class FakeCursor:
     def __init__(self, docs):
         self._docs = list(docs)
+        self._limit = None
 
     def sort(self, key, direction):
         reverse = int(direction) < 0
         self._docs.sort(key=lambda doc: doc.get(key, 0), reverse=reverse)
         return self
 
+    def limit(self, n):
+        self._limit = n
+        return self
+
     async def to_list(self, length=None):
+        docs = self._docs if self._limit is None else self._docs[: self._limit]
         if length is None:
-            return list(self._docs)
-        return list(self._docs[:length])
+            return list(docs)
+        return list(docs[:length])
 
 
 class FakeCollection:

@@ -895,8 +895,9 @@ class AG2PersistenceManager:
                     {"_id": 1, "workflow_name": 1, "status": 1, "created_at": 1},
                 )
                 .sort("created_at", -1)
+                .limit(500)
             )
-            docs = await cursor.to_list(length=None)
+            docs = await cursor.to_list(length=500)
             result: dict[str, dict[str, Any]] = {}
             for d in docs:
                 wf = d.get("workflow_name") or d.get("workflow") or "unnamed_workflow"

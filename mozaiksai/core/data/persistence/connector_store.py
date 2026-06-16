@@ -155,8 +155,8 @@ class AppConnectorStore:
     async def list_connectors(self, *, app_id: str) -> list[dict[str, Any]]:
         await self.ensure_indexes()
         coll = await self._collection()
-        cursor = coll.find({"app_id": str(app_id)}).sort("updated_at", -1)
-        docs = await cursor.to_list(length=None)
+        cursor = coll.find({"app_id": str(app_id)}).sort("updated_at", -1).limit(200)
+        docs = await cursor.to_list(length=200)
         return [self._normalize_doc(doc) for doc in docs if isinstance(doc, dict)]  # type: ignore[misc]
 
     async def patch_connector(

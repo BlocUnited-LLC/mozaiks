@@ -189,8 +189,8 @@ class BuilderArtifactStore:
 
     async def list_design_docs(self, *, app_id: str) -> list[dict[str, Any]]:
         coll = await self._collection(BuilderCollections.DESIGN_DOCUMENTS)
-        cursor = coll.find({"app_id": str(app_id)})
-        rows = await cursor.to_list(length=None)
+        cursor = coll.find({"app_id": str(app_id)}).limit(500)
+        rows = await cursor.to_list(length=500)
         docs: list[dict[str, Any]] = []
         for row in rows:
             if not isinstance(row, dict):
