@@ -89,10 +89,10 @@ def inject_agent_backend_context(agent, messages: list[dict[str, Any]]) -> None:
         
         if new_system_message != current_system_message:
             agent.update_system_message(new_system_message)
-            logger.info(f"[{agent.name}] Injected agent backend context ({len(context_str)} chars)")
+            logger.info("[%s] Injected agent backend context (%d chars)", agent.name, len(context_str))
             
     except Exception as e:
-        logger.error(f"[{agent.name}] Failed to inject agent backend context: {e}")
+        logger.error("[%s] Failed to inject agent backend context: %s", agent.name, e)
 
 
 __all__ = ["inject_agent_backend_context"]

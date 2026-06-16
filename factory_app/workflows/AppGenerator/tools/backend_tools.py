@@ -42,7 +42,7 @@ async def generate_scaffold(
     Generate app scaffold files (boilerplate, config, dockerfiles) via the backend.
     Returns a dictionary containing the generated files.
     """
-    logger.info(f"Generating scaffold for app {app_id}")
+    logger.info("Generating scaffold for app %s", app_id)
     try:
         result = await app_gen_backend_client.generate_scaffold(
             app_id=app_id,
@@ -56,7 +56,7 @@ async def generate_scaffold(
         )
         return result
     except Exception as e:
-        logger.error(f"Failed to generate scaffold: {e}")
+        logger.error("Failed to generate scaffold: %s", e)
         return {"error": str(e)}
 
 async def fetch_current_schema(
@@ -72,7 +72,7 @@ async def fetch_current_schema(
     if not artifact_version_id:
         logger.debug("fetch_current_schema: no artifact_version_id — returning null schema (greenfield)")
         return {"schema": None, "artifact_version_id": None}
-    logger.info(f"Fetching current schema for app {app_id} artifact {artifact_version_id}")
+    logger.info("Fetching current schema for app %s artifact %s", app_id, artifact_version_id)
     try:
         result = await app_gen_backend_client.get_artifact_schema(
             app_id=app_id,
@@ -80,7 +80,7 @@ async def fetch_current_schema(
         )
         return result
     except Exception as e:
-        logger.warning(f"fetch_current_schema failed (non-fatal): {e}")
+        logger.warning("fetch_current_schema failed (non-fatal): %s", e)
         return {"schema": None, "error": str(e)}
 
 
@@ -95,7 +95,7 @@ async def apply_schema_migration(
     cleared by the safety gate in schema_migration.apply_migration_safe().
     """
     migration_id = (migration or {}).get("migration_id", "unknown")
-    logger.info(f"Applying schema migration {migration_id} for app {app_id}")
+    logger.info("Applying schema migration %s for app %s", migration_id, app_id)
     try:
         result = await app_gen_backend_client.apply_schema_migration(
             app_id=app_id,
@@ -104,7 +104,7 @@ async def apply_schema_migration(
         )
         return result
     except Exception as e:
-        logger.error(f"Failed to apply migration {migration_id}: {e}")
+        logger.error("Failed to apply migration %s: %s", migration_id, e)
         return {"error": str(e), "migration_id": migration_id}
 
 

@@ -293,7 +293,7 @@ async def run_integration_tests(
             context_variables.set("integration_tests_passed", bool(results.get("passed")))
             context_variables.set("integration_test_result", results)
     except Exception as ctx_err:
-        wf_logger.debug(f"Failed to persist integration test results in context: {ctx_err}")
+        wf_logger.debug("Failed to persist integration test results in context: %s", ctx_err)
 
     return results
 

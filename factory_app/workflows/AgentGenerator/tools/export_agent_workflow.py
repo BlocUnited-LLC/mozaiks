@@ -192,7 +192,7 @@ async def export_agent_workflow_to_github(
                 },
             )
         except Exception as exc:
-            wf_logger.warning(f"[EXPORT] Failed to record workflow export metadata: {exc}")
+            wf_logger.warning("[EXPORT] Failed to record workflow export metadata: %s", exc)
 
     return payload
 

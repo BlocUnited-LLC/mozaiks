@@ -228,7 +228,7 @@ class ExportToGitHubTool:
                     if tlog and _log_tool_event:  # type: ignore[truthy-function]
                         _log_tool_event(tlog, action="repo_secrets", status="ok", repo_full_name=repo_full_name, result=secrets_res)
                 except Exception as sec_exc:
-                    wf_logger.warning(f"[EXPORT] Failed to set repository secrets: {sec_exc}")
+                    wf_logger.warning("[EXPORT] Failed to set repository secrets: %s", sec_exc)
                     if tlog and _log_tool_event:  # type: ignore[truthy-function]
                         _log_tool_event(tlog, action="repo_secrets", status="error", repo_full_name=repo_full_name, error=str(sec_exc))
 

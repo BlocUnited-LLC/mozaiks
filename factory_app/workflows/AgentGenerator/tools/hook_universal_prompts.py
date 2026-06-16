@@ -253,7 +253,7 @@ def inject_universal_prompts(agent, messages: list[dict[str, Any]], run_context:
         
         # Skip user agent
         if agent_name == "user":
-            logger.debug(f"Skipping prompt injection for {agent_name} (user agent)")
+            logger.debug("Skipping prompt injection for %s (user agent)", agent_name)
             return system_message
         
         sections_added = []
@@ -279,7 +279,7 @@ def inject_universal_prompts(agent, messages: list[dict[str, Any]], run_context:
         if agent_name in conversational_agents:
             _apply_system_message(agent, system_message)
             if sections_added:
-                logger.info(f"✓ Injected universal sections into {agent_name}: {', '.join(sections_added)}")
+                logger.info("✓ Injected universal sections into %s: %s", agent_name, ", ".join(sections_added))
             return system_message
         
         # Agents that design workflow structure - might accidentally create
@@ -333,14 +333,14 @@ def inject_universal_prompts(agent, messages: list[dict[str, Any]], run_context:
         _apply_system_message(agent, system_message)
         
         if sections_added:
-            logger.info(f"✓ Injected prompt sections into {agent_name}: {', '.join(sections_added)}")
+            logger.info("✓ Injected prompt sections into %s: %s", agent_name, ", ".join(sections_added))
         else:
-            logger.debug(f"No changes needed for {agent_name} (all sections already present)")
+            logger.debug("No changes needed for %s (all sections already present)", agent_name)
         
         return system_message
 
     except Exception as e:
-        logger.error(f"Error injecting prompts for {getattr(agent, 'name', 'unknown')}: {e}", exc_info=True)
+        logger.error("Error injecting prompts for %s: %s", getattr(agent, "name", "unknown"), e, exc_info=True)
         return getattr(agent, 'system_message', '') or ""
 
 

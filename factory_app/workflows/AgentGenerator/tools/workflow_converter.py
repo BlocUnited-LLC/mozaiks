@@ -135,12 +135,12 @@ def _normalize_runtime_extensions(
 
         kind = str(ext.get("kind") or "").strip()
         if kind not in RUNTIME_EXTENSION_KINDS:
-            wf_logger.warning(f"⚠️ [CREATE_WORKFLOW_FILES] Skipping unknown runtime extension kind: {kind}")
+            wf_logger.warning("⚠️ [CREATE_WORKFLOW_FILES] Skipping unknown runtime extension kind: %s", kind)
             continue
 
         entrypoint = ext.get("entrypoint")
         if not isinstance(entrypoint, str) or not entrypoint.strip():
-            wf_logger.warning(f"⚠️ [CREATE_WORKFLOW_FILES] Skipping runtime extension without entrypoint: {kind}")
+            wf_logger.warning("⚠️ [CREATE_WORKFLOW_FILES] Skipping runtime extension without entrypoint: %s", kind)
             continue
 
         entrypoint = entrypoint.strip()

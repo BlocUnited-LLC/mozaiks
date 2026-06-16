@@ -866,6 +866,14 @@ This project follows a practical pre-1.0 changelog format:
   `DEBUG`. `workflow_manager.py` `WORKFLOW_LOAD_OK` kept at `INFO` (startup,
   not per-call).
 
+- **MongoDB reachability added to startup validation** — `run_startup_checks()`
+  now verifies that `MONGO_URI` is set (or resolvable via Key Vault alias
+  `MongoURI`) and that the MongoDB server responds to a `ping` before accepting
+  traffic. Missing URI and ping failures emit `STARTUP_CHECK_FAILED` records
+  with `check="mongo_uri"` and raise `StartupConfigError` in `strict` mode.
+  Five new tests cover the success and failure paths; existing tests updated to
+  inject `_MockPingClient` so the new check does not change their assertions.
+
 - **Per-request INFO logs in transport handlers converted to DEBUG and
   f-string lazy-logging fixed** — `input_handlers.py`, `mode_handlers.py`,
   and `workflow_handlers.py` had 11 `logger.info(f"...")` calls that fired at

@@ -113,9 +113,9 @@ async def save_build_plan(
         try:
             store = BuilderArtifactStore()
             await store.save_build_plan(app_id=str(app_id), build_plan=build_plan)
-            logger.info(f"[ValueEngine] BuildPlan saved for app_id={app_id}")
+            logger.info("[ValueEngine] BuildPlan saved for app_id=%s", app_id)
         except Exception as e:
-            logger.warning(f"[ValueEngine] Persistence failed: {e}")
+            logger.warning("[ValueEngine] Persistence failed: %s", e)
 
     try:
         await persist_summary_artifact(
@@ -174,7 +174,7 @@ async def get_build_plan(
             if plan:
                 return {"success": True, "build_plan": plan}
         except Exception as e:
-            logger.warning(f"[ValueEngine] Load build plan failed: {e}")
+            logger.warning("[ValueEngine] Load build plan failed: %s", e)
 
     return {"success": False, "error": f"No build plan found for app_id={app_id}"}
 

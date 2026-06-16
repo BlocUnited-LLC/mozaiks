@@ -882,7 +882,7 @@ async def generate_and_download(
     except UIToolError:
         raise
     except Exception as e:
-        wf_logger.error(f"UI interaction failed: {e}", exc_info=True)
+        wf_logger.error("UI interaction failed: %s", e, exc_info=True)
         raise UIToolError("Failed during file download UI interaction") from e
 
     if response.get("status") == "cancelled":
@@ -970,7 +970,7 @@ async def generate_and_download(
                 context_variables=context_variables,
             )
     except Exception as deploy_err:
-        wf_logger.warning(f"GitHub export flow failed: {deploy_err}")
+        wf_logger.warning("GitHub export flow failed: %s", deploy_err)
 
     download_result = {
         "bundle_dir": str(app_dir.resolve()),

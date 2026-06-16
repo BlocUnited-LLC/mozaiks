@@ -301,7 +301,7 @@ async def export_app_code_to_github(
                     },
                 )
             except Exception as exc:
-                wf_logger.warning(f"[EXPORT] Failed to record update PR metadata: {exc}")
+                wf_logger.warning("[EXPORT] Failed to record update PR metadata: %s", exc)
 
             return {
                 "success": True,
@@ -360,7 +360,7 @@ async def export_app_code_to_github(
             snapshot_id = await persist_snapshot(snapshot_doc=snapshot_doc)
         except Exception as snap_exc:
             snapshot_id = None
-            wf_logger.warning(f"[EXPORT] Failed to persist initial export snapshot: {snap_exc}")
+            wf_logger.warning("[EXPORT] Failed to persist initial export snapshot: %s", snap_exc)
 
         try:
             await record_workflow_export(
@@ -380,7 +380,7 @@ async def export_app_code_to_github(
                 },
             )
         except Exception as exc:
-            wf_logger.warning(f"[EXPORT] Failed to record app export metadata: {exc}")
+            wf_logger.warning("[EXPORT] Failed to record app export metadata: %s", exc)
 
     return payload
 

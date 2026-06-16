@@ -212,9 +212,9 @@ async def save_value_manifest(
                 concept_record=concept_record,
                 created_at=now.isoformat(),
             )
-            logger.info(f"[ValueEngine] Concept saved for app_id={app_id}")
+            logger.info("[ValueEngine] Concept saved for app_id=%s", app_id)
         except Exception as e:
-            logger.warning(f"[ValueEngine] Persistence failed: {e}")
+            logger.warning("[ValueEngine] Persistence failed: %s", e)
 
     try:
         await persist_summary_artifact(
@@ -264,7 +264,7 @@ async def save_value_manifest(
             agent_name="GapAnalysisAgent",
         )
     except Exception as e:
-        logger.debug(f"[ValueEngine] UI event failed: {e}")
+        logger.debug("[ValueEngine] UI event failed: %s", e)
 
     # Store context values for downstream routing and tools.
     _set_context_value(context_variables, "value_manifest", manifest)
@@ -308,6 +308,6 @@ async def get_value_manifest(
                     "manifest": _concept_record_to_manifest(concept, str(app_id)),
                 }
         except Exception as e:
-            logger.warning(f"[ValueEngine] Load manifest failed: {e}")
+            logger.warning("[ValueEngine] Load manifest failed: %s", e)
 
     return {"success": False, "error": f"No manifest found for app_id={app_id}"}

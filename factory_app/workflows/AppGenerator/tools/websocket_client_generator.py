@@ -319,7 +319,7 @@ async def generate_websocket_client(
                 "language": language,
             }
         
-        wf_logger.info(f"[WS_CLIENT] Generated {language} WebSocket client ({len(code)} chars)")
+        wf_logger.info("[WS_CLIENT] Generated %s WebSocket client (%d chars)", language, len(code))
         
         return {
             "success": True,
@@ -331,7 +331,7 @@ async def generate_websocket_client(
         }
         
     except Exception as e:
-        wf_logger.error(f"[WS_CLIENT] Failed to generate client: {e}")
+        wf_logger.error("[WS_CLIENT] Failed to generate client: %s", e)
         return {
             "success": False,
             "error": str(e),
