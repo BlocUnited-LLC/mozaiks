@@ -138,7 +138,7 @@ class DomainEventHandler(EventHandler):
     async def handle(self, event: EventType) -> bool:
         if not isinstance(event, DomainEvent):
             return False
-        logger.info(
+        logger.debug(
             "[DOMAIN_EVENT] kind=%s chat_id=%s source=%s",
             event.kind,
             event.chat_id,
@@ -230,7 +230,7 @@ class UnifiedEventDispatcher:
         if event_type.startswith("chat.usage_"):
             logger.debug("[DISPATCH] Emitting event %s to %s listener(s)", event_type, len(listeners))
         else:
-            logger.info("[DISPATCH] Emitting event %s to %s listener(s) payload=%s", event_type, len(listeners), payload)
+            logger.debug("[DISPATCH] Emitting event %s to %s listener(s)", event_type, len(listeners))
 
         pending_results: list[Awaitable[Any]] = []
         for listener in listeners:
@@ -275,7 +275,7 @@ class UnifiedEventDispatcher:
                 self.metrics["events_failed"] += 1
             dur_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
             if dur_ms > 100:
-                logger.info("Slow event dispatch category=%s dur=%sms", getattr(event,'category',None), dur_ms)
+                logger.warning("SLOW_EVENT_DISPATCH category=%s dur=%sms", getattr(event,'category',None), dur_ms)
             return success
         except Exception as e:  # pragma: no cover
             logger.error("Dispatch failure: %s", e, exc_info=True)
@@ -378,7 +378,7 @@ class UnifiedEventDispatcher:
             _key = (chat_id, _agent)
             if _key in self._greeting_echo_keys:
                 self._greeting_echo_keys.discard(_key)
-                logger.info("[GREETING_ECHO] Converting duplicate greeting from %s to chat.greeting_echo", _agent)
+                logger.debug("[GREETING_ECHO] Converting duplicate greeting from %s to chat.greeting_echo", _agent)
                 return {
                     "type": "chat.greeting_echo",
                     "data": event_dict,
@@ -408,8 +408,8 @@ class UnifiedEventDispatcher:
             # These are internal orchestration primers retained for AG2 context only.
             if isinstance(seed_kind, str) and seed_kind.strip() in {"initial_message", "userdriven_trigger"}:
                 event_dict['_mozaiks_hide'] = True
-                logger.info(
-                    "🚫 [SEED_MESSAGE] Suppressing hidden seed '%s' from %s",
+                logger.debug(
+                    "SEED_MSG_SUPPRESSED seed=%s agent=%s",
                     seed_kind.strip(),
                     agent_name,
                 )
@@ -432,8 +432,8 @@ class UnifiedEventDispatcher:
             ):
                 self._hidden_initial_message_keys.add(suppression_key)
                 event_dict['_mozaiks_hide'] = True
-                logger.info(
-                    "🚫 [HIDDEN_INITIAL_MESSAGE] Suppressing AgentDriven startup primer for chat=%s workflow=%s",
+                logger.debug(
+                    "HIDDEN_INITIAL_MSG_SUPPRESSED chat=%s workflow=%s",
                     chat_id,
                     workflow_name,
                 )
@@ -497,7 +497,7 @@ class UnifiedEventDispatcher:
                             "timestamp": timestamp
                         }
                 except Exception as e:
-                    logger.warning("⚠️ [AUTO_TOOL_DEDUP] Failed to check auto_tool agents: %s", e, exc_info=True)
+                    logger.warning("AUTO_TOOL_DEDUP_CHECK_FAILED: %s", e, exc_info=True)
             
             # Now check other agent flags
             structured_flag = False

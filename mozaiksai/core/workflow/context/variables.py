@@ -219,7 +219,7 @@ def _load_data_reference_fallbacks() -> dict[str, Any]:
         business_logger.warning("Context fallback file must contain a JSON object: %s", resolved)
         return {}
 
-    business_logger.info("Loaded context fallback file: %s", resolved)
+    business_logger.debug("Loaded context fallback file: %s", resolved)
     return payload
 
 
@@ -262,7 +262,7 @@ def _create_minimal_context(workflow_name: str, app_id: str | None):
         context.set("app_id", app_id)
     if workflow_name:
         context.set("workflow_name", workflow_name)
-    business_logger.info(
+    business_logger.debug(
         "Created minimal context",
         extra={
             "app_id": app_id,
@@ -346,7 +346,7 @@ async def _load_data_reference_value(
         query = _materialize_query_template(source.query_template, context, app_id)
         projection = {field: 1 for field in (source.fields or [])} or None
         
-        business_logger.info("[DATA_REFERENCE] Resolved query for '%s': query=%s, projection=%s, app_id=%s", name, query, projection, app_id)
+        business_logger.debug("[DATA_REFERENCE] Resolved query for '%s': query=%s, projection=%s, app_id=%s", name, query, projection, app_id)
         
         doc = await adapter.fetch_one(source, query, projection)
 
@@ -361,12 +361,12 @@ async def _load_data_reference_value(
         # If only one field was requested, extract it directly.
         if source.fields and len(source.fields) == 1:
             field_value = doc.get(source.fields[0])
-            business_logger.info("Extracted single field '%s' from document: value=%s", source.fields[0], '<present>' if field_value else '<missing>')
+            business_logger.debug("Extracted single field '%s' from document: value=%s", source.fields[0], '<present>' if field_value else '<missing>')
             coerced = _coerce_value(definition, field_value)
-            business_logger.info("After coercion for '%s': type=%s, length=%s", name, type(coerced).__name__, len(str(coerced)) if coerced else 0)
+            business_logger.debug("After coercion for '%s': type=%s, length=%s", name, type(coerced).__name__, len(str(coerced)) if coerced else 0)
             return coerced
 
-        business_logger.info("Returning full document for '%s': keys=%s", name, list(doc.keys()) if isinstance(doc, dict) else 'not_dict')
+        business_logger.debug("Returning full document for '%s': keys=%s", name, list(doc.keys()) if isinstance(doc, dict) else 'not_dict')
         return _coerce_value(definition, doc)
     except Exception as err:
         business_logger.error("Failed loading data_reference '%s': %s", name, err, exc_info=True)
@@ -513,7 +513,7 @@ async def _get_database_schema_async(database_name: str) -> dict[str, Any]:
             schema_lines.append("")
 
         schema_info["schema_overview"] = "\n".join(schema_lines)
-        business_logger.info(
+        business_logger.debug(
             "Schema loaded",
             extra={
                 "database": database_name,
@@ -533,7 +533,7 @@ async def _get_database_schema_async(database_name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 async def _load_context_async(workflow_name: str, app_id: str | None):
-    business_logger.info("Loading context for workflow=%s", workflow_name)
+    business_logger.debug("Loading context for workflow=%s", workflow_name)
     context = _create_minimal_context(workflow_name, app_id)
     internal_app_id = app_id or ""
 
@@ -583,9 +583,9 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
         if source_type == "config":
             value = _resolve_config(definition)
             context.set(name, value)
-            business_logger.info("Loaded config variable %s", name)
+            business_logger.debug("Loaded config variable %s", name)
         elif source_type == "data_reference":
-            business_logger.info("[DATA_REFERENCE] Loading '%s' for app_id=%s", name, internal_app_id)
+            business_logger.debug("[DATA_REFERENCE] Loading '%s' for app_id=%s", name, internal_app_id)
             value = await _load_data_reference_value(
                 name,
                 definition,
@@ -597,14 +597,14 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
                 fallback_value = _lookup_data_reference_fallback(fallbacks, workflow_name, name)
                 if fallback_value is not None:
                     value = _coerce_value(definition, fallback_value)
-                    business_logger.info(
+                    business_logger.debug(
                         "[DATA_REFERENCE] Using configured fallback for '%s' in workflow '%s'",
                         name,
                         workflow_name,
                     )
             context.set(name, value)
-            business_logger.info("[DATA_REFERENCE] Loaded '%s' - type=%s, value_preview=%s", name, type(value).__name__, str(value)[:100] if value else 'None')
-            business_logger.info("Loaded data_reference %s", name)
+            business_logger.debug("[DATA_REFERENCE] Loaded '%s' - type=%s, value_preview=%s", name, type(value).__name__, str(value)[:100] if value else 'None')
+            business_logger.debug("Loaded data_reference %s", name)
         elif source_type == "data_entity":
             manager = _create_data_entity_manager(
                 name,
@@ -614,7 +614,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
             if manager:
                 data_entity_managers.append(manager)
                 context.set(name, manager)
-                business_logger.info("Initialized data_entity manager for %s", name)
+                business_logger.debug("Initialized data_entity manager for %s", name)
         elif source_type == "computed":
             context.set(name, None)
             business_logger.debug("Registered computed variable %s (on-demand)", name)
@@ -622,7 +622,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
             value = _resolve_state_default(definition)
             context.set(name, value)
             trigger_count = len(getattr(source, "triggers", []) or [])
-            business_logger.info(
+            business_logger.debug(
                 "Initialized state variable %s with default=%s, triggers=%d",
                 name,
                 value,
@@ -641,7 +641,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
                 business_logger.error("Failed loading file variable %s: %s", name, err)
                 value = None
             context.set(name, value)
-            business_logger.info("Loaded file variable %s", name)
+            business_logger.debug("Loaded file variable %s", name)
         else:
             business_logger.debug("Unsupported source type for %s: %s", name, source_type)
 
@@ -659,7 +659,7 @@ async def _load_context_async(workflow_name: str, app_id: str | None):
         keys = [k for k in context.keys() if k != "app_id"]  # type: ignore[attr-defined]
     except Exception:
         keys = list(_context_to_dict(context).keys())
-    business_logger.info(
+    business_logger.debug(
         "Context loaded",
         extra={
             "workflow": workflow_name,

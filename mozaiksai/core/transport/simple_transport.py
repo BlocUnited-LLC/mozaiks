@@ -405,7 +405,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         
         # If in general mode, show all messages (bypass visual_agents filtering)
         if ws_id and session_registry.is_in_general_mode(ws_id):
-            logger.debug("🧠 [GENERAL_MODE] Allowing message from '%s' (general mode bypass)", agent_name)
+            logger.debug("GENERAL_MODE_BYPASS agent=%s", agent_name)
             return True
         
         # If we have workflow type, use visual_agents filtering
@@ -544,8 +544,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             # Allow callers to provide a fully-formed transport envelope (e.g., ack.tool_call_response)
             # without forcing another serialization pass through the dispatcher.
             if isinstance(event, dict) and 'type' in event and 'data' in event and 'kind' not in event:
-                logger.info(
-                    "🔁 [TRANSPORT] Forwarding pre-built envelope without re-serialization: %s",
+                logger.debug(
+                    "TRANSPORT_ENVELOPE_PASSTHROUGH type=%s",
                     event.get('type')
                 )
                 await self._broadcast_to_websockets(event, chat_id)
@@ -695,9 +695,8 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                         'structured_output', 'structured_schema', 'metadata', 'sequence',
                     )
                     _stream_meta = {k: _d[k] for k in _meta_keys if k in _d}
-                    logger.info(
-                        "🌊 [STREAM] Chunking chat.text → stream_chunk + stream_end "
-                        "agent=%s chat_id=%s len=%d",
+                    logger.debug(
+                        "STREAM_TEXT_CHUNK agent=%s chat_id=%s len=%d",
                         _agent, chat_id, len(_content),
                     )
                     await self._emit_text_as_chunks(
@@ -724,7 +723,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     return  # noqa: RET504
             # ----------------------------------------------------------------
 
-            logger.info("📤 [TRANSPORT] Sending envelope: type=%s, chat_id=%s", envelope.get('type'), chat_id)
+            logger.debug("TRANSPORT_ENVELOPE_SEND type=%s chat=%s", envelope.get('type'), chat_id)
             try:
                 envelope_type = envelope.get('type') if isinstance(envelope, dict) else None
                 if envelope_type == 'chat.run_complete' and chat_id:
@@ -882,7 +881,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     self._pre_connection_buffer_overflow_counts[target_chat_id] = total_overflow
                     if total_overflow == overflow:
                         logger.warning(
-                            "🧹 Dropped %d pre-connection buffered messages for %s; "
+                            "PRE_CONN_BUFFER_OVERFLOW_DROPPED dropped=%d chat=%s; "
                             "suppressing repeated overflow logs until the connection is restored",
                             overflow,
                             target_chat_id,
@@ -895,7 +894,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                             overflow,
                             total_overflow,
                         )
-                logger.debug("🕑 Buffered pre-connection message for %s (size=%s)", target_chat_id, len(buf))
+                logger.debug("PRE_CONN_BUFFER_QUEUED chat=%s size=%s", target_chat_id, len(buf))
             return
 
         # Otherwise, broadcast to all connections
@@ -1210,7 +1209,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             return
         
         # Route: other actions (forward to agent as tool_call or handle directly)
-        logger.info("🔄 Artifact action %s received for chat %s", action, chat_id)
+        logger.debug("ARTIFACT_ACTION_RECEIVED action=%s chat=%s", action, chat_id)
         # Future: route to agent or handle other action types
         await websocket.send_json({
             "type": "ack.artifact_action",
@@ -1279,7 +1278,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     self._sequence_counters[chat_id] = last_idx_sent + 1
 
             logger.info(
-                "✅ Resume complete chat=%s replayed=%s missing_from>%s now_at_index=%s total=%s",
+                "RESUME_COMPLETE chat=%s replayed=%s missing_from>%s now_at_index=%s total=%s",
                 chat_id,
                 (summary.get("replayed_messages") if isinstance(summary, dict) else None),
                 last_client_index,
@@ -1417,7 +1416,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             "token_exp": token_exp,  # JWT expiry (unix epoch); 0 means no expiry check
             "last_received_at": time.time(),  # Updated on every inbound message for idle detection
         }
-        logger.info("🔌 WebSocket connected for chat_id: %s (ws_id=%s)", chat_id, ws_id)
+        logger.info("WS_CONNECTED chat=%s ws_id=%s", chat_id, ws_id)
 
         try:
             session_registry.add_workflow(
@@ -1446,7 +1445,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if chat_id in self._pre_connection_buffers:
             buffered = self._pre_connection_buffers.pop(chat_id)
             if buffered:
-                logger.info("📤 Flushing %s pre-connection buffered messages for %s", len(buffered), chat_id)
+                logger.debug("PRE_CONN_BUFFER_FLUSH count=%s chat=%s", len(buffered), chat_id)
                 for msg in buffered:
                     await self._queue_message_with_backpressure(chat_id, msg)
                 await self._flush_message_queue(chat_id)
@@ -1519,7 +1518,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         finally:
             # H1-H2: Clean up connection resources (heartbeat, message queues, etc.)
             await self._cleanup_connection(chat_id)
-            logger.info("🔌 WebSocket disconnected for chat_id: %s", chat_id)
+            logger.info("WS_DISCONNECTED chat=%s", chat_id)
 
     # NOTE: Workflow integration methods are provided by WorkflowBridgeMixin:
     # - handle_user_input_from_api

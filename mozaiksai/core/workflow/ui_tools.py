@@ -234,9 +234,9 @@ def _resolve_ui_tool_owner(
         tool_record = workflow_manager.get_ui_tool_record(tool_id)
         if tool_record:
             agent_name = tool_record.get("agent")
-            wf_logger.debug("🔍 Tool '%s' owned by agent: %s", tool_id, agent_name)
+            wf_logger.debug("UI_TOOL_OWNER tool=%s agent=%s", tool_id, agent_name)
     except Exception as e:
-        wf_logger.warning("⚠️ Failed to resolve tool owner for '%s': %s", tool_id, e)
+        wf_logger.warning("UI_TOOL_OWNER_FAILED tool=%s: %s", tool_id, e)
 
     if not agent_name and isinstance(payload, dict):
         agent_name = payload.get("agent_name")
@@ -254,13 +254,13 @@ def _resolve_ui_display(
             tool_record = workflow_manager.get_ui_tool_record(tool_id)
             if tool_record:
                 resolved_display = tool_record.get('mode', 'inline')
-                wf_logger.debug("🔍 Auto-resolved display mode for '%s': %s", tool_id, resolved_display)
+                wf_logger.debug("UI_TOOL_DISPLAY_RESOLVED tool=%s mode=%s", tool_id, resolved_display)
             else:
                 resolved_display = 'inline'
-                wf_logger.debug("⚠️ No tool record found for '%s', using default display: inline", tool_id)
+                wf_logger.debug("UI_TOOL_DISPLAY_FALLBACK tool=%s (no record, using inline)", tool_id)
         except Exception as e:
             resolved_display = 'inline'
-            wf_logger.warning("⚠️ Failed to resolve display mode for '%s': %s, using default: inline", tool_id, e)
+            wf_logger.warning("UI_TOOL_DISPLAY_FAILED tool=%s: %s (using inline)", tool_id, e)
     return str(resolved_display or "inline")
 
 
@@ -349,9 +349,9 @@ async def use_ui_tool(
                         },
                     ),
                 )
-                wf_logger.debug("📌 Attached UI tool metadata for %s (event=%s)", tool_id, event_id)
+                wf_logger.debug("UI_TOOL_META_ATTACHED tool=%s event=%s", tool_id, event_id)
         except Exception as meta_err:
-            wf_logger.warning("⚠️ Failed to attach UI tool metadata: %s", meta_err)
+            wf_logger.warning("UI_TOOL_META_FAILED: %s", meta_err)
 
     try:
         # Try to log via tools logger (optional import)
@@ -366,11 +366,7 @@ async def use_ui_tool(
         resp = await _wait_for_tool_call_response_internal(event_id, timeout=None)
         duration_ms = (_dt.datetime.now(_dt.UTC) - start).total_seconds() * 1000.0
         # Assemble log message to keep line length under linter limits
-        round_trip_msg = (
-            f"⏱️ [UI_TOOLS] Round-trip tool_id={tool_id} "
-            f"event={event_id} duration_ms={duration_ms:.2f}"
-        )
-        wf_logger.info(round_trip_msg)
+        wf_logger.debug("UI_TOOL_ROUNDTRIP tool=%s event=%s duration_ms=%.2f", tool_id, event_id, duration_ms)
         if isinstance(resp, dict) and 'ui_event_id' not in resp:
             resp['ui_event_id'] = event_id
         try:
@@ -399,9 +395,9 @@ async def use_ui_tool(
                     "timestamp": _dt.datetime.now(_dt.UTC).isoformat(),
                 }
                 await transport.send_event_to_ui(completion_event, chat_id=chat_id)
-                wf_logger.debug("🧹 Sent completion event for inline tool: %s", event_id)
+                wf_logger.debug("UI_TOOL_COMPLETION_SENT event=%s", event_id)
             except Exception as vanish_err:
-                wf_logger.warning("⚠️ Failed to send completion event for %s: %s", event_id, vanish_err)
+                wf_logger.warning("UI_TOOL_COMPLETION_SEND_FAILED event=%s: %s", event_id, vanish_err)
 
             try:
                 from mozaiksai.core.transport.simple_transport import SimpleTransport
@@ -425,18 +421,14 @@ async def use_ui_tool(
                             completed=True,
                         ),
                     )
-                    wf_logger.debug("✅ Updated UI tool completion status for %s (event=%s)", tool_id, event_id)
+                    wf_logger.debug("UI_TOOL_STATUS_UPDATED tool=%s event=%s", tool_id, event_id)
             except Exception as persist_err:
-                wf_logger.warning("⚠️ Failed to persist UI tool completion: %s", persist_err)
+                wf_logger.warning("UI_TOOL_PERSIST_FAILED: %s", persist_err)
 
         return resp
     except Exception as e:
         duration_ms = (_dt.datetime.now(_dt.UTC) - start).total_seconds() * 1000.0
-        fail_msg = (
-            f"❌ [UI_TOOLS] Round-trip failed tool_id={tool_id} "
-            f"event={event_id} duration_ms={duration_ms:.2f} err={e}"
-        )
-        wf_logger.error(fail_msg)
+        wf_logger.error("UI_TOOL_ROUNDTRIP_FAILED tool=%s event=%s duration_ms=%.2f: %s", tool_id, event_id, duration_ms, e, exc_info=True)
         raise
 
 

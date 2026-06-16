@@ -70,7 +70,7 @@ class WebSocketProtocolMixin:
             # Drop oldest messages to make room
             dropped = queue_size - self._max_queue_size + 10  # Keep some buffer
             self._message_queues[chat_id] = self._message_queues[chat_id][dropped:]
-            logger.info("Dropped %s queued messages for %s", dropped, chat_id)
+            logger.debug("WS_QUEUE_DROPPED count=%s chat=%s", dropped, chat_id)
             return True
         return False
 
@@ -94,7 +94,7 @@ class WebSocketProtocolMixin:
         if chat_id not in self._message_queues or not self._message_queues[chat_id]:
             return
 
-        logger.info("[PROTOCOL] Flushing message queue for chat_id=%s, queue_size=%s", chat_id, len(self._message_queues[chat_id]))
+        logger.debug("[PROTOCOL] Flushing message queue for chat_id=%s, queue_size=%s", chat_id, len(self._message_queues[chat_id]))
 
         if chat_id in self.connections:
             websocket = self.connections[chat_id]["websocket"]
@@ -122,9 +122,9 @@ class WebSocketProtocolMixin:
                             if safe_message.get("type") == "chat.tool_call":
                                 payload_obj = safe_message.get("data", {}).get("payload", {})
                                 payload_keys = list(payload_obj.keys()) if isinstance(payload_obj, dict) else []
-                                logger.info("PROTOCOL payload keys before send: %s", payload_keys[:12])
+                                logger.debug("PROTOCOL_TOOL_CALL_KEYS payload=%s", payload_keys[:12])
                             await websocket.send_json(safe_message)
-                            logger.info("[PROTOCOL] WebSocket send_json completed for envelope type=%s, chat_id=%s", safe_message.get('type'), chat_id)
+                            logger.debug("[PROTOCOL] WebSocket send_json completed for envelope type=%s, chat_id=%s", safe_message.get('type'), chat_id)
                         except Exception:
                             # Fallback: attempt to serialize whole message as a last resort
                             try:
@@ -178,7 +178,7 @@ class WebSocketProtocolMixin:
         self._heartbeat_tasks[chat_id] = asyncio.create_task(
             self._heartbeat_loop(chat_id, websocket)
         )
-        logger.info("Started heartbeat for %s", chat_id)
+        logger.debug("WS_HEARTBEAT_STARTED chat=%s", chat_id)
 
     async def _heartbeat_loop(self, chat_id: str, websocket: WebSocket) -> None:
         """Heartbeat loop for detecting silent disconnects.
@@ -445,7 +445,7 @@ class WebSocketProtocolMixin:
                 self.connections[chat_id]["userdriven_bootstrap_visible"] = True
             if session_dedupe_token:
                 self._userdriven_bootstrap_session_seen.add(session_dedupe_token)
-            logger.info("[USERDRIVEN] Emitted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
+            logger.debug("[USERDRIVEN] Emitted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
         except Exception as e:
             logger.warning("[USERDRIVEN] Failed bootstrap emit for chat %s: %s", chat_id, e)
 
@@ -472,4 +472,4 @@ class WebSocketProtocolMixin:
             input_registries.pop(chat_id, None)
 
         await self._stop_heartbeat(chat_id)
-        logger.info("Cleaned up connection resources for %s", chat_id)
+        logger.debug("WS_CONN_CLEANUP chat=%s", chat_id)

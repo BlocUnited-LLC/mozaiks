@@ -830,6 +830,44 @@ This project follows a practical pre-1.0 changelog format:
   (default 360 s) and closes the connection when no message has been received
   within the idle window, cleaning up the slot for a reconnect.
 
+- **Emoji characters removed from all log messages and remaining per-call INFO
+  logs downgraded to DEBUG** — `simple_transport.py`, `ui_tools.py`,
+  `lifecycle.py`, `handoff_events.py`, `unified_event_dispatcher.py`,
+  `persistence_manager.py`, and `auto_tool_handler.py` contained multi-byte
+  emoji characters (🎯, ✅, ✗, ⚠️, 🔍, ⏳) that confuse production log
+  aggregators and indicate per-request verbosity. All emoji removed; hot-path
+  calls in UI tool processing, auto-tool dedup, gather-agent-JSON loops,
+  lifecycle completions, and visual-agent filtering downgraded from `INFO` to
+  `DEBUG`. `workflow_manager.py` `WORKFLOW_LOAD_OK` kept at `INFO` (startup,
+  not per-call).
+
+- **Per-request INFO logs in transport handlers converted to DEBUG and
+  f-string lazy-logging fixed** — `input_handlers.py`, `mode_handlers.py`,
+  and `workflow_handlers.py` had 11 `logger.info(f"...")` calls that fired at
+  `INFO` on every user input, mode switch, and workflow start, flooding
+  production log aggregators at any realistic throughput. All converted to
+  `logger.debug("...", arg, ...)` with structured `KEY=value` names.
+  Eliminates the last G004 f-string lazy-logging violations in `mozaiksai/`.
+
+- **Tab indentation in `event_serialization.py` replaced with 4-space groups**
+  — this was the only file in `mozaiksai/` using tab indentation (245 tabs).
+  Converted via `expandtabs(4)` to match the rest of the runtime codebase and
+  avoid parser inconsistencies in mixed-indentation edge cases.
+
+- **Redundant lazy `import logging` inside `except` block removed** —
+  `control_plane/implementations/coding_worker.py` imported
+  `logging as _logging` inside an `except` block at line 446 even though
+  `import logging; logger = logging.getLogger(__name__)` was already at the
+  top of the file. Fixed to use the module-level `logger` directly.
+
+- **WebSocket connection limit and idle timeout test coverage added** —
+  7 new tests in `test_simple_transport_serialization.py` cover
+  `MOZAIKS_MAX_WS_CONNECTIONS` default (500), env-override, invalid-env
+  fallback, `MOZAIKS_WS_IDLE_TIMEOUT` default (360), env-override,
+  zero-disables-detection, and `last_received_at` presence on connection
+  registration. Brings `SimpleTransport` configuration paths to full
+  unit-test coverage.
+
 ### Removed
 
 - Retired `MozaiksContextExpression` / `evaluate_context_expression`. All

@@ -63,7 +63,7 @@ class MongoAdapter(DatabaseAdapter):
             from mozaiksai.core.core_config import get_mongo_client
 
             client = get_mongo_client()
-            logger.info("MongoAdapter querying %s.%s with query=%s, projection=%s", db_name, collection, query, projection)
+            logger.debug("MongoAdapter querying %s.%s with query=%s, projection=%s", db_name, collection, query, projection)
             
             # Sort by _id descending to get most recent document first (handles duplicates)
             # MongoDB ObjectId contains timestamp, so this gives us chronological ordering
@@ -71,9 +71,9 @@ class MongoAdapter(DatabaseAdapter):
             docs = await cursor.to_list(length=1)
             doc = docs[0] if docs else None
             
-            logger.info("MongoAdapter query result: doc=%s", 'found (most recent)' if doc else 'None')
+            logger.debug("MongoAdapter query result: doc=%s", 'found (most recent)' if doc else 'None')
             if doc:
-                logger.info("MongoAdapter document keys: %s", list(doc.keys()))
+                logger.debug("MongoAdapter document keys: %s", list(doc.keys()))
             return doc
         except Exception as err:
             logger.error(

@@ -188,7 +188,7 @@ class UIToolsMixin:
             event["agent_name"] = agent_name
 
         payload_keys = list(payload.keys()) if isinstance(payload, dict) else []
-        logger.info(
+        logger.debug(
             "[UI_TOOL] Emitting chat.tool_call event: tool=%s component=%s display=%s event_id=%s chat_id=%s payload_keys=%s",
             tool_name, component_name, _display_norm, event_id, chat_id, payload_keys[:12],
         )
@@ -229,7 +229,7 @@ class UIToolsMixin:
         """
         update_data = UIUpdateData(tool_call_id=event_id, patch=patch)
         event = {"kind": "ui_update", **update_data.model_dump()}
-        logger.info("[UI_TOOL] Emitting ui.update event: event_id=%s chat_id=%s patch_keys=%s",
+        logger.debug("[UI_TOOL] Emitting ui.update event: event_id=%s chat_id=%s patch_keys=%s",
                     event_id, chat_id, list(patch.keys())[:12])
         await self.send_event_to_ui(event, chat_id)
 
@@ -318,7 +318,7 @@ class UIToolsMixin:
                         response_data=response_data if isinstance(response_data, dict) else {},
                     )
                     if updated:
-                        logger.info(
+                        logger.debug(
                             "[UI_TOOL] Applied ui_response triggers: chat=%s tool=%s vars=%s", chat_ref, tool_name, updated)
                 except Exception as trigger_err:
                     logger.debug("[UI_TOOL] ui_response trigger apply failed: %s", trigger_err)
@@ -376,7 +376,7 @@ class UIToolsMixin:
         if future is not None:
             if not future.done():
                 self._complete_tool_call_future(future, response_data)
-                logger.info("[UI_TOOL] Submitted response for event %s", event_id)
+                logger.debug("[UI_TOOL] Submitted response for event %s", event_id)
                 metadata = self._ui_tool_metadata.pop(event_id, None)
                 self._mark_tool_call_response_resolved(event_id)
                 await self._finalize_tool_call_response(
@@ -395,7 +395,7 @@ class UIToolsMixin:
             self._buffered_tool_call_responses[event_id] = response_data
             self._ui_tool_metadata.pop(event_id, None)
             self._mark_tool_call_response_resolved(event_id)
-            logger.info("[UI_TOOL] Buffered early response for event %s", event_id)
+            logger.debug("[UI_TOOL] Buffered early response for event %s", event_id)
             await self._finalize_tool_call_response(
                 event_id=event_id,
                 response_data=response_data,
@@ -404,7 +404,7 @@ class UIToolsMixin:
             return True
         input_request_text = self._coerce_input_request_response_text(response_data)
         if self._has_pending_input_request(event_id):
-            logger.info("[UI_TOOL] Routing response-required interaction through submit_user_input for %s", event_id)
+            logger.debug("[UI_TOOL] Routing response-required interaction through submit_user_input for %s", event_id)
             submitted = await self.submit_user_input(event_id, input_request_text)
             if submitted:
                 self._mark_tool_call_response_resolved(event_id)

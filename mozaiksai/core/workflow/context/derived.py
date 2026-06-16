@@ -276,13 +276,13 @@ class DerivedContextManager:
         if self.variables or self.ui_response_bindings or self.user_text_bindings or self.state_defaults:
             self.seed_defaults()
         if self.variables:
-            logger.info(
+            logger.debug(
                 "[DERIVED_CONTEXT] Loaded %s agent_text state variables: %s", len(self.variables), [v.name for v in self.variables])
         if self.ui_response_bindings:
-            logger.info(
+            logger.debug(
                 "[DERIVED_CONTEXT] Loaded ui_response bindings: %s", len(self.ui_response_bindings))
         if self.user_text_bindings:
-            logger.info(
+            logger.debug(
                 "[DERIVED_CONTEXT] Loaded user_text bindings: %s", len(self.user_text_bindings))
         if not self.variables and not self.ui_response_bindings and not self.user_text_bindings:
             logger.debug("[DERIVED_CONTEXT] No triggers configured")
@@ -447,7 +447,7 @@ class DerivedContextManager:
                         logger.debug("[DERIVED_CONTEXT] ui_response update failed: %s", err)
             if updated:
                 updated_vars.append(binding.variable)
-                logger.info(
+                logger.debug(
                     "[DERIVED_CONTEXT] %s: %s -> %s (ui_response, tool=%s)", self.workflow_name, binding.variable, value, normalized_tool)
                 for cb in list(self._listeners):
                     try:
@@ -491,7 +491,7 @@ class DerivedContextManager:
                         except Exception as err:  # pragma: no cover
                             logger.debug("[DERIVED_CONTEXT] apply_agent_text update failed: %s", err)
                 if var.name in updated_vars:
-                    logger.info(
+                    logger.debug(
                         "[DERIVED_CONTEXT] %s: %s -> %r (agent_text, agent=%s)",
                         self.workflow_name, var.name, updated_vars[var.name], agent_name,
                     )
@@ -523,7 +523,7 @@ class DerivedContextManager:
                         logger.debug("[DERIVED_CONTEXT] user_text update failed: %s", err)
             if updated:
                 updated_vars[binding.variable] = binding.value
-                logger.info(
+                logger.debug(
                     "[DERIVED_CONTEXT] %s: %s -> %s (user_text)", self.workflow_name, binding.variable, binding.value)
                 for cb in list(self._listeners):
                     try:
@@ -569,7 +569,7 @@ class DerivedContextManager:
             return
         for var in self.variables:
             if var.apply(event, self.providers):
-                logger.info("[DERIVED_CONTEXT] %s: %s -> True", self.workflow_name, var.name)
+                logger.debug("[DERIVED_CONTEXT] %s: %s -> True", self.workflow_name, var.name)
                 try:
                     snapshot = (
                         self.base_context.to_dict()

@@ -311,7 +311,7 @@ class UnifiedWorkflowManager:
             workflow_names = self.discover_workflows()
 
             if not workflow_names:
-                logger.warning("⚠️ No workflows found in the workflows directory")
+                logger.warning("WORKFLOW_LOAD_EMPTY: no workflows found in the workflows directory")
                 return
 
             for workflow_name in workflow_names:
@@ -334,7 +334,7 @@ class UnifiedWorkflowManager:
             err_names = [n for n, w in self._workflows.items() if w.status == "error"]
             if err_names:
                 logger.warning(
-                    "⚠️ WORKFLOW_LOAD_DEGRADED: %d/%d workflows loaded. Failed: %s",
+                    "WORKFLOW_LOAD_DEGRADED: %d/%d workflows loaded. Failed: %s",
                     len(ok_names),
                     len(ok_names) + len(err_names),
                     ", ".join(sorted(err_names)),
@@ -354,7 +354,7 @@ class UnifiedWorkflowManager:
         # Load configuration directly from modular YAML files.
         config = self._load_modular_workflow_config(workflow_path)
         if not config:
-            logger.warning("⚠️ Empty config for workflow: %s", workflow_name)
+            logger.warning("WORKFLOW_CONFIG_EMPTY workflow=%s", workflow_name)
             config = {}
         self._validate_orchestrator_contract(workflow_name, config)
         validate_workflow_context_contract(

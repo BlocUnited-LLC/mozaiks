@@ -135,8 +135,8 @@ class SessionRegistry:
         
         self._workflows[ws_id].append(context)
         
-        logger.info(
-            "Added workflow context: %s (chat_id=%s) to session %s", workflow_name, chat_id, ws_id)
+        logger.debug(
+            "SESSION_WORKFLOW_ADDED workflow=%s chat=%s ws_id=%s", workflow_name, chat_id, ws_id)
         
         if auto_activate:
             return self.switch_workflow(ws_id, chat_id)  # type: ignore[return-value]
@@ -170,7 +170,7 @@ class SessionRegistry:
                 wf.status = "active"
                 wf.last_active = datetime.now(UTC)
                 self._active_chat[ws_id] = chat_id
-                logger.info("Activated workflow %s in session %s", chat_id, ws_id)
+                logger.debug("SESSION_WORKFLOW_ACTIVATED chat=%s ws_id=%s", chat_id, ws_id)
                 return wf
         
         logger.warning("Workflow %s not found or already completed in session %s", chat_id, ws_id)
@@ -191,7 +191,7 @@ class SessionRegistry:
                 wf.status = "paused"
         
         self._active_chat[ws_id] = None
-        logger.info("Session %s entered general mode (all workflows paused)", ws_id)
+        logger.debug("SESSION_GENERAL_MODE_ENTERED ws_id=%s (all workflows paused)", ws_id)
     
     def get_active_workflow(self, ws_id: str) -> WorkflowContext | None:
         """
@@ -232,7 +232,7 @@ class SessionRegistry:
         for wf in self._workflows[ws_id]:
             if wf.chat_id == chat_id:
                 wf.status = "completed"
-                logger.info("Marked workflow %s as completed in session %s", chat_id, ws_id)
+                logger.debug("SESSION_WORKFLOW_COMPLETED chat=%s ws_id=%s", chat_id, ws_id)
                 
                 # If this was the active workflow, clear active state
                 if self._active_chat.get(ws_id) == chat_id:
@@ -251,7 +251,7 @@ class SessionRegistry:
             workflow_count = len(self._workflows[ws_id])
             del self._workflows[ws_id]
             del self._active_chat[ws_id]
-            logger.info("Removed session %s (%s workflows)", ws_id, workflow_count)
+            logger.debug("SESSION_REMOVED ws_id=%s workflows=%s", ws_id, workflow_count)
     
     def get_workflow_by_chat_id(self, ws_id: str, chat_id: str) -> WorkflowContext | None:
         """

@@ -216,11 +216,11 @@ class WorkflowBridgeMixin:
             if chat_id in self._input_request_registries:
                 active_callbacks = bool(self._input_request_registries[chat_id])
 
-            logger.info("[SMART_ROUTING] chat=%s has_registry=%s has_callbacks=%s", chat_id, has_active_session, active_callbacks)
+            logger.debug("[SMART_ROUTING] chat=%s has_registry=%s has_callbacks=%s", chat_id, has_active_session, active_callbacks)
 
             if has_active_session and active_callbacks:
                 # Route to existing AG2 session via WebSocket callback mechanism
-                logger.info("[SMART_ROUTING] Continuing existing AG2 session for chat %s", chat_id)
+                logger.debug("[SMART_ROUTING] Continuing existing AG2 session for chat %s", chat_id)
 
                 # Get any available request_id from the registry
                 registry = self._input_request_registries.get(chat_id, {})
@@ -255,7 +255,7 @@ class WorkflowBridgeMixin:
                         logger.warning("[SMART_ROUTING] Failed to submit input to existing session, falling back to new workflow")
 
             # No active session or callback failed - start new workflow
-            logger.info("[SMART_ROUTING] Starting new workflow for chat %s", chat_id)
+            logger.debug("[SMART_ROUTING] Starting new workflow for chat %s", chat_id)
             starting_new_workflow = True
 
             from mozaiksai.core.adapters.ag2_orchestration import get_ag2_adapter
@@ -273,7 +273,7 @@ class WorkflowBridgeMixin:
                             chat_id=chat_id,
                             app_id=app_id,
                         )
-                        logger.info(
+                        logger.debug(
                             "[SMART_ROUTING] Cleared persisted pending input request %s before launching workflow for chat %s",
                             pending.get("request_id"),
                             chat_id,
@@ -627,7 +627,6 @@ class WorkflowBridgeMixin:
         if metadata:
             event_data["metadata"] = metadata
 
-        # Enhanced logging for debugging UI rendering
-        logger.info("Sending chat message: kind=%s agent='%s' content_len=%s", event_data['kind'], agent_name, len(message))
+        logger.debug("CHAT_MSG_SEND kind=%s agent=%s content_len=%s", event_data['kind'], agent_name, len(message))
 
         await self.send_event_to_ui(event_data, chat_id)

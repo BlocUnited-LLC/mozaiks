@@ -108,7 +108,7 @@ class SimpleLLMCapabilityService:
         if extra_payload:
             payload.update(extra_payload)
 
-        logger.info(
+        logger.debug(
             "[CAPABILITY_LLM] Request",
             extra={
                 "model": model,
@@ -152,7 +152,7 @@ class SimpleLLMCapabilityService:
         if instructions:
             payload["instructions"] = instructions
 
-        logger.info(
+        logger.debug(
             "[CAPABILITY_LLM] Request",
             extra={
                 "model": model,

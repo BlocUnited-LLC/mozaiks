@@ -66,7 +66,7 @@ class AutoToolEventHandler:
         """Process an agent_output_validated event and trigger the corresponding tool."""
 
         try:
-            logger.info("[AUTO_TOOL] Received agent_output_validated event: agent=%s turn=%s", event.get('agent_name') or event.get('agent'), event.get('turn_idempotency_key'))
+            logger.debug("[AUTO_TOOL] Received agent_output_validated event: agent=%s turn=%s", event.get('agent_name') or event.get('agent'), event.get('turn_idempotency_key'))
             auto_tool_call_enabled = bool(event.get("auto_tool_call"))
             if not auto_tool_call_enabled:
                 logger.debug("[AUTO_TOOL] Event marked auto_tool_call=false; ignoring")
@@ -92,7 +92,7 @@ class AutoToolEventHandler:
                 "[AUTO_TOOL] Skipping auto-tool (missing chat_id/turn key) agent=%s", agent_name
             )
             return
-        logger.info("[AUTO_TOOL] Processing auto tool turn=%s for agent=%s workflow=%s", turn_key, agent_name, workflow_name)
+        logger.debug("[AUTO_TOOL] Processing auto tool turn=%s for agent=%s workflow=%s", turn_key, agent_name, workflow_name)
         if not isinstance(structured_data, dict):
             logger.warning(
                 "[AUTO_TOOL] Structured data for agent %s is not a dict (type=%s)",
@@ -139,13 +139,13 @@ class AutoToolEventHandler:
             return
 
         for binding in bindings:
-            logger.info("[AUTO_TOOL] Binding resolved for agent=%s tool=%s model=%s", agent_name, binding.tool_name, binding.model_name)
+            logger.debug("[AUTO_TOOL] Binding resolved for agent=%s tool=%s model=%s", agent_name, binding.tool_name, binding.model_name)
             kwargs = self._build_tool_kwargs(binding, normalized, {
                 **context,
                 "turn_idempotency_key": turn_key,
                 "agent_name": agent_name,
             }, pattern_context_ref)
-            logger.info("[AUTO_TOOL] Prepared kwargs for %s: %s", binding.tool_name, {k: v for k, v in kwargs.items() if k != 'context_variables'})
+            logger.debug("[AUTO_TOOL] Prepared kwargs for %s: %s", binding.tool_name, {k: v for k, v in kwargs.items() if k != 'context_variables'})
             await self._emit_tool_call(binding, agent_name, chat_id, kwargs, turn_key)
             result_payload, status = await self._invoke_tool(binding, kwargs)
 
@@ -308,7 +308,7 @@ class AutoToolEventHandler:
                 mapping.setdefault(model_name, []).append(binding)
                 logger.debug("AUTO_TOOL_BINDING_CREATED model=%s agent=%s tool=%s", model_name, agent_name, binding.tool_name)
 
-        logger.info("[AUTO_TOOL] Loaded %d total bindings for workflow=%s: %s", len(mapping), workflow_name, list(mapping.keys()))
+        logger.debug("[AUTO_TOOL] Loaded %d total bindings for workflow=%s: %s", len(mapping), workflow_name, list(mapping.keys()))
         self._workflow_bindings[workflow_name] = mapping
         return mapping
 
@@ -472,7 +472,7 @@ class AutoToolEventHandler:
         if isinstance(agent_message, str) and agent_message.strip():
             event_payload["payload"]["agent_message"] = agent_message.strip()
         try:
-            logger.info("[AUTO_TOOL] Emitting chat.tool_call for agent=%s tool=%s turn=%s", agent_name, binding.tool_name, turn_key)
+            logger.debug("[AUTO_TOOL] Emitting chat.tool_call for agent=%s tool=%s turn=%s", agent_name, binding.tool_name, turn_key)
             await transport.send_event_to_ui(event_payload, chat_id)
         except Exception:
             logger.debug("[AUTO_TOOL] Failed to emit tool_call for agent=%s", agent_name)
@@ -520,7 +520,7 @@ class AutoToolEventHandler:
             "interaction_type": "auto_tool",  # Mark as auto-tool for frontend filtering
         }
         try:
-            logger.info("[AUTO_TOOL] Emitting chat.tool_response for agent=%s tool=%s status=%s turn=%s", agent_name, binding.tool_name, status, turn_key)
+            logger.debug("[AUTO_TOOL] Emitting chat.tool_response for agent=%s tool=%s status=%s turn=%s", agent_name, binding.tool_name, status, turn_key)
             await transport.send_event_to_ui(payload, chat_id)
         except Exception:
             logger.debug("[AUTO_TOOL] Failed to emit tool_result for agent=%s", agent_name)

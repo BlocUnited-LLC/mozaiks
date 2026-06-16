@@ -1013,22 +1013,22 @@ class AG2PersistenceManager:
         try:
             if text is None:
                 if agent_name:
-                    logger.info("[JSON_PARSE] %s: text is None", agent_name)
+                    logger.debug("[JSON_PARSE] %s: text is None", agent_name)
                 return None
             if isinstance(text, dict):
                 if agent_name:
-                    logger.info("[JSON_PARSE] %s: already a dict", agent_name)
+                    logger.debug("[JSON_PARSE] %s: already a dict", agent_name)
                 return text
             if isinstance(text, list):
                 if agent_name:
-                    logger.info("[JSON_PARSE] %s: text is a list, returning None", agent_name)
+                    logger.debug("[JSON_PARSE] %s: text is a list, returning None", agent_name)
                 return None
             
             s = AG2PersistenceManager._normalize_wrapped_text_content(text)
             s_strip = s.strip()
             
             if agent_name:
-                logger.info("[JSON_PARSE] %s: original length=%s, stripped length=%s", agent_name, len(s), len(s_strip))
+                logger.debug("[JSON_PARSE] %s: original length=%s, stripped length=%s", agent_name, len(s), len(s_strip))
             
             # CLEANING STEP 1: Remove Markdown code fences
             if s_strip.startswith("```") and "```" in s_strip[3:]:
@@ -1036,13 +1036,13 @@ class AG2PersistenceManager:
                 end_fence = s_strip.find("```", 3)
                 s_strip = s_strip[3:end_fence].strip()
                 if agent_name:
-                    logger.info("[JSON_PARSE] %s: removed markdown fences, new length=%s", agent_name, len(s_strip))
+                    logger.debug("[JSON_PARSE] %s: removed markdown fences, new length=%s", agent_name, len(s_strip))
             
             # CLEANING STEP 2: Remove "json" or "JSON" prefix if present
             if s_strip.lower().startswith("json"):
                 s_strip = s_strip[4:].strip()
                 if agent_name:
-                    logger.info("[JSON_PARSE] %s: removed json prefix", agent_name)
+                    logger.debug("[JSON_PARSE] %s: removed json prefix", agent_name)
             
             # CLEANING STEP 3: Find JSON boundaries (first { or [ to last } or ])
             json_start = s_strip.find("{") if "{" in s_strip else s_strip.find("[")
@@ -1052,7 +1052,7 @@ class AG2PersistenceManager:
                 if json_end != -1:
                     s_strip = s_strip[json_start:json_end + 1]
                     if agent_name:
-                        logger.info("[JSON_PARSE] %s: extracted JSON boundaries, length=%s", agent_name, len(s_strip))
+                        logger.debug("[JSON_PARSE] %s: extracted JSON boundaries, length=%s", agent_name, len(s_strip))
             
             # CLEANING STEP 4: Remove trailing commas before closing brackets (invalid JSON)
             import re
@@ -1070,7 +1070,7 @@ class AG2PersistenceManager:
                 brace_idx = s_strip.find("{", idx)
                 if brace_idx == -1:
                     if agent_name:
-                        logger.info("[JSON_PARSE] %s: no opening brace found", agent_name)
+                        logger.debug("[JSON_PARSE] %s: no opening brace found", agent_name)
                     return None
                 try:
                     obj, end_idx = decoder.raw_decode(s_strip, brace_idx)
@@ -1082,15 +1082,15 @@ class AG2PersistenceManager:
                     continue
                 except json.JSONDecodeError as e:
                     if agent_name and idx == 0:  # Only log first attempt
-                        logger.info("[JSON_PARSE] %s: JSONDecodeError at pos %s: %s, content preview: %s", agent_name, e.pos, e.msg, s_strip[max(0, e.pos-50):e.pos+50])
+                        logger.debug("[JSON_PARSE] %s: JSONDecodeError at pos %s: %s, content preview: %s", agent_name, e.pos, e.msg, s_strip[max(0, e.pos-50):e.pos+50])
                     idx = brace_idx + 1
                     continue
             if agent_name:
-                logger.info("[JSON_PARSE] %s: exhausted all parse attempts", agent_name)
+                logger.debug("[JSON_PARSE] %s: exhausted all parse attempts", agent_name)
             return None
         except Exception as ex:
             if agent_name:
-                logger.info("[JSON_PARSE] %s: exception during parse: %s", agent_name, ex)
+                logger.debug("[JSON_PARSE] %s: exception during parse: %s", agent_name, ex)
             return None
 
     @staticmethod
@@ -1293,7 +1293,7 @@ class AG2PersistenceManager:
             )
 
             if result.modified_count > 0:
-                logger.info(
+                logger.debug(
                     "[TOOL_CALL_METADATA] Persisted workflow UI state for message[%s] ", last_assistant_idx)
             else:
                 logger.debug("[TOOL_CALL_METADATA] Failed to persist tool-call state in %s", chat_id)
@@ -1341,7 +1341,7 @@ class AG2PersistenceManager:
             )
 
             if result.modified_count > 0:
-                logger.info(
+                logger.debug(
                     "[TOOL_CALL_STATE] Updated tool_call state for event=%s in %s (completed=%s, status=%s)",
                     event_id, chat_id, completed, status)
             else:
@@ -1406,7 +1406,7 @@ class AG2PersistenceManager:
                     }
                 }
             )
-            logger.info("[PENDING_INPUT] Saved pending input request %s for chat %s", request_id, chat_id)
+            logger.debug("[PENDING_INPUT] Saved pending input request %s for chat %s", request_id, chat_id)
         except Exception as e:
             logger.error("[PENDING_INPUT] Failed to save pending input request for %s: %s", chat_id, e, exc_info=True)
 
