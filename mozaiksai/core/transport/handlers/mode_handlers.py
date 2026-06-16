@@ -35,7 +35,7 @@ async def handle_enter_general_mode(
     )
     general_chat_id = general_ctx.get("chat_id")
 
-    logger.info(f"Entered general mode (ws_id={ws_id}, general_chat={general_chat_id})")
+    logger.debug("GENERAL_MODE_ENTERED ws_id=%s general_chat=%s", ws_id, general_chat_id)
 
     await websocket.send_json({
         "type": "chat.mode_changed",
@@ -72,4 +72,4 @@ async def handle_start_general_chat(
         },
         "timestamp": utc_timestamp()
     })
-    logger.info(f"Started new general chat session {general_ctx.get('chat_id')} (ws_id={ws_id})")
+    logger.debug("GENERAL_CHAT_STARTED chat=%s ws_id=%s", general_ctx.get("chat_id"), ws_id)

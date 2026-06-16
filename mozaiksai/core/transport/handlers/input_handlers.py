@@ -38,10 +38,10 @@ async def handle_user_input_submit(
     if requested_general_chat_id:
         ui_context_payload["requested_general_chat_id"] = requested_general_chat_id
 
-    logger.info(f"[INPUT] Received user.input.submit: chat={chat_id}, req_id={req_id}, text_len={len(text)}, ws_id={ws_id}")
+    logger.debug("INPUT_SUBMIT chat=%s req_id=%s text_len=%d ws_id=%s", chat_id, req_id, len(text), ws_id)
 
     is_general_mode = bool(ws_id and session_registry.is_in_general_mode(ws_id))
-    logger.info(f"[INPUT] Mode check: is_general={is_general_mode}, has_req_id={bool(req_id)}")
+    logger.debug("INPUT_MODE_CHECK is_general=%s has_req_id=%s", is_general_mode, bool(req_id))
 
     # General mode without request_id
     if not req_id and is_general_mode:
@@ -152,7 +152,7 @@ async def handle_tool_call_response(
         return
     try:
         ok = await transport.submit_tool_call_response(event_id, response_data)
-        logger.info(f"Tool call response received for event {event_id}: {ok}")
+        logger.debug("TOOL_CALL_RESPONSE_RECEIVED event=%s accepted=%s", event_id, ok)
         await websocket.send_json({
             "type": "ack.tool_call_response",
             "data": {"tool_call_id": event_id, "status": "accepted" if ok else "rejected"},

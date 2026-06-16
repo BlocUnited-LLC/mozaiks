@@ -40,14 +40,14 @@ async def handle_switch_workflow(
         if chat_id not in transport.connections:
             transport.connections[chat_id] = {"websocket": websocket}
         transport.connections[chat_id]["ws_id"] = ws_id
-        logger.warning(f"Recovered missing ws_id for chat {chat_id} using websocket identity")
+        logger.warning("WS_ID_RECOVERED chat=%s using websocket identity", chat_id)
 
     # Store frontend context in connection metadata
     if frontend_context and isinstance(frontend_context, dict):
         if target_chat_id not in transport.connections:
             transport.connections[target_chat_id] = {}
         transport.connections[target_chat_id]["frontend_context"] = frontend_context
-        logger.info(f"Stored frontend context for {target_chat_id}: {list(frontend_context.keys())}")
+        logger.debug("FRONTEND_CONTEXT_STORED chat=%s keys=%s", target_chat_id, list(frontend_context.keys()))
 
     # Switch workflow context
     active_context = session_registry.switch_workflow(ws_id, target_chat_id)  # type: ignore[arg-type]
@@ -71,12 +71,12 @@ async def handle_switch_workflow(
                     auto_activate=True,
                 )
         except Exception as hydrate_err:
-            logger.warning(f"Failed to hydrate workflow context for {target_chat_id}: {hydrate_err}")
+            logger.warning("WORKFLOW_HYDRATE_FAILED chat=%s: %s", target_chat_id, hydrate_err)
 
     if not active_context:
         raise ValueError(f"Workflow {target_chat_id} not found or already completed")
 
-    logger.info(f"Switched from {chat_id} to {target_chat_id} (ws_id={ws_id})")
+    logger.debug("WORKFLOW_CONTEXT_SWITCHED from=%s to=%s ws_id=%s", chat_id, target_chat_id, ws_id)
 
     await websocket.send_json({
         "type": "chat.context_switched",
@@ -206,8 +206,8 @@ async def handle_switch_workflow(
             target_chat_id_str = str(target_chat_id)
             if target_chat_id_str in transport.connections:
                 transport.connections[target_chat_id_str]["userdriven_bootstrap_visible"] = True
-                logger.info(
-                    "[WORKFLOW_SWITCH] Set userdriven_bootstrap_visible=True for chat %s after replay",
+                logger.debug(
+                    "USERDRIVEN_BOOTSTRAP_VISIBLE_SET chat=%s after replay",
                     target_chat_id_str,
                 )
         except Exception as replay_err:
@@ -297,7 +297,7 @@ async def handle_start_workflow(
         if new_chat_id not in transport.connections:
             transport.connections[new_chat_id] = {}
         transport.connections[new_chat_id]["frontend_context"] = frontend_context
-        logger.info(f"Stored frontend context for new workflow {new_chat_id}: {list(frontend_context.keys())}")
+        logger.debug("FRONTEND_CONTEXT_STORED chat=%s keys=%s", new_chat_id, list(frontend_context.keys()))
 
     # Register in session registry
     session_registry.add_workflow(
@@ -309,7 +309,7 @@ async def handle_start_workflow(
         auto_activate=True
     )
 
-    logger.info(f"Started new workflow {resolved_workflow} (chat_id={new_chat_id}, ws_id={ws_id})")
+    logger.debug("WORKFLOW_STARTED workflow=%s chat=%s ws_id=%s", resolved_workflow, new_chat_id, ws_id)
 
     await websocket.send_json({
         "type": "chat.workflow_started",
