@@ -11,6 +11,8 @@ Behaviour is controlled by the ``MOZAIKS_STARTUP_CHECKS`` environment variable:
 Checks performed:
   LLM API key     — OPENAI_API_KEY resolvable via env, Key Vault alias
                     ``OpenAIApiKey``, or a MongoDB ``llm_config`` document.
+  MongoDB         — MONGO_URI must be set (env or Key Vault alias ``MongoURI``)
+                    and MongoDB must respond to a ping within the driver timeout.
   Workflows path  — ``MOZAIKS_WORKFLOWS_PATH``, if set, must exist on disk.
 
 Log record fields:
@@ -67,6 +69,11 @@ async def _has_mongo_llm_config() -> bool:
         return False
 
 
+async def _ping_mongo(client: Any) -> None:
+    """Ping the MongoDB server; raises if unreachable."""
+    await client.admin.command("ping")
+
+
 async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
     """Run all boot-time configuration checks.
 
@@ -105,6 +112,42 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
             source,
             extra={"check": "llm_api_key", "mode": mode, "source": source},
         )
+
+    # ── MongoDB reachability ──────────────────────────────────────────────────
+    mongo_uri = os.getenv("MONGO_URI", "").strip()
+    if not mongo_uri:
+        try:
+            get_secret("MongoURI")
+        except Exception:
+            pass
+        mongo_uri = os.getenv("MONGO_URI", "").strip()
+    if not mongo_uri:
+        msg = (
+            "MONGO_URI is not configured. The runtime requires MongoDB for session "
+            "persistence. Set MONGO_URI in the environment or Key Vault secret 'MongoURI'."
+        )
+        warnings.append(msg)
+        logger.warning("STARTUP_CHECK_FAILED: %s", msg, extra={"check": "mongo_uri", "mode": mode})
+        if mode == "strict":
+            raise StartupConfigError(msg)
+    else:
+        try:
+            client = _mongo_client if _mongo_client is not None else get_mongo_client()
+            await _ping_mongo(client)
+            logger.info(
+                "STARTUP_CHECK_OK: MongoDB reachable",
+                extra={"check": "mongo_uri", "mode": mode},
+            )
+        except Exception as ping_err:
+            msg = f"MongoDB is not reachable: {ping_err}"
+            warnings.append(msg)
+            logger.warning(
+                "STARTUP_CHECK_FAILED: %s",
+                msg,
+                extra={"check": "mongo_uri", "mode": mode},
+            )
+            if mode == "strict":
+                raise StartupConfigError(msg) from ping_err
 
     # ── Workflows path ────────────────────────────────────────────────────────
     workflows_path = os.getenv("MOZAIKS_WORKFLOWS_PATH", "").strip()

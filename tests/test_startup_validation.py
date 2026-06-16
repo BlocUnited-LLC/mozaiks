@@ -16,6 +16,27 @@ from mozaiksai.core.startup.validation import (
     run_startup_checks,
 )
 
+
+# ---------------------------------------------------------------------------
+# Shared test helpers
+# ---------------------------------------------------------------------------
+
+class _MockPingClient:
+    """Minimal MongoDB client stub whose admin.command("ping") succeeds."""
+    class _Admin:
+        async def command(self, cmd: str):
+            return {"ok": 1}
+    admin = _Admin()
+
+
+class _FailingPingClient:
+    """Minimal MongoDB client stub whose admin.command("ping") raises."""
+    class _Admin:
+        async def command(self, cmd: str):
+            raise ConnectionError("MongoDB not reachable in test")
+    admin = _Admin()
+
+
 # ---------------------------------------------------------------------------
 # _can_resolve_api_key
 # ---------------------------------------------------------------------------
@@ -70,11 +91,12 @@ class TestRunStartupChecksWarnMode:
     @pytest.mark.asyncio
     async def test_passes_when_api_key_in_env(self, monkeypatch, caplog):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
         with caplog.at_level(logging.INFO, logger="mozaiksai.startup.validation"):
-            warnings = await run_startup_checks()
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert warnings == []
         ok_records = [r for r in caplog.records if "STARTUP_CHECKS_PASSED" in r.getMessage()]
@@ -83,6 +105,7 @@ class TestRunStartupChecksWarnMode:
     @pytest.mark.asyncio
     async def test_warns_when_api_key_missing_and_no_mongo_config(self, monkeypatch, caplog):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
@@ -98,7 +121,7 @@ class TestRunStartupChecksWarnMode:
             ),
             caplog.at_level(logging.WARNING, logger="mozaiksai.startup.validation"),
         ):
-            warnings = await run_startup_checks()
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert len(warnings) == 1
         assert "OPENAI_API_KEY" in warnings[0]
@@ -109,6 +132,7 @@ class TestRunStartupChecksWarnMode:
     @pytest.mark.asyncio
     async def test_passes_when_llm_config_in_mongo(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
@@ -123,18 +147,19 @@ class TestRunStartupChecksWarnMode:
                 return_value=True,
             ),
         ):
-            warnings = await run_startup_checks()
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert warnings == []
 
     @pytest.mark.asyncio
     async def test_warns_when_workflows_path_missing(self, monkeypatch, tmp_path, caplog):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path / "nonexistent"))
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
 
         with caplog.at_level(logging.WARNING, logger="mozaiksai.startup.validation"):
-            warnings = await run_startup_checks()
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert len(warnings) == 1
         assert "MOZAIKS_WORKFLOWS_PATH" in warnings[0]
@@ -142,26 +167,29 @@ class TestRunStartupChecksWarnMode:
     @pytest.mark.asyncio
     async def test_passes_when_workflows_path_exists(self, monkeypatch, tmp_path):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path))
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
 
-        warnings = await run_startup_checks()
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert warnings == []
 
     @pytest.mark.asyncio
     async def test_skips_workflows_path_check_when_not_set(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
 
-        warnings = await run_startup_checks()
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert warnings == []
 
     @pytest.mark.asyncio
-    async def test_returns_multiple_warnings_when_both_checks_fail(self, monkeypatch, tmp_path):
+    async def test_returns_multiple_warnings_when_llm_and_workflows_fail(self, monkeypatch, tmp_path):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(tmp_path / "nonexistent"))
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
 
@@ -176,13 +204,14 @@ class TestRunStartupChecksWarnMode:
                 return_value=False,
             ),
         ):
-            warnings = await run_startup_checks()
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert len(warnings) == 2
 
     @pytest.mark.asyncio
     async def test_does_not_raise_in_warn_mode_when_api_key_missing(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "warn")
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
@@ -198,9 +227,89 @@ class TestRunStartupChecksWarnMode:
             ),
         ):
             # Must not raise
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert len(warnings) == 1
+
+
+# ---------------------------------------------------------------------------
+# run_startup_checks — MongoDB reachability check
+# ---------------------------------------------------------------------------
+
+
+class TestRunStartupChecksMongoCheck:
+    @pytest.mark.asyncio
+    async def test_warns_when_mongo_uri_not_set(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("MONGO_URI", raising=False)
+        monkeypatch.delenv("MONGODB_URI", raising=False)
+        monkeypatch.delenv("MONGO_URL", raising=False)
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        with patch(
+            "mozaiksai.core.startup.validation.get_secret",
+            side_effect=ValueError("not found"),
+        ):
             warnings = await run_startup_checks()
 
         assert len(warnings) == 1
+        assert "MONGO_URI" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_warns_when_mongo_not_reachable(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_FailingPingClient())
+
+        assert len(warnings) == 1
+        assert "MongoDB" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_passes_when_mongo_reachable(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_when_mongo_uri_missing(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("MONGO_URI", raising=False)
+        monkeypatch.delenv("MONGODB_URI", raising=False)
+        monkeypatch.delenv("MONGO_URL", raising=False)
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        with (
+            patch(
+                "mozaiksai.core.startup.validation.get_secret",
+                side_effect=ValueError("not found"),
+            ),
+            pytest.raises(StartupConfigError) as exc_info,
+        ):
+            await run_startup_checks()
+
+        assert "MONGO_URI" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_when_mongo_unreachable(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        with pytest.raises(StartupConfigError) as exc_info:
+            await run_startup_checks(_mongo_client=_FailingPingClient())
+
+        assert "MongoDB" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +341,11 @@ class TestRunStartupChecksStrictMode:
     @pytest.mark.asyncio
     async def test_strict_mode_passes_when_api_key_present(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
-        warnings = await run_startup_checks()
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert warnings == []
 
@@ -271,11 +381,12 @@ class TestStartupValidationLogFields:
     @pytest.mark.asyncio
     async def test_ok_record_has_check_field(self, monkeypatch, caplog):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
         with caplog.at_level(logging.INFO, logger="mozaiksai.startup.validation"):
-            await run_startup_checks()
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
         ok_records = [
             r for r in caplog.records if r.__dict__.get("check") == "llm_api_key"
@@ -286,6 +397,7 @@ class TestStartupValidationLogFields:
     @pytest.mark.asyncio
     async def test_fail_record_has_check_field(self, monkeypatch, caplog):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
@@ -301,7 +413,7 @@ class TestStartupValidationLogFields:
             ),
             caplog.at_level(logging.WARNING, logger="mozaiksai.startup.validation"),
         ):
-            await run_startup_checks()
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
         fail_records = [
             r for r in caplog.records if r.__dict__.get("check") == "llm_api_key"
@@ -312,11 +424,12 @@ class TestStartupValidationLogFields:
     @pytest.mark.asyncio
     async def test_summary_record_has_failure_count(self, monkeypatch, caplog):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
         with caplog.at_level(logging.INFO, logger="mozaiksai.startup.validation"):
-            await run_startup_checks()
+            await run_startup_checks(_mongo_client=_MockPingClient())
 
         summary = [r for r in caplog.records if r.__dict__.get("check") == "summary"]
         assert summary
