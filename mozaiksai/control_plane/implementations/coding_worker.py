@@ -444,9 +444,8 @@ class ScopedRefinementCodingWorker:
                 commit_content_metadata["content_ref"] = content_ref
                 commit_content_metadata["content_backend"] = content_store.backend_name
             except Exception as cs_exc:
-                import logging as _logging
-                _logging.getLogger(__name__).warning(
-                    "Content store put_bundle failed for app %s; falling back to local path: %s",
+                logger.warning(
+                    "CONTENT_STORE_PUT_BUNDLE_FAILED app=%s: %s — using local path only",
                     request.app_id,
                     cs_exc,
                 )

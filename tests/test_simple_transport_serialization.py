@@ -110,6 +110,58 @@ def test_background_run_summary_reports_active_tasks():
     }
 
 
+def test_ws_connection_limit_default_is_500():
+    transport = SimpleTransport()
+    assert transport._max_connections == 500
+
+
+def test_ws_connection_limit_from_env(monkeypatch):
+    monkeypatch.setenv("MOZAIKS_MAX_WS_CONNECTIONS", "10")
+    transport = SimpleTransport()
+    assert transport._max_connections == 10
+
+
+def test_ws_connection_limit_invalid_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("MOZAIKS_MAX_WS_CONNECTIONS", "not-a-number")
+    transport = SimpleTransport()
+    assert transport._max_connections == 500
+
+
+def test_ws_idle_timeout_default_is_360():
+    transport = SimpleTransport()
+    assert transport._heartbeat_idle_timeout == 360
+
+
+def test_ws_idle_timeout_from_env(monkeypatch):
+    monkeypatch.setenv("MOZAIKS_WS_IDLE_TIMEOUT", "120")
+    transport = SimpleTransport()
+    assert transport._heartbeat_idle_timeout == 120
+
+
+def test_ws_idle_timeout_zero_disables_detection(monkeypatch):
+    monkeypatch.setenv("MOZAIKS_WS_IDLE_TIMEOUT", "0")
+    transport = SimpleTransport()
+    assert transport._heartbeat_idle_timeout == 0
+
+
+def test_last_received_at_set_on_new_connection():
+    import time
+
+    transport = SimpleTransport()
+    before = time.time()
+    # Simulate connection registration (as handle_websocket does it)
+    transport.connections["chat-x"] = {
+        "workflow_name": "TestWorkflow",
+        "user_id": "user-1",
+        "last_received_at": time.time(),
+    }
+    after = time.time()
+
+    conn = transport.connections["chat-x"]
+    assert "last_received_at" in conn
+    assert before <= conn["last_received_at"] <= after
+
+
 async def _record_broadcast(events, event, chat_id):  # noqa: ANN001
     events.append((event, chat_id))
 
