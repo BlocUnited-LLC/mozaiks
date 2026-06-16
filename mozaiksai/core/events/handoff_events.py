@@ -33,7 +33,7 @@ def _run_async_fire_and_forget(coro: Any) -> None:
         asyncio.set_event_loop(new_loop)
         new_loop.run_until_complete(coro)
     except Exception as exc:  # pragma: no cover - logging guard
-        log.warning("⚠️ [HANDOFF_EVENTS] Failed to emit event: %s", exc)
+        log.warning("HANDOFF_EVENTS_EMIT_FAILED: %s", exc)
     finally:
         asyncio.set_event_loop(None)
         new_loop.close()
@@ -51,7 +51,7 @@ def emit_handoff_event(event_kind: str, payload: dict[str, Any]) -> None:
     try:
         _run_async_fire_and_forget(dispatcher.emit(HANDOFF_EVENT_TYPE, event_payload))
     except Exception as exc:  # pragma: no cover - defensive logging only
-        log.warning("⚠️ [HANDOFF_EVENTS] Unexpected failure scheduling event: %s", exc)
+        log.warning("HANDOFF_EVENTS_SCHEDULE_FAILED: %s", exc)
 
 
 def sanitize_identifier(value: Any) -> str | None:

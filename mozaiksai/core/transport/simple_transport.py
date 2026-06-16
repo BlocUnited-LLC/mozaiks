@@ -417,13 +417,13 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
                 # Explicit null is an authoring signal to hide all agent text for this workflow.
                 if has_visual_agents_key and visual_agents is None:
-                    logger.debug("🔍 visual_agents=null for %s; hiding message from %s", workflow_name, agent_name)
+                    logger.debug("VISUAL_AGENTS_NULL workflow=%s agent=%s — hiding message", workflow_name, agent_name)
                     return False
                 
                 # If visual_agents is defined, only show messages from those agents
                 if isinstance(visual_agents, list):
                     if not visual_agents:
-                        logger.debug("🔍 visual_agents empty for %s; allowing message from %s", workflow_name, agent_name)
+                        logger.debug("VISUAL_AGENTS_EMPTY workflow=%s agent=%s — allowing message", workflow_name, agent_name)
                         return True
                     # Normalize both the agent name and visual_agents list for comparison
                     # This matches the frontend normalization logic in ChatPage.js
@@ -436,7 +436,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                     normalized_visual_agents = [normalize_agent(va) for va in visual_agents]
                     
                     is_allowed = normalized_agent in normalized_visual_agents
-                    logger.debug("🔍 Backend visual_agents check: '%s' -> '%s' in %s = %s", agent_name, normalized_agent, normalized_visual_agents, is_allowed)
+                    logger.debug("VISUAL_AGENTS_CHECK agent=%s normalized=%s allowed=%s", agent_name, normalized_agent, is_allowed)
                     return is_allowed
             except FileNotFoundError:
                 # If no specific config, default to showing the message
@@ -624,7 +624,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             )
             
             if is_ui_tool_event:
-                logger.info("🎯 [TRANSPORT] UI tool event detected - bypassing agent visibility filter (component=%s)", envelope.get('data', {}).get('component_type'))
+                logger.debug("TRANSPORT_UI_TOOL_EVENT chat=%s component=%s — bypassing agent visibility filter", chat_id, envelope.get('data', {}).get('component_type'))
 
             # Additional filtering (agent visibility) only for BaseEvent path where needed
             agent_name = None

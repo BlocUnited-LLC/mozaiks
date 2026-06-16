@@ -401,8 +401,8 @@ class LifecycleToolManager:
                 result = tool.callable(**kwargs)
 
             elapsed = asyncio.get_event_loop().time() - start_time
-            wf_logger.info(
-                "[LIFECYCLE] ✓ %s completed in %ss", tool_name, elapsed)
+            wf_logger.debug(
+                "[LIFECYCLE] %s completed in %ss", tool_name, elapsed)
 
             # Emit observability event (optional - can integrate with UnifiedEventDispatcher)
             await self._emit_lifecycle_event(
@@ -422,7 +422,7 @@ class LifecycleToolManager:
         except Exception as err:
             elapsed = asyncio.get_event_loop().time() - start_time
             wf_logger.error(
-                "[LIFECYCLE] ✗ %s failed in %ss: %s", tool_name, elapsed, err,
+                "[LIFECYCLE] %s failed in %ss: %s", tool_name, elapsed, err,
                 exc_info=True,
             )
 

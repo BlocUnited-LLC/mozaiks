@@ -1076,7 +1076,7 @@ class AG2PersistenceManager:
                     obj, end_idx = decoder.raw_decode(s_strip, brace_idx)
                     if isinstance(obj, dict):
                         if agent_name:
-                            logger.info("[JSON_PARSE] %s: ✓ Successfully parsed JSON", agent_name)
+                            logger.debug("[JSON_PARSE] %s: JSON parsed ok", agent_name)
                         return obj
                     idx = end_idx
                     continue
@@ -1121,7 +1121,7 @@ class AG2PersistenceManager:
             raise ValueError("app_id is required")
         try:
             msgs = await self.load_run_history(chat_id=chat_id, app_id=resolved_app_id)
-            logger.info("[GATHER_AGENT_JSONS] chat_id=%s app_id=%s msgs_count=%s", chat_id, resolved_app_id, len(msgs))
+            logger.debug("[GATHER_AGENT_JSONS] chat_id=%s app_id=%s msgs_count=%s", chat_id, resolved_app_id, len(msgs))
 
             if not msgs:
                 logger.debug("[GATHER_AGENT_JSONS] No AG2 run history for chat_id=%s", chat_id)
@@ -1134,7 +1134,7 @@ class AG2PersistenceManager:
             
             if agent_names:
                 wanted = {n.strip() for n in agent_names}
-                logger.info("[GATHER_AGENT_JSONS] Filtering for specific agents: %s", wanted)
+                logger.debug("[GATHER_AGENT_JSONS] Filtering for specific agents: %s", wanted)
                 for m in reversed(msgs):
                     if not isinstance(m, dict):
                         continue
@@ -1146,16 +1146,16 @@ class AG2PersistenceManager:
                     structured_output = m.get("structured_output")
                     if isinstance(structured_output, dict):
                         result[nm] = structured_output
-                        logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via structured_output field)", nm)
+                        logger.debug("[GATHER_AGENT_JSONS] Extracted JSON from %s (via structured_output field)", nm)
                         continue
                     
                     # PRIORITY 2: Try content field
                     js = self._extract_json_from_text(m.get("content"))
                     if js is not None:
                         result[nm] = js
-                        logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via content field)", nm)
+                        logger.debug("[GATHER_AGENT_JSONS] Extracted JSON from %s (via content field)", nm)
                     else:
-                        logger.warning("[GATHER_AGENT_JSONS] ✗ No JSON found in %s message", nm)
+                        logger.warning("[GATHER_AGENT_JSONS] No JSON found in %s message", nm)
                 return result
             
             seen: set[str] = set()
@@ -1180,7 +1180,7 @@ class AG2PersistenceManager:
                     result[nm] = structured_output
                     seen.add(nm)
                     agents_found.append(nm)
-                    logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via structured_output field)", nm)
+                    logger.debug("[GATHER_AGENT_JSONS] Extracted JSON from %s (via structured_output field)", nm)
                     continue
                 
                 # PRIORITY 2: Try to extract JSON from content field (fallback)
@@ -1189,15 +1189,15 @@ class AG2PersistenceManager:
                     result[nm] = js
                     seen.add(nm)
                     agents_found.append(nm)
-                    logger.info("[GATHER_AGENT_JSONS] ✓ Extracted JSON from %s (via content field)", nm)
+                    logger.debug("[GATHER_AGENT_JSONS] Extracted JSON from %s (via content field)", nm)
                 else:
                     # Log first 500 chars of content for failed extractions
                     content = m.get("content", "")
                     content_sample = str(content)[:500] if content else "(empty)"
-                    logger.debug("[GATHER_AGENT_JSONS] ✗ No JSON found in %s message (role=%s)", nm, role)
+                    logger.debug("[GATHER_AGENT_JSONS] No JSON found in %s message (role=%s)", nm, role)
                     logger.debug("[GATHER_AGENT_JSONS]    Content sample: %s", content_sample)
             
-            logger.info("[GATHER_AGENT_JSONS] Completed: found %s agents with valid JSON: %s", len(result), agents_found)
+            logger.debug("[GATHER_AGENT_JSONS] Completed: found %s agents with valid JSON: %s", len(result), agents_found)
             return result
         except Exception as e:  # pragma: no cover
             logger.error("[GATHER_AGENT_JSONS] Failed for chat_id=%s: %s", chat_id, e, exc_info=True)

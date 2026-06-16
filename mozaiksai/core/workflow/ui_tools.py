@@ -133,7 +133,7 @@ def _enrich_payload_with_ui_contract(
             enriched_payload["actions"] = [deepcopy(action) for action in normalized_actions]
 
         wf_logger.debug(
-            "🔍 Enriched UI payload from manifest: tool=%s primitive=%s actions=%d",
+            "UI_PAYLOAD_ENRICHED tool=%s primitive=%s actions=%d",
             tool_id,
             workflow_primitive or "<none>",
             len(normalized_actions),
@@ -185,8 +185,8 @@ async def _emit_tool_call_core(
         "mode": payload.get("mode") or display,
         "interaction_type": payload.get("interaction_type") or ("ui_tool" if awaiting_response else "ui_surface"),
     }
-    chat_logger.info(
-        "🎯 UI tool event: %s (event=%s, display=%s, payload_keys=%s)", tool_id, event_id, display, list(payload_to_send.keys())[:12])
+    chat_logger.debug(
+        "UI_TOOL_EVENT tool=%s event=%s display=%s payload_keys=%s", tool_id, event_id, display, list(payload_to_send.keys())[:12])
     
     # Extract agent_name from payload if not explicitly provided
     if not agent_name and isinstance(payload_to_send, dict):
@@ -203,11 +203,11 @@ async def _emit_tool_call_core(
             agent_name=agent_name,
             awaiting_response=awaiting_response,
         )
-        wf_logger.info("✅ [UI_TOOLS] Emitted UI tool event: %s", event_id)
+        wf_logger.debug("UI_TOOL_EMIT_OK event=%s", event_id)
         return event_id
     except Exception as e:
         wf_logger.error(
-            "❌ [UI_TOOLS] Failed to emit UI tool event '%s': %s", event_id, e,
+            "UI_TOOL_EMIT_FAILED event=%s: %s", event_id, e,
             exc_info=True,
         )
         raise UIToolError(f"Failed to emit UI tool event: {e}") from e
@@ -572,7 +572,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
         tool_name = "unknown_tool"
     
     effective_component = tool_config.get('component') or tool_config.get('component_type') or 'inline'
-    wf_logger.info("🎯 Processing UI tool '%s' with component: %s", tool_name, effective_component)
+    wf_logger.debug("UI_TOOL_PROCESS tool=%s component=%s", tool_name, effective_component)
     
     # Extract tool arguments
     content = getattr(tool_call_event, "content", {})
@@ -586,7 +586,7 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
     # If no arguments are present, avoid emitting UI at this stage.
     # Many UI tools construct their payload inside the tool function itself.
     if not tool_args:
-        wf_logger.info("🔇 Orchestrator UI emission suppressed for '%s' (no args provided in call)", tool_name)
+        wf_logger.debug("UI_TOOL_EMIT_SUPPRESSED tool=%s (no args)", tool_name)
         return None
     
     # Use configuration-driven component type and display mode
@@ -612,11 +612,11 @@ async def handle_tool_call_for_ui_interaction(tool_call_event: Any, chat_id: str
             chat_id=chat_id,
             workflow_name=tool_config.get('workflow_name', 'tool_interaction')
         )
-        wf_logger.info("⏳ Waiting for user interaction on tool_call '%s'", tool_call_component)
+        wf_logger.debug("UI_TOOL_AWAIT_RESPONSE tool_call=%s", tool_call_component)
 
         # Wait for user response using internal primitive
         response = await _wait_for_tool_call_response_internal(event_id)
-        wf_logger.info("✅ Received user response for tool_call '%s'", tool_call_component)
+        wf_logger.debug("UI_TOOL_RESPONSE_RECEIVED tool_call=%s", tool_call_component)
 
         if isinstance(response, dict) and 'ui_event_id' not in response:
             response['ui_event_id'] = event_id

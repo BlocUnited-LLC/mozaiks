@@ -306,7 +306,7 @@ class AutoToolEventHandler:
                     model_cls=model_cls,
                 )
                 mapping.setdefault(model_name, []).append(binding)
-                logger.info("[AUTO_TOOL] ✅ Created binding: model=%s agent=%s tool=%s", model_name, agent_name, binding.tool_name)
+                logger.debug("AUTO_TOOL_BINDING_CREATED model=%s agent=%s tool=%s", model_name, agent_name, binding.tool_name)
 
         logger.info("[AUTO_TOOL] Loaded %d total bindings for workflow=%s: %s", len(mapping), workflow_name, list(mapping.keys()))
         self._workflow_bindings[workflow_name] = mapping

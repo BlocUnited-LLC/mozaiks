@@ -340,7 +340,7 @@ class UnifiedWorkflowManager:
                     ", ".join(sorted(err_names)),
                 )
             else:
-                logger.info("✅ WORKFLOW_LOAD_OK: %d workflows loaded.", len(ok_names))
+                logger.info("WORKFLOW_LOAD_OK: %d workflows loaded.", len(ok_names))
 
         except Exception as e:
             logger.error("WORKFLOW_LOAD_ALL_FAILED: %s", e, exc_info=True)

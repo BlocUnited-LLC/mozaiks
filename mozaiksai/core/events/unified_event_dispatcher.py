@@ -480,7 +480,7 @@ class UnifiedEventDispatcher:
                             "timestamp": timestamp
                         }
                 except Exception as e:
-                    logger.warning("⚠️ [UI_HIDDEN] Failed to check hidden triggers: %s", e, exc_info=True)
+                    logger.warning("UI_HIDDEN_CHECK_FAILED: %s", e, exc_info=True)
                 
                 # Check 2: AUTO_TOOL agent message deduplication
                 # Auto-tool agents emit text (with agent_message) then tool_call (with same agent_message)
@@ -489,7 +489,7 @@ class UnifiedEventDispatcher:
                     auto_tool_agents = workflow_manager.get_auto_tool_agents(workflow_name)
                     if agent_name in auto_tool_agents:
                         event_dict['_mozaiks_hide'] = True
-                        logger.info("� [AUTO_TOOL_DEDUP] Suppressing text from auto_tool agent %s: '%s'", agent_name, content[:100])
+                        logger.debug("AUTO_TOOL_DEDUP_SUPPRESS agent=%s content_prefix=%r", agent_name, content[:100])
                         return {
                             "type": f"chat.{base_kind}",
                             "data": event_dict,
