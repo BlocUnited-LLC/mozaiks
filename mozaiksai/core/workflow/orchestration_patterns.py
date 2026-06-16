@@ -151,7 +151,7 @@ async def _emit_startup_greeting_if_needed(
         agent_name=initial_agent_name,
         metadata={"source": "startup_greeting"},
     )
-    wf_logger.info("[%s] UserDriven greeting sent", workflow_name_upper)
+    wf_logger.debug("[%s] UserDriven greeting sent", workflow_name_upper)
     return 1
 
 
@@ -287,7 +287,7 @@ async def run_workflow_orchestration(
         if initial_agent_name_override:
             initial_agent_name = str(initial_agent_name_override)
 
-        wf_logger.info(
+        wf_logger.debug(
             "[%s] CONFIG: mode=%s pattern=beta initial_agent=%s",
             workflow_name_upper, workflow_startup_mode, initial_agent_name,
         )
@@ -495,7 +495,7 @@ async def run_workflow_orchestration(
             from mozaiksai.core.workflow.execution.lifecycle import get_lifecycle_manager
             lifecycle_manager = get_lifecycle_manager(workflow_name)
             await lifecycle_manager.trigger_before_chat(context_variables=context_bridge)
-            wf_logger.info("[%s] Lifecycle before_chat completed", workflow_name_upper)
+            wf_logger.debug("[%s] Lifecycle before_chat completed", workflow_name_upper)
         except Exception as lc_err:
             wf_logger.debug("[%s] Lifecycle before_chat failed: %s", workflow_name_upper, lc_err)
 

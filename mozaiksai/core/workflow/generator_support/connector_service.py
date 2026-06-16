@@ -319,7 +319,7 @@ async def record_connector_metadata(
         ),
     )
     if logger:
-        logger.info("Saved connector metadata for %s (app %s)", normalized_service, app_id)
+        logger.debug("CONNECTOR_METADATA_SAVED service=%s app_id=%s", normalized_service, app_id)
     return {
         "saved": True,
         "connector": record,
@@ -338,14 +338,14 @@ async def get_connector_status(
     classified = _classify_connector_status(record)
     if logger:
         if classified["exists"]:
-            logger.info(
-                "Connector metadata found for %s on app %s with status=%s",
+            logger.debug(
+                "CONNECTOR_STATUS service=%s app_id=%s status=%s",
                 service,
                 app_id,
                 classified["status"],
             )
         else:
-            logger.info("No connector metadata found for %s on app %s", service, app_id)
+            logger.debug("CONNECTOR_NOT_FOUND service=%s app_id=%s", service, app_id)
     return classified
 
 
@@ -354,10 +354,10 @@ async def get_secret_for_e2b(app_id: str, service: str, logger: Any | None = Non
     result = await backend.get_secret(app_id=str(app_id), service=_normalize_service(service))
     if logger:
         if result.get("success"):
-            logger.info("Connector secret resolved for %s via %s", service, result.get("provider"))
+            logger.debug("CONNECTOR_SECRET_RESOLVED service=%s provider=%s", service, result.get("provider"))
         else:
-            logger.info(
-                "Connector secret lookup unavailable for %s via %s: %s",
+            logger.debug(
+                "CONNECTOR_SECRET_UNAVAILABLE service=%s provider=%s: %s",
                 service,
                 result.get("provider"),
                 result.get("error"),
@@ -436,10 +436,10 @@ async def store_connector(
     )
     if logger:
         if success:
-            logger.info("Connector secret persisted for %s on app %s via %s", normalized_service, app_id, vault_provider)
+            logger.debug("CONNECTOR_SECRET_PERSISTED service=%s app_id=%s provider=%s", normalized_service, app_id, vault_provider)
         else:
-            logger.info(
-                "Connector metadata saved for %s on app %s, but secret storage failed via %s: %s",
+            logger.warning(
+                "CONNECTOR_SECRET_PERSIST_FAILED service=%s app_id=%s provider=%s: %s",
                 normalized_service,
                 app_id,
                 vault_provider,

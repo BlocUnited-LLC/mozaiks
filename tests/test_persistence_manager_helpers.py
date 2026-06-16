@@ -10,13 +10,6 @@ Covers:
     - multiple indexes, one matches → True
     - order matters (list comparison)
 
-  _resolve_agent_log_limit (env-dependent):
-    - env not set → returns default
-    - env set to valid positive int → that int
-    - env set to zero → None (disabled)
-    - env set to negative → None (disabled)
-    - env set to non-numeric → returns default
-
   extract_workflow_ui_state:
     - non-dict chat_doc → default state
     - chat_doc with no workflow_ui_state → default state
@@ -41,7 +34,6 @@ from __future__ import annotations
 
 from mozaiksai.core.data.persistence.persistence_manager import (
     _has_index_with_keys,
-    _resolve_agent_log_limit,
     extract_last_artifact,
     extract_pending_input_request,
     extract_workflow_ui_state,
@@ -95,41 +87,7 @@ class TestHasIndexWithKeys:
 
 
 # ---------------------------------------------------------------------------
-# 2. _resolve_agent_log_limit (env-dependent)
-# ---------------------------------------------------------------------------
-
-class TestResolveAgentLogLimit:
-    def test_unset_env_returns_default(self, monkeypatch):
-        monkeypatch.delenv("TEST_LOG_LIMIT", raising=False)
-        assert _resolve_agent_log_limit("TEST_LOG_LIMIT", 100) == 100
-
-    def test_unset_env_none_default(self, monkeypatch):
-        monkeypatch.delenv("TEST_LOG_LIMIT", raising=False)
-        assert _resolve_agent_log_limit("TEST_LOG_LIMIT", None) is None
-
-    def test_positive_int_returned(self, monkeypatch):
-        monkeypatch.setenv("TEST_LOG_LIMIT", "50")
-        assert _resolve_agent_log_limit("TEST_LOG_LIMIT", 100) == 50
-
-    def test_zero_returns_none(self, monkeypatch):
-        monkeypatch.setenv("TEST_LOG_LIMIT", "0")
-        assert _resolve_agent_log_limit("TEST_LOG_LIMIT", 100) is None
-
-    def test_negative_returns_none(self, monkeypatch):
-        monkeypatch.setenv("TEST_LOG_LIMIT", "-5")
-        assert _resolve_agent_log_limit("TEST_LOG_LIMIT", 100) is None
-
-    def test_non_numeric_returns_default(self, monkeypatch):
-        monkeypatch.setenv("TEST_LOG_LIMIT", "bad")
-        assert _resolve_agent_log_limit("TEST_LOG_LIMIT", 200) == 200
-
-    def test_whitespace_stripped(self, monkeypatch):
-        monkeypatch.setenv("TEST_LOG_LIMIT", "  75  ")
-        assert _resolve_agent_log_limit("TEST_LOG_LIMIT", 100) == 75
-
-
-# ---------------------------------------------------------------------------
-# 3. extract_workflow_ui_state
+# 2. extract_workflow_ui_state
 # ---------------------------------------------------------------------------
 
 class TestExtractWorkflowUiState:
@@ -193,7 +151,7 @@ class TestExtractWorkflowUiState:
 
 
 # ---------------------------------------------------------------------------
-# 4. extract_last_artifact
+# 3. extract_last_artifact
 # ---------------------------------------------------------------------------
 
 class TestExtractLastArtifact:
@@ -219,7 +177,7 @@ class TestExtractLastArtifact:
 
 
 # ---------------------------------------------------------------------------
-# 5. extract_pending_input_request
+# 4. extract_pending_input_request
 # ---------------------------------------------------------------------------
 
 class TestExtractPendingInputRequest:

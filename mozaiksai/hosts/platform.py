@@ -2620,7 +2620,7 @@ async def start_chat(
     requested_workflow_name = workflow_name
     workflow_name = _resolve_requested_workflow_name(workflow_name)
     if requested_workflow_name and requested_workflow_name != workflow_name:
-        logger.info(
+        logger.debug(
             "CHAT_START_WORKFLOW_NORMALIZED: requested=%s resolved=%s app_id=%s user_id=%s",
             requested_workflow_name,
             workflow_name,
@@ -2843,7 +2843,7 @@ async def websocket_endpoint(
         logger.debug("WS_CHAT_OWNERSHIP_CHECK_SKIPPED: %s", ownership_err)
 
     if requested_workflow_name and requested_workflow_name != workflow_name:
-        logger.info(
+        logger.debug(
             "WS_WORKFLOW_NORMALIZED: requested=%s resolved=%s app_id=%s chat_id=%s user_id=%s",
             requested_workflow_name,
             workflow_name,
@@ -3116,7 +3116,7 @@ async def websocket_endpoint(
         )
     finally:
         session_registry.remove_session(ws_id)
-        logger.info("Cleaned up session registry for ws_id=%s", ws_id)
+        logger.debug("SESSION_REGISTRY_CLEANUP ws_id=%s", ws_id)
 
 
 @app.post("/api/chat/upload")

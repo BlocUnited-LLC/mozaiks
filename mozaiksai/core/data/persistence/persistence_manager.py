@@ -55,24 +55,6 @@ def _has_index_with_keys(existing_indexes: list[dict[str, Any]], expected_keys: 
     return False
 
 
-def _resolve_agent_log_limit(env_key: str, default: int | None) -> int | None:
-    """Resolve agent conversation log length limits from environment."""
-    raw_value = os.getenv(env_key)
-    if raw_value is None:
-        return default
-    try:
-        parsed = int(raw_value.strip())
-    except ValueError:
-        logger.warning(
-            "Invalid %s value '%s'; using default %s", env_key, raw_value, default
-        )
-        return default
-    return None if parsed <= 0 else parsed
-
-
-_AGENT_CONV_JSON_MAX_LEN = _resolve_agent_log_limit("AGENT_CONV_JSON_MAX_LEN", None)
-_AGENT_CONV_TEXT_MAX_LEN = _resolve_agent_log_limit("AGENT_CONV_TEXT_MAX_LEN", None)
-
 _GENERAL_CHAT_COLLECTION = RuntimeCollections.GENERAL_CHAT_SESSIONS
 _GENERAL_CHAT_COUNTER_COLLECTION = RuntimeCollections.GENERAL_CHAT_COUNTERS
 
@@ -602,9 +584,9 @@ class AG2PersistenceManager:
                 upsert=True,
             )
 
-            logger.info(
-                "[GENERAL_CHAT] Created general session",
-                extra={"general_chat_id": general_chat_id, "app_id": ent_id, "user_id": user_id, "sequence": seq},
+            logger.debug(
+                "GENERAL_CHAT_SESSION_CREATED general_chat_id=%s app_id=%s user_id=%s sequence=%s",
+                general_chat_id, ent_id, user_id, seq,
             )
 
             return {"chat_id": general_chat_id, "label": label, "sequence": seq}

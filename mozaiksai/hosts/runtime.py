@@ -146,6 +146,35 @@ app = FastAPI(
 app.state.persistence_manager = persistence_manager
 
 
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """Sanitize 5xx responses so internal exception details are never sent to clients.
+
+    4xx errors are intentionally user-facing (validation, not-found, conflict) and
+    pass through unchanged. 5xx errors log the detail server-side and return a
+    generic message to prevent leaking database addresses, file paths, or stack info.
+    """
+    if exc.status_code == 500:
+        # Strip internal exception details from 500 responses to prevent leaking
+        # database addresses, file paths, or exception stack info to clients.
+        # 503 and other 5xx codes carry intentional operational messages (e.g.
+        # "Service Unavailable", "Refinement classification unavailable") that
+        # should pass through to the caller.
+        logger.warning(
+            "HTTP 500 on %s %s: %s",
+            request.method,
+            request.url.path,
+            exc.detail,
+        )
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+    headers = getattr(exc, "headers", None)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=headers,
+    )
+
+
 def register_app_lifespan(
     target_app: FastAPI,
     lifespan_factory: Callable[[FastAPI], AsyncIterator[None]],

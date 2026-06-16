@@ -830,6 +830,31 @@ This project follows a practical pre-1.0 changelog format:
   (default 360 s) and closes the connection when no message has been received
   within the idle window, cleaning up the slot for a reconnect.
 
+- **HTTP 500 responses no longer leak internal exception details to clients** —
+  `runtime.py` registers a global `HTTPException` handler that intercepts
+  status-500 responses, logs the original detail at `WARNING` server-side, and
+  returns `{"detail": "Internal server error"}` to the caller. Prevents
+  database addresses, file paths, and exception messages embedded in
+  `f"Failed to ... {exc}"` detail strings from reaching API consumers.
+  4xx and 5xx non-500 codes (503 operational messages) pass through unchanged.
+
+- **Dead `_resolve_agent_log_limit` / `_AGENT_CONV_*` declarations removed** —
+  `persistence_manager.py` declared `_resolve_agent_log_limit`,
+  `_AGENT_CONV_JSON_MAX_LEN`, and `_AGENT_CONV_TEXT_MAX_LEN` but never applied
+  the limits anywhere in the source (only in a stale `build/` copy). Removed
+  all three, plus the seven `TestResolveAgentLogLimit` test cases, to eliminate
+  dead feature stubs that implied a false safety guarantee.
+
+- **Per-request INFO logs in `platform.py`, `orchestration_patterns.py`,
+  `simple_transport.py`, and `connector_service.py` downgraded to DEBUG** —
+  `CHAT_START_WORKFLOW_NORMALIZED`, `WS_WORKFLOW_NORMALIZED`,
+  `SESSION_REGISTRY_CLEANUP`, `CONFIG: mode=…`, `Lifecycle before_chat
+  completed`, `UserDriven greeting sent`, `Launching workflow`, `WebSocket
+  closed normally`, and seven connector-service status calls now emit at
+  `DEBUG`. Connector secret-persist failure promoted from `INFO` to `WARNING`.
+  `GENERAL_CHAT_SESSION_CREATED` converted from `extra={}` dict logging to
+  positional structured format at `DEBUG`.
+
 - **Emoji characters removed from all log messages and remaining per-call INFO
   logs downgraded to DEBUG** — `simple_transport.py`, `ui_tools.py`,
   `lifecycle.py`, `handoff_events.py`, `unified_event_dispatcher.py`,

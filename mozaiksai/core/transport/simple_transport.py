@@ -1125,7 +1125,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 logger.warning("Missing workflow_name in launch_workflow action")
                 return
             
-            logger.info("Launching workflow %s from chat %s", target_workflow, chat_id)
+            logger.debug("WORKFLOW_LAUNCH workflow=%s chat=%s", target_workflow, chat_id)
             
         # Route workflow start through SessionRouter so dependency reroutes are consistent
             from mozaiksai.core.session import TriggerInput, get_session_router
@@ -1510,9 +1510,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         except Exception as e:
             close_code = getattr(e, "code", None)
             if isinstance(e, WebSocketDisconnect) and close_code == 1000:
-                logger.info("WebSocket closed normally for chat %s: %s", chat_id, e)
+                logger.debug("WS_CLOSED_NORMALLY chat=%s code=%s", chat_id, close_code)
             elif ConnectionClosed and isinstance(e, ConnectionClosed) and close_code == 1000:
-                logger.info("WebSocket closed normally for chat %s: %s", chat_id, e)
+                logger.debug("WS_CLOSED_NORMALLY chat=%s code=%s", chat_id, close_code)
             else:
                 logger.warning("WebSocket error for chat %s: %s", chat_id, e)
         finally:
