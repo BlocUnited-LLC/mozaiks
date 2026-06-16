@@ -210,7 +210,7 @@ async def create_agents(
 ) -> dict[str, Agent]:
     """Create autogen.beta.Agent instances for a workflow."""
 
-    logger.info("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
+    logger.debug("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
     from time import perf_counter
 
     start_time = perf_counter()
@@ -473,7 +473,7 @@ async def create_agents(
         agents[agent_name] = agent
 
     duration = perf_counter() - start_time
-    logger.info("[AGENTS] Created %d beta agents for '%s' in %.2fs", len(agents), workflow_name, duration)
+    logger.debug("[AGENTS] Created %d beta agents for '%s' in %.2fs", len(agents), workflow_name, duration)
 
     return agents
 

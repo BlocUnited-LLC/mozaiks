@@ -193,19 +193,19 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
             providers = db_doc.get("providers") or db_doc.get("models") or [db_doc]
             if not isinstance(providers, list):
                 providers = [providers]
-            logger.info("[LLM_CONFIG] Processing %s providers from DB", len(providers))
+            logger.debug("[LLM_CONFIG] Processing %s providers from DB", len(providers))
             for i, p in enumerate(providers):
                 try:
-                    logger.info("[LLM_CONFIG] Processing provider %s: %s", i, _redact_mapping(p))
+                    logger.debug("[LLM_CONFIG] Processing provider %s: %s", i, _redact_mapping(p))
                 except Exception:
-                    logger.info("[LLM_CONFIG] Processing provider %s: <redaction error>", i)
+                    logger.debug("[LLM_CONFIG] Processing provider %s: <redaction error>", i)
                 # Extract model name with logging for debugging
                 model_lowercase = p.get("model")
                 model_capitalized = p.get("Model")
                 model_name_field = p.get("name")
                 env_default = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano")
                 model_name = model_lowercase or model_capitalized or model_name_field or env_default
-                logger.info(
+                logger.debug(
                     "[LLM_CONFIG] Model extraction for provider %s: ", i)
                 # First check if API key is in the DB document
                 api_key = p.get("api_key") or p.get("ApiKey") or p.get("OPENAI_API_KEY")
@@ -222,7 +222,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
                     if model_name in PRICE_MAP:
                         entry["price"] = PRICE_MAP[model_name]
                 safe_entry = {**entry, "api_key": "***REDACTED***" if entry.get("api_key") else entry.get("api_key")}
-                logger.info("[LLM_CONFIG] Created entry %s: %s", i, safe_entry)
+                logger.debug("[LLM_CONFIG] Created entry %s: %s", i, safe_entry)
                 config_list.append(entry)
 
         # Fallback if empty
@@ -246,7 +246,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
 
     _RAW_CONFIG_CACHE["config_list"] = config_list
     _RAW_CONFIG_CACHE["loaded_at"] = time.time()
-    logger.info("[LLM_CONFIG] Loaded provider list (count=%s)", len(config_list))
+    logger.debug("[LLM_CONFIG] Loaded provider list (count=%s)", len(config_list))
 
     # -----------------------------
     # Change detection / invalidation
@@ -281,7 +281,7 @@ async def _load_raw_config_list(force: bool = False) -> list[ProviderConfig]:
     # Debug: log each config entry
     for i, entry in enumerate(config_list):
         safe_entry = {**entry, "api_key": "***REDACTED***" if entry.get("api_key") else entry.get("api_key")}
-        logger.info("[LLM_CONFIG] config_list[%s]: %s", i, safe_entry)
+        logger.debug("[LLM_CONFIG] config_list[%s]: %s", i, safe_entry)
     return config_list
 
 
@@ -419,7 +419,7 @@ def clear_llm_caches(raw: bool = True, built: bool = True) -> None:
         _LAST_API_KEYS = set()
     if built:
         _LLM_CONFIG_CACHE.clear()
-    logger.info("[LLM_CONFIG] Caches cleared raw=%s built=%s", raw, built)
+    logger.debug("[LLM_CONFIG] Caches cleared raw=%s built=%s", raw, built)
 
 
 __all__ = [

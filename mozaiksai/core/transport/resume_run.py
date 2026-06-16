@@ -286,7 +286,7 @@ class AgentRunResumer:
                     app_id=app_id,
                 )
                 if pending:
-                    self.logger.info(
+                    self.logger.debug(
                         "[AUTO_RESUME] Re-emitting pending input request: %s (chat=%s)",
                         pending.get("request_id"),
                         chat_id,

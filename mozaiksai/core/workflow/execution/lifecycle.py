@@ -116,7 +116,7 @@ class LifecycleToolManager:
             self._loaded = True
             return
 
-        logger.info("[LIFECYCLE] Loading %s lifecycle tools for '%s'", len(lifecycle_entries), self.workflow_name)
+        logger.debug("[LIFECYCLE] Loading %s lifecycle tools for '%s'", len(lifecycle_entries), self.workflow_name)
 
         for idx, entry in enumerate(lifecycle_entries, start=1):
             if not isinstance(entry, dict):
@@ -166,11 +166,11 @@ class LifecycleToolManager:
             )
 
             self.tools[trigger].append(lifecycle_tool)
-            logger.info(
+            logger.debug(
                 "[LIFECYCLE] Registered %s for %s", func_name, trigger.value)
 
         total = sum(len(v) for v in self.tools.values())
-        logger.info("[LIFECYCLE] Loaded %s lifecycle tools for '%s'", total, self.workflow_name)
+        logger.debug("[LIFECYCLE] Loaded %s lifecycle tools for '%s'", total, self.workflow_name)
         self._loaded = True
 
     def _load_platform_defaults(self) -> None:
@@ -333,7 +333,7 @@ class LifecycleToolManager:
             chat_id=getattr(context_variables, 'data', {}).get('chat_id') if context_variables else None,
         )
 
-        wf_logger.info(
+        wf_logger.debug(
             "[LIFECYCLE] Executing %s tools for %s", len(tools), trigger.value)
 
         # Deterministic contract: execute in declaration order.
@@ -370,7 +370,7 @@ class LifecycleToolManager:
                 if accepts_var_kwargs or key in sig.parameters:
                     kwargs[key] = value
 
-            wf_logger.info(
+            wf_logger.debug(
                 "[LIFECYCLE] Calling %s for %s", tool_name, tool.trigger.value)
 
             # Emit lightweight 'tool_call' event via tools logger (no heavy metrics)

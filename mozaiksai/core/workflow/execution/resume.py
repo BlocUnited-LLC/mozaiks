@@ -80,7 +80,7 @@ async def resume_or_initialize_chat(
     resume_valid = bool(resumed_messages) and bool(meaningful_messages)
 
     if resume_valid:
-        wf_logger.info(
+        wf_logger.debug(
             "[RESUME] Resuming chat %s: messages=%d meaningful=%d",
             chat_id, len(resumed_messages), len(meaningful_messages),
         )
@@ -91,7 +91,7 @@ async def resume_or_initialize_chat(
             initial_messages.append({"role": "user", "name": "user", "content": initial_message, "_mozaiks_seed_kind": "initial_message"})
     else:
         if resumed_messages:
-            wf_logger.info("[RESUME] Discarding scaffolding-only resume for %s; treating as NEW", chat_id)
+            wf_logger.debug("[RESUME] Discarding scaffolding-only resume for %s; treating as NEW", chat_id)
         resumed_messages = []
 
         if hidden_config_seed:

@@ -373,7 +373,7 @@ async def execute_task_batches_for_trigger(
         task_items = _normalize_task_items(raw_tasks)
         if not task_items:
             if wf_logger:
-                wf_logger.info(
+                wf_logger.debug(
                     "[TASK_BATCH] %s produced no task items from %s",
                     batch.id,
                     batch.source.path,
@@ -381,7 +381,7 @@ async def execute_task_batches_for_trigger(
             continue
 
         if wf_logger:
-            wf_logger.info(
+            wf_logger.debug(
                 "[TASK_BATCH] Starting %s tasks=%d trigger=%s task_model=%s",
                 batch.id,
                 len(task_items),

@@ -440,7 +440,7 @@ def load_agent_tool_functions(
     # Emit a structured summary for post-mortem debugging
     summary = {agent: [getattr(f, '__name__', '<noname>') for f in funcs] for agent, funcs in mapping.items()}
     total_funcs = sum(len(v) for v in mapping.values())
-    logger.info("[TOOLS] Bound %s tool functions across %s agents for '%s'", total_funcs, len(mapping), workflow_name)
+    logger.debug("[TOOLS] Bound %s tool functions across %s agents for '%s'", total_funcs, len(mapping), workflow_name)
     logger.debug("[TOOLS][TRACE] Tool binding summary for '%s': %s", workflow_name, summary)
     return mapping
 
@@ -479,7 +479,7 @@ def clear_tool_cache(workflow_name: str | None = None) -> int:
             pass
     
     if cleared_count > 0:
-        logger.info("[TOOLS] Cleared %s cached tool modules", cleared_count)
+        logger.debug("[TOOLS] Cleared %s cached tool modules", cleared_count)
     else:
         logger.debug("[TOOLS] No cached tool modules found to clear")
     

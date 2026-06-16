@@ -57,7 +57,7 @@ class WebSocketSessionManager:
         })
         self.connections[chat_id] = connection_meta
         self._message_queues.setdefault(chat_id, [])
-        self.logger.info("WebSocket connected for %s", chat_id)
+        self.logger.debug("WS_CONNECTED chat=%s", chat_id)
 
         await self.start_heartbeat(chat_id, websocket)
         await self.flush_pre_connection_buffer(chat_id)
@@ -76,7 +76,7 @@ class WebSocketSessionManager:
             task.cancel()
 
         await self.stop_heartbeat(chat_id)
-        self.logger.info("Cleaned up WebSocket resources for %s", chat_id)
+        self.logger.debug("WS_CLEANUP chat=%s", chat_id)
 
     # ---------------------------------------------------------------------
     # Message queuing + delivery
@@ -134,7 +134,7 @@ class WebSocketSessionManager:
         buffered = self._pre_connection_buffers.pop(chat_id, None) or []
         if not buffered:
             return
-        self.logger.info("Flushing %d buffered messages for %s", len(buffered), chat_id)
+        self.logger.debug("WS_PRE_CONN_BUFFER_FLUSH count=%d chat=%s", len(buffered), chat_id)
         for event in buffered:
             await self._queue_message(chat_id, event)
         await self.flush_message_queue(chat_id)
@@ -160,7 +160,7 @@ class WebSocketSessionManager:
             dropped = queue_size - self._max_queue_size + 10
             if dropped > 0:
                 del queue[0:dropped]
-                self.logger.info("Dropped %d queued messages for %s", dropped, chat_id)
+                self.logger.debug("WS_QUEUE_DROPPED count=%d chat=%s", dropped, chat_id)
             return True
         return False
 
@@ -202,7 +202,7 @@ class WebSocketSessionManager:
         self._heartbeat_tasks[chat_id] = asyncio.create_task(
             self._heartbeat_loop(chat_id, websocket)
         )
-        self.logger.info("Started WebSocket heartbeat for %s", chat_id)
+        self.logger.debug("WS_HEARTBEAT_STARTED chat=%s", chat_id)
 
     async def stop_heartbeat(self, chat_id: str) -> None:
         task = self._heartbeat_tasks.pop(chat_id, None)
