@@ -37,6 +37,7 @@ from mozaiksai.core.auth import (
 )
 from mozaiksai.core.auth.dependencies import (
     validate_path_app_id,
+    validate_path_id,
 )
 from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal as _validate_user_id_against_principal,
@@ -47,6 +48,7 @@ from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.startup.validation import run_startup_checks
 from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
+from mozaiksai.core.transport.security_headers import SecurityHeadersMiddleware
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_tools,
@@ -218,6 +220,11 @@ if _cors_origins:
 # Rate limiting — runs before CORS (outermost layer).
 # Controlled entirely by RATE_LIMIT_* env vars; disabled when RATE_LIMIT_ENABLED=false.
 app.add_middleware(RateLimitMiddleware)
+
+# Security headers — outermost response decorator.
+# Adds X-Content-Type-Options, X-Frame-Options, CSP, HSTS, Referrer-Policy,
+# and Permissions-Policy. Controlled by SECURITY_HEADERS_ENABLED env var.
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 async def _chat_coll():
@@ -478,6 +485,8 @@ async def start_chat(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Create an idempotent runtime chat session for a workflow."""
+    validate_path_id(app_id, "app_id")
+    validate_path_id(workflow_name, "workflow_name")
     validate_path_app_id(principal, app_id)
 
     data: dict[str, Any] = {}
@@ -652,6 +661,15 @@ async def websocket_endpoint(
     user_id: str,
 ):
     """Pure runtime WebSocket transport endpoint."""
+    try:
+        validate_path_id(app_id, "app_id")
+        validate_path_id(chat_id, "chat_id")
+        validate_path_id(user_id, "user_id")
+        validate_path_id(workflow_name, "workflow_name")
+    except Exception:
+        await websocket.close(code=1008, reason="Invalid path parameter")
+        return
+
     if simple_transport is None:
         await websocket.close(code=1011, reason="Transport service unavailable")
         return
@@ -944,6 +962,9 @@ async def handle_user_input(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Submit user input and execute or resume a runtime workflow."""
+    validate_path_id(app_id, "app_id")
+    validate_path_id(chat_id, "chat_id")
+    validate_path_id(user_id, "user_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
 
     if simple_transport is None:

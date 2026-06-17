@@ -15,6 +15,7 @@ Usage:
         ...
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -317,6 +318,33 @@ def validate_path_chat_id(principal: UserPrincipal, path_chat_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Shared user-id validation helper
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Path parameter format validation
+# ---------------------------------------------------------------------------
+
+# Allows UUIDs, slugs (alphanumeric + hyphens + underscores + dots), max 128 chars.
+# Rejects path traversal, shell metacharacters, and excessively long values.
+_SAFE_PATH_ID_RE = re.compile(r'^[\w\-\.]{1,128}$')
+
+
+def validate_path_id(value: str, field_name: str = "id") -> str:
+    """Validate a URL path parameter is safe to use in database queries.
+
+    Accepts: alphanumeric characters, hyphens, underscores, dots; max 128 chars.
+    Rejects: path traversal (`..`), shell metacharacters, empty strings, or
+    values exceeding 128 characters.
+
+    Raises HTTPException(400) on invalid input.
+    Returns the value unchanged if valid.
+    """
+    if not value or not _SAFE_PATH_ID_RE.match(value) or ".." in value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {field_name} format",
+        )
+    return value
+
 
 def validate_user_id_against_principal(
     principal: "UserPrincipal",

@@ -30,14 +30,14 @@ class MozaiksConfig(BaseModel):
     """Configuration for the runtime-substrate convenience factory."""
     workflow_dir: str = Field(default="./workflows", description="Path to workflows directory")
     mongo_uri: str | None = Field(default=None, description="MongoDB connection URI")
-    cors_origins: list = Field(default=["*"], description="Allowed CORS origins")
+    cors_origins: list = Field(default=[], description="Allowed CORS origins. Empty list disables CORS middleware.")
     debug: bool = Field(default=False, description="Enable debug mode")
 
 
 def create_mozaiks_app(
     workflow_dir: str = "./workflows",
     mongo_uri: str | None = None,
-    cors_origins: list | None = None,
+    cors_origins: list | None = None,  # Empty list or None = no CORS middleware
     debug: bool = False,
     **kwargs: Any,
 ) -> FastAPI:
@@ -86,14 +86,18 @@ def create_mozaiks_app(
         redoc_url="/redoc" if debug else None,
     )
 
-    # CORS
-    runtime_subapp.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins or ["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS — only add when explicit origins are provided.
+    # Wildcard origins ("*") with allow_credentials=True is invalid per the CORS spec
+    # and browsers reject it. Callers must supply explicit origin lists.
+    resolved_origins = [o for o in (cors_origins or []) if o and str(o).strip() != "*"]
+    if resolved_origins:
+        runtime_subapp.add_middleware(
+            CORSMiddleware,
+            allow_origins=resolved_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # Import routes after env vars are set
     # This deferred import ensures the runtime picks up the configuration

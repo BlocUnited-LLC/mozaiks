@@ -104,6 +104,7 @@ from mozaiksai.core.auth.dependencies import (
     require_user_scope,
     validate_path_app_id,
     validate_path_chat_id,
+    validate_path_id,
     validate_user_id_against_principal,
 )
 
@@ -141,6 +142,7 @@ __all__ = [
     "optional_user",
     "validate_path_app_id",
     "validate_path_chat_id",
+    "validate_path_id",
     "validate_user_id_against_principal",
     # WebSocket
     "WebSocketUser",

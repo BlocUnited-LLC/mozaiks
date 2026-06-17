@@ -12,6 +12,25 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Security
+
+- **HTTP security headers middleware** (`mozaiksai/core/transport/security_headers.py`):
+  `SecurityHeadersMiddleware` now added to all Mozaiks hosts. Sets
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Content-Security-Policy` (with `frame-ancestors 'none'`),
+  `Referrer-Policy`, `Permissions-Policy`, and HSTS on HTTPS connections.
+  All values are env-configurable. Existing route-level headers are preserved.
+
+- **Path parameter sanitization** (`mozaiksai/core/auth/dependencies.py`):
+  `validate_path_id()` added and wired into chat, WebSocket, and user input
+  endpoints. Rejects path traversal (`..`), shell metacharacters, spaces,
+  and values over 128 characters before they reach MongoDB queries.
+
+- **Fixed wildcard CORS + credentials** (`mozaiksai/factory.py`):
+  `create_mozaiks_app()` no longer adds CORS middleware with `"*"` origin
+  and `allow_credentials=True` (invalid per spec; browsers reject it).
+  CORS middleware is now only added when explicit non-wildcard origins are provided.
+
 ### Added
 
 - **Live AppGenerator subscription smoke** (`scripts/smoke_appgenerator_live_subscription.py`)
