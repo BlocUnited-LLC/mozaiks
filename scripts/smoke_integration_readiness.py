@@ -174,9 +174,9 @@ def analytics_plan() -> dict[str, Any]:
         "app_kind": "analytics-reporting",
         "external_integrations": [
             {
-                "name": "Hosted Analytics",
+                "name": "Example Analytics",
                 "service": "analytics_provider",
-                "provider": "hosted_analytics",
+                "provider": "managed_analytics",
                 "kind": "api_key",
                 "purpose": "Send usage events to an external analytics API.",
                 "required_at": "validation_time",
@@ -190,7 +190,7 @@ def analytics_plan() -> dict[str, Any]:
                 "integration_needs": [
                     {
                         "service": "analytics_provider",
-                        "provider": "hosted_analytics",
+                        "provider": "managed_analytics",
                         "purpose": "Validate analytics adapter configuration.",
                         "required_at": "validation_time",
                         "required_fields": fields,

@@ -337,7 +337,7 @@ user action or integration
 | Workflow trigger policy | `workflows/{workflow}/orchestrator.yaml` |
 | Workflow runtime stream and AG2 custom event types | runtime code in `mozaiksai/core/events/` |
 | Page primitive UI reactions | `ui/pages/*.yaml` and primitive component contracts |
-| Hosted-only product events | hosted capability pack contracts |
+| Hosted-only product events | managed capability pack contracts |
 
 Persistent pages may also launch workflow sessions through declarative page
 actions, but that is a page-action contract, not an event-stream contract.

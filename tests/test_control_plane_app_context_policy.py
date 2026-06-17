@@ -113,16 +113,16 @@ def test_stale_context_integration_change_blocks_for_refresh() -> None:
     assert "integration" in result.risky_signals
 
 
-def test_stale_context_hosted_capability_change_blocks_for_refresh() -> None:
+def test_stale_context_managed_capability_change_blocks_for_refresh() -> None:
     result = evaluate_app_context_policy(
         app_context_summary=_stale_context(),
         change_class="design",
-        refinement_lane="hosted_capability_change",
-        affected_bundle_paths=["modules/hosted_reports/module.yaml"],
+        refinement_lane="managed_capability_change",
+        affected_bundle_paths=["modules/managed_reports/module.yaml"],
     )
 
     assert result.decision is AppContextPolicyDecision.BLOCK_REQUIRES_CONTEXT_REFRESH
-    assert "hosted_capability_change" in result.risky_signals
+    assert "managed_capability_change" in result.risky_signals
 
 
 def test_stale_context_conceptual_reframe_core_blocks_for_refresh() -> None:

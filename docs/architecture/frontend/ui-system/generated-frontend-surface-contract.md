@@ -120,7 +120,7 @@ primitives from `@mozaiks/chat-ui/ui` for the common UI shapes:
 
 Thin domain wrappers are allowed when they delegate to shared primitives. For
 example, a notifications page can implement `NotificationRow` as a wrapper
-around `ResourceList` cells and `StatusPill`, or a hosted analytics dashboard
+around `ResourceList` cells and `StatusPill`, or a managed analytics dashboard
 can implement `AnalyticsMetricGroup` as a wrapper around `SummaryStrip`.
 
 Local visual primitive clones are not allowed:

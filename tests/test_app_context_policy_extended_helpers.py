@@ -19,7 +19,7 @@ Covers helpers NOT tested in test_app_context_policy_pure_helpers.py:
     - change_class="core" → conceptual_or_architecture_replan signal
     - lane="data_model_migration" → data_model_migration signal
     - lane="integration" → integration signal
-    - lane="hosted_capability_change" → hosted_capability_change signal
+    - lane="managed_capability_change" → managed_capability_change signal
     - lane="architecture_replan" → conceptual_or_architecture_replan signal
     - lane="conceptual_reframe" → conceptual_or_architecture_replan signal
     - lane="feature_addition" + backend path → module_backend_feature_addition signal
@@ -176,9 +176,9 @@ class TestRiskySignals:
         signals = _call_risky(refinement_lane="integration")
         assert "integration" in signals
 
-    def test_lane_hosted_capability_change_signal(self):
-        signals = _call_risky(refinement_lane="hosted_capability_change")
-        assert "hosted_capability_change" in signals
+    def test_lane_managed_capability_change_signal(self):
+        signals = _call_risky(refinement_lane="managed_capability_change")
+        assert "managed_capability_change" in signals
 
     def test_lane_architecture_replan_triggers_conceptual_signal(self):
         signals = _call_risky(refinement_lane="architecture_replan")

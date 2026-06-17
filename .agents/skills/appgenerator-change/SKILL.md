@@ -19,7 +19,7 @@ Typical triggers:
 - `tools/assemble_app_tasks.py`
 - shared generated UI contract checks used by AppGenerator
 - module, page, or data contract generation behavior
-- hosted-pack or external-adapter planning
+- managed-capability or external-adapter planning
 - app-owned facade module patterns
 - AppGenerator-specific tests or fixtures
 
@@ -51,7 +51,7 @@ Catalog placement rule:
   - `tests/test_appgenerator_validate_wiring.py`
   - `tests/test_appgenerator_ui_quality_gate.py`
   - `tests/test_appgenerator_component_drift_guard.py`
-  - `tests/test_appgenerator_hosted_pack_smoke.py`
+  - `tests/test_appgenerator_managed_capability_smoke.py`
   - `tests/test_appgenerator_generated_page_binding.py`
 - inspect upstream build-sequence context only when the AppGenerator change depends on upstream inputs or assumptions from `ValueEngine`, `ThemeCapture`, `DesignDocs`, or `AgentGenerator`
 
@@ -64,7 +64,7 @@ Core truth:
 - It must respect the canonical app structure and the platform's current runtime contracts.
 - It must respect `factory_app/build_context/AppGenerator/file_contracts.yaml`.
 - It must not invent runtime contracts unsupported by the platform.
-- It must not generate hosted product internals.
+- It must not generate provider-owned managed capability internals.
 - It should keep persistent app UI schema-first unless the bounded custom route contract is explicitly required.
 
 Boundary rules:
@@ -76,7 +76,7 @@ Boundary rules:
 - Do not generate flat root manifests when the canonical contract uses `contracts/`.
 - Do not generate `app/capability_packs/`.
 - Do not generate `transport.py` or duplicate runtime transport infrastructure.
-- Do not bind pages directly to hosted-pack internals; use the app-owned facade module pattern.
+- Do not bind pages directly to managed-capability internals; use the app-owned facade module pattern.
 - Do not hardcode provider-specific or private product examples into OSS guidance, tests, or fixtures.
 - Do not assume `ctx.db`; use the canonical persistence model and `ctx.persistence.collection(module_id, entity_name)`.
 - Do not generate local visual primitive clones or raw persistent-page React when the shipped schema and primitive contracts can represent the surface.
@@ -98,8 +98,8 @@ Common change types:
 5. Data contract generation changes:
    - inspect `structured_outputs.yaml`, `factory_app/build_context/AppGenerator/file_contracts.yaml`, and persistence tests together
    - keep `data/contract.json` and `data/migrations/{migration_id}.json` as the canonical output family
-6. Hosted-pack or external-adapter generation changes:
-   - inspect `factory_app/build_context/AppGenerator/file_contracts.yaml`, hosted-pack rules, and hosted-pack smoke tests together
+6. Managed-capability or external-adapter generation changes:
+   - inspect `factory_app/build_context/AppGenerator/file_contracts.yaml`, managed-capability rules, and managed-capability smoke tests together
    - preserve the app-owned facade module pattern and thin adapter boundary
 7. Assembly or template behavior:
    - inspect `assemble_app_tasks.py`, `assembly_phase.py`, and the nearest assembly or validation tests
@@ -117,7 +117,7 @@ Common change types:
 Focused testing guidance:
 
 - AppBuildPlan validation and wiring:
-  - `python -m pytest tests/test_appgenerator_validate_wiring.py tests/test_appgenerator_hosted_pack_smoke.py -q`
+  - `python -m pytest tests/test_appgenerator_validate_wiring.py tests/test_appgenerator_managed_capability_smoke.py -q`
 - AppGenerator canonical generation and module contract guidance:
   - `python -m pytest tests/test_appgenerator_canonical_generation.py tests/test_appgenerator_module_contracts.py -q`
 - generated UI contract and UI quality gates:
@@ -126,8 +126,8 @@ Focused testing guidance:
   - `python -m pytest tests/test_appgenerator_backend_helper_contracts.py -q`
 - data contract and persistence alignment:
   - `python -m pytest tests/test_appgenerator_persistence_alignment.py tests/test_appgenerator_persistent_module_generation.py -q`
-- hosted-pack facade and page binding checks:
-  - `python -m pytest tests/test_appgenerator_hosted_pack_smoke.py tests/test_appgenerator_generated_page_binding.py tests/test_appgenerator_hosted_facade_binding.py -q`
+- managed-capability facade and page binding checks:
+  - `python -m pytest tests/test_appgenerator_managed_capability_smoke.py tests/test_appgenerator_generated_page_binding.py tests/test_appgenerator_managed_facade_binding.py -q`
 - docs or contributor-guidance changes for this skill:
   - `python -m pytest tests/test_appgenerator_change_skill.py tests/test_contributor_quickstart.py tests/test_claude_guidance_operating_system.py -q`
 
@@ -136,7 +136,7 @@ Final report requirements:
 - Always include `OSS Change Impact`.
 - Always include `AppGenerator Workflow Impact`.
 - Include `Module Contract Impact` when module contract files, generated module backend structure, or module loader assumptions changed.
-- Include `Hosted Pack Boundary Check` when hosted-pack classification, facade routing, or adapter clients changed.
+- Include `Managed Capability Boundary Check` when managed-capability classification, facade routing, or adapter clients changed.
 - Include `Build Workflow Sequence Impact` when AppGenerator assumptions changed because sequence composition, transitions, entrypoints, or upstream build ownership changed.
 
 ## AppGenerator Workflow Impact

@@ -164,7 +164,7 @@
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -177,7 +177,7 @@
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -420,7 +420,7 @@
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -433,7 +433,7 @@
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -682,7 +682,7 @@
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -695,7 +695,7 @@
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -946,7 +946,7 @@
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -959,7 +959,7 @@
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -1042,7 +1042,7 @@
       }
     },
     {
-      "app_id": "refinement-live-worker-smoke-hosted",
+      "app_id": "refinement-live-worker-smoke-managed",
       "artifact_store": {
         "attempted": true,
         "backend": "smoke_local_in_memory",
@@ -1055,7 +1055,7 @@
       },
       "coding_worker_result": {
         "applied_files": {
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\n\nThis module handles the mapping of hosted analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n"
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\n\nThis module handles the mapping of managed analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n"
         },
         "blocked_reason": null,
         "eligible": true,
@@ -1067,25 +1067,25 @@
             "modules/analytics_dashboard/backend/service.py"
           ],
           "artifact_kind": "app_bundle",
-          "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmph16tbjf8\\generated_refinements\\refinement-live-worker-smoke-hosted\\app_bundle\\app_bundle\\4c636f58cedb\\artifact.zip",
+          "artifact_path": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmph16tbjf8\\generated_refinements\\refinement-live-worker-smoke-managed\\app_bundle\\app_bundle\\4c636f58cedb\\artifact.zip",
           "artifact_version_id": "av_refinement_live_worker_smoke_persisted",
           "bundle_mode": "workspace_snapshot",
           "change_class": "patch",
           "selected_file_paths": [],
           "tool_context_loaded": true,
-          "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmph16tbjf8\\generated_refinements\\refinement-live-worker-smoke-hosted\\app_bundle\\app_bundle\\4c636f58cedb\\workspace"
+          "workspace_dir": "C:\\Users\\mbari\\AppData\\Local\\Temp\\tmph16tbjf8\\generated_refinements\\refinement-live-worker-smoke-managed\\app_bundle\\app_bundle\\4c636f58cedb\\workspace"
         },
         "plan": {
           "needs_human_review": false,
           "owned_paths": [
             "modules/analytics_dashboard/backend/service.py"
           ],
-          "rationale": "The request was to add a comment explaining the hosted analytics display mapping. The change is straightforward and involves only adding a descriptive comment to the specified file. No functional code changes were made, so no validation is necessary.",
+          "rationale": "The request was to add a comment explaining the managed analytics display mapping. The change is straightforward and involves only adding a descriptive comment to the specified file. No functional code changes were made, so no validation is necessary.",
           "start_preview": false,
-          "summary": "Added a comment explaining hosted analytics display mapping in the analytics dashboard service.",
+          "summary": "Added a comment explaining managed analytics display mapping in the analytics dashboard service.",
           "updated_files": [
             {
-              "content": "\"\"\"Hosted analytics dashboard service.\n\nThis module handles the mapping of hosted analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n",
+              "content": "\"\"\"Managed analytics dashboard service.\n\nThis module handles the mapping of managed analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n",
               "path": "modules/analytics_dashboard/backend/service.py"
             }
           ],
@@ -1110,7 +1110,7 @@
       ],
       "failure_category": null,
       "failure_detail": null,
-      "name": "hosted_facade",
+      "name": "managed_facade",
       "plan": {
         "affected_bundle_paths": [
           "modules/analytics_dashboard/backend/service.py"
@@ -1124,7 +1124,7 @@
         "app_context_impact_hints": null,
         "app_context_policy_override": null,
         "app_context_summary": null,
-        "app_id": "refinement-live-worker-smoke-hosted",
+        "app_id": "refinement-live-worker-smoke-managed",
         "artifact_kind": "app_bundle",
         "change_class": "patch",
         "context_policy_decision": {
@@ -1140,7 +1140,7 @@
           "requires_human_override": false,
           "risk_level": "high",
           "risky_signals": [
-            "hosted_capability_change"
+            "managed_capability_change"
           ],
           "warnings": [
             "No current app context version is registered; refinement impact uses route and artifact evidence only.",
@@ -1152,18 +1152,18 @@
         "human_review_required": false,
         "mutation_allowed": false,
         "next_step": "scoped_patch_candidate",
-        "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001",
+        "output_workspace": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-managed/req_refinement_live_worker_managed_001",
         "profiles": {
           "classifier": "raw_llm_config",
           "codegen": null,
           "planner_replanner": null,
           "reviewer_validator": null
         },
-        "refinement_lane": "hosted_capability_change",
-        "request": "Add a comment explaining hosted analytics display mapping in the analytics dashboard service.",
-        "request_id": "req_refinement_live_worker_hosted_001",
-        "scope_summary": "Manual live smoke for a hosted facade app-owned comment-only patch.",
-        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001",
+        "refinement_lane": "managed_capability_change",
+        "request": "Add a comment explaining managed analytics display mapping in the analytics dashboard service.",
+        "request_id": "req_refinement_live_worker_managed_001",
+        "scope_summary": "Manual live smoke for a managed facade app-owned comment-only patch.",
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-managed/req_refinement_live_worker_managed_001",
         "target_workflow": "smoke_workflow",
         "validation_plan": {
           "items": [
@@ -1186,9 +1186,9 @@
               "required": true
             },
             {
-              "id": "hosted_facade_validation",
-              "label": "Hosted capability facade validation",
-              "reason": "Required when hosted capability adapter, facade module, or page paths are in scope.",
+              "id": "managed_facade_validation",
+              "label": "Managed capability facade validation",
+              "reason": "Required when managed capability adapter, facade module, or page paths are in scope.",
               "required": true
             }
           ]
@@ -1201,14 +1201,14 @@
         "workflow_id": "smoke_workflow",
         "workflow_sequence": "app_revision"
       },
-      "request": "Add a comment explaining hosted analytics display mapping in the analytics dashboard service.",
-      "request_id": "req_refinement_live_worker_hosted_001",
+      "request": "Add a comment explaining managed analytics display mapping in the analytics dashboard service.",
+      "request_id": "req_refinement_live_worker_managed_001",
       "source_file_unchanged": true,
       "source_snapshot": {
         "after": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -1221,7 +1221,7 @@
         "before": {
           "app.json": "{\n  \"name\": \"refinement-smoke\",\n  \"version\": \"1.0.0\"\n}\n",
           "backend/integrations/analytics_provider_client.py": "\"\"\"Analytics provider client.\"\"\"\n",
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n",
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n",
           "modules/projects/backend/handler.py": "class ProjectsModule:\n    def __init__(self, ctx):\n        self.ctx = ctx\n",
           "modules/projects/backend/schemas.py": "\"\"\"Projects schemas.\"\"\"\n\nPROJECT_PHASE = \"draft\"\n",
           "modules/projects/backend/service.py": "\"\"\"Projects service.\"\"\"\n\ndef list_projects():\n    return []\n",
@@ -1234,56 +1234,56 @@
       },
       "staged_snapshot": {
         "workspace": {
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\n\nThis module handles the mapping of hosted analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n"
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\n\nThis module handles the mapping of managed analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n"
         }
       },
       "staging_result": {
         "changed_files": [
           {
             "path": "modules/analytics_dashboard/backend/service.py",
-            "reason": "The request was to add a comment explaining the hosted analytics display mapping. The change is straightforward and involves only adding a descriptive commen...",
-            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001/workspace/modules/analytics_dashboard/backend/service.py",
+            "reason": "The request was to add a comment explaining the managed analytics display mapping. The change is straightforward and involves only adding a descriptive...",
+            "staged_path": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-managed/req_refinement_live_worker_managed_001/workspace/modules/analytics_dashboard/backend/service.py",
             "status": "updated"
           }
         ],
         "execution_mode": "scoped_staging",
         "mutation_allowed": false,
         "mutation_scope": "staging_only",
-        "request_id": "req_refinement_live_worker_hosted_001",
-        "result_path": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001/execution_result.json",
+        "request_id": "req_refinement_live_worker_managed_001",
+        "result_path": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-managed/req_refinement_live_worker_managed_001/execution_result.json",
         "source_mutated": false,
-        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-hosted/req_refinement_live_worker_hosted_001"
+        "staging_area": "C:/Users/mbari/AppData/Local/Temp/tmph16tbjf8/.refinement_staging/refinement-live-worker-smoke-managed/req_refinement_live_worker_managed_001"
       },
       "status": "success",
       "warnings": [
         "manual live smoke skips persistent validation output; replay fixture captures the staged result"
       ],
       "worker_request": {
-        "app_id": "refinement-live-worker-smoke-hosted",
+        "app_id": "refinement-live-worker-smoke-managed",
         "artifact_key": "app_bundle",
         "artifact_kind": "app_bundle",
-        "artifact_version_id": "av_refinement_live_worker_hosted_001",
+        "artifact_version_id": "av_refinement_live_worker_managed_001",
         "change_class": "patch",
         "context_seed": {
           "affected_bundle_paths": [
             "modules/analytics_dashboard/backend/service.py"
           ],
-          "refinement_lane": "hosted_capability_change",
-          "request_id": "req_refinement_live_worker_hosted_001",
-          "scenario_name": "hosted_facade"
+          "refinement_lane": "managed_capability_change",
+          "request_id": "req_refinement_live_worker_managed_001",
+          "scenario_name": "managed_facade"
         },
         "files": {
-          "modules/analytics_dashboard/backend/service.py": "\"\"\"Hosted analytics dashboard service.\"\"\"\n"
+          "modules/analytics_dashboard/backend/service.py": "\"\"\"Managed analytics dashboard service.\"\"\"\n"
         },
         "metadata": {
           "affected_bundle_paths": [
             "modules/analytics_dashboard/backend/service.py"
           ],
-          "request_id": "req_refinement_live_worker_hosted_001",
-          "scenario_name": "hosted_facade",
+          "request_id": "req_refinement_live_worker_managed_001",
+          "scenario_name": "managed_facade",
           "smoke": "refinement_live_coding_worker"
         },
-        "raw_user_request": "Add a comment explaining hosted analytics display mapping in the analytics dashboard service.",
+        "raw_user_request": "Add a comment explaining managed analytics display mapping in the analytics dashboard service.",
         "requested_workflow_id": "smoke_workflow",
         "source_surface": "refinement_live_coding_worker_smoke",
         "start_preview": false,
@@ -1293,12 +1293,12 @@
       "worker_result": {
         "changes": [
           {
-            "new_content": "\"\"\"Hosted analytics dashboard service.\n\nThis module handles the mapping of hosted analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n",
+            "new_content": "\"\"\"Managed analytics dashboard service.\n\nThis module handles the mapping of managed analytics displays. It ensures that the data from various analytics providers is correctly mapped and displayed on the dashboard, providing a seamless integration for end-users.\"\"\"\n",
             "path": "modules/analytics_dashboard/backend/service.py",
-            "reason": "The request was to add a comment explaining the hosted analytics display mapping. The change is straightforward and involves only adding a descriptive commen..."
+            "reason": "The request was to add a comment explaining the managed analytics display mapping. The change is straightforward and involves only adding a descriptive..."
           }
         ],
-        "request_id": "req_refinement_live_worker_hosted_001",
+        "request_id": "req_refinement_live_worker_managed_001",
         "source": "live_worker",
         "warnings": []
       }
@@ -1307,3 +1307,5 @@
   "schema_version": "mozaiks.refinement_live_coding_worker_matrix.v1",
   "success_count": 5
 }
+
+

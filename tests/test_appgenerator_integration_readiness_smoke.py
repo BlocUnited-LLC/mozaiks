@@ -189,7 +189,7 @@ def _analytics_plan() -> dict[str, Any]:
             {
                 "name": "Hosted Analytics",
                 "service": "analytics_provider",
-                "provider": "hosted_analytics",
+                "provider": "managed_analytics",
                 "kind": "api_key",
                 "purpose": "Send event analytics to an external analytics API.",
                 "required_at": "validation_time",
@@ -203,7 +203,7 @@ def _analytics_plan() -> dict[str, Any]:
                 "integration_needs": [
                     {
                         "service": "analytics_provider",
-                        "provider": "hosted_analytics",
+                        "provider": "managed_analytics",
                         "purpose": "Validate analytics adapter configuration.",
                         "required_at": "validation_time",
                         "required_fields": fields,
@@ -220,7 +220,7 @@ def test_plan_fixture_declares_neutral_analytics_integration() -> None:
     task_need = plan["build_tasks"][0]["integration_needs"][0]
 
     assert integration["service"] == "analytics_provider"
-    assert integration["provider"] == "hosted_analytics"
+    assert integration["provider"] == "managed_analytics"
     assert task_need["service"] == "analytics_provider"
     assert integration["required_fields"][0]["type"] == "secret"
     assert integration["required_fields"][0]["frontend_safe"] is False
@@ -321,7 +321,7 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
     integration_request = request_payload["integration_requests"][0]
     assert request_payload["event_type"] == "integration.required"
     assert integration_request["integration_id"] == "analytics_provider"
-    assert integration_request["provider"] == "hosted_analytics"
+    assert integration_request["provider"] == "managed_analytics"
     assert integration_request["purpose"] == "Send event analytics to an external analytics API."
     assert integration_request["secret_fields"][0]["name"] == "api_key"
     assert [field["name"] for field in integration_request["non_secret_fields"]] == [

@@ -271,12 +271,12 @@ def _pack_id_from_descriptor(pack: Any) -> str:
     return str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
 
 
-def _selected_hosted_pack_ids(capability_packs: list[dict[str, Any]] | None) -> set[str]:
+def _selected_managed_capability_ids(capability_packs: list[dict[str, Any]] | None) -> set[str]:
     ids: set[str] = set()
     for pack in capability_packs or []:
         if not isinstance(pack, dict):
             continue
-        if str(pack.get("capability_source") or "").strip() != "hosted_pack":
+        if str(pack.get("capability_source") or "").strip() != "managed_capability":
             continue
         pack_id = _pack_id_from_descriptor(pack)
         if pack_id:
@@ -284,36 +284,48 @@ def _selected_hosted_pack_ids(capability_packs: list[dict[str, Any]] | None) -> 
     return ids
 
 
+def _selected_pack_descriptor(
+    capability_packs: list[dict[str, Any]] | None,
+    pack_id: str,
+) -> dict[str, Any] | None:
+    for pack in capability_packs or []:
+        if not isinstance(pack, dict):
+            continue
+        if _pack_id_from_descriptor(pack) == pack_id:
+            return pack
+    return None
+
+
 def _iter_api_endpoint_literals(content: str) -> list[str]:
     return re.findall(r'["\'](/api/modules/[^"\']+)["\']', content)
 
 
-def _scan_selected_hosted_pack_boundaries(
+def _scan_selected_managed_capability_boundaries(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None,
 ) -> list[str]:
-    hosted_pack_ids = _selected_hosted_pack_ids(capability_packs)
-    if not hosted_pack_ids:
+    managed_capability_ids = _selected_managed_capability_ids(capability_packs)
+    if not managed_capability_ids:
         return []
 
     normalized_files = _normalized_files_map(files_map)
     errors: list[str] = []
-    for pack_id in sorted(hosted_pack_ids):
-        hosted_module_prefix = f"modules/{pack_id}/"
-        hosted_module_paths = [
-            path for path in normalized_files if path.startswith(hosted_module_prefix)
+    for pack_id in sorted(managed_capability_ids):
+        managed_capability_module_prefix = f"modules/{pack_id}/"
+        managed_capability_module_paths = [
+            path for path in normalized_files if path.startswith(managed_capability_module_prefix)
         ]
-        if hosted_module_paths:
+        if managed_capability_module_paths:
             errors.append(
-                f"Selected hosted pack '{pack_id}' must not generate hosted internals: "
-                f"{hosted_module_paths}. Generate app-owned facade modules instead."
+                f"Selected managed capability '{pack_id}' must not generate provider internals: "
+                f"{managed_capability_module_paths}. Generate app-owned facade modules instead."
             )
 
         adapter_path = f"services/integrations/{pack_id}_client.py"
         if adapter_path not in normalized_files:
             errors.append(
-                f"Selected hosted pack '{pack_id}' requires app-owned adapter "
+                f"Selected managed capability '{pack_id}' requires app-owned adapter "
                 f"{adapter_path}."
             )
 
@@ -324,16 +336,252 @@ def _scan_selected_hosted_pack_boundaries(
             for endpoint in _iter_api_endpoint_literals(content):
                 if endpoint.startswith(direct_endpoint_prefix):
                     errors.append(
-                        f"{path}: page binds directly to hosted pack endpoint "
+                        f"{path}: page binds directly to managed capability endpoint "
                         f"{endpoint}. Bind pages to an app-owned facade module instead."
                     )
     return errors
+
+
+def _load_yaml_mapping_from_file(
+    files_map: dict[str, str],
+    path: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    raw = files_map.get(path)
+    if raw is None:
+        return None, None
+    try:
+        parsed = yaml.safe_load(str(raw)) or {}
+    except Exception as exc:
+        return None, f"{path}: must be valid YAML: {exc}"
+    if not isinstance(parsed, dict):
+        return None, f"{path}: must be a YAML object."
+    return parsed, None
+
+
+def _module_actions_from_yaml(path: str, content: str) -> set[str]:
+    parsed, error = _load_yaml_mapping_from_file({path: content}, path)
+    if error or not isinstance(parsed, dict):
+        return set()
+    actions = parsed.get("actions")
+    if not isinstance(actions, list):
+        return set()
+    return {
+        str(action.get("id") or "").strip()
+        for action in actions
+        if isinstance(action, dict) and str(action.get("id") or "").strip()
+    }
+
+
+def _page_endpoint_literals(content: str) -> list[str]:
+    return re.findall(r'["\']?(/api/modules/[^"\'\s]+)', content)
+
+
+def _validate_subscriptions_contract(
+    files_map: dict[str, str],
+    *,
+    path: str = "config/subscriptions.yaml",
+) -> list[str]:
+    raw, error = _load_yaml_mapping_from_file(files_map, path)
+    if error:
+        return [error]
+    if not isinstance(raw, dict):
+        return [f"{path}: generated SaaS apps must include config/subscriptions.yaml."]
+
+    try:
+        from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+
+        config = SubscriptionsConfig.model_validate(raw)
+    except Exception as exc:
+        return [f"{path}: invalid subscriptions contract: {exc}"]
+
+    errors: list[str] = []
+    if not config.token_wallets:
+        errors.append(f"{path}: generated SaaS apps must declare token_wallets for runtime token balance display/enforcement.")
+    plans_with_token_allowances = [
+        plan.plan_id for plan in config.plans if plan.token_allowances
+    ]
+    plans_with_usage_limits = [
+        plan.plan_id for plan in config.plans if plan.usage_limits
+    ]
+    if not plans_with_token_allowances:
+        errors.append(f"{path}: generated SaaS plans must declare token_allowances for at least one plan.")
+    if not plans_with_usage_limits:
+        errors.append(f"{path}: generated SaaS plans must declare usage_limits for at least one plan.")
+    return errors
+
+
+def _scan_mozaikspay_saas_contract(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
+    pack = _selected_pack_descriptor(capability_packs, "mozaikspay")
+    if not pack or str(pack.get("capability_source") or "").strip() != "managed_capability":
+        return []
+
+    normalized_files = _normalized_files_map(files_map)
+    errors: list[str] = []
+
+    required_paths = {
+        "config/subscriptions.yaml",
+        "services/integrations/mozaikspay_client.py",
+        "modules/billing_portal/module.yaml",
+        "modules/billing_portal/backend/handler.py",
+        "modules/billing_portal/backend/service.py",
+        "modules/billing_portal/backend/schemas.py",
+        "ui/pages/billing.yaml",
+        "ui/pages/usage.yaml",
+    }
+    missing = sorted(path for path in required_paths if path not in normalized_files)
+    if missing:
+        errors.append(
+            "Selected mozaikspay SaaS capability requires deterministic generated app files: "
+            f"{missing}."
+        )
+
+    errors.extend(_validate_subscriptions_contract(normalized_files))
+
+    client_content = normalized_files.get("services/integrations/mozaikspay_client.py", "")
+    if client_content:
+        required_markers = {
+            "_CONNECTOR_SERVICE": "_CONNECTOR_SERVICE",
+            "mozaikspay": "mozaikspay",
+            "AppConnectorStore": "AppConnectorStore",
+            "get_connector_vault_backend": "get_connector_vault_backend",
+            "MOZAIKSPAY_API_BASE": "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID": "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET": "MOZAIKSPAY_CLIENT_SECRET",
+        }
+        missing_markers = [
+            label for label, marker in required_markers.items() if marker not in client_content
+        ]
+        if missing_markers:
+            errors.append(
+                "services/integrations/mozaikspay_client.py must resolve the app-scoped "
+                f"mozaikspay connector and env fallback; missing markers: {missing_markers}."
+            )
+
+    module_content = normalized_files.get("modules/billing_portal/module.yaml", "")
+    if module_content:
+        actions = _module_actions_from_yaml("modules/billing_portal/module.yaml", module_content)
+        required_actions = {"get_subscription_status", "get_usage_status", "open_billing_portal"}
+        missing_actions = sorted(required_actions - actions)
+        if missing_actions:
+            errors.append(
+                "modules/billing_portal/module.yaml must expose app-owned SaaS billing facade "
+                f"actions: {missing_actions}."
+            )
+        declared_module_id = _declared_module_id_from_yaml(
+            "modules/billing_portal/module.yaml",
+            module_content,
+        )
+        if declared_module_id != "billing_portal":
+            errors.append("modules/billing_portal/module.yaml must declare module.id 'billing_portal'.")
+
+    service_content = normalized_files.get("modules/billing_portal/backend/service.py", "")
+    if service_content:
+        service_markers = {
+            "MozaiksPayClient": "MozaiksPayClient",
+            "get_subscription_status_for_scope": "get_subscription_status_for_scope",
+            "get_runtime_ai_usage": "get_runtime_ai_usage",
+            "create_billing_portal_session": "create_billing_portal_session",
+        }
+        missing_service_markers = [
+            label for label, marker in service_markers.items() if marker not in service_content
+        ]
+        if missing_service_markers:
+            errors.append(
+                "modules/billing_portal/backend/service.py must delegate subscription, usage, "
+                f"and portal operations through MozaiksPayClient; missing markers: {missing_service_markers}."
+            )
+        forbidden_terms = [
+            "assign_plan",
+            "cancel_subscription",
+            "expire_subscription",
+            "record_usage",
+            "upsert_grants",
+            "StripeBillingClient",
+            "import stripe",
+            "from stripe import",
+        ]
+        leaked_terms = sorted(term for term in forbidden_terms if term in service_content)
+        if leaked_terms:
+            errors.append(
+                "modules/billing_portal/backend/service.py must not expose managed billing internals "
+                f"or provider credentials: {leaked_terms}."
+            )
+
+    page_requirements = {
+        "ui/pages/billing.yaml": {
+            "/api/modules/billing_portal/get_subscription_status",
+            "/api/modules/billing_portal/open_billing_portal",
+        },
+        "ui/pages/usage.yaml": {
+            "/api/modules/billing_portal/get_usage_status",
+        },
+    }
+    for page_path, required_endpoints in page_requirements.items():
+        content = normalized_files.get(page_path, "")
+        if not content:
+            continue
+        endpoints = set(_page_endpoint_literals(content))
+        missing_endpoints = sorted(required_endpoints - endpoints)
+        if missing_endpoints:
+            errors.append(
+                f"{page_path}: generated SaaS page must bind through billing_portal facade endpoints: "
+                f"{missing_endpoints}."
+            )
+        direct_forbidden = [
+            endpoint for endpoint in endpoints
+            if endpoint.startswith((
+                "/api/modules/mozaikspay/",
+                "/api/modules/wallet/",
+            ))
+        ]
+        if direct_forbidden:
+            errors.append(
+                f"{page_path}: generated SaaS page must not bind directly to managed/provider modules: "
+                f"{sorted(direct_forbidden)}."
+            )
+
+    return errors
+
+
+def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
+    normalized_files = _normalized_files_map(files_map)
+    deployment_artifacts = {
+        path: normalized_files[path]
+        for path in (
+            "Dockerfile",
+            "env.example",
+            "deployment.manifest.json",
+            ".github/workflows/deploy.yml",
+        )
+        if path in normalized_files
+    }
+    try:
+        from .deployment_contract import validate_generated_deployment_bundle
+
+        deployment_errors = validate_generated_deployment_bundle(
+            deployment_artifacts,
+            include_dockerfiles=True,
+            include_workflow=".github/workflows/deploy.yml" in deployment_artifacts,
+        )
+    except Exception as exc:
+        deployment_errors = [f"deployment artifact validation failed: {exc}"]
+    if deployment_errors:
+        return [
+            "Generated app bundle must include valid provider-neutral deployment artifacts: "
+            f"{deployment_errors}."
+        ]
+    return []
 
 
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
     capability_packs: list[dict[str, Any]] | None = None,
+    require_deployment_artifacts: bool = False,
 ) -> list[str]:
     """Scan files_map for forbidden patterns.
 
@@ -348,11 +596,19 @@ def scan_generated_bundle(
     errors.extend(_scan_security_secret_contract(files_map))
     errors.extend(_scan_data_contract_module_alignment(files_map))
     errors.extend(
-        _scan_selected_hosted_pack_boundaries(
+        _scan_selected_managed_capability_boundaries(
             files_map,
             capability_packs=capability_packs,
         )
     )
+    errors.extend(
+        _scan_mozaikspay_saas_contract(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    if require_deployment_artifacts:
+        errors.extend(_scan_deployment_artifacts_contract(files_map))
 
     for path, content in files_map.items():
         if not isinstance(path, str) or not isinstance(content, str):
@@ -375,27 +631,27 @@ def scan_generated_bundle(
             errors.append(
                 f"{path}: assigns stripe.api_key directly. Generated apps must "
                 "resolve provider credentials through the configured secret "
-                "backend or hosted adapter boundary."
+                "backend or managed capability adapter boundary."
             )
 
         if _STRIPE_REFUND_CALL_RE.search(content):
             errors.append(
                 f"{path}: calls Stripe refunds APIs directly. Generated apps "
                 "must route refund mutations through an app-owned facade or "
-                "hosted payment adapter."
+                "managed payment adapter."
             )
 
         if _STRIPE_REFUNDS_ENDPOINT_RE.search(content):
             errors.append(
                 f"{path}: references /v1/refunds directly. Generated apps must "
-                "route refund mutations through an app-owned facade or hosted "
+                "route refund mutations through an app-owned facade or managed "
                 "payment adapter."
             )
 
         if path.lower().endswith(".py") and _STRIPE_IMPORT_RE.search(content):
             errors.append(
                 f"{path}: imports the Stripe SDK directly. Generated apps must "
-                "use generated service boundaries or hosted adapter clients "
+                "use generated service boundaries or managed capability adapter clients "
                 "instead of provider SDKs in app business code."
             )
 

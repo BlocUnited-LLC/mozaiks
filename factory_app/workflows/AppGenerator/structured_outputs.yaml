@@ -285,7 +285,7 @@ models:
         - api_key
         - oauth
         - webhook
-        - hosted_pack
+        - managed_capability
         - internal_service
         description: Connector/configuration kind.
       purpose:
@@ -326,7 +326,7 @@ models:
         description: Normalized app-scoped connector service id required by the capability pack.
       provider:
         type: optional_str
-        description: Provider id used by the backing integration or hosted capability.
+        description: Provider id used by the backing integration or managed capability.
       display_name:
         type: optional_str
         description: Human-readable label shown in inline credential prompts and the app-scoped integrations surface.
@@ -336,7 +336,7 @@ models:
         - api_key
         - oauth
         - webhook
-        - hosted_pack
+        - managed_capability
         - internal_service
         description: Connector/configuration kind needed by this capability pack.
       purpose:
@@ -586,7 +586,7 @@ models:
         type: optional_list
         items: AppCapabilityRequiredIntegration
         description: >
-          Structured app-scoped connector requirements for this pack. Hosted packs
+          Structured app-scoped connector requirements for this pack. Managed capabilities
           must copy pack-declared requirements here instead of downgrading them to
           string names, so IntegrationReadinessAgent can request exact public and
           secret fields.
@@ -598,8 +598,8 @@ models:
         type: optional_str
         description: >
           Implementation origin of this capability pack. Use one of:
-          hosted_pack (provided by a hosted platform capability — do not generate
-          a module_contract for the hosted pack id itself; generate app-owned
+          managed_capability (provided by a hosted platform capability — do not generate
+          a module_contract for the managed capability id itself; generate app-owned
           facade module_contract tasks when UI/pages need local app actions),
           host_universal (provided universally by the platform host — no scaffold needed),
           framework_pack (provided by an OSS or operator framework pack — generate only

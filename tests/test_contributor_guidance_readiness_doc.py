@@ -34,7 +34,7 @@ def test_contributor_guidance_readiness_doc_mentions_main_focused_skills() -> No
 def test_contributor_guidance_readiness_doc_lists_known_deferrals_and_entry_points() -> None:
     doc = _read("docs/contributing/contributor-guidance-readiness.md")
 
-    assert "No dedicated `hosted-pack-change` skill exists yet." in doc
+    assert "No dedicated `managed-capability-change` skill exists yet." in doc
     assert "No dedicated CLI-change skill exists yet." in doc
     assert "CONTRIBUTING.md" in doc
     assert ".claude/skills/README.md" in doc

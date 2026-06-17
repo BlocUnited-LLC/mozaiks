@@ -68,7 +68,7 @@ _VALIDATION_ALIASES: dict[str, set[str]] = {
     "data_contract_validation": {"data_contract_validation"},
     "migration_plan_validation": {"migration_plan_validation"},
     "integration_readiness_validation": {"integration_readiness_validation", "integration_readiness"},
-    "hosted_facade_boundary_validation": {"hosted_facade_boundary_validation", "hosted_facade_validation"},
+    "managed_facade_boundary_validation": {"managed_facade_boundary_validation", "managed_facade_validation"},
     "module_contract_validation": {"module_contract_validation"},
 }
 
@@ -119,12 +119,12 @@ def _is_ui_only_scope(paths: list[str]) -> bool:
     return normalized_paths.issubset(allowed_paths)
 
 
-def _is_module_internal_hosted_path(path: str) -> bool:
+def _is_module_internal_managed_path(path: str) -> bool:
     parts = PurePosixPath(path).parts
     if len(parts) < 2 or parts[0] != "modules":
         return False
     module_id = parts[1].lower()
-    return module_id.startswith("hosted_") or "provider" in module_id
+    return module_id.startswith("managed_") or "provider" in module_id
 
 
 def _required_validation_names(*, lane: str, path: str) -> list[str]:
@@ -136,14 +136,14 @@ def _required_validation_names(*, lane: str, path: str) -> list[str]:
             "route_component_validation",
             "ui_theme_primitive_validation",
         ]
-    if lane == "hosted_capability_change":
+    if lane == "managed_capability_change":
         if _is_ui_leaf_path(path):
             return [
-                "hosted_facade_boundary_validation",
+                "managed_facade_boundary_validation",
                 "route_component_validation",
                 "ui_theme_primitive_validation",
             ]
-        return ["hosted_facade_boundary_validation"]
+        return ["managed_facade_boundary_validation"]
     if _matches_any(path, _DATA_MODEL_BACKEND_PATTERNS):
         return ["data_contract_validation", "migration_plan_validation"]
     if _matches_any(path, _INTEGRATION_PATTERNS):
@@ -299,11 +299,11 @@ def evaluate_refinement_promotion_policy(
             reason="Core and replan lanes must regenerate from upstream artifacts instead of direct promotion.",
         )
 
-    if _is_module_internal_hosted_path(normalized_path):
+    if _is_module_internal_managed_path(normalized_path):
         return _build_blocked_decision(
             path=normalized_path,
             mode="blocked_requires_replan",
-            reason="Hosted/provider internal module paths are not directly promotable.",
+            reason="Managed/provider internal module paths are not directly promotable.",
         )
 
     if _matches_any(normalized_path, _SOURCE_OF_TRUTH_GENERATED_PATTERNS):
@@ -390,7 +390,7 @@ def evaluate_refinement_promotion_policy(
             required_validation=required_validation,
         )
 
-    if lane == "hosted_capability_change":
+    if lane == "managed_capability_change":
         required_validation = _required_validation_names(lane=lane, path=normalized_path)
         if evidence_failed:
             return _build_blocked_decision(
@@ -410,13 +410,13 @@ def evaluate_refinement_promotion_policy(
             return _build_allowed_decision(
                 path=normalized_path,
                 mode="direct_leaf_patch",
-                reason="Hosted capability UI leaf changes are promotable with boundary validation evidence.",
+                reason="Managed capability UI leaf changes are promotable with boundary validation evidence.",
                 required_validation=required_validation,
             )
         return _build_allowed_decision(
             path=normalized_path,
             mode="staged_generated_artifact",
-            reason="Hosted capability adapter and facade paths are promotable with boundary validation evidence.",
+            reason="Managed capability adapter and facade paths are promotable with boundary validation evidence.",
             required_validation=required_validation,
         )
 

@@ -3,7 +3,7 @@
 This document defines the canonical Mozaiks event contract.
 
 Use this for generated apps, module contracts, workflow triggers, UI primitive
-events, hosted capability packs, and runtime transport.
+events, managed capability packs, and runtime transport.
 
 ## Canonical Envelope
 
@@ -274,7 +274,7 @@ type: platform.app.created
 ### `hosted.*`
 
 Owner:
-hosted capability packs.
+managed capability packs.
 
 Allowed publishers:
 hosted-only product services such as MozaiksPay.

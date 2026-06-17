@@ -243,14 +243,14 @@ def test_collect_integration_needs_dedupes_task_batch_results() -> None:
     assert len(payment["required_by"]) == 2
 
 
-def test_collect_integration_needs_supports_structured_hosted_pack_requirements() -> None:
+def test_collect_integration_needs_supports_structured_managed_capability_requirements() -> None:
     context = _Context(
         {
             "app_build_plan": {
                 "capability_packs": [
                     {
                         "capability_pack_id": "mozaikspay",
-                        "capability_source": "hosted_pack",
+                        "capability_source": "managed_capability",
                         "required_integrations": [
                             {
                                 "service": "mozaikspay",

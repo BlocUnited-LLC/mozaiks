@@ -317,7 +317,7 @@ Risky refinements receive a `context_policy_decision` on the dry-run or
 execution-plan payload. Missing, stale, or unknown context can produce
 `block_requires_context_refresh` for data model migrations, architecture or
 conceptual replans, module/backend feature additions, integration changes,
-hosted capability changes, sensitive auth/permission/secret/deployment/CI
+managed capability changes, sensitive auth/permission/secret/deployment/CI
 surfaces, read-only discovered ownership boundaries, or brownfield
 source-affecting changes.
 

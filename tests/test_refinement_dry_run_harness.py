@@ -93,11 +93,11 @@ def test_data_model_request_includes_database_paths_and_review_warning() -> None
     assert plan.next_step == "needs_human_review"
 
 
-def test_hosted_capability_request_includes_adapter_facade_and_page_paths() -> None:
-    plan = _run_plan("Change hosted analytics dashboard display.", "design")
+def test_managed_capability_request_includes_adapter_facade_and_page_paths() -> None:
+    plan = _run_plan("Change managed analytics dashboard display.", "design")
 
     assert plan.workflow_sequence == "app_surface_revision"
-    assert "services/integrations/hosted_analytics_client.py" in plan.affected_bundle_paths
+    assert "services/integrations/managed_analytics_client.py" in plan.affected_bundle_paths
     assert "modules/analytics_dashboard/module.yaml" in plan.affected_bundle_paths
     assert "modules/analytics_dashboard/backend/service.py" in plan.affected_bundle_paths
     assert "ui/pages/analytics.yaml" in plan.affected_bundle_paths

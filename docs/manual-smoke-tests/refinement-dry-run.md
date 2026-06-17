@@ -52,7 +52,7 @@ configured classifier profile:
 
 ```powershell
 python scripts/dry_run_refinement.py `
-  --request "Change hosted analytics dashboard display." `
+  --request "Change managed analytics dashboard display." `
   --live-classifier `
   --json
 ```

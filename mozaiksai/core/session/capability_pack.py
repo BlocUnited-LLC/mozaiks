@@ -65,7 +65,7 @@ if _PYDANTIC:
             "active" | "placeholder". Only active packs should be passed to
             factory workflows. Operators filter before launch.
         capability_source
-            Taxonomy label: "hosted_pack" | "framework_pack" | "host_universal"
+            Taxonomy label: "managed_capability" | "framework_pack" | "host_universal"
             | "generated_module" | "external_adapter".
         """
         id: str
@@ -77,7 +77,7 @@ if _PYDANTIC:
         branding: dict[str, Any] = Field(default_factory=dict)
         pack_source_path: str | None = None
         status: str = "active"
-        capability_source: str = "hosted_pack"
+        capability_source: str = "managed_capability"
 
 else:
     # Pydantic not available — provide plain dataclass-style fallbacks so
@@ -94,7 +94,7 @@ else:
                      surfaces: list | None = None, supported_domains: list | None = None,
                      branding: dict | None = None, pack_source_path: str | None = None,
                      status: str = "active",
-                     capability_source: str = "hosted_pack") -> None:
+                     capability_source: str = "managed_capability") -> None:
             self.id = id
             self.display_name = display_name
             self.description = description

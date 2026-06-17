@@ -13,15 +13,15 @@ Covers helpers not in test_app_build_plan_helpers.py or test_app_build_plan_help
   _context_available_pack_map:
     - None → {}
     - capability_packs list → mapped by pack_id
-    - available_hosted_packs list → merged into map
+    - available_managed_capabilities list → merged into map
     - duplicate pack_ids → merged (later values win for non-existing keys)
     - packs with id / pack_id / capability_pack_id fields → all accepted
     - non-dict packs → skipped
 
-  _context_hosted_pack_ids:
+  _context_managed_capability_ids:
     - None → empty frozenset
     - packs without capability_source → not included
-    - packs with capability_source="hosted_pack" → included
+    - packs with capability_source="managed_capability" → included
     - mixed packs → only hosted included
 
   _pack_id_from_descriptor:
@@ -56,45 +56,55 @@ Covers helpers not in test_app_build_plan_helpers.py or test_app_build_plan_help
   _validate_page_bindings:
     - no forbidden ids → no error
     - page binds to allowed module → no error
-    - page binds to hosted pack module → raises ValueError
+    - page binds to managed capability module → raises ValueError
     - page binds to backing module → raises ValueError
     - nested endpoint binding → raises ValueError
 
-  _hosted_backing_module_ids:
-    - no hosted packs → empty frozenset
-    - hosted pack with backing_module → included
-    - hosted pack with requires_modules → included
-    - hosted pack with capabilities[].module → included
-    - hosted pack's own id excluded from result
+  _managed_capability_backing_module_ids:
+    - no managed capabilities → empty frozenset
+    - managed capability with backing_module → included
+    - managed capability with requires_modules → included
+    - managed capability with capabilities[].module → included
+    - managed capability's own id excluded from result
     - pack not in context available_packs → nothing added
 
-  _selected_hosted_pack_descriptors:
-    - non-hosted packs excluded
-    - hosted pack in available_packs → descriptor from available_packs
-    - hosted pack not in available_packs → descriptor from pack itself
+  _selected_managed_capability_descriptors:
+    - non-managed capabilities excluded
+    - managed capability in available_packs → descriptor from available_packs
+    - managed capability not in available_packs → descriptor from pack itself
 
-  _hosted_facade_route_rules:
-    - no hosted packs → empty dict
+  _managed_facade_route_rules:
+    - no managed capabilities → empty dict
     - pack with facade + provider_actions → rules built
     - facade missing provider_module → pack_id used as fallback
     - facade missing facade_id → rule skipped
     - empty provider_actions → no rules
+
+  _validate_user_facing_managed_capability_tasks:
+    - user-facing managed capability without page_bundle → raises ValueError
+    - user-facing managed capability without facade module_contract → raises ValueError
+    - backend-only managed capability → no error
+
 """
 from __future__ import annotations
 
+import pytest
+
 from factory_app.workflows.AppGenerator.tools.app_build_plan import (
+    _apply_selected_pack_files,
     _context_available_pack_map,
     _context_get,
-    _context_hosted_pack_ids,
+    _context_managed_capability_ids,
     _facade_pack_descriptor,
-    _hosted_backing_module_ids,
-    _hosted_facade_route_rules,
+    _managed_capability_backing_module_ids,
+    _managed_facade_route_rules,
     _iter_page_api_endpoints,
     _merge_available_pack_defaults,
     _pack_facades,
     _pack_id_from_descriptor,
-    _selected_hosted_pack_descriptors,
+    _selected_managed_capability_descriptors,
     _validate_page_bindings,
+    _validate_user_facing_managed_capability_tasks,
 )
 
 # ---------------------------------------------------------------------------
@@ -149,10 +159,10 @@ class TestContextAvailablePackMap:
         assert "wallet" in result
         assert result["wallet"]["label"] == "Wallet"
 
-    def test_available_hosted_packs_merged(self):
+    def test_available_managed_capabilities_merged(self):
         ctx = _ctx({
             "capability_packs": [],
-            "available_hosted_packs": [{"id": "billing", "label": "Billing"}],
+            "available_managed_capabilities": [{"id": "billing", "label": "Billing"}],
         })
         result = _context_available_pack_map(ctx)
         assert "billing" in result
@@ -170,7 +180,7 @@ class TestContextAvailablePackMap:
     def test_duplicate_pack_ids_merged(self):
         ctx = _ctx({
             "capability_packs": [{"id": "wallet", "from_caps": True}],
-            "available_hosted_packs": [{"id": "wallet", "from_hosted": True}],
+            "available_managed_capabilities": [{"id": "wallet", "from_hosted": True}],
         })
         result = _context_available_pack_map(ctx)
         # Both keys merged — both present
@@ -194,40 +204,40 @@ class TestContextAvailablePackMap:
 
 
 # ---------------------------------------------------------------------------
-# 3. _context_hosted_pack_ids
+# 3. _context_managed_capability_ids
 # ---------------------------------------------------------------------------
 
-class TestContextHostedPackIds:
+class TestContextManagedCapabilityIds:
     def test_none_returns_empty_frozenset(self):
-        assert _context_hosted_pack_ids(None) == frozenset()
+        assert _context_managed_capability_ids(None) == frozenset()
 
     def test_packs_without_capability_source_excluded(self):
         ctx = _ctx({"capability_packs": [{"id": "wallet"}]})
-        assert _context_hosted_pack_ids(ctx) == frozenset()
+        assert _context_managed_capability_ids(ctx) == frozenset()
 
-    def test_hosted_pack_source_included(self):
-        ctx = _ctx({"capability_packs": [{"id": "billing", "capability_source": "hosted_pack"}]})
-        result = _context_hosted_pack_ids(ctx)
+    def test_managed_capability_source_included(self):
+        ctx = _ctx({"capability_packs": [{"id": "billing", "capability_source": "managed_capability"}]})
+        result = _context_managed_capability_ids(ctx)
         assert "billing" in result
 
     def test_non_hosted_source_excluded(self):
         ctx = _ctx({"capability_packs": [{"id": "tasks", "capability_source": "generated_module"}]})
-        assert _context_hosted_pack_ids(ctx) == frozenset()
+        assert _context_managed_capability_ids(ctx) == frozenset()
 
     def test_mixed_packs_only_hosted_included(self):
         ctx = _ctx({"capability_packs": [
-            {"id": "billing", "capability_source": "hosted_pack"},
+            {"id": "billing", "capability_source": "managed_capability"},
             {"id": "tasks"},
         ]})
-        result = _context_hosted_pack_ids(ctx)
+        result = _context_managed_capability_ids(ctx)
         assert result == frozenset({"billing"})
 
-    def test_available_hosted_packs_key_also_searched(self):
+    def test_available_managed_capabilities_key_also_searched(self):
         ctx = _ctx({
             "capability_packs": [],
-            "available_hosted_packs": [{"pack_id": "stripe", "capability_source": "hosted_pack"}],
+            "available_managed_capabilities": [{"pack_id": "stripe", "capability_source": "managed_capability"}],
         })
-        result = _context_hosted_pack_ids(ctx)
+        result = _context_managed_capability_ids(ctx)
         assert "stripe" in result
 
 
@@ -237,7 +247,7 @@ class TestContextHostedPackIds:
 
 class TestMergeAvailablePackDefaults:
     def test_preserves_structured_required_integrations_from_available_pack(self):
-        item = {"capability_pack_id": "mozaikspay", "capability_source": "hosted_pack"}
+        item = {"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"}
         available = {
             "id": "mozaikspay",
             "required_integrations": [
@@ -358,9 +368,9 @@ class TestFacadePackDescriptor:
         result = _facade_pack_descriptor(self._base_facade())
         assert result["surface_kind"] == "module"
 
-    def test_pack_type_is_hosted_facade(self):
+    def test_pack_type_is_managed_facade(self):
         result = _facade_pack_descriptor(self._base_facade())
-        assert result["pack_type"] == "hosted_facade"
+        assert result["pack_type"] == "managed_facade"
 
     def test_label_from_facade(self):
         result = _facade_pack_descriptor(self._base_facade())
@@ -465,24 +475,24 @@ class TestIterPageApiEndpoints:
 
 class TestValidatePageBindings:
     def test_no_forbidden_ids_no_error(self):
-        pages = [{"name": "Tasks", "api_endpoint": "/api/modules/hosted_pack/action"}]
-        _validate_page_bindings(pages, hosted_pack_ids=frozenset(), hosted_backing_module_ids=frozenset())
+        pages = [{"name": "Tasks", "api_endpoint": "/api/modules/managed_capability/action"}]
+        _validate_page_bindings(pages, managed_capability_ids=frozenset(), managed_capability_backing_module_ids=frozenset())
 
     def test_page_binds_to_allowed_module_no_error(self):
         pages = [{"name": "Tasks", "api_endpoint": "/api/modules/tasks/list_tasks"}]
         _validate_page_bindings(
             pages,
-            hosted_pack_ids=frozenset({"billing"}),
-            hosted_backing_module_ids=frozenset(),
+            managed_capability_ids=frozenset({"billing"}),
+            managed_capability_backing_module_ids=frozenset(),
         )
 
-    def test_page_binds_to_hosted_pack_raises(self):
+    def test_page_binds_to_managed_capability_raises(self):
         pages = [{"name": "Billing", "api_endpoint": "/api/modules/billing/create_checkout"}]
         try:
             _validate_page_bindings(
                 pages,
-                hosted_pack_ids=frozenset({"billing"}),
-                hosted_backing_module_ids=frozenset(),
+                managed_capability_ids=frozenset({"billing"}),
+                managed_capability_backing_module_ids=frozenset(),
             )
             raise AssertionError("Expected ValueError")
         except ValueError as exc:
@@ -493,8 +503,8 @@ class TestValidatePageBindings:
         try:
             _validate_page_bindings(
                 pages,
-                hosted_pack_ids=frozenset({"billing"}),
-                hosted_backing_module_ids=frozenset({"stripe_backend"}),
+                managed_capability_ids=frozenset({"billing"}),
+                managed_capability_backing_module_ids=frozenset({"stripe_backend"}),
             )
             raise AssertionError("Expected ValueError")
         except ValueError as exc:
@@ -506,158 +516,257 @@ class TestValidatePageBindings:
         with pytest.raises(ValueError, match="billing"):
             _validate_page_bindings(
                 pages,
-                hosted_pack_ids=frozenset({"billing"}),
-                hosted_backing_module_ids=frozenset(),
+                managed_capability_ids=frozenset({"billing"}),
+                managed_capability_backing_module_ids=frozenset(),
             )
 
 
 # ---------------------------------------------------------------------------
-# 9. _hosted_backing_module_ids
+# 9. _managed_capability_backing_module_ids
 # ---------------------------------------------------------------------------
 
 class TestHostedBackingModuleIds:
     def _ctx_with_hosted(self, pack_id: str, pack_data: dict):
-        return _ctx({"available_hosted_packs": [{**pack_data, "id": pack_id, "capability_source": "hosted_pack"}]})
+        return _ctx({"available_managed_capabilities": [{**pack_data, "id": pack_id, "capability_source": "managed_capability"}]})
 
-    def test_no_hosted_packs_returns_empty(self):
-        result = _hosted_backing_module_ids([], context_variables=None)
+    def test_no_managed_capabilities_returns_empty(self):
+        result = _managed_capability_backing_module_ids([], context_variables=None)
         assert result == frozenset()
 
     def test_backing_module_field_included(self):
         ctx = self._ctx_with_hosted("billing", {"backing_module": "stripe_internal"})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        result = _hosted_backing_module_ids(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "stripe_internal" in result
 
     def test_requires_modules_included(self):
         ctx = self._ctx_with_hosted("billing", {"requires_modules": ["payment_processor"]})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        result = _hosted_backing_module_ids(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "payment_processor" in result
 
     def test_capabilities_module_field_included(self):
         ctx = self._ctx_with_hosted("billing", {
             "capabilities": [{"capability_id": "pay", "module": "payment_gateway"}],
         })
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        result = _hosted_backing_module_ids(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "payment_gateway" in result
 
-    def test_hosted_pack_own_id_excluded(self):
+    def test_managed_capability_own_id_excluded(self):
         ctx = self._ctx_with_hosted("billing", {"backing_module": "billing"})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        result = _hosted_backing_module_ids(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "billing" not in result
 
-    def test_non_hosted_packs_excluded(self):
-        ctx = _ctx({"available_hosted_packs": [
+    def test_non_managed_capabilities_excluded(self):
+        ctx = _ctx({"available_managed_capabilities": [
             {"id": "billing", "capability_source": "generated_module", "backing_module": "billing_backend"},
         ]})
         packs = [{"capability_pack_id": "billing", "capability_source": "generated_module"}]
-        result = _hosted_backing_module_ids(packs, context_variables=ctx)
+        result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
         assert "billing_backend" not in result
 
     def test_pack_not_in_context_returns_empty(self):
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        result = _hosted_backing_module_ids(packs, context_variables=_ctx({}))
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        result = _managed_capability_backing_module_ids(packs, context_variables=_ctx({}))
         assert result == frozenset()
 
 
 # ---------------------------------------------------------------------------
-# 10. _selected_hosted_pack_descriptors
+# 10. _selected_managed_capability_descriptors
 # ---------------------------------------------------------------------------
 
-class TestSelectedHostedPackDescriptors:
-    def test_non_hosted_packs_excluded(self):
+class TestSelectedManagedCapabilityDescriptors:
+    def test_non_managed_capabilities_excluded(self):
         packs = [{"capability_pack_id": "tasks", "capability_source": "generated_module"}]
-        result = _selected_hosted_pack_descriptors(packs, context_variables=None)
+        result = _selected_managed_capability_descriptors(packs, context_variables=None)
         assert result == {}
 
-    def test_hosted_pack_in_available_packs_returns_available_descriptor(self):
-        ctx = _ctx({"available_hosted_packs": [{
+
+# ---------------------------------------------------------------------------
+# 10b. _apply_selected_pack_files
+# ---------------------------------------------------------------------------
+
+class TestApplySelectedPackFiles:
+    def test_pack_declared_facade_overrides_llm_managed_source(self):
+        ctx = _ctx({"available_managed_capabilities": [{
+            "id": "mozaikspay",
+            "capability_source": "managed_capability",
+            "facades": [{"module_id": "billing_portal", "provider_module": "mozaikspay"}],
+        }]})
+        packs, pages, tasks = _apply_selected_pack_files(
+            capability_packs=[
+                {"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"},
+                {"capability_pack_id": "billing_portal", "capability_source": "managed_capability"},
+            ],
+            pages=[],
+            build_tasks=[],
+            context_variables=ctx,
+        )
+
+        by_id = {pack["capability_pack_id"]: pack for pack in packs}
+        assert by_id["billing_portal"]["capability_source"] == "generated_module"
+        assert by_id["billing_portal"]["pack_type"] == "managed_facade"
+        assert pages == []
+        assert tasks == []
+
+    def test_managed_capability_in_available_packs_returns_available_descriptor(self):
+        ctx = _ctx({"available_managed_capabilities": [{
             "id": "billing",
-            "capability_source": "hosted_pack",
+            "capability_source": "managed_capability",
             "facades": [{"module_id": "billing_portal"}],
         }]})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        result = _selected_hosted_pack_descriptors(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        result = _selected_managed_capability_descriptors(packs, context_variables=ctx)
         assert "billing" in result
         # Descriptor from available_packs includes facades
         assert "facades" in result["billing"]
 
-    def test_hosted_pack_not_in_context_uses_pack_itself(self):
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack", "custom": True}]
-        result = _selected_hosted_pack_descriptors(packs, context_variables=_ctx({}))
+    def test_managed_capability_not_in_context_uses_pack_itself(self):
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability", "custom": True}]
+        result = _selected_managed_capability_descriptors(packs, context_variables=_ctx({}))
         assert "billing" in result
         assert result["billing"]["custom"] is True
 
     def test_empty_pack_id_excluded(self):
-        packs = [{"capability_source": "hosted_pack"}]
-        result = _selected_hosted_pack_descriptors(packs, context_variables=None)
+        packs = [{"capability_source": "managed_capability"}]
+        result = _selected_managed_capability_descriptors(packs, context_variables=None)
         assert result == {}
 
 
 # ---------------------------------------------------------------------------
-# 11. _hosted_facade_route_rules
+# 11. _managed_facade_route_rules
 # ---------------------------------------------------------------------------
 
 class TestHostedFacadeRouteRules:
-    def test_no_hosted_packs_empty_rules(self):
-        result = _hosted_facade_route_rules([], context_variables=None)
+    def test_no_managed_capabilities_empty_rules(self):
+        result = _managed_facade_route_rules([], context_variables=None)
         assert result == {}
 
     def test_facade_with_provider_actions_builds_rules(self):
-        ctx = _ctx({"available_hosted_packs": [{
+        ctx = _ctx({"available_managed_capabilities": [{
             "id": "billing",
-            "capability_source": "hosted_pack",
+            "capability_source": "managed_capability",
             "facades": [{
                 "module_id": "billing_portal",
                 "provider_module": "mozaikspay",
                 "provider_actions": ["create_checkout", "cancel_subscription"],
             }],
         }]})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        rules = _hosted_facade_route_rules(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        rules = _managed_facade_route_rules(packs, context_variables=ctx)
         assert rules[("mozaikspay", "create_checkout")] == "billing_portal"
         assert rules[("mozaikspay", "cancel_subscription")] == "billing_portal"
 
     def test_facade_missing_provider_module_falls_back_to_pack_id(self):
-        ctx = _ctx({"available_hosted_packs": [{
+        ctx = _ctx({"available_managed_capabilities": [{
             "id": "billing",
-            "capability_source": "hosted_pack",
+            "capability_source": "managed_capability",
             "facades": [{
                 "module_id": "billing_portal",
                 "provider_actions": ["checkout"],
             }],
         }]})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        rules = _hosted_facade_route_rules(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        rules = _managed_facade_route_rules(packs, context_variables=ctx)
         # Falls back to pack_id as provider_module
         assert rules[("billing", "checkout")] == "billing_portal"
 
     def test_facade_missing_facade_id_skipped(self):
-        ctx = _ctx({"available_hosted_packs": [{
+        ctx = _ctx({"available_managed_capabilities": [{
             "id": "billing",
-            "capability_source": "hosted_pack",
+            "capability_source": "managed_capability",
             "facades": [{
                 "provider_module": "mozaikspay",
                 "provider_actions": ["checkout"],
             }],
         }]})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        rules = _hosted_facade_route_rules(packs, context_variables=ctx)
+        packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+        rules = _managed_facade_route_rules(packs, context_variables=ctx)
         assert rules == {}
 
-    def test_empty_provider_actions_produces_no_rules(self):
-        ctx = _ctx({"available_hosted_packs": [{
-            "id": "billing",
-            "capability_source": "hosted_pack",
-            "facades": [{
-                "module_id": "billing_portal",
-                "provider_module": "mozaikspay",
-                "provider_actions": [],
-            }],
-        }]})
-        packs = [{"capability_pack_id": "billing", "capability_source": "hosted_pack"}]
-        rules = _hosted_facade_route_rules(packs, context_variables=ctx)
-        assert rules == {}
+
+# ---------------------------------------------------------------------------
+# 12. _validate_user_facing_managed_capability_tasks
+# ---------------------------------------------------------------------------
+
+class TestValidateUserFacingManagedCapabilityTasks:
+    def _wallet_pack(self):
+        return {
+            "capability_pack_id": "wallet",
+            "capability_source": "managed_capability",
+            "surface_kind": "external_integration",
+            "operations": ["wallet.view", "wallet.payout"],
+        }
+
+    def _wallet_page(self):
+        return {
+            "name": "Wallet",
+            "route": "/wallet",
+            "purpose": "Show wallet balance and payout activity.",
+            "primary_actions": ["wallet.view"],
+        }
+
+    def test_user_facing_managed_capability_requires_page_bundle(self):
+        with pytest.raises(ValueError, match="no page_bundle build task"):
+            _validate_user_facing_managed_capability_tasks(
+                [self._wallet_pack()],
+                [self._wallet_page()],
+                [
+                    {
+                        "task_id": "task_wallet_facade",
+                        "task_type": "module_contract",
+                        "capability_pack_id": "wallet_dashboard",
+                    }
+                ],
+                managed_capability_ids=frozenset({"wallet"}),
+            )
+
+    def test_user_facing_managed_capability_requires_facade_module_contract(self):
+        with pytest.raises(ValueError, match="no app-owned facade module_contract task"):
+            _validate_user_facing_managed_capability_tasks(
+                [self._wallet_pack()],
+                [self._wallet_page()],
+                [
+                    {
+                        "task_id": "task_wallet_pages",
+                        "task_type": "page_bundle",
+                        "capability_pack_id": "wallet_dashboard",
+                    }
+                ],
+                managed_capability_ids=frozenset({"wallet"}),
+            )
+
+    def test_backend_only_managed_capability_does_not_require_facade(self):
+        _validate_user_facing_managed_capability_tasks(
+            [self._wallet_pack()],
+            [{"name": "Home", "route": "/", "purpose": "General landing page."}],
+            [
+                {
+                    "task_id": "task_wallet_adapter",
+                    "task_type": "api_surface",
+                    "capability_pack_id": "wallet",
+                }
+            ],
+            managed_capability_ids=frozenset({"wallet"}),
+        )
+
+
+# ---------------------------------------------------------------------------
+# 13. _managed_facade_route_rules — additional edge cases
+# ---------------------------------------------------------------------------
+
+def test_empty_provider_actions_produces_no_rules():
+    ctx = _ctx({"available_managed_capabilities": [{
+        "id": "billing",
+        "capability_source": "managed_capability",
+        "facades": [{
+            "module_id": "billing_portal",
+            "provider_module": "mozaikspay",
+            "provider_actions": [],
+        }],
+    }]})
+    packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
+    rules = _managed_facade_route_rules(packs, context_variables=ctx)
+    assert rules == {}

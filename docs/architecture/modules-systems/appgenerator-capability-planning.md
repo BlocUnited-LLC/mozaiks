@@ -20,7 +20,7 @@ A planned capability can become:
 - generated pages
 - generated workflows
 - app-owned integration facades
-- provider-backed hosted pack adapters
+- provider-backed managed capability adapters
 - cross-cutting setup tasks
 
 The planning group gives downstream agents a stable ownership boundary for
@@ -55,7 +55,7 @@ Every planned capability should resolve to one ownership source.
 | --- | --- | --- |
 | `host_universal` | Runtime/platform | Already present; never generate |
 | `framework_pack` | OSS framework/build context | Reuse declared context; generate only app-specific wiring |
-| `hosted_pack` | Hosted/private service | Generate app-side adapter and optional facade only |
+| `managed_capability` | Operator-managed service | Generate app-side adapter and optional facade only |
 | `generated_module` | Generated app | Generate module contracts and backend stubs |
 | `external_adapter` | External provider | Generate provider-facing wiring/facade only |
 
@@ -75,12 +75,12 @@ Reusable OSS capability context or deterministic templates shipped by Mozaiks.
 Rule: select the framework capability and generate only app-specific
 composition.
 
-### `hosted_pack`
+### `managed_capability`
 
-Private or hosted product capability exposed to generated apps through an
+Operator-managed product capability exposed to generated apps through an
 app-side surface.
 
-Rule: do not generate hosted internals. Generate or copy only declared app-side
+Rule: do not generate provider internals. Generate or copy only declared app-side
 adapters, facade modules, and pages.
 
 ### `generated_module`
@@ -106,11 +106,11 @@ capability_source: generated_module
 surface_kind: module
 ```
 
-Hosted pack:
+Managed capability:
 
 ```yaml
 capability_pack_id: mozaikspay
-capability_source: hosted_pack
+capability_source: managed_capability
 surface_kind: external_integration
 implementation_mode: external_integration
 ```
@@ -123,33 +123,33 @@ capability_source: external_adapter
 surface_kind: external_integration
 ```
 
-## Hosted Facade Pattern
+## Managed Facade Pattern
 
-Hosted packs must be consumed through generated app-owned facades:
+Managed capabilities must be consumed through generated app-owned facades:
 
 ```text
-hosted_pack
+managed_capability
   -> app/services/integrations/{pack_id}_client.py
   -> app/modules/{facade_module_id}/
   -> app/ui/pages/{page}.yaml
 ```
 
-Hosted pack service clients are consumer adapters. For SaaS billing, the
+Managed capability service clients are consumer adapters. For SaaS billing, the
 generated `mozaikspay_client.py` resolves the app-scoped `mozaikspay` connector
 or `MOZAIKSPAY_*` env fallback, calls the public MozaiksPay provider API, and
-does not call hosted product modules such as `hosted_billing` directly.
+does not call provider-owned modules such as `managed_billing` directly.
 Runtime token usage remains local to the generated app runtime: `MOZAIKS_APP_URL`
 or an explicit `runtime_base` connector field points at the generated app's own
 `/api/me/usage` endpoint, while `MOZAIKSPAY_API_BASE` points only at the
 MozaiksPay provider.
 
-Hosted packs declare connector requirements on
+Managed capabilities declare connector requirements on
 `capability_packs[].required_integrations` as structured objects, not string-only
 service names. Public config such as `api_base` and `client_id` may be
 `frontend_safe: true`; provider secrets such as `client_secret` must be
 `type: secret` and `frontend_safe: false`. Integration readiness uses that
 shape to request missing app-scoped credentials without placing raw values in
-generated artifacts. When a hosted provider can pre-provision credentials, it
+generated artifacts. When a provider can pre-provision credentials, it
 should write the same app-scoped connector record through the generic connector
 store; connector metadata should preserve `service`, `provider`, and
 `integration_id`, while raw secret values remain only in the configured vault.
@@ -168,7 +168,7 @@ It must not receive:
 
 ```text
 app/modules/mozaikspay/
-app/modules/hosted_billing/
+app/modules/managed_billing/
 app/modules/wallet/
 app/services/hosted_*
 app/capability_packs/
@@ -186,8 +186,8 @@ Ask these questions when classifying a planned capability:
    Use `generated_module`.
 3. Is it backed by reusable OSS build context?
    Use `framework_pack`.
-4. Does it depend on a hosted/private engine?
-   Use `hosted_pack` and generate only app-side facade surfaces.
+4. Does it depend on an operator-managed engine?
+   Use `managed_capability` and generate only app-side facade surfaces.
 5. Does it call an external provider?
    Use `external_adapter`.
 

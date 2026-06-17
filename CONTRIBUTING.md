@@ -33,7 +33,7 @@ If scope spans layers or the right owner is unclear, start with the
 - Test-only change: use the owning surface skill when obvious. Runtime tests go to `runtime-change`, AppGenerator tests go to `appgenerator-change`, and workflow sequence tests go to `factory-build-workflow-change`. If the owner is unclear, use `oss-contribution-review`.
 - CLI change: use `oss-contribution-review` for now. If CLI scaffolding changes module, page, or workflow contracts, also inspect the owning layer rule or skill.
 - Release/changelog change: use `release-notes`.
-- Hosted-pack support change: use `oss-contribution-review` plus the hosted-packs rule for now; no dedicated `hosted-pack-change` skill exists yet.
+- Managed-capability support change: use `oss-contribution-review` plus the managed-capabilities rule for now; no dedicated `managed-capability-change` skill exists yet.
 - Unsure: use `oss-contribution-review` first.
 
 ## Build And Refinement Truth
@@ -54,7 +54,7 @@ from [.claude/rules/testing.md](.claude/rules/testing.md):
 - `Build Workflow Sequence Impact` when sequence, transition, or entry routing changed
 - `Control-Plane / Refinement Impact` when checkpoint routing or refinement behavior changed
 - `Module Contract Impact` when module contracts or module loader expectations changed
-- `Hosted Pack Boundary Check` when hosted-pack, facade, or adapter boundaries changed
+- `Managed Capability Boundary Check` when managed-capability, facade, or adapter boundaries changed
 
 ## Focused Tests
 
@@ -78,7 +78,7 @@ python -m pytest tests/test_contributor_guidance_framing.py tests/test_module_re
 - Do not treat `workflow_sequence` as HITL handoff routing.
 - Do not reintroduce `backend/models.py` as canonical persistence structure.
 - Do not author `contracts/subscriptions.yaml`; use `contracts/reactions.yaml`.
-- Do not route contributors toward `app/capability_packs`, `transport.py`, or direct hosted internals as current canonical extension points.
+- Do not route contributors toward `app/capability_packs`, `transport.py`, or direct provider internals as current canonical extension points.
 
 ## Development Setup
 

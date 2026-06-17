@@ -14,7 +14,7 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
     modules_rule = _read(".claude/rules/modules.md")
     frontend_rule = _read(".claude/rules/frontend.md")
     persistence_rule = _read(".claude/rules/persistence.md")
-    hosted_rule = _read(".claude/rules/hosted-packs.md")
+    managed_rule = _read(".claude/rules/managed-capabilities.md")
     testing_rule = _read(".claude/rules/testing.md")
 
     assert "universal substrate" in architecture_boundaries
@@ -60,17 +60,17 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
     assert "ModuleContext.persistence" in persistence_rule
     assert "ctx.db" in persistence_rule
 
-    assert "hosted_pack" in hosted_rule
-    assert "external_adapter" in hosted_rule
-    assert "facade" in hosted_rule
-    assert "provider-neutral" in hosted_rule
-    assert "Do not copy hosted" in hosted_rule
+    assert "managed_capability" in managed_rule
+    assert "external_adapter" in managed_rule
+    assert "facade" in managed_rule
+    assert "provider-neutral" in managed_rule
+    assert "Do not copy managed" in managed_rule
 
     assert "OSS Change Impact" in testing_rule
     assert "Build Workflow Sequence Impact" in testing_rule
     assert "Control-Plane / Refinement Impact" in testing_rule
     assert "Module Contract Impact" in testing_rule
-    assert "Hosted Pack Boundary Check" in testing_rule
+    assert "Managed Capability Boundary Check" in testing_rule
     assert "Tests run" in testing_rule
     assert "Compatibility risk" in testing_rule
 
@@ -90,7 +90,7 @@ def test_skills_readme_maps_requested_task_types() -> None:
     assert "docs-maintenance" in readme
     assert "persistence-change" in readme
     assert "release-notes" in readme
-    assert "hosted-pack-change" in readme
+    assert "managed-capability-change" in readme
     assert "oss-contribution-review" in readme
     assert "planned" in readme
     assert "AppGenerator is one workflow inside the build sequence" in readme
@@ -132,7 +132,7 @@ def test_no_private_repo_or_app_zero_language_in_new_guidance_surfaces() -> None
         ".claude/rules/factory-build-workflows.md",
         ".claude/rules/control-plane-refinement.md",
         ".claude/rules/persistence.md",
-        ".claude/rules/hosted-packs.md",
+        ".claude/rules/managed-capabilities.md",
         ".claude/rules/testing.md",
         ".claude/skills/README.md",
         ".claude/skills/oss-contribution-review/SKILL.md",

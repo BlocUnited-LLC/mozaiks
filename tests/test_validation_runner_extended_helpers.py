@@ -56,8 +56,8 @@ Covers helpers NOT tested in test_validation_runner_helpers.py:
     - ui_schema.yaml → included
     - other files → excluded
 
-  _is_module_internal_hosted_path:
-    - modules/hosted_payments/... → True
+  _is_module_internal_managed_path:
+    - modules/managed_payments/... → True
     - modules/payment_provider/... → True
     - modules/orders/... → False
     - non-modules path → False
@@ -90,7 +90,7 @@ from mozaiksai.control_plane.validation_runner import (
     _custom_react_entries,
     _database_surface_entries,
     _experience_spec_entries,
-    _is_module_internal_hosted_path,
+    _is_module_internal_managed_path,
     _module_contract_entries,
     _module_contract_module_dir,
     _normalize_selected_targets,
@@ -349,27 +349,27 @@ class TestExperienceSpecEntries:
 
 
 # ---------------------------------------------------------------------------
-# 9. _is_module_internal_hosted_path
+# 9. _is_module_internal_managed_path
 # ---------------------------------------------------------------------------
 
-class TestIsModuleInternalHostedPath:
-    def test_hosted_prefix_returns_true(self):
-        assert _is_module_internal_hosted_path("modules/hosted_payments/module.yaml") is True
+class TestIsModuleInternalManagedPath:
+    def test_managed_prefix_returns_true(self):
+        assert _is_module_internal_managed_path("modules/managed_payments/module.yaml") is True
 
     def test_provider_term_returns_true(self):
-        assert _is_module_internal_hosted_path("modules/payment_provider/module.yaml") is True
+        assert _is_module_internal_managed_path("modules/payment_provider/module.yaml") is True
 
     def test_standard_module_returns_false(self):
-        assert _is_module_internal_hosted_path("modules/orders/module.yaml") is False
+        assert _is_module_internal_managed_path("modules/orders/module.yaml") is False
 
     def test_non_modules_path_returns_false(self):
-        assert _is_module_internal_hosted_path("config/settings.yaml") is False
+        assert _is_module_internal_managed_path("config/settings.yaml") is False
 
     def test_single_segment_returns_false(self):
-        assert _is_module_internal_hosted_path("modules") is False
+        assert _is_module_internal_managed_path("modules") is False
 
     def test_empty_string_returns_false(self):
-        assert _is_module_internal_hosted_path("") is False
+        assert _is_module_internal_managed_path("") is False
 
 
 # ---------------------------------------------------------------------------

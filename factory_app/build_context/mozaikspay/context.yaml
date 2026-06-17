@@ -9,13 +9,13 @@ assets:
 pack:
   id: mozaikspay
   status: active
-  capability_source: hosted_pack
+  capability_source: managed_capability
   required_integrations:
     - service: mozaikspay
       provider: mozaikspay
       display_name: MozaiksPay
       kind: api_key
-      purpose: Connect this generated SaaS app to the hosted MozaiksPay subscription provider.
+      purpose: Connect this generated SaaS app to the managed MozaiksPay subscription provider.
       required_at: runtime
       required_fields:
         - name: api_base

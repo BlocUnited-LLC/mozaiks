@@ -1,15 +1,15 @@
 """
-Hook: Inject Hosted Capabilities Context
+Hook: Inject Managed Capabilities Context
 
 Fires as an prompt middleware function on AppPlanAgent.
 
 When ``capability_packs`` is present and non-empty in context_variables
 (populated by an operator at launch), this hook injects a compact
-[HOSTED CAPABILITIES CONTEXT] block into the AppPlanAgent system message.
+[MANAGED CAPABILITIES CONTEXT] block into the AppPlanAgent system message.
 
 Capability source taxonomy injected into the block:
   host_universal  — built-in platform features; never generate them
-  hosted_pack     — proprietary hosted capability; use as-is, do not regenerate
+  managed_capability     — operator-managed capability; use as-is, do not regenerate
   generated_module — AppGenerator should generate full module contracts
   external_adapter — generate adapter/client wiring only; backend is third-party
 
@@ -26,7 +26,7 @@ from factory_app.workflows._shared.hook_utils import update_agent_section
 
 logger = logging.getLogger(__name__)
 
-_HOSTED_CAP_HEADER = "[HOSTED CAPABILITIES CONTEXT]"
+_MANAGED_CAP_HEADER = "[MANAGED CAPABILITIES CONTEXT]"
 
 # ---------------------------------------------------------------------------
 # Capability source taxonomy guidance (always included when packs are present)
@@ -37,11 +37,14 @@ Capability source taxonomy:
   host_universal  — Built-in platform feature already provided by the runtime host.
                     Do NOT scaffold or generate code for these. Reference them in
                     service_scope or external_integrations, never as capability packs.
-  hosted_pack     — Proprietary hosted capability available in this deployment.
+  managed_capability     — Operator-managed capability available in this deployment.
                     Do NOT regenerate its internals. Include it as a capability pack
                     entry with implementation_mode: external_integration and
                     surface_kind: external_integration or module (as declared).
                     The pack is already deployed; only wire it into the generated app.
+                    Never create modules/{capability_pack_id}/ for this source.
+                    For user-facing pages/actions, create an app-owned facade module
+                    with a different id, then bind pages to that facade.
   framework_pack  — OSS or operator framework pack. Generate only the declared
                     app-specific wiring; do not invent undeclared pack internals.
   generated_module — AppGenerator must generate full module contracts and module backend files.
@@ -58,15 +61,23 @@ def _is_empty(value: Any) -> bool:
     return False
 
 
-def _format_hosted_packs(packs: list[Any]) -> str:
-    lines = ["Hosted capability packs available (do NOT regenerate internals):"]
+def _format_managed_capabilities(packs: list[Any]) -> str:
+    lines = [
+        "Managed capabilities available (do NOT regenerate internals):",
+        "For each listed capability, output capability_packs[].capability_pack_id exactly as the listed id.",
+        "Do not rename ids, add managed_ prefixes, or plan modules/{capability_pack_id}/ outputs.",
+        "If the managed capability backs pages or user actions, plan a separate app-owned facade module plus data_models, business_services, and page_bundle tasks.",
+    ]
     for pack in packs:
         if isinstance(pack, dict):
             pack_id = pack.get("id") or pack.get("pack_id") or str(pack)
             label = pack.get("display_name") or pack.get("label") or pack_id
             description = pack.get("description") or ""
             caps = pack.get("capabilities") or []
-            line = f"  - {pack_id} ({label}) [capability_source: hosted_pack]"
+            line = (
+                f"  - {pack_id} ({label}) "
+                f"[capability_pack_id: {pack_id}; capability_source: managed_capability]"
+            )
             if description:
                 line += f": {description.strip().split(chr(10))[0]}"
             if caps:
@@ -271,25 +282,25 @@ def _format_operator_contracts(contracts: list[Any]) -> str | None:
     return "Operator build-pack contracts:\n" + "\n".join(blocks)
 
 
-def _build_hosted_context_body(capability_packs: list[Any], operator_contracts: list[Any] | None = None) -> str:
+def _build_managed_context_body(capability_packs: list[Any], operator_contracts: list[Any] | None = None) -> str:
     parts: list[str] = [_CAPABILITY_SOURCE_GUIDANCE]
 
-    parts.append(_format_hosted_packs(capability_packs))
+    parts.append(_format_managed_capabilities(capability_packs))
     parts.append(
-        "Planning rules for hosted_pack entries:\n"
-        "1. Include each hosted_pack in AppBuildPlan.capability_packs exactly once with\n"
+        "Planning rules for managed_capability entries:\n"
+        "1. Include each managed_capability in AppBuildPlan.capability_packs exactly once with\n"
         "   these REQUIRED fields and values:\n"
-        "   - capability_pack_id: the hosted pack id exactly as listed above\n"
-        "   - capability_source: hosted_pack\n"
+        "   - capability_pack_id: the managed capability id exactly as listed above\n"
+        "   - capability_source: managed_capability\n"
         "   - implementation_mode: external_integration\n"
         "   - surface_kind: external_integration\n"
-        "   The capability_source field MUST be present and MUST be \"hosted_pack\".\n"
-        "   Do not substitute pack_type: hosted_pack for capability_source.\n"
-        "   Do not mark the hosted pack entry as generated_module.\n"
-        "2. Do NOT generate a module_contract build task for the hosted_pack itself —\n"
+        "   The capability_source field MUST be present and MUST be \"managed_capability\".\n"
+        "   Do not substitute pack_type: managed_capability for capability_source.\n"
+        "   Do not mark the managed capability entry as generated_module.\n"
+        "2. Do NOT generate a module_contract build task for the managed_capability itself —\n"
         "   the module is already deployed in the host.\n"
-        "3. For each hosted_pack with surface_kind: external_integration, generate one\n"
-        "   api_surface adapter task for the hosted pack. Then, for each selected active\n"
+        "3. For each managed_capability with surface_kind: external_integration, generate one\n"
+        "   api_surface adapter task for the managed capability. Then, for each selected active\n"
         "   pack surface that needs app-owned actions or page endpoints, generate the\n"
         "   corresponding app-owned facade module and page tasks declared by the typed\n"
         "   operator contract:\n"
@@ -297,14 +308,15 @@ def _build_hosted_context_body(capability_packs: list[Any], operator_contracts: 
         "      capability_pack_id: {pack_id}  (REQUIRED — do NOT set to null)\n"
         "      initial_agent: ControllerAgent\n"
         "      owned_paths: [\"services/integrations/{pack_id}_client.py\"]\n"
-        "      This thin adapter wraps calls to the hosted pack API.\n"
-        "      The capability_pack_id identifies which hosted pack template to copy.\n"
+        "      This thin adapter is app-level service code and wraps calls to the managed capability API.\n"
+        "      Do not place it under modules/{facade_id}/services/ or modules/{pack_id}/services/.\n"
+        "      The capability_pack_id identifies which managed capability template to copy.\n"
         "   b) task_type: module_contract — surface_kind: module  (NOT external_integration)\n"
         "      initial_agent: ConfigMiddlewareAgent\n"
         "      capability_pack_id: {app_owned_facade_id}  (e.g. {pack_id}_dashboard)\n"
         "      This is an app-owned facade module that uses the adapter above.\n"
         "      depends_on: [the api_surface task id above]\n"
-        "      The facade module is generated_module; the hosted pack remains hosted_pack.\n"
+        "      The facade module is generated_module; the managed capability remains managed_capability.\n"
         "      Also plan the matching data_models and business_services tasks for this\n"
         "      facade module unless selected pack templates provide those outputs.\n"
         "   c) task_type: page_bundle — surface_kind: ui_only\n"
@@ -314,9 +326,12 @@ def _build_hosted_context_body(capability_packs: list[Any], operator_contracts: 
         "4. Page bundles must bind to the app-owned facade module route\n"
         "   (e.g. /api/modules/{facade_id}/), never to /api/modules/{pack_id}/ directly.\n"
         "5. Before emitting AppBuildPlan, verify every page config_hint.api_endpoint for\n"
-        "   hosted-pack features uses /api/modules/{app_owned_facade_id}/{action_id}.\n"
-        "   Direct /api/modules/{pack_id}/, hosted backing module, wallet, hosted_billing,\n"
-        "   hosted_usage, or hosted_entitlements endpoints are invalid page bindings."
+        "   managed-capability features uses /api/modules/{app_owned_facade_id}/{action_id}.\n"
+        "   Direct /api/modules/{pack_id}/, managed backing module, wallet, managed_billing,\n"
+        "   managed_usage, or managed_entitlements endpoints are invalid page bindings.\n"
+        "6. If the operator contract declares required_outputs, forbidden_outputs, facades,\n"
+        "   or pages, treat those typed values as authoritative. Do not invent alternate\n"
+        "   facade ids, adapter paths, or page routes for the selected managed capability."
     )
 
     surfaces_block = _format_pack_surfaces(capability_packs)
@@ -338,7 +353,7 @@ def _build_hosted_context_body(capability_packs: list[Any], operator_contracts: 
     return "\n\n".join(parts)
 
 
-def inject_hosted_capabilities_context(
+def inject_managed_capabilities_context(
     agent: Any,
     messages: list[dict[str, Any]],
 ) -> None:
@@ -346,7 +361,7 @@ def inject_hosted_capabilities_context(
     prompt middleware function for AppPlanAgent.
 
     Reads ``capability_packs`` from context_variables. No-ops when the list is
-    null or empty (OSS mode). Injects [HOSTED CAPABILITIES CONTEXT] when packs
+    null or empty (OSS mode). Injects [MANAGED CAPABILITIES CONTEXT] when packs
     are present.
     """
     agent_name = getattr(agent, "name", "")
@@ -362,27 +377,27 @@ def inject_hosted_capabilities_context(
         if _is_empty(capability_packs):
             return
 
-        body = _build_hosted_context_body(capability_packs, operator_contracts)  # type: ignore[arg-type]
-        update_agent_section(agent, _HOSTED_CAP_HEADER, body)
+        body = _build_managed_context_body(capability_packs, operator_contracts)  # type: ignore[arg-type]
+        update_agent_section(agent, _MANAGED_CAP_HEADER, body)
 
         pack_ids = [
             (p.get("id") or p.get("pack_id") or "?") if isinstance(p, dict) else str(p)
             for p in capability_packs  # type: ignore[union-attr]
         ]
         logger.info(
-            "[%s] Injected hosted capabilities context (packs: %s)",
+            "[%s] Injected managed capabilities context (packs: %s)",
             agent_name,
             ", ".join(pack_ids),
         )
 
     except Exception as exc:
         logger.error(
-            "[%s] Failed to inject hosted capabilities context: %s",
+            "[%s] Failed to inject managed capabilities context: %s",
             agent_name,
             exc,
         )
 
 
-__all__ = ["inject_hosted_capabilities_context"]
+__all__ = ["inject_managed_capabilities_context"]
 
 

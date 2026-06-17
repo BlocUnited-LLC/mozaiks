@@ -1,28 +1,28 @@
 """
-Manual smoke script: AppPlanAgent hosted-wallet planning.
+Manual smoke script: AppPlanAgent managed-wallet planning.
 
 Usage:
     cd mozaiks
-    python scripts/smoke_appplan_hosted_wallet.py
-    python scripts/smoke_appplan_hosted_wallet.py --save-fixture
-    python scripts/smoke_appplan_hosted_wallet.py --model gpt-4o
+    python scripts/smoke_appplan_managed_wallet.py
+    python scripts/smoke_appplan_managed_wallet.py --save-fixture
+    python scripts/smoke_appplan_managed_wallet.py --model gpt-4o
 
 What it does:
     1. Builds AppPlanAgent system prompt from agents.yaml.
     2. Injects [FILE CONTRACTS CONTEXT] via hook_file_contract_context.
-    3. Injects [HOSTED CAPABILITIES CONTEXT] via hook_hosted_capabilities_context.
+    3. Injects [MANAGED CAPABILITIES CONTEXT] via hook_managed_capabilities_context.
     4. Calls OpenAI with a creator-dashboard user request.
     5. Parses the AppBuildPlan JSON output.
     6. Validates with app_build_plan.py.
-    7. Checks plan shape: hosted_pack entry, adapter task, facade module, page binding.
+    7. Checks plan shape: managed_capability entry, adapter task, facade module, page binding.
     8. Reports results. Exits 0 on success, 1 on failure.
 
---save-fixture  Write output to tests/fixtures/appplan_hosted_wallet_output.json
+--save-fixture  Write output to tests/fixtures/appplan_managed_wallet_output.json
                 for use by the pytest fixture-replay test.
 
 Environment:
     OPENAI_API_KEY     Required.
-    DEFAULT_LLM_MODEL  Override model (default: gpt-5-nano).
+    APPPLAN_SMOKE_MODEL  Override model (default: gpt-5-nano).
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ _TOOLS_DIR = _REPO_ROOT / "factory_app" / "workflows" / "AppGenerator" / "tools"
 _FIXTURES_DIR = _REPO_ROOT / "tests" / "fixtures"
 
 # ---------------------------------------------------------------------------
-# Hosted wallet context
+# Managed wallet context
 # ---------------------------------------------------------------------------
 
 _RUNTIME_CAPABILITIES = [
@@ -53,14 +53,13 @@ _RUNTIME_CAPABILITIES = [
     "page_primitives",
     "websocket_transport",
     "notifications",
-    "hosted_wallet",
 ]
 
-_AVAILABLE_HOSTED_PACKS = [
+_AVAILABLE_MANAGED_CAPABILITIES = [
     {
         "id": "wallet",
         "label": "Wallet",
-        "capability_source": "hosted_pack",
+        "capability_source": "managed_capability",
         "status": "active",
         "capabilities": [
             {"capability_id": "wallet.view"},
@@ -73,7 +72,7 @@ _AVAILABLE_HOSTED_PACKS = [
 _USER_REQUEST = (
     "Build a creator dashboard app where creators can view their wallet balance, "
     "connect Stripe, request payouts, and see recent payout activity. "
-    "Use the hosted wallet capability if available."
+    "Use the managed wallet capability if available."
 )
 
 # ---------------------------------------------------------------------------
@@ -112,8 +111,9 @@ def _build_agent_system_prompt(agent_name: str) -> str:
     with open(_AGENTS_YAML, encoding="utf-8") as f:
         agents = yaml.safe_load(f)
 
+    agents = agents.get("agents") if isinstance(agents, dict) else agents
     if not isinstance(agents, list):
-        raise ValueError(f"agents.yaml root is not a list: {type(agents)}")
+        raise ValueError(f"agents.yaml must contain an agents list: {type(agents)}")
 
     for agent in agents:
         if not isinstance(agent, dict) or agent.get("name") != agent_name:
@@ -135,11 +135,7 @@ def _build_agent_system_prompt(agent_name: str) -> str:
 
 
 def _apply_hooks(agent: _FakeAgent) -> None:
-    """Apply file_contract and hosted_capabilities hooks to the fake agent."""
-    tools_path = str(_TOOLS_DIR)
-    if tools_path not in sys.path:
-        sys.path.insert(0, tools_path)
-
+    """Apply file_contract and managed_capabilities hooks to the fake agent."""
     # File contracts context hook
     fc_hook = _load_module(
         _TOOLS_DIR / "hook_file_contract_context.py",
@@ -147,12 +143,12 @@ def _apply_hooks(agent: _FakeAgent) -> None:
     )
     fc_hook.inject_cookie_cutter_contracts_context(agent, [])
 
-    # Hosted capabilities context hook
+    # Managed capabilities context hook
     hc_hook = _load_module(
-        _TOOLS_DIR / "hook_hosted_capabilities_context.py",
-        f"smoke_hook_hosted_capabilities.{id(agent)}",
+        _TOOLS_DIR / "hook_managed_capabilities_context.py",
+        f"smoke_hook_managed_capabilities.{id(agent)}",
     )
-    hc_hook.inject_hosted_capabilities_context(agent, [])
+    hc_hook.inject_managed_capabilities_context(agent, [])
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -192,15 +188,17 @@ def _call_openai(system_message: str, user_message: str, model: str) -> str:
         raise RuntimeError("OPENAI_API_KEY environment variable not set")
 
     client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
+    request: dict[str, Any] = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
         ],
-        temperature=0.1,
-        timeout=120,
-    )
+        "timeout": 120,
+    }
+    if not model.startswith("gpt-5"):
+        request["temperature"] = 0.1
+    response = client.chat.completions.create(**request)
     return response.choices[0].message.content
 
 
@@ -237,7 +235,7 @@ def _check_plan_shape(plan: dict[str, Any]) -> list[str]:
     capability_packs = plan.get("capability_packs") or []
     build_tasks = plan.get("build_tasks") or []
 
-    # 1. Must have wallet as hosted_pack
+    # 1. Must have wallet as managed_capability
     wallet_pack = next(
         (p for p in capability_packs if isinstance(p, dict) and p.get("capability_pack_id") == "wallet"),
         None,
@@ -245,9 +243,9 @@ def _check_plan_shape(plan: dict[str, Any]) -> list[str]:
     if wallet_pack is None:
         violations.append("MISSING: wallet capability_pack entry")
     else:
-        if wallet_pack.get("capability_source") != "hosted_pack":
+        if wallet_pack.get("capability_source") != "managed_capability":
             violations.append(
-                f"DRIFT: wallet capability_source={wallet_pack.get('capability_source')!r}, expected hosted_pack"
+                f"DRIFT: wallet capability_source={wallet_pack.get('capability_source')!r}, expected managed_capability"
             )
         if wallet_pack.get("implementation_mode") not in ("external_integration", None):
             if wallet_pack.get("implementation_mode") != "external_integration":
@@ -258,7 +256,7 @@ def _check_plan_shape(plan: dict[str, Any]) -> list[str]:
     # 2. Must NOT have module_contract task for wallet
     for t in build_tasks:
         if isinstance(t, dict) and t.get("task_type") == "module_contract" and t.get("capability_pack_id") == "wallet":
-            violations.append(f"DRIFT: module_contract task exists for wallet (hosted_pack): {t.get('task_id')}")
+            violations.append(f"DRIFT: module_contract task exists for wallet (managed_capability): {t.get('task_id')}")
 
     # 3. Must have api_surface adapter task targeting wallet_client.py
     adapter_task: dict[str, Any] | None = next(
@@ -283,7 +281,7 @@ def _check_plan_shape(plan: dict[str, Any]) -> list[str]:
     if not facade_tasks:
         violations.append(
             "MISSING: module_contract task for app-owned facade module "
-            "(e.g. wallet_dashboard, creator_earnings — not wallet itself)"
+            "(e.g. wallet_dashboard, creator_earnings - not wallet itself)"
         )
 
     # 5. Must have page_bundle task
@@ -317,7 +315,7 @@ def _check_plan_shape(plan: dict[str, Any]) -> list[str]:
 
 def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     print("=" * 70)
-    print("AppPlanAgent Hosted-Wallet Planning Smoke Test")
+    print("AppPlanAgent Managed-Wallet Planning Smoke Test")
     print("=" * 70)
 
     # Step 1: Build system prompt
@@ -326,12 +324,13 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     print(f"      Base prompt: {len(base_prompt):,} chars, {base_prompt.count(chr(10)) + 1} lines")
 
     # Step 2: Apply hooks
-    print("[2/6] Applying hooks (file_contracts + hosted_capabilities)...")
+    print("[2/6] Applying hooks (file_contracts + managed_capabilities)...")
     agent = _FakeAgent(
         name="AppPlanAgent",
         context_variables={
             "runtime_capabilities": _RUNTIME_CAPABILITIES,
-            "available_hosted_packs": _AVAILABLE_HOSTED_PACKS,
+            "capability_packs": _AVAILABLE_MANAGED_CAPABILITIES,
+            "available_managed_capabilities": _AVAILABLE_MANAGED_CAPABILITIES,
             "pack_sources": [],
         },
     )
@@ -343,11 +342,11 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     if "[FILE CONTRACTS CONTEXT]" not in system_message:
         print("      ERROR: [FILE CONTRACTS CONTEXT] not injected")
         return 1
-    if "[HOSTED CAPABILITIES CONTEXT]" not in system_message:
-        print("      ERROR: [HOSTED CAPABILITIES CONTEXT] not injected")
+    if "[MANAGED CAPABILITIES CONTEXT]" not in system_message:
+        print("      ERROR: [MANAGED CAPABILITIES CONTEXT] not injected")
         return 1
-    print("      [FILE CONTRACTS CONTEXT] injected ✓")
-    print("      [HOSTED CAPABILITIES CONTEXT] injected ✓")
+    print("      [FILE CONTRACTS CONTEXT] injected")
+    print("      [MANAGED CAPABILITIES CONTEXT] injected")
 
     # Step 3: Call LLM
     print(f"\n[3/6] Calling OpenAI ({model})...")
@@ -355,7 +354,7 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     try:
         response_text = _call_openai(system_message, _USER_REQUEST, model)
     except Exception as exc:
-        print(f"      ERROR: LLM call failed — {exc}")
+        print(f"      ERROR: LLM call failed - {exc}")
         return 1
     print(f"      Response: {len(response_text):,} chars")
 
@@ -364,7 +363,7 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     try:
         raw = _extract_json(response_text)
     except Exception as exc:
-        print(f"      ERROR: JSON parse failed — {exc}")
+        print(f"      ERROR: JSON parse failed - {exc}")
         print(f"      Raw response (first 800 chars):\n{response_text[:800]}")
         return 1
 
@@ -384,10 +383,13 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
         if ctx_data.get("app_plan_ready") is not True:
             print(f"      ERROR: app_plan_ready={ctx_data.get('app_plan_ready')!r}, expected True")
             return 1
+        plan = ctx_data.get("app_build_plan") or plan
+        capability_packs = plan.get("capability_packs") or []
+        build_tasks = plan.get("build_tasks") or []
         print(f"      {result_msg}")
-        print("      Validation: PASSED ✓")
+        print("      Validation: PASSED")
     except Exception as exc:
-        print(f"      Validation: FAILED — {exc}")
+        print(f"      Validation: FAILED - {exc}")
         return 1
 
     # Step 6: Shape checks
@@ -413,17 +415,17 @@ def run(*, save_fixture: bool = False, model: str = "gpt-5-nano") -> int:
     if violations:
         print(f"\n  VIOLATIONS ({len(violations)}):")
         for v in violations:
-            print(f"    ✗ {v}")
+            print(f"    FAIL: {v}")
         return 1
 
-    print("\n  All shape checks passed ✓")
+    print("\n  All shape checks passed")
 
     # Optionally save fixture
     if save_fixture:
         _FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
-        fixture_path = _FIXTURES_DIR / "appplan_hosted_wallet_output.json"
+        fixture_path = _FIXTURES_DIR / "appplan_managed_wallet_output.json"
         fixture_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
-        print(f"\n  Fixture saved → {fixture_path}")
+        print(f"\n  Fixture saved: {fixture_path}")
         print("  Commit this file for CI fixture-replay tests.")
 
     print("\n" + "=" * 70)
@@ -440,19 +442,19 @@ def main() -> int:
         pass
 
     parser = argparse.ArgumentParser(
-        description="AppPlanAgent hosted-wallet planning smoke test",
+        description="AppPlanAgent managed-wallet planning smoke test",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
         "--save-fixture",
         action="store_true",
-        help="Save plan output to tests/fixtures/appplan_hosted_wallet_output.json for CI replay",
+        help="Save plan output to tests/fixtures/appplan_managed_wallet_output.json for CI replay",
     )
     parser.add_argument(
         "--model",
-        default=os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano"),
-        help="OpenAI model to use (default: gpt-5-nano or DEFAULT_LLM_MODEL env var)",
+        default=os.getenv("APPPLAN_SMOKE_MODEL", "gpt-5-nano"),
+        help="OpenAI model to use (default: gpt-5-nano or APPPLAN_SMOKE_MODEL env var)",
     )
     args = parser.parse_args()
     return run(save_fixture=args.save_fixture, model=args.model)

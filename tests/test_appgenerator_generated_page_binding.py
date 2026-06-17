@@ -3,7 +3,7 @@ Generated page binding validation tests.
 
 Verifies:
 1. Every page api_endpoint points to a module declared in the current build plan.
-2. Hosted-pack direct endpoints are rejected in generated page schemas.
+2. Managed-capability direct endpoints are rejected in generated page schemas.
 3. App-owned façade module endpoints are allowed.
 4. Page binding validator provides clear error messages for orphaned endpoints.
 5. Generated pages can only bind to modules in the current build scope.
@@ -18,14 +18,14 @@ class AppBuildPlan:
 
     def __init__(self):
         self.modules: set[str] = set()
-        self.hosted_packs: set[str] = set()
+        self.managed_capabilities: set[str] = set()
         self.facades: set[str] = set()
 
-    def declare_module(self, module_id: str, is_hosted_pack: bool = False) -> None:
+    def declare_module(self, module_id: str, is_managed_capability: bool = False) -> None:
         """Declare a module in this build plan."""
         self.modules.add(module_id)
-        if is_hosted_pack:
-            self.hosted_packs.add(module_id)
+        if is_managed_capability:
+            self.managed_capabilities.add(module_id)
         else:
             self.facades.add(module_id)
 
@@ -37,9 +37,9 @@ class AppBuildPlan:
         """Get app-owned façade modules."""
         return self.facades.copy()
 
-    def get_hosted_packs(self) -> set[str]:
-        """Get hosted pack references."""
-        return self.hosted_packs.copy()
+    def get_managed_capabilities(self) -> set[str]:
+        """Get managed capability references."""
+        return self.managed_capabilities.copy()
 
     def is_valid_endpoint(self, module_id: str) -> bool:
         """Check if module_id is declared in this plan."""
@@ -102,7 +102,7 @@ class TestGeneratedPageBindingValidation:
     def test_page_with_valid_endpoint_passes(self):
         """Page binding to a declared module passes validation."""
         plan = AppBuildPlan()
-        plan.declare_module("analytics_dashboard", is_hosted_pack=False)
+        plan.declare_module("analytics_dashboard", is_managed_capability=False)
 
         page = PageSchema("Analytics", "/analytics")
         page.add_endpoint("analytics_dashboard", "list_analytics")
@@ -128,8 +128,8 @@ class TestGeneratedPageBindingValidation:
     def test_error_message_lists_available_modules(self):
         """Error message shows available modules for debugging."""
         plan = AppBuildPlan()
-        plan.declare_module("dashboard", is_hosted_pack=False)
-        plan.declare_module("reports", is_hosted_pack=False)
+        plan.declare_module("dashboard", is_managed_capability=False)
+        plan.declare_module("reports", is_managed_capability=False)
 
         page = PageSchema("Analytics", "/analytics")
         page.add_endpoint("missing_module", "get_data")
@@ -145,8 +145,8 @@ class TestGeneratedPageBindingValidation:
     def test_page_multiple_endpoints_all_validated(self):
         """All endpoints on a page are validated."""
         plan = AppBuildPlan()
-        plan.declare_module("analytics_dashboard", is_hosted_pack=False)
-        plan.declare_module("reports", is_hosted_pack=False)
+        plan.declare_module("analytics_dashboard", is_managed_capability=False)
+        plan.declare_module("reports", is_managed_capability=False)
 
         page = PageSchema("Dashboard", "/dashboard")
         page.add_endpoint("analytics_dashboard", "list_items")
@@ -161,31 +161,31 @@ class TestGeneratedPageBindingValidation:
         assert "missing_module" in str(errors[0])
 
 
-class TestHostedPackBindingRejection:
-    """Verify hosted packs cannot be directly bound in generated pages."""
+class TestManagedCapabilityBindingRejection:
+    """Verify managed capabilities cannot be directly bound in generated pages."""
 
-    def test_direct_hosted_pack_endpoint_detected(self):
-        """Pages cannot bind directly to /api/modules/{hosted_pack_id}/*."""
+    def test_direct_managed_capability_endpoint_detected(self):
+        """Pages cannot bind directly to /api/modules/{managed_capability_id}/*."""
         plan = AppBuildPlan()
-        # Register hosted_analytics as a hosted pack, not a façade
-        plan.declare_module("hosted_analytics", is_hosted_pack=True)
+        # Register managed_analytics as a managed capability, not a façade
+        plan.declare_module("managed_analytics", is_managed_capability=True)
 
         # Create a page that tries to bind directly (violation)
         page = PageSchema("Analytics", "/analytics")
-        page.add_endpoint("hosted_analytics", "get_summary")
+        page.add_endpoint("managed_analytics", "get_summary")
 
-        # For validation purposes, we can reject direct hosted pack endpoints
-        # This would require the validator to know which modules are hosted packs
+        # For validation purposes, we can reject direct managed capability endpoints
+        # This would require the validator to know which modules are managed capabilities
         # For now, this is a conceptual test — the real guard would be at build time
         module_ids = page.extract_module_ids()
-        assert "hosted_analytics" in module_ids
-        # A stricter validator would reject hosted_analytics in page bindings
+        assert "managed_analytics" in module_ids
+        # A stricter validator would reject managed_analytics in page bindings
 
     def test_facade_module_endpoint_allowed(self):
         """Pages CAN bind to app-owned façade modules."""
         plan = AppBuildPlan()
         # Register the façade (app-owned)
-        plan.declare_module("analytics_dashboard", is_hosted_pack=False)
+        plan.declare_module("analytics_dashboard", is_managed_capability=False)
 
         page = PageSchema("Analytics", "/analytics")
         page.add_endpoint("analytics_dashboard", "get_summary")
@@ -229,10 +229,10 @@ class TestBuildPlanModuleScoping:
     def test_modules_isolated_by_plan(self):
         """Each build plan has its own module scope."""
         plan1 = AppBuildPlan()
-        plan1.declare_module("analytics", is_hosted_pack=False)
+        plan1.declare_module("analytics", is_managed_capability=False)
 
         plan2 = AppBuildPlan()
-        plan2.declare_module("reports", is_hosted_pack=False)
+        plan2.declare_module("reports", is_managed_capability=False)
 
         # Modules are not shared
         assert "analytics" not in plan2.get_modules()
@@ -241,10 +241,10 @@ class TestBuildPlanModuleScoping:
     def test_page_binds_within_plan_scope(self):
         """Pages can only bind to modules in their build plan."""
         plan_a = AppBuildPlan()
-        plan_a.declare_module("dashboard", is_hosted_pack=False)
+        plan_a.declare_module("dashboard", is_managed_capability=False)
 
         plan_b = AppBuildPlan()
-        plan_b.declare_module("reports", is_hosted_pack=False)
+        plan_b.declare_module("reports", is_managed_capability=False)
 
         page = PageSchema("Dashboard", "/dashboard")
         page.add_endpoint("dashboard", "get")
@@ -264,13 +264,13 @@ class TestBuildPlanModuleScoping:
 class TestFacadeBindingPattern:
     """Realistic façade + page binding patterns."""
 
-    def test_facade_with_hosted_pack_reference(self):
-        """Façade module is in build plan; hosted pack is not."""
+    def test_facade_with_managed_capability_reference(self):
+        """Façade module is in build plan; managed capability is not."""
         plan = AppBuildPlan()
         # Façade module: app-owned, declared in build
-        plan.declare_module("analytics_dashboard", is_hosted_pack=False)
-        # Hosted pack: NOT in build plan (external)
-        # (do not declare hosted_analytics)
+        plan.declare_module("analytics_dashboard", is_managed_capability=False)
+        # Managed capability: NOT in build plan (external)
+        # (do not declare managed_analytics)
 
         # Page binds to façade
         page = PageSchema("Analytics", "/analytics")
@@ -283,9 +283,9 @@ class TestFacadeBindingPattern:
     def test_multiple_facades_in_one_plan(self):
         """A build plan can have multiple façade modules."""
         plan = AppBuildPlan()
-        plan.declare_module("analytics_dashboard", is_hosted_pack=False)
-        plan.declare_module("reports_center", is_hosted_pack=False)
-        plan.declare_module("audit_log", is_hosted_pack=False)
+        plan.declare_module("analytics_dashboard", is_managed_capability=False)
+        plan.declare_module("reports_center", is_managed_capability=False)
+        plan.declare_module("audit_log", is_managed_capability=False)
 
         # Page binds to multiple façades
         page = PageSchema("Operations", "/operations")
@@ -297,17 +297,17 @@ class TestFacadeBindingPattern:
         is_valid, errors = validator.validate(page, plan)
         assert is_valid, f"Multiple façade endpoints should pass: {errors}"
 
-    def test_facade_module_vs_hosted_pack_distinction(self):
-        """Build plan distinguishes between façades and hosted packs."""
+    def test_facade_module_vs_managed_capability_distinction(self):
+        """Build plan distinguishes between façades and managed capabilities."""
         plan = AppBuildPlan()
-        plan.declare_module("analytics_dashboard", is_hosted_pack=False)  # Façade
-        plan.declare_module("hosted_analytics", is_hosted_pack=True)  # Hosted pack ref
+        plan.declare_module("analytics_dashboard", is_managed_capability=False)  # Façade
+        plan.declare_module("managed_analytics", is_managed_capability=True)  # Managed capability ref
 
         # Both are in modules, but can be distinguished
         facades = plan.get_facade_modules()
-        hosted = plan.get_hosted_packs()
+        hosted = plan.get_managed_capabilities()
 
         assert "analytics_dashboard" in facades
-        assert "hosted_analytics" in hosted
+        assert "managed_analytics" in hosted
         assert "analytics_dashboard" not in hosted
 

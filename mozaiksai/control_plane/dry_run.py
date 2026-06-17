@@ -164,7 +164,7 @@ def neutral_manifest() -> list[dict[str, Any]]:
         {"path": "config/integrations.json"},
         {"path": "docs/integrations.md"},
         {"path": "services/integrations/analytics_provider_client.py"},
-        {"path": "services/integrations/hosted_analytics_client.py"},
+        {"path": "services/integrations/managed_analytics_client.py"},
         {"path": "modules/projects/module.yaml"},
         {"path": "modules/projects/contracts/events.yaml"},
         {"path": "modules/projects/backend/handler.py"},
@@ -251,8 +251,8 @@ def infer_refinement_lane(
         or any(term in request_text for term in ("data model", "database", "migration", "migrate", "required field"))
     ):
         return "data_model_migration"
-    if re.search(r"(?<![a-z0-9])hosted(?![a-z0-9])", text):
-        return "hosted_capability_change"
+    if re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text) or "provider-backed" in text:
+        return "managed_capability_change"
     if any(term in text for term in ("connector", "integration", "adapter")):
         return "integration"
     if change_class == ChangeClass.CORE.value:
@@ -317,7 +317,7 @@ def _path_text(paths: list[str]) -> str:
 def _has_ui_surface_impact(*, lane: str | None, paths: list[str], families: list[str]) -> bool:
     text = _path_text(paths)
     return (
-        lane in {"experience_design", "ui_patch", "hosted_capability_change"}
+        lane in {"experience_design", "ui_patch", "managed_capability_change"}
         or "experience_spec" in families
         or "ui/" in text
         or "route_manifest" in text
@@ -328,7 +328,7 @@ def _has_ui_surface_impact(*, lane: str | None, paths: list[str], families: list
 def _has_module_contract_impact(*, lane: str | None, paths: list[str]) -> bool:
     text = _path_text(paths)
     return (
-        lane in {"feature_addition", "hosted_capability_change"}
+        lane in {"feature_addition", "managed_capability_change"}
         or "modules/" in text
         or "/contracts/" in text
         or "/backend/handler.py" in text
@@ -368,9 +368,13 @@ def _has_database_review_impact(
     )
 
 
-def _has_hosted_facade_impact(*, lane: str | None, paths: list[str], scope_summary: str) -> bool:
+def _has_managed_facade_impact(*, lane: str | None, paths: list[str], scope_summary: str) -> bool:
     text = " ".join([_path_text(paths), str(scope_summary or "").lower()])
-    return lane == "hosted_capability_change" or re.search(r"(?<![a-z0-9])hosted(?![a-z0-9])", text) is not None
+    return (
+        lane == "managed_capability_change"
+        or re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text) is not None
+        or "provider-backed" in text
+    )
 
 
 def build_validation_plan(
@@ -398,7 +402,7 @@ def build_validation_plan(
         paths=affected_bundle_paths,
         scope_summary=scope_summary,
     )
-    hosted_required = _has_hosted_facade_impact(
+    managed_facade_required = _has_managed_facade_impact(
         lane=refinement_lane,
         paths=affected_bundle_paths,
         scope_summary=scope_summary,
@@ -442,13 +446,13 @@ def build_validation_plan(
                 reason="Required when data contract, migrations, or destructive data changes are in scope.",
             )
         )
-    if hosted_required:
+    if managed_facade_required:
         items.append(
             RefinementValidationItem(
-                id="hosted_facade_validation",
-                label="Hosted capability facade validation",
+                id="managed_facade_validation",
+                label="Managed capability facade validation",
                 required=True,
-                reason="Required when hosted capability adapter, facade module, or page paths are in scope.",
+                reason="Required when managed capability adapter, facade module, or page paths are in scope.",
             )
         )
     return RefinementValidationPlan(items=items)

@@ -505,7 +505,7 @@ def test_app_build_plan_tool_rejects_build_time_prompting_root() -> None:
                     "initial_agent": "ConfigMiddlewareAgent",
                     "description": "Generate hosted build context.",
                     "initial_message": "Generate product-owned prompt context.",
-                    "owned_paths": ["build_context/hosted_payments/context.yaml"],
+                    "owned_paths": ["build_context/managed_payments/context.yaml"],
                     "depends_on": [],
                     "acceptance_criteria": ["Context exists"],
                 }
@@ -780,7 +780,7 @@ def test_app_build_plan_tool_accepts_service_foundation_provider_adapter_lane() 
     assert task["owned_paths"] == ["services/adapters/search/vector_provider.py"]
 
 
-def test_app_build_plan_tool_rejects_hosted_pack_backend_adapter_lane() -> None:
+def test_app_build_plan_tool_rejects_managed_capability_backend_adapter_lane() -> None:
     module = _load_module(
         "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
         "tests.app_build_plan_tool_hosted_backend_adapter_reject",
@@ -794,7 +794,7 @@ def test_app_build_plan_tool_rejects_hosted_pack_backend_adapter_lane() -> None:
             "surface_kind": "external_integration",
             "execution_target": "AppGenerator",
             "initial_agent": "ConfigMiddlewareAgent",
-            "description": "Invalid hosted provider adapter.",
+            "description": "Invalid provider-owned adapter.",
             "initial_message": "Do not do this.",
             "owned_paths": ["services/adapters/wallet/provider.py"],
             "depends_on": [],
@@ -804,12 +804,12 @@ def test_app_build_plan_tool_rejects_hosted_pack_backend_adapter_lane() -> None:
     plan["capability_packs"] = [
         {
             "capability_pack_id": "wallet",
-            "capability_source": "hosted_pack",
+            "capability_source": "managed_capability",
             "implementation_mode": "external_integration",
         }
     ]
 
-    with pytest.raises(ValueError, match="Hosted pack adapters must be thin API clients"):
+    with pytest.raises(ValueError, match="Managed capability adapters must be thin API clients"):
         module.app_build_plan(AppBuildPlan=plan, context_variables=_Context())
 
 

@@ -162,7 +162,7 @@ Recommended lanes:
 | `integration` | `feature` | External connector or API readiness change |
 | `conceptual_reframe` | `core` | Product purpose, audience, or value proposition change |
 | `architecture_replan` | `core` or high-impact `feature` | Module, workflow, data ownership, or tenancy model replan |
-| `hosted_capability_change` | `feature` | Provider-neutral hosted capability pack or façade boundary change |
+| `managed_capability_change` | `feature` | Provider-neutral managed capability pack or façade boundary change |
 | `data_model_migration` | `feature` or `core` | Persistence shape change requiring data contract and migration planning |
 
 Examples:
@@ -171,7 +171,7 @@ Examples:
 - "Replace dashboard experience" -> `design` + `experience_design`
 - "Add external analytics connector" -> `feature` + `integration`
 - "Turn a marketplace into a subscription community" -> `core` + `conceptual_reframe`
-- "Add hosted analytics pack" -> `feature` + `hosted_capability_change`
+- "Add managed analytics capability" -> `feature` + `managed_capability_change`
 - "Change project schema" -> `feature` or `core` + `data_model_migration`
 
 Early implementation may only document or persist `refinement_lane`; routing can
@@ -221,24 +221,24 @@ policy:
 
 These module paths are deterministic review and scoping hints. They do not
 replace module contract validation, and they do not yet model database
-migration, hosted capability façade, or integration readiness impact. Future
+migration, managed capability façade, or integration readiness impact. Future
 slices will add those path families separately.
 
-The third supported mapping is hosted capability façade impact for
-`app_bundle` refinements. Generated apps consume hosted capabilities through an
+The third supported mapping is managed capability façade impact for
+`app_bundle` refinements. Generated apps consume managed capabilities through an
 app-owned boundary:
 
 ```text
-hosted_pack
+managed_capability
   -> app/services/integrations/{pack_id}_client.py
   -> modules/{facade_module_id}/
   -> ui/pages/*.yaml bound to /api/modules/{facade_module_id}/...
 ```
 
-When the request refers to a hosted capability, hosted pack, external adapter,
-integration client, façade module, provider-backed surface, managed capability,
+When the request refers to a managed capability, external adapter,
+integration client, façade module, provider-backed surface,
 external service, or neutral provider category such as analytics, reporting,
-audit, or notification, the router can add hosted capability path hints:
+audit, or notification, the router can add managed capability path hints:
 
 - adapter clients under `app/services/integrations/*_client.py`
 - app-owned façade module files under `modules/{facade_module_id}/`
@@ -247,12 +247,12 @@ audit, or notification, the router can add hosted capability path hints:
 - `ui/pages/*.yaml` as a conservative hint only when the request is UI-facing
   and exact page binding is not available
 
-Generated apps must not refine hosted provider internals. Hosted provider
+Generated apps must not refine provider-owned internals. Provider
 implementation remains outside the generated app artifact bundle. The app-owned
 façade module and adapter client are the generated app refinement surfaces.
 
 The fourth supported mapping is external integration impact for `app_bundle`
-refinements. External integrations are distinct from hosted capabilities:
+refinements. External integrations are distinct from managed capabilities:
 
 ```text
 AppBuildPlan.external_integrations / task integration_needs
@@ -1005,7 +1005,7 @@ Current lane rules are:
   evidence before `repo.py`, `schemas.py`, or `policy.py` can be promoted.
 - `conceptual_reframe` and `architecture_replan` block direct file promotion
   and require a replan.
-- `hosted_capability_change` only permits app-owned adapter, facade, or page
+- `managed_capability_change` only permits app-owned adapter, facade, or page
   paths; hosted/provider internals are blocked.
 - `integration` permits adapter/client and app-owned module files, but never
   secrets or credential material.
@@ -1027,7 +1027,7 @@ selected lane. Current validation item ids are:
 | `integration_readiness_validation` | Connector, adapter, or integration files are in scope |
 | `data_contract_validation` | Data contract artifacts are in scope |
 | `migration_plan_validation` | Migration plan artifacts or destructive database changes are in scope |
-| `hosted_facade_boundary_validation` | Hosted capability adapter, facade module, or page paths are in scope |
+| `managed_facade_boundary_validation` | Managed capability adapter, facade module, or page paths are in scope |
 
 ### Validation Evidence
 

@@ -295,7 +295,7 @@ that modules, workflows, or host contracts call. Service files must not own
 durable app facts, lifecycle transitions, user-facing actions, permissions,
 emitted events, or persistence authority.
 
-Use `services/integrations/{pack_id}_client.py` for hosted-pack API clients and
+Use `services/integrations/{pack_id}_client.py` for managed-capability API clients and
 generate an app-owned facade module when pages or actions need that capability.
 Use `services/adapters/{area}/{provider}.py` for provider mechanics such as SDK
 calls, protocol translation, signing, retries, and response normalization only

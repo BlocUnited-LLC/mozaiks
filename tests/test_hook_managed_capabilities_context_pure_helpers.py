@@ -1,6 +1,6 @@
 """
 Pure helper unit tests for:
-  factory_app/workflows/AppGenerator/tools/hook_hosted_capabilities_context.py
+  factory_app/workflows/AppGenerator/tools/hook_managed_capabilities_context.py
 
 Covers:
   _is_empty:
@@ -12,7 +12,7 @@ Covers:
     - string (non-None) → False
     - integer 0 → False (not None/list/dict)
 
-  _format_hosted_packs:
+  _format_managed_capabilities:
     - empty packs list → header only
     - pack with id and display_name → rendered with both
     - pack without display_name → falls back to id
@@ -79,10 +79,10 @@ Covers:
 """
 from __future__ import annotations
 
-from factory_app.workflows.AppGenerator.tools.hook_hosted_capabilities_context import (
+from factory_app.workflows.AppGenerator.tools.hook_managed_capabilities_context import (
     _format_contract_list_items,
     _format_facade_contracts,
-    _format_hosted_packs,
+    _format_managed_capabilities,
     _format_operator_contracts,
     _format_pack_branding,
     _format_pack_supported_domains,
@@ -122,49 +122,49 @@ class TestIsEmpty:
 
 
 # ---------------------------------------------------------------------------
-# 2. _format_hosted_packs
+# 2. _format_managed_capabilities
 # ---------------------------------------------------------------------------
 
-class TestFormatHostedPacks:
+class TestFormatManagedCapabilities:
     def test_header_always_present(self):
-        result = _format_hosted_packs([])
-        assert "Hosted capability packs available" in result
+        result = _format_managed_capabilities([])
+        assert "Managed capabilities available" in result
 
     def test_pack_id_rendered(self):
-        result = _format_hosted_packs([{"id": "stripe_pay"}])
+        result = _format_managed_capabilities([{"id": "stripe_pay"}])
         assert "stripe_pay" in result
 
     def test_display_name_rendered(self):
-        result = _format_hosted_packs([{"id": "stripe_pay", "display_name": "Stripe Payments"}])
+        result = _format_managed_capabilities([{"id": "stripe_pay", "display_name": "Stripe Payments"}])
         assert "Stripe Payments" in result
 
     def test_display_name_fallback_to_id(self):
-        result = _format_hosted_packs([{"id": "stripe_pay"}])
+        result = _format_managed_capabilities([{"id": "stripe_pay"}])
         assert "stripe_pay" in result
 
     def test_description_first_line_rendered(self):
-        result = _format_hosted_packs([{"id": "pay", "description": "Payment integration\nExtra line"}])
+        result = _format_managed_capabilities([{"id": "pay", "description": "Payment integration\nExtra line"}])
         assert "Payment integration" in result
         assert "Extra line" not in result
 
     def test_capabilities_listed(self):
         caps = [{"capability_id": "payments.charge"}, {"capability_id": "payments.refund"}]
-        result = _format_hosted_packs([{"id": "pay", "capabilities": caps}])
+        result = _format_managed_capabilities([{"id": "pay", "capabilities": caps}])
         assert "payments.charge" in result
 
     def test_capabilities_capped_at_four(self):
         caps = [{"capability_id": f"cap_{i}"} for i in range(6)]
-        result = _format_hosted_packs([{"id": "pay", "capabilities": caps}])
+        result = _format_managed_capabilities([{"id": "pay", "capabilities": caps}])
         assert "cap_3" in result
         assert "cap_4" not in result
 
     def test_non_dict_pack_rendered_as_string(self):
-        result = _format_hosted_packs(["string_pack"])
+        result = _format_managed_capabilities(["string_pack"])
         assert "string_pack" in result
 
     def test_capability_source_label_in_line(self):
-        result = _format_hosted_packs([{"id": "pay"}])
-        assert "hosted_pack" in result
+        result = _format_managed_capabilities([{"id": "pay"}])
+        assert "managed_capability" in result
 
 
 # ---------------------------------------------------------------------------

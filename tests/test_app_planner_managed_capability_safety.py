@@ -1,14 +1,14 @@
 """
-AppPlanAgent hosted-pack safety tests.
+AppPlanAgent managed-capability safety tests.
 
 Verifies:
 1. AppCapabilityPack.capability_source is correctly defined in structured_outputs.yaml.
 2. app_build_plan.py preserves capability_source through normalization/caching.
-3. app_build_plan.py rejects module_contract build tasks for hosted_pack entries.
-4. app_build_plan.py accepts hosted_pack entries with no module_contract build task.
+3. app_build_plan.py rejects module_contract build tasks for managed_capability entries.
+4. app_build_plan.py accepts managed_capability entries with no module_contract build task.
 5. generated_module packs still produce module_contract tasks normally.
-6. agents.yaml contains the explicit hosted_pack rules.
-7. hook_hosted_capabilities_context.py injects the planning rule and taxonomy.
+6. agents.yaml contains the explicit managed_capability rules.
+7. hook_managed_capabilities_context.py injects the planning rule and taxonomy.
 """
 from __future__ import annotations
 
@@ -82,15 +82,15 @@ _MINIMAL_PLAN_BASE: dict = {
     "generation_order": [],
 }
 
-_HOSTED_PACK: dict = {
+_MANAGED_CAPABILITY: dict = {
     "capability_pack_id": "wallet",
     "surface_id": "wallet_surface",
     "surface_kind": "external_integration",
     "pack_type": "billing_pack",
     "label": "Wallet",
-    "summary": "Hosted wallet pack.",
+    "summary": "Managed wallet pack.",
     "implementation_mode": "external_integration",
-    "capability_source": "hosted_pack",
+    "capability_source": "managed_capability",
 }
 
 _GENERATED_PACK: dict = {
@@ -104,10 +104,10 @@ _GENERATED_PACK: dict = {
     "capability_source": "generated_module",
 }
 
-_HOSTED_PACK_MODULE_CONTRACT_TASK: dict = {
+_MANAGED_CAPABILITY_MODULE_CONTRACT_TASK: dict = {
     "task_id": "task_wallet_contract",
     "task_type": "module_contract",
-    "capability_pack_id": "wallet",  # hosted_pack — must be rejected
+    "capability_pack_id": "wallet",  # managed_capability — must be rejected
     "surface_id": "wallet_surface",
     "surface_kind": "module",
     "execution_target": "AppGenerator",
@@ -155,12 +155,12 @@ class TestCapabilitySourceSchema:
         assert cs.get("type") == "optional_str", \
             f"capability_source.type should be optional_str, got {cs.get('type')!r}"
 
-    def test_capability_source_description_covers_hosted_pack(self):
+    def test_capability_source_description_covers_managed_capability(self):
         models = _read_yaml(
             "factory_app/workflows/AppGenerator/structured_outputs.yaml"
         )["models"]
         description = models["AppCapabilityPack"]["fields"]["capability_source"].get("description", "")
-        assert "hosted_pack" in description
+        assert "managed_capability" in description
         assert "host_universal" in description
         assert "framework_pack" in description
         assert "generated_module" in description
@@ -191,7 +191,7 @@ class TestCapabilitySourceSchema:
         )["models"]
         task_fields = models["AppBuildTask"]["fields"]
         assert "capability_pack_id" in task_fields
-        # Can be null (hosted packs have no task) or str
+        # Can be null (managed capabilities have no task) or str
         variants = set(task_fields["capability_pack_id"]["variants"])
         assert "str" in variants
         assert "null" in variants
@@ -201,41 +201,41 @@ class TestCapabilitySourceSchema:
 # 2. app_build_plan.py normalization tests
 # ---------------------------------------------------------------------------
 
-class TestAppBuildPlanHostedPackNormalization:
+class TestAppBuildPlanManagedCapabilityNormalization:
     @pytest.fixture(autouse=True)
     def _module(self):
         self.mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
-            "tests.app_build_plan_hosted_pack_safety",
+            "tests.app_build_plan_managed_capability_safety",
         )
 
-    def test_hosted_pack_capability_source_preserved(self):
+    def test_managed_capability_capability_source_preserved(self):
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK],
+                "capability_packs": [_MANAGED_CAPABILITY],
             },
             context_variables=ctx,
         )
         cached = ctx.data["app_build_plan"]
-        assert cached["capability_packs"][0]["capability_source"] == "hosted_pack"
+        assert cached["capability_packs"][0]["capability_source"] == "managed_capability"
 
-    def test_context_selected_hosted_pack_source_is_normalized(self):
+    def test_context_selected_managed_capability_source_is_normalized(self):
         ctx = _Context(
             capability_packs=[
                 {
                     "id": "mozaikspay",
                     "display_name": "MozaiksPay",
-                    "capability_source": "hosted_pack",
+                    "capability_source": "managed_capability",
                     "implementation_mode": "external_integration",
                 }
             ],
-            available_hosted_packs=[
+            available_managed_capabilities=[
                 {
                     "id": "mozaikspay",
                     "display_name": "MozaiksPay",
-                    "capability_source": "hosted_pack",
+                    "capability_source": "managed_capability",
                     "implementation_mode": "external_integration",
                 }
             ],
@@ -250,7 +250,7 @@ class TestAppBuildPlanHostedPackNormalization:
                         "surface_kind": "external_integration",
                         "pack_type": "billing_pack",
                         "label": "MozaiksPay",
-                        "summary": "Hosted billing.",
+                        "summary": "Managed billing.",
                         "implementation_mode": "external_integration",
                     }
                 ],
@@ -258,16 +258,16 @@ class TestAppBuildPlanHostedPackNormalization:
             context_variables=ctx,
         )
         normalized = ctx.data["app_build_plan"]["capability_packs"][0]
-        assert normalized["capability_source"] == "hosted_pack"
+        assert normalized["capability_source"] == "managed_capability"
         assert normalized["implementation_mode"] == "external_integration"
 
-    def test_hosted_pack_with_no_module_contract_task_is_accepted(self):
-        """A hosted_pack entry with no build task at all must be accepted."""
+    def test_managed_capability_with_no_module_contract_task_is_accepted(self):
+        """A managed_capability entry with no build task at all must be accepted."""
         ctx = _Context()
         result = self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK],
+                "capability_packs": [_MANAGED_CAPABILITY],
                 "build_tasks": [],  # No module_contract for wallet — correct
             },
             context_variables=ctx,
@@ -289,13 +289,13 @@ class TestAppBuildPlanHostedPackNormalization:
         )
         assert "Build tasks: 1" in result
 
-    def test_mixed_hosted_and_generated_packs_accepted_when_only_generated_has_task(self):
-        """Wallet (hosted) has no task; orders (generated_module) has module_contract — valid."""
+    def test_mixed_managed_and_generated_packs_accepted_when_only_generated_has_task(self):
+        """Wallet (managed) has no task; orders (generated_module) has module_contract — valid."""
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK, _GENERATED_PACK],
+                "capability_packs": [_MANAGED_CAPABILITY, _GENERATED_PACK],
                 "build_tasks": [_GENERATED_MODULE_CONTRACT_TASK],
             },
             context_variables=ctx,
@@ -305,7 +305,7 @@ class TestAppBuildPlanHostedPackNormalization:
         assert len(cached["build_tasks"]) == 1
 
     def test_capability_packs_without_capability_source_not_affected(self):
-        """Packs with no capability_source are not treated as hosted_pack."""
+        """Packs with no capability_source are not treated as managed_capability."""
         ctx = _Context()
         pack_no_source = {
             "capability_pack_id": "crm",
@@ -329,11 +329,11 @@ class TestAppBuildPlanHostedPackNormalization:
         )
         assert ctx.data["app_build_plan"]["capability_packs"][0]["capability_pack_id"] == "crm"
 
-    def test_multi_hosted_facades_depend_on_their_matching_adapters(self):
-        """Multiple hosted packs must wire each facade to its own adapter task."""
+    def test_multi_managed_facades_depend_on_their_matching_adapters(self):
+        """Multiple managed capabilities must wire each facade to its own adapter task."""
         ctx = _Context()
         notifications_pack = {
-            **_HOSTED_PACK,
+            **_MANAGED_CAPABILITY,
             "capability_pack_id": "notifications",
             "surface_id": "notifications_surface",
             "label": "Notifications",
@@ -345,7 +345,7 @@ class TestAppBuildPlanHostedPackNormalization:
             "surface_kind": "external_integration",
             "execution_target": "AppGenerator",
             "initial_agent": "ControllerAgent",
-            "initial_message": "Generate hosted wallet adapter.",
+            "initial_message": "Generate managed wallet adapter.",
             "owned_paths": ["services/integrations/wallet_client.py"],
             "depends_on": [],
         }
@@ -356,7 +356,7 @@ class TestAppBuildPlanHostedPackNormalization:
             "surface_kind": "external_integration",
             "execution_target": "AppGenerator",
             "initial_agent": "ControllerAgent",
-            "initial_message": "Generate hosted notifications adapter.",
+            "initial_message": "Generate managed notifications adapter.",
             "owned_paths": ["services/integrations/notifications_client.py"],
             "depends_on": [],
         }
@@ -385,7 +385,7 @@ class TestAppBuildPlanHostedPackNormalization:
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK, notifications_pack],
+                "capability_packs": [_MANAGED_CAPABILITY, notifications_pack],
                 "build_tasks": [
                     wallet_adapter,
                     notifications_adapter,
@@ -549,24 +549,24 @@ class TestAppBuildPlanHostedPackNormalization:
 
 
 # ---------------------------------------------------------------------------
-# 3. Negative test: hosted_pack + module_contract → ValueError
+# 3. Negative test: managed_capability + module_contract → ValueError
 # ---------------------------------------------------------------------------
 
-class TestAppBuildPlanHostedPackModuleContractRejection:
+class TestAppBuildPlanManagedCapabilityModuleContractRejection:
     @pytest.fixture(autouse=True)
     def _module(self):
         self.mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
-            "tests.app_build_plan_hosted_module_contract_guard",
+            "tests.app_build_plan_managed_module_contract_guard",
         )
 
-    def test_rejects_module_contract_for_hosted_pack(self):
-        with pytest.raises(ValueError, match="hosted pack 'wallet'"):
+    def test_rejects_module_contract_for_managed_capability(self):
+        with pytest.raises(ValueError, match="managed capability 'wallet'"):
             self.mod.app_build_plan(
                 AppBuildPlan={
                     **_MINIMAL_PLAN_BASE,
-                    "capability_packs": [_HOSTED_PACK],
-                    "build_tasks": [_HOSTED_PACK_MODULE_CONTRACT_TASK],
+                    "capability_packs": [_MANAGED_CAPABILITY],
+                    "build_tasks": [_MANAGED_CAPABILITY_MODULE_CONTRACT_TASK],
                 },
                 context_variables=_Context(),
             )
@@ -576,25 +576,25 @@ class TestAppBuildPlanHostedPackModuleContractRejection:
             self.mod.app_build_plan(
                 AppBuildPlan={
                     **_MINIMAL_PLAN_BASE,
-                    "capability_packs": [_HOSTED_PACK],
-                    "build_tasks": [_HOSTED_PACK_MODULE_CONTRACT_TASK],
+                    "capability_packs": [_MANAGED_CAPABILITY],
+                    "build_tasks": [_MANAGED_CAPABILITY_MODULE_CONTRACT_TASK],
                 },
                 context_variables=_Context(),
             )
 
-    def test_rejects_investor_marketplace_hosted_pack_module_contract(self):
+    def test_rejects_investor_marketplace_managed_capability_module_contract(self):
         im_pack = {
-            **_HOSTED_PACK,
+            **_MANAGED_CAPABILITY,
             "capability_pack_id": "investor_marketplace",
             "label": "Investor Marketplace",
         }
         im_task = {
-            **_HOSTED_PACK_MODULE_CONTRACT_TASK,
+            **_MANAGED_CAPABILITY_MODULE_CONTRACT_TASK,
             "task_id": "task_im_contract",
             "capability_pack_id": "investor_marketplace",
             "owned_paths": ["modules/investor_marketplace/module.yaml"],
         }
-        with pytest.raises(ValueError, match="hosted pack 'investor_marketplace'"):
+        with pytest.raises(ValueError, match="managed capability 'investor_marketplace'"):
             self.mod.app_build_plan(
                 AppBuildPlan={
                     **_MINIMAL_PLAN_BASE,
@@ -605,12 +605,12 @@ class TestAppBuildPlanHostedPackModuleContractRejection:
             )
 
     def test_generated_module_not_blocked(self):
-        """generated_module packs must not be blocked even if a hosted_pack is also present."""
+        """generated_module packs must not be blocked even if a managed_capability is also present."""
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK, _GENERATED_PACK],
+                "capability_packs": [_MANAGED_CAPABILITY, _GENERATED_PACK],
                 "build_tasks": [_GENERATED_MODULE_CONTRACT_TASK],  # orders — ok
             },
             context_variables=ctx,
@@ -622,19 +622,19 @@ class TestAppBuildPlanHostedPackModuleContractRejection:
 # 4. agents.yaml static text checks
 # ---------------------------------------------------------------------------
 
-class TestAgentsYamlHostedPackRules:
+class TestAgentsYamlManagedCapabilityRules:
     @pytest.fixture(autouse=True)
     def _content(self):
         self._text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
 
-    def test_hosted_pack_rule_present(self):
-        assert "hosted_pack" in self._text
+    def test_managed_capability_rule_present(self):
+        assert "managed_capability" in self._text
 
-    def test_hosted_pack_no_module_contract_rule(self):
+    def test_managed_capability_no_module_contract_rule(self):
         # Exact rule from agents.yaml lines 153-154
         assert "Do NOT plan a `module_contract` build task for it" in self._text
 
-    def test_hosted_pack_external_integration_rule(self):
+    def test_managed_capability_external_integration_rule(self):
         assert "implementation_mode: external_integration" in self._text
 
     def test_host_universal_no_scaffold_rule(self):
@@ -680,41 +680,41 @@ def _load_hook():
     tools_path = str(_TOOLS_DIR)
     if tools_path not in sys.path:
         sys.path.insert(0, tools_path)
-    if "hook_hosted_capabilities_context" in sys.modules:
-        del sys.modules["hook_hosted_capabilities_context"]
-    import hook_hosted_capabilities_context as m
+    if "hook_managed_capabilities_context" in sys.modules:
+        del sys.modules["hook_managed_capabilities_context"]
+    import hook_managed_capabilities_context as m
     return m
 
 
-class TestHookHostedPackContextInjection:
+class TestHookManagedCapabilityContextInjection:
     @pytest.fixture(autouse=True)
     def _hook(self):
         self.hook = _load_hook()
 
-    def test_planning_rule_injected_when_hosted_packs_present(self):
+    def test_planning_rule_injected_when_managed_capabilities_present(self):
         agent = _FakeAgent("AppPlanAgent", context_variables={
             "capability_packs": [{"id": "wallet", "display_name": "Wallet"}],
         })
-        self.hook.inject_hosted_capabilities_context(agent, [])
+        self.hook.inject_managed_capabilities_context(agent, [])
         assert "module_contract" in agent.system_message
         assert "external_integration" in agent.system_message
 
-    def test_hosted_capabilities_context_header_present(self):
+    def test_managed_capabilities_context_header_present(self):
         agent = _FakeAgent("AppPlanAgent", context_variables={
-            "capability_packs": [{"id": "hosted_wallet"}],
+            "capability_packs": [{"id": "managed_wallet"}],
         })
-        self.hook.inject_hosted_capabilities_context(agent, [])
-        assert "[HOSTED CAPABILITIES CONTEXT]" in agent.system_message
+        self.hook.inject_managed_capabilities_context(agent, [])
+        assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message
 
     def test_taxonomy_covers_all_five_sources(self):
         agent = _FakeAgent("AppPlanAgent", context_variables={
             "capability_packs": [{"id": "module_execution"}],
         })
-        self.hook.inject_hosted_capabilities_context(agent, [])
+        self.hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "host_universal" in msg
         assert "framework_pack" in msg
-        assert "hosted_pack" in msg
+        assert "managed_capability" in msg
         assert "generated_module" in msg
         assert "external_adapter" in msg
 
@@ -722,7 +722,7 @@ class TestHookHostedPackContextInjection:
         agent = _FakeAgent("AppPlanAgent", context_variables={
             "capability_packs": None,
         })
-        self.hook.inject_hosted_capabilities_context(agent, [])
+        self.hook.inject_managed_capabilities_context(agent, [])
         assert agent.system_message == ""
 
     def test_pack_listed_in_injected_context(self):
@@ -733,7 +733,7 @@ class TestHookHostedPackContextInjection:
                 {"id": "investor_marketplace", "display_name": "Investor Marketplace"},
             ],
         })
-        self.hook.inject_hosted_capabilities_context(agent, [])
+        self.hook.inject_managed_capabilities_context(agent, [])
         assert "wallet" in agent.system_message
         assert "investor_marketplace" in agent.system_message
 
@@ -756,7 +756,7 @@ class TestCapabilityDirectoryProjection:
         assert any("SaaS" in signal or "plans" in signal.lower() for signal in billing_pack["intent_signals"])
         alternatives = {item["id"] for item in billing_pack["alternatives"]}
         assert {"stripe", "custom_payments_provider"} <= alternatives
-        # OSS catalog must not reference proprietary hosted packs
+        # OSS catalog must not reference proprietary managed capabilities
         assert "mozaikspay" not in entries
 
     def test_appgenerator_manifest_projects_capability_directory_to_appplanagent(self):
@@ -806,15 +806,15 @@ class TestCapabilityDirectoryProjection:
         assert "recommendation_rank: 1" in injected
         assert "stripe" in injected
         assert "custom_payments_provider" in injected
-        # OSS projection must not inject proprietary hosted pack names
+        # OSS projection must not inject proprietary managed capability names
         assert "mozaikspay" not in injected
 
 
 # ---------------------------------------------------------------------------
-# 6. Hosted adapter task validation tests
+# 6. Managed capability adapter task validation tests
 # ---------------------------------------------------------------------------
 
-_HOSTED_ADAPTER_TASK: dict = {
+_MANAGED_CAPABILITY_ADAPTER_TASK: dict = {
     "task_id": "task_wallet_adapter",
     "task_type": "api_surface",
     "capability_pack_id": "wallet",
@@ -822,33 +822,33 @@ _HOSTED_ADAPTER_TASK: dict = {
     "surface_kind": "external_integration",
     "execution_target": "AppGenerator",
     "initial_agent": "ControllerAgent",
-    "description": "Generate app-side adapter for hosted wallet capability.",
+    "description": "Generate app-side adapter for managed wallet capability.",
     "initial_message": "Generate a thin client in services/integrations/wallet_client.py.",
     "owned_paths": ["services/integrations/wallet_client.py"],
     "depends_on": [],
     "acceptance_criteria": [
         "Does not implement wallet internals",
-        "Calls hosted wallet API only",
+        "Calls managed wallet API only",
     ],
 }
 
 
-class TestHostedPackAdapterTaskValidation:
+class TestManagedCapabilityAdapterTaskValidation:
     @pytest.fixture(autouse=True)
     def _module(self):
         self.mod = _load_module(
             "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
-            "tests.app_build_plan_hosted_adapter_validation",
+            "tests.app_build_plan_managed_adapter_validation",
         )
 
-    def test_hosted_pack_api_surface_adapter_task_accepted(self):
-        """hosted_pack with api_surface task at services/integrations/ must be accepted."""
+    def test_managed_capability_api_surface_adapter_task_accepted(self):
+        """managed_capability with api_surface task at services/integrations/ must be accepted."""
         ctx = _Context()
         result = self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK],
-                "build_tasks": [_HOSTED_ADAPTER_TASK],
+                "capability_packs": [_MANAGED_CAPABILITY],
+                "build_tasks": [_MANAGED_CAPABILITY_ADAPTER_TASK],
             },
             context_variables=ctx,
         )
@@ -856,49 +856,49 @@ class TestHostedPackAdapterTaskValidation:
         cached = ctx.data["app_build_plan"]
         assert cached["build_tasks"][0]["task_id"] == "task_wallet_adapter"
 
-    def test_hosted_pack_adapter_task_with_external_integration_surface_kind(self):
-        """surface_kind: external_integration on a hosted adapter task is valid."""
+    def test_managed_capability_adapter_task_with_external_integration_surface_kind(self):
+        """surface_kind: external_integration on a managed capability adapter task is valid."""
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK],
-                "build_tasks": [{**_HOSTED_ADAPTER_TASK, "surface_kind": "external_integration"}],
+                "capability_packs": [_MANAGED_CAPABILITY],
+                "build_tasks": [{**_MANAGED_CAPABILITY_ADAPTER_TASK, "surface_kind": "external_integration"}],
             },
             context_variables=ctx,
         )
         assert ctx.data["app_plan_ready"] is True
 
-    def test_hosted_pack_no_task_still_valid(self):
-        """A hosted_pack with no build task at all must always be accepted."""
+    def test_managed_capability_no_task_still_valid(self):
+        """A managed_capability with no build task at all must always be accepted."""
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK],
+                "capability_packs": [_MANAGED_CAPABILITY],
                 "build_tasks": [],
             },
             context_variables=ctx,
         )
         assert ctx.data["app_plan_ready"] is True
 
-    def test_hosted_pack_and_generated_module_together(self):
-        """hosted_pack adapter + generated_module contract simultaneously accepted."""
+    def test_managed_capability_and_generated_module_together(self):
+        """managed_capability adapter + generated_module contract simultaneously accepted."""
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK, _GENERATED_PACK],
-                "build_tasks": [_HOSTED_ADAPTER_TASK, _GENERATED_MODULE_CONTRACT_TASK],
+                "capability_packs": [_MANAGED_CAPABILITY, _GENERATED_PACK],
+                "build_tasks": [_MANAGED_CAPABILITY_ADAPTER_TASK, _GENERATED_MODULE_CONTRACT_TASK],
             },
             context_variables=ctx,
         )
         assert len(ctx.data["app_build_plan"]["build_tasks"]) == 2
 
-    def test_hosted_pack_owned_path_in_modules_dir_rejected(self):
-        """adapter task owned_paths must not target modules/{hosted_pack_id}/."""
+    def test_managed_capability_owned_path_in_modules_dir_rejected(self):
+        """adapter task owned_paths must not target modules/{managed_capability_id}/."""
         bad_task = {
-            **_HOSTED_ADAPTER_TASK,
+            **_MANAGED_CAPABILITY_ADAPTER_TASK,
             "task_id": "task_bad_path",
             "task_type": "api_surface",
             "owned_paths": ["modules/wallet/backend/some_file.py"],
@@ -907,29 +907,29 @@ class TestHostedPackAdapterTaskValidation:
             self.mod.app_build_plan(
                 AppBuildPlan={
                     **_MINIMAL_PLAN_BASE,
-                    "capability_packs": [_HOSTED_PACK],
+                    "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [bad_task],
                 },
                 context_variables=_Context(),
             )
 
-    def test_hosted_pack_module_contract_still_rejected_with_adapter_present(self):
+    def test_managed_capability_module_contract_still_rejected_with_adapter_present(self):
         """Adding a valid adapter task does not allow the module_contract task."""
-        with pytest.raises(ValueError, match="hosted pack 'wallet'"):
+        with pytest.raises(ValueError, match="managed capability 'wallet'"):
             self.mod.app_build_plan(
                 AppBuildPlan={
                     **_MINIMAL_PLAN_BASE,
-                    "capability_packs": [_HOSTED_PACK],
-                    "build_tasks": [_HOSTED_ADAPTER_TASK, _HOSTED_PACK_MODULE_CONTRACT_TASK],
+                    "capability_packs": [_MANAGED_CAPABILITY],
+                    "build_tasks": [_MANAGED_CAPABILITY_ADAPTER_TASK, _MANAGED_CAPABILITY_MODULE_CONTRACT_TASK],
                 },
                 context_variables=_Context(),
             )
 
-    def test_investor_marketplace_hosted_adapter_accepted(self):
-        """investor_marketplace hosted adapter is also valid."""
-        im_pack = {**_HOSTED_PACK, "capability_pack_id": "investor_marketplace",
+    def test_investor_marketplace_managed_adapter_accepted(self):
+        """investor_marketplace managed capability adapter is also valid."""
+        im_pack = {**_MANAGED_CAPABILITY, "capability_pack_id": "investor_marketplace",
                    "label": "Investor Marketplace"}
-        im_adapter = {**_HOSTED_ADAPTER_TASK,
+        im_adapter = {**_MANAGED_CAPABILITY_ADAPTER_TASK,
                       "task_id": "task_im_adapter",
                       "capability_pack_id": "investor_marketplace",
                       "owned_paths": ["services/integrations/investor_marketplace_client.py"]}
@@ -946,28 +946,28 @@ class TestHostedPackAdapterTaskValidation:
 
 
 # ---------------------------------------------------------------------------
-# 7. agents.yaml hosted adapter guidance static checks
+# 7. agents.yaml managed capability adapter guidance static checks
 # ---------------------------------------------------------------------------
 
-class TestAgentsYamlHostedAdapterGuidance:
+class TestAgentsYamlManagedAdapterGuidance:
     @pytest.fixture(autouse=True)
     def _content(self):
         self._text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
 
-    def test_appplanagent_hosted_adapter_task_rule_present(self):
+    def test_appplanagent_managed_adapter_task_rule_present(self):
         assert "services/integrations/{pack_id}_client.py" in self._text
 
-    def test_appplanagent_hosted_adapter_no_hosted_business_logic(self):
-        assert "no hosted business logic" in self._text
+    def test_appplanagent_managed_adapter_no_managed_business_logic(self):
+        assert "no provider business logic" in self._text
 
-    def test_appplanagent_hosted_adapter_no_module_paths(self):
+    def test_appplanagent_managed_adapter_no_module_paths(self):
         assert "modules/{pack_id}/" in self._text
 
-    def test_controller_agent_hosted_adapter_lane_present(self):
-        assert "Hosted adapter lane" in self._text
+    def test_controller_agent_managed_adapter_lane_present(self):
+        assert "Managed capability adapter lane" in self._text
 
-    def test_controller_agent_no_hosted_internals_rule(self):
-        assert "Do NOT implement hosted business logic" in self._text
+    def test_controller_agent_no_managed_internals_rule(self):
+        assert "Do NOT implement provider business logic" in self._text
 
     def test_controller_agent_thin_client_rule(self):
         assert "thin Python client" in self._text
@@ -977,10 +977,10 @@ class TestAgentsYamlHostedAdapterGuidance:
         api_surface_outputs = fc["task_contracts"]["api_surface"]["optional_outputs"]
         assert any("services/integrations" in o for o in api_surface_outputs)
 
-    def test_file_contracts_hosted_adapter_constraint(self):
+    def test_file_contracts_managed_adapter_constraint(self):
         fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         constraints = fc["task_contracts"]["api_surface"]["hard_constraints"]
-        assert any("hosted" in c.lower() for c in constraints)
+        assert any("managed capability adapter" in c.lower() for c in constraints)
 
     def test_appplanagent_adapter_task_decision_rule_present(self):
         assert "Adapter task decision rule" in self._text
@@ -989,10 +989,10 @@ class TestAgentsYamlHostedAdapterGuidance:
         assert "integration-adapters" in self._text
 
     def test_output_format_contains_provider_neutral_adapter_task_example(self):
-        assert "task_hosted_payments_adapter" in self._text
+        assert "task_managed_payments_adapter" in self._text
 
     def test_output_format_contains_integrations_path_example(self):
-        assert "services/integrations/hosted_payments_client.py" in self._text
+        assert "services/integrations/managed_payments_client.py" in self._text
 
     def test_output_format_contains_adapter_task_batch_spec(self):
         assert "current_build_task_type" in self._text
@@ -1008,7 +1008,7 @@ class TestAgentsYamlHostedAdapterGuidance:
 # 8. Adapter task surface_kind validation
 # ---------------------------------------------------------------------------
 
-class TestHostedAdapterSurfaceKindValidation:
+class TestManagedAdapterSurfaceKindValidation:
     @pytest.fixture(autouse=True)
     def _module(self):
         self.mod = _load_module(
@@ -1017,28 +1017,28 @@ class TestHostedAdapterSurfaceKindValidation:
         )
 
     def test_adapter_task_with_wrong_surface_kind_rejected(self):
-        """api_surface + hosted_pack + services/integrations/ + surface_kind=module → rejected."""
+        """api_surface + managed_capability + services/integrations/ + surface_kind=module → rejected."""
         bad_task = {
-            **_HOSTED_ADAPTER_TASK,
+            **_MANAGED_CAPABILITY_ADAPTER_TASK,
             "surface_kind": "module",
         }
         with pytest.raises(ValueError, match="surface_kind"):
             self.mod.app_build_plan(
                 AppBuildPlan={
                     **_MINIMAL_PLAN_BASE,
-                    "capability_packs": [_HOSTED_PACK],
+                    "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [bad_task],
                 },
                 context_variables=_Context(),
             )
 
     def test_adapter_task_wrong_surface_kind_error_mentions_external_integration(self):
-        bad_task = {**_HOSTED_ADAPTER_TASK, "surface_kind": "control_plane"}
+        bad_task = {**_MANAGED_CAPABILITY_ADAPTER_TASK, "surface_kind": "control_plane"}
         with pytest.raises(ValueError, match="external_integration"):
             self.mod.app_build_plan(
                 AppBuildPlan={
                     **_MINIMAL_PLAN_BASE,
-                    "capability_packs": [_HOSTED_PACK],
+                    "capability_packs": [_MANAGED_CAPABILITY],
                     "build_tasks": [bad_task],
                 },
                 context_variables=_Context(),
@@ -1049,8 +1049,8 @@ class TestHostedAdapterSurfaceKindValidation:
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK],
-                "build_tasks": [{**_HOSTED_ADAPTER_TASK, "surface_kind": "external_integration"}],
+                "capability_packs": [_MANAGED_CAPABILITY],
+                "build_tasks": [{**_MANAGED_CAPABILITY_ADAPTER_TASK, "surface_kind": "external_integration"}],
             },
             context_variables=ctx,
         )
@@ -1058,27 +1058,27 @@ class TestHostedAdapterSurfaceKindValidation:
 
     def test_adapter_task_with_no_surface_kind_accepted(self):
         """surface_kind absent (null) on adapter task is not enforced — graceful."""
-        task_no_surface_kind = {k: v for k, v in _HOSTED_ADAPTER_TASK.items()
+        task_no_surface_kind = {k: v for k, v in _MANAGED_CAPABILITY_ADAPTER_TASK.items()
                                 if k != "surface_kind"}
         ctx = _Context()
         self.mod.app_build_plan(
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
-                "capability_packs": [_HOSTED_PACK],
+                "capability_packs": [_MANAGED_CAPABILITY],
                 "build_tasks": [task_no_surface_kind],
             },
             context_variables=ctx,
         )
         assert ctx.data["app_plan_ready"] is True
 
-    def test_non_hosted_api_surface_task_wrong_surface_kind_not_blocked(self):
-        """Surface_kind guard only fires for hosted_pack ids — non-hosted api_surface is unaffected."""
-        non_hosted_task = {
+    def test_non_managed_api_surface_task_wrong_surface_kind_not_blocked(self):
+        """Surface_kind guard only fires for managed_capability ids — non-managed api_surface is unaffected."""
+        non_managed_task = {
             "task_id": "task_crm_api",
             "task_type": "api_surface",
             "capability_pack_id": "crm",
             "surface_id": "crm",
-            "surface_kind": "module",   # wrong for hosted, but crm is not hosted
+            "surface_kind": "module",   # wrong for managed, but crm is not managed
             "execution_target": "AppGenerator",
             "initial_agent": "ControllerAgent",
             "description": "CRM API surface.",
@@ -1097,7 +1097,7 @@ class TestHostedAdapterSurfaceKindValidation:
             AppBuildPlan={
                 **_MINIMAL_PLAN_BASE,
                 "capability_packs": [crm_pack],
-                "build_tasks": [non_hosted_task],
+                "build_tasks": [non_managed_task],
             },
             context_variables=ctx,
         )
@@ -1105,7 +1105,7 @@ class TestHostedAdapterSurfaceKindValidation:
 
 
 # ---------------------------------------------------------------------------
-# 9. Task batch item shape for hosted adapter task
+# 9. Task batch item shape for managed capability adapter task
 # ---------------------------------------------------------------------------
 
 class TestTaskBatchSpecShape:
@@ -1115,7 +1115,7 @@ class TestTaskBatchSpecShape:
 
     def test_output_format_task_batch_has_provider_neutral_adapter_owned_path(self):
         text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")
-        assert '"services/integrations/hosted_payments_client.py"' in text
+        assert '"services/integrations/managed_payments_client.py"' in text
 
     def test_output_format_task_batch_has_surface_kind_external_integration(self):
         text = _read_text("factory_app/workflows/AppGenerator/agents.yaml")

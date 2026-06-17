@@ -117,7 +117,7 @@ Final report requirements:
 - Include `Module Contract Impact` when module manifests, loader validation, executor behavior, or module event routing changed.
 - Include `Control-Plane / Refinement Impact` when runtime session or control-plane resume behavior or workflow routing contracts changed.
 - Include `Build Workflow Sequence Impact` when runtime or platform work also changes sequence or entry routing.
-- Include `Hosted Pack Boundary Check` when the change touches hosted boundaries, facade wiring, or adapter contracts.
+- Include `Managed Capability Boundary Check` when the change touches managed-capability boundaries, facade wiring, or adapter contracts.
 
 Return:
 

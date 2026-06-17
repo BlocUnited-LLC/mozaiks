@@ -3,7 +3,7 @@
 This file is copied to:
     services/integrations/mozaikspay_client.py
 
-It is consumer-side adapter code. It must not import hosted provider modules,
+It is consumer-side adapter code. It must not import provider-owned modules,
 call Stripe directly, store secrets, or create a token usage ledger.
 """
 

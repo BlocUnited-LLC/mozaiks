@@ -157,7 +157,7 @@ class _Context:
 
 class _DemoHealthProvider:
     provider_id = "demo_health_provider"
-    supported_integration_ids = ["analytics_provider", "hosted_analytics"]
+    supported_integration_ids = ["analytics_provider", "managed_analytics"]
 
     def __init__(self) -> None:
         self.calls = []

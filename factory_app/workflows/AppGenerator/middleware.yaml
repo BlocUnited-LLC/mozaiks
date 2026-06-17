@@ -53,8 +53,8 @@ prompt_middleware:
   filename: ../_shared/subscription_contract_context.py
   function: inject_subscription_contract_context
 - agent: AppPlanAgent
-  filename: hook_hosted_capabilities_context.py
-  function: inject_hosted_capabilities_context
+  filename: hook_managed_capabilities_context.py
+  function: inject_managed_capabilities_context
 - agent: AppPlanAgent
   filename: hook_ai_pack_workflow_context.py
   function: inject_ai_pack_workflow_context

@@ -22,7 +22,7 @@ def test_manual_smoke_script_declares_neutral_cases_only() -> None:
         "module_backend",
         "external_integration",
         "data_model_migration",
-        "hosted_capability_facade",
+        "managed_capability_facade",
     }
     assert "analytics_provider" in rendered
     assert "projects" in rendered
@@ -75,7 +75,7 @@ class TestRefinementClassifierFixtureReplay:
         assert by_id["module_backend"]["classifier"]["change_class"] in {"feature", "patch"}
         assert by_id["external_integration"]["classifier"]["change_class"] in {"feature", "patch"}
         assert by_id["data_model_migration"]["classifier"]["change_class"] in {"feature", "core"}
-        assert by_id["hosted_capability_facade"]["classifier"]["change_class"] in {"design", "feature"}
+        assert by_id["managed_capability_facade"]["classifier"]["change_class"] in {"design", "feature"}
         assert "modules/projects/module.yaml" in by_id["module_backend"]["impact"]["affected_bundle_paths"]
         assert (
             "services/integrations/analytics_provider_client.py"
@@ -86,7 +86,7 @@ class TestRefinementClassifierFixtureReplay:
             in by_id["data_model_migration"]["impact"]["scope_summary"]
         )
         assert (
-            "services/integrations/hosted_analytics_client.py"
-            in by_id["hosted_capability_facade"]["impact"]["affected_bundle_paths"]
+            "services/integrations/managed_analytics_client.py"
+            in by_id["managed_capability_facade"]["impact"]["affected_bundle_paths"]
         )
 

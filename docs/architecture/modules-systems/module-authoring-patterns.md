@@ -80,7 +80,7 @@ module-local helper files declared for that module. Do not turn an adapter into
 a module just to give it a place in the tree. Modules own actions, events,
 lifecycle state, authorization, and persistence; adapters do not.
 
-### Hosted-pack facade pattern
+### Managed-capability facade pattern
 
 Use for host-provided capabilities that should appear in generated apps without
 copying the hosted service internals into the generated app.
@@ -88,7 +88,7 @@ copying the hosted service internals into the generated app.
 The generic shape is:
 
 ```text
-hosted_pack
+managed_capability
   -> app/services/integrations/{pack_id}_client.py
   -> app-owned facade module
   -> ui/pages bind to the facade module
@@ -97,15 +97,15 @@ hosted_pack
 Provider-neutral example:
 
 ```text
-hosted_analytics
-  -> app/services/integrations/hosted_analytics_client.py
+managed_analytics
+  -> app/services/integrations/managed_analytics_client.py
   -> modules/analytics_dashboard/
   -> ui/pages/analytics.yaml
   -> /api/modules/analytics_dashboard/get_metrics
 ```
 
 Pages must call the app-owned facade module API. They must not bind directly to
-hosted-pack internals or assume hosted service routes exist inside the generated app.
+managed-capability internals or assume hosted service routes exist inside the generated app.
 
 ## Backend Helper-File Governance
 

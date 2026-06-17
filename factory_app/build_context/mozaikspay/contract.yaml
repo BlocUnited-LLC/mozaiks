@@ -30,7 +30,7 @@ required_integrations:
     provider: mozaikspay
     display_name: MozaiksPay
     kind: api_key
-    purpose: Connect this generated SaaS app to the hosted MozaiksPay subscription provider.
+    purpose: Connect this generated SaaS app to the managed MozaiksPay subscription provider.
     required_at: runtime
     required_fields:
       - name: api_base
@@ -71,7 +71,7 @@ forbidden_outputs:
   - path_prefix: modules/mozaikspay/
   - path_prefix: modules/wallet/
   - path_prefix: app/capability_packs/
-  - path_prefix: services/hosted_billing/
+  - path_prefix: services/managed_billing/
   - path_prefix: services/wallet/
 
 runtime_boundaries:
@@ -81,12 +81,12 @@ runtime_boundaries:
     rule: Read runtime token usage through /api/me/usage or /api/admin/usage; use the OSS token wallet ledger for balances instead of app-local duplicate ledgers.
   - id: plan_limits
     rule: Use app/config/subscriptions.yaml usage_limits, token_wallets, and token_allowances for generated SaaS plan limits and token allowances.
-  - id: hosted_internals
-    rule: Do not generate hosted service internals, checkout, wallet, settlement logic, private APIs, or provider credentials.
+  - id: managed_internals
+    rule: Do not generate managed service internals, checkout, wallet, settlement logic, private APIs, or provider credentials.
   - id: connector_boundary
     rule: Generated apps must configure MozaiksPay through the app-scoped connector named mozaikspay or the MOZAIKSPAY_* env fallback; never commit provider credentials.
   - id: page_bindings
-    rule: Generated pages must call app-owned billing_portal actions, not hosted backing modules directly.
+    rule: Generated pages must call app-owned billing_portal actions, not managed backing modules directly.
 
 facades:
   - module_id: billing_portal

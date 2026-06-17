@@ -20,8 +20,8 @@ def _load_module(relative_path: str, module_name: str):
 
 def _load_resolver():
     return _load_module(
-        "factory_app/workflows/AppGenerator/tools/resolve_hosted_pack_templates.py",
-        "tests.resolve_hosted_pack_templates",
+        "factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py",
+        "tests.resolve_managed_capability_templates",
     )
 
 
@@ -54,7 +54,7 @@ def _write_pack(root: Path, pack_id: str, files: dict[str, str], *, status: str 
                 "pack": {
                     "id": pack_id,
                     "status": status,
-                    "capability_source": "hosted_pack",
+                    "capability_source": "managed_capability",
                 },
             },
             sort_keys=False,
@@ -69,8 +69,8 @@ def _write_pack(root: Path, pack_id: str, files: dict[str, str], *, status: str 
 
 
 def test_null_capability_packs_return_empty(resolver) -> None:
-    assert resolver.resolve_hosted_pack_templates(None) == []
-    assert resolver.resolve_hosted_pack_templates([]) == []
+    assert resolver.resolve_managed_capability_templates(None) == []
+    assert resolver.resolve_managed_capability_templates([]) == []
 
 
 def test_selected_pack_materializes_all_templates(resolver, tmp_path: Path) -> None:
@@ -83,8 +83,8 @@ def test_selected_pack_materializes_all_templates(resolver, tmp_path: Path) -> N
         },
     )
 
-    result = resolver.resolve_hosted_pack_templates(
-        [{"id": "wallet", "capability_source": "hosted_pack", "pack_source_path": str(pack_root)}]
+    result = resolver.resolve_managed_capability_templates(
+        [{"id": "wallet", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
     )
 
     files = {item["filename"]: item["content"] for item in result}
@@ -113,8 +113,8 @@ def test_selected_pack_ignores_cache_and_bytecode_files(resolver, tmp_path: Path
     hidden_file = pack_root / "templates" / ".DS_Store"
     hidden_file.write_text("not a template", encoding="utf-8")
 
-    result = resolver.resolve_hosted_pack_templates(
-        [{"id": "mozaikspay", "capability_source": "hosted_pack", "pack_source_path": str(pack_root)}]
+    result = resolver.resolve_managed_capability_templates(
+        [{"id": "mozaikspay", "capability_source": "managed_capability", "pack_source_path": str(pack_root)}]
     )
 
     assert result == [
@@ -136,14 +136,14 @@ async def test_assemble_app_tasks_overlays_selected_pack_template(tmp_path: Path
             "app_id": "app_template_overlay",
             "app_build_plan": {
                 "capability_packs": [
-                    {"capability_pack_id": "wallet", "capability_source": "hosted_pack"}
+                    {"capability_pack_id": "wallet", "capability_source": "managed_capability"}
                 ],
                 "build_tasks": [],
             },
             "capability_packs": [
                 {
                     "id": "wallet",
-                    "capability_source": "hosted_pack",
+                    "capability_source": "managed_capability",
                     "pack_source_path": str(pack_root),
                 }
             ],
@@ -173,15 +173,15 @@ def test_inactive_pack_is_not_materialized(resolver, tmp_path: Path) -> None:
         status="inactive",
     )
 
-    result = resolver.resolve_hosted_pack_templates(
+    result = resolver.resolve_managed_capability_templates(
         [{"id": "wallet", "pack_source_path": str(pack_root)}]
     )
     assert result == []
 
 
 def test_missing_pack_context_raises(resolver, tmp_path: Path) -> None:
-    with pytest.raises(resolver.HostedPackTemplateError, match="pack context"):
-        resolver.resolve_hosted_pack_templates(
+    with pytest.raises(resolver.ManagedCapabilityTemplateError, match="pack context"):
+        resolver.resolve_managed_capability_templates(
             [{"id": "wallet", "pack_source_path": str(tmp_path)}]
         )
 
@@ -193,8 +193,8 @@ def test_unsafe_pack_id_raises(resolver, tmp_path: Path) -> None:
         {"services/integrations/wallet_client.py": "# wallet\n"},
     )
 
-    with pytest.raises(resolver.HostedPackTemplateError, match="Unsafe pack_id"):
-        resolver.resolve_hosted_pack_templates(
+    with pytest.raises(resolver.ManagedCapabilityTemplateError, match="Unsafe pack_id"):
+        resolver.resolve_managed_capability_templates(
             [{"id": "../wallet", "pack_source_path": str(pack_root)}]
         )
 
@@ -211,8 +211,8 @@ def test_conflicting_selected_pack_templates_raise(resolver, tmp_path: Path) -> 
         {"services/integrations/shared_client.py": "# pay\n"},
     )
 
-    with pytest.raises(resolver.HostedPackTemplateError, match="Multiple selected"):
-        resolver.resolve_hosted_pack_templates(
+    with pytest.raises(resolver.ManagedCapabilityTemplateError, match="Multiple selected"):
+        resolver.resolve_managed_capability_templates(
             [
                 {"id": "wallet", "pack_source_path": str(wallet_root)},
                 {"id": "mozaikspay", "pack_source_path": str(pay_root)},
@@ -222,7 +222,7 @@ def test_conflicting_selected_pack_templates_raise(resolver, tmp_path: Path) -> 
 
 def test_resolver_and_assembly_do_not_import_mozaiks_app() -> None:
     for relative in (
-        "factory_app/workflows/AppGenerator/tools/resolve_hosted_pack_templates.py",
+        "factory_app/workflows/AppGenerator/tools/resolve_managed_capability_templates.py",
         "factory_app/workflows/AppGenerator/tools/assemble_app_tasks.py",
     ):
         src = (WORKSPACE / relative).read_text(encoding="utf-8")

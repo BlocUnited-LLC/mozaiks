@@ -112,7 +112,7 @@ actions:
     permissions: [my_module.manage]
     emits: [domain.my_module.item_created]
 
-# Optional: expose named capabilities for reaction routing and hosted-pack wiring.
+# Optional: expose named capabilities for reaction routing and managed-capability wiring.
 # Omit this section when reactions only target handler_method directly.
 capabilities:
   - capability_id: my_module.list
@@ -123,7 +123,7 @@ capabilities:
 ```
 
 `capabilities[]` is optional. Use it when reactions need to route to a
-named capability_id (`target.kind: capability`) or when a hosted pack must
+named capability_id (`target.kind: capability`) or when a managed capability must
 reference a named integration point. Each entry maps a stable `capability_id`
 to an action, workflow, page, or transition `target`. The runtime validates
 that `capability_id` values are unique within the module and that `target`
@@ -543,7 +543,7 @@ This determines who generates it, who consumes it, and whether OSS apps may incl
 |-------|-------|------------|----------|
 | `host_universal` | Runtime/Platform | Never generate — always present | Yes, automatic |
 | `framework_pack` | Mozaiks framework | Select from pack catalog — don't regenerate | Yes, opt-in |
-| `hosted_pack` | Mozaiks App (proprietary) | Not generated — licensed integration only | No |
+| `managed_capability` | Mozaiks App (proprietary) | Not generated — licensed integration only | No |
 | `generated_module` | App-specific | AppGenerator generates contracts + stubs | Yes, per app |
 | `external_adapter` | External service | AppGenerator generates wiring + facade only | Adapter yes; engine no |
 
@@ -567,18 +567,18 @@ Examples: `notifications` pack, `messaging` pack, `files` pack, `audit` pack.
 **Rule:** Reference the pack; expand pack-specific app overlay only (app-specific wiring,
 page composition, event flow declarations).
 
-### `hosted_pack`
+### `managed_capability`
 
 Licensed capability packs that depend on private Mozaiks App hosted services.
 OSS apps must not copy these.
 
-Examples: `generic_hosted_analytics`, `managed_search`.
+Examples: `generic_managed_analytics`, `managed_search`.
 
 **Rule:** Generate the integration facade and wiring for the app; the hosted service
 engine lives in the private product repo.
 
-Hosted pack access is operator-managed. The generated app may receive a facade
-module or thin service client for a hosted pack, but it must not copy or enforce
+Managed capability access is operator-managed. The generated app may receive a facade
+module or thin service client for a managed capability, but it must not copy or enforce
 the hosted product's pack-access entitlement rules. If the generated app is
 itself a SaaS product, its end-user feature gates still use the OSS
 `entitlement_gate` and `EntitlementPort` contract described above.
@@ -623,7 +623,7 @@ AppGenerator does **not** generate:
 - notification delivery infrastructure, admin shell → `host_universal`
 - the user profile page or `/api/me` identity — both are `host_universal`
 - pack internals for framework packs → `framework_pack`
-- hosted service engines or external systems → `hosted_pack` / `external_adapter`
+- hosted service engines or external systems → `managed_capability` / `external_adapter`
 - `contracts/profile.yaml` with `kind: form` — `form` is reserved and rejected by the validator
 
 ---

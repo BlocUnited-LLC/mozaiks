@@ -328,7 +328,7 @@ def test_appgenerator_guidance_mentions_provider_neutral_target_profiles() -> No
     source = _read("factory_app/workflows/AppGenerator/agents.yaml")
     assert "provider-neutral outputs from the deployment contract" in source
     assert "how the generated app runs" in source
-    assert "hosted provider adapters" in source
+    assert "provider-owned adapters" in source
     assert "deployment_profile" in source
     assert "ci_secret_requirements" in source
 

@@ -30,7 +30,7 @@ Covers:
   _has_ui_surface_impact:
     - experience_design lane → True
     - ui_patch lane → True
-    - hosted_capability_change lane → True
+    - managed_capability_change lane → True
     - experience_spec in families → True
     - "ui/" in path → True
     - "route_manifest" in path → True
@@ -39,7 +39,7 @@ Covers:
 
   _has_module_contract_impact:
     - feature_addition lane → True
-    - hosted_capability_change lane → True
+    - managed_capability_change lane → True
     - "modules/" in path → True
     - "/contracts/" in path → True
     - "/backend/handler.py" in path → True
@@ -64,10 +64,10 @@ Covers:
     - "required field" in request → True
     - unrelated → False
 
-  _has_hosted_facade_impact:
-    - hosted_capability_change lane → True
-    - "hosted" in path text → True
-    - "hosted" in scope_summary → True
+  _has_managed_facade_impact:
+    - managed_capability_change lane → True
+    - "managed" in path text → True
+    - "provider-backed" in scope_summary → True
     - unrelated → False
 
   _app_context_impact_warnings:
@@ -86,7 +86,7 @@ from mozaiksai.control_plane.dry_run import (
     _app_context_impact_warnings,
     _dedupe,
     _has_database_review_impact,
-    _has_hosted_facade_impact,
+    _has_managed_facade_impact,
     _has_integration_impact,
     _has_module_contract_impact,
     _has_ui_surface_impact,
@@ -283,8 +283,8 @@ class TestHasUiSurfaceImpact:
     def test_ui_patch_lane_true(self):
         assert _has_ui_surface_impact(lane="ui_patch", paths=[], families=[]) is True
 
-    def test_hosted_capability_change_lane_true(self):
-        assert _has_ui_surface_impact(lane="hosted_capability_change", paths=[], families=[]) is True
+    def test_managed_capability_change_lane_true(self):
+        assert _has_ui_surface_impact(lane="managed_capability_change", paths=[], families=[]) is True
 
     def test_experience_spec_family_true(self):
         assert _has_ui_surface_impact(lane=None, paths=[], families=["experience_spec"]) is True
@@ -313,8 +313,8 @@ class TestHasModuleContractImpact:
     def test_feature_addition_lane_true(self):
         assert _has_module_contract_impact(lane="feature_addition", paths=[]) is True
 
-    def test_hosted_capability_change_lane_true(self):
-        assert _has_module_contract_impact(lane="hosted_capability_change", paths=[]) is True
+    def test_managed_capability_change_lane_true(self):
+        assert _has_module_contract_impact(lane="managed_capability_change", paths=[]) is True
 
     def test_modules_in_path_true(self):
         assert _has_module_contract_impact(lane=None, paths=["app/modules/billing/module.yaml"]) is True
@@ -401,28 +401,28 @@ class TestHasDatabaseReviewImpact:
 
 
 # ---------------------------------------------------------------------------
-# 9. _has_hosted_facade_impact
+# 9. _has_managed_facade_impact
 # ---------------------------------------------------------------------------
 
-class TestHasHostedFacadeImpact:
-    def test_hosted_capability_change_lane_true(self):
-        assert _has_hosted_facade_impact(lane="hosted_capability_change", paths=[], scope_summary="") is True
+class TestHasManagedFacadeImpact:
+    def test_managed_capability_change_lane_true(self):
+        assert _has_managed_facade_impact(lane="managed_capability_change", paths=[], scope_summary="") is True
 
-    def test_hosted_in_path_true(self):
-        assert _has_hosted_facade_impact(lane=None, paths=["modules/hosted_billing/module.yaml"], scope_summary="") is True
+    def test_managed_in_path_true(self):
+        assert _has_managed_facade_impact(lane=None, paths=["modules/managed_billing/module.yaml"], scope_summary="") is True
 
-    def test_hosted_in_scope_summary_true(self):
-        assert _has_hosted_facade_impact(lane=None, paths=[], scope_summary="Update hosted capability facade") is True
+    def test_managed_in_scope_summary_true(self):
+        assert _has_managed_facade_impact(lane=None, paths=[], scope_summary="Update managed capability facade") is True
 
     def test_unrelated_returns_false(self):
-        assert _has_hosted_facade_impact(lane="ui_patch", paths=["app/ui/home.yaml"], scope_summary="UI change") is False
+        assert _has_managed_facade_impact(lane="ui_patch", paths=["app/ui/home.yaml"], scope_summary="UI change") is False
 
-    def test_word_boundary_for_hosted(self):
-        # "unhosted" should NOT match because regex requires word boundary
-        assert _has_hosted_facade_impact(lane=None, paths=[], scope_summary="unhosted service") is False
+    def test_word_boundary_for_managed(self):
+        # "unmanaged" should NOT match because regex requires word boundary
+        assert _has_managed_facade_impact(lane=None, paths=[], scope_summary="unmanaged service") is False
 
-    def test_hosted_standalone_word_true(self):
-        assert _has_hosted_facade_impact(lane=None, paths=[], scope_summary="hosted service update") is True
+    def test_managed_standalone_word_true(self):
+        assert _has_managed_facade_impact(lane=None, paths=[], scope_summary="managed service update") is True
 
 
 # ---------------------------------------------------------------------------

@@ -501,7 +501,7 @@ BuildSurface:
     primary_views: str[]           # Replaces primary_pages
     operations: str[]
     required_integrations: BuildRequiredIntegration[]
-    capability_source: str         # generated | hosted_pack | framework | external_adapter
+    capability_source: str         # generated | managed_capability | framework | external_adapter
 
 BuildRequiredIntegration:
   type: model
@@ -509,7 +509,7 @@ BuildRequiredIntegration:
     service: str                   # App-scoped connector service id
     provider: str | null
     display_name: str | null
-    kind: str                      # api_key | oauth | webhook | hosted_pack | internal_service
+    kind: str                      # api_key | oauth | webhook | managed_capability | internal_service
     purpose: str
     required_at: str               # build_time | validation_time | runtime | deployment | optional
     required_fields: IntegrationRequiredField[]
@@ -636,7 +636,7 @@ Remove all agent-specific hooks that inject web vocabulary:
 - `hook_file_contract_context.py` — move to dev pack `file_contracts.yaml` catalog
 - `hook_shell_preset_context.py` — move to webapp dev pack `view_presets.yaml`
 - `hook_capability_routing_context.py` — move to dev pack `capability_routing.yaml`
-- `hook_hosted_capabilities_context.py` — move to hosted pack context
+- `hook_managed_capabilities_context.py` — move to managed capability context
 
 Keep only:
 - `inject_context_graph_context` (all agents) — domain-agnostic

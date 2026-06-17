@@ -170,7 +170,7 @@ def test_subscription_contract_designer_is_registered_before_generators() -> Non
 def test_subscription_contract_designer_pack_is_host_agnostic() -> None:
     text = _workflow_text().lower()
     assert "mozaikspay" not in text
-    assert "hosted_billing" not in text
+    assert "managed_billing" not in text
     assert "hosted billing" not in text
 
 
@@ -348,7 +348,7 @@ def test_subscription_contract_normalizer_rejects_hosted_product_terms() -> None
 
     contract = _sample_contract()
     contract["app_generator_instructions"] = [
-        {"target": "AppPlanAgent", "instruction": "Call hosted_billing.create_plan_catalog."}
+        {"target": "AppPlanAgent", "instruction": "Call managed_billing.create_plan_catalog."}
     ]
 
     with pytest.raises(ValueError, match="provider-neutral"):

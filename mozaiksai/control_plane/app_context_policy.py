@@ -194,7 +194,7 @@ def _risky_signals(
     lane = str(refinement_lane or "").strip().lower()
     normalized_change_class = str(change_class or "").strip().lower()
 
-    if lane in {"data_model_migration", "integration", "hosted_capability_change"}:
+    if lane in {"data_model_migration", "integration", "managed_capability_change"}:
         signals.append(lane)
     if lane in {"architecture_replan", "conceptual_reframe"} or normalized_change_class == "core":
         signals.append("conceptual_or_architecture_replan")

@@ -960,33 +960,33 @@ async def test_non_data_model_backend_request_does_not_include_database_paths() 
 
 
 @pytest.mark.asyncio
-async def test_hosted_capability_impact_includes_adapter_facade_and_dependent_page() -> None:
+async def test_managed_capability_impact_includes_adapter_facade_and_dependent_page() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="feature",
-            rationale="Hosted analytics display needs a scoped revision.",
+            rationale="Managed analytics display needs a scoped revision.",
         )
     )
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
                 "artifact_kind": "app_bundle",
-                "raw_user_request": "Change how hosted analytics metrics display on the dashboard.",
+                "raw_user_request": "Change how managed analytics metrics display on the dashboard.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "services/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/managed_analytics_client.py"},
                         {"path": "services/integrations/reporting_provider_client.py"},
                         {"path": "modules/analytics_dashboard/backend/service.py"},
                         {"path": "modules/analytics_dashboard/module.yaml"},
                         {"path": "modules/analytics_dashboard/backend/handler.py"},
                         {"path": "modules/analytics_dashboard/contracts/events.yaml"},
-                        {"path": "modules/hosted_analytics/module.yaml"},
+                        {"path": "modules/managed_analytics/module.yaml"},
                         {
                             "path": "ui/pages/analytics.yaml",
                             "content": "api_endpoint: /api/modules/analytics_dashboard/get_metrics",
                         },
                         {"path": "ui/pages/reports.yaml"},
-                        {"path": "services/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/managed_analytics_client.py"},
                     ]
                 },
             }
@@ -999,7 +999,7 @@ async def test_hosted_capability_impact_includes_adapter_facade_and_dependent_pa
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "services/integrations/hosted_analytics_client.py",
+        "services/integrations/managed_analytics_client.py",
         "modules/analytics_dashboard/module.yaml",
         "modules/analytics_dashboard/contracts/events.yaml",
         "modules/analytics_dashboard/backend/handler.py",
@@ -1007,7 +1007,7 @@ async def test_hosted_capability_impact_includes_adapter_facade_and_dependent_pa
         "ui/pages/analytics.yaml",
     ]
     assert "services/integrations/reporting_provider_client.py" not in decision.impact_set.affected_bundle_paths
-    assert "modules/hosted_analytics/module.yaml" not in decision.impact_set.affected_bundle_paths
+    assert "modules/managed_analytics/module.yaml" not in decision.impact_set.affected_bundle_paths
 
 
 @pytest.mark.asyncio
@@ -1047,21 +1047,21 @@ async def test_integration_impact_includes_app_backend_provider_adapters() -> No
 
 
 @pytest.mark.asyncio
-async def test_hosted_capability_non_ui_request_does_not_force_page_paths() -> None:
+async def test_managed_capability_non_ui_request_does_not_force_page_paths() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="feature",
-            rationale="Hosted analytics adapter behavior needs a scoped revision.",
+            rationale="Managed analytics adapter behavior needs a scoped revision.",
         )
     )
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
                 "artifact_kind": "app_bundle",
-                "raw_user_request": "Update hosted analytics provider-backed refresh policy.",
+                "raw_user_request": "Update managed analytics provider-backed refresh policy.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "services/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/managed_analytics_client.py"},
                         {"path": "modules/analytics_dashboard/module.yaml"},
                         {"path": "modules/analytics_dashboard/backend/service.py"},
                         {"path": "ui/pages/analytics.yaml"},
@@ -1077,28 +1077,28 @@ async def test_hosted_capability_non_ui_request_does_not_force_page_paths() -> N
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "services/integrations/hosted_analytics_client.py",
+        "services/integrations/managed_analytics_client.py",
         "modules/analytics_dashboard/module.yaml",
         "modules/analytics_dashboard/backend/service.py",
     ]
 
 
 @pytest.mark.asyncio
-async def test_hosted_capability_ui_request_uses_page_glob_when_page_binding_is_unknown() -> None:
+async def test_managed_capability_ui_request_uses_page_glob_when_page_binding_is_unknown() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="feature",
-            rationale="Hosted analytics page display needs a scoped revision.",
+            rationale="Managed analytics page display needs a scoped revision.",
         )
     )
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
                 "artifact_kind": "app_bundle",
-                "raw_user_request": "Change hosted analytics dashboard display.",
+                "raw_user_request": "Change managed analytics dashboard display.",
                 "extra": {
                     "files_manifest": [
-                        {"path": "services/integrations/hosted_analytics_client.py"},
+                        {"path": "services/integrations/managed_analytics_client.py"},
                         {"path": "modules/analytics_dashboard/module.yaml"},
                         {"path": "modules/analytics_dashboard/backend/service.py"},
                         {"path": "ui/pages/analytics.yaml"},
@@ -1114,7 +1114,7 @@ async def test_hosted_capability_ui_request_uses_page_glob_when_page_binding_is_
     decision = await resolver.route(request)
 
     assert decision.impact_set.affected_bundle_paths == [
-        "services/integrations/hosted_analytics_client.py",
+        "services/integrations/managed_analytics_client.py",
         "modules/analytics_dashboard/module.yaml",
         "modules/analytics_dashboard/backend/service.py",
         "ui/pages/*.yaml",
@@ -1122,18 +1122,18 @@ async def test_hosted_capability_ui_request_uses_page_glob_when_page_binding_is_
 
 
 @pytest.mark.asyncio
-async def test_hosted_capability_without_manifest_uses_conservative_hints() -> None:
+async def test_managed_capability_without_manifest_uses_conservative_hints() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="feature",
-            rationale="Hosted pack adapter behavior needs a scoped revision.",
+            rationale="Managed capability adapter behavior needs a scoped revision.",
         )
     )
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
                 "artifact_kind": "app_bundle",
-                "raw_user_request": "Change hosted pack external adapter behavior.",
+                "raw_user_request": "Change managed capability external adapter behavior.",
             }
         },
         app_id="app_1",
@@ -1152,18 +1152,18 @@ async def test_hosted_capability_without_manifest_uses_conservative_hints() -> N
 
 
 @pytest.mark.asyncio
-async def test_hosted_capability_without_manifest_adds_page_hint_only_for_ui_requests() -> None:
+async def test_managed_capability_without_manifest_adds_page_hint_only_for_ui_requests() -> None:
     resolver = _factory_resolver(
         _FakeChangeClassifier(
             change_class="feature",
-            rationale="Hosted analytics dashboard needs a scoped revision.",
+            rationale="Managed analytics dashboard needs a scoped revision.",
         )
     )
     request = resolver.request_from_payload(
         payload={
             "refinement_request": {
                 "artifact_kind": "app_bundle",
-                "raw_user_request": "Change hosted analytics dashboard page display.",
+                "raw_user_request": "Change managed analytics dashboard page display.",
             }
         },
         app_id="app_1",

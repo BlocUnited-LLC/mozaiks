@@ -47,7 +47,7 @@ def test_contributing_quickstart_contains_common_task_map() -> None:
     assert "Test-only change" in quickstart
     assert "CLI change" in quickstart
     assert "Release/changelog change" in quickstart
-    assert "Hosted-pack support change" in quickstart
+    assert "Managed-capability support change" in quickstart
     assert "Unsure" in quickstart
 
 
@@ -59,8 +59,8 @@ def test_contributing_quickstart_mentions_final_report_sections() -> None:
     assert "Build Workflow Sequence Impact" in quickstart
     assert "Control-Plane / Refinement Impact" in quickstart
     assert "Module Contract Impact" in quickstart
-    assert "Hosted Pack Boundary Check" in quickstart
-    assert "Hosted Pack Boundary Check" in testing_rule
+    assert "Managed Capability Boundary Check" in quickstart
+    assert "Managed Capability Boundary Check" in testing_rule
 
 
 def test_contributing_quickstart_includes_focused_guidance_validation_command() -> None:
@@ -90,7 +90,7 @@ def test_contributing_quickstart_avoids_private_or_stale_public_framing() -> Non
     assert "Do not author `contracts/subscriptions.yaml`; use `contracts/reactions.yaml`." in quickstart
     assert "app/capability_packs" in quickstart
     assert "transport.py" in quickstart
-    assert "direct hosted internals" in quickstart
+    assert "direct provider internals" in quickstart
 
     for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in quickstart, forbidden
@@ -113,6 +113,6 @@ def test_skill_index_still_maps_common_tasks_for_quickstart_follow_through() -> 
     assert "Test-only change" in skills
     assert "CLI change" in skills
     assert "Release/changelog change" in skills
-    assert "Hosted-pack support" in skills
+    assert "Managed-capability support" in skills
     assert "If unsure or scope spans layers" in skills
 

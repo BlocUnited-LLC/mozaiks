@@ -46,8 +46,8 @@ _PLAN_VALIDATION_TARGETS: dict[str, list[str]] = {
     "database_migration_review": ["data_contract_validation", "migration_plan_validation"],
     "data_contract_validation": ["data_contract_validation"],
     "migration_plan_validation": ["migration_plan_validation"],
-    "hosted_facade_validation": ["hosted_facade_boundary_validation"],
-    "hosted_facade_boundary_validation": ["hosted_facade_boundary_validation"],
+    "managed_facade_validation": ["managed_facade_boundary_validation"],
+    "managed_facade_boundary_validation": ["managed_facade_boundary_validation"],
     "experience_spec_update": ["experience_spec_validation"],
     "experience_spec_validation": ["experience_spec_validation"],
     "app_bundle_validation": ["app_bundle_validation"],
@@ -61,7 +61,7 @@ _VALIDATION_ORDER = [
     "app_bundle_validation",
     "data_contract_validation",
     "migration_plan_validation",
-    "hosted_facade_boundary_validation",
+    "managed_facade_boundary_validation",
     "integration_readiness_validation",
 ]
 
@@ -72,7 +72,7 @@ _BUNDLE_VALIDATION_NAMES = {
     "experience_spec_validation",
 }
 
-_HOSTED_INTERNAL_TERMS = ("hosted_", "provider")
+_MANAGED_INTERNAL_TERMS = ("managed_", "provider")
 
 
 class RefinementValidationItemResult(BaseModel):
@@ -247,12 +247,12 @@ def _experience_spec_entries(files: dict[str, str]) -> list[dict[str, str]]:
     return _code_file_list(files, predicate=_is_experience_spec_surface)
 
 
-def _is_module_internal_hosted_path(path: str) -> bool:
+def _is_module_internal_managed_path(path: str) -> bool:
     parts = PurePosixPath(path).parts
     if len(parts) < 2 or parts[0] != "modules":
         return False
     module_id = parts[1].lower()
-    return any(term in module_id for term in _HOSTED_INTERNAL_TERMS)
+    return any(term in module_id for term in _MANAGED_INTERNAL_TERMS)
 
 
 def _plan_validation_targets(plan: RefinementExecutionPlan) -> list[str]:
@@ -563,34 +563,34 @@ def _migration_plan_validation(
     )
 
 
-def _hosted_facade_boundary_validation(
+def _managed_facade_boundary_validation(
     files: dict[str, str],
 ) -> RefinementValidationItemResult:
     paths = sorted(files)
-    hosted_internal_paths = [path for path in paths if _is_module_internal_hosted_path(path)]
+    managed_internal_paths = [path for path in paths if _is_module_internal_managed_path(path)]
     integration_paths = [
         path
         for path in paths
         if _matches_any(path, ("services/integrations/*_client.py", "services/adapters/**/*.py"))
         or path.startswith("modules/")
     ]
-    if not hosted_internal_paths and not integration_paths:
+    if not managed_internal_paths and not integration_paths:
         return _result(
-            name="hosted_facade_boundary_validation",
+            name="managed_facade_boundary_validation",
             status="skipped",
-            reason="No hosted capability adapter/facade surfaces were present in the staged workspace.",
+            reason="No managed capability adapter/facade surfaces were present in the staged workspace.",
         )
-    if hosted_internal_paths:
+    if managed_internal_paths:
         return _result(
-            name="hosted_facade_boundary_validation",
+            name="managed_facade_boundary_validation",
             status="failed",
-            reason="Hosted/provider internal module paths are not allowed: " + ", ".join(hosted_internal_paths),
-            artifacts=hosted_internal_paths,
+            reason="Managed/provider internal module paths are not allowed: " + ", ".join(managed_internal_paths),
+            artifacts=managed_internal_paths,
         )
     return _result(
-        name="hosted_facade_boundary_validation",
+        name="managed_facade_boundary_validation",
         status="passed",
-        reason="Hosted capability boundaries stay app-owned.",
+        reason="Managed capability boundaries stay app-owned.",
         artifacts=integration_paths,
     )
 
@@ -730,8 +730,8 @@ def run_refinement_validations(
                     required="migration_plan_validation" in targets,
                 )
             )
-        elif name == "hosted_facade_boundary_validation":
-            items.append(_hosted_facade_boundary_validation(files))
+        elif name == "managed_facade_boundary_validation":
+            items.append(_managed_facade_boundary_validation(files))
         elif name == "integration_readiness_validation":
             items.append(_integration_readiness_validation(files))
 

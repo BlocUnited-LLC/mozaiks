@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from factory_app.workflows.AppGenerator.tools.deployment_contract import generate_deployment_artifacts
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 
 
@@ -38,6 +39,131 @@ module:
   handler: backend.handler:TicketsModule
 actions: []
 """
+
+
+def _mozaikspay_pack() -> list[dict[str, str]]:
+    return [{"id": "mozaikspay", "capability_source": "managed_capability"}]
+
+
+def _valid_mozaikspay_saas_bundle(*, include_deployment: bool = True) -> dict[str, str]:
+    files = {
+        "app.json": '{"name":"SaaS Smoke"}',
+        "config/subscriptions.yaml": """
+schema_version: mozaiks.subscriptions.v1
+label: SaaS Smoke Plans
+default_plan_id: free
+assignment_store:
+  data_alias: subscriptions.assignments
+  user_id_field: user_id
+  active_statuses: [active, pending]
+token_wallets:
+  - wallet_id: ai_tokens
+    label: AI tokens
+    unit: tokens
+    usage_meter_id: ai_tokens
+    scope: user
+    auto_debit_usage: true
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: []
+    usage_limits:
+      - meter_id: ai_tokens
+        unit: tokens
+        monthly_limit: 1000
+    token_allowances:
+      - wallet_id: ai_tokens
+        amount: 1000
+        cadence: monthly
+  - plan_id: pro
+    label: Pro
+    capabilities: [billing_portal.read]
+    usage_limits:
+      - meter_id: ai_tokens
+        unit: tokens
+        monthly_limit: 100000
+    token_allowances:
+      - wallet_id: ai_tokens
+        amount: 100000
+        cadence: monthly
+""",
+        "services/integrations/mozaikspay_client.py": """
+from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+from mozaiksai.core.secrets import get_connector_vault_backend
+
+_CONNECTOR_SERVICE = "mozaikspay"
+MOZAIKSPAY_API_BASE = "MOZAIKSPAY_API_BASE"
+MOZAIKSPAY_CLIENT_ID = "MOZAIKSPAY_CLIENT_ID"
+MOZAIKSPAY_CLIENT_SECRET = "MOZAIKSPAY_CLIENT_SECRET"
+
+class MozaiksPayClient:
+    async def get_subscription_status_for_scope(self, **scope):
+        return {"success": True, "scope": scope}
+
+    async def get_runtime_ai_usage(self, limit=500):
+        return {"success": True, "limit": limit}
+
+    async def create_billing_portal_session(self, **payload):
+        return {"success": True, "portal_url": "https://billing.example.test"}
+""",
+        "modules/billing_portal/module.yaml": """
+schema_version: mozaiks.module.v1
+module:
+  id: billing_portal
+  handler: backend.handler:BillingPortalHandler
+actions:
+  - id: get_subscription_status
+    handler_method: get_subscription_status
+  - id: get_usage_status
+    handler_method: get_usage_status
+  - id: open_billing_portal
+    handler_method: open_billing_portal
+""",
+        "modules/billing_portal/backend/handler.py": """
+class BillingPortalHandler:
+    pass
+""",
+        "modules/billing_portal/backend/service.py": """
+from services.integrations.mozaikspay_client import MozaiksPayClient
+
+class BillingPortalService:
+    async def get_subscription_status(self, ctx):
+        return await MozaiksPayClient().get_subscription_status_for_scope(user_id=ctx.user_id)
+
+    async def get_usage_status(self, ctx, limit=500):
+        return await MozaiksPayClient().get_runtime_ai_usage(limit=limit)
+
+    async def open_billing_portal(self, ctx, return_url):
+        return await MozaiksPayClient().create_billing_portal_session(return_url=return_url)
+""",
+        "modules/billing_portal/backend/schemas.py": """
+class SubscriptionStatus:
+    pass
+""",
+        "ui/pages/billing.yaml": """
+sections:
+  - config:
+      api_endpoint: /api/modules/billing_portal/get_subscription_status
+  - config:
+      api_endpoint: /api/modules/billing_portal/open_billing_portal
+""",
+        "ui/pages/usage.yaml": """
+sections:
+  - config:
+      api_endpoint: /api/modules/billing_portal/get_usage_status
+""",
+    }
+    if include_deployment:
+        files.update(
+            generate_deployment_artifacts(
+                app_id="saas-smoke",
+                deployment_profile="generic_container",
+                include_dockerfiles=True,
+                include_workflow=False,
+                include_compose=False,
+            )["artifacts"]
+        )
+    return files
 
 
 def test_scan_generated_bundle_rejects_data_contract_module_without_module_artifact() -> None:
@@ -115,13 +241,13 @@ def test_scan_generated_bundle_accepts_runtime_project_manifests() -> None:
 def test_scan_generated_bundle_rejects_build_time_prompting_root() -> None:
     errors = scan_generated_bundle(
         {
-            "build_context/HostedPayments/context.yaml": "context_id: hosted_context\n",
+            "build_context/ManagedPayments/context.yaml": "context_id: managed_context\n",
             "app.json": '{"name":"Demo"}',
         }
     )
 
     assert any("outside the canonical app planes" in error for error in errors)
-    assert any("build_context/HostedPayments/context.yaml" in error for error in errors)
+    assert any("build_context/ManagedPayments/context.yaml" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_raw_secret_fields() -> None:
@@ -172,7 +298,7 @@ def test_scan_generated_bundle_rejects_direct_provider_refund_calls() -> None:
     assert any("/v1/refunds" in error for error in errors)
 
 
-def test_scan_generated_bundle_allows_hosted_refund_adapter_call() -> None:
+def test_scan_generated_bundle_allows_managed_refund_adapter_call() -> None:
     errors = scan_generated_bundle(
         {
             "modules/billing_portal/backend/service.py": (
@@ -185,37 +311,109 @@ def test_scan_generated_bundle_allows_hosted_refund_adapter_call() -> None:
     assert errors == []
 
 
-def test_scan_generated_bundle_enforces_selected_hosted_pack_adapter() -> None:
+def test_scan_generated_bundle_enforces_selected_managed_capability_adapter() -> None:
     errors = scan_generated_bundle(
         {
             "app.json": "{}",
             "ui/pages/billing.yaml": "sections: []\n",
         },
-        capability_packs=[{"id": "mozaikspay", "capability_source": "hosted_pack"}],
+        capability_packs=[{"id": "mozaikspay", "capability_source": "managed_capability"}],
     )
 
     assert any("services/integrations/mozaikspay_client.py" in error for error in errors)
 
 
-def test_scan_generated_bundle_rejects_selected_hosted_pack_internals() -> None:
+def test_scan_generated_bundle_rejects_selected_managed_capability_internals() -> None:
     errors = scan_generated_bundle(
         {
             "services/integrations/mozaikspay_client.py": "class MozaiksPayClient: pass\n",
             "modules/mozaikspay/module.yaml": "module:\n  id: mozaikspay\n",
         },
-        capability_packs=[{"id": "mozaikspay", "capability_source": "hosted_pack"}],
+        capability_packs=[{"id": "mozaikspay", "capability_source": "managed_capability"}],
     )
 
-    assert any("must not generate hosted internals" in error for error in errors)
+    assert any("must not generate provider internals" in error for error in errors)
 
 
-def test_scan_generated_bundle_rejects_page_binding_to_selected_hosted_pack() -> None:
+def test_scan_generated_bundle_rejects_page_binding_to_selected_managed_capability() -> None:
     errors = scan_generated_bundle(
         {
             "services/integrations/mozaikspay_client.py": "class MozaiksPayClient: pass\n",
             "ui/pages/billing.yaml": 'api_endpoint: "/api/modules/mozaikspay/create_checkout_session"\n',
         },
-        capability_packs=[{"id": "mozaikspay", "capability_source": "hosted_pack"}],
+        capability_packs=[{"id": "mozaikspay", "capability_source": "managed_capability"}],
     )
 
-    assert any("page binds directly to hosted pack endpoint" in error for error in errors)
+    assert any("page binds directly to managed capability endpoint" in error for error in errors)
+
+
+def test_scan_generated_bundle_accepts_mozaikspay_saas_contract_with_deployment_artifacts() -> None:
+    errors = scan_generated_bundle(
+        _valid_mozaikspay_saas_bundle(include_deployment=True),
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert errors == []
+
+
+def test_scan_generated_bundle_rejects_mozaikspay_saas_without_subscriptions() -> None:
+    files = _valid_mozaikspay_saas_bundle()
+    files.pop("config/subscriptions.yaml")
+
+    errors = scan_generated_bundle(
+        files,
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert any("config/subscriptions.yaml" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_mozaikspay_saas_without_billing_facade() -> None:
+    files = _valid_mozaikspay_saas_bundle()
+    files.pop("modules/billing_portal/module.yaml")
+
+    errors = scan_generated_bundle(
+        files,
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert any("billing_portal/module.yaml" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_mozaikspay_saas_without_runtime_usage_delegate() -> None:
+    files = _valid_mozaikspay_saas_bundle()
+    files["modules/billing_portal/backend/service.py"] = files[
+        "modules/billing_portal/backend/service.py"
+    ].replace("get_runtime_ai_usage", "get_usage_status")
+
+    errors = scan_generated_bundle(
+        files,
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert any("get_runtime_ai_usage" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_managed_mozaikspay_saas_without_deployment_artifacts() -> None:
+    errors = scan_generated_bundle(
+        _valid_mozaikspay_saas_bundle(include_deployment=False),
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert any("deployment artifacts" in error for error in errors)
+    assert any("Dockerfile" in error for error in errors)
+
+
+def test_scan_generated_bundle_allows_mozaikspay_saas_without_deployment_artifacts_when_not_required() -> None:
+    errors = scan_generated_bundle(
+        _valid_mozaikspay_saas_bundle(include_deployment=False),
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=False,
+    )
+
+    assert errors == []

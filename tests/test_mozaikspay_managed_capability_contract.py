@@ -1,14 +1,14 @@
 """
-MozaiksPay hosted pack contract tests.
+MozaiksPay managed capability contract tests.
 
 Verifies that the mozaikspay OSS build pack:
   - has a valid context.yaml and contract.yaml
   - all required_outputs have matching template files
   - no forbidden_output path prefixes appear in templates
   - the app-side client (mozaikspay_client.py) is provider-neutral
-  - the billing_portal facade module is app-owned (not hosted)
-  - generated pages call billing_portal actions only (not hosted modules directly)
-  - no raw Stripe secrets or hosted internals bleed into generated output
+  - the billing_portal facade module is app-owned
+  - generated pages call billing_portal actions only, not managed modules directly
+  - no raw Stripe secrets or provider internals bleed into generated output
   - runtime boundary rules are documented in contract.yaml
 """
 from __future__ import annotations
@@ -131,12 +131,12 @@ class TestContractYaml:
         assert "services/integrations/mozaikspay_client.py" in paths
         assert "modules/billing_portal/module.yaml" in paths
 
-    def test_forbidden_outputs_exclude_hosted_internals(self):
+    def test_forbidden_outputs_exclude_managed_internals(self):
         c = _read_yaml(_CONTRACT_YAML)
         prefixes = {f["path_prefix"] for f in c.get("forbidden_outputs", [])}
         assert "modules/mozaikspay/" in prefixes or any(
             "mozaikspay" in p for p in prefixes
-        ), "hosted module path must be a forbidden output"
+        ), "managed module path must be a forbidden output"
         assert any("wallet" in p for p in prefixes), "wallet module must be forbidden"
 
     def test_runtime_boundaries_documented(self):
@@ -144,7 +144,7 @@ class TestContractYaml:
         boundaries = c.get("runtime_boundaries", [])
         assert len(boundaries) >= 3, "runtime boundaries must be documented"
         rule_ids = {b["id"] for b in boundaries}
-        assert "hosted_internals" in rule_ids
+        assert "managed_internals" in rule_ids
 
     def test_facades_declare_billing_portal(self):
         c = _read_yaml(_CONTRACT_YAML)
@@ -197,25 +197,25 @@ class TestForbiddenOutputsAbsent:
                 violations.append(str(f.relative_to(_PACK_ROOT)))
         assert violations == [], f"Templates reference STRIPE_SECRET_KEY: {violations}"
 
-    def test_templates_do_not_include_hosted_entitlements_mutations(self):
+    def test_templates_do_not_include_managed_entitlements_mutations(self):
         violations = []
         for f in _all_template_files():
             content = _template_content(f)
-            if "hosted_entitlements" in content.lower() and "mutation" in content.lower():
+            if "managed_entitlements" in content.lower() and "mutation" in content.lower():
                 violations.append(str(f.relative_to(_PACK_ROOT)))
-        assert violations == [], f"Templates contain hosted_entitlements mutations: {violations}"
+        assert violations == [], f"Templates contain managed_entitlements mutations: {violations}"
 
     def test_templates_do_not_expose_mozaikspay_module_path(self):
-        """Pages and service code must not bind directly to hosted module routes."""
+        """Pages and service code must not bind directly to managed module routes."""
         violations = []
         for f in _all_template_files():
             if f.suffix not in (".py", ".yaml", ".yml"):
                 continue
             content = _template_content(f)
-            for forbidden in ("/api/modules/mozaikspay", "/api/modules/wallet", "/api/modules/hosted_billing"):
+            for forbidden in ("/api/modules/mozaikspay", "/api/modules/wallet", "/api/modules/managed_billing"):
                 if forbidden in content:
                     violations.append(f"{f.relative_to(_PACK_ROOT)!s}: {forbidden}")
-        assert violations == [], f"Templates expose forbidden hosted module routes: {violations}"
+        assert violations == [], f"Templates expose forbidden managed module routes: {violations}"
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ class TestMozaiksPayClientTemplate:
         assert "X-MozaiksPay-Client-Id" in content
         assert "get_connector(" in content
         assert "get_connector_vault_backend" in content
-        assert "/api/modules/hosted_billing" not in content
+        assert "/api/modules/managed_billing" not in content
 
     def test_runtime_usage_does_not_fall_back_to_provider_api_base(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
@@ -286,11 +286,9 @@ class TestBillingPortalModuleYaml:
         doc = _read_yaml(_MODULE_YAML)
         assert doc["module"]["id"] == "billing_portal"
 
-    def test_owner_is_app_not_hosted(self):
+    def test_owner_is_app(self):
         doc = _read_yaml(_MODULE_YAML)
-        assert doc["module"]["owner"] == "app", (
-            "billing_portal is an app-owned facade — owner must be 'app', not 'hosted'"
-        )
+        assert doc["module"]["owner"] == "app"
 
     def test_visibility_is_private(self):
         doc = _read_yaml(_MODULE_YAML)
@@ -305,12 +303,12 @@ class TestBillingPortalModuleYaml:
         content = _MODULE_YAML.read_text(encoding="utf-8")
         for forbidden in ("stripe_customer_id", "stripe_subscription_id", "STRIPE_"):
             assert forbidden not in content, (
-                f"module.yaml must not expose hosted provider field: {forbidden}"
+                f"module.yaml must not expose provider-owned field: {forbidden}"
             )
 
 
 # ---------------------------------------------------------------------------
-# 7. Page YAMLs — bind through billing_portal facade, not hosted modules
+# 7. Page YAMLs — bind through billing_portal facade, not managed modules
 # ---------------------------------------------------------------------------
 
 class TestPageYamls:
@@ -326,13 +324,13 @@ class TestPageYamls:
             "billing page must route through billing_portal facade module"
         )
 
-    def test_billing_page_does_not_call_hosted_billing_directly(self):
+    def test_billing_page_does_not_call_managed_billing_directly(self):
         content = _BILLING_PAGE.read_text(encoding="utf-8")
-        assert "/api/modules/hosted_billing/" not in content, (
-            "billing page must not bind directly to hosted_billing — use billing_portal facade"
+        assert "/api/modules/managed_billing/" not in content, (
+            "billing page must not bind directly to managed_billing — use billing_portal facade"
         )
 
-    def test_billing_page_does_not_call_hosted_billing_module(self):
+    def test_billing_page_does_not_call_managed_billing_module(self):
         content = _BILLING_PAGE.read_text(encoding="utf-8")
         assert "/api/modules/mozaikspay/" not in content
 
@@ -350,16 +348,16 @@ class TestPageYamls:
 
 
 # ---------------------------------------------------------------------------
-# 8. Pack-wide drift guard — no hosted internals in any template
+# 8. Pack-wide drift guard — no provider internals in any template
 # ---------------------------------------------------------------------------
 
 class TestPackDriftGuard:
-    """Belt-and-suspenders: no template should contain hosted-service internals."""
+    """Belt-and-suspenders: no template should contain managed-service internals."""
 
     DRIFT_PATTERNS = [
         ("app/modules/wallet/", "wallet module path — use billing_portal facade instead"),
         ("app/capability_packs/", "capability_packs internal path"),
-        ("hosted_entitlements mutation", "hosted entitlements mutation logic"),
+        ("managed_entitlements mutation", "managed entitlements mutation logic"),
     ]
 
     def test_no_drift_patterns_in_templates(self):

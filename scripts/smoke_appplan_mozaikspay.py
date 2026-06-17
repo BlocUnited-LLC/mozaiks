@@ -99,19 +99,16 @@ class _Context:
 
 
 def _apply_prompt_hooks(agent: _FakeAgent) -> None:
-    tools_path = str(TOOLS_DIR)
-    if tools_path not in sys.path:
-        sys.path.insert(0, tools_path)
     file_contracts = _load_module(
         TOOLS_DIR / "hook_file_contract_context.py",
         f"smoke_mozaikspay_file_contracts.{id(agent)}",
     )
-    hosted = _load_module(
-        TOOLS_DIR / "hook_hosted_capabilities_context.py",
-        f"smoke_mozaikspay_hosted.{id(agent)}",
+    managed = _load_module(
+        TOOLS_DIR / "hook_managed_capabilities_context.py",
+        f"smoke_mozaikspay_managed.{id(agent)}",
     )
     file_contracts.inject_cookie_cutter_contracts_context(agent, [])
-    hosted.inject_hosted_capabilities_context(agent, [])
+    managed.inject_managed_capabilities_context(agent, [])
 
 
 def _call_openai(system_message: str, user_message: str, model: str) -> str:
@@ -121,15 +118,17 @@ def _call_openai(system_message: str, user_message: str, model: str) -> str:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured")
     client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
+    request: dict[str, Any] = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
         ],
-        temperature=0.1,
-        timeout=180,
-    )
+        "timeout": 180,
+    }
+    if not model.startswith("gpt-5"):
+        request["temperature"] = 0.1
+    response = client.chat.completions.create(**request)
     return response.choices[0].message.content or ""
 
 
@@ -158,35 +157,38 @@ def _validate_with_app_build_plan(plan: dict[str, Any], projected: dict[str, Any
     return ctx.data["app_build_plan"]
 
 
+def _managed_template_paths(plan: dict[str, Any]) -> set[str]:
+    resolver = _load_module(
+        TOOLS_DIR / "resolve_managed_capability_templates.py",
+        f"smoke_mozaikspay_template_resolver.{id(plan)}",
+    )
+    return {
+        file.get("filename")
+        for file in resolver.resolve_managed_capability_templates(plan.get("capability_packs") or [])
+        if isinstance(file, dict) and file.get("filename")
+    }
+
+
 def _assert_mozaikspay_shape(plan: dict[str, Any]) -> None:
     pack_ids = {pack.get("capability_pack_id") for pack in plan.get("capability_packs") or []}
-    task_ids = {task.get("task_id") for task in plan.get("build_tasks") or []}
     routes = {page.get("route") for page in plan.get("pages") or []}
-    paths = {
+    task_paths = {
         path
         for task in plan.get("build_tasks") or []
         for path in task.get("owned_paths") or []
     }
-    required_tasks = {
-        "task_mozaikspay_adapter",
-        "task_billing_portal_module",
-        "task_billing_portal_models",
-        "task_billing_portal_services",
-        "task_billing_portal_pages",
-        "task_wallet_connection_module",
-        "task_wallet_connection_models",
-        "task_wallet_connection_services",
-        "task_wallet_connection_pages",
+    paths = task_paths | _managed_template_paths(plan)
+    required_paths = {
+        "services/integrations/mozaikspay_client.py",
+        "modules/billing_portal/module.yaml",
     }
     missing = []
-    if not {"mozaikspay", "billing_portal", "wallet_connection"}.issubset(pack_ids):
+    if not {"mozaikspay", "billing_portal"}.issubset(pack_ids):
         missing.append("required capability packs")
-    if not required_tasks.issubset(task_ids):
-        missing.append("required build tasks")
-    if not {"/billing", "/usage", "/wallet"}.issubset(routes):
+    if not required_paths.issubset(paths):
+        missing.append(f"required paths: {sorted(required_paths.difference(paths))}")
+    if not {"/billing", "/usage"}.issubset(routes):
         missing.append("required routes")
-    if "services/integrations/mozaikspay_client.py" not in paths:
-        missing.append("mozaikspay adapter path")
     if any(str(path).startswith("modules/mozaikspay/") for path in paths):
         missing.append("forbidden modules/mozaikspay output")
     if missing:
@@ -195,7 +197,7 @@ def _assert_mozaikspay_shape(plan: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run live AppPlanAgent MozaiksPay smoke.")
-    parser.add_argument("--model", default=os.getenv("DEFAULT_LLM_MODEL", "gpt-5-nano"))
+    parser.add_argument("--model", default=os.getenv("APPPLAN_SMOKE_MODEL", "gpt-5-nano"))
     args = parser.parse_args()
 
     _load_dotenv()
@@ -211,7 +213,7 @@ def main() -> int:
         (
             "Build a SaaS creator app. It needs subscriptions, checkout, usage "
             "status, a billing portal, and wallet/account connection through the "
-            "selected MozaiksPay hosted payments pack. Return only the AppBuildPlan JSON."
+            "selected MozaiksPay managed payments capability. Return only the AppBuildPlan JSON."
         ),
         args.model,
     )

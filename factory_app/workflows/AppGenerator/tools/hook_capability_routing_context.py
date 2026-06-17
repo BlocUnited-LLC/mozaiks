@@ -11,7 +11,7 @@ ai_workflow, capability_pack, and custom_owned — and which known capability pa
 exist at what capability_kind. It fires on every AppPlanAgent turn so the rules
 are always in scope when the plan is being written.
 
-This is unconditional (unlike the hosted capabilities hook which no-ops in OSS
+This is unconditional (unlike the managed capabilities hook which no-ops in OSS
 mode). The routing rules are always relevant and do not change per deployment.
 """
 

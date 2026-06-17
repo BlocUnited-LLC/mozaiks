@@ -36,8 +36,8 @@ Covers:
     - includes non-UI path → False
     - config/shell.json allowed → True
 
-  _is_module_internal_hosted_path:
-    - "modules/hosted_billing/module.yaml" → True (hosted_ prefix)
+  _is_module_internal_managed_path:
+    - "modules/managed_billing/module.yaml" → True (managed_ prefix)
     - "modules/stripe_provider/handler.py" → True (provider in name)
     - "modules/billing/module.yaml" → False
     - path with fewer than 2 parts → False
@@ -45,8 +45,8 @@ Covers:
 
   _required_validation_names:
     - experience_design lane → full set of experience validations
-    - hosted_capability_change lane + UI leaf → hosted + route/UI validations
-    - hosted_capability_change lane + non-UI → only hosted validation
+    - managed_capability_change lane + UI leaf → managed capability + route/UI validations
+    - managed_capability_change lane + non-UI → only managed capability validation
     - data model backend path → data contract + migration validations
     - integration path → integration readiness
     - module generated path → module contract validation
@@ -87,7 +87,7 @@ from mozaiksai.control_plane.promotion_policy import (
     _build_allowed_decision,
     _build_blocked_decision,
     _has_required_artifact_evidence,
-    _is_module_internal_hosted_path,
+    _is_module_internal_managed_path,
     _is_ui_leaf_path,
     _is_ui_only_scope,
     _matches_any,
@@ -233,28 +233,28 @@ class TestIsUiOnlyScope:
 
 
 # ---------------------------------------------------------------------------
-# 6. _is_module_internal_hosted_path
+# 6. _is_module_internal_managed_path
 # ---------------------------------------------------------------------------
 
-class TestIsModuleInternalHostedPath:
-    def test_hosted_prefix_true(self):
-        assert _is_module_internal_hosted_path("modules/hosted_billing/module.yaml") is True
+class TestIsModuleInternalManagedPath:
+    def test_managed_prefix_true(self):
+        assert _is_module_internal_managed_path("modules/managed_billing/module.yaml") is True
 
     def test_provider_in_name_true(self):
-        assert _is_module_internal_hosted_path("modules/stripe_provider/handler.py") is True
+        assert _is_module_internal_managed_path("modules/stripe_provider/handler.py") is True
 
     def test_regular_module_false(self):
-        assert _is_module_internal_hosted_path("modules/billing/module.yaml") is False
+        assert _is_module_internal_managed_path("modules/billing/module.yaml") is False
 
     def test_non_modules_prefix_false(self):
-        assert _is_module_internal_hosted_path("app/hosted_billing/module.yaml") is False
+        assert _is_module_internal_managed_path("app/managed_billing/module.yaml") is False
 
     def test_too_few_parts_false(self):
-        assert _is_module_internal_hosted_path("modules") is False
+        assert _is_module_internal_managed_path("modules") is False
 
-    def test_hosted_in_module_id_capitalized_true(self):
+    def test_managed_in_module_id_capitalized_true(self):
         # Parts are lowercased before check
-        assert _is_module_internal_hosted_path("modules/Hosted_Billing/module.yaml") is True
+        assert _is_module_internal_managed_path("modules/Managed_Billing/module.yaml") is True
 
 
 # ---------------------------------------------------------------------------
@@ -269,18 +269,18 @@ class TestRequiredValidationNames:
         assert "route_component_validation" in result
         assert "ui_theme_primitive_validation" in result
 
-    def test_hosted_capability_ui_leaf_path(self):
+    def test_managed_capability_ui_leaf_path(self):
         result = _required_validation_names(
-            lane="hosted_capability_change", path="ui/pages/home.yaml"
+            lane="managed_capability_change", path="ui/pages/home.yaml"
         )
-        assert "hosted_facade_boundary_validation" in result
+        assert "managed_facade_boundary_validation" in result
         assert "route_component_validation" in result
 
-    def test_hosted_capability_non_ui_path(self):
+    def test_managed_capability_non_ui_path(self):
         result = _required_validation_names(
-            lane="hosted_capability_change", path="modules/hosted_billing/module.yaml"
+            lane="managed_capability_change", path="modules/managed_billing/module.yaml"
         )
-        assert "hosted_facade_boundary_validation" in result
+        assert "managed_facade_boundary_validation" in result
         assert "route_component_validation" not in result
 
     def test_data_model_backend_path(self):
@@ -322,8 +322,8 @@ class TestMatchesValidationName:
     def test_no_match(self):
         assert _matches_validation_name("data_contract_validation", {"other_validation"}) is False
 
-    def test_hosted_facade_alias(self):
-        assert _matches_validation_name("hosted_facade_boundary_validation", {"hosted_facade_validation"}) is True
+    def test_managed_facade_alias(self):
+        assert _matches_validation_name("managed_facade_boundary_validation", {"managed_facade_validation"}) is True
 
     def test_integration_alias(self):
         assert _matches_validation_name("integration_readiness_validation", {"integration_readiness"}) is True

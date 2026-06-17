@@ -297,14 +297,14 @@ def test_core_conceptual_reframe_blocks_direct_promotion(tmp_path: Path) -> None
     assert decision.mode == "blocked_requires_replan"
 
 
-def test_hosted_capability_blocks_hosted_module_internal_path(tmp_path: Path) -> None:
+def test_managed_capability_blocks_managed_module_internal_path(tmp_path: Path) -> None:
     plan, review, execution_result, changed_file, evidence = _policy_inputs(
         tmp_path,
-        request="Change hosted analytics dashboard display.",
+        request="Change managed analytics dashboard display.",
         change_class="design",
         workflow_sequence="app_surface_revision",
-        affected_bundle_paths=["modules/hosted_analytics/backend/service.py"],
-        candidate_path="modules/hosted_analytics/backend/service.py",
+        affected_bundle_paths=["modules/managed_analytics/backend/service.py"],
+        candidate_path="modules/managed_analytics/backend/service.py",
     )
 
     decision = evaluate_refinement_promotion_policy(
@@ -319,15 +319,15 @@ def test_hosted_capability_blocks_hosted_module_internal_path(tmp_path: Path) ->
     assert decision.mode == "blocked_requires_replan"
 
 
-def test_hosted_capability_allows_backend_integrations_client_path(tmp_path: Path) -> None:
+def test_managed_capability_allows_backend_integrations_client_path(tmp_path: Path) -> None:
     plan, review, execution_result, changed_file, evidence = _policy_inputs(
         tmp_path,
-        request="Change hosted analytics dashboard display.",
+        request="Change managed analytics dashboard display.",
         change_class="design",
         workflow_sequence="app_surface_revision",
-        affected_bundle_paths=["services/integrations/hosted_analytics_client.py"],
-        candidate_path="services/integrations/hosted_analytics_client.py",
-        validation_completed=["hosted_facade_boundary_validation"],
+        affected_bundle_paths=["services/integrations/managed_analytics_client.py"],
+        candidate_path="services/integrations/managed_analytics_client.py",
+        validation_completed=["managed_facade_boundary_validation"],
     )
 
     decision = evaluate_refinement_promotion_policy(

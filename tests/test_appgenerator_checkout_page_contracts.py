@@ -43,9 +43,9 @@ _PROPRIETARY_NAMES = [
     "Stripe",
     "stripe",
     "wallet",
-    "hosted_billing",
-    "hosted_usage",
-    "hosted_entitlements",
+    "managed_billing",
+    "managed_usage",
+    "managed_entitlements",
 ]
 
 
@@ -604,7 +604,7 @@ class TestNoDirectProviderEndpointBinding:
         app-owned module and goes directly to an external payment provider path.
 
         For OSS purposes, the provider is identified by pattern:
-        - endpoint path segment contains 'external_payment_provider' or 'hosted_pack'
+        - endpoint path segment contains 'external_payment_provider' or 'managed_capability'
         """
         violations = []
         for section in page.get("sections", []):

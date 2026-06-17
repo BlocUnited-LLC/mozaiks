@@ -69,14 +69,14 @@ def _base_manifest() -> list[dict[str, str]]:
     ]
 
 
-def _hosted_manifest() -> list[dict[str, str]]:
+def _managed_manifest() -> list[dict[str, str]]:
     return [
-        {"path": "services/integrations/hosted_analytics_client.py"},
+        {"path": "services/integrations/managed_analytics_client.py"},
         {"path": "modules/analytics_dashboard/module.yaml"},
         {"path": "modules/analytics_dashboard/backend/service.py"},
         {"path": "modules/analytics_dashboard/backend/handler.py"},
         {"path": "modules/analytics_dashboard/contracts/events.yaml"},
-        {"path": "modules/hosted_analytics/module.yaml"},
+        {"path": "modules/managed_analytics/module.yaml"},
         {
             "path": "ui/pages/analytics.yaml",
             "content": "api_endpoint: /api/modules/analytics_dashboard/get_metrics\n",
@@ -216,16 +216,16 @@ async def test_refinement_control_plane_smoke_marks_data_model_migration_review_
 
 
 @pytest.mark.asyncio
-async def test_refinement_control_plane_smoke_scopes_hosted_capability_to_app_owned_facade() -> None:
+async def test_refinement_control_plane_smoke_scopes_managed_capability_to_app_owned_facade() -> None:
     classifier = _FakeChangeClassifier(
         change_class="feature",
-        rationale="Hosted analytics dashboard display needs a scoped revision.",
+        rationale="Managed analytics dashboard display needs a scoped revision.",
     )
     resolver = _resolver(classifier)
     request = resolver.request_from_payload(
         payload=_request_payload(
-            "Change hosted analytics dashboard display.",
-            _hosted_manifest(),
+            "Change managed analytics dashboard display.",
+            _managed_manifest(),
         ),
         app_id="neutral_app",
         requested_workflow_id="AppGenerator",
@@ -234,11 +234,11 @@ async def test_refinement_control_plane_smoke_scopes_hosted_capability_to_app_ow
     assert request is not None
     decision = await resolver.route(request)
 
-    assert "services/integrations/hosted_analytics_client.py" in decision.impact_set.affected_bundle_paths
+    assert "services/integrations/managed_analytics_client.py" in decision.impact_set.affected_bundle_paths
     assert "modules/analytics_dashboard/module.yaml" in decision.impact_set.affected_bundle_paths
     assert "modules/analytics_dashboard/backend/service.py" in decision.impact_set.affected_bundle_paths
     assert "ui/pages/analytics.yaml" in decision.impact_set.affected_bundle_paths
-    assert "modules/hosted_analytics/module.yaml" not in decision.impact_set.affected_bundle_paths
+    assert "modules/managed_analytics/module.yaml" not in decision.impact_set.affected_bundle_paths
 
 
 def test_refinement_control_plane_smoke_resolves_llm_profiles_without_provider_assumptions() -> None:

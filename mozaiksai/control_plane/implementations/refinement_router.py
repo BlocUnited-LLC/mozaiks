@@ -99,16 +99,13 @@ _MODULE_BACKEND_ORDER = {
     "admin.py": 6,
 }
 
-_HOSTED_CAPABILITY_TERMS = (
-    "hosted",
-    "hosted capability",
-    "hosted pack",
+_MANAGED_CAPABILITY_TERMS = (
+    "managed capability",
     "external adapter",
     "integration client",
     "facade module",
     "façade module",
     "provider-backed",
-    "managed capability",
     "external service",
     "analytics provider",
     "reporting provider",
@@ -116,8 +113,20 @@ _HOSTED_CAPABILITY_TERMS = (
     "notification provider",
 )
 
-_HOSTED_GENERIC_PACK_TOKENS = {
-    "hosted",
+_MANAGED_CAPABILITY_CATEGORY_TERMS = (
+    "analytics",
+    "reporting",
+    "audit",
+    "notification",
+    "billing",
+    "payments",
+    "search",
+    "email",
+    "storage",
+    "crm",
+)
+
+_MANAGED_GENERIC_PACK_TOKENS = {
     "pack",
     "provider",
     "external",
@@ -689,7 +698,7 @@ class RefinementTriggerRouteResolver:
         known_connector_ids: list[str],
     ) -> bool:
         text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
-        if re.search(r"(?<![a-z0-9])hosted(?![a-z0-9])", text):
+        if re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text) or "provider-backed" in text:
             return False
         for term in _INTEGRATION_IMPACT_TERMS:
             variants = {term}
@@ -1080,17 +1089,22 @@ class RefinementTriggerRouteResolver:
         return mentioned
 
     @staticmethod
-    def _has_hosted_capability_signal(
+    def _has_managed_capability_signal(
         *,
         request: RefinementRequest,
         intent: ChangeIntent,
         known_pack_ids: list[str],
     ) -> bool:
         text = RefinementTriggerRouteResolver._request_impact_text(request=request, intent=intent)
-        for term in _HOSTED_CAPABILITY_TERMS:
+        for term in _MANAGED_CAPABILITY_TERMS:
             pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
             if re.search(pattern, text):
                 return True
+        if re.search(r"(?<![a-z0-9])managed(?![a-z0-9])", text):
+            for term in _MANAGED_CAPABILITY_CATEGORY_TERMS:
+                pattern = rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])"
+                if re.search(pattern, text):
+                    return True
         return bool(
             RefinementTriggerRouteResolver._mentioned_ids(
                 request=request,
@@ -1113,12 +1127,12 @@ class RefinementTriggerRouteResolver:
         tokens: set[str] = set()
         for pack_id in pack_ids:
             for token in re.split(r"[_\-\s]+", pack_id.lower()):
-                if token and token not in _HOSTED_GENERIC_PACK_TOKENS:
+                if token and token not in _MANAGED_GENERIC_PACK_TOKENS:
                     tokens.add(token)
         return tokens
 
     @classmethod
-    def _facade_module_ids_for_hosted_impact(
+    def _facade_module_ids_for_managed_impact(
         cls,
         *,
         request: RefinementRequest,
@@ -1136,7 +1150,7 @@ class RefinementTriggerRouteResolver:
         pack_id_set = set(pack_ids)
         pack_tokens = cls._pack_tokens(pack_ids)
         for module_id in known_module_ids:
-            if module_id in pack_id_set or module_id.startswith("hosted_") or module_id.startswith("provider_"):
+            if module_id in pack_id_set or module_id.startswith("managed_") or module_id.startswith("provider_"):
                 continue
             module_tokens = set(re.split(r"[_\-\s]+", module_id.lower()))
             if module_id in mentioned_module_ids or (pack_tokens and pack_tokens.intersection(module_tokens)):
@@ -1156,7 +1170,7 @@ class RefinementTriggerRouteResolver:
         return "\n".join(parts)
 
     @classmethod
-    def _hosted_capability_bundle_paths(
+    def _managed_capability_bundle_paths(
         cls,
         *,
         request: RefinementRequest,
@@ -1164,7 +1178,7 @@ class RefinementTriggerRouteResolver:
         manifest_paths: list[str],
     ) -> list[str]:
         known_pack_ids = cls._pack_ids_from_integration_clients(manifest_paths)
-        if not cls._has_hosted_capability_signal(
+        if not cls._has_managed_capability_signal(
             request=request,
             intent=intent,
             known_pack_ids=known_pack_ids,
@@ -1198,7 +1212,7 @@ class RefinementTriggerRouteResolver:
             )
         ]
 
-        facade_module_ids = cls._facade_module_ids_for_hosted_impact(
+        facade_module_ids = cls._facade_module_ids_for_managed_impact(
             request=request,
             intent=intent,
             manifest_paths=manifest_paths,
@@ -1303,13 +1317,13 @@ class RefinementTriggerRouteResolver:
             paths.extend(integration_paths)
             if integration_paths:
                 return self._dedupe_paths(paths)
-            hosted_paths = self._hosted_capability_bundle_paths(
+            managed_capability_paths = self._managed_capability_bundle_paths(
                 request=request,
                 intent=intent,
                 manifest_paths=manifest_paths,
             )
-            paths.extend(hosted_paths)
-            if hosted_paths:
+            paths.extend(managed_capability_paths)
+            if managed_capability_paths:
                 return self._dedupe_paths(paths)
             data_model_paths = self._data_model_bundle_paths(
                 request=request,

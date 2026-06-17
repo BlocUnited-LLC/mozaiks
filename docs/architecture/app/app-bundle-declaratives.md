@@ -57,7 +57,7 @@ workflow metering declarations. Non-SaaS apps produce a no-op subscription
 contract and must not emit this file.
 
 This file does not control whether the workspace is allowed to use a hosted
-operator pack such as MozaiksPay. Hosted pack access is enforced by the hosted
+operator pack such as MozaiksPay. Managed capability access is enforced by the hosted
 product that provides the pack. Generated app subscription config only controls
 the generated app's own users, plans, usage limits, and feature gates.
 

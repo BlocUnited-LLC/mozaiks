@@ -67,7 +67,7 @@ REQUEST_TEXT = "Change the dashboard title to Reports Dashboard."
 REQUEST_ID = "req_refinement_live_worker_001"
 APP_ID = "refinement-live-worker-smoke"
 
-_SCENARIO_NAMES = ("ui_patch", "module_backend", "integration_adapter", "data_model_comment", "hosted_facade")
+_SCENARIO_NAMES = ("ui_patch", "module_backend", "integration_adapter", "data_model_comment", "managed_facade")
 
 
 @dataclass(frozen=True)
@@ -332,15 +332,15 @@ def _scenario_specs() -> list[SmokeScenarioSpec]:
             scope_summary="Manual live smoke for a data model documentation-only patch.",
         ),
         SmokeScenarioSpec(
-            name="hosted_facade",
-            request_id="req_refinement_live_worker_hosted_001",
-            request_text="Add a comment explaining hosted analytics display mapping in the analytics dashboard service.",
-            app_id=f"{APP_ID}-hosted",
-            artifact_version_id="av_refinement_live_worker_hosted_001",
+            name="managed_facade",
+            request_id="req_refinement_live_worker_managed_001",
+            request_text="Add a comment explaining managed analytics display mapping in the analytics dashboard service.",
+            app_id=f"{APP_ID}-managed",
+            artifact_version_id="av_refinement_live_worker_managed_001",
             source_files=dict(source_files),
             request_files={"modules/analytics_dashboard/backend/service.py": source_files["modules/analytics_dashboard/backend/service.py"]},
             affected_bundle_paths=["modules/analytics_dashboard/backend/service.py"],
-            scope_summary="Manual live smoke for a hosted facade app-owned comment-only patch.",
+            scope_summary="Manual live smoke for a managed facade app-owned comment-only patch.",
         ),
     ]
 
@@ -605,11 +605,11 @@ def _build_single_fixture_payload(
     staged_after: dict[str, str],
 ) -> dict[str, Any]:
     plan_payload = plan.model_dump(mode="json")
-    plan_payload["affected_workflows"] = ["hosted_product"]
-    plan_payload["target_workflow"] = "hosted_product"
-    plan_payload["workflow_id"] = "hosted_product"
+    plan_payload["affected_workflows"] = ["managed_capability"]
+    plan_payload["target_workflow"] = "managed_capability"
+    plan_payload["workflow_id"] = "managed_capability"
     worker_request_payload = _redact(worker_request.model_dump(mode="json"))
-    worker_request_payload["requested_workflow_id"] = "hosted_product"
+    worker_request_payload["requested_workflow_id"] = "managed_capability"
     return {
         "schema_version": "mozaiks.refinement_live_coding_worker_smoke.v1",
         "request_id": spec.request_id,

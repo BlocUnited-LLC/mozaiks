@@ -81,7 +81,7 @@ retired customer-facing terms such as `Hub`, `Treasury`, `Adapters`,
 `Deploy`, `Operations`, `Settings`, or `Admin`.
 
 Provider-owned billing or hosting pages belong in hosted app workspaces through
-hosted packs, custom routes, or generated app-owned facades backed by explicit
+managed capabilities, custom routes, or generated app-owned facades backed by explicit
 host capability metadata. The OSS factory Studio must not hardcode hosted
 product billing routes.
 

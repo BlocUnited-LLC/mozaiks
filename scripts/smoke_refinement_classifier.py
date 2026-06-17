@@ -85,15 +85,15 @@ def base_manifest() -> list[dict[str, Any]]:
     ]
 
 
-def hosted_manifest() -> list[dict[str, Any]]:
+def managed_manifest() -> list[dict[str, Any]]:
     return [
-        {"path": "services/integrations/hosted_analytics_client.py"},
+        {"path": "services/integrations/managed_analytics_client.py"},
         {"path": "modules/analytics_dashboard/module.yaml"},
         {"path": "modules/analytics_dashboard/contracts/events.yaml"},
         {"path": "modules/analytics_dashboard/backend/handler.py"},
         {"path": "modules/analytics_dashboard/backend/service.py"},
         {"path": "modules/analytics_dashboard/backend/schemas.py"},
-        {"path": "modules/hosted_analytics/module.yaml"},
+        {"path": "modules/managed_analytics/module.yaml"},
         {
             "path": "ui/pages/analytics.yaml",
             "content": "api_endpoint: /api/modules/analytics_dashboard/get_metrics\n",
@@ -132,10 +132,10 @@ SMOKE_CASES: tuple[SmokeCase, ...] = (
         allowed_change_classes=("feature", "core"),
     ),
     SmokeCase(
-        id="hosted_capability_facade",
-        label="Hosted capability facade",
-        request="Change hosted analytics dashboard display.",
-        files_manifest=hosted_manifest(),
+        id="managed_capability_facade",
+        label="Managed capability facade",
+        request="Change managed analytics dashboard display.",
+        files_manifest=managed_manifest(),
         allowed_change_classes=("design", "feature"),
     ),
 )
@@ -388,18 +388,18 @@ def validate_case(case: dict[str, Any]) -> list[str]:
             violations.append(f"{case_id}: missing database migration path")
         if "Destructive changes require explicit review." not in scope_summary:
             violations.append(f"{case_id}: missing destructive-review warning")
-    elif case_id == "hosted_capability_facade":
+    elif case_id == "managed_capability_facade":
         required = {
-            "services/integrations/hosted_analytics_client.py",
+            "services/integrations/managed_analytics_client.py",
             "modules/analytics_dashboard/module.yaml",
             "modules/analytics_dashboard/backend/service.py",
             "ui/pages/analytics.yaml",
         }
         missing = sorted(required.difference(paths))
         if missing:
-            violations.append(f"{case_id}: missing hosted facade paths {missing}")
-        if "modules/hosted_analytics/module.yaml" in paths:
-            violations.append(f"{case_id}: emitted hosted provider module internals")
+            violations.append(f"{case_id}: missing managed facade paths {missing}")
+        if "modules/managed_analytics/module.yaml" in paths:
+            violations.append(f"{case_id}: emitted managed provider module internals")
 
     return violations
 

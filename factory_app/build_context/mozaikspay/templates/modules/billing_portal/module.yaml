@@ -5,7 +5,7 @@ module:
   version: 1.0.0
   description: >
     App-owned facade for subscription status, usage display, and customer
-    billing portal redirects through the MozaiksPay hosted pack client.
+    billing portal redirects through the MozaiksPay managed capability client.
   owner: app
   visibility: private
   handler: backend.handler:BillingPortalHandler
@@ -21,7 +21,7 @@ actions:
     description: >
       Return safe current plan display fields through MozaiksPayClient.
       Never returns hosted subscription ids, Stripe customer ids, or granted
-      hosted-pack capabilities.
+      managed-capability capabilities.
     handler_method: get_subscription_status
     input_schema:
       type: object

@@ -4,9 +4,9 @@ OSS prompt hygiene tests.
 Verifies that base OSS generator prompts are host-agnostic:
 
 1. hook_universal_prompts.py has no proprietary product names (MozaiksPay, etc.).
-2. AppGenerator agents.yaml does not use HOSTED_WALLET_URL as the primary generic example.
-3. Generic hosted adapter acceptance criteria do not say "Stripe" in non-wallet-scoped templates.
-4. OSS mode: hook_hosted_capabilities_context is a no-op when no hosted context is supplied.
+2. AppGenerator agents.yaml does not use MANAGED_WALLET_URL as the primary generic example.
+3. Generic managed capability adapter acceptance criteria do not say "Stripe" in non-wallet-scoped templates.
+4. OSS mode: hook_managed_capabilities_context is a no-op when no managed context is supplied.
 5. When typed operator contracts are supplied, the hook renders them.
 6. MozaiksPay does not appear anywhere in OSS default prompts or hooks.
 """
@@ -25,7 +25,7 @@ _APPGEN_TOOLS = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "too
 _APPGEN_DIR = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator"
 _APPGEN_CATALOGS = _WORKSPACE / "factory_app" / "build_context" / "AppGenerator"
 _UNIVERSAL_PROMPTS_PATH = _AGENTGEN_TOOLS / "hook_universal_prompts.py"
-_HOSTED_CAPS_PATH = _APPGEN_TOOLS / "hook_hosted_capabilities_context.py"
+_MANAGED_CAPS_PATH = _APPGEN_TOOLS / "hook_managed_capabilities_context.py"
 _AGENTS_YAML_PATH = _APPGEN_DIR / "agents.yaml"
 
 _PROPRIETARY_NAMES = [
@@ -133,30 +133,30 @@ class TestAppGeneratorAgentsYamlHostAgnostic:
     def test_agents_yaml_exists(self) -> None:
         assert _AGENTS_YAML_PATH.exists(), f"agents.yaml not found at {_AGENTS_YAML_PATH}"
 
-    def test_hosted_adapter_env_var_example_is_generic(self) -> None:
-        """Generic hosted adapter instruction must not use HOSTED_WALLET_URL as primary example."""
+    def test_managed_adapter_env_var_example_is_generic(self) -> None:
+        """Generic managed capability adapter instruction must not use MANAGED_WALLET_URL as primary example."""
         source = self._read_source()
-        # Should use generic pattern like HOSTED_{PACK_ID}_URL, not the wallet-specific name
-        assert "HOSTED_WALLET_URL" not in source, (
-            "agents.yaml still contains HOSTED_WALLET_URL as a generic env var example. "
-            "Replace with app_backend_url or HOSTED_{PACK_ID}_URL."
+        # Should use generic pattern like MANAGED_{PACK_ID}_URL, not the wallet-specific name
+        assert "MANAGED_WALLET_URL" not in source, (
+            "agents.yaml still contains MANAGED_WALLET_URL as a generic env var example. "
+            "Replace with app_backend_url or MANAGED_{PACK_ID}_URL."
         )
 
-    def test_hosted_adapter_env_var_uses_generic_pattern(self) -> None:
-        """The hosted adapter lane guidance should use a generic env var placeholder."""
+    def test_managed_adapter_env_var_uses_generic_pattern(self) -> None:
+        """The managed capability adapter lane guidance should use a generic env var placeholder."""
         source = self._read_source()
-        assert "HOSTED_{PACK_ID}_URL" in source or "app_backend_url" in source, (
-            "agents.yaml hosted adapter lane should use 'app_backend_url' or "
-            "'HOSTED_{PACK_ID}_URL' as the generic env var example."
+        assert "MANAGED_{PACK_ID}_URL" in source or "app_backend_url" in source, (
+            "agents.yaml managed capability adapter lane should use 'app_backend_url' or "
+            "'MANAGED_{PACK_ID}_URL' as the generic env var example."
         )
 
-    def test_generic_hosted_adapter_acceptance_criteria_no_stripe(self) -> None:
+    def test_generic_managed_adapter_acceptance_criteria_no_stripe(self) -> None:
         """
-        The generic hosted adapter example's acceptance_criteria must not say
+        The generic managed capability adapter example's acceptance_criteria must not say
         'Does not call Stripe directly'. That is a wallet-specific constraint.
         """
         source = self._read_source()
-        # Find the acceptance_criteria block in the generic hosted adapter output example.
+        # Find the acceptance_criteria block in the generic managed capability adapter output example.
         # The wallet-specific example scoped around task_wallet_adapter is acceptable.
         # The generic ControllerAgent prompt template must not have Stripe-specific criteria.
 
@@ -171,48 +171,48 @@ class TestAppGeneratorAgentsYamlHostAgnostic:
         """Replacement acceptance criterion should be provider-agnostic."""
         source = self._read_source()
         assert (
-            "Does not call the hosted provider" in source
+            "Does not call the managed provider" in source
             or "Does not call third-party" in source
         ), (
             "agents.yaml should contain a provider-agnostic acceptance criterion like "
-            "'Does not call the hosted provider\\'s private APIs directly'."
+            "'Does not call the managed provider\\'s private APIs directly'."
         )
 
 
 # ---------------------------------------------------------------------------
-# 3. hook_hosted_capabilities_context.py — OSS no-op + typed contract rendering
+# 3. hook_managed_capabilities_context.py — OSS no-op + typed contract rendering
 # ---------------------------------------------------------------------------
 
 
-class TestHostedCapabilitiesHook:
+class TestManagedCapabilitiesHook:
     def _load_hook(self):
-        return _load_module(_HOSTED_CAPS_PATH, f"test_hosted_caps.{id(object())}")
+        return _load_module(_MANAGED_CAPS_PATH, f"test_managed_caps.{id(object())}")
 
     def test_hook_is_noop_in_oss_mode(self) -> None:
-        """When no hosted context is supplied, the hook must not modify system_message."""
+        """When no managed context is supplied, the hook must not modify system_message."""
         mod = self._load_hook()
         agent = _FakeAgent(name="AppPlanAgent", context_variables={})
         agent.system_message = "base prompt"
-        mod.inject_hosted_capabilities_context(agent, [])
+        mod.inject_managed_capabilities_context(agent, [])
         assert agent.system_message == "base prompt", (
-            "inject_hosted_capabilities_context must be a no-op in OSS mode "
+            "inject_managed_capabilities_context must be a no-op in OSS mode "
             "(no capability_packs supplied)."
         )
 
-    def test_hook_injects_when_hosted_packs_present(self) -> None:
-        """When hosted packs are supplied, the hook must inject [HOSTED CAPABILITIES CONTEXT]."""
+    def test_hook_injects_when_managed_capabilities_present(self) -> None:
+        """When managed capabilities are supplied, the hook must inject [MANAGED CAPABILITIES CONTEXT]."""
         mod = self._load_hook()
         agent = _FakeAgent(
             name="AppPlanAgent",
             context_variables={
                 "capability_packs": [
-                    {"id": "wallet", "label": "Wallet", "capability_source": "hosted_pack"}
+                    {"id": "wallet", "label": "Wallet", "capability_source": "managed_capability"}
                 ]
             },
         )
-        mod.inject_hosted_capabilities_context(agent, [])
-        assert "[HOSTED CAPABILITIES CONTEXT]" in agent.system_message, (
-            "inject_hosted_capabilities_context must inject the context block when "
+        mod.inject_managed_capabilities_context(agent, [])
+        assert "[MANAGED CAPABILITIES CONTEXT]" in agent.system_message, (
+            "inject_managed_capabilities_context must inject the context block when "
             "capability_packs is non-empty."
         )
 
@@ -226,15 +226,15 @@ class TestHostedCapabilitiesHook:
                     {
                         "id": "wallet",
                         "label": "Wallet",
-                        "capability_source": "hosted_pack",
+                        "capability_source": "managed_capability",
                         "generation_rules": ["legacy rule that must not render"],
                     }
                 ]
             },
         )
-        mod.inject_hosted_capabilities_context(agent, [])
+        mod.inject_managed_capabilities_context(agent, [])
         assert "legacy rule that must not render" not in agent.system_message
-        assert "Host-provided generation rules" not in agent.system_message
+        assert "Operator-provided generation rules" not in agent.system_message
 
     def test_typed_operator_contracts_are_rendered_when_supplied(self) -> None:
         mod = self._load_hook()
@@ -242,7 +242,7 @@ class TestHostedCapabilitiesHook:
             name="AppPlanAgent",
             context_variables={
                 "capability_packs": [
-                    {"id": "testpay", "label": "TestPay", "capability_source": "hosted_pack"}
+                    {"id": "testpay", "label": "TestPay", "capability_source": "managed_capability"}
                 ],
                 "operator_contracts": [
                     {
@@ -276,7 +276,7 @@ class TestHostedCapabilitiesHook:
                 ],
             },
         )
-        mod.inject_hosted_capabilities_context(agent, [])
+        mod.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message
         assert "Operator build-pack contracts" in msg
         assert "select_for_saas_billing" in msg
@@ -290,10 +290,10 @@ class TestHostedCapabilitiesHook:
         The base hook code must not contain any hardcoded MozaiksPay rules.
         Rules are supplied at runtime via typed operator_contracts.
         """
-        source = _HOSTED_CAPS_PATH.read_text(encoding="utf-8")
+        source = _MANAGED_CAPS_PATH.read_text(encoding="utf-8")
         for name in _PROPRIETARY_NAMES:
             assert name not in source, (
-                f"Proprietary product name {name!r} found in hook_hosted_capabilities_context.py. "
+                f"Proprietary product name {name!r} found in hook_managed_capabilities_context.py. "
                 "Host-specific rules must be supplied at runtime via typed operator_contracts, "
                 "not hardcoded in OSS base hooks."
             )
@@ -310,9 +310,9 @@ class TestHostedCapabilitiesHook:
             },
         )
         agent.system_message = "original"
-        mod.inject_hosted_capabilities_context(agent, [])
+        mod.inject_managed_capabilities_context(agent, [])
         assert agent.system_message == "original", (
-            "inject_hosted_capabilities_context must only modify AppPlanAgent."
+            "inject_managed_capabilities_context must only modify AppPlanAgent."
         )
 
 
@@ -324,7 +324,7 @@ class TestHostedCapabilitiesHook:
 class TestNoProprietaryNamesInOssDefaults:
     _OSS_PROMPT_FILES = [
         _UNIVERSAL_PROMPTS_PATH,
-        _HOSTED_CAPS_PATH,
+        _MANAGED_CAPS_PATH,
         _APPGEN_TOOLS / "hook_file_contract_context.py",
     ]
 

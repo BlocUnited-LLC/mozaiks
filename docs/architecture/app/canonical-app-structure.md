@@ -81,7 +81,7 @@ workspace/
   targets, and deployment/domain target intent. It does not execute deployment
   operations.
 - Root deployment artifacts declare how the app runs and is packaged. They are
-  provider-neutral handoff artifacts, not hosted provider adapters or product
+  provider-neutral handoff artifacts, not provider-owned adapters or product
   operations code.
 - `workflows/` at the workspace root owns app-local AI workflows.
 - `build_context/` is workspace-level build-time context when the workspace has

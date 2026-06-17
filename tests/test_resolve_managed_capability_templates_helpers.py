@@ -1,5 +1,5 @@
 """
-resolve_hosted_pack_templates.py pure helper unit tests.
+resolve_managed_capability_templates.py pure helper unit tests.
 
 Covers:
   _is_safe_identifier:
@@ -14,7 +14,7 @@ Covers:
 
   _template_output_path:
     - valid child path → relative posix string returned
-    - path outside templates_root → HostedPackTemplateError raised
+    - path outside templates_root → ManagedCapabilityTemplateError raised
     - nested child → correct relative path
 
   _is_materializable_template_file:
@@ -34,8 +34,8 @@ from pathlib import Path
 
 import pytest
 
-from factory_app.workflows.AppGenerator.tools.resolve_hosted_pack_templates import (
-    HostedPackTemplateError,
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    ManagedCapabilityTemplateError,
     _is_materializable_template_file,
     _is_safe_identifier,
     _template_output_path,
@@ -112,7 +112,7 @@ class TestTemplateOutputPath:
         other = tmp_path / "other" / "file.py"
         other.parent.mkdir()
         other.touch()
-        with pytest.raises(HostedPackTemplateError, match="escapes"):
+        with pytest.raises(ManagedCapabilityTemplateError, match="escapes"):
             _template_output_path(other, templates_root)
 
     def test_result_is_posix_path(self, tmp_path):

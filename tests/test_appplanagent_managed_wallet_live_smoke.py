@@ -1,28 +1,28 @@
 """
-AppPlanAgent hosted-wallet planning smoke test.
+AppPlanAgent managed-wallet planning smoke test.
 
 Two test modes:
 
   Live LLM (manual only):
     The TestAppPlanAgentLiveRun class is always skipped in CI.
     Run the smoke script instead:
-        python scripts/smoke_appplan_hosted_wallet.py
-        python scripts/smoke_appplan_hosted_wallet.py --save-fixture
+        python scripts/smoke_appplan_managed_wallet.py
+        python scripts/smoke_appplan_managed_wallet.py --save-fixture
 
   Fixture replay (CI-compatible):
     TestAppPlanAgentFixtureReplay loads and validates the fixture at
-    tests/fixtures/appplan_hosted_wallet_output.json (if present).
+    tests/fixtures/appplan_managed_wallet_output.json (if present).
     All tests skip when the fixture is absent.
 
 To generate the fixture for CI replay:
     1. Set OPENAI_API_KEY in your environment (or .env).
-    2. Run: python scripts/smoke_appplan_hosted_wallet.py --save-fixture
-    3. Commit tests/fixtures/appplan_hosted_wallet_output.json.
+    2. Run: python scripts/smoke_appplan_managed_wallet.py --save-fixture
+    3. Commit tests/fixtures/appplan_managed_wallet_output.json.
     4. Future CI runs validate the saved plan without calling the LLM.
 
 Validated invariants (fixture replay):
     1. Plan validates with app_build_plan.py without raising.
-    2. wallet in capability_packs as hosted_pack / external_integration.
+    2. wallet in capability_packs as managed_capability / external_integration.
     3. No module_contract task for wallet.
     4. api_surface adapter task exists for services/integrations/wallet_client.py.
     5. module_contract task exists for an app-owned facade module (not wallet).
@@ -42,7 +42,7 @@ import pytest
 
 _WORKSPACE = Path(__file__).resolve().parents[1]
 _TOOLS_DIR = _WORKSPACE / "factory_app" / "workflows" / "AppGenerator" / "tools"
-_FIXTURE_PATH = _WORKSPACE / "tests" / "fixtures" / "appplan_hosted_wallet_output.json"
+_FIXTURE_PATH = _WORKSPACE / "tests" / "fixtures" / "appplan_managed_wallet_output.json"
 
 _FIXTURE_PRESENT = _FIXTURE_PATH.exists()
 
@@ -125,9 +125,9 @@ def _find_facade_module_task(build_tasks: list[dict[str, Any]]) -> dict[str, Any
 @pytest.mark.skip(
     reason=(
         "Live LLM test — not run in CI. "
-        "To run manually: python scripts/smoke_appplan_hosted_wallet.py\n"
+        "To run manually: python scripts/smoke_appplan_managed_wallet.py\n"
         "To generate fixture for CI replay: "
-        "python scripts/smoke_appplan_hosted_wallet.py --save-fixture"
+        "python scripts/smoke_appplan_managed_wallet.py --save-fixture"
     )
 )
 class TestAppPlanAgentLiveRun:
@@ -136,11 +136,11 @@ class TestAppPlanAgentLiveRun:
 
     Run instructions:
         cd mozaiks
-        python scripts/smoke_appplan_hosted_wallet.py
-        python scripts/smoke_appplan_hosted_wallet.py --model gpt-4o --save-fixture
+        python scripts/smoke_appplan_managed_wallet.py
+        python scripts/smoke_appplan_managed_wallet.py --model gpt-4o --save-fixture
 
     Expected output:
-        - Capability packs includes wallet as hosted_pack / external_integration.
+        - Capability packs includes wallet as managed_capability / external_integration.
         - Build tasks: api_surface wallet adapter, module_contract facade, page_bundle.
         - No module_contract task for wallet.
         - No owned_paths under modules/wallet/.
@@ -161,15 +161,15 @@ class TestAppPlanAgentLiveRun:
     not _FIXTURE_PRESENT,
     reason=(
         "Fixture not present. Generate with: "
-        "python scripts/smoke_appplan_hosted_wallet.py --save-fixture"
+        "python scripts/smoke_appplan_managed_wallet.py --save-fixture"
     ),
 )
 class TestAppPlanAgentFixtureReplay:
     """
     Validates the saved AppBuildPlan fixture without calling the LLM.
 
-    All tests skip when tests/fixtures/appplan_hosted_wallet_output.json is absent.
-    To generate the fixture: python scripts/smoke_appplan_hosted_wallet.py --save-fixture
+    All tests skip when tests/fixtures/appplan_managed_wallet_output.json is absent.
+    To generate the fixture: python scripts/smoke_appplan_managed_wallet.py --save-fixture
     """
 
     @pytest.fixture(autouse=True)
@@ -202,21 +202,21 @@ class TestAppPlanAgentFixtureReplay:
     def test_fixture_has_pages(self) -> None:
         assert len(self.plan.get("pages") or []) > 0, "Plan has no pages"
 
-    # --- Hosted wallet pack invariants ---
+    # --- Managed wallet pack invariants ---
 
     def test_wallet_pack_present_in_capability_packs(self) -> None:
         wallet = _get_pack(self.capability_packs, "wallet")
         assert wallet is not None, (
             "wallet capability_pack entry missing from plan. "
-            "Expected: capability_pack_id='wallet' with capability_source='hosted_pack'."
+            "Expected: capability_pack_id='wallet' with capability_source='managed_capability'."
         )
 
-    def test_wallet_pack_is_hosted_pack(self) -> None:
+    def test_wallet_pack_is_managed_capability(self) -> None:
         wallet = _get_pack(self.capability_packs, "wallet")
         if wallet is None:
             pytest.skip("wallet pack not present — see test_wallet_pack_present_in_capability_packs")
-        assert wallet.get("capability_source") == "hosted_pack", (
-            f"wallet.capability_source={wallet.get('capability_source')!r}, expected 'hosted_pack'"
+        assert wallet.get("capability_source") == "managed_capability", (
+            f"wallet.capability_source={wallet.get('capability_source')!r}, expected 'managed_capability'"
         )
 
     def test_wallet_pack_surface_kind_is_external_integration(self) -> None:
@@ -236,7 +236,7 @@ class TestAppPlanAgentFixtureReplay:
             "expected 'external_integration'"
         )
 
-    # --- No module_contract for hosted wallet ---
+    # --- No module_contract for managed wallet ---
 
     def test_no_module_contract_task_for_wallet(self) -> None:
         bad = [
@@ -246,7 +246,7 @@ class TestAppPlanAgentFixtureReplay:
             and t.get("capability_pack_id") == "wallet"
         ]
         assert not bad, (
-            f"Drift: found module_contract task(s) for wallet (hosted_pack): "
+            f"Drift: found module_contract task(s) for wallet (managed_capability): "
             f"{[t.get('task_id') for t in bad]}"
         )
 
@@ -280,7 +280,7 @@ class TestAppPlanAgentFixtureReplay:
         adapter = _find_adapter_task(self.build_tasks)
         assert adapter is not None, (
             "Missing api_surface task with services/integrations/wallet_client.py. "
-            "AppPlanAgent must generate a thin hosted-wallet adapter task."
+            "AppPlanAgent must generate a thin managed-wallet adapter task."
         )
 
     def test_adapter_task_type_is_api_surface(self) -> None:
@@ -314,7 +314,7 @@ class TestAppPlanAgentFixtureReplay:
         assert facade is not None, (
             "Missing module_contract task for app-owned facade module. "
             "AppPlanAgent must generate a facade module (e.g. wallet_dashboard) "
-            "that wraps the hosted wallet adapter."
+            "that wraps the managed wallet adapter."
         )
 
     def test_facade_module_task_type_is_module_contract(self) -> None:
@@ -328,7 +328,7 @@ class TestAppPlanAgentFixtureReplay:
         if facade is None:
             pytest.skip("facade module task not present")
         assert facade.get("capability_pack_id") != "wallet", (
-            "Facade module must have a different id from the hosted wallet pack"
+            "Facade module must have a different id from the managed wallet pack"
         )
 
     def test_facade_module_owned_paths_are_not_under_modules_wallet(self) -> None:
@@ -350,14 +350,14 @@ class TestAppPlanAgentFixtureReplay:
         )
 
     def test_facade_module_initial_message_references_wallet_adapter(self) -> None:
-        """Facade service must reference the hosted wallet adapter (wallet_client)."""
+        """Facade service must reference the managed wallet adapter (wallet_client)."""
         facade = _find_facade_module_task(self.build_tasks)
         if facade is None:
             pytest.skip("facade module task not present")
         initial_message = str(facade.get("initial_message") or "").lower()
         description = str(facade.get("description") or "").lower()
         combined = initial_message + " " + description
-        # Should reference the wallet adapter client or hosted wallet capability
+        # Should reference the wallet adapter client or managed wallet capability
         assert (
             "wallet_client" in combined
             or "wallet" in combined
@@ -401,12 +401,12 @@ class TestAppPlanAgentFixtureReplay:
             pytest.skip("page_bundle task not present")
         for t in page_tasks:
             msg = str(t.get("initial_message") or "")
-            # Check that if wallet API paths are mentioned, they are for the facade, not the hosted pack
+            # Check that if wallet API paths are mentioned, they are for the facade, not the managed capability
             import re
-            direct_hosted_refs = re.findall(r"/api/modules/wallet/", msg)
-            assert not direct_hosted_refs, (
+            direct_managed_refs = re.findall(r"/api/modules/wallet/", msg)
+            assert not direct_managed_refs, (
                 f"Page bundle initial_message references /api/modules/wallet/ directly. "
-                "Pages must bind through the facade module, not the hosted pack id. "
+                "Pages must bind through the facade module, not the managed capability id. "
                 f"Got: {msg[:200]!r}"
             )
 

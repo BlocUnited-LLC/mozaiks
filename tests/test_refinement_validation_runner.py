@@ -174,9 +174,9 @@ def _module_bundle_files(*, valid: bool = True) -> dict[str, str]:
     }
 
 
-def _hosted_bundle_files() -> dict[str, str]:
+def _managed_bundle_files() -> dict[str, str]:
     return {
-        "modules/hosted_analytics/backend/service.py": "VALUE = 'hosted'\n",
+        "modules/managed_analytics/backend/service.py": "VALUE = 'managed'\n",
     }
 
 
@@ -353,11 +353,11 @@ def test_module_contract_validation_fails_for_invalid_module_yaml(tmp_path: Path
     assert "module_contract_validation" in result.evidence.failed
 
 
-def test_hosted_facade_boundary_validation_blocks_hosted_internal_path(tmp_path: Path) -> None:
-    files = _hosted_bundle_files()
+def test_managed_facade_boundary_validation_blocks_managed_internal_path(tmp_path: Path) -> None:
+    files = _managed_bundle_files()
     _, plan, staging_result = _stage_workspace(
         tmp_path,
-        request="Change hosted analytics service behavior.",
+        request="Change managed analytics service behavior.",
         change_class="design",
         workflow_sequence="app_surface_revision",
         affected_bundle_paths=list(files.keys()),
@@ -366,8 +366,8 @@ def test_hosted_facade_boundary_validation_blocks_hosted_internal_path(tmp_path:
 
     result = run_refinement_validations(plan, staging_result)
 
-    assert _item(result, "hosted_facade_boundary_validation").status == "failed"
-    assert "hosted_facade_boundary_validation" in result.evidence.failed
+    assert _item(result, "managed_facade_boundary_validation").status == "failed"
+    assert "managed_facade_boundary_validation" in result.evidence.failed
 
 
 def test_integration_readiness_validation_is_warning_without_deterministic_context(tmp_path: Path) -> None:

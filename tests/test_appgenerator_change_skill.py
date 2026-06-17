@@ -31,7 +31,7 @@ def test_appgenerator_change_skill_forbids_drift_paths_and_runtime_leaks() -> No
     assert "Do not generate `backend/models.py` or `backend/models/*.py`." in skill
     assert "Do not generate `contracts/subscriptions.yaml` as the canonical reaction contract." in skill
     assert "Do not generate `app/capability_packs/`." in skill
-    assert "Do not bind pages directly to hosted-pack internals; use the app-owned facade module pattern." in skill
+    assert "Do not bind pages directly to managed-capability internals; use the app-owned facade module pattern." in skill
     assert "Do not assume `ctx.db`" in skill
 
 

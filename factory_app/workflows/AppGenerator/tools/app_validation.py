@@ -1066,6 +1066,31 @@ def _capability_packs_from_context(context_variables: Any | None) -> list[dict[s
     return [pack for pack in packs if isinstance(pack, dict)]
 
 
+def _requires_deployment_artifacts(
+    generated_files: dict[str, str],
+    context_variables: Any | None,
+) -> bool:
+    deployment_context_keys = (
+        "require_deployment_artifacts",
+        "includeDockerfiles",
+        "include_dockerfiles",
+        "includeDeploymentArtifacts",
+        "include_deployment_artifacts",
+        "include_deployment_workflow",
+        "include_workflow",
+        "include_compose",
+    )
+    if any(_is_truthy(_context_get(context_variables, key, False)) for key in deployment_context_keys):
+        return True
+    deployment_paths = {
+        "Dockerfile",
+        "docker-compose.yml",
+        "deployment.manifest.json",
+        ".github/workflows/deploy.yml",
+    }
+    return bool(deployment_paths & set(generated_files))
+
+
 def _safe_files_map(files: dict[str, str] | None) -> dict[str, str]:
     if not isinstance(files, dict):
         return {}
@@ -1588,6 +1613,10 @@ async def run_app_bundle_acceptance_gate(
     scanner_errors = scan_generated_bundle(
         generated_files,
         capability_packs=selected_capability_packs,
+        require_deployment_artifacts=_requires_deployment_artifacts(
+            generated_files,
+            context_variables,
+        ),
     )
     all_scan_errors = [*required_bundle_errors, *scanner_errors]
     bundle_scan_result = {

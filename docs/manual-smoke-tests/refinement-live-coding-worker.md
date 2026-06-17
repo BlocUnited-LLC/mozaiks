@@ -83,7 +83,7 @@ The smoke currently supports these neutral scenarios:
 - `module_backend`
 - `integration_adapter`
 - `data_model_comment`
-- `hosted_facade`
+- `managed_facade`
 
 Use `--scenario all` to run the matrix. Each scenario writes only to its own
 staging workspace and uses `apply_scoped_refinement_changes(...)` as the only

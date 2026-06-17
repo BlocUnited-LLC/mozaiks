@@ -20,7 +20,7 @@ python scripts/smoke_integration_readiness.py --json
 The script uses a neutral analytics connector:
 
 - `integration_id`: `analytics_provider`
-- `provider`: `hosted_analytics`
+- `provider`: `managed_analytics`
 - purpose: send usage events to an external analytics API
 - secret field: `api_key`
 - frontend-safe fields: `endpoint_url`, `workspace_id`

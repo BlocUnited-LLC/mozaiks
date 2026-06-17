@@ -71,7 +71,7 @@ agents:
           generation downstream.
         - owner_hint: "hosted" → surface_map entry owner must be "hosted"; DesignDocs must
           NOT declare app-owned backend entities or actions for this surface. Use the facade
-          pattern: one app-owned module action per hosted capability boundary.
+          pattern: one app-owned module action per managed capability boundary.
         - owner_hint: "platform" → surface_map entry owner must be "platform"; no module
           generation needed at all, already provided by the runtime.
         - owner_hint: null → infer owner from likely_surface_kind and source_capability_packs

@@ -14,7 +14,7 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
 from .assembly_phase import assemble_features
 from .code_file_utils import collect_generated_app_file_entries
 from .generate_module_interface_files import generate_module_interface_files
-from .resolve_hosted_pack_templates import resolve_hosted_pack_templates
+from .resolve_managed_capability_templates import resolve_managed_capability_templates
 
 
 def _is_truthy(value: Any) -> bool:
@@ -129,7 +129,7 @@ def _apply_module_handler_method_alignment(
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
-def _apply_hosted_pack_templates(
+def _apply_managed_capability_templates(
     code_files: list[dict[str, str]],
     *,
     app_build_plan: Any,
@@ -146,7 +146,7 @@ def _apply_hosted_pack_templates(
     if not isinstance(capability_packs, list):
         return code_files
 
-    template_files = resolve_hosted_pack_templates(capability_packs)
+    template_files = resolve_managed_capability_templates(capability_packs)
     if not template_files:
         return code_files
 
@@ -242,7 +242,7 @@ async def assemble_app_tasks(
 
     code_files = _apply_planned_page_contracts(code_files, app_build_plan)
     code_files = _apply_module_handler_method_alignment(code_files)
-    code_files = _apply_hosted_pack_templates(
+    code_files = _apply_managed_capability_templates(
         code_files,
         app_build_plan=app_build_plan,
         context_variables=context_variables,

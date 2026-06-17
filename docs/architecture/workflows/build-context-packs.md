@@ -75,7 +75,7 @@ assets:
 pack:
   id: mozaikspay
   status: active
-  capability_source: hosted_pack
+  capability_source: managed_capability
   required_integrations:
     - service: mozaikspay
       provider: mozaikspay

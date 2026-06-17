@@ -2,7 +2,7 @@
 Pure helper unit tests for:
   factory_app/workflows/AppGenerator/tools/app_build_plan.py
 
-Covers helpers NOT already tested in test_appgenerator_hosted_pack_smoke.py:
+Covers helpers NOT already tested in test_appgenerator_managed_capability_smoke.py:
 
   _normalize_string_list:
     - non-list → []

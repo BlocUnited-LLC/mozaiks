@@ -17,7 +17,7 @@ from mozaiksai.core.session.build_context import (
 logger = logging.getLogger(__name__)
 
 
-class HostedPackTemplateError(Exception):
+class ManagedCapabilityTemplateError(Exception):
     """Raised when a selected pack template tree cannot be materialized."""
 
 
@@ -31,18 +31,18 @@ def _is_safe_identifier(name: str) -> bool:
 def _read_pack_context(pack_source_path: Path, pack_id: str) -> dict[str, Any]:
     context_path = pack_source_path / "context.yaml"
     if not context_path.exists():
-        raise HostedPackTemplateError(f"Hosted pack context not found: {context_path}")
+        raise ManagedCapabilityTemplateError(f"Managed capability pack context not found: {context_path}")
     try:
         data = yaml.safe_load(context_path.read_text(encoding="utf-8")) or {}
     except Exception as exc:
-        raise HostedPackTemplateError(f"Cannot read pack context at {context_path}: {exc}") from exc
+        raise ManagedCapabilityTemplateError(f"Cannot read pack context at {context_path}: {exc}") from exc
     if not isinstance(data, dict):
-        raise HostedPackTemplateError(f"Pack context at {context_path} is not a YAML mapping")
+        raise ManagedCapabilityTemplateError(f"Pack context at {context_path} is not a YAML mapping")
 
     pack = data.get("pack")
     declared_id = str((pack or {}).get("id") or data.get("context_id") or "").strip() if isinstance(pack, dict) else ""
     if declared_id and declared_id != pack_id:
-        raise HostedPackTemplateError(
+        raise ManagedCapabilityTemplateError(
             f"Pack context id mismatch: expected '{pack_id}', found '{declared_id}' at {context_path}"
         )
     return data
@@ -52,10 +52,10 @@ def _template_output_path(path: Path, templates_root: Path) -> str:
     try:
         relative = path.resolve().relative_to(templates_root.resolve())
     except ValueError as exc:
-        raise HostedPackTemplateError(f"Template path escapes templates root: {path}") from exc
+        raise ManagedCapabilityTemplateError(f"Template path escapes templates root: {path}") from exc
     output_path = relative.as_posix()
     if not output_path or output_path.startswith("/") or ".." in output_path.split("/"):
-        raise HostedPackTemplateError(f"Unsafe template output path: {output_path}")
+        raise ManagedCapabilityTemplateError(f"Unsafe template output path: {output_path}")
     return output_path
 
 
@@ -65,11 +65,11 @@ def _template_roots(context_root: Path, context: dict[str, Any]) -> list[Path]:
         try:
             path = resolve_context_asset_path(context_root, asset)
         except BuildContextError as exc:
-            raise HostedPackTemplateError(str(exc)) from exc
+            raise ManagedCapabilityTemplateError(str(exc)) from exc
         if not path.exists():
-            raise HostedPackTemplateError(f"Declared pack templates asset not found: {path}")
+            raise ManagedCapabilityTemplateError(f"Declared pack templates asset not found: {path}")
         if not path.is_dir():
-            raise HostedPackTemplateError(f"Pack templates asset must be a directory: {path}")
+            raise ManagedCapabilityTemplateError(f"Pack templates asset must be a directory: {path}")
         roots.append(path)
     return roots
 
@@ -90,7 +90,7 @@ def resolve_templates_for_pack(
     """Return all files under a selected pack's ``templates/`` tree."""
 
     if not _is_safe_identifier(pack_id):
-        raise HostedPackTemplateError(
+        raise ManagedCapabilityTemplateError(
             f"Unsafe pack_id '{pack_id}': must be a simple identifier without path separators or traversal sequences"
         )
 
@@ -117,7 +117,7 @@ def resolve_templates_for_pack(
             content = path.read_text(encoding="utf-8")
             existing = by_filename.get(output_path)
             if existing is not None and existing != content:
-                raise HostedPackTemplateError(
+                raise ManagedCapabilityTemplateError(
                     f"Pack template assets contain conflicting output '{output_path}'"
                 )
             by_filename[output_path] = content
@@ -126,10 +126,10 @@ def resolve_templates_for_pack(
     return files
 
 
-def resolve_hosted_pack_templates(
+def resolve_managed_capability_templates(
     capability_packs: list[dict[str, Any]] | None,
 ) -> list[dict[str, str]]:
-    """Materialize all template files from selected hosted packs."""
+    """Materialize all template files from selected managed capabilities."""
 
     if not capability_packs:
         return []
@@ -147,7 +147,7 @@ def resolve_hosted_pack_templates(
             content = file["content"]
             existing = results_by_filename.get(filename)
             if existing is not None and existing != content:
-                raise HostedPackTemplateError(
+                raise ManagedCapabilityTemplateError(
                     f"Multiple selected pack templates resolve to '{filename}'"
                 )
             results_by_filename[filename] = content
@@ -159,7 +159,7 @@ def resolve_hosted_pack_templates(
 
 
 __all__ = [
-    "HostedPackTemplateError",
-    "resolve_hosted_pack_templates",
+    "ManagedCapabilityTemplateError",
+    "resolve_managed_capability_templates",
     "resolve_templates_for_pack",
 ]

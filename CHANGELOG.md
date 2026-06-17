@@ -25,9 +25,9 @@ This project follows a practical pre-1.0 changelog format:
   batch generation, workflow export, semantic drift checks, and runtime loader
   promotion.
 
-- **Structured hosted-pack connector requirements** for AppGenerator capability
+- **Structured managed-capability connector requirements** for AppGenerator capability
   packs. `capability_packs[].required_integrations` now uses a typed connector
-  object with explicit public and secret fields, and hosted pack defaults flow
+  object with explicit public and secret fields, and managed capability defaults flow
   into IntegrationReadinessAgent without losing provider metadata.
 
 - **OSS build telemetry** (`mozaiksai/core/telemetry.py`) — opt-in HMAC-SHA256
@@ -120,22 +120,27 @@ This project follows a practical pre-1.0 changelog format:
   incoming delegation block, cycle detection via `_creates_cycle`), and
   revocation (own, admin override, non-admin blocked) (63 tests).
 
-- **`test_mozaikspay_hosted_pack_contract.py`** — new OSS test file that the
+- **`test_mozaikspay_managed_capability_contract.py`** — new OSS test file that the
   production readiness gate requires. Covers context.yaml and contract.yaml
   contract shapes, all `required_outputs` having matching template files, the
   `forbidden_outputs` drift guard, `mozaikspay_client.py` provider-neutrality
   (no `import stripe`, no raw secrets, env-var–only URL resolution), the
   `billing_portal` facade module being app-owned (`owner: app`), page schemas
-  routing through the facade rather than hosted modules directly, and a
+  routing through the facade rather than provider-owned modules directly, and a
   pack-wide drift guard (41 tests).
+
+- **Managed-capability artifact replay gate** — production readiness now runs an
+  offline AppGenerator replay that normalizes managed-capability plans, assembles
+  deterministic pack templates, and scans the final bundle for facade binding,
+  adapter path, provider-internal path, and raw-secret drift.
 
 - **`test_wallet_module.py`** (mozaiks-app) — comprehensive wallet service
   tests covering balance calculation, payout request guards (no Stripe account,
   amount exceeds available, zero amount, default-to-full-available), credit
   reactions (`credit_app_earnings`, `credit_investment_return`), Stripe webhook
   processing idempotency (`payout.paid`, `payout.failed`, already-terminal,
-  transaction-not-found, unhandled event), hosted wallet provisioning validation,
-  `get_hosted_wallet_provisioning_status` with secret stripping, and repo
+  transaction-not-found, unhandled event), managed wallet provisioning validation,
+  wallet provisioning status with secret stripping, and repo
   collection aliases (61 tests).
 
 - **`test_module_executor_dispatch.py`** — comprehensive OSS tests for the

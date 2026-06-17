@@ -77,12 +77,12 @@ def test_data_model_refinement_execution_plan_requires_migration_review_and_huma
     assert "Human review is required before mutation." in plan.warnings
 
 
-def test_hosted_capability_refinement_execution_plan_requires_facade_validation() -> None:
-    plan = _run_execution_plan("Change hosted analytics dashboard display.", "design")
+def test_managed_capability_refinement_execution_plan_requires_facade_validation() -> None:
+    plan = _run_execution_plan("Change managed analytics dashboard display.", "design")
 
     assert plan.workflow_sequence == "app_surface_revision"
-    assert "hosted_facade_validation" in _required_validation_ids(plan)
-    assert "services/integrations/hosted_analytics_client.py" in plan.affected_bundle_paths
+    assert "managed_facade_validation" in _required_validation_ids(plan)
+    assert "services/integrations/managed_analytics_client.py" in plan.affected_bundle_paths
 
 
 def test_execution_plan_defaults_to_dry_run_without_mutation() -> None:
@@ -160,5 +160,5 @@ def test_live_classifier_fixture_cases_convert_to_execution_plans() -> None:
     assert all(plan.mutation_allowed is False for plan in plans)
     assert "integration_readiness" in _required_validation_ids(by_request_id["fixture_external_integration"])
     assert "database_migration_review" in _required_validation_ids(by_request_id["fixture_data_model_migration"])
-    assert "hosted_facade_validation" in _required_validation_ids(by_request_id["fixture_hosted_capability_facade"])
+    assert "managed_facade_validation" in _required_validation_ids(by_request_id["fixture_managed_capability_facade"])
 

@@ -22,7 +22,8 @@ def test_production_readiness_gate_includes_core_offline_targets() -> None:
 
     assert "tests/test_appgenerator_canonical_generation.py" in targets
     assert "tests/test_appgenerator_save_app_schema.py" in targets
-    assert "tests/test_mozaikspay_hosted_pack_contract.py" in targets
+    assert "tests/test_managed_capability_artifact_replay.py" in targets
+    assert "tests/test_mozaikspay_managed_capability_contract.py" in targets
     assert "tests/test_studio_host_smoke.py" in targets
 
 

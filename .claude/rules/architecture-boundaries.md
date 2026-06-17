@@ -23,7 +23,8 @@ contributor guidance.
   and `factory_app/app/` as the first-party builder/reference app workspace.
 - Hosted product capability: app-local hosted product hosts outside this OSS
   repo, hosted-only collaboration/billing/marketplace/deployment surfaces, and
-  proprietary hosted packs or engines consumed from outside this OSS repo.
+  proprietary hosted product engines or provider-owned managed capabilities
+  consumed from outside this OSS repo.
 
 ## Ownership Boundaries
 

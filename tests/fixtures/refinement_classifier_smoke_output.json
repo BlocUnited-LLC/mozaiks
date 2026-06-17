@@ -189,18 +189,18 @@
       "classifier": {
         "change_class": "design",
         "confidence": 0.72,
-        "rationale": "The request specifies changes to the hosted analytics dashboard display, which is a UI/UX/visual presentation change within the current app_bundle without altering product concept or adding new capabilities.",
+        "rationale": "The request specifies changes to the managed analytics dashboard display, which is a UI/UX/visual presentation change within the current app_bundle without altering product concept or adding new capabilities.",
         "signals": [
           "visual_redesign"
         ],
         "source": "llm"
       },
-      "id": "hosted_capability_facade",
+      "id": "managed_capability_facade",
       "impact": {
         "affected_bundle_paths": [
           "ui/pages/analytics.yaml",
           "ui/route_manifest.json",
-          "services/integrations/hosted_analytics_client.py",
+          "services/integrations/managed_analytics_client.py",
           "modules/analytics_dashboard/module.yaml",
           "modules/analytics_dashboard/contracts/events.yaml",
           "modules/analytics_dashboard/backend/handler.py",
@@ -213,9 +213,9 @@
         ],
         "scope_summary": "Reopen structured planning surfaces for the app bundle and rebuild the affected downstream outputs. Integration readiness may need to be rechecked. Data model migration impact detected."
       },
-      "label": "Hosted capability facade",
+      "label": "Managed capability facade",
       "llm_profile_used": "classifier",
-      "request": "Change hosted analytics dashboard display.",
+      "request": "Change managed analytics dashboard display.",
       "route": {
         "affected_workflows": [
           "DesignDocs",

@@ -639,7 +639,7 @@ def test_app_type_selector_emits_generic_monetization_selection_context() -> Non
     assert "monetization_enabled: true" in content
     assert "onResolve(optionId, resolveContext)" in content
     assert "provider_backed_capability_selection" not in content
-    assert "hosted_capability_selection" not in content
+    assert "managed_capability_selection" not in content
     assert "mozaikspay" not in content.lower()
 
 

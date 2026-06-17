@@ -56,10 +56,10 @@ Use these rules when reviewing, implementing, or finishing a change.
 - compatibility policy
 - tests run
 
-## Hosted Pack Boundary Check
+## Managed Capability Boundary Check
 
-- hosted-pack or external-adapter surfaces affected
+- managed-capability or external-adapter surfaces affected
 - app-owned facade boundary preserved
-- no hosted internals copied into OSS/runtime/app bundle output
+- no provider internals copied into OSS/runtime/app bundle output
 - examples remain provider-neutral
 - tests run

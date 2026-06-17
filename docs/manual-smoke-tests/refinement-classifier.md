@@ -54,7 +54,7 @@ The smoke uses five neutral cases:
 - Module/backend: `Add an archive_project action to the projects module API.`
 - External integration: `Change the analytics_provider connector sync behavior.`
 - Data model migration: `Add a required project phase field and migrate existing project records.`
-- Hosted capability facade: `Change hosted analytics dashboard display.`
+- Managed capability facade: `Change managed analytics dashboard display.`
 
 ## Output Shape
 

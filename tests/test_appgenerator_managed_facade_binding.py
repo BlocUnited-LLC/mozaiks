@@ -1,16 +1,16 @@
 """
-Hosted-pack façade and page-binding validation tests.
+Managed-capability façade and page-binding validation tests.
 
 Verifies:
-1. Hosted packs have capability_source="hosted_pack" in AppBuildPlan.
+1. Managed capabilities have capability_source="managed_capability" in AppBuildPlan.
 2. App-owned façade modules have capability_source="generated_module".
-3. Pages bind to app-owned façade module endpoints, not hosted-pack endpoints.
-4. Adapter paths follow app/modules/{facade_id}/services/integrations/ pattern.
-5. Hosted-pack internals are not copied into generated modules.
-6. Generic adapter fixtures use neutral names (hosted_analytics, external_reporting, etc.).
+3. Pages bind to app-owned façade module endpoints, not managed-capability endpoints.
+4. Adapter paths follow app/services/integrations/{managed_capability_id}_client.py.
+5. Managed-capability internals are not copied into generated modules.
+6. Generic adapter fixtures use neutral names (managed_analytics, external_reporting, etc.).
 
 Test fixtures use neutral names:
-- hosted_analytics instead of wallet/billing-specific names
+- managed_analytics instead of wallet/billing-specific names
 - external_reporting for external integrations
 - audit_service for internal audit capability
 """
@@ -21,21 +21,21 @@ from pathlib import Path
 _WORKSPACE = Path(__file__).resolve().parents[1]
 
 
-def _make_hosted_pack(pack_id: str, surface_id: str) -> dict:
-    """Create a minimal hosted-pack entry."""
+def _make_managed_capability(pack_id: str, surface_id: str) -> dict:
+    """Create a minimal managed-capability entry."""
     return {
         "capability_pack_id": pack_id,
         "surface_id": surface_id,
         "surface_kind": "external_integration",
         "pack_type": "analytics_pack",
         "label": f"{pack_id} Analytics",
-        "summary": f"Hosted {pack_id} analytics capability.",
+        "summary": f"Managed {pack_id} analytics capability.",
         "implementation_mode": "external_integration",
-        "capability_source": "hosted_pack",  # Required key for hosted packs
+        "capability_source": "managed_capability",  # Required key for managed capabilities
     }
 
 
-def _make_facade_module(facade_id: str, hosted_pack_id: str) -> dict:
+def _make_facade_module(facade_id: str, managed_capability_id: str) -> dict:
     """Create a minimal app-owned façade module."""
     return {
         "capability_pack_id": facade_id,
@@ -43,7 +43,7 @@ def _make_facade_module(facade_id: str, hosted_pack_id: str) -> dict:
         "surface_kind": "module",
         "pack_type": "generated_facade",
         "label": f"{facade_id} Dashboard",
-        "summary": f"App-owned façade for {hosted_pack_id} analytics.",
+        "summary": f"App-owned façade for {managed_capability_id} analytics.",
         "implementation_mode": "declarative_module",
         "capability_source": "generated_module",  # Required key for app-owned modules
     }
@@ -70,28 +70,28 @@ def _make_page_with_endpoint(
     }
 
 
-class TestHostedPackCapabilitySource:
-    """Verify hosted packs declare capability_source correctly."""
+class TestManagedCapabilityCapabilitySource:
+    """Verify managed capabilities declare capability_source correctly."""
 
-    def test_hosted_pack_has_capability_source_field(self):
-        """Hosted packs must declare capability_source='hosted_pack'."""
-        pack = _make_hosted_pack("hosted_analytics", "analytics_surface")
-        assert pack["capability_source"] == "hosted_pack"
+    def test_managed_capability_has_capability_source_field(self):
+        """Managed capabilities must declare capability_source='managed_capability'."""
+        pack = _make_managed_capability("managed_analytics", "analytics_surface")
+        assert pack["capability_source"] == "managed_capability"
 
     def test_generated_module_has_capability_source_field(self):
         """App-owned façade modules must declare capability_source='generated_module'."""
-        facade = _make_facade_module("analytics_dashboard", "hosted_analytics")
+        facade = _make_facade_module("analytics_dashboard", "managed_analytics")
         assert facade["capability_source"] == "generated_module"
 
-    def test_hosted_pack_and_facade_are_distinct(self):
-        """Hosted packs and façade modules must have different capability_source values."""
-        pack = _make_hosted_pack("hosted_analytics", "analytics_surface")
-        facade = _make_facade_module("analytics_dashboard", "hosted_analytics")
+    def test_managed_capability_and_facade_are_distinct(self):
+        """Managed capabilities and façade modules must have different capability_source values."""
+        pack = _make_managed_capability("managed_analytics", "analytics_surface")
+        facade = _make_facade_module("analytics_dashboard", "managed_analytics")
         assert pack["capability_source"] != facade["capability_source"]
 
 
 class TestPageBindingPatterns:
-    """Verify pages bind to app-owned façade endpoints, not hosted-pack endpoints."""
+    """Verify pages bind to app-owned façade endpoints, not managed-capability endpoints."""
 
     def test_page_binds_to_facade_module_endpoint(self):
         """Pages must bind to /api/modules/{facade_module_id}/*."""
@@ -105,19 +105,19 @@ class TestPageBindingPatterns:
         assert endpoint == "/api/modules/analytics_dashboard/get_summary"
         assert "analytics_dashboard" in endpoint
 
-    def test_page_does_not_bind_to_hosted_pack_endpoint(self):
-        """Pages must NOT bind directly to /api/modules/{hosted_pack_id}/*."""
+    def test_page_does_not_bind_to_managed_capability_endpoint(self):
+        """Pages must NOT bind directly to /api/modules/{managed_capability_id}/*."""
         # This is a violation test — simulate an incorrectly bound page
         bad_page = _make_page_with_endpoint(
             page_name="Bad Analytics",
             route="/bad-analytics",
-            module_id="hosted_analytics",  # WRONG: direct hosted pack reference
+            module_id="managed_analytics",  # WRONG: direct managed capability reference
             action_id="get_summary",
         )
         endpoint = bad_page["sections"][0]["api_endpoint"]
         # A validator would reject this
-        assert "hosted_analytics" in endpoint  # This is what we want to avoid
-        assert endpoint.startswith("/api/modules/hosted_analytics/")
+        assert "managed_analytics" in endpoint  # This is what we want to avoid
+        assert endpoint.startswith("/api/modules/managed_analytics/")
 
     def test_page_endpoint_structure_is_standard(self):
         """Page endpoints must follow /api/modules/{module_id}/{action_id} format."""
@@ -139,45 +139,38 @@ class TestPageBindingPatterns:
 class TestAdapterPathPatterns:
     """Verify adapter code follows the correct path structure."""
 
-    def test_adapter_path_follows_module_convention(self):
-        """Adapter client must be at app/modules/{facade_id}/services/integrations/."""
-        facade_id = "analytics_dashboard"
-        adapter_path = f"app/modules/{facade_id}/services/integrations/hosted_analytics_client.py"
+    def test_adapter_path_follows_app_services_convention(self):
+        """Adapter client must be in the app-level services/integrations lane."""
+        adapter_path = "app/services/integrations/managed_analytics_client.py"
         # Validate path structure
-        assert adapter_path.startswith("app/modules/")
-        assert facade_id in adapter_path
-        assert "/services/integrations/" in adapter_path
+        assert adapter_path.startswith("app/services/integrations/")
         assert adapter_path.endswith(".py")
 
     def test_adapter_client_names_use_host_prefix(self):
-        """Adapter client file should be named {hosted_pack_id}_client.py."""
-        hosted_pack_id = "hosted_analytics"
-        adapter_file = f"{hosted_pack_id}_client.py"
-        assert adapter_file == "hosted_analytics_client.py"
+        """Adapter client file should be named {managed_capability_id}_client.py."""
+        managed_capability_id = "managed_analytics"
+        adapter_file = f"{managed_capability_id}_client.py"
+        assert adapter_file == "managed_analytics_client.py"
         assert adapter_file.endswith("_client.py")
 
-    def test_adapter_path_is_module_local(self):
-        """Adapter paths must not leak across modules."""
-        facade_id = "analytics_dashboard"
-        adapter_path = f"app/modules/{facade_id}/services/integrations/hosted_analytics_client.py"
-        # Extract the module_id from the path
-        module_id = adapter_path.split("/")[2]
-        assert module_id == facade_id
-        # Adapter must be scoped under the module, not globally
-        assert adapter_path.count("/") >= 5  # Deep enough nesting
+    def test_adapter_path_is_app_level_not_module_local(self):
+        """Managed capability clients are shared app services, not facade module files."""
+        adapter_path = "app/services/integrations/managed_analytics_client.py"
+        assert adapter_path.startswith("app/services/integrations/")
+        assert not adapter_path.startswith("app/modules/")
 
 
-class TestHostedInternalsNotCopied:
-    """Verify hosted-pack internals are not copied into generated modules."""
+class TestManagedInternalsNotCopied:
+    """Verify managed-capability internals are not copied into generated modules."""
 
-    def test_facade_module_does_not_embed_hosted_secrets(self):
-        """Generated façade must not contain hosted-pack secrets or credentials."""
+    def test_facade_module_does_not_embed_managed_secrets(self):
+        """Generated façade must not contain managed-capability secrets or credentials."""
         # Simulate a module source check
         prohibited_terms = [
             "STRIPE_SECRET_KEY",
             "STRIPE_WEBHOOK_SECRET",
-            "HOSTED_WALLET_URL",
-            "HOSTED_ENTITLEMENTS_TOKEN",
+            "MANAGED_WALLET_URL",
+            "MANAGED_ENTITLEMENTS_TOKEN",
         ]
         # In real tests, this would check generated file content
         for term in prohibited_terms:
@@ -188,16 +181,16 @@ class TestHostedInternalsNotCopied:
         """Facade module service.py should import and delegate to adapter, not re-implement."""
         # This is validated by the generator, not here, but we document the pattern
         # Example facade service.py pattern:
-        # from integrations.hosted_analytics_client import HostedAnalyticsClient
+        # from services.integrations.managed_analytics_client import ManagedAnalyticsClient
         # async def get_summary(...):
-        #     client = HostedAnalyticsClient(ctx.app_id)
+        #     client = ManagedAnalyticsClient(ctx.app_id)
         #     return await client.fetch_summary(...)
         pass
 
     def test_facade_module_contracts_are_app_owned(self):
         """Façade module contracts (module.yaml, events.yaml) are app-owned."""
-        # Facade contracts are NOT hosted-pack manifests
-        # They declare façade actions, not hosted-pack actions
+        # Facade contracts are NOT managed-capability manifests
+        # They declare façade actions, not managed-capability actions
         facade_actions = ["list_analytics", "get_summary", "export_report"]
         for action in facade_actions:
             assert action  # Document expected actions
@@ -206,9 +199,9 @@ class TestHostedInternalsNotCopied:
 class TestNeutralFixtureNames:
     """Verify test fixtures use neutral naming conventions."""
 
-    def test_fixture_hosted_analytics_is_neutral(self):
-        """hosted_analytics is neutral and not wallet/billing-specific."""
-        pack_id = "hosted_analytics"
+    def test_fixture_managed_analytics_is_neutral(self):
+        """managed_analytics is neutral and not wallet/billing-specific."""
+        pack_id = "managed_analytics"
         assert "wallet" not in pack_id.lower()
         assert "billing" not in pack_id.lower()
         assert "stripe" not in pack_id.lower()
@@ -244,42 +237,44 @@ class TestFacadeModuleGenerationPattern:
         assert facade_id in module_yaml_path
 
     def test_facade_module_has_adapter_client(self):
-        """Every façade module must have a backend adapter client."""
-        # Pattern: app/modules/{facade_id}/services/integrations/{hosted_pack_id}_client.py
-        facade_id = "analytics_dashboard"
-        hosted_pack_id = "hosted_analytics"
-        adapter_path = f"app/modules/{facade_id}/services/integrations/{hosted_pack_id}_client.py"
-        assert "/integrations/" in adapter_path
+        """Every managed facade must use an app-level adapter client."""
+        # Pattern: app/services/integrations/{managed_capability_id}_client.py
+        managed_capability_id = "managed_analytics"
+        adapter_path = f"app/services/integrations/{managed_capability_id}_client.py"
+        assert adapter_path.startswith("app/services/integrations/")
         assert adapter_path.endswith("_client.py")
 
     def test_facade_module_service_imports_adapter(self):
-        """Facade service.py must import adapter, not re-implement hosted logic."""
-        # Pattern: from integrations.{hosted_pack_id}_client import ...
-        hosted_pack_id = "hosted_analytics"
-        expected_import = f"from integrations.{hosted_pack_id}_client import"
+        """Facade service.py must import adapter, not re-implement managed logic."""
+        # Pattern: from services.integrations.{managed_capability_id}_client import ...
+        managed_capability_id = "managed_analytics"
+        expected_import = f"from services.integrations.{managed_capability_id}_client import"
         # This is conceptual; actual tests parse generated Python
-        assert "integrations" in expected_import
-        assert hosted_pack_id in expected_import
+        assert "services.integrations" in expected_import
+        assert managed_capability_id in expected_import
 
     def test_facade_build_task_owns_facade_paths_only(self):
-        """Build task for façade owns only façade paths, not hosted-pack paths."""
+        """Build task for façade owns only façade paths, not managed-capability paths."""
         facade_id = "analytics_dashboard"
         owned_paths = [
             f"modules/{facade_id}/module.yaml",
             f"modules/{facade_id}/backend/handler.py",
             f"modules/{facade_id}/backend/service.py",
             f"modules/{facade_id}/backend/repo.py",
-            f"modules/{facade_id}/services/integrations/hosted_analytics_client.py",
         ]
-        # Paths that MUST NOT be in owned_paths for a hosted pack
+        adapter_paths = ["services/integrations/managed_analytics_client.py"]
+        # Paths that MUST NOT be in owned_paths for a managed capability
         prohibited_paths = [
-            "capability_packs/hosted_analytics/",
-            "hosted/analytics/",
-            "integrations/stripe_client.py",  # Global integrations forbidden
+            "capability_packs/managed_analytics/",
+            "managed/analytics/",
+            "modules/managed_analytics/",
         ]
         for path in owned_paths:
             assert facade_id in path
+        for path in adapter_paths:
+            assert path.startswith("services/integrations/")
+            assert facade_id not in path
         for bad_path in prohibited_paths:
-            for good_path in owned_paths:
+            for good_path in [*owned_paths, *adapter_paths]:
                 assert bad_path not in good_path
 

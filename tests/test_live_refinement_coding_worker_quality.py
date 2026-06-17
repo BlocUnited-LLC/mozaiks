@@ -15,7 +15,7 @@ EXPECTED_SCENARIOS: dict[str, dict[str, object]] = {
             "archive_project",
             "retry behavior",
             "project_phase",
-            "hosted analytics display mapping",
+            "managed analytics display mapping",
         ],
         "summary_contains": ["reports dashboard"],
         "rationale_contains": ["title", "yaml"],
@@ -50,16 +50,16 @@ EXPECTED_SCENARIOS: dict[str, dict[str, object]] = {
         "summary_contains": ["future migration", "project_phase"],
         "rationale_contains": ["todo", "specified file"],
     },
-    "hosted_facade": {
+    "managed_facade": {
         "path": "modules/analytics_dashboard/backend/service.py",
         "content_contains": [
-            "hosted analytics",
+            "managed analytics",
             "mapping",
             "dashboard",
         ],
         "content_not_contains": ["secret", "token", "credential", "api key"],
-        "summary_contains": ["hosted analytics display mapping", "analytics dashboard service"],
-        "rationale_contains": ["hosted analytics display mapping", "comment"],
+        "summary_contains": ["managed analytics display mapping", "analytics dashboard service"],
+        "rationale_contains": ["managed analytics display mapping", "comment"],
     },
 }
 

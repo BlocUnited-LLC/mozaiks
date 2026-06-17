@@ -23,13 +23,13 @@ Use this index to choose the closest skill before nontrivial work.
 | Test-only change | owning surface skill | Use the owning surface skill when obvious. If unclear, start with `oss-contribution-review`. |
 | CLI change | `oss-contribution-review` | No CLI-specific skill exists yet. If CLI scaffolding changes module/page/workflow contracts, also inspect the owning layer rule or skill. |
 | Release/changelog change | `release-notes` | Use for `CHANGELOG.md`, release docs, versioning, or release-impact review. |
-| Hosted-pack support | `oss-contribution-review` | No dedicated `hosted-pack-change` skill exists yet. Pair with the hosted-packs rule; `hosted-pack-change` remains planned. |
+| Managed-capability support | `oss-contribution-review` | No dedicated `managed-capability-change` skill exists yet. Pair with the managed-capabilities rule; `managed-capability-change` remains planned. |
 | Setup or local-dev guidance | `setup` | Use for installation, local runtime, and repo setup guidance. |
 | If unsure or scope spans layers | `oss-contribution-review` | Use before or after the change to classify the impact. |
 
 ## Planned Focused Skills
 
-- `hosted-pack-change`
+- `managed-capability-change`
 - `add-workflow` alias for `create-workflow`
 
 ## Routing Notes
@@ -38,13 +38,13 @@ Use this index to choose the closest skill before nontrivial work.
 - AppGenerator is one workflow inside the build sequence, not the whole build system.
 - AgentGenerator is one workflow inside the build sequence, not the whole build system.
 - `ExistingAppDiscovery` belongs to the brownfield flow.
-- Use `appgenerator-change` as the primary skill for workflow-local AppGenerator prompts, file contracts, AppBuildPlan validation, app-bundle assembly, generated UI quality gates, and hosted-pack facade planning. Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow build ownership.
+- Use `appgenerator-change` as the primary skill for workflow-local AppGenerator prompts, file contracts, AppBuildPlan validation, app-bundle assembly, generated UI quality gates, and managed-capability facade planning. Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow build ownership.
 - Use `agentgenerator-change` as the primary skill for workflow-local AgentGenerator prompts, workflow-bundle scaffolds, universal prompt hooks, tool-planning contracts, and generated handoff or tool bundle guidance. Add `factory-build-workflow-change` only when the change also affects `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow build ownership.
 - Use `existing-app-discovery-change` as the primary skill for workflow-local brownfield discovery, preload detectors, adoption classification, discovery artifact saving, and AppContext onboarding changes. Add `factory-build-workflow-change` only when the change also affects `extension_registry.json`, `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow sequence composition.
 - Use `factory-build-workflow-change` for factory workflow changes that span sequence design, workflow ownership, artifact routing, or brownfield vs greenfield routing.
 - Use `runtime-change` for auth, transport, platform, and other runtime substrate work unless the task is purely docs or tests.
 - For test-only work, use the owning surface skill when obvious; otherwise start with `oss-contribution-review`.
-- Use `oss-contribution-review` plus the hosted-packs rule for hosted-pack work until a dedicated skill exists.
+- Use `oss-contribution-review` plus the managed-capabilities rule for managed-capability work until a dedicated skill exists.
 - Task label note: "Build sequence / extension registry / journey composition" work routes through `factory-build-workflow-change`.
 - When a planned skill is missing, start with `oss-contribution-review` and
   then inspect the owning files directly.

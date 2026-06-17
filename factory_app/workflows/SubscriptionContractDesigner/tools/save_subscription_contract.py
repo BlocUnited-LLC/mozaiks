@@ -22,6 +22,7 @@ _PROPRIETARY_TERMS = (
     "".join(("mozaiks", "pay")),
     "_".join(("hosted", "billing")),
     " ".join(("hosted", "billing")),
+    "_".join(("managed", "billing")),
 )
 
 

@@ -24,11 +24,11 @@ Primary covered surfaces today:
 - Module authoring and scaffolding: `add-module`
 - Frontend pages and admin UI surfaces: `add-page` plus the frontend rule
 - Persistence and data contract guidance: `persistence-change`
-- Hosted-pack boundaries: `oss-contribution-review` plus the hosted-packs rule
+- Managed-capability boundaries: `oss-contribution-review` plus the managed-capabilities rule
 - Docs, release, and testing guidance: `docs-maintenance`, `release-notes`, and `.claude/rules/testing.md`
 
 Supporting guardrails are also in place through the rule pack for module
-contracts, frontend and admin UI boundaries, persistence, hosted-pack boundaries,
+contracts, frontend and admin UI boundaries, persistence, managed-capability boundaries,
 docs, release notes, architecture placement, and final-report expectations.
 
 ## Task routing summary
@@ -49,11 +49,11 @@ docs, release notes, architecture placement, and final-report expectations.
 | Release/changelog | `release-notes` | release-notes rule |
 | Test-only | owning surface skill | use `oss-contribution-review` if the owning surface is unclear |
 | CLI | `oss-contribution-review` | also inspect the owning layer rule or skill when CLI scaffolding changes module, page, or workflow contracts |
-| Hosted-pack support | `oss-contribution-review` | hosted-packs rule for now |
+| Managed-capability support | `oss-contribution-review` | managed-capabilities rule for now |
 
 ## Known deferrals
 
-- No dedicated `hosted-pack-change` skill exists yet.
+- No dedicated `managed-capability-change` skill exists yet.
 - No dedicated CLI-change skill exists yet.
 - Deeper AppGenerator or AgentGenerator subsystem skills can be added later if
   workflow-local change volume or subsystem complexity grows.

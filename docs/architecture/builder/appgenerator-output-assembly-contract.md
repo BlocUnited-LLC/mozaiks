@@ -125,16 +125,16 @@ Rules:
 - every custom route manifest entry must have exactly one `page_files` entry whose `registry_key` matches the route `component`; `save_app_schema` synthesizes `ui/index.js` from that matched pair
 - `app/ui/index.js` must register every component referenced by `ui/route_manifest.json`; missing registrations are export/download blockers, not runtime surprises
 - `admin/admin_registry.yaml` declares admin page and panel metadata; it is not a route registry and must not own full-page custom route components
-- hosted-pack pages must bind through an app-owned facade module endpoint such as `/api/modules/analytics_dashboard/get_metrics`, never directly to hosted-pack internals
+- managed-capability pages must bind through an app-owned facade module endpoint such as `/api/modules/analytics_dashboard/get_metrics`, never directly to managed-capability internals
 - declarative pages may launch workflow sessions through typed page actions (`action_type: workflow`), but workflow-local React still belongs to AgentGenerator and `chat.tool_call`
 
-### Hosted-pack facade binding
+### Managed-capability facade binding
 
-When a build has a host-provided pack, AppGenerator must keep the generated app
+When a build has a selected managed capability pack, AppGenerator must keep the generated app
 boundary explicit:
 
 ```text
-hosted_pack
+managed_capability
   -> app/services/integrations/{pack_id}_client.py
   -> app-owned facade module
   -> ui/pages bind to the facade module
@@ -143,8 +143,8 @@ hosted_pack
 Provider-neutral example:
 
 ```text
-hosted_analytics
-  -> app/services/integrations/hosted_analytics_client.py
+managed_analytics
+  -> app/services/integrations/managed_analytics_client.py
   -> modules/analytics_dashboard/
   -> ui/pages/analytics.yaml
   -> /api/modules/analytics_dashboard/get_metrics
@@ -153,7 +153,19 @@ hosted_analytics
 The pack descriptor may provide `surfaces`, `supported_domains`, `branding`,
 `generation_rules`, `adapter_template`, and `capability_source`.
 Those fields are planning metadata. They do not authorize generated pages to
-call hosted service internals directly.
+call managed provider internals directly.
+
+For SaaS apps that select the `mozaikspay` managed capability, the generated
+app bundle must include the portable SaaS contract, not hosted provider
+internals:
+
+- `config/subscriptions.yaml` with token wallets, token allowances, and usage
+  limits
+- `services/integrations/mozaikspay_client.py` as the app-side connector client
+- `modules/billing_portal/` as the app-owned facade module
+- billing and usage pages bound only to `/api/modules/billing_portal/*`
+- no `modules/mozaikspay/`, hosted billing module, wallet module, or direct
+  provider SDK ownership in the generated app
 
 ### Route/component registration drift
 
@@ -188,13 +200,13 @@ Rules:
 - Page ids must cover every entity domain that `ConfigMiddlewareAgent` assigns module admin panels to
 - The module contract quality gate validates at generation time that every `admin.yaml` panel `page` field resolves to a declared page id
 
-**Hosted-only pages:**
+**Operator-only pages:**
 
 | Page id | Inclusion condition | Path |
 |---|---|---|
 | `hosting` | `capability_packs` explicitly targets hosted/operator app management such as `hosting` or hosted deployment records; portable deployment artifacts alone do not qualify | `/apps/:appId/hosting` |
 
-Add new hosted-only pages here when a hosted capability pack introduces a new operator surface. Do not add them to the standard inclusion rules.
+Add new operator-only pages here when a managed capability context introduces a new operator surface. Do not add them to the standard inclusion rules.
 
 `AssemblyAgent` must include `admin/admin_registry.yaml` in the final bundle output.
 
@@ -333,6 +345,14 @@ injected `[WORKFLOW INTEGRATION CONTRACT]` as authority. It must not regenerate
 backend Python, frontend code, pages, data contracts, service foundation files,
 or unrelated modules. After the configured attempt limit, the status becomes
 `blocked` and the workflow returns to the user.
+
+When a build/export context requests deployment output, or the generated files
+already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,
+or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral
+deployment artifact validator. Hosted-ready bundles must include valid
+deployment artifacts such as `Dockerfile`, `env.example`, and
+`deployment.manifest.json`; missing deployment artifacts block export/promotion
+instead of being discovered by a later hosting adapter.
 
 ### 7. AppValidation Strategy
 

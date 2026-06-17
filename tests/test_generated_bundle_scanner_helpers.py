@@ -70,13 +70,13 @@ Covers pure helpers NOT tested by test_generated_bundle_scanner.py
     - all three present → capability_pack_id wins
     - all empty → ""
 
-  _selected_hosted_pack_ids:
+  _selected_managed_capability_ids:
     - None → empty set
     - empty list → empty set
-    - non-hosted_pack capability_source → excluded
-    - hosted_pack with id → included
+    - non-managed_capability capability_source → excluded
+    - managed_capability with id → included
     - non-dict item → skipped
-    - multiple hosted packs → all ids
+    - multiple managed capabilities → all ids
 
   _iter_api_endpoint_literals:
     - no match → []
@@ -100,7 +100,7 @@ from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
     _normalized_files_map,
     _normalized_path,
     _pack_id_from_descriptor,
-    _selected_hosted_pack_ids,
+    _selected_managed_capability_ids,
 )
 from mozaiksai.core.runtime.app.paths import APP_DATA_CONTRACT_PATH
 
@@ -429,38 +429,38 @@ class TestPackIdFromDescriptor:
 
 
 # ---------------------------------------------------------------------------
-# 10. _selected_hosted_pack_ids
+# 10. _selected_managed_capability_ids
 # ---------------------------------------------------------------------------
 
-class TestSelectedHostedPackIds:
+class TestSelectedManagedCapabilityIds:
     def test_none_returns_empty_set(self):
-        assert _selected_hosted_pack_ids(None) == set()
+        assert _selected_managed_capability_ids(None) == set()
 
     def test_empty_list_returns_empty_set(self):
-        assert _selected_hosted_pack_ids([]) == set()
+        assert _selected_managed_capability_ids([]) == set()
 
-    def test_non_hosted_pack_excluded(self):
+    def test_non_managed_capability_excluded(self):
         packs = [{"id": "wallet", "capability_source": "oss_pack"}]
-        assert _selected_hosted_pack_ids(packs) == set()
+        assert _selected_managed_capability_ids(packs) == set()
 
-    def test_hosted_pack_included(self):
-        packs = [{"id": "mozaikspay", "capability_source": "hosted_pack"}]
-        assert _selected_hosted_pack_ids(packs) == {"mozaikspay"}
+    def test_managed_capability_included(self):
+        packs = [{"id": "mozaikspay", "capability_source": "managed_capability"}]
+        assert _selected_managed_capability_ids(packs) == {"mozaikspay"}
 
     def test_non_dict_item_skipped(self):
-        packs = ["string_item", {"id": "mozaikspay", "capability_source": "hosted_pack"}]
-        assert _selected_hosted_pack_ids(packs) == {"mozaikspay"}
+        packs = ["string_item", {"id": "mozaikspay", "capability_source": "managed_capability"}]
+        assert _selected_managed_capability_ids(packs) == {"mozaikspay"}
 
-    def test_multiple_hosted_packs(self):
+    def test_multiple_managed_capabilities(self):
         packs = [
-            {"id": "mozaikspay", "capability_source": "hosted_pack"},
-            {"id": "mozaiksmail", "capability_source": "hosted_pack"},
+            {"id": "mozaikspay", "capability_source": "managed_capability"},
+            {"id": "mozaiksmail", "capability_source": "managed_capability"},
         ]
-        assert _selected_hosted_pack_ids(packs) == {"mozaikspay", "mozaiksmail"}
+        assert _selected_managed_capability_ids(packs) == {"mozaikspay", "mozaiksmail"}
 
     def test_empty_pack_id_excluded(self):
-        packs = [{"id": "", "capability_source": "hosted_pack"}]
-        assert _selected_hosted_pack_ids(packs) == set()
+        packs = [{"id": "", "capability_source": "managed_capability"}]
+        assert _selected_managed_capability_ids(packs) == set()
 
 
 # ---------------------------------------------------------------------------

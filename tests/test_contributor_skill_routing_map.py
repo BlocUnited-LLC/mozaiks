@@ -59,15 +59,15 @@ def test_admin_ui_and_module_contract_routes_are_explicit() -> None:
     assert "Use `appgenerator-change` if generated module output changes." in quickstart
 
 
-def test_hosted_pack_support_route_is_explicit_without_new_skill() -> None:
+def test_managed_capability_support_route_is_explicit_without_new_skill() -> None:
     skills = _read(".claude/skills/README.md")
     quickstart = _read("CONTRIBUTING.md")
 
-    assert "Hosted-pack support | `oss-contribution-review` |" in skills
-    assert "No dedicated `hosted-pack-change` skill exists yet." in skills
-    assert "`hosted-pack-change` remains planned." in skills
-    assert "Hosted-pack support change: use `oss-contribution-review` plus the hosted-packs rule for now; no dedicated `hosted-pack-change` skill exists yet." in quickstart
-    assert "- `hosted-pack-change`" in skills
+    assert "Managed-capability support | `oss-contribution-review` |" in skills
+    assert "No dedicated `managed-capability-change` skill exists yet." in skills
+    assert "`managed-capability-change` remains planned." in skills
+    assert "Managed-capability support change: use `oss-contribution-review` plus the managed-capabilities rule for now; no dedicated `managed-capability-change` skill exists yet." in quickstart
+    assert "- `managed-capability-change`" in skills
 
 
 def test_local_workflow_skills_stay_primary_and_factory_build_is_companion() -> None:

@@ -322,9 +322,9 @@ When working in or generating app services:
   `registrar/`, `cloud/`, `storage/`, `search/`, `email/`, `database/`,
   `secrets/`, and `payments/` when the app itself directly owns that provider
   integration.
-- `services/integrations/{pack_id}_client.py` is the lane for hosted-pack API
+- `services/integrations/{pack_id}_client.py` is the lane for managed-capability API
   clients. Pages and app actions should bind to app-owned facade modules, not
-  directly to hosted-pack internals.
+  directly to managed-capability internals.
 - `services/adapters/{area}/{provider}.py` owns provider mechanics such as SDK
   calls, protocol translation, signing, retries, and response normalization.
   It must not own durable app facts, lifecycle transitions, user-facing actions,

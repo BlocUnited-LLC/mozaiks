@@ -94,6 +94,7 @@ task_contracts:
       - ui/index.js
     hard_constraints:
       - module.yaml is always required.
+      - module_contract owned_paths are YAML/declarative contract files only - module.yaml, contracts/*.yaml, and optional runtime_extensions.yaml. Do not include backend/*.py in module_contract tasks; use data_models for backend/schemas.py and business_services for handler.py/service.py/repo.py/policy.py.
       - Emit only files declared by owned_paths or explicit file_manifest.
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.
@@ -221,10 +222,10 @@ task_contracts:
       - Emit bespoke REST adapters only when explicitly requested.
       - Delegate behavior to backend/handler.py instead of duplicating business logic.
       - Service admin config is a separate contract and must expose only GET /api/admin/config.
-      - For hosted-pack adapter tasks (owned_paths under services/integrations/), generate thin client wrappers only — no hosted business logic, no proprietary pack internals in generated files.
-      - Hosted adapter clients must target the stable hosted API contract supplied by the deployment host (e.g. POST {MOZAIKS_APP_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or provider credentials in generated files.
-      - Pages must not bind directly to /api/modules/{hosted_pack_id}/{action}. When hosted-pack data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the hosted adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
-      - Provider implementation adapters that are not hosted-pack API clients belong in services/adapters/ through service_foundation, not under modules/ and not in services/integrations/.
+      - For managed-capability adapter tasks (owned_paths under services/integrations/), generate thin client wrappers only — no provider business logic, no proprietary provider internals in generated files.
+      - Managed capability adapter clients must target the stable API contract supplied by the operator/provider boundary (e.g. POST {APP_BACKEND_URL}/api/modules/{module_id}/{action_id}). Do not embed host-specific secrets or provider credentials in generated files.
+      - Pages must not bind directly to /api/modules/{managed_capability_id}/{action}. When managed-capability data must appear on a persistent page, AppGenerator generates an app-owned façade module (generated_module) whose service calls the managed capability adapter client. Pages bind to /api/modules/{facade_module_id}/{action} using the standard page→module convention.
+      - Provider implementation adapters that are not managed-capability API clients belong in services/adapters/ through service_foundation, not under modules/ and not in services/integrations/.
 
   agent_backend_integration:
     owner_agent: AppPlanAgent
@@ -279,7 +280,7 @@ backend_helper_files:
     rules:
       - must be declared in current_build_task.owned_paths or python_stubs before ServiceAgent generates it
       - must be imported by at least one canonical backend layer (handler.py, service.py) or referenced by runtime_extensions.yaml
-      - must be module-local — no cross-module imports except to hosted capability service interfaces
+      - must be module-local — no cross-module imports except to managed capability service interfaces
       - must not create new public module actions or bypass the handler dispatch contract
       - AppPlanAgent must declare it with a short rationale in the build task initial_message
       - ConfigMiddlewareAgent must add it to python_stubs before ServiceAgent runs
