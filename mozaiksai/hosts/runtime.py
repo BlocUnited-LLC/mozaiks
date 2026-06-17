@@ -48,6 +48,7 @@ from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.startup.validation import run_startup_checks
 from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
+from mozaiksai.core.transport.request_middleware import RequestBodySizeLimitMiddleware, RequestIDMiddleware
 from mozaiksai.core.transport.security_headers import SecurityHeadersMiddleware
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import (
@@ -213,8 +214,9 @@ if _cors_origins:
         CORSMiddleware,
         allow_origins=_cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-App-ID", "X-User-ID"],
+        expose_headers=["X-API-Version", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "X-Request-ID"],
     )
 
 # Rate limiting — runs before CORS (outermost layer).
@@ -225,6 +227,14 @@ app.add_middleware(RateLimitMiddleware)
 # Adds X-Content-Type-Options, X-Frame-Options, CSP, HSTS, Referrer-Policy,
 # and Permissions-Policy. Controlled by SECURITY_HEADERS_ENABLED env var.
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Request ID — generates or validates X-Request-ID on every request/response.
+# Bound to request.state.request_id for handlers, logs, and audit trails.
+app.add_middleware(RequestIDMiddleware)
+
+# Request body size limit — rejects oversized JSON bodies before the route handler
+# reads them. Configurable via MAX_REQUEST_BODY_BYTES (default 1 MB).
+app.add_middleware(RequestBodySizeLimitMiddleware)
 
 
 async def _chat_coll():

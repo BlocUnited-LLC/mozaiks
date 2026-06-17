@@ -171,3 +171,121 @@ class TestSecurityHeadersMiddleware:
         _, client = _make_app(enabled=True)
         resp = client.get("/test")
         assert "Strict-Transport-Security" not in resp.headers
+
+
+# ---------------------------------------------------------------------------
+# RequestBodySizeLimitMiddleware tests
+# ---------------------------------------------------------------------------
+
+def _make_body_limit_app(max_bytes: int = 100, excluded: str = "/api/upload") -> TestClient:
+    import os
+    os.environ["MAX_REQUEST_BODY_BYTES"] = str(max_bytes)
+    os.environ["MAX_REQUEST_BODY_EXCLUDED_PATHS"] = excluded
+
+    from mozaiksai.core.transport.request_middleware import RequestBodySizeLimitMiddleware
+
+    body_app = FastAPI()
+
+    @body_app.post("/api/data")
+    async def endpoint():
+        return {"ok": True}
+
+    @body_app.post("/api/upload/file")
+    async def upload():
+        return {"ok": True}
+
+    body_app.add_middleware(RequestBodySizeLimitMiddleware)
+    return TestClient(body_app)
+
+
+class TestRequestBodySizeLimitMiddleware:
+    def setup_method(self):
+        import os
+        os.environ.pop("MAX_REQUEST_BODY_BYTES", None)
+        os.environ.pop("MAX_REQUEST_BODY_EXCLUDED_PATHS", None)
+
+    def test_allows_small_body(self):
+        client = _make_body_limit_app(max_bytes=1000)
+        resp = client.post("/api/data", json={"key": "val"})
+        assert resp.status_code == 200
+
+    def test_rejects_oversized_body(self):
+        client = _make_body_limit_app(max_bytes=10)
+        large_payload = {"key": "a" * 200}
+        resp = client.post("/api/data", json=large_payload)
+        assert resp.status_code == 413
+
+    def test_413_has_informative_message(self):
+        client = _make_body_limit_app(max_bytes=10)
+        resp = client.post("/api/data", json={"key": "a" * 200})
+        assert "too large" in resp.json()["detail"].lower()
+
+    def test_excluded_path_not_limited(self):
+        client = _make_body_limit_app(max_bytes=10, excluded="/api/upload")
+        # Even with a body that exceeds the limit, excluded path passes
+        resp = client.post("/api/upload/file", content=b"x" * 200, headers={"Content-Length": "200"})
+        assert resp.status_code == 200
+
+    def test_get_request_not_limited(self):
+        import os
+        os.environ["MAX_REQUEST_BODY_BYTES"] = "1"
+        from mozaiksai.core.transport.request_middleware import RequestBodySizeLimitMiddleware
+        get_app = FastAPI()
+
+        @get_app.get("/api/data")
+        async def endpoint():
+            return {"ok": True}
+
+        get_app.add_middleware(RequestBodySizeLimitMiddleware)
+        client = TestClient(get_app)
+        resp = client.get("/api/data")
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# RequestIDMiddleware tests
+# ---------------------------------------------------------------------------
+
+def _make_request_id_app() -> TestClient:
+    from mozaiksai.core.transport.request_middleware import RequestIDMiddleware
+
+    rid_app = FastAPI()
+
+    @rid_app.get("/test")
+    async def endpoint(request: Request):
+        return {"request_id": request.state.request_id}
+
+    rid_app.add_middleware(RequestIDMiddleware)
+    return TestClient(rid_app)
+
+
+class TestRequestIDMiddleware:
+    def test_generates_request_id_when_absent(self):
+        client = _make_request_id_app()
+        resp = client.get("/test")
+        assert "X-Request-ID" in resp.headers
+        assert len(resp.headers["X-Request-ID"]) > 0
+
+    def test_echoes_client_supplied_request_id(self):
+        client = _make_request_id_app()
+        resp = client.get("/test", headers={"X-Request-ID": "my-trace-abc-123"})
+        assert resp.headers["X-Request-ID"] == "my-trace-abc-123"
+
+    def test_ignores_invalid_client_request_id_and_generates_new(self):
+        client = _make_request_id_app()
+        # Contains a space — invalid
+        resp = client.get("/test", headers={"X-Request-ID": "bad id here"})
+        returned_id = resp.headers["X-Request-ID"]
+        assert returned_id != "bad id here"
+        assert len(returned_id) > 0
+
+    def test_request_id_bound_to_request_state(self):
+        client = _make_request_id_app()
+        resp = client.get("/test", headers={"X-Request-ID": "trace-xyz"})
+        assert resp.json()["request_id"] == "trace-xyz"
+
+    def test_generated_id_is_unique(self):
+        client = _make_request_id_app()
+        id1 = client.get("/test").headers["X-Request-ID"]
+        id2 = client.get("/test").headers["X-Request-ID"]
+        assert id1 != id2

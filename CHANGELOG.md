@@ -31,6 +31,23 @@ This project follows a practical pre-1.0 changelog format:
   and `allow_credentials=True` (invalid per spec; browsers reject it).
   CORS middleware is now only added when explicit non-wildcard origins are provided.
 
+- **Tightened CORS method/header wildcards** (`mozaiksai/hosts/runtime.py`):
+  `allow_methods` and `allow_headers` replaced with explicit allowlists.
+  `expose_headers` now declares the rate-limit and request-ID headers the
+  frontend needs.
+
+- **Request body size limit** (`mozaiksai/core/transport/request_middleware.py`):
+  `RequestBodySizeLimitMiddleware` rejects JSON requests with a
+  `Content-Length` header exceeding `MAX_REQUEST_BODY_BYTES` (default 1 MB)
+  before the route handler reads the body. Upload paths are excluded by
+  default and configurable via `MAX_REQUEST_BODY_EXCLUDED_PATHS`.
+
+- **Request ID propagation** (`mozaiksai/core/transport/request_middleware.py`):
+  `RequestIDMiddleware` attaches a unique `X-Request-ID` to every request
+  and response. Client-supplied IDs are validated and echoed; otherwise a
+  UUID4 is generated. Bound to `request.state.request_id` for handlers,
+  tools, and structured logs.
+
 ### Added
 
 - **Live AppGenerator subscription smoke** (`scripts/smoke_appgenerator_live_subscription.py`)
