@@ -200,10 +200,26 @@ This project follows a practical pre-1.0 changelog format:
   to drive which billing surfaces, plan catalog artifacts, and entitlement gates
   are required in the build plan.
 
+- **Startup validation: upload storage writability check** (`mozaiksai/core/startup/validation.py`):
+  `run_startup_checks` now emits a WARNING when `UPLOAD_STORAGE_DIR` points to an
+  existing directory that is not writable. Non-existent directories are skipped
+  (created on first upload). 3 new tests added to `test_startup_validation.py`.
+
+- **Upload path containment tests** (`tests/test_chat_attachments_helpers.py`):
+  3 new integration tests verify that `handle_chat_upload` rejects path traversal
+  sequences in `app_id` and `chat_id` (both raise `ValueError: outside the permitted
+  upload directory`) and that legitimate uploads store files inside `upload_root`.
+
 - **Expanded production readiness gate** (`scripts/production_readiness_gate.py`):
   9 additional test suites added to `PYTEST_GATE_TARGETS` covering runtime contracts,
   platform hooks, offline acceptance, security hardening, workflow contracts, session
   launcher, and factory workflow integration.
+
+- **Health probe and attachment tests in production gate** (`scripts/production_readiness_gate.py`):
+  `test_runtime_health.py` and `test_chat_attachments_helpers.py` added to both
+  `PYTEST_GATE_TARGETS` and `QUICK_PYTEST_TARGETS`. These cover the `/api/health`
+  and `/api/health/ready` security contracts and the upload path-containment
+  defense-in-depth layer.
 
 - **Live AppGenerator subscription smoke** (`scripts/smoke_appgenerator_live_subscription.py`)
   now exercises real ConfigMiddlewareAgent LLM calls for SaaS subscription config

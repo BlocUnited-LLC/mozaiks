@@ -301,3 +301,80 @@ async def test_handle_chat_upload_strips_mime_parameters(
         chat_id="chat_1",
     )
     assert result.bytes_written == 5
+
+
+# ---------------------------------------------------------------------------
+# 6. handle_chat_upload — upload path containment
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_upload_rejects_traversal_in_app_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Path traversal sequences in app_id must be rejected before disk access."""
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir()
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(upload_root))
+    monkeypatch.delenv("UPLOAD_ALLOWED_MIME_TYPES", raising=False)
+    coll = _FakeChatColl(user_id="u1")
+    file_obj = _FakeFileObj(content_type="text/plain", data=b"exploit")
+
+    with pytest.raises(ValueError, match="outside the permitted upload directory"):
+        await handle_chat_upload(
+            chat_coll=coll,
+            file_obj=file_obj,
+            app_id="../../etc",
+            user_id="u1",
+            chat_id="chat_1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_upload_rejects_traversal_in_chat_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Path traversal sequences in chat_id must be rejected before disk access."""
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir()
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(upload_root))
+    monkeypatch.delenv("UPLOAD_ALLOWED_MIME_TYPES", raising=False)
+    coll = _FakeChatColl(user_id="u1")
+    file_obj = _FakeFileObj(content_type="text/plain", data=b"exploit")
+
+    with pytest.raises(ValueError, match="outside the permitted upload directory"):
+        await handle_chat_upload(
+            chat_coll=coll,
+            file_obj=file_obj,
+            app_id="app_1",
+            user_id="u1",
+            chat_id="../../../tmp",
+        )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_upload_stored_path_inside_upload_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Verify stored_path of a legitimate upload stays within upload_root."""
+    from pathlib import Path as P
+
+    upload_root = tmp_path / "uploads"
+    upload_root.mkdir()
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(upload_root))
+    monkeypatch.delenv("UPLOAD_ALLOWED_MIME_TYPES", raising=False)
+    coll = _FakeChatColl(user_id="u1")
+    file_obj = _FakeFileObj(content_type="text/plain", data=b"safe content")
+
+    result = await handle_chat_upload(
+        chat_coll=coll,
+        file_obj=file_obj,
+        app_id="safe_app",
+        user_id="u1",
+        chat_id="safe_chat",
+    )
+    stored = P(result.stored_path).resolve()
+    assert stored.is_relative_to(upload_root.resolve())

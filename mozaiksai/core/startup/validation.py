@@ -169,6 +169,28 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
                 extra={"check": "workflows_path", "mode": mode},
             )
 
+    # ── Upload storage writability ───────────────────────────────────────────
+    upload_dir = os.getenv("UPLOAD_STORAGE_DIR", "").strip()
+    if upload_dir:
+        upload_path = Path(upload_dir)
+        if upload_path.exists() and not os.access(upload_path, os.W_OK):
+            msg = (
+                f"UPLOAD_STORAGE_DIR={upload_dir!r} exists but is not writable. "
+                "File uploads will fail at request time. Check directory permissions."
+            )
+            warnings.append(msg)
+            logger.warning(
+                "STARTUP_CHECK_FAILED: %s",
+                msg,
+                extra={"check": "upload_storage_dir", "mode": mode},
+            )
+        else:
+            logger.info(
+                "STARTUP_CHECK_OK: UPLOAD_STORAGE_DIR configured at %s",
+                upload_dir,
+                extra={"check": "upload_storage_dir", "mode": mode},
+            )
+
     # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
     # When not set, service-to-service requests bypass the key check (dev mode).
     # Warn operators so this is not accidentally left unset in production.

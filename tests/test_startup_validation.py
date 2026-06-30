@@ -494,3 +494,51 @@ class TestInternalApiKeyCheck:
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert any("INTERNAL_API_KEY" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Upload storage writability check
+# ---------------------------------------------------------------------------
+
+
+class TestUploadStorageDirCheck:
+    @pytest.mark.asyncio
+    async def test_no_warning_when_upload_dir_not_set(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.delenv("UPLOAD_STORAGE_DIR", raising=False)
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_upload_dir_exists_and_writable(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(tmp_path))
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert warnings == []
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_upload_dir_does_not_exist_yet(self, monkeypatch, tmp_path):
+        """Non-existent upload dir is allowed — created on first upload."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(tmp_path / "nonexistent_uploads"))
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        # Non-existent dir is not warned about — it gets created on first upload
+        assert not any("UPLOAD_STORAGE_DIR" in w for w in warnings)
