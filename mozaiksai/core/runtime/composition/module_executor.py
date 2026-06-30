@@ -309,7 +309,7 @@ class ModuleExecutor:
                 "MODULE_ACTION_BAD_PARAMS: module=%s action=%s error=%s", request.module, request.action, exc)
             return ModuleResult(
                 success=False,
-                error=f"Invalid parameters for {request.module}.{request.action}: {exc}",
+                error=f"Invalid parameters for action '{request.action}'",
                 error_code="INVALID_PARAMS",
             )
         except Exception as exc:
