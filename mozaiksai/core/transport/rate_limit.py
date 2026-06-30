@@ -10,6 +10,7 @@ Reads configuration from environment variables:
   REDIS_URL                       — Redis connection URL; falls back to in-memory if unset
 
 Built-in tighter limits on high-cost endpoints (can be overridden via RATE_LIMIT_PATH_LIMITS):
+  /api/auth    → 20/minute   (token endpoints — brute-force protection)
   /api/chats   → 10/minute   (workflow session starts, each spawns an LLM context)
   /chat        → 30/minute   (user message sends, primary LLM cost driver)
   /api/workflows → 20/minute (programmatic workflow triggers)
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Default tighter limits on expensive endpoints; env values override these.
 _DEFAULT_PATH_LIMITS: dict[str, int] = {
+    "/api/auth": 20,      # auth token endpoints — brute-force protection
     "/api/chats": 10,
     "/chat": 30,
     "/api/workflows": 20,

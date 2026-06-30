@@ -127,6 +127,7 @@ class TestPathLimits:
     def test_defaults_present_when_no_env(self, monkeypatch):
         monkeypatch.delenv("RATE_LIMIT_PATH_LIMITS", raising=False)
         limits = _path_limits()
+        assert "/api/auth" in limits
         assert "/api/chats" in limits
         assert "/chat" in limits
         assert "/api/workflows" in limits
@@ -134,6 +135,7 @@ class TestPathLimits:
     def test_default_values_correct(self, monkeypatch):
         monkeypatch.delenv("RATE_LIMIT_PATH_LIMITS", raising=False)
         limits = _path_limits()
+        assert limits["/api/auth"] == 20
         assert limits["/api/chats"] == 10
         assert limits["/chat"] == 30
         assert limits["/api/workflows"] == 20
