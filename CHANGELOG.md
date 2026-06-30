@@ -300,6 +300,13 @@ This project follows a practical pre-1.0 changelog format:
   `record_placement_impression` and `record_placement_click` truncate `slot` and
   `source` to 64 characters. Prevents unbounded data from being written to MongoDB.
 
+- **Open-redirect guard in mozaikspay billing_portal template** (`factory_app/build_context/mozaikspay/templates/modules/billing_portal/backend/service.py`):
+  `open_billing_portal` now validates `return_url` before passing it to the MozaiksPay client.
+  Empty URLs return `INVALID_INPUT`; non-`https://` schemes (including `http://`, `javascript:`,
+  and bare paths) are rejected without contacting the billing API. The fix applies to the
+  generator template, so all apps generated with the mozaikspay capability pack get the guard
+  automatically. Defense-in-depth alongside any MozaiksPay server-side validation.
+
 - **Open-redirect guard on billing portal return_url** (`mozaiks-app/app/modules/hosted_billing/backend/service.py`):
   `create_billing_portal_session` now validates that `return_url` uses the `https://`
   scheme and contains a non-empty host before passing the URL to the Stripe Customer

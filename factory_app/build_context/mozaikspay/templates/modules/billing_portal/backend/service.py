@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from services.integrations.mozaikspay_client import MozaiksPayClient
 
@@ -66,6 +67,11 @@ class BillingPortalService:
         return_url: str,
         **_: Any,
     ) -> dict[str, Any]:
+        if not return_url:
+            return {"success": False, "error_code": "INVALID_INPUT", "detail": "return_url is required"}
+        parsed = urlparse(return_url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            return {"success": False, "error_code": "INVALID_INPUT", "detail": "return_url must be an https URL"}
         raw = await self._client(ctx).create_billing_portal_session(
             return_url=return_url,
             **_ctx_scope(ctx),
