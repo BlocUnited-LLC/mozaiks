@@ -46,10 +46,12 @@ This project follows a practical pre-1.0 changelog format:
   generic `"Action {action!r} failed"` message; full detail stays in server logs.
 
 - **SSRF mitigation on webhook_url** (`mozaiksai/hosts/runtime.py`):
-  `TriggerWorkflowRequest.webhook_url` now validated with a Pydantic
-  `field_validator`: must be a valid `https://` URL with a hostname and must
-  not target `localhost` or the `127.x` loopback range. Rejects HTTP-scheme
-  and loopback URLs at deserialization time before the session is created.
+  `TriggerWorkflowRequest.webhook_url` validated with a Pydantic `field_validator`:
+  must use `https://`, include a hostname, and must not target private or reserved
+  IP space. Blocked ranges: loopback (`127.x` / `::1` / `localhost`), all RFC-1918
+  private ranges (`10.x`, `172.16–31.x`, `192.168.x`), link-local / cloud metadata
+  (`169.254.x`), IPv6 ULA (`fc00::/7`), and all `ipaddress.ip_address` reserved and
+  multicast ranges. 9 new validator tests cover all blocked ranges.
 
 - **Agent tool error message suppression** (`mozaiksai/core/events/auto_tool_handler.py`, `mozaiksai/core/workflow/app_backend_tools.py`, `mozaiksai/core/adapters/http_app_backend.py`):
   Auto-tool failures, backend request errors, emit-event failures, and health-check
@@ -136,6 +138,16 @@ This project follows a practical pre-1.0 changelog format:
   image, PDF, JSON, and XML types. Configurable via `UPLOAD_ALLOWED_MIME_TYPES`
   (comma-separated; set to `*` to disable). Content-type parameters (e.g.
   `; charset=utf-8`) are stripped before comparison. 4 integration tests added.
+
+- **Upload path containment** (`mozaiksai/core/chat_attachments/attachments.py`):
+  `handle_chat_upload` now verifies that `dest_dir` and `stored_path` remain inside
+  `upload_root` after `Path.resolve()`. Defense-in-depth against symlink-based or
+  unusual `app_id`/`chat_id` path traversal edge cases.
+
+- **Chat upload form field validation** (`mozaiksai/hosts/platform.py`):
+  `_handle_chat_upload` now calls `validate_path_id` on `app_id` and `chat_id` from
+  form data, ensuring both `/api/chat/upload` and `/api/chat/upload/{app_id}/{user_id}`
+  reject malformed identifiers before filesystem operations run.
 
 - **Sandbox API error detail suppression** (`factory_app/workflows/AppGenerator/tools/sandbox_api.py`):
   All sandbox HTTP routes (create, sync, start, status, stop) and the WebSocket

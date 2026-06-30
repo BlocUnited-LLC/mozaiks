@@ -65,7 +65,8 @@ async def _has_mongo_llm_config() -> bool:
         db = get_mongo_client()[SYSTEM_DATABASE]
         doc = await db[BuilderCollections.LLM_CONFIG].find_one()
         return doc is not None
-    except Exception:
+    except Exception as exc:
+        logger.debug("LLM config MongoDB lookup failed (treating as absent): %s", exc)
         return False
 
 
