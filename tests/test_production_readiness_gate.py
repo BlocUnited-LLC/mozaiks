@@ -26,6 +26,12 @@ def test_production_readiness_gate_includes_core_offline_targets() -> None:
     assert "tests/test_mozaikspay_managed_capability_contract.py" in targets
     assert "tests/test_app_loader.py" in targets
     assert "tests/test_studio_host_smoke.py" in targets
+    # Security and runtime contracts
+    assert "tests/test_security_hardening.py" in targets
+    assert "tests/test_rate_limit_helpers.py" in targets
+    assert "tests/test_rate_limit_middleware.py" in targets
+    assert "tests/test_startup_validation.py" in targets
+    assert "tests/test_module_executor_permission_enforcement.py" in targets
 
 
 def test_production_readiness_gate_can_list_without_running() -> None:
