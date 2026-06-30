@@ -350,13 +350,13 @@ async def _platform_startup() -> None:
         # health checks can surface this rather than hiding it as a warning.
         logger.error("APP_LOAD_FAILED_DEGRADED (ModuleLoadError): %s", exc)
         app.state.startup_degraded = True
-        app.state.startup_degraded_reason = "ModuleLoadError"
+        app.state.startup_degraded_reason = "MODULE_LOAD_ERROR"
     except Exception as exc:
         # Unexpected error during app/module setup. Mark degraded so health
         # checks report the problem; do not swallow silently.
         logger.error("APP_LOAD_FAILED_DEGRADED (%s): %s", type(exc).__name__, exc)
         app.state.startup_degraded = True
-        app.state.startup_degraded_reason = type(exc).__name__
+        app.state.startup_degraded_reason = "STARTUP_ERROR"
 
     try:
         await get_platform_hooks().run_startup(app)
