@@ -104,7 +104,7 @@ class HttpAppBackendAdapter:
             )
         except httpx.HTTPError as exc:
             logger.error("Backend request failed %s %s: %s", method, path, exc)
-            return BackendResponse(success=False, error=str(exc))
+            return BackendResponse(success=False, error="backend_unavailable")
 
     # ------------------------------------------------------------------
     # AppBackendPort.emit
@@ -137,7 +137,7 @@ class HttpAppBackendAdapter:
             return BackendHealth(healthy=False, details={"error": resp.error})
         except Exception as exc:
             logger.error("Health check failed: %s", exc)
-            return BackendHealth(healthy=False, details={"error": str(exc)})
+            return BackendHealth(healthy=False, details={"error": "health_check_failed"})
 
 
 # ---------------------------------------------------------------------------

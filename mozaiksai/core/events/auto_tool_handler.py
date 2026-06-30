@@ -377,13 +377,13 @@ class AutoToolEventHandler:
             if inspect.isawaitable(result):
                 result = await result  # type: ignore[assignment]
             return result, "ok"
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "[AUTO_TOOL] Tool execution failed for agent=%s tool=%s",
                 binding.agent_name,
                 binding.tool_name,
             )
-            return {"status": "error", "message": str(exc)}, "error"
+            return {"status": "error", "message": "tool_execution_failed"}, "error"
 
     async def _persist_context_variables(
         self,

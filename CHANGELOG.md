@@ -45,6 +45,12 @@ This project follows a practical pre-1.0 changelog format:
   failures in the `/api/me/profile-panels` response. Replaced `str(exc)` with a
   generic `"Action {action!r} failed"` message; full detail stays in server logs.
 
+- **Agent tool error message suppression** (`mozaiksai/core/events/auto_tool_handler.py`, `mozaiksai/core/workflow/app_backend_tools.py`, `mozaiksai/core/adapters/http_app_backend.py`):
+  Auto-tool failures, backend request errors, emit-event failures, and health-check
+  exceptions no longer include raw Python exception text in tool result payloads that
+  AG2 agents reason over (and could surface in chat messages). Replaced with opaque
+  error codes; full exception details remain in `logger.error`.
+
 - **WebSocket path parameter validation** (`mozaiksai/hosts/platform.py`):
   `/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}` now validates all four path
   parameters against `validate_path_id` before authentication. Invalid values

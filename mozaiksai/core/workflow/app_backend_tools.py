@@ -54,7 +54,7 @@ async def backend_request(
         return json.dumps({"status": "error", "error": result.error})
     except Exception as exc:
         logger.error("backend_request tool error %s %s: %s", method, path, exc)
-        return json.dumps({"status": "error", "error": str(exc)})
+        return json.dumps({"status": "error", "error": "backend_request_failed"})
 
 
 async def emit_event(
@@ -84,7 +84,7 @@ async def emit_event(
         return json.dumps({"status": "emitted" if ok else "failed", "event_type": event_type})
     except Exception as exc:
         logger.error("emit_event tool error %s: %s", event_type, exc)
-        return json.dumps({"status": "failed", "event_type": event_type, "error": str(exc)})
+        return json.dumps({"status": "failed", "event_type": event_type, "error": "emit_event_failed"})
 
 
 async def check_backend_health(
@@ -104,7 +104,7 @@ async def check_backend_health(
         return json.dumps({"healthy": health.healthy, "version": health.version})
     except Exception as exc:
         logger.error("check_backend_health tool error: %s", exc)
-        return json.dumps({"healthy": False, "version": "unknown", "error": str(exc)})
+        return json.dumps({"healthy": False, "version": "unknown"})
 
 
 __all__ = [
