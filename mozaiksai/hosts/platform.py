@@ -1106,7 +1106,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
         result["entry_point"] = workflows.get("entry_point")
         result["resume_policy"] = workflows.get("resume_policy")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read shell config: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to read shell config") from exc
 
     try:
         shell_config_path = _resolve_shell_config_path()
@@ -1930,7 +1930,7 @@ async def get_theme_config():
     try:
         return json.loads(config_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read theme config: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to read theme config") from exc
 
 
 @app.get("/api/themes/{app_id}")
@@ -1956,7 +1956,7 @@ async def get_page_schema(name: str):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read page schema: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to read page schema") from exc
 
 
 def _load_pack_graph_or_404():
@@ -2488,7 +2488,7 @@ async def resolve_transition_route(
         raise HTTPException(status_code=400, detail=str(route_err)) from route_err
     except Exception as route_err:
         logger.error("Transition resolution failed: %s", route_err, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to resolve transition: {route_err}") from route_err
+        raise HTTPException(status_code=500, detail="Failed to resolve transition") from route_err
 
     if launch_result.resolution_type == "transition":
         if launch_result.transition is None or not launch_result.next_transition_id:
@@ -3318,7 +3318,7 @@ async def chat_exists(
             return {"exists": False}
         return {"exists": doc is not None}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to check chat existence: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to check chat existence") from exc
 
 
 @app.get("/api/sessions/list/{app_id}/{user_id}")
@@ -3358,7 +3358,7 @@ async def list_user_sessions(
         return {"sessions": result, "count": len(result)}
     except Exception as exc:
         logger.error("[LIST_SESSIONS] Failed to list sessions: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to list sessions: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to list sessions") from exc
 
 
 @app.get("/api/sessions/recent/{app_id}/{user_id}")
@@ -3398,7 +3398,7 @@ async def get_most_recent_workflow_session(
             "last_artifact": extract_last_artifact(recent),
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch most recent session: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to fetch most recent session") from exc
 
 
 @app.get("/api/sessions/oldest/{app_id}/{user_id}")
@@ -3438,7 +3438,7 @@ async def get_oldest_workflow_session(
             "last_artifact": extract_last_artifact(oldest),
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch oldest session: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to fetch oldest session") from exc
 
 
 @app.delete("/api/sessions/{app_id}/{user_id}")
@@ -3478,7 +3478,7 @@ async def delete_user_sessions(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to delete sessions: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to delete sessions") from exc
 
 
 @app.delete("/api/general_chats/{app_id}/{user_id}")
@@ -3524,7 +3524,7 @@ async def delete_general_chats(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to delete general chats: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to delete general chats") from exc
 
 
 @app.delete("/api/general_chats/{app_id}/{user_id}/{general_chat_id}")
@@ -3549,7 +3549,7 @@ async def delete_general_chat(
             "general_chat_id": general_chat_id,
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to delete general chat: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to delete general chat") from exc
 
 
 @app.get("/api/notifications/count")
@@ -3842,7 +3842,7 @@ async def chat_meta(
             "app_id": app_id,
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to load chat meta: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to load chat meta") from exc
 
 
 _PLATFORM_OVERRIDE_PATHS = frozenset({

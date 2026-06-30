@@ -576,7 +576,7 @@ async def get_app_overview(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build app overview summary: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to build app overview summary") from exc
 
 
 @app.get("/api/studio/apps")
@@ -603,7 +603,7 @@ async def get_workspace_apps(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build apps summary: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to build apps summary") from exc
 
 
 class CreateWorkspaceAppRequest(BaseModel):
@@ -1197,7 +1197,7 @@ async def get_build_artifact_bundle(
     try:
         generated_files, skipped_files = _decode_text_bundle_entries(zip_path)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to load artifact bundle: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to load artifact bundle") from exc
 
     review_payload = await _build_artifact_review_payload(
         app_id=app_id,
@@ -1428,7 +1428,7 @@ async def promote_build_artifact_version(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to promote artifact: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to promote artifact") from exc
 
     for session in await artifact_store.list_refinement_sessions(
         app_id=app_id,
@@ -1537,7 +1537,7 @@ async def revert_to_artifact_version(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to extract artifact: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to extract artifact") from exc
 
     logger.info(
         "Reverted app_id=%s to artifact_version_id=%s (%s/%s)",
@@ -1590,7 +1590,7 @@ async def get_build_surface(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to build build summary: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Failed to build build summary") from exc
 
 
 class BuildSaveRequest(BaseModel):
@@ -2012,7 +2012,7 @@ async def trigger_workflow(
         raise HTTPException(status_code=400, detail=str(route_err)) from route_err
     except Exception as route_err:
         logger.error("SessionRouter routing failed: %s", route_err, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to route workflow trigger: {route_err}") from route_err
+        raise HTTPException(status_code=500, detail="Failed to route workflow trigger") from route_err
 
     resolved_workflow_id = launch.workflow_id
     routing_decision = launch.routing_decision
