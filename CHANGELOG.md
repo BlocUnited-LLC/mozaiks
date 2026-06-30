@@ -300,6 +300,17 @@ This project follows a practical pre-1.0 changelog format:
   `record_placement_impression` and `record_placement_click` truncate `slot` and
   `source` to 64 characters. Prevents unbounded data from being written to MongoDB.
 
+- **Open-redirect guard on hosting_url in mark_deployed** (`mozaiks-app/app/modules/hosting/backend/service.py`):
+  `mark_deployed` now validates `hosting_url` uses `https://` before storing it or emitting
+  the `hosted.hosting.app.deployed` event. Non-https URLs are rejected with success=False.
+  2 new tests cover http:// and bare-hostname rejection.
+
+- **Input length limits on community_membership, mozaikspay_checkout, domain_registry**:
+  - `community_membership.create_community`: name truncated to 100 chars, description to 1,000 chars.
+  - `mozaikspay_checkout.create_checkout_session`: description truncated to 500 chars.
+  - `domain_registry.record_certificate_observation`: certificate_source truncated to 50 chars,
+    certificate_provider to 100 chars, certificate_issuer to 200 chars.
+
 - **Open-redirect guard in mozaikspay billing_portal template** (`factory_app/build_context/mozaikspay/templates/modules/billing_portal/backend/service.py`):
   `open_billing_portal` now validates `return_url` before passing it to the MozaiksPay client.
   Empty URLs return `INVALID_INPUT`; non-`https://` schemes (including `http://`, `javascript:`,
