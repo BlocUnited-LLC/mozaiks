@@ -323,6 +323,22 @@ This project follows a practical pre-1.0 changelog format:
   as the success path, returning only safe structural fields (`success`, `record_id`,
   `record_type`, `name`, `provider`).
 
+- **Startup check for auth provider misconfiguration** (`mozaiksai/core/startup/validation.py`):
+  When `ENV=production`, auth is not explicitly disabled (`AUTH_ENABLED` not false), and
+  none of the provider env vars (`SUPABASE_URL`, `KEYCLOAK_URL`+`KEYCLOAK_REALM`,
+  `AUTH_JWKS_URL`+`AUTH_ISSUER`, or `AUTH_PROVIDER`) are set, the runtime previously
+  silently fell back to demo mode (no authentication). A new boot-time check now emits
+  a structured warning for this gap; in strict mode (`MOZAIKS_STARTUP_CHECKS=strict`) it
+  raises `StartupConfigError`. 8 new tests cover all provider detection branches and the
+  strict-mode raise path.
+
+- **Admin-only service guard for tenant_identity list_all_tenants** (`mozaiks-app/app/modules/tenant_identity/backend/service.py`):
+  `list_all_tenants` had no authorization check at the service layer — any code path
+  that bypassed the module executor (reaction handlers, direct instantiation, tests)
+  could enumerate all tenants. Added `is_admin_context(ctx)` guard that mirrors the
+  `tenant_identity.admin` permission declared in `module.yaml`. 3 new tests cover
+  admin allowed, non-admin rejected, and no-permissions rejected.
+
 ### Added
 
 - **App runtime load acceptance gate** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
