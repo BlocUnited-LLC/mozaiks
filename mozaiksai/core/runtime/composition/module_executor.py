@@ -274,6 +274,11 @@ class ModuleExecutor:
                 user_id=request.user_id,
                 tenant_id=request.tenant_id,
                 auth_token=request.auth_token,
+                permissions=(
+                    list(request.granted_permissions)
+                    if request.granted_permissions is not None
+                    else None
+                ),
                 correlation_id=request.correlation_id,
                 settings=self._settings.get(request.module),
                 persistence=self._build_persistence_context(request),

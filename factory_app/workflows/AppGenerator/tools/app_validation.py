@@ -15,6 +15,7 @@ import builtins
 import json
 import os
 import re
+import sys
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
@@ -1158,6 +1159,125 @@ def _runtime_quality_result(generated_files: dict[str, str]) -> dict[str, Any]:
     }
 
 
+async def _app_runtime_load_result(generated_files: dict[str, str]) -> dict[str, Any]:
+    failed_tests: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    details: dict[str, Any] = {
+        "app_name": None,
+        "module_names": [],
+        "failed_module_names": [],
+        "page_names": [],
+        "workflow_names": [],
+        "subscriptions_loaded": False,
+    }
+
+    if not generated_files:
+        failed_tests.append(
+            {
+                "test": "app_runtime_load",
+                "error": "No generated files were available for runtime app loading.",
+                "fix_suggestion": "Assemble a complete app bundle with app.json before validation or export.",
+            }
+        )
+    else:
+        from mozaiksai.core.runtime.app.loader import AppLoader
+
+        with tempfile.TemporaryDirectory(prefix="mozaiks-app-runtime-load-") as tmp:
+            app_root = Path(tmp) / "app"
+            _write_files_to_dir(app_root, generated_files)
+            # Ensure every Python package directory under app_root has an
+            # __init__.py so Python treats them as regular packages, not
+            # namespace packages.  Namespace packages aggregate paths from all
+            # sys.path entries; regular packages resolve from the first match.
+            # Missing __init__.py files lead to import failures when sys.path
+            # has stale entries left by previous AppLoader.load() calls in the
+            # same process (common in test suites).
+            # Process bottom-up (reverse sorted) so parent directories like
+            # `services/` inherit the marker from child packages that already
+            # contain .py files (e.g. `services/integrations/`).
+            for dir_path in sorted(app_root.rglob("*"), reverse=True):
+                if not dir_path.is_dir() or dir_path == app_root:
+                    continue
+                init_file = dir_path / "__init__.py"
+                if init_file.exists():
+                    continue
+                has_py = any(f.suffix == ".py" for f in dir_path.iterdir() if f.is_file())
+                has_pkg_child = any(
+                    (child / "__init__.py").exists()
+                    for child in dir_path.iterdir()
+                    if child.is_dir()
+                )
+                if has_py or has_pkg_child:
+                    init_file.write_text("", encoding="utf-8")
+            # Snapshot global import state so this call is test-isolated.
+            _path_before = list(sys.path)
+            _modules_before = set(sys.modules)
+            try:
+                loaded = await AppLoader.load(str(app_root))
+                details = {
+                    "app_name": loaded.definition.name,
+                    "module_names": [module.name for module in loaded.modules],
+                    "failed_module_names": list(loaded.failed_module_names),
+                    "page_names": [page.name for page in loaded.definition.pages],
+                    "workflow_names": [workflow.name for workflow in loaded.definition.workflows],
+                    "subscriptions_loaded": loaded.subscriptions_config is not None,
+                }
+                for module_name in loaded.failed_module_names:
+                    failed_tests.append(
+                        {
+                            "test": "app_runtime_module_load",
+                            "module": module_name,
+                            "error": f"AppLoader could not load module {module_name!r}.",
+                            "fix_suggestion": (
+                                "Fix the module contract, companion manifests, handler entrypoint, "
+                                "or app-owned service imports so AppLoader.load() can load every module."
+                            ),
+                        }
+                    )
+            except Exception as exc:
+                failed_tests.append(
+                    {
+                        "test": "app_runtime_load",
+                        "error": f"AppLoader.load() failed: {exc}",
+                        "fix_suggestion": (
+                            "Ensure app.json, modules/*/module.yaml, contracts/*.yaml, "
+                            "backend handlers, and app-level service imports are loadable."
+                        ),
+                    }
+                )
+            finally:
+                # Restore global import state so this transient load doesn't
+                # pollute sys.path or sys.modules for subsequent tests/callers.
+                sys.path[:] = _path_before
+                for key in list(sys.modules):
+                    if key not in _modules_before:
+                        sys.modules.pop(key, None)
+
+    passed = not failed_tests
+    return {
+        "contract_version": "1.0",
+        "passed": passed,
+        "checks": [
+            _check_result(
+                check_id="app_runtime_load",
+                passed=passed,
+                message=(
+                    "Generated app bundle loads through AppLoader."
+                    if passed
+                    else f"{len(failed_tests)} app runtime load issue(s) found."
+                ),
+                details={
+                    **details,
+                    "failed_test_count": len(failed_tests),
+                },
+            )
+        ],
+        "failed_tests": failed_tests,
+        "warnings": warnings,
+        "details": details,
+    }
+
+
 async def _agent_backend_integration_result(context_variables: Any | None) -> dict[str, Any]:
     if _context_has_agent_backend(context_variables):
         from .integration_tests import run_integration_tests
@@ -1628,7 +1748,7 @@ async def run_app_bundle_acceptance_gate(
                 check_id="generated_bundle_scan",
                 passed=not all_scan_errors,
                 message=(
-                    "Generated app bundle passed canonical path, data, secret, and hosted-boundary scanning."
+                    "Generated app bundle passed canonical path, data, secret, and managed-capability boundary scanning."
                     if not all_scan_errors
                     else "Generated app bundle failed canonical scanner checks."
                 ),
@@ -1648,6 +1768,7 @@ async def run_app_bundle_acceptance_gate(
         generated_files,
         context_variables,
     )
+    app_runtime_load_result = await _app_runtime_load_result(generated_files)
 
     subresults = {
         "bundle_scan": bundle_scan_result,
@@ -1656,6 +1777,7 @@ async def run_app_bundle_acceptance_gate(
         "module_implementation": module_implementation_result,
         "module_runtime_quality": runtime_quality_result,
         "workflow_integration": workflow_integration_result,
+        "app_runtime_load": app_runtime_load_result,
     }
     passed_by_check = {
         name: bool(result.get("passed"))
@@ -1698,6 +1820,7 @@ async def run_app_bundle_acceptance_gate(
             _result_check(module_implementation_result, default_id="module_implementation", default_message="Module implementation check completed."),
             _result_check(runtime_quality_result, default_id="module_runtime_quality", default_message="Module runtime quality check completed."),
             _result_check(workflow_integration_result, default_id="workflow_integration", default_message="Workflow integration check completed."),
+            _result_check(app_runtime_load_result, default_id="app_runtime_load", default_message="App runtime load check completed."),
         ],
         "validation_evidence": {
             "completed": completed,
@@ -1724,6 +1847,8 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "module_runtime_quality_result", runtime_quality_result)
     _context_set(context_variables, "workflow_integration_validation_passed", workflow_integration_result.get("passed"))
     _context_set(context_variables, "workflow_integration_validation_result", workflow_integration_result)
+    _context_set(context_variables, "app_runtime_load_passed", app_runtime_load_result.get("passed"))
+    _context_set(context_variables, "app_runtime_load_result", app_runtime_load_result)
     _context_set(context_variables, "integration_tests_passed", acceptance_passed)
     _context_set(context_variables, "integration_test_result", {
         **subresults,
@@ -1885,6 +2010,7 @@ async def validate_app_bundle_from_request(
     module_implementation_result = acceptance_result["module_implementation"]
     runtime_quality_result = acceptance_result["module_runtime_quality"]
     workflow_integration_result = acceptance_result["workflow_integration"]
+    app_runtime_load_result = acceptance_result["app_runtime_load"]
     workflow_integration_repair = acceptance_result.get("workflow_integration_repair")
     validation_passed = str(validation.get("validation_status") or "").strip().lower() != "failed"
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
@@ -1896,6 +2022,7 @@ async def validate_app_bundle_from_request(
         "module_implementation": module_implementation_result,
         "module_runtime_quality": runtime_quality_result,
         "workflow_integration": workflow_integration_result,
+        "app_runtime_load": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,
         "passed": combined_passed,
     }
@@ -1912,6 +2039,7 @@ async def validate_app_bundle_from_request(
         "module_implementation_validation_result": module_implementation_result,
         "module_runtime_quality_result": runtime_quality_result,
         "workflow_integration_validation_result": workflow_integration_result,
+        "app_runtime_load_result": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,
         "integration_tests_passed": combined_passed,
     }

@@ -172,3 +172,47 @@ archetypes:
       - The repo layer provides append_entry style writes instead of update_balance shortcuts.
       - Multi-document writes use atomic operations.
       - The schemas layer separates balance projections from ledger entries.
+
+  billing:
+    summary: >
+      Deterministic module that gates features behind subscription plans, reacts
+      to payment lifecycle events, and exposes self-serve upgrade/cancellation
+      surfaces. Use when an app monetizes through subscriptions, pay-per-use, or
+      one-time purchases and needs entitlement enforcement at the action level.
+    select_when:
+      - The module owns plan assignment, subscription lifecycle, or checkout sessions.
+      - Actions must be gated by entitlement_gate declarations tied to plan capabilities.
+      - The module reacts to payment provider webhooks (checkout.session.completed,
+        invoice.paid, subscription.cancelled, etc.) to update subscription state.
+      - Usage metering or token allowance sync is required on plan activation.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+        - contracts/events.yaml
+        - contracts/reactions.yaml
+      optional:
+        - notifications.yaml
+        - settings.yaml
+        - admin.yaml
+    backend_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/schemas.py
+    hard_constraints:
+      - Every plan-gated module action must declare entitlement_gate in module.yaml
+        referencing a capability_id from config/subscriptions.yaml.
+      - The service layer never checks entitlements itself — entitlement_gate on
+        the action declaration is the authorization boundary.
+      - Subscription state transitions are driven by payment provider webhook events
+        reacted to via reactions.yaml, not by direct operator calls.
+      - Usage meters (token_wallets, usage_limits) are synced from the plan
+        snapshot captured at subscription activation time, not derived live.
+      - The schemas layer exposes plan_snapshot, catalog_id, and catalog_version
+        fields on subscription records for downstream audit traceability.
+      - Emit hosted.* namespaced events for platform subscription lifecycle;
+        emit domain.* events for app-level entitlement changes that other modules react to.
+      - Checkout sessions are append-only records; never mutate a completed session.
+      - Refund and cancellation flows must emit events that downstream entitlement
+        and wallet modules can react to independently.

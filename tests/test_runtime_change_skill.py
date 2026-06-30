@@ -16,6 +16,7 @@ def test_runtime_change_skill_exists_and_names_runtime_platform_anchors() -> Non
     assert "mozaiksai/core/runtime/composition/module_executor.py" in skill
     assert "mozaiksai/core/runtime/composition/module_event_router.py" in skill
     assert "mozaiksai/core/runtime/composition/module_context.py" in skill
+    assert "mozaiksai/core/runtime/composition/platform_hooks.py" in skill
     assert "mozaiksai/core/runtime/composition/extensions.py" in skill
 
 

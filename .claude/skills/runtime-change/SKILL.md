@@ -14,6 +14,7 @@ Typical triggers:
 - `mozaiksai/core/runtime/composition/module_executor.py`
 - `mozaiksai/core/runtime/composition/module_event_router.py`
 - `mozaiksai/core/runtime/composition/module_context.py`
+- `mozaiksai/core/runtime/composition/platform_hooks.py`
 - `mozaiksai/core/runtime/composition/extensions.py`
 - `mozaiksai/core/auth/**`
 - `mozaiksai/core/transport/**`
@@ -37,6 +38,7 @@ Inspect first:
   - `mozaiksai/core/runtime/app/module_loader.py` + `tests/test_module_loader_contracts.py`
   - `mozaiksai/core/runtime/composition/extensions.py` + `tests/test_module_runtime_extensions.py`
   - `mozaiksai/core/runtime/composition/module_executor.py` / `mozaiksai/core/runtime/composition/module_context.py` + `tests/test_runtime_persistence_module_injection.py`
+  - `mozaiksai/core/runtime/composition/platform_hooks.py` + `tests/test_platform_hook_registry.py`
   - `mozaiksai/core/runtime/composition/module_event_router.py` + `tests/test_module_loader_contracts.py`
   - generated-app dependency checks + `tests/test_appgenerator_canonical_generation.py` or `tests/test_appgenerator_persistence_alignment.py` when AppGenerator assumptions are touched
 
@@ -83,6 +85,9 @@ Common runtime areas:
 - Module reactions, notifications, and capability dispatch:
   - Inspect `mozaiksai/core/runtime/composition/module_event_router.py` and `tests/test_module_loader_contracts.py`.
   - The runtime carries events; the platform owns module-level meaning, notifications, and capability dispatch.
+- Platform hooks:
+  - Inspect `mozaiksai/core/runtime/composition/platform_hooks.py` and `tests/test_platform_hook_registry.py`.
+  - Hooks are provider-neutral extension points for deployers. They must not encode hosted-only product rules in OSS.
 - Runtime extensions:
   - Inspect `mozaiksai/core/runtime/composition/extensions.py`, `mozaiksai/core/runtime/app/module_loader.py`, and `tests/test_module_runtime_extensions.py`.
   - Keep entrypoints module-local under `backend.*` and contract-bound.
@@ -102,6 +107,7 @@ Focused testing guidance:
 - If you changed contracts or host wiring, add the nearest generator or docs slice that depends on that behavior.
 - Good starting slices:
   - module contracts and reactions: `python -m pytest tests/test_module_loader_contracts.py -q`
+  - platform hooks: `python -m pytest tests/test_platform_hook_registry.py -q`
   - runtime extensions: `python -m pytest tests/test_module_runtime_extensions.py -q`
   - persistence injection: `python -m pytest tests/test_runtime_persistence_module_injection.py -q`
   - WebSocket or runtime host behavior: `python -m pytest tests/test_runtime_websocket_contract.py -q`

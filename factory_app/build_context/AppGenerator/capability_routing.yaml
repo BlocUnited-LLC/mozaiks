@@ -157,6 +157,103 @@ layers:
         schema_fields_required:
           - "extraction_results (array field on item schema)"
 
+  monetization:
+    description: >
+      Revenue and payment capabilities. Select the appropriate monetization
+      routing based on the app's declared revenue_model. These are NOT inferred
+      from domain selection — they are explicitly declared when revenue_model is
+      set in the AppBuildPlan. For each revenue_model value, the AppPlanAgent
+      must include the corresponding capability pack and build tasks listed below.
+    entries:
+      - revenue_model: subscriptions
+        capability_pack: saas_subscriptions
+        capability_kind: operator_pack
+        build_tasks_required:
+          - module_id: billing
+            archetype: billing
+            surface_kind: module
+            notes: >
+              Plan-gated actions, subscription lifecycle, portal session creation.
+              entitlement_gate on every plan-gated action declaration is mandatory.
+          - surface_kind: page
+            page_type: pricing
+            route: /pricing
+            notes: Plan comparison and upgrade CTA page. Public-facing.
+        event_flows_required:
+          - event: hosted.billing.subscription.activated
+            reaction: sync token allowances and entitlements
+          - event: hosted.billing.subscription.cancelled
+            reaction: revoke gated capabilities
+        operator_pack_note: >
+          When the hosted platform's hosted_billing pack is available in
+          capability_packs, use it instead of generating a custom billing module.
+          hosted_billing owns plan assignment and the subscription lifecycle;
+          the generated app owns entitlement_gate declarations and the pricing page.
+
+      - revenue_model: pay_per_use
+        capability_pack: usage_metering
+        capability_kind: operator_pack
+        build_tasks_required:
+          - module_id: usage
+            archetype: billing
+            surface_kind: module
+            notes: >
+              usage_limits and token_wallet allowances on plan activation.
+              Module increments usage meters on metered actions.
+        operator_pack_note: >
+          When the hosted platform's token_wallet pack is available, reference it
+          as the metering primitive. The generated app declares meter_id on usage
+          actions; the platform tracks running totals.
+
+      - revenue_model: one_time_purchase
+        capability_pack: mozaikspay
+        capability_kind: operator_pack
+        build_tasks_required:
+          - module_id: checkout
+            archetype: billing
+            surface_kind: module
+            notes: >
+              Checkout session creation + webhook handler.
+              checkout.session.completed marks purchase as fulfilled.
+          - surface_kind: page
+            page_type: checkout_success
+            route: /checkout/success
+            notes: Post-purchase confirmation page.
+        operator_pack_note: >
+          When mozaikspay is available in capability_packs, generate only the
+          app-specific facade: product listing → create_checkout_session →
+          success page. Never regenerate Stripe internals.
+
+      - revenue_model: community_funded
+        capability_pack: investor_marketplace
+        capability_kind: operator_pack
+        build_tasks_required:
+          - module_id: campaign
+            archetype: workflow
+            surface_kind: module
+            notes: >
+              Campaign listing, contribution tracking, goal progress.
+              Investor interest expressions backed by investor_marketplace.
+          - surface_kind: page
+            page_type: gallery
+            route: /campaigns
+            notes: Campaign discovery and contribution page.
+        operator_pack_note: >
+          When investor_marketplace is available in capability_packs, the
+          generated app wires campaign events to the marketplace listing flow.
+          investor_profile.manage is an Enterprise-tier entitlement gate.
+
+    rule: >
+      For any app with revenue_model != free:
+        1. Declare the corresponding capability_pack in AppBuildPlan.capability_packs.
+        2. Include the required build_tasks in AppBuildPlan.build_tasks.
+        3. Set revenue_model in AppBuildPlan so downstream agents enforce contracts.
+        4. If the operator pack is not available in context capability_packs, declare
+           the billing module as custom_owned with the same interface contract.
+      Never generate Stripe, payment provider internals, or raw payment credentials
+      as module business logic. Payment provider mechanics belong in operator packs
+      or app/services/adapters/payments/ (hosted product only).
+
   custom_owned:
     description: >
       Advanced, custom, or bring-your-own capabilities the user owns entirely.

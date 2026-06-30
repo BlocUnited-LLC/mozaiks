@@ -24,6 +24,9 @@ class _Handler:
     async def do_read(self, ctx, **kwargs):
         return {"item": None}
 
+    async def show_permissions(self, ctx, **kwargs):
+        return {"permissions": ctx.permissions}
+
 
 def _executor_with_permissions(action_permissions: dict) -> ModuleExecutor:
     """Build an executor with a module registered with the given action_permissions."""
@@ -31,7 +34,11 @@ def _executor_with_permissions(action_permissions: dict) -> ModuleExecutor:
     executor.register(
         "orders",
         _Handler(),
-        action_method_map={"list": "do_list", "read": "do_read"},
+        action_method_map={
+            "list": "do_list",
+            "read": "do_read",
+            "permissions": "show_permissions",
+        },
         action_permissions=action_permissions,
     )
     return executor
@@ -106,4 +113,17 @@ async def test_partial_scope_match_still_denies():
     assert result.success is False
     assert result.error_code == "PERMISSION_DENIED"
     assert "orders:admin" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_granted_permissions_are_injected_into_module_context():
+    """Module policies can inspect ctx.permissions for resource-level checks."""
+    executor = _executor_with_permissions({})
+
+    result = await executor.execute(
+        _request(action="permissions", granted_permissions=["orders:read"])
+    )
+
+    assert result.success is True
+    assert result.data == {"permissions": ["orders:read"]}
 

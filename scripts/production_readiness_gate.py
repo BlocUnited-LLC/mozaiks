@@ -27,6 +27,7 @@ PYTEST_GATE_TARGETS = [
     "tests/test_managed_capability_artifact_replay.py",
     "tests/test_mozaikspay_managed_capability_contract.py",
     "tests/test_production_readiness_gate.py",
+    "tests/test_app_loader.py",
     "tests/test_appgenerator_ui_quality_gate.py",
     "tests/test_structured_output_runtime_contracts.py",
     "tests/test_ui_surface_taxonomy.py",
@@ -41,6 +42,7 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_managed_capability_artifact_replay.py",
     "tests/test_mozaikspay_managed_capability_contract.py",
     "tests/test_production_readiness_gate.py",
+    "tests/test_app_loader.py",
     "tests/test_studio_host_smoke.py",
 ]
 

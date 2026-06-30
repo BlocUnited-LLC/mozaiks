@@ -190,6 +190,13 @@ def test_canonical_app_structure_lists_both_tier_files() -> None:
     assert "admin/index.js" in doc or "admin/pages/" in doc
 
 
+def test_canonical_app_structure_names_platform_hooks_support_lane() -> None:
+    doc = _read("docs/architecture/app/canonical-app-structure.md")
+    assert "app/services/platform_hooks.py" in doc
+    assert "RUNTIME_PLATFORM_EXTENSIONS" in doc
+    assert "must not own durable facts" in doc
+
+
 # ── No product-specific terms in the new doc ──────────────────────────────────
 
 

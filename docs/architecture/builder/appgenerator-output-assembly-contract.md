@@ -156,7 +156,7 @@ Those fields are planning metadata. They do not authorize generated pages to
 call managed provider internals directly.
 
 For SaaS apps that select the `mozaikspay` managed capability, the generated
-app bundle must include the portable SaaS contract, not hosted provider
+app bundle must include the portable SaaS contract, not managed provider
 internals:
 
 - `config/subscriptions.yaml` with token wallets, token allowances, and usage
@@ -164,8 +164,17 @@ internals:
 - `services/integrations/mozaikspay_client.py` as the app-side connector client
 - `modules/billing_portal/` as the app-owned facade module
 - billing and usage pages bound only to `/api/modules/billing_portal/*`
-- no `modules/mozaikspay/`, hosted billing module, wallet module, or direct
+- no `modules/mozaikspay/`, managed billing module, wallet module, or direct
   provider SDK ownership in the generated app
+
+The deterministic app-bundle acceptance gate enforces this boundary on the
+assembled bundle, not on isolated task output. A selected managed capability
+must pass the generated bundle scanner and the `app_runtime_load` check, which
+materializes the same file map that `generate_and_download` would package and
+loads it through `AppLoader.load()`. This catches semantic drift such as pages
+binding to provider internals, facade handlers accepting synthetic payload
+wrappers, missing app-level service packages, invalid companion manifests, or
+template files that cannot be imported by the runtime loader.
 
 ### Route/component registration drift
 
@@ -349,10 +358,19 @@ or unrelated modules. After the configured attempt limit, the status becomes
 When a build/export context requests deployment output, or the generated files
 already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,
 or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral
-deployment artifact validator. Hosted-ready bundles must include valid
+deployment artifact validator. Deployment-ready bundles must include valid
 deployment artifacts such as `Dockerfile`, `env.example`, and
 `deployment.manifest.json`; missing deployment artifacts block export/promotion
 instead of being discovered by a later hosting adapter.
+
+The acceptance gate also runs `app_runtime_load`, a no-live-call runtime loader
+check. It writes the assembled file map to a temporary `app/` root and calls
+`AppLoader.load()`. Export and promotion are blocked when the app manifest,
+module contracts, companion manifests, handler entrypoints, runtime extension
+contracts, data/subscription config, or app-level `services.*` imports cannot
+load. The check persists `app_runtime_load_passed` and
+`app_runtime_load_result` into workflow context and includes `app_runtime_load`
+in `app_bundle_acceptance_result.validation_evidence`.
 
 ### 7. AppValidation Strategy
 

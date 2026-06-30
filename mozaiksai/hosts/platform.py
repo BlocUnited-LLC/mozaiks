@@ -2238,6 +2238,31 @@ def _extract_bearer_token(request: Request) -> str | None:
     return auth_header.strip() or None
 
 
+async def _resolve_module_granted_permissions(
+    *,
+    request: Request | None,
+    principal: UserPrincipal | None,
+    module_name: str,
+    action_name: str,
+    app_id: str,
+    tenant_id: str | None,
+    user_id: str | None,
+    params: dict[str, Any],
+) -> list[str] | None:
+    default_permissions = list(principal.scopes) if principal else None
+    return await get_platform_hooks().call_module_permissions(
+        principal=principal,
+        module_name=module_name,
+        action_name=action_name,
+        app_id=str(app_id),
+        tenant_id=str(tenant_id) if tenant_id else None,
+        user_id=str(user_id) if user_id else None,
+        params=params,
+        request=request,
+        default_permissions=default_permissions,
+    )
+
+
 _MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -2285,6 +2310,17 @@ async def _execute_module_action(
     auth_token = context_overrides.get("auth_token") or _extract_bearer_token(request)
     user_id = context_overrides.get("user_id") or (principal.user_id if principal else None)
 
+    granted_permissions = await _resolve_module_granted_permissions(
+        request=request,
+        principal=principal,
+        module_name=module_name,
+        action_name=action_name,
+        app_id=str(app_id),
+        tenant_id=str(tenant_id) if tenant_id else None,
+        user_id=str(user_id) if user_id else None,
+        params=params,
+    )
+
     module_request = ModuleRequest(
         module=module_name,
         action=action_name,
@@ -2294,11 +2330,10 @@ async def _execute_module_action(
         tenant_id=str(tenant_id) if tenant_id else None,
         auth_token=str(auth_token) if auth_token else None,
         correlation_id=str(correlation_id) if correlation_id else None,
-        # Use the principal's OAuth2 scopes as the granted permission set so
-        # the executor can enforce action-level permission declarations from
-        # module.yaml.  When no principal is present (unauthenticated /
+        # Resolve permissions from OAuth2 scopes plus optional host-provided
+        # membership bridges.  When no principal is present (unauthenticated /
         # trusted-internal call path), None bypasses enforcement as before.
-        granted_permissions=list(principal.scopes) if principal else None,
+        granted_permissions=granted_permissions,
     )
 
     result = await module_executor.execute(module_request, context=None)

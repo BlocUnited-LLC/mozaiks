@@ -35,6 +35,17 @@ Bundle keys (all optional):
         Extra fields to merge into the chat session document at creation time
         (e.g. journey_id, journey_key).
 
+    module_permission_resolver
+                          async (*, principal, module_name, action_name,
+                                  app_id, tenant_id, user_id, params,
+                                  request, default_permissions)
+                              -> Optional[List[str]]
+        Optional host authorization bridge for module action dispatch.  Return
+        a permission list to use for the module request, or None to keep the
+        current/default permission list.  Hosts can map authenticated principals
+        to app-local memberships without teaching OSS runtime about a specific
+        tenant product.
+
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
         step sequence).
@@ -58,6 +69,7 @@ _BUNDLE_KEYS = (
     "on_startup",
     "chat_prereqs",
     "chat_session_fields",
+    "module_permission_resolver",
     "workflow_ordering",
     "workflow_name_resolver",
 )
@@ -88,6 +100,7 @@ class PlatformHookRegistry:
         self._startup_hooks: list[Callable] = []
         self._chat_prereqs_hooks: list[Callable] = []
         self._chat_session_fields_hooks: list[Callable] = []
+        self._module_permission_resolver_hooks: list[Callable] = []
         self._workflow_ordering_hooks: list[Callable] = []
         self._workflow_name_resolver_hooks: list[Callable] = []
         self._loaded = False
@@ -147,6 +160,7 @@ class PlatformHookRegistry:
             "on_startup": self._startup_hooks,
             "chat_prereqs": self._chat_prereqs_hooks,
             "chat_session_fields": self._chat_session_fields_hooks,
+            "module_permission_resolver": self._module_permission_resolver_hooks,
             "workflow_ordering": self._workflow_ordering_hooks,
             "workflow_name_resolver": self._workflow_name_resolver_hooks,
         }
@@ -224,6 +238,50 @@ class PlatformHookRegistry:
                 logger.warning("PLATFORM_HOOKS_SESSION_FIELDS_ERROR: %s", exc)
         return extra
 
+    async def call_module_permissions(
+        self,
+        *,
+        principal: Any,
+        module_name: str,
+        action_name: str,
+        app_id: str,
+        tenant_id: str | None,
+        user_id: str | None,
+        params: dict[str, Any],
+        request: Any = None,
+        default_permissions: list[str] | None = None,
+    ) -> list[str] | None:
+        """Resolve module permissions through optional host hooks.
+
+        ``None`` retains the trusted/internal bypass semantics used by
+        ModuleExecutor.  A hook may return an empty list to require enforcement
+        with no permissions granted.
+        """
+
+        current = list(default_permissions) if default_permissions is not None else None
+        for hook in self._module_permission_resolver_hooks:
+            try:
+                res = hook(
+                    principal=principal,
+                    module_name=module_name,
+                    action_name=action_name,
+                    app_id=app_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    params=dict(params or {}),
+                    request=request,
+                    default_permissions=list(current) if current is not None else None,
+                )
+                if inspect.isawaitable(res):
+                    res = await res
+                if res is None:
+                    continue
+                if isinstance(res, (list, tuple, set)):
+                    current = [str(item) for item in res if str(item).strip()]
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_MODULE_PERMISSIONS_ERROR: %s", exc)
+        return current
+
     def call_workflow_ordering(self, workflow_names: list[str]) -> list[str]:
         """Reorder the workflow list for frontend display."""
         result = list(workflow_names)
@@ -272,6 +330,10 @@ class PlatformHookRegistry:
         return bool(self._chat_session_fields_hooks)
 
     @property
+    def has_module_permission_resolver(self) -> bool:
+        return bool(self._module_permission_resolver_hooks)
+
+    @property
     def has_startup(self) -> bool:
         return bool(self._startup_hooks)
 
@@ -280,6 +342,7 @@ class PlatformHookRegistry:
             "startup_hooks": len(self._startup_hooks),
             "chat_prereqs_hooks": len(self._chat_prereqs_hooks),
             "chat_session_fields_hooks": len(self._chat_session_fields_hooks),
+            "module_permission_resolver_hooks": len(self._module_permission_resolver_hooks),
             "workflow_ordering_hooks": len(self._workflow_ordering_hooks),
             "workflow_name_resolver_hooks": len(self._workflow_name_resolver_hooks),
         }

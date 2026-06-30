@@ -14,12 +14,34 @@ Covers:
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError, AppLoadResult
 from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+
+
+@pytest.fixture(autouse=True)
+def _restore_import_state():
+    """Restore sys.path and sys.modules after every test in this file.
+
+    AppLoader.load() adds temporary directories to sys.path so generated module
+    handlers can import app-local packages.  Without cleanup, stale path entries
+    from one test remain in sys.path for subsequent tests.  When a later test's
+    temp dir contains a package with a different set of modules (e.g. the replay
+    test needs mozaikspay_client.py but the previous test's package only has
+    billing_client.py), Python resolves the package from the earlier stale entry
+    and the import fails.
+    """
+    path_snapshot = list(sys.path)
+    modules_snapshot = set(sys.modules)
+    yield
+    sys.path[:] = path_snapshot
+    for key in list(sys.modules):
+        if key not in modules_snapshot:
+            sys.modules.pop(key, None)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -70,6 +92,63 @@ def _write_broken_module(root: Path, module_id: str = "broken") -> Path:
 
     module_dir.joinpath("module.yaml").write_text(
         "schema_version: mozaiks.module.v1\n",  # missing module: section
+        encoding="utf-8",
+    )
+    return module_dir
+
+
+def _write_module_using_app_services(root: Path, module_id: str = "billing") -> Path:
+    services_dir = root / "services" / "integrations"
+    services_dir.mkdir(parents=True, exist_ok=True)
+    (root / "services" / "__init__.py").write_text("", encoding="utf-8")
+    (services_dir / "__init__.py").write_text("", encoding="utf-8")
+    (services_dir / "billing_client.py").write_text(
+        "class BillingClient:\n    async def status(self):\n        return {'success': True}\n",
+        encoding="utf-8",
+    )
+
+    module_dir = root / "modules" / module_id
+    backend_dir = module_dir / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (backend_dir / "__init__.py").write_text("", encoding="utf-8")
+    module_dir.joinpath("module.yaml").write_text(
+        f"""
+schema_version: mozaiks.module.v1
+module:
+  id: {module_id}
+  display_name: Billing
+  version: 1.0.0
+  handler: backend.handler:BillingHandler
+actions:
+  - id: status
+    description: Return billing status.
+    handler_method: status
+""".lstrip(),
+        encoding="utf-8",
+    )
+    backend_dir.joinpath("handler.py").write_text(
+        """
+from .service import BillingService
+
+
+class BillingHandler:
+    def __init__(self):
+        self.service = BillingService()
+
+    async def status(self, ctx, **params):
+        return await self.service.status(ctx, **params)
+""".lstrip(),
+        encoding="utf-8",
+    )
+    backend_dir.joinpath("service.py").write_text(
+        """
+from services.integrations.billing_client import BillingClient
+
+
+class BillingService:
+    async def status(self, ctx, **params):
+        return await BillingClient().status()
+""".lstrip(),
         encoding="utf-8",
     )
     return module_dir
@@ -161,6 +240,19 @@ async def test_app_loader_loads_valid_module(tmp_path: Path) -> None:
 
     assert len(result.modules) == 1
     assert result.modules[0].name == "tasks"
+    assert result.failed_module_names == []
+
+
+@pytest.mark.asyncio
+async def test_app_loader_app_root_named_app_can_import_app_services(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    _write_app_json(app_root)
+    _write_module_using_app_services(app_root)
+
+    result = await AppLoader.load(str(app_root))
+
+    assert [module.name for module in result.modules] == ["billing"]
     assert result.failed_module_names == []
 
 

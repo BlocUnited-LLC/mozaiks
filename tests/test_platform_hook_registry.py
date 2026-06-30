@@ -7,6 +7,7 @@ Covers:
   - call_chat_prereqs: passes when all hooks allow, first denial wins,
     exception in hook is tolerated, empty reason normalized
   - call_chat_session_fields: merges extra fields from all hooks, tolerates exceptions
+  - call_module_permissions: lets host hooks resolve module permissions
   - call_workflow_ordering: returns original list when no hooks, applies hook chain
   - call_workflow_name_resolver: hook override, case-insensitive built-in fallback,
     no match returns None, empty request returns None
@@ -98,6 +99,10 @@ class TestEmptyRegistry:
         reg = _fresh()
         assert reg.has_session_fields is False
 
+    def test_has_module_permission_resolver_false(self):
+        reg = _fresh()
+        assert reg.has_module_permission_resolver is False
+
     def test_has_startup_false(self):
         reg = _fresh()
         assert reg.has_startup is False
@@ -141,6 +146,7 @@ class TestBundleRegistration:
             "on_startup": MagicMock(),
             "chat_prereqs": MagicMock(return_value=(True, None)),
             "chat_session_fields": MagicMock(return_value={}),
+            "module_permission_resolver": MagicMock(return_value=[]),
             "workflow_ordering": MagicMock(return_value=[]),
             "workflow_name_resolver": MagicMock(return_value=None),
         }
@@ -148,6 +154,7 @@ class TestBundleRegistration:
         assert reg.has_startup is True
         assert reg.has_prereqs is True
         assert reg.has_session_fields is True
+        assert reg.has_module_permission_resolver is True
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +260,103 @@ class TestCallChatSessionFields:
 
 
 # ---------------------------------------------------------------------------
-# 5. call_workflow_ordering
+# 5. call_module_permissions
+# ---------------------------------------------------------------------------
+
+class TestCallModulePermissions:
+    @pytest.mark.asyncio
+    async def test_returns_default_permissions_when_no_hooks(self):
+        reg = _fresh()
+        result = await reg.call_module_permissions(
+            principal=None,
+            module_name="orders",
+            action_name="list",
+            app_id="app",
+            tenant_id=None,
+            user_id="user",
+            params={},
+            default_permissions=["orders.read"],
+        )
+        assert result == ["orders.read"]
+
+    @pytest.mark.asyncio
+    async def test_hook_can_replace_permission_list(self):
+        reg = _fresh()
+        reg._register_bundle({
+            "module_permission_resolver": lambda **kw: [
+                *(kw["default_permissions"] or []),
+                "orders.manage",
+            ],
+        })
+        result = await reg.call_module_permissions(
+            principal=object(),
+            module_name="orders",
+            action_name="create",
+            app_id="app",
+            tenant_id="tenant",
+            user_id="user",
+            params={"x": 1},
+            default_permissions=["orders.read"],
+        )
+        assert result == ["orders.read", "orders.manage"]
+
+    @pytest.mark.asyncio
+    async def test_hook_none_keeps_current_permissions(self):
+        reg = _fresh()
+        reg._register_bundle({"module_permission_resolver": lambda **kw: None})
+        result = await reg.call_module_permissions(
+            principal=object(),
+            module_name="orders",
+            action_name="list",
+            app_id="app",
+            tenant_id=None,
+            user_id="user",
+            params={},
+            default_permissions=["orders.read"],
+        )
+        assert result == ["orders.read"]
+
+    @pytest.mark.asyncio
+    async def test_exception_in_hook_is_tolerated(self):
+        def bad(**kw):
+            raise RuntimeError("permission resolver failed")
+
+        reg = _fresh()
+        reg._register_bundle({"module_permission_resolver": bad})
+        result = await reg.call_module_permissions(
+            principal=object(),
+            module_name="orders",
+            action_name="list",
+            app_id="app",
+            tenant_id=None,
+            user_id="user",
+            params={},
+            default_permissions=["orders.read"],
+        )
+        assert result == ["orders.read"]
+
+    @pytest.mark.asyncio
+    async def test_async_hook_awaited(self):
+        async def resolver(**kw):
+            return ["orders.read"]
+
+        reg = _fresh()
+        reg._register_bundle({"module_permission_resolver": resolver})
+        result = await reg.call_module_permissions(
+            principal=object(),
+            module_name="orders",
+            action_name="list",
+            app_id="app",
+            tenant_id=None,
+            user_id="user",
+            params={},
+            default_permissions=[],
+        )
+        assert result == ["orders.read"]
+
+
+# ---------------------------------------------------------------------------
+# 6. call_workflow_ordering
 # ---------------------------------------------------------------------------
 
 class TestCallWorkflowOrdering:
@@ -285,7 +388,7 @@ class TestCallWorkflowOrdering:
 
 
 # ---------------------------------------------------------------------------
-# 6. call_workflow_name_resolver
+# 7. call_workflow_name_resolver
 # ---------------------------------------------------------------------------
 
 class TestCallWorkflowNameResolver:
@@ -328,7 +431,7 @@ class TestCallWorkflowNameResolver:
 
 
 # ---------------------------------------------------------------------------
-# 7. run_startup
+# 8. run_startup
 # ---------------------------------------------------------------------------
 
 class TestRunStartup:
@@ -367,7 +470,7 @@ class TestRunStartup:
 
 
 # ---------------------------------------------------------------------------
-# 8. summary()
+# 9. summary()
 # ---------------------------------------------------------------------------
 
 class TestSummary:
@@ -377,11 +480,13 @@ class TestSummary:
         reg._register_bundle({
             "on_startup": hook,
             "chat_prereqs": hook,
+            "module_permission_resolver": hook,
             "workflow_ordering": hook,
         })
         s = reg.summary()
         assert s["startup_hooks"] == 1
         assert s["chat_prereqs_hooks"] == 1
+        assert s["module_permission_resolver_hooks"] == 1
         assert s["workflow_ordering_hooks"] == 1
         assert s["chat_session_fields_hooks"] == 0
 
@@ -394,7 +499,7 @@ class TestSummary:
 
 
 # ---------------------------------------------------------------------------
-# 9. Singleton reset
+# 10. Singleton reset
 # ---------------------------------------------------------------------------
 
 class TestSingletonReset:

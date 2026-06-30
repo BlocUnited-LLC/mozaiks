@@ -612,6 +612,7 @@ async def trigger_workflow(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     """Create a runtime workflow session for programmatic callers."""
+    validate_path_id(workflow_name, "workflow_name")
     _ = principal
     _validate_internal_api_key(request)
 
@@ -1026,6 +1027,8 @@ async def handle_component_action(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Apply a runtime UI component action to workflow context."""
+    validate_path_id(app_id, "app_id")
+    validate_path_id(chat_id, "chat_id")
     if simple_transport is None:
         raise HTTPException(status_code=503, detail="Transport service is not available")
 
@@ -1093,6 +1096,7 @@ async def get_workflow_transport_info(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     """Return workflow transport metadata."""
+    validate_path_id(workflow_name, "workflow_name")
     _ = principal
     return {"workflow_name": workflow_name, "transport": get_workflow_transport(workflow_name)}
 
@@ -1103,6 +1107,7 @@ async def get_workflow_tools_info(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     """Return workflow runtime tool metadata."""
+    validate_path_id(workflow_name, "workflow_name")
     _ = principal
     return {"workflow_name": workflow_name, "tools": get_workflow_tools(workflow_name)}
 
@@ -1113,6 +1118,7 @@ async def get_workflow_ui_tools_manifest(
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     """Return workflow UI tool manifest metadata."""
+    validate_path_id(workflow_name, "workflow_name")
     _ = principal
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
 

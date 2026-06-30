@@ -136,6 +136,15 @@ metadata for tooling, generated admin surfaces, and planning, but it does not
 replace authorization. Runtime permission checks continue to use
 `actions[].permissions` and the caller's granted permissions.
 
+The platform host starts with the authenticated principal's auth scopes as the
+granted permission list. Deployers can register a host-agnostic
+`module_permission_resolver` platform hook through `RUNTIME_PLATFORM_EXTENSIONS`
+to map principals to app-local memberships, teams, or roles. The hook returns
+the permission ids that should be enforced for the module request; the OSS
+runtime does not know about any specific tenant product. The resolved list is
+also available to module policies as `ctx.permissions` for resource-scoped
+checks inside handlers and services.
+
 `actions[].entitlement_gate` is optional. Set it to a `capability_id` string
 when the action belongs to the generated app's own SaaS feature-gate model and
 requires an active plan grant before executing. The `ModuleExecutor` checks

@@ -170,11 +170,20 @@ It must not receive:
 app/modules/mozaikspay/
 app/modules/managed_billing/
 app/modules/wallet/
-app/services/hosted_*
+app/services/managed_*
 app/capability_packs/
 ```
 
-Those are hosted/provider internals or obsolete output shapes.
+Those are managed/provider internals or obsolete output shapes.
+
+The managed facade must also satisfy normal module runtime contracts. Page
+endpoints must resolve to actions declared by the facade module, handler methods
+must accept runtime input as declared in `module.yaml.actions[].input_schema`,
+and app-level service clients must be importable from the generated app bundle
+root. The deterministic acceptance gate runs the assembled file map through
+scanner checks and `AppLoader.load()`, while the production readiness replay
+keeps selected managed packs covered end to end. Template drift fails before
+export or promotion.
 
 ## Decision Test
 

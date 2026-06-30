@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 
-from factory_app.workflows.AppGenerator.tools.deployment_contract import generate_deployment_artifacts
+from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    generate_deployment_artifacts,
+)
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
 
 

@@ -254,6 +254,8 @@ async def test_offline_generated_build_acceptance_gate_loads_runtime_app(tmp_pat
     assert context.get("wiring_validation_result")["passed"] is True
     assert context.get("module_implementation_validation_result")["passed"] is True
     assert context.get("module_runtime_quality_result")["passed"] is True
+    assert context.get("app_runtime_load_passed") is True
+    assert context.get("app_runtime_load_result")["passed"] is True
 
     app_root = tmp_path / "app"
     _write_files(app_root, files)
@@ -302,3 +304,52 @@ async def test_offline_generated_build_acceptance_blocks_unwired_page_endpoint()
     assert context.get("app_bundle_acceptance_status") == "failed"
     assert gate["allow_export"] is False
     assert "App bundle acceptance failed." in gate["reasons"]
+
+
+@pytest.mark.asyncio
+async def test_offline_generated_build_acceptance_blocks_runtime_loader_failure() -> None:
+    files = _generated_build_files()
+    files["modules/orders/backend/service.py"] = """
+from services.integrations.missing_orders_client import MissingOrdersClient
+
+
+class OrdersService:
+    async def list_orders(self, ctx, **params):
+        return await MissingOrdersClient().list_orders()
+
+    async def create_order(self, ctx, **params):
+        return {"order": params}
+"""
+    context = _Context(
+        {
+            "app_id": "support-operations",
+            "chat_id": "offline-build-acceptance",
+            "generated_files": files,
+            "app_validation_status": "skipped",
+            "app_validation_strategy_used": "skip",
+            "app_build_plan": {
+                "capability_packs": [
+                    {
+                        "module_id": "orders",
+                        "actions": ["list_orders", "create_order"],
+                    }
+                ]
+            },
+        }
+    )
+
+    acceptance = await run_app_bundle_acceptance_gate(
+        files=files,
+        context_variables=context,
+    )
+    gate = resolve_export_gate(context)
+
+    assert acceptance["status"] == "failed"
+    assert "app_runtime_load" in acceptance["validation_evidence"]["failed"]
+    assert context.get("app_runtime_load_passed") is False
+    assert context.get("app_runtime_load_result")["passed"] is False
+    assert gate["allow_export"] is False
+    assert any(
+        item["gate"] == "app_runtime_load" and item["test"] == "app_runtime_module_load"
+        for item in acceptance["failed_tests"]
+    )

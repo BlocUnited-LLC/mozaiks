@@ -39,6 +39,10 @@ class ModuleContext:
     # Auth token forwarded from the incoming request (for external API calls)
     auth_token: str | None = None
 
+    # Resolved permission ids for this caller/action dispatch.  None preserves
+    # trusted internal runtime calls; external dispatch normally supplies a list.
+    permissions: list[str] | None = None
+
     # Setting definitions declared in settings.yaml for this module.
     # Each entry is a setting definition dict: {id, type, default, label, ...}.
     # Handlers use this to resolve defaults or validate setting-aware logic.

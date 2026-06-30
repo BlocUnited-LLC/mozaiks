@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -8,9 +9,10 @@ import pytest
 import yaml
 
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
+from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
-
+from mozaiksai.core.runtime.app.loader import AppLoader
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "mozaikspay"
@@ -33,6 +35,13 @@ def _file_map(result: dict[str, Any]) -> dict[str, str]:
         for item in result.get("code_files") or []
         if isinstance(item, dict) and item.get("filename")
     }
+
+
+def _write_files(root: Path, files: dict[str, str]) -> None:
+    for rel_path, content in files.items():
+        path = root / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
 
 
 def _write_wallet_pack(root: Path) -> dict[str, Any]:
@@ -386,6 +395,42 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
 
 def _mozaikspay_task_outputs() -> dict[str, Any]:
     return {
+        "app_shell": {
+            "code_files": [
+                {
+                    "filename": "app.json",
+                    "content": json.dumps(
+                        {
+                            "appId": "mozaikspay-replay",
+                            "appName": "MozaiksPay Replay",
+                            "version": "1.0.0",
+                            "startup": {"landing_spot": "/billing"},
+                        }
+                    ),
+                },
+                {
+                    "filename": "config/ai.json",
+                    "content": json.dumps(
+                        {
+                            "chat": {"chat_startup_mode": "ask"},
+                            "workflows": {"entry_point": None, "resume_policy": "manual"},
+                        }
+                    ),
+                },
+                {
+                    "filename": "config/shell.json",
+                    "content": json.dumps(
+                        {
+                            "navigation": {"autoFromPages": True},
+                            "header": {"show": True},
+                        }
+                    ),
+                },
+                {"filename": "services/__init__.py", "content": ""},
+                {"filename": "services/integrations/__init__.py", "content": ""},
+                {"filename": "modules/billing_portal/backend/__init__.py", "content": ""},
+            ]
+        },
         "subscriptions": {
             "code_files": [
                 {"filename": "config/subscriptions.yaml", "content": _subscriptions_yaml()},
@@ -452,7 +497,7 @@ async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_mozaikspay_replay_uses_templates_and_passes_bundle_scanner() -> None:
+async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(tmp_path: Path) -> None:
     descriptor, contract = _load_mozaikspay_descriptor()
     ctx = _Context(
         {
@@ -495,3 +540,31 @@ async def test_mozaikspay_replay_uses_templates_and_passes_bundle_scanner() -> N
     assert "/api/modules/billing_portal/get_subscription_status" in files["ui/pages/billing.yaml"]
     assert "/api/modules/mozaikspay/" not in files["ui/pages/billing.yaml"]
     assert scan_generated_bundle(files, capability_packs=cached_plan["capability_packs"]) == []
+
+    validation = await validate_app_bundle_from_request(
+        {
+            "validation_strategy": "skip",
+            "start_dev_server": False,
+        },
+        context_variables=ctx,
+    )
+
+    assert validation["status"] == "success"
+    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
+    assert ctx.get("app_bundle_acceptance_status") == "passed"
+    assert ctx.get("bundle_scan_result")["passed"] is True
+    assert ctx.get("wiring_validation_result")["passed"] is True
+    assert ctx.get("module_implementation_validation_result")["passed"] is True
+    assert ctx.get("module_runtime_quality_result")["passed"] is True
+    assert ctx.get("app_runtime_load_result")["passed"] is True
+
+    app_root = tmp_path / "app"
+    _write_files(app_root, files)
+    loaded = await AppLoader.load(str(app_root))
+
+    assert loaded.definition.name == "MozaiksPay Replay"
+    assert [module.name for module in loaded.modules] == ["billing_portal"]
+    assert loaded.failed_module_names == []
+    assert [page.name for page in loaded.definition.pages] == ["billing", "usage"]
+    assert loaded.subscriptions_config is not None
+    assert loaded.subscriptions_config.default_plan_id == "free"

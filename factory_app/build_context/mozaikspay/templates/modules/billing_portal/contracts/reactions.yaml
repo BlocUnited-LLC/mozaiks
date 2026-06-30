@@ -1,20 +1,29 @@
 schema_version: mozaiks.reactions.v1
 reactions:
-  - event: hosted.billing.subscription.activated
-    handler: handle_subscription_activated
+  - id: subscription_activated
+    event_type: hosted.billing.subscription.activated
+    target:
+      kind: handler
+      handler_method: handle_subscription_activated
     description: >
       Observe hosted subscription activation and refresh local display/cache
       state if the generated app chooses to persist a display snapshot.
       Read-only: never mutates hosted billing, usage, or entitlement state.
 
-  - event: hosted.billing.subscription.updated
-    handler: handle_subscription_updated
+  - id: subscription_updated
+    event_type: hosted.billing.subscription.updated
+    target:
+      kind: handler
+      handler_method: handle_subscription_updated
     description: >
       Observe hosted subscription updates and refresh local display/cache state.
       Read-only: never mutates hosted billing, usage, or entitlement state.
 
-  - event: hosted.billing.subscription.cancelled
-    handler: handle_subscription_cancelled
+  - id: subscription_cancelled
+    event_type: hosted.billing.subscription.cancelled
+    target:
+      kind: handler
+      handler_method: handle_subscription_cancelled
     description: >
       Observe hosted subscription cancellation and refresh local display/cache
       state. Read-only: never mutates hosted billing, usage, or entitlement state.

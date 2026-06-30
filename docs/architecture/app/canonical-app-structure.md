@@ -45,6 +45,7 @@ workspace/
 │   │   └── pages/            ← admin/pages/ holds custom admin page files
 │   ├── brand/
 │   └── services/
+│       ├── platform_hooks.py  ← optional host/platform hook bundle
 │       ├── integrations/
 │       ├── adapters/
 │       └── routes/
@@ -123,6 +124,10 @@ query helpers. `schemas.py` owns typed request, response, and document shapes.
 
 `app/services/` is the canonical support lane:
 
+- `app/services/platform_hooks.py` - optional host/platform hook bundle for
+  `RUNTIME_PLATFORM_EXTENSIONS`. It may adapt runtime hook calls to app-owned
+  records, but it must not own durable facts, user-facing actions, emitted
+  events, or provider-specific hosted product policy.
 - `app/services/integrations/` - thin clients for external or hosted APIs.
 - `app/services/adapters/` - provider-specific mechanics for auth, source control,
   deployment, DNS, registrar, cloud, storage, secrets, database, payments, and similar
@@ -134,6 +139,18 @@ query helpers. `schemas.py` owns typed request, response, and document shapes.
 If a behavior has product state, permissions, user-facing actions, domain events,
 or persistence authority, it belongs in a module. A module may call `app/services/`
 code as an implementation detail.
+
+The platform loader treats the active app root as an import root, so module
+service code may import app-level support clients with package paths such as
+`from services.integrations.billing_client import BillingClient`. App services
+remain support code only; they do not become modules, persistence owners, or
+authorization boundaries.
+
+Generated bundles must pass the AppGenerator `app_runtime_load` acceptance
+check before export or promotion. That check loads the assembled bundle through
+`AppLoader.load()` and rejects missing service packages, stale imports, invalid
+module companion manifests, and module handler entrypoints that the platform
+cannot import.
 
 Mozaiks-hosted platform operations are not copied into a generated app as
 `app/services/adapters/` code. A hosted customer app consumes host APIs and

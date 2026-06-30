@@ -889,6 +889,22 @@ models:
         type: optional_list
         items: AppCapabilityPack
         description: Canonical product capability packs selected before deriving pages, entities, and build tasks.
+      revenue_model:
+        type: union
+        variants:
+        - str
+        - 'null'
+        default: free
+        description: >
+          Revenue model declared during the intake interview.
+          free | subscriptions | pay_per_use | one_time_purchase | community_funded.
+          Drives which billing surfaces, entitlement gates, and plan catalog
+          artifacts are required in build_tasks:
+            subscriptions        → requires plan catalog artifact + billing surface task
+            pay_per_use          → requires usage_metering + token_wallet config task
+            one_time_purchase    → requires checkout surface task
+            community_funded     → requires investor_marketplace surface task
+          Null is treated as free (no billing surface required).
       external_integrations:
         type: optional_list
         items: AppBuildIntegration
@@ -1722,6 +1738,7 @@ models:
         - workflow
         - event_pipeline
         - transactional
+        - billing
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
           standard = request/response CRUD (default).
@@ -1729,6 +1746,7 @@ models:
           workflow = named lifecycle/state behavior implemented through canonical module contracts and backend policy helpers.
           event_pipeline = automated multi-step lifecycle driven by events, reactions, and optional background polling.
           transactional = append-only ledger for value movements.
+          billing = plan-gated entitlements, checkout sessions, subscription lifecycle, and webhook-driven state transitions.
       description:
         type: str
         description: Short module summary.

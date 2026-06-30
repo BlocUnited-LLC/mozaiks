@@ -167,8 +167,10 @@ This project follows a practical pre-1.0 changelog format:
 
 - **Managed-capability artifact replay gate** — production readiness now runs an
   offline AppGenerator replay that normalizes managed-capability plans, assembles
-  deterministic pack templates, and scans the final bundle for facade binding,
-  adapter path, provider-internal path, and raw-secret drift.
+  deterministic pack templates, scans the final bundle for facade binding,
+  adapter path, provider-internal path, and raw-secret drift, then runs the same
+  assembled file map through deterministic app-bundle acceptance and the
+  export-blocking `app_runtime_load` check.
 
 - **`test_wallet_module.py`** (mozaiks-app) — comprehensive wallet service
   tests covering balance calculation, payout request guards (no Stripe account,
