@@ -57,7 +57,8 @@ async def test_health_endpoint_returns_clear_failure_when_ping_raises(monkeypatc
 
     assert exc.value.status_code == 503
     assert "MongoDB unreachable" in exc.value.detail
-    assert "network down" in exc.value.detail
+    # Exception details must not be forwarded to callers (security hardening)
+    assert "network down" not in exc.value.detail
 
 
 @pytest.mark.asyncio

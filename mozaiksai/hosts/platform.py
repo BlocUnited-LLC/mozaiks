@@ -311,14 +311,12 @@ async def _platform_startup() -> None:
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
 
             if load_result.failed_module_names:
-                reason = (
-                    f"MODULE_LOAD_PARTIAL: {len(load_result.failed_module_names)} module(s) failed to load: "
-                    + ", ".join(sorted(load_result.failed_module_names))
-                )
-                logger.error("PLATFORM_DEGRADED: %s", reason)
+                failed_names = sorted(load_result.failed_module_names)
+                reason = f"MODULE_LOAD_PARTIAL: {len(failed_names)} module(s) failed to load"
+                logger.error("PLATFORM_DEGRADED: %s — %s", reason, ", ".join(failed_names))
                 app.state.startup_degraded = True
                 app.state.startup_degraded_reason = reason
-                app.state.failed_module_names = sorted(load_result.failed_module_names)
+                app.state.failed_module_names = failed_names
 
             # Mount api_router extensions and start startup_service extensions
             # now that module packages are registered in sys.modules.

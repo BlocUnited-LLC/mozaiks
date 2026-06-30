@@ -1,5 +1,7 @@
 
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
@@ -7,6 +9,8 @@ from mozaiksai.core.auth import (
     WS_CLOSE_POLICY_VIOLATION,
     require_user_scope,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def get_router() -> APIRouter:
@@ -71,14 +75,16 @@ def get_router() -> APIRouter:
         try:
             mgr, is_valid_artifact_id, _is_valid_sandbox_id2 = _get_sandbox_api()
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            _logger.warning("sandbox_unavailable: %s", exc)
+            raise HTTPException(status_code=503, detail="Sandbox service unavailable") from exc
         if not is_valid_artifact_id(artifactId):
             raise HTTPException(status_code=400, detail="Invalid artifactId")
         try:
             st = await mgr.create_or_reuse(artifactId)
             return {"sandboxId": st.sandbox_id}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            _logger.error("sandbox_create_failed: artifactId=%s error=%s", artifactId, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to create sandbox") from exc
 
     @router.post("/api/sandbox/{sandboxId}/sync", response_model=_OkResponse)
     async def sandbox_sync_files(
@@ -89,7 +95,8 @@ def get_router() -> APIRouter:
         try:
             mgr, _is_valid_artifact_id2, is_valid_sandbox_id = _get_sandbox_api()
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            _logger.warning("sandbox_unavailable: %s", exc)
+            raise HTTPException(status_code=503, detail="Sandbox service unavailable") from exc
         if not is_valid_sandbox_id(sandboxId):
             raise HTTPException(status_code=400, detail="Invalid sandboxId")
         try:
@@ -102,7 +109,8 @@ def get_router() -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            _logger.error("sandbox_sync_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Sandbox sync failed") from exc
 
     @router.post("/api/sandbox/{sandboxId}/start", response_model=_StartResponse)
     async def sandbox_start_app(
@@ -112,7 +120,8 @@ def get_router() -> APIRouter:
         try:
             mgr, _is_valid_artifact_id2, is_valid_sandbox_id = _get_sandbox_api()
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            _logger.warning("sandbox_unavailable: %s", exc)
+            raise HTTPException(status_code=503, detail="Sandbox service unavailable") from exc
         if not is_valid_sandbox_id(sandboxId):
             raise HTTPException(status_code=400, detail="Invalid sandboxId")
         try:
@@ -122,7 +131,8 @@ def get_router() -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            _logger.error("sandbox_start_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to start sandbox") from exc
 
     @router.get("/api/sandbox/{sandboxId}/status", response_model=_StatusResponse)
     async def sandbox_status(
@@ -132,7 +142,8 @@ def get_router() -> APIRouter:
         try:
             mgr, _is_valid_artifact_id2, is_valid_sandbox_id = _get_sandbox_api()
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            _logger.warning("sandbox_unavailable: %s", exc)
+            raise HTTPException(status_code=503, detail="Sandbox service unavailable") from exc
         if not is_valid_sandbox_id(sandboxId):
             raise HTTPException(status_code=400, detail="Invalid sandboxId")
         try:
@@ -141,7 +152,8 @@ def get_router() -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Sandbox not found") from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            _logger.error("sandbox_status_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to get sandbox status") from exc
 
     @router.post("/api/sandbox/{sandboxId}/stop", response_model=_OkResponse)
     async def sandbox_stop(
@@ -151,21 +163,24 @@ def get_router() -> APIRouter:
         try:
             mgr, _is_valid_artifact_id2, is_valid_sandbox_id = _get_sandbox_api()
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            _logger.warning("sandbox_unavailable: %s", exc)
+            raise HTTPException(status_code=503, detail="Sandbox service unavailable") from exc
         if not is_valid_sandbox_id(sandboxId):
             raise HTTPException(status_code=400, detail="Invalid sandboxId")
         try:
             await mgr.stop(sandboxId)
             return {"ok": True}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            _logger.error("sandbox_stop_failed: sandboxId=%s error=%s", sandboxId, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to stop sandbox") from exc
 
     @router.websocket("/ws/sandbox/{sandboxId}")
     async def ws_sandbox_stream(websocket: WebSocket, sandboxId: str):
         try:
             mgr, _is_valid_artifact_id2, is_valid_sandbox_id = _get_sandbox_api()
         except Exception as exc:
-            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason=str(exc))
+            _logger.warning("sandbox_unavailable: %s", exc)
+            await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Sandbox service unavailable")
             return
         if not is_valid_sandbox_id(sandboxId):
             await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason="Invalid sandbox ID")
@@ -189,4 +204,3 @@ def get_router() -> APIRouter:
             await mgr.unregister_ws(sandboxId, websocket)
 
     return router
-

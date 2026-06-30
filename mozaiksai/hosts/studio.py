@@ -1760,7 +1760,8 @@ async def trigger_workflow(
         try:
             refinement_decision = await orchestration_control.route_refinement_request(refinement_request)
         except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Refinement classification unavailable: {exc}") from exc
+            logger.error("refinement_classification_failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail="Refinement classification unavailable") from exc
         harness_decision = orchestration_control.build_harness_decision(refinement_decision)
         resolved_change_class = refinement_decision.change_intent.change_class.value
         resolved_artifact_kind = refinement_request.artifact_kind
@@ -1779,7 +1780,8 @@ async def trigger_workflow(
                         coding_result = await orchestration_control.execute_coding_request(coding_request)
                         harness_decision = orchestration_control.build_coding_result_decision(coding_request)
                 except Exception as exc:
-                    raise HTTPException(status_code=503, detail=f"Coding worker unavailable: {exc}") from exc
+                    logger.error("coding_worker_failed: %s", exc, exc_info=True)
+                    raise HTTPException(status_code=503, detail="Coding worker unavailable") from exc
         trigger_payload = {
             "refinement_request": refinement_request.model_dump(mode="python"),
         }
