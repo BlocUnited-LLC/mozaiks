@@ -200,6 +200,11 @@ This project follows a practical pre-1.0 changelog format:
   to drive which billing surfaces, plan catalog artifacts, and entitlement gates
   are required in the build plan.
 
+- **Startup validation: AUTH_ENABLED=false warning in production** (`mozaiksai/core/startup/validation.py`):
+  `run_startup_checks` now warns (and raises in strict mode) when `ENV=production`
+  and `AUTH_ENABLED=false`. Development and test environments are unaffected.
+  5 new tests cover the warn/strict/dev/unset combinations.
+
 - **Startup validation: upload storage writability check** (`mozaiksai/core/startup/validation.py`):
   `run_startup_checks` now emits a WARNING when `UPLOAD_STORAGE_DIR` points to an
   existing directory that is not writable. Non-existent directories are skipped

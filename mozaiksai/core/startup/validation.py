@@ -191,6 +191,33 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
                 extra={"check": "upload_storage_dir", "mode": mode},
             )
 
+    # ── AUTH_ENABLED in production ───────────────────────────────────────────
+    # AUTH_ENABLED=false is intentional in dev but a critical gap in production.
+    # Warn when the runtime environment is production and auth is disabled.
+    env_name = os.getenv("ENV", os.getenv("ENVIRONMENT", "")).strip().lower()
+    auth_enabled = os.getenv("AUTH_ENABLED", "true").strip().lower()
+    if env_name == "production" and auth_enabled in {"false", "0", "no", "off"}:
+        msg = (
+            "AUTH_ENABLED=false in a production environment. "
+            "All endpoints are exposed to unauthenticated access. "
+            "Set AUTH_ENABLED=true and configure an auth provider before serving production traffic."
+        )
+        warnings.append(msg)
+        logger.warning(
+            "STARTUP_CHECK_FAILED: %s",
+            msg,
+            extra={"check": "auth_enabled", "mode": mode},
+        )
+        if mode == "strict":
+            raise StartupConfigError(msg)
+    else:
+        logger.info(
+            "STARTUP_CHECK_OK: AUTH_ENABLED=%s (env=%s)",
+            auth_enabled,
+            env_name or "unset",
+            extra={"check": "auth_enabled", "mode": mode},
+        )
+
     # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
     # When not set, service-to-service requests bypass the key check (dev mode).
     # Warn operators so this is not accidentally left unset in production.

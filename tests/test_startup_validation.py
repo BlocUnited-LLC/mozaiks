@@ -542,3 +542,82 @@ class TestUploadStorageDirCheck:
 
         # Non-existent dir is not warned about — it gets created on first upload
         assert not any("UPLOAD_STORAGE_DIR" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# AUTH_ENABLED in production check
+# ---------------------------------------------------------------------------
+
+
+class TestAuthEnabledCheck:
+    @pytest.mark.asyncio
+    async def test_warns_when_auth_disabled_in_production(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert any("AUTH_ENABLED" in w for w in warnings)
+        assert any("production" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_auth_disabled_in_development(self, monkeypatch):
+        """AUTH_ENABLED=false is expected in dev — no warning."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("AUTH_ENABLED" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_auth_enabled_in_production(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("AUTH_ENABLED" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_when_auth_disabled_in_production(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        with pytest.raises(StartupConfigError, match="AUTH_ENABLED"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_env_unset(self, monkeypatch):
+        """When ENV is not set, no auth warning should fire (not in production)."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.delenv("ENV", raising=False)
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("AUTH_ENABLED" in w for w in warnings)
