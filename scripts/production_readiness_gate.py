@@ -50,6 +50,7 @@ PYTEST_GATE_TARGETS = [
     "tests/test_chat_attachments_helpers.py",
     "tests/test_platform_module_dispatch.py",
     "tests/test_module_executor_dispatch.py",
+    "tests/test_app_validation_strategy.py",
 ]
 
 QUICK_PYTEST_TARGETS = [
@@ -72,6 +73,7 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_chat_attachments_helpers.py",
     "tests/test_platform_module_dispatch.py",
     "tests/test_module_executor_dispatch.py",
+    "tests/test_app_validation_strategy.py",
 ]
 
 SOURCE_HYGIENE_SUFFIXES = {
