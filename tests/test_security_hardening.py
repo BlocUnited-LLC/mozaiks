@@ -117,6 +117,10 @@ class TestSecurityHeadersMiddleware:
         import os
         os.environ.pop("SECURITY_HEADERS_ENABLED", None)
 
+    def teardown_method(self):
+        import os
+        os.environ.pop("SECURITY_HEADERS_ENABLED", None)
+
     def test_x_content_type_options_nosniff(self):
         _, client = _make_app(enabled=True)
         resp = client.get("/test")
@@ -199,6 +203,11 @@ def _make_body_limit_app(max_bytes: int = 100, excluded: str = "/api/upload") ->
 
 class TestRequestBodySizeLimitMiddleware:
     def setup_method(self):
+        import os
+        os.environ.pop("MAX_REQUEST_BODY_BYTES", None)
+        os.environ.pop("MAX_REQUEST_BODY_EXCLUDED_PATHS", None)
+
+    def teardown_method(self):
         import os
         os.environ.pop("MAX_REQUEST_BODY_BYTES", None)
         os.environ.pop("MAX_REQUEST_BODY_EXCLUDED_PATHS", None)
