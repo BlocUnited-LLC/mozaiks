@@ -128,6 +128,31 @@ async def test_granted_permissions_are_injected_into_module_context():
     assert result.data == {"permissions": ["orders:read"]}
 
 
+class _BadParamsHandler:
+    async def do_action(self, ctx, *, required_kwarg):
+        return {}  # will raise TypeError when called without required_kwarg
+
+
+@pytest.mark.asyncio
+async def test_type_error_does_not_leak_exception_message():
+    """TypeError from a handler must not expose raw exception text to callers."""
+    executor = ModuleExecutor()
+    executor.register(
+        "bad",
+        _BadParamsHandler(),
+        action_method_map={"act": "do_action"},
+        action_permissions={},
+    )
+    req = ModuleRequest(module="bad", action="act", params={}, app_id="app_1", granted_permissions=None)
+    result = await executor.execute(req)
+
+    assert result.success is False
+    assert result.error_code == "INVALID_PARAMS"
+    # Raw TypeError text must not appear — it can expose parameter names/types
+    assert "required_kwarg" not in (result.error or "")
+    assert "missing" not in (result.error or "").lower()
+
+
 
 # ── error suppression ──────────────────────────────────────────────────────────
 
