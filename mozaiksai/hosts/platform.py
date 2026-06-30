@@ -2831,6 +2831,15 @@ async def websocket_endpoint(
         await websocket.close(code=1000, reason="Transport service not available")
         return
 
+    try:
+        validate_path_id(workflow_name, "workflow_name")
+        validate_path_id(app_id, "app_id")
+        validate_path_id(chat_id, "chat_id")
+        validate_path_id(user_id, "user_id")
+    except HTTPException:
+        await websocket.close(code=1008, reason="Invalid path parameter")
+        return
+
     requested_workflow_name = workflow_name
     workflow_name = _resolve_requested_workflow_name(workflow_name)
 

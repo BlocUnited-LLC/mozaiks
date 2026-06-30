@@ -45,6 +45,12 @@ This project follows a practical pre-1.0 changelog format:
   failures in the `/api/me/profile-panels` response. Replaced `str(exc)` with a
   generic `"Action {action!r} failed"` message; full detail stays in server logs.
 
+- **WebSocket path parameter validation** (`mozaiksai/hosts/platform.py`):
+  `/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}` now validates all four path
+  parameters against `validate_path_id` before authentication. Invalid values
+  (path traversal, shell metacharacters, values >128 chars) close the WebSocket
+  with code 1008 (Policy Violation) before any DB or auth operations run.
+
 - **Path parameter validation on platform routes** (`mozaiksai/hosts/platform.py`):
   `validate_path_id` now applied to six previously unprotected chat and notification
   routes: `notification_id` in `/api/notifications/{notification_id}/read`,
