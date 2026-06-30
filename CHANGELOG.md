@@ -427,6 +427,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Changed
 
+- **`hosted-capability` / `hosted-packs` renamed to `managed-capability`** across
+  AppGenerator tools, build contexts, rules, skills, docs, and tests. The term
+  "managed capability" is now the canonical name for externally-hosted capability
+  packs (e.g. `mozaikspay`, `managed_analytics`). All builder prompts, structured
+  output models, build-plan validation, context hooks, and template resolution
+  functions use the new name. `managed_billing` added to the subscription contract
+  proprietary-term blocklist. `_split_mixed_module_contract_tasks` auto-split
+  fallback removed; module contract tasks that include backend Python paths now
+  raise `ValueError` immediately rather than silently splitting.
+
 - AgentGenerator workflow bundle downloads now run a production quality gate before
   packaging, artifact registration, or promotion, blocking bundles with contract
   errors or semantic drift such as unresolved event triggers and serial task
