@@ -14,6 +14,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- **Per-user WebSocket connection limit** (`mozaiksai/core/transport/simple_transport.py`):
+  Added `MOZAIKS_MAX_WS_CONNECTIONS_PER_USER` (default 20) to cap how many concurrent
+  WebSocket sessions a single authenticated user can have open at once. A user opening
+  more connections than this limit receives WS close code 1008. Prevents a single user
+  from exhausting the global connection pool. Documented in `.env.example` alongside the
+  existing `MOZAIKS_MAX_WS_CONNECTIONS` and `MOZAIKS_WS_IDLE_TIMEOUT` settings.
+
+- **Theme endpoint path validation** (`mozaiksai/hosts/platform.py`):
+  Added `validate_path_id(app_id, "app_id")` to `/api/themes/{app_id}` so malformed
+  path segments (e.g., traversal sequences) are rejected before theme resolution runs,
+  consistent with validation on other path-parameter endpoints.
+
 - **WebSocket connection rate limiting** (`mozaiksai/core/transport/rate_limit.py`):
   Added `/ws/` to `_DEFAULT_PATH_LIMITS` (10/min per client) so WebSocket upgrade requests
   are governed by a tighter path-specific cap rather than the global 60/min default. Each

@@ -182,6 +182,16 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         except Exception:
             self._max_connections = 500
 
+        # Per-user concurrent connection limit. Prevents a single user from
+        # exhausting the global connection pool by opening many chat sessions.
+        # Set to 0 to disable per-user enforcement.
+        try:
+            self._max_connections_per_user = int(
+                os.environ.get("MOZAIKS_MAX_WS_CONNECTIONS_PER_USER", "20")
+            )
+        except Exception:
+            self._max_connections_per_user = 20
+
         # Idle connection timeout: how long a client can be silent before the
         # heartbeat considers it dead. Set to 0 to disable idle detection.
         # Clients should send pong (any message) within heartbeat_interval seconds.
@@ -1386,6 +1396,28 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             )
             await websocket.close(code=1008, reason="Server connection limit reached")
             return
+
+        # Per-user connection limit: count how many existing slots belong to this user.
+        # Excludes same-chat_id reconnects (those evict the old slot, not a new one).
+        if (
+            self._max_connections_per_user > 0
+            and user_id
+            and chat_id not in self.connections
+        ):
+            user_connection_count = sum(
+                1
+                for conn in self.connections.values()
+                if conn.get("user_id") == user_id
+            )
+            if user_connection_count >= self._max_connections_per_user:
+                logger.warning(
+                    "WS_USER_CONNECTION_LIMIT_REACHED limit=%d chat=%s user=%s — rejecting",
+                    self._max_connections_per_user,
+                    chat_id,
+                    user_id,
+                )
+                await websocket.close(code=1008, reason="User connection limit reached")
+                return
 
         await websocket.accept()
 

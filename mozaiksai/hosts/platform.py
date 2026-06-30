@@ -1930,7 +1930,9 @@ async def get_theme_config():
 
 @app.get("/api/themes/{app_id}")
 async def get_app_theme(app_id: str):
-    _ = app_id
+    # Validate the path segment even though theme config is currently app-agnostic,
+    # to prevent malformed IDs (e.g., traversal sequences) from reaching future logic.
+    validate_path_id(app_id, "app_id")
     return await get_theme_config()
 
 
