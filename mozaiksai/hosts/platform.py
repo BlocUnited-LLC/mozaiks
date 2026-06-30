@@ -327,21 +327,19 @@ async def _platform_startup() -> None:
                 if n:
                     logger.info("MODULE_EXTENSIONS_ROUTERS_MOUNTED: %s router(s)", n)
             except Exception as exc:
-                reason = f"MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED: {exc}"
-                logger.error(reason)
+                logger.error("MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED: %s", exc)
                 if not app.state.startup_degraded:
                     app.state.startup_degraded = True
-                    app.state.startup_degraded_reason = reason
+                    app.state.startup_degraded_reason = "MODULE_EXTENSIONS_ROUTER_MOUNT_FAILED"
 
             try:
                 module_services = await start_module_services(load_result.modules)
                 _runtime_services.extend(module_services)
             except Exception as exc:
-                reason = f"MODULE_EXTENSIONS_SERVICES_NOT_STARTED: {exc}"
-                logger.error(reason)
+                logger.error("MODULE_EXTENSIONS_SERVICES_NOT_STARTED: %s", exc)
                 if not app.state.startup_degraded:
                     app.state.startup_degraded = True
-                    app.state.startup_degraded_reason = reason
+                    app.state.startup_degraded_reason = "MODULE_EXTENSIONS_SERVICES_NOT_STARTED"
 
     except DatabaseStartupError:
         raise
@@ -352,17 +350,15 @@ async def _platform_startup() -> None:
     except ModuleLoadError as exc:
         # A module contract is invalid — platform starts in degraded state so
         # health checks can surface this rather than hiding it as a warning.
-        reason = f"ModuleLoadError: {exc}"
-        logger.error("APP_LOAD_FAILED_DEGRADED: %s", reason)
+        logger.error("APP_LOAD_FAILED_DEGRADED (ModuleLoadError): %s", exc)
         app.state.startup_degraded = True
-        app.state.startup_degraded_reason = reason
+        app.state.startup_degraded_reason = "ModuleLoadError"
     except Exception as exc:
         # Unexpected error during app/module setup. Mark degraded so health
         # checks report the problem; do not swallow silently.
-        reason = f"{type(exc).__name__}: {exc}"
-        logger.error("APP_LOAD_FAILED_DEGRADED: %s", reason)
+        logger.error("APP_LOAD_FAILED_DEGRADED (%s): %s", type(exc).__name__, exc)
         app.state.startup_degraded = True
-        app.state.startup_degraded_reason = reason
+        app.state.startup_degraded_reason = type(exc).__name__
 
     try:
         await get_platform_hooks().run_startup(app)

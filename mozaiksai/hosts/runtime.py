@@ -389,8 +389,8 @@ async def health_readiness(request: Request):
         try:
             await _ping_mongo(mongo_client)
             checks["mongodb"] = "ok"
-        except Exception as exc:
-            checks["mongodb"] = f"error: {exc}"
+        except Exception:
+            checks["mongodb"] = "error"
             degraded = True
 
     # Transport
@@ -430,7 +430,7 @@ async def health_check():
     try:
         await _ping_mongo(mongo_client)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"MongoDB unreachable: {exc}") from exc
+        raise HTTPException(status_code=503, detail="MongoDB unreachable") from exc
 
     status = workflow_status_summary()
 
@@ -671,7 +671,7 @@ async def trigger_workflow(
                 journey_id=body.journey_id,
             )
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid journey binding: {exc}") from exc
+            raise HTTPException(status_code=400, detail="Invalid journey binding") from exc
 
     return {
         "success": True,
