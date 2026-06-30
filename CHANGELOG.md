@@ -300,6 +300,29 @@ This project follows a practical pre-1.0 changelog format:
   `record_placement_impression` and `record_placement_click` truncate `slot` and
   `source` to 64 characters. Prevents unbounded data from being written to MongoDB.
 
+- **Open-redirect guard on billing portal return_url** (`mozaiks-app/app/modules/hosted_billing/backend/service.py`):
+  `create_billing_portal_session` now validates that `return_url` uses the `https://`
+  scheme and contains a non-empty host before passing the URL to the Stripe Customer
+  Portal API. `http://` and `javascript:` URLs are rejected with `INVALID_INPUT`
+  without contacting Stripe. 3 new tests cover http rejection, javascript: rejection,
+  and empty URL. Stripe itself also validates portal return URLs in the dashboard
+  allowlist, so this is defense-in-depth on the Mozaiks side.
+
+- **Public-status filter bypass closed** (`mozaiks-app/app/modules/investor_marketplace/backend/service.py`, `policy.py`):
+  `list_listings` and `list_marketplace_placements` now enforce status filters for
+  non-admin callers: non-admins always receive `{"$in": ["live", "approved"]}` (or
+  `"live"` for placements) regardless of the `status` parameter supplied. Previously
+  a caller could pass `status=draft` to bypass the live/approved default and read
+  unpublished listings. Admins with `marketplace.approve` may still supply any
+  valid status. `is_marketplace_admin` helper added to `policy.py`.
+
+- **target_result sanitization in remediation_registry** (`mozaiks-app/app/modules/remediation_registry/backend/service.py`):
+  The failure path of `approve_and_execute` was returning the raw dispatcher result
+  dict as `target_result`, which could contain `error`, `message`, and `status` fields
+  from module action handlers. Now uses the same `_summarize_target_result()` helper
+  as the success path, returning only safe structural fields (`success`, `record_id`,
+  `record_type`, `name`, `provider`).
+
 ### Added
 
 - **App runtime load acceptance gate** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
