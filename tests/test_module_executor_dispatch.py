@@ -124,7 +124,10 @@ class TestActionErrorHandling:
         result = await ex.execute(_request(action="blow_up"))
         assert result.success is False
         assert result.error_code == "EXECUTION_ERROR"
-        assert "something went wrong" in result.error
+        # Raw exception text is suppressed; only a generic action-level message is returned.
+        # The full exception is logged server-side (see MODULE_ACTION_ERROR log above).
+        assert "blow_up" in result.error
+        assert "something went wrong" not in result.error
 
     @pytest.mark.asyncio
     async def test_type_error_from_missing_required_param_returns_invalid_params(self):
