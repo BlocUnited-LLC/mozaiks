@@ -48,6 +48,8 @@ PYTEST_GATE_TARGETS = [
     "tests/test_rate_limit_middleware.py",
     "tests/test_runtime_health.py",
     "tests/test_chat_attachments_helpers.py",
+    "tests/test_platform_module_dispatch.py",
+    "tests/test_module_executor_dispatch.py",
 ]
 
 QUICK_PYTEST_TARGETS = [
@@ -68,6 +70,8 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_rate_limit_middleware.py",
     "tests/test_runtime_health.py",
     "tests/test_chat_attachments_helpers.py",
+    "tests/test_platform_module_dispatch.py",
+    "tests/test_module_executor_dispatch.py",
 ]
 
 SOURCE_HYGIENE_SUFFIXES = {
