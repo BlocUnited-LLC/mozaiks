@@ -3217,6 +3217,8 @@ async def _handle_chat_upload(
 ) -> dict[str, Any]:
     if not app_id or not user_id or not chat_id:
         raise HTTPException(status_code=400, detail="app_id, user_id, and chat_id are required")
+    validate_path_id(app_id, "app_id")
+    validate_path_id(chat_id, "chat_id")
 
     allowed_raw = os.getenv("CHAT_ATTACHMENTS_ALLOWED_WORKFLOWS", "").strip()
     try:
