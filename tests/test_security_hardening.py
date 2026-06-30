@@ -13,7 +13,6 @@ from starlette.responses import JSONResponse
 from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.transport.security_headers import SecurityHeadersMiddleware
 
-
 # ---------------------------------------------------------------------------
 # validate_path_id unit tests
 # ---------------------------------------------------------------------------
