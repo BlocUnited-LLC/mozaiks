@@ -587,6 +587,7 @@ class TestAuthEnabledCheck:
         monkeypatch.setenv("INTERNAL_API_KEY", "key")
         monkeypatch.setenv("ENV", "production")
         monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
 
@@ -624,6 +625,119 @@ class TestAuthEnabledCheck:
 
 
 # ---------------------------------------------------------------------------
+# Auth provider configured in production check
+# ---------------------------------------------------------------------------
+
+
+class TestAuthProviderCheck:
+    """run_startup_checks warns when auth is not disabled but no provider is configured."""
+
+    def _base_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+        monkeypatch.delenv("AUTH_PROVIDER", raising=False)
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("KEYCLOAK_URL", raising=False)
+        monkeypatch.delenv("KEYCLOAK_REALM", raising=False)
+        monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
+        monkeypatch.delenv("AUTH_ISSUER", raising=False)
+
+    @pytest.mark.asyncio
+    async def test_warns_in_production_when_auth_enabled_but_no_provider(self, monkeypatch):
+        """AUTH_ENABLED=true in production with no provider silently falls back to demo mode."""
+        self._base_env(monkeypatch)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert any("auth provider" in w.lower() for w in warnings)
+        assert any("production" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_explicit_auth_provider_set(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_supabase_url_configured(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_keycloak_configured(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("KEYCLOAK_URL", "https://keycloak.example.com")
+        monkeypatch.setenv("KEYCLOAK_REALM", "myrealm")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_jwt_configured(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
+        monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_in_development_without_provider(self, monkeypatch):
+        """Missing provider is expected in dev — no warning outside production."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "development")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_auth_explicitly_disabled_and_no_provider(self, monkeypatch):
+        """AUTH_ENABLED=false already caught by the auth_enabled check; provider check skips."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("AUTH_ENABLED", "false")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        # auth_enabled fires, auth_provider does not
+        assert any("AUTH_ENABLED" in w for w in warnings)
+        assert not any("no auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_when_production_auth_enabled_but_no_provider(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+
+        with pytest.raises(StartupConfigError, match="auth provider"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+    @pytest.mark.asyncio
+    async def test_no_check_when_env_unset(self, monkeypatch):
+        """Check only fires in production — not when ENV is unset."""
+        self._base_env(monkeypatch)
+        monkeypatch.delenv("ENV", raising=False)
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+
+# ---------------------------------------------------------------------------
 # RATE_LIMIT_ENABLED check
 # ---------------------------------------------------------------------------
 
@@ -636,6 +750,7 @@ class TestRateLimitEnabledCheck:
         monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
         monkeypatch.setenv("INTERNAL_API_KEY", "key")
         monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("AUTH_PROVIDER", "jwt")
         monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
         monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
         monkeypatch.delenv("REDIS_URL", raising=False)

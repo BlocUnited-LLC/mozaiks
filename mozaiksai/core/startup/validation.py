@@ -16,6 +16,9 @@ Checks performed:
   Workflows path       — ``MOZAIKS_WORKFLOWS_PATH``, if set, must exist on disk.
   Upload dir           — ``UPLOAD_STORAGE_DIR``, if set, must be writable when it exists.
   AUTH_ENABLED         — warns when ``ENV=production`` and ``AUTH_ENABLED=false``.
+  Auth provider        — warns when ``ENV=production``, auth is not explicitly disabled,
+                         and no auth provider env vars are configured (silently falls
+                         back to demo mode without this check).
   INTERNAL_API_KEY     — warns when the key is absent (defense-in-depth; not a hard gate).
   RATE_LIMIT_ENABLED   — warns when ``ENV=production`` and ``RATE_LIMIT_ENABLED=false``.
   Redis connectivity   — when ``REDIS_URL`` is set, validates TCP reachability on startup.
@@ -224,6 +227,45 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
             env_name or "unset",
             extra={"check": "auth_enabled", "mode": mode},
         )
+
+    # ── Auth provider configured in production ───────────────────────────────
+    # When auth is not explicitly disabled but no provider env vars are set,
+    # _auto_detect_provider() silently falls back to "none" (demo mode).
+    # Catch this at startup so operators are not surprised in production.
+    if env_name == "production" and auth_enabled not in {"false", "0", "no", "off"}:
+        explicit_provider = os.getenv("AUTH_PROVIDER", "").strip()
+        has_supabase = bool(os.getenv("SUPABASE_URL", "").strip())
+        has_keycloak = bool(
+            os.getenv("KEYCLOAK_URL", "").strip() and os.getenv("KEYCLOAK_REALM", "").strip()
+        )
+        has_jwt = bool(
+            os.getenv("AUTH_JWKS_URL", "").strip() and os.getenv("AUTH_ISSUER", "").strip()
+        )
+        has_provider = bool(explicit_provider) or has_supabase or has_keycloak or has_jwt
+        if not has_provider:
+            msg = (
+                "AUTH_ENABLED is not false but no auth provider is configured in production. "
+                "The runtime will silently fall back to demo mode (no authentication). "
+                "Set AUTH_PROVIDER or configure SUPABASE_URL, KEYCLOAK_URL, or AUTH_JWKS_URL."
+            )
+            warnings.append(msg)
+            logger.warning(
+                "STARTUP_CHECK_FAILED: %s",
+                msg,
+                extra={"check": "auth_provider", "mode": mode},
+            )
+            if mode == "strict":
+                raise StartupConfigError(msg)
+        else:
+            detected = (
+                explicit_provider
+                or ("supabase" if has_supabase else ("keycloak" if has_keycloak else "jwt"))
+            )
+            logger.info(
+                "STARTUP_CHECK_OK: auth provider configured (%s)",
+                detected,
+                extra={"check": "auth_provider", "mode": mode},
+            )
 
     # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
     # When not set, service-to-service requests bypass the key check (dev mode).
