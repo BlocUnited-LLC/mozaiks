@@ -45,6 +45,14 @@ This project follows a practical pre-1.0 changelog format:
   failures in the `/api/me/profile-panels` response. Replaced `str(exc)` with a
   generic `"Action {action!r} failed"` message; full detail stays in server logs.
 
+- **Path parameter validation on platform routes** (`mozaiksai/hosts/platform.py`):
+  `validate_path_id` now applied to six previously unprotected chat and notification
+  routes: `notification_id` in `/api/notifications/{notification_id}/read`,
+  `workflow_name` in `list_chats` and `chat_exists`, `chat_id` in `chat_exists` and
+  `chat_meta`, and `general_chat_id` in `general_chat_transcript` and
+  `delete_general_chat`. Rejects path traversal and shell metacharacters before
+  values reach MongoDB queries.
+
 - **Path ID validation on workflow routes** (`mozaiksai/hosts/runtime.py`):
   `validate_path_id` now applied to `workflow_name`, `app_id`, and `chat_id` on
   five previously unprotected routes: `component_action`, `trigger`, `transport`,

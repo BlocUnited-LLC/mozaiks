@@ -32,6 +32,7 @@ from mozaiksai.core.auth import (
 )
 from mozaiksai.core.auth.dependencies import (
     validate_path_app_id,
+    validate_path_id,
 )
 from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal as _validate_user_id_against_principal,
@@ -1896,8 +1897,8 @@ async def _load_account_preferences(*, app_id: str, user_id: str) -> dict[str, A
 
 
 class ProfileUpdateRequest(BaseModel):
-    display_name: str | None = Field(default=None, description="Preferred user-facing display name")
-    avatar_url: str | None = Field(default=None, description="Optional avatar image URL")
+    display_name: str | None = Field(default=None, max_length=120, description="Preferred user-facing display name")
+    avatar_url: str | None = Field(default=None, max_length=2048, description="Optional avatar image URL")
 
 
 class ProfilePreferencesUpdateRequest(BaseModel):
@@ -3279,6 +3280,7 @@ async def list_chats(
     workflow_name: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(workflow_name, "workflow_name")
     try:
         coll = await runtime_app._chat_coll()
         query: dict[str, Any] = {"workflow_name": workflow_name, **build_app_scope_filter(app_id)}
@@ -3308,6 +3310,8 @@ async def chat_exists(
     chat_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(workflow_name, "workflow_name")
+    validate_path_id(chat_id, "chat_id")
     try:
         coll = await runtime_app._chat_coll()
         query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
@@ -3535,6 +3539,7 @@ async def delete_general_chat(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
+    validate_path_id(general_chat_id, "general_chat_id")
     try:
         deleted = await persistence_manager.delete_general_chat(
             general_chat_id=general_chat_id,
@@ -3661,6 +3666,7 @@ async def mark_notification_read(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     """Mark a single notification as read. Only updates records visible to the principal."""
+    validate_path_id(notification_id, "notification_id")
     try:
         from mozaiksai.core.core_config import get_mongo_client
 
@@ -3747,6 +3753,7 @@ async def general_chat_transcript_fallback(
     limit: int = 200,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(general_chat_id, "general_chat_id")
     bounded_limit = max(1, min(int(limit or 200), 2000))
     try:
         transcript = await persistence_manager.fetch_general_chat_transcript(
@@ -3794,6 +3801,8 @@ async def chat_meta(
     chat_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(workflow_name, "workflow_name")
+    validate_path_id(chat_id, "chat_id")
     try:
         from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
 
