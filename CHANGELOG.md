@@ -14,6 +14,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- **IDOR protection on module action routes** (`mozaiksai/hosts/platform.py`):
+  `_execute_module_action` now validates an explicit `?app_id` query parameter against the
+  authenticated principal's token claim before dispatching. Callers cannot execute actions
+  scoped to a foreign app by supplying `?app_id=other-app`. The check is a no-op when
+  `AUTH_ENABLED=false`. Authorization is evaluated before executor availability checks so
+  auth errors always take priority over infrastructure errors.
+
 - **Broad HTTP 500 error detail suppression** (`mozaiksai/hosts/platform.py`, `studio.py`, `runtime.py`, `factory.py`, `core/admin/router.py`):
   Removed raw exception text from 22 additional HTTPException 500 `detail=` fields across
   platform (12), studio (7), runtime (1), factory (2), and admin router (1) endpoints.

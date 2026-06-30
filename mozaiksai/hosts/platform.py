@@ -2275,6 +2275,16 @@ async def _execute_module_action(
     if not _MODULE_NAME_RE.fullmatch(action_name):
         raise HTTPException(status_code=400, detail="Invalid action name")
 
+    # IDOR gate: when an explicit app_id was supplied (not derived from the token),
+    # verify it matches the authenticated principal's token claim. This prevents a
+    # caller from executing actions scoped to a foreign app by passing ?app_id=other.
+    # Must run before executor availability checks so auth errors take priority.
+    context_overrides = context_overrides or {}
+    explicit_app_id = context_overrides.get("app_id") or request.query_params.get("app_id")
+    if explicit_app_id and principal is not None:
+        from mozaiksai.core.auth.dependencies import validate_path_app_id
+        validate_path_app_id(principal, str(explicit_app_id))
+
     failed_at_startup: list[str] = getattr(request.app.state, "failed_module_names", [])
     if module_name in failed_at_startup:
         raise HTTPException(
@@ -2289,13 +2299,12 @@ async def _execute_module_action(
             detail="Module runtime is not available. Verify modules/*/module.yaml handlers are loaded.",
         )
 
-    context_overrides = context_overrides or {}
     app_id = (
-        context_overrides.get("app_id")
-        or request.query_params.get("app_id")
+        explicit_app_id
         or (principal.app_id if principal else None)
         or "default"
     )
+
     tenant_id = (
         context_overrides.get("tenant_id")
         or request.query_params.get("tenant_id")
