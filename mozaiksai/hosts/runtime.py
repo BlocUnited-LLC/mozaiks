@@ -650,7 +650,6 @@ async def trigger_workflow(
 ):
     """Create a runtime workflow session for programmatic callers."""
     validate_path_id(workflow_name, "workflow_name")
-    _ = principal
     _validate_internal_api_key(request)
 
     from mozaiksai.core.workflow.workflow_manager import workflow_manager
@@ -659,6 +658,10 @@ async def trigger_workflow(
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_name}' not found")
 
     app_id = body.app_id or f"trigger-{workflow_name}"
+
+    # When an authenticated principal has an app_id claim, validate it matches the
+    # requested app_id to prevent cross-tenant workflow creation via this endpoint.
+    validate_path_app_id(principal, app_id)
     user_id = body.user_id
     chat_id = str(uuid4())
     context = _validate_context_for_workflow(workflow_name, body.context or {})

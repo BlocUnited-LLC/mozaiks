@@ -14,6 +14,18 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- **Multi-tenant isolation gaps closed** (`mozaiksai/core/data/persistence/persistence_manager.py`, `mozaiksai/hosts/runtime.py`):
+  Two cross-tenant isolation gaps identified and fixed:
+  - Cache seed find/update queries in `persistence_manager.get_or_assign_cache_seed()` (lines ~319, ~343)
+    now include `app_id` in the MongoDB filter for defense-in-depth isolation. Previously the filter
+    used only `chat_id`; since chat IDs are UUIDs the practical risk was near zero but the pattern
+    was inconsistent with the rest of the persistence layer.
+  - `create_chat_session()` duplicate check (line ~381) now scopes the existing-document check to
+    the requesting app.
+  - `/api/workflows/{workflow_name}/trigger` now calls `validate_path_app_id(principal, app_id)` so
+    an authenticated caller cannot create workflow sessions scoped to a foreign app by supplying an
+    arbitrary `app_id` in the request body.
+
 - **Per-user WebSocket connection limit** (`mozaiksai/core/transport/simple_transport.py`):
   Added `MOZAIKS_MAX_WS_CONNECTIONS_PER_USER` (default 20) to cap how many concurrent
   WebSocket sessions a single authenticated user can have open at once. A user opening

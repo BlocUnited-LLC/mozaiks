@@ -316,7 +316,11 @@ class AG2PersistenceManager:
         """
         resolved_app_id = coalesce_app_id(app_id=app_id)
         coll = await self._coll()
-        doc = await coll.find_one({"_id": chat_id}, {"cache_seed": 1})
+        # Include app_id in the filter for defense-in-depth tenant isolation.
+        _seed_filter: dict = {"_id": chat_id}
+        if resolved_app_id:
+            _seed_filter.update(build_app_scope_filter(resolved_app_id))
+        doc = await coll.find_one(_seed_filter, {"cache_seed": 1})
         if doc and isinstance(doc.get("cache_seed"), (int, float)):
             try:
                 reused_seed = int(doc["cache_seed"])
@@ -340,7 +344,7 @@ class AG2PersistenceManager:
         seed_bytes = hashlib.sha256(basis.encode("utf-8")).digest()[:4]
         seed = int.from_bytes(seed_bytes, "big", signed=False)
         try:
-            await coll.update_one({"_id": chat_id}, {"$set": {"cache_seed": seed}})
+            await coll.update_one(_seed_filter, {"$set": {"cache_seed": seed}})
             logger.debug(
                 "[CACHE_SEED] Assigned new deterministic per-chat seed",
                 extra={
@@ -374,7 +378,8 @@ class AG2PersistenceManager:
             raise ValueError("app_id is required")
         try:
             coll = await self._coll()
-            if await coll.find_one({"_id": chat_id}):
+            # Scope the duplicate check to this app to maintain tenant isolation.
+            if await coll.find_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}):
                 return
             now = datetime.now(UTC)
             session_doc: dict[str, Any] = {
