@@ -382,6 +382,15 @@ This project follows a practical pre-1.0 changelog format:
   `tenant_identity.admin` permission declared in `module.yaml`. 3 new tests cover
   admin allowed, non-admin rejected, and no-permissions rejected.
 
+### Fixed
+
+- **AG2 stream events TTL index** (`mozaiksai/core/adapters/ag2_stream_storage.py`):
+  `_ensure_indexes` now creates a TTL index on `created_at` for the AG2 stream events
+  collection, capped at 30 days by default. Without this index, every workflow run's
+  stream events accumulated indefinitely in MongoDB. Configurable via
+  `AG2_STREAM_EVENT_TTL_DAYS` (set to 0 to disable). Documented in `.env.example`.
+  2 new tests verify TTL creation and disabled mode.
+
 ### Added
 
 - **App runtime load acceptance gate** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
