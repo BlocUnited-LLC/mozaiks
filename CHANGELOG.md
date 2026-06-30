@@ -14,6 +14,28 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- **Broad HTTP 500 error detail suppression** (`mozaiksai/hosts/platform.py`, `studio.py`, `runtime.py`, `factory.py`, `core/admin/router.py`):
+  Removed raw exception text from 22 additional HTTPException 500 `detail=` fields across
+  platform (12), studio (7), runtime (1), factory (2), and admin router (1) endpoints.
+  All exceptions are still logged server-side; callers receive only the action-level description.
+
+- **Module executor error suppression** (`mozaiksai/core/runtime/composition/module_executor.py`):
+  The catch-all `EXECUTION_ERROR` handler no longer surfaces `str(exc)` in the
+  `ModuleResult.error` field (and thus the HTTP response body). Exception text that could
+  contain DB connection strings, internal paths, or stack details is replaced with
+  `"Action '{action}' failed"`; full detail remains in `logger.error(..., exc_info=True)`.
+
+- **Workflow bridge error suppression** (`mozaiksai/core/transport/workflow_bridge.py`):
+  `handle_user_input_from_api` no longer includes raw exception text in the websocket
+  `send_error` message or the HTTP return dict on `WORKFLOW_EXECUTION_FAILED`.
+  Replaced with generic user-facing messages; internal details stay in `logger.error`.
+
+- **Rate limit middleware integration tests** (`tests/test_rate_limit_middleware.py`):
+  19 end-to-end integration tests added covering: 429 responses, `Retry-After` and
+  `X-RateLimit-*` headers, per-path prefix limits, excluded paths, OPTIONS bypass,
+  per-client bucket isolation, CORS header on 429, and disabled mode. Added
+  `test_execution_error_does_not_leak_exception_message` to module executor tests.
+
 - **Auth endpoint rate limit**: `/api/auth` now has a tighter default of 20 req/min
   (vs the global 60) in `RateLimitMiddleware` to reduce brute-force risk on token
   and login routes. Overridable via `RATE_LIMIT_PATH_LIMITS`.
