@@ -108,7 +108,7 @@ class AppRegistryRepo:
     async def list_apps_for_user(self, *, owner_user_id: str) -> list[dict[str, Any]]:
         await self.ensure_indexes()
         coll = await self._collection()
-        docs = await coll.find({"owner_user_id": owner_user_id}).sort("updated_at", -1).to_list(length=None)
+        docs = await coll.find({"owner_user_id": owner_user_id}).sort("updated_at", -1).to_list(length=500)
         return [normalized for doc in docs if (normalized := self._normalize_doc(doc))]
 
     async def get_by_app_id(self, *, app_id: str) -> dict[str, Any] | None:

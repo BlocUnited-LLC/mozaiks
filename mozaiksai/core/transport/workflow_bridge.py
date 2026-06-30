@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import traceback
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -388,7 +387,6 @@ class WorkflowBridgeMixin:
             logger.error("User input handling failed for chat %s: %s", chat_id, e, exc_info=True)
             if starting_new_workflow and _emit_execution_failed is not None:
                 try:
-                    err_details = traceback.format_exc()
                     _t = asyncio.create_task(
                         _emit_execution_failed(
                             app_id=app_id,
@@ -396,8 +394,8 @@ class WorkflowBridgeMixin:
                             chat_id=chat_id,
                             user_id=user_id,
                             workflow_name=workflow_name,
-                            message=str(e),
-                            details=str(err_details) if isinstance(err_details, str) else None,
+                            message="workflow_execution_failed",
+                            details=None,
                         )
                     )
                     _t.add_done_callback(

@@ -983,7 +983,7 @@ async def create_studio_app_context_policy_override(
                 override,
             )
     except (ValidationError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid policy override request") from exc
 
     return _redact_secret_fields(
         {
@@ -1742,7 +1742,7 @@ async def trigger_workflow(
                 ),
             )
         except ValidationError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid refinement_request: {exc}") from exc
+            raise HTTPException(status_code=400, detail="Invalid refinement_request") from exc
 
         if refinement_request is None:
             raise HTTPException(
