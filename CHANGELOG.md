@@ -70,6 +70,20 @@ This project follows a practical pre-1.0 changelog format:
   traversal, shell metacharacters, and values over 128 characters before they reach
   MongoDB queries or downstream handlers.
 
+- **Health check error detail suppression** (`mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`):
+  `/api/health/ready` MongoDB ping errors no longer include raw exception text in
+  `checks.mongodb`; returns opaque `"error"` code instead. `/api/health` MongoDB
+  unreachable detail no longer includes `str(exc)`. Journey binding failures in
+  `/api/chats/.../start` no longer expose internal error text in the 400 response.
+  `startup_degraded_reason` (surfaced in health responses) now stores only the
+  exception class name rather than the full message, preventing DB connection
+  strings and internal paths from leaking via unauthenticated health endpoints.
+
+- **Module executor TypeError suppression** (`mozaiksai/core/runtime/composition/module_executor.py`):
+  `INVALID_PARAMS` error responses no longer include the raw `TypeError` message,
+  which could expose handler parameter names or internal type details. Returns
+  `"Invalid parameters for action '{action}'"` instead; full detail stays in logs.
+
 - **Path parameter validation on all Studio routes** (`mozaiksai/hosts/studio.py`):
   `validate_path_id` now applied to all Studio route path parameters:
   `artifact_version_id` on bundle/review/accept/reject/promote endpoints,
