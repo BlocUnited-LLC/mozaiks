@@ -25,6 +25,7 @@ Module handlers must NOT import from mozaiksai.core.workflow or any AI layer.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
@@ -43,6 +44,18 @@ from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 logger = get_workflow_logger("module_executor")
+
+# Timeout for async module action dispatch (default 30 s, 0 = disabled).
+# Prevents a misbehaving module from blocking platform request handling indefinitely.
+# Sync actions are not timed out here (they block the event loop anyway and should
+# use threading if they perform I/O).
+def _action_timeout() -> float | None:
+    raw = os.getenv("MODULE_ACTION_TIMEOUT_SECONDS", "30").strip()
+    try:
+        v = float(raw)
+        return v if v > 0 else None
+    except (ValueError, AttributeError):
+        return 30.0
 
 # Maximum serialized byte size for module action params (default 512 KB).
 # Prevents memory exhaustion from unexpectedly large payloads sent through
@@ -327,44 +340,27 @@ class ModuleExecutor:
                 _emit=self._build_context_emitter(request),  # type: ignore[arg-type]
             )
 
+        timeout = _action_timeout()
         try:
             if inspect.iscoroutinefunction(action_fn):
-                result = await action_fn(context, **request.params)
+                coro = action_fn(context, **request.params)
+                result = (
+                    await asyncio.wait_for(coro, timeout=timeout)
+                    if timeout is not None
+                    else await coro
+                )
             else:
                 result = action_fn(context, **request.params)
-
-            # Output schema validation — warn only; don't fail the caller on a module contract bug.
-            if output_schema and result is not None:
-                out_error = _validate_schema(result, output_schema)
-                if out_error:
-                    logger.warning(
-                        "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
-                        request.module, request.action, out_error)
-
-            # Response size gate — prevent unbounded responses from being buffered
-            # in platform routes or sent over WebSocket payloads.
-            if result is not None:
-                try:
-                    result_size = len(json.dumps(result, default=str))
-                except Exception:
-                    result_size = 0
-                max_response = _response_max_bytes()
-                if result_size > max_response:
-                    logger.error(
-                        "MODULE_RESPONSE_TOO_LARGE: module=%s action=%s size=%d limit=%d",
-                        request.module, request.action, result_size, max_response,
-                    )
-                    return ModuleResult(
-                        success=False,
-                        error=f"Response too large for action '{request.action}'",
-                        error_code="RESPONSE_TOO_LARGE",
-                    )
-
-            logger.debug(
-                "MODULE_ACTION_OK: module=%s action=%s app_id=%s",
-                request.module, request.action, request.app_id)
-            return ModuleResult(success=True, data=result)
-
+        except asyncio.TimeoutError:
+            logger.error(
+                "MODULE_ACTION_TIMEOUT: module=%s action=%s timeout=%.1fs user=%s",
+                request.module, request.action, timeout, request.user_id,
+            )
+            return ModuleResult(
+                success=False,
+                error=f"Action '{request.action}' timed out",
+                error_code="ACTION_TIMEOUT",
+            )
         except TypeError as exc:
             logger.warning(
                 "MODULE_ACTION_BAD_PARAMS: module=%s action=%s error=%s", request.module, request.action, exc)
@@ -383,6 +379,38 @@ class ModuleExecutor:
                 error=f"Action {request.action!r} failed",
                 error_code="EXECUTION_ERROR",
             )
+
+        # Output schema validation — warn only; don't fail the caller on a module contract bug.
+        if output_schema and result is not None:
+            out_error = _validate_schema(result, output_schema)
+            if out_error:
+                logger.warning(
+                    "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
+                    request.module, request.action, out_error)
+
+        # Response size gate — prevent unbounded responses from being buffered
+        # in platform routes or sent over WebSocket payloads.
+        if result is not None:
+            try:
+                result_size = len(json.dumps(result, default=str))
+            except Exception:
+                result_size = 0
+            max_response = _response_max_bytes()
+            if result_size > max_response:
+                logger.error(
+                    "MODULE_RESPONSE_TOO_LARGE: module=%s action=%s size=%d limit=%d",
+                    request.module, request.action, result_size, max_response,
+                )
+                return ModuleResult(
+                    success=False,
+                    error=f"Response too large for action '{request.action}'",
+                    error_code="RESPONSE_TOO_LARGE",
+                )
+
+        logger.debug(
+            "MODULE_ACTION_OK: module=%s action=%s app_id=%s",
+            request.module, request.action, request.app_id)
+        return ModuleResult(success=True, data=result)
 
     async def health(self) -> dict[str, Any]:
         return {

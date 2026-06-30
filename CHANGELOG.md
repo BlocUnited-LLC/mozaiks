@@ -200,6 +200,12 @@ This project follows a practical pre-1.0 changelog format:
   to drive which billing surfaces, plan catalog artifacts, and entitlement gates
   are required in the build plan.
 
+- **Module action timeout enforcement** (`mozaiksai/core/runtime/composition/module_executor.py`):
+  Async module actions are now bounded by `MODULE_ACTION_TIMEOUT_SECONDS` (default 30 s).
+  Actions that exceed the timeout are cancelled and return `ACTION_TIMEOUT` to the caller
+  without leaving the handler coroutine alive. Set to 0 to disable. 3 new tests cover
+  timeout, fast-completion, and disabled cases.
+
 - **Module action payload size limits** (`mozaiksai/core/runtime/composition/module_executor.py`):
   `ModuleExecutor.execute()` now enforces byte-size caps on both request params
   (default 512 KB, configurable via `MODULE_PARAMS_MAX_BYTES`) and action responses

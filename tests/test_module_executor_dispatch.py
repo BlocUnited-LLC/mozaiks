@@ -6,6 +6,7 @@ dispatch, error handling, and registry queries.
 """
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -510,3 +511,50 @@ class TestPayloadSizeLimits:
 
         assert result.success is True
         assert result.data is None
+
+
+# ---------------------------------------------------------------------------
+# 9. Action timeout
+# ---------------------------------------------------------------------------
+
+
+class TestActionTimeout:
+    @pytest.mark.asyncio
+    async def test_async_action_times_out(self, monkeypatch):
+        """An async action that exceeds MODULE_ACTION_TIMEOUT_SECONDS is cancelled."""
+        monkeypatch.setenv("MODULE_ACTION_TIMEOUT_SECONDS", "0.05")
+
+        class _SlowHandler:
+            async def echo(self, ctx, **kwargs) -> dict:
+                await asyncio.sleep(10)
+                return {"done": True}
+
+        ex = ModuleExecutor()
+        ex.register("contacts", _SlowHandler())
+        result = await ex.execute(_request())
+
+        assert result.success is False
+        assert result.error_code == "ACTION_TIMEOUT"
+        assert "timed out" in result.error
+
+    @pytest.mark.asyncio
+    async def test_async_action_completes_within_timeout(self, monkeypatch):
+        """Fast actions complete normally even with a short timeout."""
+        monkeypatch.setenv("MODULE_ACTION_TIMEOUT_SECONDS", "30")
+
+        ex = ModuleExecutor()
+        ex.register("contacts", _EchoHandler())
+        result = await ex.execute(_request(params={"x": 1}))
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_timeout_disabled_when_zero(self, monkeypatch):
+        """MODULE_ACTION_TIMEOUT_SECONDS=0 disables the timeout."""
+        monkeypatch.setenv("MODULE_ACTION_TIMEOUT_SECONDS", "0")
+
+        ex = ModuleExecutor()
+        ex.register("contacts", _EchoHandler())
+        result = await ex.execute(_request(params={"x": 1}))
+
+        assert result.success is True
