@@ -3200,6 +3200,7 @@ async def upload_chat_file_scoped(
     bundle_path: str | None = Form(None),
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     return await _handle_chat_upload(
         file=file,
@@ -3289,6 +3290,7 @@ async def list_chats(
     workflow_name: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     validate_path_id(workflow_name, "workflow_name")
     try:
         coll = await runtime_app._chat_coll()
@@ -3319,6 +3321,7 @@ async def chat_exists(
     chat_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     validate_path_id(workflow_name, "workflow_name")
     validate_path_id(chat_id, "chat_id")
     try:
@@ -3340,6 +3343,7 @@ async def list_user_sessions(
     user_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
@@ -3380,6 +3384,7 @@ async def get_most_recent_workflow_session(
     user_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
@@ -3420,6 +3425,7 @@ async def get_oldest_workflow_session(
     user_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
@@ -3462,6 +3468,7 @@ async def delete_user_sessions(
     workflow_name: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
@@ -3501,6 +3508,7 @@ async def delete_general_chats(
     status: str = "all",
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     try:
         from mozaiksai.core.data.models import WorkflowStatus
@@ -3547,6 +3555,7 @@ async def delete_general_chat(
     general_chat_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     validate_path_id(general_chat_id, "general_chat_id")
     try:
@@ -3720,6 +3729,7 @@ async def list_general_chats_fallback(
     limit: int = 50,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
     bounded_limit = max(1, min(int(limit or 50), 200))
     try:
@@ -3762,6 +3772,7 @@ async def general_chat_transcript_fallback(
     limit: int = 200,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     validate_path_id(general_chat_id, "general_chat_id")
     bounded_limit = max(1, min(int(limit or 200), 2000))
     try:
@@ -3810,6 +3821,7 @@ async def chat_meta(
     chat_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     validate_path_id(workflow_name, "workflow_name")
     validate_path_id(chat_id, "chat_id")
     try:
