@@ -64,12 +64,18 @@ This project follows a practical pre-1.0 changelog format:
   with code 1008 (Policy Violation) before any DB or auth operations run.
 
 - **Path parameter validation on platform routes** (`mozaiksai/hosts/platform.py`):
-  `validate_path_id` now applied to six previously unprotected chat and notification
-  routes: `notification_id` in `/api/notifications/{notification_id}/read`,
-  `workflow_name` in `list_chats` and `chat_exists`, `chat_id` in `chat_exists` and
-  `chat_meta`, and `general_chat_id` in `general_chat_transcript` and
-  `delete_general_chat`. Rejects path traversal and shell metacharacters before
-  values reach MongoDB queries.
+  `validate_path_id` now applied across all platform routes that take path parameters.
+  Covers `notification_id`, `workflow_name`, `chat_id`, `general_chat_id`, and `app_id`
+  on chat, session, general-chat, notification, and upload endpoints. Rejects path
+  traversal, shell metacharacters, and values over 128 characters before they reach
+  MongoDB queries or downstream handlers.
+
+- **Path parameter validation on all Studio routes** (`mozaiksai/hosts/studio.py`):
+  `validate_path_id` now applied to all Studio route path parameters:
+  `artifact_version_id` on bundle/review/accept/reject/promote endpoints,
+  `service` on integration connector endpoints, and `app_id` on app-context
+  management endpoints. Rejects malformed identifiers before any artifact store,
+  workspace, or context operations run.
 
 - **Path ID validation on workflow routes** (`mozaiksai/hosts/runtime.py`):
   `validate_path_id` now applied to `workflow_name`, `app_id`, and `chat_id` on
