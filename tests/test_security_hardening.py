@@ -297,3 +297,49 @@ class TestRequestIDMiddleware:
         id1 = client.get("/test").headers["X-Request-ID"]
         id2 = client.get("/test").headers["X-Request-ID"]
         assert id1 != id2
+
+
+# ---------------------------------------------------------------------------
+# TriggerWorkflowRequest.webhook_url SSRF mitigation
+# ---------------------------------------------------------------------------
+
+class TestWebhookUrlValidator:
+    """Pydantic validator on TriggerWorkflowRequest.webhook_url blocks SSRF vectors."""
+
+    def _make(self, url: str | None):
+        from mozaiksai.hosts.runtime import TriggerWorkflowRequest
+        return TriggerWorkflowRequest(user_id="u1", webhook_url=url)
+
+    def test_none_is_accepted(self):
+        req = self._make(None)
+        assert req.webhook_url is None
+
+    def test_https_accepted(self):
+        req = self._make("https://example.com/webhook")
+        assert req.webhook_url == "https://example.com/webhook"
+
+    def test_http_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError) as exc_info:
+            self._make("http://example.com/webhook")
+        assert "https" in str(exc_info.value).lower()
+
+    def test_localhost_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://localhost/webhook")
+
+    def test_loopback_127_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://127.0.0.1/webhook")
+
+    def test_loopback_127_prefix_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://127.1.2.3/webhook")
+
+    def test_no_scheme_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("example.com/webhook")
