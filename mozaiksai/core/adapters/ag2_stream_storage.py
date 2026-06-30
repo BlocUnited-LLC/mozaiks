@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from importlib import import_module
@@ -192,6 +193,17 @@ class MongoAG2StreamStorage(Storage):
                 name="ag2_stream_app_stream_seq",
                 unique=True,
             )
+            # TTL index: expire old stream events to prevent unbounded growth.
+            # Default 30 days; override with AG2_STREAM_EVENT_TTL_DAYS (set to 0
+            # to disable). The TTL applies only to the events collection —
+            # heads records are small and expire when their stream is dropped.
+            ttl_days = int(os.getenv("AG2_STREAM_EVENT_TTL_DAYS", "30"))
+            if ttl_days > 0:
+                await create_events_index(
+                    [("created_at", 1)],
+                    name="ag2_stream_events_ttl",
+                    expireAfterSeconds=ttl_days * 86400,
+                )
         if callable(create_heads_index):
             await create_heads_index(
                 [("app_id", 1), ("stream_id", 1)],

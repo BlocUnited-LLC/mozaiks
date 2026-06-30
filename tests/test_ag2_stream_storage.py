@@ -31,8 +31,10 @@ class _FakeCursor:
 class _FakeEventsCollection:
     def __init__(self) -> None:
         self.docs: list[dict] = []
+        self.index_calls: list[tuple] = []
 
     async def create_index(self, keys, **kwargs):  # noqa: ANN001
+        self.index_calls.append((keys, kwargs))
         return None
 
     async def insert_one(self, doc):  # noqa: ANN001
@@ -163,4 +165,42 @@ async def test_ag2_stream_storage_next_sequence_only_updates_counter_with_inc() 
     assert update["$inc"] == {"next_sequence": 1}
     assert "next_sequence" not in update["$set"]
     assert "next_sequence" not in update["$setOnInsert"]
+
+
+@pytest.mark.asyncio
+async def test_ag2_stream_storage_creates_ttl_index_on_events(monkeypatch) -> None:
+    """_ensure_indexes creates a TTL index on created_at with the configured TTL."""
+    monkeypatch.setenv("AG2_STREAM_EVENT_TTL_DAYS", "7")
+    events = _FakeEventsCollection()
+    heads = _FakeHeadsCollection()
+    storage = MongoAG2StreamStorage(app_id="app_ttl", events_collection=events, heads_collection=heads)
+    context = SimpleNamespace(stream=SimpleNamespace(id=stream_id_for_run("app_ttl", "chat_ttl")))
+
+    await storage.save_event(HumanInputRequest("ping"), context)
+
+    ttl_call = next(
+        (call for call in events.index_calls if call[0] == [("created_at", 1)]),
+        None,
+    )
+    assert ttl_call is not None, "No TTL index created on created_at"
+    assert ttl_call[1].get("expireAfterSeconds") == 7 * 86400
+    assert ttl_call[1].get("name") == "ag2_stream_events_ttl"
+
+
+@pytest.mark.asyncio
+async def test_ag2_stream_storage_skips_ttl_index_when_disabled(monkeypatch) -> None:
+    """AG2_STREAM_EVENT_TTL_DAYS=0 disables TTL index creation."""
+    monkeypatch.setenv("AG2_STREAM_EVENT_TTL_DAYS", "0")
+    events = _FakeEventsCollection()
+    heads = _FakeHeadsCollection()
+    storage = MongoAG2StreamStorage(app_id="app_nottl", events_collection=events, heads_collection=heads)
+    context = SimpleNamespace(stream=SimpleNamespace(id=stream_id_for_run("app_nottl", "chat_nottl")))
+
+    await storage.save_event(HumanInputRequest("ping"), context)
+
+    ttl_call = next(
+        (call for call in events.index_calls if call[0] == [("created_at", 1)]),
+        None,
+    )
+    assert ttl_call is None, "TTL index should not be created when TTL_DAYS=0"
 
