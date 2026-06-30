@@ -69,7 +69,9 @@ async def test_backend_request_returns_json_on_backend_exception(monkeypatch):
 
     assert parsed["status"] == "error"
     assert "error" in parsed
-    assert "backend unreachable" in parsed["error"]
+    # Raw exception text must NOT appear in the error field (information disclosure)
+    assert "backend unreachable" not in parsed["error"]
+    assert parsed["error"] == "backend_request_failed"
 
 
 @pytest.mark.asyncio
@@ -138,7 +140,8 @@ async def test_check_backend_health_returns_json_on_exception(monkeypatch):
     parsed = json.loads(result)
 
     assert parsed["healthy"] is False
-    assert "error" in parsed
+    # error field is omitted on health-check exception to avoid leaking internal details
+    assert "error" not in parsed
 
 
 @pytest.mark.asyncio
