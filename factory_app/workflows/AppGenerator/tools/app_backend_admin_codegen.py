@@ -26,7 +26,9 @@ _ADMIN_ROUTE_MODULE = (
     "    except HTTPException:\n"
     "        raise\n"
     "    except Exception as exc:\n"
-    "        raise HTTPException(status_code=500, detail=str(exc)) from exc\n"
+    "        import logging as _logging\n"
+    "        _logging.getLogger(__name__).error('admin_config_error: %s', exc, exc_info=True)\n"
+    "        raise HTTPException(status_code=500, detail='Failed to load admin configuration') from exc\n"
 )
 
 
