@@ -18,6 +18,10 @@ class _FakeCursor:
         self._docs.sort(key=lambda item: item.get(key, 0), reverse=reverse)
         return self
 
+    def limit(self, n):  # noqa: ANN001
+        self._docs = self._docs[:n]
+        return self
+
     async def to_list(self, length=None):  # noqa: ANN001
         if length is None:
             return list(self._docs)

@@ -149,7 +149,8 @@ class AzureKeyVaultConnectorVaultBackend:
             self._client = SecretClient(vault_url=vault_url, credential=credential)
             return self._client
         except Exception as exc:  # pragma: no cover - environment specific
-            self._client_error = str(exc)
+            logger.error("Azure Key Vault client initialisation failed: %s", exc, exc_info=True)
+            self._client_error = "Azure Key Vault client could not be initialised."
             return None
 
     async def describe(self) -> dict[str, Any]:
@@ -212,13 +213,13 @@ class AzureKeyVaultConnectorVaultBackend:
                 "secret_available": True,
             }
         except Exception as exc:  # pragma: no cover - depends on Azure service
-            logger.warning("Failed to store connector secret %s: %s", secret_name, exc)
+            logger.error("Failed to store connector secret %s: %s", secret_name, exc, exc_info=True)
             return {
                 "success": False,
                 "provider": "azure_key_vault",
                 "secret_name": secret_name,
                 "expires_at": None,
-                "error": str(exc),
+                "error": "Secret could not be stored.",
             }
 
     async def get_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
@@ -246,13 +247,13 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": None if value else "Secret exists but has no value.",
             }
         except Exception as exc:  # pragma: no cover - depends on Azure service
-            logger.warning("Failed to fetch connector secret %s: %s", secret_name, exc)
+            logger.error("Failed to fetch connector secret %s: %s", secret_name, exc, exc_info=True)
             return {
                 "success": False,
                 "provider": "azure_key_vault",
                 "secret_name": secret_name,
                 "secret_value": None,
-                "error": str(exc),
+                "error": "Secret could not be retrieved.",
             }
 
     async def delete_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
@@ -274,12 +275,12 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": None,
             }
         except Exception as exc:  # pragma: no cover - depends on Azure service
-            logger.warning("Failed to delete connector secret %s: %s", secret_name, exc)
+            logger.error("Failed to delete connector secret %s: %s", secret_name, exc, exc_info=True)
             return {
                 "success": False,
                 "provider": "azure_key_vault",
                 "secret_name": secret_name,
-                "error": str(exc),
+                "error": "Secret could not be deleted.",
             }
 
 

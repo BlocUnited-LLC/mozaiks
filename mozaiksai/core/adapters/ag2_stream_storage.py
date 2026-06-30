@@ -82,8 +82,8 @@ class MongoAG2StreamStorage(Storage):
                 "stream_id": self._normalize_stream_id(stream_id),
                 **build_app_scope_filter(self._app_id),
             }
-        ).sort("sequence", 1)
-        docs = await cursor.to_list(length=None)
+        ).sort("sequence", 1).limit(10_000)
+        docs = await cursor.to_list(length=10_000)
         return [self._restore_event(doc) for doc in docs if isinstance(doc, dict)]
 
     async def set_history(self, stream_id: Any, events: Iterable[BaseEvent]) -> None:
