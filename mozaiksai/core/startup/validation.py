@@ -9,11 +9,16 @@ Behaviour is controlled by the ``MOZAIKS_STARTUP_CHECKS`` environment variable:
   ``"warn"``   — (default) emit WARNING log records but do not block startup.
 
 Checks performed:
-  LLM API key     — OPENAI_API_KEY resolvable via env, Key Vault alias
-                    ``OpenAIApiKey``, or a MongoDB ``llm_config`` document.
-  MongoDB         — MONGO_URI must be set (env or Key Vault alias ``MongoURI``)
-                    and MongoDB must respond to a ping within the driver timeout.
-  Workflows path  — ``MOZAIKS_WORKFLOWS_PATH``, if set, must exist on disk.
+  LLM API key          — OPENAI_API_KEY resolvable via env, Key Vault alias
+                         ``OpenAIApiKey``, or a MongoDB ``llm_config`` document.
+  MongoDB              — MONGO_URI must be set (env or Key Vault alias ``MongoURI``)
+                         and MongoDB must respond to a ping within the driver timeout.
+  Workflows path       — ``MOZAIKS_WORKFLOWS_PATH``, if set, must exist on disk.
+  Upload dir           — ``UPLOAD_STORAGE_DIR``, if set, must be writable when it exists.
+  AUTH_ENABLED         — warns when ``ENV=production`` and ``AUTH_ENABLED=false``.
+  INTERNAL_API_KEY     — warns when the key is absent (defense-in-depth; not a hard gate).
+  RATE_LIMIT_ENABLED   — warns when ``ENV=production`` and ``RATE_LIMIT_ENABLED=false``.
+  Redis connectivity   — when ``REDIS_URL`` is set, validates TCP reachability on startup.
 
 Log record fields:
   check    — check identifier (``"llm_api_key"``, ``"workflows_path"``, ``"summary"``)
@@ -25,8 +30,10 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from mozaiksai.core.core_config import get_mongo_client, get_secret
 
@@ -241,6 +248,64 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
             "STARTUP_CHECK_OK: INTERNAL_API_KEY is configured",
             extra={"check": "internal_api_key", "mode": mode},
         )
+
+    # ── RATE_LIMIT_ENABLED in production ─────────────────────────────────────
+    rate_limit_enabled = os.getenv("RATE_LIMIT_ENABLED", "true").strip().lower()
+    if env_name == "production" and rate_limit_enabled in {"false", "0", "no", "off"}:
+        msg = (
+            "RATE_LIMIT_ENABLED=false in a production environment. "
+            "API rate limiting is disabled — the service is vulnerable to request flooding. "
+            "Set RATE_LIMIT_ENABLED=true before serving production traffic."
+        )
+        warnings.append(msg)
+        logger.warning(
+            "STARTUP_CHECK_FAILED: %s",
+            msg,
+            extra={"check": "rate_limit_enabled", "mode": mode},
+        )
+        if mode == "strict":
+            raise StartupConfigError(msg)
+    else:
+        logger.info(
+            "STARTUP_CHECK_OK: RATE_LIMIT_ENABLED=%s (env=%s)",
+            rate_limit_enabled,
+            env_name or "unset",
+            extra={"check": "rate_limit_enabled", "mode": mode},
+        )
+
+    # ── Redis connectivity ────────────────────────────────────────────────────
+    # When REDIS_URL is set, validate connectivity at startup. Without Redis,
+    # the rate limiter silently falls back to in-memory storage, which does not
+    # enforce limits across multiple runtime instances or pods.
+    redis_url = os.getenv("REDIS_URL", "").strip()
+    if redis_url:
+        try:
+            parsed = urlparse(redis_url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 6379
+            with socket.create_connection((host, port), timeout=3):
+                pass
+            logger.info(
+                "STARTUP_CHECK_OK: Redis reachable at %s:%s",
+                host,
+                port,
+                extra={"check": "redis_url", "mode": mode},
+            )
+        except Exception as exc:
+            safe_url = redis_url.split("@")[-1] if "@" in redis_url else redis_url
+            msg = (
+                f"REDIS_URL is set but Redis is not reachable ({safe_url}): {exc}. "
+                "The rate limiter will fall back to in-memory storage, which does not "
+                "enforce limits across multiple runtime instances."
+            )
+            warnings.append(msg)
+            logger.warning(
+                "STARTUP_CHECK_FAILED: %s",
+                msg,
+                extra={"check": "redis_url", "mode": mode},
+            )
+            # Not raised in strict mode — in-memory fallback is functional;
+            # this is a configuration warning, not a hard failure.
 
     # ── Summary ───────────────────────────────────────────────────────────────
     if not warnings:

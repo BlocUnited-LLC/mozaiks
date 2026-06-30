@@ -621,3 +621,139 @@ class TestAuthEnabledCheck:
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 
         assert not any("AUTH_ENABLED" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# RATE_LIMIT_ENABLED check
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitEnabledCheck:
+    """run_startup_checks warns when RATE_LIMIT_ENABLED=false in production."""
+
+    def _base_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+    @pytest.mark.asyncio
+    async def test_warns_when_rate_limit_disabled_in_production(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert any("RATE_LIMIT_ENABLED" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_rate_limit_disabled_in_dev(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "development")
+        monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("RATE_LIMIT_ENABLED" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_rate_limit_enabled_in_production(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("RATE_LIMIT_ENABLED" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_when_rate_limit_disabled_in_production(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setenv("RATE_LIMIT_ENABLED", "false")
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+
+        with pytest.raises(StartupConfigError, match="RATE_LIMIT_ENABLED"):
+            await run_startup_checks(_mongo_client=_MockPingClient())
+
+
+# ---------------------------------------------------------------------------
+# Redis connectivity check
+# ---------------------------------------------------------------------------
+
+
+class TestRedisConnectivityCheck:
+    """run_startup_checks warns when REDIS_URL is set but Redis is unreachable."""
+
+    def _base_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+        monkeypatch.setenv("INTERNAL_API_KEY", "key")
+        monkeypatch.setenv("AUTH_ENABLED", "true")
+        monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+        monkeypatch.delenv("ENV", raising=False)
+        monkeypatch.delenv("MOZAIKS_STARTUP_CHECKS", raising=False)
+        monkeypatch.delenv("MOZAIKS_WORKFLOWS_PATH", raising=False)
+
+    @pytest.mark.asyncio
+    async def test_warns_when_redis_unreachable(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("REDIS_URL", "redis://localhost:6380")
+
+        with patch(
+            "mozaiksai.core.startup.validation.socket.create_connection",
+            side_effect=ConnectionRefusedError("Connection refused"),
+        ):
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert any("REDIS_URL" in w for w in warnings)
+        assert any("not reachable" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_redis_reachable(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+
+        mock_cm = patch(
+            "mozaiksai.core.startup.validation.socket.create_connection",
+        )
+        with mock_cm as mock_conn:
+            mock_conn.return_value.__enter__ = lambda s: s
+            mock_conn.return_value.__exit__ = lambda s, *a: False
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("REDIS_URL" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_check_when_redis_url_not_set(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        with patch(
+            "mozaiksai.core.startup.validation.socket.create_connection",
+            side_effect=AssertionError("Should not be called"),
+        ):
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        # No Redis warnings should appear
+        assert not any("REDIS_URL" in w for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_redis_unreachable_does_not_raise_in_strict_mode(self, monkeypatch):
+        """Redis failure is a warning only even in strict mode — in-memory fallback is functional."""
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("REDIS_URL", "redis://localhost:6380")
+        monkeypatch.setenv("MOZAIKS_STARTUP_CHECKS", "strict")
+
+        with patch(
+            "mozaiksai.core.startup.validation.socket.create_connection",
+            side_effect=ConnectionRefusedError("Connection refused"),
+        ):
+            # Should not raise — Redis degradation is handled gracefully
+            warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert any("REDIS_URL" in w for w in warnings)

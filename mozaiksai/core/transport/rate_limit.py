@@ -14,6 +14,7 @@ Built-in tighter limits on high-cost endpoints (can be overridden via RATE_LIMIT
   /api/chats   → 10/minute   (workflow session starts, each spawns an LLM context)
   /chat        → 30/minute   (user message sends, primary LLM cost driver)
   /api/workflows → 20/minute (programmatic workflow triggers)
+  /ws/         → 10/minute   (WebSocket upgrade requests — each starts a new workflow context)
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ _DEFAULT_PATH_LIMITS: dict[str, int] = {
     "/api/chats": 10,
     "/chat": 30,
     "/api/workflows": 20,
+    "/ws/": 10,           # WebSocket upgrades — each opens a new workflow context
 }
 
 

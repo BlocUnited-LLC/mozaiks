@@ -308,7 +308,10 @@ def _make_ws_rate_limit_app(*, rpm: int = 3, enabled: bool = True) -> TestClient
         await websocket.send_text("ok")
         await websocket.close()
 
-    inner_app.router.add_websocket_route("/ws/test", _ws_handler)
+    # Use /echo — a path that does not match any entry in _DEFAULT_PATH_LIMITS
+    # (/api/auth, /api/chats, /chat, /api/workflows, /ws/).  This ensures the
+    # global rpm cap governs both the HTTP drain request and the WS upgrade.
+    inner_app.router.add_websocket_route("/echo", _ws_handler)
 
     @inner_app.get("/api/data")
     async def _data_endpoint():
@@ -321,12 +324,16 @@ def _make_ws_rate_limit_app(*, rpm: int = 3, enabled: bool = True) -> TestClient
 class TestWebSocketRateLimit:
     def test_ws_connection_accepted_within_limit(self):
         client = _make_ws_rate_limit_app(rpm=10)
-        with client.websocket_connect("/ws/test") as ws:
+        with client.websocket_connect("/echo") as ws:
             msg = ws.receive_text()
         assert msg == "ok"
 
     def test_ws_connection_rejected_after_limit_exhausted(self):
-        """After exceeding the per-client limit, the WS handshake is closed with 1008."""
+        """After exceeding the per-client global limit, the WS handshake is closed with 1008.
+
+        Uses /echo (not under /ws/ or /chat) so the global limit governs both the
+        HTTP drain request and the WebSocket upgrade attempt.
+        """
         from starlette.websockets import WebSocketDisconnect
 
         client = _make_ws_rate_limit_app(rpm=1)
@@ -337,7 +344,7 @@ class TestWebSocketRateLimit:
 
         # The next WS connection from the same IP must be refused with 1008.
         with pytest.raises((WebSocketDisconnect, Exception)) as exc_info:
-            with client.websocket_connect("/ws/test", headers={"X-Real-IP": ip_header}) as ws:
+            with client.websocket_connect("/echo", headers={"X-Real-IP": ip_header}) as ws:
                 ws.receive_text()
 
         exc = exc_info.value
@@ -348,6 +355,13 @@ class TestWebSocketRateLimit:
     def test_ws_not_rate_limited_when_disabled(self):
         """When rate limiting is disabled, WS connections pass through unconditionally."""
         client = _make_ws_rate_limit_app(rpm=1, enabled=False)
-        with client.websocket_connect("/ws/test") as ws:
+        with client.websocket_connect("/echo") as ws:
             msg = ws.receive_text()
         assert msg == "ok"
+
+    def test_ws_path_limit_in_default_config(self):
+        """The /ws/ path prefix appears in _DEFAULT_PATH_LIMITS with a tighter cap (10/min)."""
+        from mozaiksai.core.transport.rate_limit import _DEFAULT_PATH_LIMITS
+
+        assert "/ws/" in _DEFAULT_PATH_LIMITS
+        assert _DEFAULT_PATH_LIMITS["/ws/"] <= 20, "WS default limit should be tighter than global 60/min"

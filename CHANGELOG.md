@@ -14,6 +14,21 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- **WebSocket connection rate limiting** (`mozaiksai/core/transport/rate_limit.py`):
+  Added `/ws/` to `_DEFAULT_PATH_LIMITS` (10/min per client) so WebSocket upgrade requests
+  are governed by a tighter path-specific cap rather than the global 60/min default. Each
+  WebSocket connection opens a full workflow context, making WS upgrades a high-cost target.
+  Documented in the module docstring.
+
+- **Startup checks for rate limiting and Redis** (`mozaiksai/core/startup/validation.py`):
+  Added two new boot-time checks:
+  - `RATE_LIMIT_ENABLED=false` in a production environment now emits a structured warning
+    (raises `StartupConfigError` in strict mode), consistent with the `AUTH_ENABLED` check.
+  - When `REDIS_URL` is configured, the runtime now TCP-pings the Redis host/port at startup
+    and warns if unreachable. Without Redis, the rate limiter silently falls back to in-memory
+    storage that does not enforce limits across multiple instances. The Redis check is a warning
+    only even in strict mode — the in-memory fallback is functional.
+
 - **IDOR protection on module action routes** (`mozaiksai/hosts/platform.py`):
   `_execute_module_action` now validates an explicit `?app_id` query parameter against the
   authenticated principal's token claim before dispatching. Callers cannot execute actions
