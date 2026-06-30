@@ -181,7 +181,13 @@ async def authenticate_websocket(
     try:
         claims = await adapter.validate_token(token)
     except AuthError as e:
-        logger.warning("WebSocket auth failed (%s): %s", adapter.name, e.message)
+        logger.warning(
+            "AUTH_FAILED (websocket): provider=%s reason=%s status=%s",
+            adapter.name,
+            e.message,
+            e.status_code,
+            extra={"event": "AUTH_FAILED", "provider": adapter.name, "status": e.status_code, "transport": "websocket"},
+        )
         await websocket.close(code=WS_CLOSE_POLICY_VIOLATION, reason=e.message)
         return None
     except Exception as e:

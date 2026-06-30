@@ -223,3 +223,56 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             pass  # Headers are informational; never fail a request over them.
 
         return response  # type: ignore[no-any-return]
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[override]
+        """ASGI entry point — applies rate limiting to both HTTP and WebSocket scopes."""
+        if scope["type"] != "websocket" or not self._enabled:
+            await super().__call__(scope, receive, send)
+            return
+
+        # WebSocket rate limiting: check on the upgrade request before accepting.
+        path = scope.get("path", "")
+
+        if path in self._excluded_paths:
+            await super().__call__(scope, receive, send)
+            return
+
+        # Resolve client key from scope headers.
+        from starlette.datastructures import Headers
+
+        headers = Headers(scope=scope)
+        client_key: str
+        if self._client_header:
+            val = headers.get(self._client_header, "").strip()
+            client_key = val.split(",")[0].strip() if val else "unknown"
+        else:
+            client_info = scope.get("client")
+            client_key = client_info[0] if client_info else "unknown"
+
+        # Find the most specific matching path-prefix limit.
+        active_limit = self._global_limit
+        matched_prefix = "global"
+        for prefix, limit_item in self._path_limits_parsed.items():
+            if path.startswith(prefix):
+                active_limit = limit_item
+                matched_prefix = prefix
+                break
+
+        allowed = self._limiter.hit(active_limit, client_key, matched_prefix)
+
+        if not allowed:
+            logger.warning(
+                "Rate limit exceeded (websocket): client=%s path=%s prefix=%s",
+                client_key,
+                path,
+                matched_prefix,
+            )
+            # Complete the WebSocket handshake just enough to close it cleanly.
+            # The ASGI WS protocol requires we receive the connect event before
+            # sending close; never closing leaves the client hanging.
+            event = await receive()
+            if event.get("type") == "websocket.connect":
+                await send({"type": "websocket.close", "code": 1008, "reason": "Rate limit exceeded"})
+            return
+
+        await super().__call__(scope, receive, send)

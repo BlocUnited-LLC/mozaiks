@@ -200,6 +200,18 @@ This project follows a practical pre-1.0 changelog format:
   to drive which billing surfaces, plan catalog artifacts, and entitlement gates
   are required in the build plan.
 
+- **WebSocket rate limiting** (`mozaiksai/core/transport/rate_limit.py`):
+  `RateLimitMiddleware` now overrides `__call__` to intercept WebSocket upgrade
+  requests (`scope["type"] == "websocket"`). WS connections from clients that have
+  exhausted their bucket are closed with ASGI code 1008 (Policy Violation) before
+  the handshake completes. Excluded paths and disabled mode are respected.
+  3 new tests cover: within-limit accept, post-exhaustion reject, and disabled pass-through.
+
+- **Structured auth failure log fields** (`mozaiksai/core/auth/dependencies.py`, `websocket_auth.py`):
+  Auth failure log records now include structured `extra` fields (`event`, `provider`,
+  `status`) in addition to the formatted message, making log aggregation and alerting
+  on `AUTH_FAILED` events reliable. Both HTTP and WebSocket auth failures are covered.
+
 - **Startup validation: AUTH_ENABLED=false warning in production** (`mozaiksai/core/startup/validation.py`):
   `run_startup_checks` now warns (and raises in strict mode) when `ENV=production`
   and `AUTH_ENABLED=false`. Development and test environments are unaffected.

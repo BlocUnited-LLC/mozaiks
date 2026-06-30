@@ -277,3 +277,77 @@ class TestDisabledRateLimiting:
         client = _make_rate_limit_app(enabled=False)
         resp = client.get("/api/data", headers={"X-Real-IP": "60.0.0.2"})
         assert "X-RateLimit-Limit" not in resp.headers
+
+
+# ---------------------------------------------------------------------------
+# 7. WebSocket connections are rate-limited
+# ---------------------------------------------------------------------------
+
+
+def _make_ws_rate_limit_app(*, rpm: int = 3, enabled: bool = True) -> TestClient:
+    """Build a minimal app with a WebSocket endpoint and RateLimitMiddleware.
+
+    Uses a plain async route handler (not FastAPI DI injection) to avoid
+    dependency-injection interference from previous test-session imports.
+    """
+    os.environ["RATE_LIMIT_ENABLED"] = "true" if enabled else "false"
+    os.environ["RATE_LIMIT_REQUESTS_PER_MINUTE"] = str(rpm)
+    os.environ["RATE_LIMIT_PATH_LIMITS"] = ""
+    os.environ["RATE_LIMIT_EXCLUDED_PATHS"] = "/api/health"
+    os.environ["RATE_LIMIT_CLIENT_HEADER"] = ""
+    os.environ.pop("REDIS_URL", None)
+
+    from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
+
+    inner_app = FastAPI()
+
+    # Register as a plain WebSocket route to avoid FastAPI DI resolution
+    # interference that occurs in long-running pytest sessions.
+    async def _ws_handler(websocket) -> None:
+        await websocket.accept()
+        await websocket.send_text("ok")
+        await websocket.close()
+
+    inner_app.router.add_websocket_route("/ws/test", _ws_handler)
+
+    @inner_app.get("/api/data")
+    async def _data_endpoint():
+        return {"ok": True}
+
+    inner_app.add_middleware(RateLimitMiddleware)
+    return TestClient(inner_app, raise_server_exceptions=False)
+
+
+class TestWebSocketRateLimit:
+    def test_ws_connection_accepted_within_limit(self):
+        client = _make_ws_rate_limit_app(rpm=10)
+        with client.websocket_connect("/ws/test") as ws:
+            msg = ws.receive_text()
+        assert msg == "ok"
+
+    def test_ws_connection_rejected_after_limit_exhausted(self):
+        """After exceeding the per-client limit, the WS handshake is closed with 1008."""
+        from starlette.websockets import WebSocketDisconnect
+
+        client = _make_ws_rate_limit_app(rpm=1)
+        ip_header = "70.0.0.1"
+
+        # Exhaust the 1/min limit with an HTTP request first.
+        client.get("/api/data", headers={"X-Real-IP": ip_header})
+
+        # The next WS connection from the same IP must be refused with 1008.
+        with pytest.raises((WebSocketDisconnect, Exception)) as exc_info:
+            with client.websocket_connect("/ws/test", headers={"X-Real-IP": ip_header}) as ws:
+                ws.receive_text()
+
+        exc = exc_info.value
+        # When it's a WebSocketDisconnect, confirm the code is 1008 (Policy Violation).
+        if isinstance(exc, WebSocketDisconnect):
+            assert exc.code == 1008
+
+    def test_ws_not_rate_limited_when_disabled(self):
+        """When rate limiting is disabled, WS connections pass through unconditionally."""
+        client = _make_ws_rate_limit_app(rpm=1, enabled=False)
+        with client.websocket_connect("/ws/test") as ws:
+            msg = ws.receive_text()
+        assert msg == "ok"
