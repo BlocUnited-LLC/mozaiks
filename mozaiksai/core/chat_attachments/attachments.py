@@ -58,6 +58,44 @@ def _max_bytes_from_env(env_key: str, default_bytes: int) -> int:
     return int(default_bytes) if parsed <= 0 else parsed
 
 
+# Default MIME type allowlist for chat attachments.
+# Covers text/code files, images, PDFs, and structured data — types that make
+# sense as AI context. Binary executables and archives are intentionally excluded.
+_DEFAULT_ALLOWED_MIME_TYPES: frozenset[str] = frozenset({
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "text/html",
+    "text/xml",
+    "text/x-python",
+    "text/x-java",
+    "text/javascript",
+    "text/typescript",
+    "application/json",
+    "application/pdf",
+    "application/xml",
+    "application/yaml",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+})
+
+
+def _allowed_mime_types_from_env() -> frozenset[str]:
+    """Return the configured allowed MIME type set.
+
+    Reads UPLOAD_ALLOWED_MIME_TYPES (comma-separated).  Falls back to the
+    default set when the env var is absent or empty.  Set to ``*`` to
+    disable MIME type enforcement (not recommended in production).
+    """
+    raw = os.getenv("UPLOAD_ALLOWED_MIME_TYPES", "").strip()
+    if not raw:
+        return _DEFAULT_ALLOWED_MIME_TYPES
+    return frozenset(t.strip().lower() for t in raw.split(",") if t.strip())
+
+
 async def handle_chat_upload(
     *,
     chat_coll: Any,
@@ -78,6 +116,17 @@ async def handle_chat_upload(
 
     if not app_id or not user_id or not chat_id:
         raise ValueError("app_id, user_id, and chat_id are required")
+
+    # MIME type enforcement — reject file types not in the configured allowlist.
+    # content_type is browser-reported (can be spoofed) so this is defense-in-depth,
+    # not a trust boundary. '*' in the allowed set disables enforcement.
+    declared_content_type = str(getattr(file_obj, "content_type", None) or "").strip().lower()
+    allowed_types = _allowed_mime_types_from_env()
+    if "*" not in allowed_types:
+        # Strip parameters (e.g. "text/plain; charset=utf-8" → "text/plain")
+        base_type = declared_content_type.split(";")[0].strip()
+        if base_type and base_type not in allowed_types:
+            raise ValueError(f"File type not permitted: {base_type!r}")
 
     normalized_intent = _normalize_intent(intent)
 

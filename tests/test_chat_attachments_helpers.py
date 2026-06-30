@@ -32,9 +32,11 @@ from __future__ import annotations
 import pytest
 
 from mozaiksai.core.chat_attachments.attachments import (
+    _allowed_mime_types_from_env,
     _max_bytes_from_env,
     _normalize_intent,
     _parse_allowed_workflows,
+    handle_chat_upload,
 )
 
 # ---------------------------------------------------------------------------
@@ -142,3 +144,160 @@ class TestMaxBytesFromEnv:
         monkeypatch.setenv("TEST_MAX_BYTES", "3.5")
         result = _max_bytes_from_env("TEST_MAX_BYTES", 1024)
         assert result == 1024
+
+
+# ---------------------------------------------------------------------------
+# 4. _allowed_mime_types_from_env
+# ---------------------------------------------------------------------------
+
+class TestAllowedMimeTypesFromEnv:
+    def test_env_not_set_returns_defaults(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("UPLOAD_ALLOWED_MIME_TYPES", raising=False)
+        result = _allowed_mime_types_from_env()
+        assert "application/json" in result
+        assert "image/png" in result
+        assert "application/pdf" in result
+        assert "text/plain" in result
+
+    def test_env_empty_returns_defaults(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "")
+        result = _allowed_mime_types_from_env()
+        assert "application/json" in result
+
+    def test_env_custom_list(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "text/plain,application/json")
+        result = _allowed_mime_types_from_env()
+        assert result == frozenset({"text/plain", "application/json"})
+        assert "image/png" not in result
+
+    def test_env_wildcard_disables_enforcement(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "*")
+        result = _allowed_mime_types_from_env()
+        assert "*" in result
+
+    def test_env_values_lowercased(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "Text/Plain, APPLICATION/JSON")
+        result = _allowed_mime_types_from_env()
+        assert "text/plain" in result
+        assert "application/json" in result
+
+    def test_env_whitespace_stripped(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "  text/plain  ,  image/png  ")
+        result = _allowed_mime_types_from_env()
+        assert "text/plain" in result
+        assert "image/png" in result
+
+
+# ---------------------------------------------------------------------------
+# 5. handle_chat_upload — MIME type enforcement
+# ---------------------------------------------------------------------------
+
+class _FakeFileObj:
+    """Minimal UploadFile stub for testing handle_chat_upload."""
+    def __init__(self, content_type: str, data: bytes = b"data", filename: str = "test.txt"):
+        self.content_type = content_type
+        self.filename = filename
+        self._data = data
+        self._read = False
+
+    async def read(self, size: int = -1) -> bytes:
+        if self._read:
+            return b""
+        self._read = True
+        return self._data[:size] if size > 0 else self._data
+
+
+class _FakeChatColl:
+    def __init__(self, session_exists: bool = True, user_id: str = "user_1"):
+        self._user_id = user_id
+        self._session_exists = session_exists
+        self.updates: list[tuple] = []
+
+    async def find_one(self, query, projection=None):  # noqa: ANN001
+        if not self._session_exists:
+            return None
+        return {"_id": query.get("_id"), "workflow_name": None, "user_id": self._user_id}
+
+    async def update_one(self, query, update, **kwargs):  # noqa: ANN001
+        self.updates.append((query, update))
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_upload_rejects_disallowed_mime_type(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "text/plain,image/png")
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(tmp_path))
+    coll = _FakeChatColl(user_id="u1")
+    file_obj = _FakeFileObj(content_type="application/x-executable")
+
+    with pytest.raises(ValueError, match="File type not permitted"):
+        await handle_chat_upload(
+            chat_coll=coll,
+            file_obj=file_obj,
+            app_id="app_1",
+            user_id="u1",
+            chat_id="chat_1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_upload_accepts_allowed_mime_type(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "text/plain,image/png")
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(tmp_path))
+    coll = _FakeChatColl(user_id="u1")
+    file_obj = _FakeFileObj(content_type="text/plain", data=b"hello")
+
+    result = await handle_chat_upload(
+        chat_coll=coll,
+        file_obj=file_obj,
+        app_id="app_1",
+        user_id="u1",
+        chat_id="chat_1",
+    )
+    assert result.bytes_written == 5
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_upload_wildcard_bypasses_mime_enforcement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "*")
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(tmp_path))
+    coll = _FakeChatColl(user_id="u1")
+    file_obj = _FakeFileObj(content_type="application/x-executable", data=b"\x7fELF")
+
+    result = await handle_chat_upload(
+        chat_coll=coll,
+        file_obj=file_obj,
+        app_id="app_1",
+        user_id="u1",
+        chat_id="chat_1",
+    )
+    assert result.bytes_written == 4
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_upload_strips_mime_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """content_type with charset parameter should still match the base type."""
+    monkeypatch.setenv("UPLOAD_ALLOWED_MIME_TYPES", "text/plain")
+    monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(tmp_path))
+    coll = _FakeChatColl(user_id="u1")
+    file_obj = _FakeFileObj(content_type="text/plain; charset=utf-8", data=b"hello")
+
+    result = await handle_chat_upload(
+        chat_coll=coll,
+        file_obj=file_obj,
+        app_id="app_1",
+        user_id="u1",
+        chat_id="chat_1",
+    )
+    assert result.bytes_written == 5

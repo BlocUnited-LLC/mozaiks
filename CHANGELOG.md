@@ -130,6 +130,29 @@ This project follows a practical pre-1.0 changelog format:
   UUID4 is generated. Bound to `request.state.request_id` for handlers,
   tools, and structured logs.
 
+- **MIME type enforcement on file uploads** (`mozaiksai/core/chat_attachments/attachments.py`):
+  `handle_chat_upload` now validates the declared `content_type` against a configurable
+  MIME type allowlist before writing any bytes to disk. Default allowlist covers text,
+  image, PDF, JSON, and XML types. Configurable via `UPLOAD_ALLOWED_MIME_TYPES`
+  (comma-separated; set to `*` to disable). Content-type parameters (e.g.
+  `; charset=utf-8`) are stripped before comparison. 4 integration tests added.
+
+- **Sandbox API error detail suppression** (`factory_app/workflows/AppGenerator/tools/sandbox_api.py`):
+  All sandbox HTTP routes (create, sync, start, status, stop) and the WebSocket
+  endpoint no longer include raw exception text in 500/503 responses or WebSocket
+  close reasons. Generic messages returned; full exceptions logged server-side.
+
+- **Studio refinement endpoint error detail suppression** (`mozaiksai/hosts/studio.py`):
+  Refinement classification (503) and coding worker (503) exception handlers no
+  longer include `str(exc)` in the HTTP response detail. Generic messages returned;
+  full exceptions logged with `exc_info=True`.
+
+- **Health endpoint module name suppression** (`mozaiksai/hosts/platform.py`):
+  `startup_degraded_reason` for partial module load failures no longer includes the
+  list of failed module names, which would expose internal app structure to
+  unauthenticated callers of `/health`. Returns only the count; full name list
+  remains in `logger.error`.
+
 - **AppGenerator admin route template hardened** (`factory_app/workflows/AppGenerator/tools/app_backend_admin_codegen.py`):
   The generated `/api/admin/config` route template was emitting `str(exc)` in the
   HTTP 500 detail, which would have leaked exceptions in all generated apps' admin
