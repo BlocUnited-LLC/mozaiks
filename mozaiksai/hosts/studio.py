@@ -64,6 +64,7 @@ from mozaiksai.core.artifacts import (
     get_artifact_store,
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
+from mozaiksai.core.auth.dependencies import validate_path_id
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -774,6 +775,7 @@ async def get_studio_app_context_status(
     app_id: str,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     summary = await get_current_app_context_summary(
         app_id=resolved_app_id,
@@ -815,6 +817,7 @@ async def create_studio_workspace_snapshot_context(
     body: AppContextWorkspaceSnapshotRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     try:
         result = await register_workspace_snapshot(
@@ -853,6 +856,7 @@ async def create_studio_app_context_refresh_plan(
     body: AppContextRefreshPlanRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     summary = await get_current_app_context_summary(
         app_id=resolved_app_id,
@@ -893,6 +897,7 @@ async def launch_studio_app_context_refresh(
     body: AppContextRefreshLaunchRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     if not body.confirm_launch:
         raise HTTPException(status_code=400, detail="confirm_launch=true is required to launch context refresh.")
     resolved_app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
@@ -922,6 +927,7 @@ async def complete_studio_app_context_refresh(
     body: AppContextRefreshCompleteRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     try:
         result = await complete_context_refresh(
@@ -948,6 +954,7 @@ async def create_studio_app_context_policy_override(
     body: AppContextPolicyOverrideRequest,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(app_id, "app_id")
     resolved_app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     policy_result = body.policy_result or AppContextPolicyResult(
         decision=body.original_policy_decision,
@@ -1059,6 +1066,7 @@ async def patch_integration_connector(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(service, "service")
     from mozaiksai.core.data.persistence import AppConnectorStore
 
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
@@ -1103,6 +1111,7 @@ async def check_integration_connector_health(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(service, "service")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     result = await run_connector_health_check(app_id=app_id, service=service, checked_by="manual")
     return {
@@ -1130,6 +1139,7 @@ async def remove_integration_connector(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(service, "service")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     result = await delete_connector(app_id=app_id, service=service)
     if not result.get("deleted"):
@@ -1176,6 +1186,7 @@ async def get_build_artifact_bundle(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(
@@ -1234,6 +1245,7 @@ async def get_build_artifact_review(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(
@@ -1256,6 +1268,7 @@ async def accept_build_artifact_version(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
@@ -1319,6 +1332,7 @@ async def reject_build_artifact_version(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
@@ -1370,6 +1384,7 @@ async def promote_build_artifact_version(
     app_id: str | None = None,
     principal: UserPrincipal = Depends(require_user_scope),
 ):
+    validate_path_id(artifact_version_id, "artifact_version_id")
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
     artifact_store = get_artifact_store()
     version = await artifact_store.get_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
