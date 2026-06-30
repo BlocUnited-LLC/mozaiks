@@ -332,6 +332,18 @@ This project follows a practical pre-1.0 changelog format:
   raises `StartupConfigError`. 8 new tests cover all provider detection branches and the
   strict-mode raise path.
 
+- **Defense-in-depth admin guards for dns_management and schema_migrations** (`mozaiks-app/app/modules/dns_management/backend/service.py`, `mozaiks-app/app/modules/schema_migrations/backend/policy.py`, `service.py`):
+  - `dns_management.provision_activation_record` is an event-authorized internal action
+    (`api_surface: internal, permissions: []`) called by the event bus, but had no
+    service-layer guard. Added `require_ops_admin(ctx)` — the `ModuleContext` pass-through
+    allows event-driven calls through while blocking direct non-admin API calls.
+    Updated `test_all_actions_require_ops_admin` to exempt `api_surface: internal` actions
+    (event-authorized actions use a different security model).
+  - `schema_migrations.record_migration` and `run_migration` declared `schema_migrations.admin`
+    in `module.yaml` but had no service-layer check. Added `require_schema_migrations_admin(ctx)`
+    to `policy.py` (same `ModuleContext` pass-through pattern). 4 new tests cover
+    admin allowed, `ops.admin` allowed, and non-admin rejected for both write methods.
+
 - **Admin-only service guard for tenant_identity list_all_tenants** (`mozaiks-app/app/modules/tenant_identity/backend/service.py`):
   `list_all_tenants` had no authorization check at the service layer — any code path
   that bypassed the module executor (reaction handlers, direct instantiation, tests)
