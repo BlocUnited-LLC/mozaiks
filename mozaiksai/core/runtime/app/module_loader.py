@@ -767,6 +767,16 @@ class ModuleLoader:
         if not handler_path.exists():
             raise ModuleLoadError(f"handler entrypoint file not found: {handler_path_rel}")
 
+        # Defense-in-depth: verify the resolved path stays within module_dir.
+        # _validate_entrypoint rejects ".." segments, but this explicit check
+        # also catches symlink-based escapes that static analysis cannot prevent.
+        try:
+            handler_path.resolve().relative_to(module_dir.resolve())
+        except ValueError:
+            raise ModuleLoadError(
+                f"handler path escapes module directory: {handler_path_rel}"
+            )
+
         handler = self._import_handler(name, module_dir, handler_path, class_name, definition)
 
         logger.info(

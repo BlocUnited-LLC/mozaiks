@@ -360,3 +360,60 @@ async def test_module_loader_load_all_empty_names_returns_empty_tuple(tmp_path: 
 
     assert loaded == []
     assert failed == []
+
+
+# ---------------------------------------------------------------------------
+# Handler path containment: symlink escape guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_module_loader_rejects_symlinked_handler_outside_module_dir(
+    tmp_path: Path,
+) -> None:
+    """A handler symlinked to a file outside the module directory must be rejected."""
+    app_root = tmp_path / "app"
+    app_root.mkdir()
+    _write_app_json(app_root)
+
+    # Create a target file outside the module directory
+    secret_file = tmp_path / "secret.py"
+    secret_file.write_text(
+        "class TasksHandler:\n    async def list_items(self, ctx, payload): return {}\n",
+        encoding="utf-8",
+    )
+
+    module_dir = app_root / "modules" / "tasks"
+    backend_dir = module_dir / "backend"
+    backend_dir.mkdir(parents=True, exist_ok=True)
+    (module_dir / "contracts").mkdir(exist_ok=True)
+    module_dir.joinpath("module.yaml").write_text(
+        """
+schema_version: mozaiks.module.v1
+module:
+  id: tasks
+  display_name: Tasks
+  version: 1.0.0
+  handler: backend.handler:TasksHandler
+actions:
+  - id: list
+    description: List items
+    handler_method: list_items
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    # Symlink handler.py → outside module directory
+    handler_link = backend_dir / "handler.py"
+    try:
+        handler_link.symlink_to(secret_file)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks not supported on this platform")
+
+    loader = ModuleLoader(base_path=str(app_root))
+    loaded, failed = await loader.load_all(["tasks"])
+
+    assert "tasks" in failed, (
+        "Module loader must reject a handler symlinked outside the module directory"
+    )
+    assert loaded == []
