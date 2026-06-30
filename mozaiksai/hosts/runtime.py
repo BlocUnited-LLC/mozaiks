@@ -15,12 +15,13 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import autogen
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.cors import CORSMiddleware
 
 from logs.logging_config import (
@@ -601,7 +602,26 @@ class TriggerWorkflowRequest(BaseModel):
     app_id: str | None = Field(None, description="Application ID")
     journey_id: str | None = Field(None, description="Optional workflow sequence to bind the run to")
     context: dict[str, Any] | None = Field(None, description="Initial context variables")
-    webhook_url: str | None = Field(None, description="Optional completion notification URL")
+    webhook_url: str | None = Field(None, description="Optional completion notification URL (https:// only)")
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        try:
+            parsed = urlparse(v)
+        except Exception as exc:
+            raise ValueError("webhook_url must be a valid URL") from exc
+        if parsed.scheme != "https":
+            raise ValueError("webhook_url must use the https:// scheme")
+        if not parsed.netloc:
+            raise ValueError("webhook_url must include a hostname")
+        hostname = parsed.hostname or ""
+        # Reject loopback and link-local addresses to prevent SSRF against localhost
+        if hostname in ("localhost", "127.0.0.1", "::1") or hostname.startswith("127."):
+            raise ValueError("webhook_url must not target localhost")
+        return v
 
 
 @app.post("/api/workflows/{workflow_name}/trigger")
