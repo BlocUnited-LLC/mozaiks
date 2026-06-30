@@ -200,6 +200,13 @@ This project follows a practical pre-1.0 changelog format:
   to drive which billing surfaces, plan catalog artifacts, and entitlement gates
   are required in the build plan.
 
+- **Module action payload size limits** (`mozaiksai/core/runtime/composition/module_executor.py`):
+  `ModuleExecutor.execute()` now enforces byte-size caps on both request params
+  (default 512 KB, configurable via `MODULE_PARAMS_MAX_BYTES`) and action responses
+  (default 2 MB, configurable via `MODULE_RESPONSE_MAX_BYTES`). Oversized params are
+  rejected before dispatch with `PAYLOAD_TOO_LARGE`; oversized responses are replaced
+  with a `RESPONSE_TOO_LARGE` error result. 4 new tests cover both paths and edge cases.
+
 - **WebSocket rate limiting** (`mozaiksai/core/transport/rate_limit.py`):
   `RateLimitMiddleware` now overrides `__call__` to intercept WebSocket upgrade
   requests (`scope["type"] == "websocket"`). WS connections from clients that have

@@ -438,3 +438,75 @@ class TestRegistryQueries:
         health = await ex.health()
         assert "contacts" in health["modules"]
         assert health["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 8. Payload size limits
+# ---------------------------------------------------------------------------
+
+
+class TestPayloadSizeLimits:
+    @pytest.mark.asyncio
+    async def test_oversized_params_rejected_before_dispatch(self, monkeypatch):
+        """Params exceeding MODULE_PARAMS_MAX_BYTES must be rejected without dispatching."""
+        # Set a very tight limit so we can trigger it with a small payload.
+        monkeypatch.setenv("MODULE_PARAMS_MAX_BYTES", "10")
+
+        dispatched: list = []
+
+        class _SpyHandler:
+            def echo(self, ctx, **kwargs) -> dict:
+                dispatched.append(kwargs)
+                return {"echo": kwargs}
+
+        ex = ModuleExecutor()
+        ex.register("contacts", _SpyHandler())
+        # Build a params dict that serializes to > 10 bytes.
+        result = await ex.execute(_request(params={"x": "a" * 100}))
+
+        assert result.success is False
+        assert result.error_code == "PAYLOAD_TOO_LARGE"
+        assert not dispatched  # handler must not have been called
+
+    @pytest.mark.asyncio
+    async def test_within_limit_params_dispatched_normally(self, monkeypatch):
+        monkeypatch.setenv("MODULE_PARAMS_MAX_BYTES", "10000")
+
+        ex = ModuleExecutor()
+        ex.register("contacts", _EchoHandler())
+        result = await ex.execute(_request(params={"name": "Alice"}))
+
+        assert result.success is True
+        assert result.data == {"echo": {"name": "Alice"}}
+
+    @pytest.mark.asyncio
+    async def test_oversized_response_blocked(self, monkeypatch):
+        """A module returning more than MODULE_RESPONSE_MAX_BYTES must yield an error result."""
+        monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", "10")
+
+        class _BigResponseHandler:
+            def echo(self, ctx, **kwargs) -> dict:
+                return {"data": "x" * 10000}
+
+        ex = ModuleExecutor()
+        ex.register("contacts", _BigResponseHandler())
+        result = await ex.execute(_request())
+
+        assert result.success is False
+        assert result.error_code == "RESPONSE_TOO_LARGE"
+
+    @pytest.mark.asyncio
+    async def test_none_response_not_size_checked(self, monkeypatch):
+        """Actions that return None should not trigger the size gate."""
+        monkeypatch.setenv("MODULE_RESPONSE_MAX_BYTES", "1")
+
+        class _NoneHandler:
+            def echo(self, ctx, **kwargs):
+                return None
+
+        ex = ModuleExecutor()
+        ex.register("contacts", _NoneHandler())
+        result = await ex.execute(_request())
+
+        assert result.success is True
+        assert result.data is None

@@ -26,6 +26,8 @@ Module handlers must NOT import from mozaiksai.core.workflow or any AI layer.
 from __future__ import annotations
 
 import inspect
+import json
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -41,6 +43,28 @@ from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from mozaiksai.core.runtime.persistence import MongoPersistenceContext
 
 logger = get_workflow_logger("module_executor")
+
+# Maximum serialized byte size for module action params (default 512 KB).
+# Prevents memory exhaustion from unexpectedly large payloads sent through
+# module action dispatch. Override via MODULE_PARAMS_MAX_BYTES env var.
+def _params_max_bytes() -> int:
+    raw = os.getenv("MODULE_PARAMS_MAX_BYTES", "")
+    try:
+        v = int(raw.strip())
+        return v if v > 0 else 512 * 1024
+    except (ValueError, AttributeError):
+        return 512 * 1024
+
+# Maximum serialized byte size for a module action response (default 2 MB).
+# Oversized responses are logged and replaced with an error result so callers
+# don't buffer unbounded data in platform routes or WebSocket payloads.
+def _response_max_bytes() -> int:
+    raw = os.getenv("MODULE_RESPONSE_MAX_BYTES", "")
+    try:
+        v = int(raw.strip())
+        return v if v > 0 else 2 * 1024 * 1024
+    except (ValueError, AttributeError):
+        return 2 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +292,24 @@ class ModuleExecutor:
                     error_code="INVALID_PARAMS",
                 )
 
+        # Input size gate — reject payloads that would exhaust memory on dispatch.
+        if request.params:
+            try:
+                params_size = len(json.dumps(request.params, default=str))
+            except Exception:
+                params_size = 0
+            max_params = _params_max_bytes()
+            if params_size > max_params:
+                logger.warning(
+                    "MODULE_PARAMS_TOO_LARGE: module=%s action=%s size=%d limit=%d",
+                    request.module, request.action, params_size, max_params,
+                )
+                return ModuleResult(
+                    success=False,
+                    error=f"Request payload too large for action '{request.action}'",
+                    error_code="PAYLOAD_TOO_LARGE",
+                )
+
         if context is None:
             context = ModuleContext(
                 app_id=request.app_id,
@@ -298,6 +340,25 @@ class ModuleExecutor:
                     logger.warning(
                         "MODULE_OUTPUT_INVALID: module=%s action=%s error=%s",
                         request.module, request.action, out_error)
+
+            # Response size gate — prevent unbounded responses from being buffered
+            # in platform routes or sent over WebSocket payloads.
+            if result is not None:
+                try:
+                    result_size = len(json.dumps(result, default=str))
+                except Exception:
+                    result_size = 0
+                max_response = _response_max_bytes()
+                if result_size > max_response:
+                    logger.error(
+                        "MODULE_RESPONSE_TOO_LARGE: module=%s action=%s size=%d limit=%d",
+                        request.module, request.action, result_size, max_response,
+                    )
+                    return ModuleResult(
+                        success=False,
+                        error=f"Response too large for action '{request.action}'",
+                        error_code="RESPONSE_TOO_LARGE",
+                    )
 
             logger.debug(
                 "MODULE_ACTION_OK: module=%s action=%s app_id=%s",
