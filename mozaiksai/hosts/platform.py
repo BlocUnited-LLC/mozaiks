@@ -1456,7 +1456,7 @@ async def get_profile_panels(
                     panel_out["error"] = result.error or f"Action {action!r} failed"
             except Exception as exc:
                 logger.warning("[profile-panels] %s.%s failed: %s", module_name, action, exc)
-                panel_out["error"] = str(exc)
+                panel_out["error"] = f"Action {action!r} failed"
 
         hydrated.append(panel_out)
 
