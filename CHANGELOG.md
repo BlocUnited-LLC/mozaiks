@@ -14,6 +14,20 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Security
 
+- **Auth endpoint rate limit**: `/api/auth` now has a tighter default of 20 req/min
+  (vs the global 60) in `RateLimitMiddleware` to reduce brute-force risk on token
+  and login routes. Overridable via `RATE_LIMIT_PATH_LIMITS`.
+
+- **Profile panel error sanitization** (`mozaiksai/hosts/platform.py`):
+  `get_profile_panels` no longer surfaces raw exception messages from module action
+  failures in the `/api/me/profile-panels` response. Replaced `str(exc)` with a
+  generic `"Action {action!r} failed"` message; full detail stays in server logs.
+
+- **Path ID validation on workflow routes** (`mozaiksai/hosts/runtime.py`):
+  `validate_path_id` now applied to `workflow_name`, `app_id`, and `chat_id` on
+  five previously unprotected routes: `component_action`, `trigger`, `transport`,
+  `tools`, and `ui-tools`.
+
 - **HTTP security headers middleware** (`mozaiksai/core/transport/security_headers.py`):
   `SecurityHeadersMiddleware` now added to all Mozaiks hosts. Sets
   `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
@@ -49,6 +63,30 @@ This project follows a practical pre-1.0 changelog format:
   tools, and structured logs.
 
 ### Added
+
+- **App runtime load acceptance gate** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
+  `run_app_bundle_acceptance_gate` now runs `AppLoader.load()` on the assembled bundle
+  inside a temp dir before export. Regular `__init__.py` stubs are injected so all
+  Python package directories resolve as regular (not namespace) packages. `sys.path` and
+  `sys.modules` are snapshot-restored after each load so the gate is fully test-isolated.
+  Test `test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance` now asserts
+  `app_runtime_load_result["passed"] is True`.
+
+- **Platform hooks permission override** (`mozaiksai/core/runtime/composition/platform_hooks.py`):
+  `PlatformHookRegistry.call_module_permissions()` allows hosted products to inject
+  custom permission logic per module/action dispatch. Wired into `_execute_module_action`
+  in `platform.py`; falls back to `principal.scopes` when no hook is registered.
+
+- **`revenue_model` context variable and structured output field** for AppGenerator:
+  InterviewAgent and AppPlanAgent can now capture and use the revenue model
+  (`free`, `subscriptions`, `pay_per_use`, `one_time_purchase`, `community_funded`)
+  to drive which billing surfaces, plan catalog artifacts, and entitlement gates
+  are required in the build plan.
+
+- **Expanded production readiness gate** (`scripts/production_readiness_gate.py`):
+  9 additional test suites added to `PYTEST_GATE_TARGETS` covering runtime contracts,
+  platform hooks, offline acceptance, security hardening, workflow contracts, session
+  launcher, and factory workflow integration.
 
 - **Live AppGenerator subscription smoke** (`scripts/smoke_appgenerator_live_subscription.py`)
   now exercises real ConfigMiddlewareAgent LLM calls for SaaS subscription config
