@@ -72,6 +72,25 @@ def _safe_relpath(raw: str) -> str | None:
     return str(p)
 
 
+def _is_safe_build_command(command: str) -> bool:
+    """Return True when *command* looks like a safe build/test shell command.
+
+    Blocks shell metacharacters that enable command chaining or substitution:
+    ``;``, ``&&``, ``||``, ``|``, backtick, ``$(…)``, and output redirection
+    (``>`` / ``<``).  Also rejects commands that contain null bytes.
+
+    This is defence-in-depth against prompt-injection attacks where a
+    compromised or confused agent emits shell payloads inside
+    ``validation_commands``.  Legitimate build commands (``npm install``,
+    ``npm run build``, ``python -m pytest``, etc.) never need these characters.
+    """
+    if not command or "\x00" in command:
+        return False
+    # Reject shell metacharacters used for chaining, substitution, or redirection
+    _SHELL_METACHAR_RE = re.compile(r"[;|&`$><]")
+    return not _SHELL_METACHAR_RE.search(command)
+
+
 def _is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -949,6 +968,11 @@ async def _run_local_validation(
             _write_files_to_dir(root, resolved_files)
 
             for cmd in commands:
+                if not _is_safe_build_command(cmd):
+                    result["warnings"].append(
+                        f"Skipped unsafe validation command (contains shell metacharacters): {cmd!r}"
+                    )
+                    continue
                 exit_code, stdout, stderr = await _run_local_command(
                     command=cmd,
                     cwd=root,
@@ -2046,6 +2070,7 @@ async def validate_app_bundle_from_request(
 
 
 __all__ = [
+    "_is_safe_build_command",
     "parse_build_errors",
     "run_app_bundle_acceptance_gate",
     "validate_module_implementation_contract",

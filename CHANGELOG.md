@@ -216,6 +216,13 @@ This project follows a practical pre-1.0 changelog format:
   HTTP 500 detail, which would have leaked exceptions in all generated apps' admin
   endpoints. Replaced with a generic message; full exception is logged server-side.
 
+- **Module handler symlink-escape guard** (`mozaiksai/core/runtime/app/module_loader.py`):
+  After locating a handler file, the loader now calls `handler_path.resolve().relative_to(module_dir.resolve())`
+  to confirm the resolved path is still within the module directory. This guards against
+  symlink-based escapes that the existing static analysis (rejecting `..`, absolute paths,
+  and `_shared` references) cannot prevent. A symlinked handler pointing outside the
+  module directory causes a `ModuleLoadError` and the module is classified as failed.
+
 - **Azure Key Vault connector error suppression** (`mozaiksai/core/secrets/connector_vault.py`):
   `store_secret`, `get_secret`, and `delete_secret` no longer return raw Azure
   SDK exception text (which can include subscription IDs and vault URLs).

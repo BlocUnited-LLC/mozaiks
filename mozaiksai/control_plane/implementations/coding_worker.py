@@ -10,7 +10,10 @@ logger = logging.getLogger(__name__)
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_build
+from factory_app.workflows.AppGenerator.tools.app_validation import (
+    _is_safe_build_command,
+    validate_app_build,
+)
 from mozaiksai.control_plane.config import ControlPlaneConfig, load_control_plane_config
 from mozaiksai.control_plane.contracts import (
     CodingWorkerPlan,
@@ -271,8 +274,13 @@ class ScopedRefinementCodingWorker:
         commands = []
         for raw_command in plan.validation_commands or []:
             command = str(raw_command or "").strip()
-            if command:
+            if command and _is_safe_build_command(command):
                 commands.append(command)
+            elif command:
+                logger.warning(
+                    "CODING_WORKER: rejected unsafe validation_command (shell metacharacters): %r",
+                    command,
+                )
 
         return plan.model_copy(
             update={
