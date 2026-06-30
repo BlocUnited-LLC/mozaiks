@@ -116,6 +116,20 @@ This project follows a practical pre-1.0 changelog format:
   UUID4 is generated. Bound to `request.state.request_id` for handlers,
   tools, and structured logs.
 
+- **AppGenerator admin route template hardened** (`factory_app/workflows/AppGenerator/tools/app_backend_admin_codegen.py`):
+  The generated `/api/admin/config` route template was emitting `str(exc)` in the
+  HTTP 500 detail, which would have leaked exceptions in all generated apps' admin
+  endpoints. Replaced with a generic message; full exception is logged server-side.
+
+- **Azure Key Vault connector error suppression** (`mozaiksai/core/secrets/connector_vault.py`):
+  `store_secret`, `get_secret`, and `delete_secret` no longer return raw Azure
+  SDK exception text (which can include subscription IDs and vault URLs).
+  Generic messages returned to callers; exceptions logged with `exc_info=True`.
+
+- **AG2 stream history bounded** (`mozaiksai/core/adapters/ag2_stream_storage.py`):
+  `get_history` now applies `.limit(10_000)` to prevent unbounded MongoDB reads
+  on event streams from long-running or abnormally large AG2 tasks.
+
 ### Added
 
 - **App runtime load acceptance gate** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
