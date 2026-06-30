@@ -351,6 +351,19 @@ This project follows a practical pre-1.0 changelog format:
     to `policy.py` (same `ModuleContext` pass-through pattern). 4 new tests cover
     admin allowed, `ops.admin` allowed, and non-admin rejected for both write methods.
 
+- **Defense-in-depth admin guards for wallet admin_internal actions** (`mozaiks-app/app/modules/wallet/backend/service.py`, `policy.py`):
+  `get_platform_financials`, `provision_hosted_wallet`, and `get_hosted_wallet_provisioning_status`
+  are `api_surface: admin_internal, permissions: [wallet.admin]` actions that previously relied
+  solely on the module executor for enforcement. Added `require_wallet_admin(ctx)` to `policy.py`
+  (same `ModuleContext` pass-through pattern) and wired it into all three methods. 3 new tests
+  cover non-admin blocked and admin allowed for each method.
+
+- **Input length limits on community_governance and messages write methods** (`mozaiks-app/app/modules/community_governance/backend/service.py`, `mozaiks-app/app/modules/messages/backend/service.py`):
+  `create_proposal` now truncates `title` to 200 characters and `description` to 5,000 characters.
+  `create_announcement` now truncates `title` to 200 characters and `body` to 5,000 characters.
+  Prevents unbounded user-supplied strings from being written to MongoDB. 5 new tests cover
+  truncation behavior for both methods.
+
 - **Admin-only service guard for tenant_identity list_all_tenants** (`mozaiks-app/app/modules/tenant_identity/backend/service.py`):
   `list_all_tenants` had no authorization check at the service layer — any code path
   that bypassed the module executor (reaction handlers, direct instantiation, tests)
