@@ -232,6 +232,74 @@ This project follows a practical pre-1.0 changelog format:
   `get_history` now applies `.limit(10_000)` to prevent unbounded MongoDB reads
   on event streams from long-running or abnormally large AG2 tasks.
 
+- **SSRF guard on domain probe** (`mozaiks-app/app/modules/infra_assurance/backend/service.py`):
+  `run_checks` now validates the caller-supplied domain through `_is_safe_probe_domain()`
+  before any HTTP probe runs. Blocked targets: loopback names (`localhost`, `127.x`,
+  `::1`), all RFC-1918 private ranges, link-local/IMDS (`169.254.x`), CGNAT
+  (`100.64.0.0/10`), IPv6 ULA (`fc00::/7`), and private DNS TLDs
+  (`.local`, `.internal`, `.corp`, `.home`, `.lan`, `.intranet`, `.localdomain`,
+  `.example`, `.test`, `.invalid`). Domains that fail validation return an error
+  without making any outbound request. Hostname-format validation applied to bare
+  labels. 6 new tests cover accepted public hosts, all blocked categories, and edge cases.
+
+- **HTTP probe error sanitization** (`mozaiks-app/app/services/adapters/probes/http_health.py`):
+  `check_http_health` no longer includes raw `httpx` exception text in the returned
+  `error` field (which flows through `infra_assurance` and `provider_connections`
+  into user-visible responses). `TimeoutException` returns `"timeout after {N}s"`;
+  `HTTPError` returns only the exception class name. Full detail logged server-side.
+
+- **Azure cert 404 detection hardened** (`mozaiks-app/app/services/adapters/ssl/azure_cert.py`):
+  `get_status` and `deprovision` previously parsed `"404"` and `"NotFound"` from
+  `str(exc)`, which is brittle and could match false positives in exception messages.
+  Both now check `exc.response.status_code == 404` directly on the response attribute.
+
+- **Auth bypass fixed in build event route** (`mozaiks-app/app/modules/app_registry/backend/routes_build_events.py`):
+  `_authorize_internal_request` previously allowed unauthenticated calls in any
+  environment where `MOZAIKS_PLATFORM_INTERNAL_API_KEY` was not configured. Flipped
+  to fail-safe: an unconfigured key now returns 503 (endpoint not configured) rather
+  than silently passing the request. Removed dead `_production_env()` helper.
+
+- **Admin-only service guards for app_registry** (`mozaiks-app/app/modules/app_registry/backend/service.py`, `policy.py`):
+  `list_all_apps` now calls `require_app_registry_admin(ctx)` at the service layer,
+  enforcing that the caller holds `app_registry.admin` permission. Previously the
+  guard existed only in `module.yaml`; a misconfigured host or direct service call
+  could bypass it. `require_app_registry_admin` added to `policy.py`.
+
+- **Unsafe hosting URL scheme rejected** (`mozaiks-app/app/modules/app_registry/backend/service.py`):
+  `on_app_deployed` now validates that `hosting_url` uses `https://` before storing it.
+  Non-HTTPS URLs (including `javascript:`, `file://`, and bare HTTP) are rejected with an
+  error; the call is logged and the record is not updated.
+
+- **Bare assert replaced with explicit guard** (`mozaiks-app/app/modules/app_registry/backend/generated_bundle_gate.py`):
+  `validate_generated_bundle_for_hosting` contained `assert bundle_path is not None`
+  which is silently removed by Python's `-O` flag in optimized production builds.
+  Replaced with an explicit `if bundle_path is None: return _failure(...)` check.
+
+- **IDOR fix for listing submission** (`mozaiks-app/app/modules/investor_marketplace/backend/service.py`):
+  `submit_listing` now fetches the target listing and verifies `owner_id` matches the
+  authenticated user before performing any update. Previously a caller could supply an
+  arbitrary `listing_id` and mutate another user's listing record.
+
+- **Anonymous investor fallback removed** (`mozaiks-app/app/modules/investor_marketplace/backend/policy.py`):
+  `investor_id_from_context` previously returned the string `"anonymous"` when no
+  `user_id` was present. Unauthenticated callers could create records aggregated under
+  a single shared `"anonymous"` key. Now returns `""`, and all write methods in the
+  service layer reject an empty `investor_id` with an explicit auth-required error.
+
+- **Admin-only service guards for investor_marketplace** (`mozaiks-app/app/modules/investor_marketplace/backend/service.py`, `policy.py`):
+  `approve_listing`, `approve_marketplace_placement`, and
+  `bulk_set_marketplace_placement_status` now call `require_marketplace_admin(ctx)` at
+  the service layer, enforcing the `marketplace.approve` permission even when reached
+  through non-module-dispatch paths. `require_marketplace_admin` added to `policy.py`.
+
+- **Input length limits and investor_type allowlist** (`mozaiks-app/app/modules/investor_marketplace/backend/service.py`):
+  `record_investment_interest` truncates `message` to 2,000 characters.
+  `upsert_investor_profile` validates `investor_type` against an explicit allowlist
+  (`individual`, `institutional`, `fund`, `firm`, `angel`, `corporate`, `family_office`,
+  `vc`, `pe`) and truncates `thesis` to 2,000 characters.
+  `record_placement_impression` and `record_placement_click` truncate `slot` and
+  `source` to 64 characters. Prevents unbounded data from being written to MongoDB.
+
 ### Added
 
 - **App runtime load acceptance gate** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
