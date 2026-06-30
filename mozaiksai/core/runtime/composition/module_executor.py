@@ -319,7 +319,7 @@ class ModuleExecutor:
             )
             return ModuleResult(
                 success=False,
-                error=str(exc),
+                error=f"Action {request.action!r} failed",
                 error_code="EXECUTION_ERROR",
             )
 

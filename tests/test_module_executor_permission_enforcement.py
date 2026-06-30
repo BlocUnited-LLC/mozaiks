@@ -127,3 +127,47 @@ async def test_granted_permissions_are_injected_into_module_context():
     assert result.success is True
     assert result.data == {"permissions": ["orders:read"]}
 
+
+
+# ── error suppression ──────────────────────────────────────────────────────────
+
+
+class _RaisingHandler:
+    """Handler that raises a raw exception with internal details."""
+
+    async def risky(self, ctx, **kwargs):
+        raise RuntimeError("mongodb://user:secret@host/db connection refused")
+
+
+@pytest.mark.asyncio
+async def test_execution_error_does_not_leak_exception_message():
+    """EXECUTION_ERROR responses must suppress the raw exception message.
+
+    Internal exception text (e.g. DB connection strings, stack frames) must
+    not reach callers — only a generic 'action failed' message is returned.
+    The full error is still logged (verified by exc_info=True in the handler).
+    """
+    executor = ModuleExecutor()
+    executor.register(
+        "risky_module",
+        _RaisingHandler(),
+        action_method_map={"risky": "risky"},
+    )
+    req = ModuleRequest(
+        module="risky_module",
+        action="risky",
+        params={},
+        app_id="app_test",
+        granted_permissions=None,
+    )
+
+    result = await executor.execute(req)
+
+    assert result.success is False
+    assert result.error_code == "EXECUTION_ERROR"
+    # Raw exception text must not be in the response.
+    assert "mongodb" not in (result.error or "")
+    assert "secret" not in (result.error or "")
+    assert "connection refused" not in (result.error or "")
+    # Must contain a generic, user-facing message.
+    assert "failed" in (result.error or "").lower()

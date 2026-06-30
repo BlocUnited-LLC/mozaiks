@@ -426,11 +426,11 @@ class WorkflowBridgeMixin:
                 except Exception as _rev_exc:
                     logger.debug("REVISION_FAIL_TASK_CREATE_FAILED app=%s workflow=%s: %s", app_id, workflow_name, _rev_exc)
             await self.send_error(
-                error_message=f"An internal error occurred: {e}",
+                error_message="An internal error occurred. Please try again.",
                 error_code="WORKFLOW_EXECUTION_FAILED",
                 chat_id=chat_id
             )
-            return {"status": "error", "chat_id": chat_id, "message": str(e)}
+            return {"status": "error", "chat_id": chat_id, "message": "Workflow execution failed"}
 
     # ==================================================================================
     # BACKGROUND WORKFLOW EXECUTION

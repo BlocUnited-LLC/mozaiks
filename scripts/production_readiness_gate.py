@@ -43,6 +43,9 @@ PYTEST_GATE_TARGETS = [
     "tests/test_workflow_declarative_contracts.py",
     "tests/test_workflow_entry_point_config.py",
     "tests/test_factory_workflow_integration_contracts.py",
+    "tests/test_security_hardening.py",
+    "tests/test_rate_limit_helpers.py",
+    "tests/test_rate_limit_middleware.py",
 ]
 
 QUICK_PYTEST_TARGETS = [
@@ -58,6 +61,9 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_profile_contract.py",
     "tests/test_module_executor_permission_enforcement.py",
     "tests/test_offline_generated_build_acceptance.py",
+    "tests/test_security_hardening.py",
+    "tests/test_rate_limit_helpers.py",
+    "tests/test_rate_limit_middleware.py",
 ]
 
 SOURCE_HYGIENE_SUFFIXES = {

@@ -310,7 +310,7 @@ async def get_admin_sessions(
         return {"sessions": sessions, "total": len(sessions)}
     except Exception as e:
         logger.warning("[admin] sessions query failed: %s", e)
-        return {"sessions": [], "total": 0, "error": str(e)}
+        return {"sessions": [], "total": 0, "error": "Sessions query failed"}
 
 
 # ---------------------------------------------------------------------------

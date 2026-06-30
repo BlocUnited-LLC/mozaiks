@@ -629,7 +629,8 @@ async def create_workspace_app(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to create app record: {exc}") from exc
+        logger.exception("Failed to create app record")
+        raise HTTPException(status_code=500, detail="Failed to create app record") from exc
 
 
 @app.get("/api/studio/integrations")
@@ -1652,7 +1653,8 @@ async def save_build_surface(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to persist build state: {exc}") from exc
+        logger.exception("Failed to persist build state")
+        raise HTTPException(status_code=500, detail="Failed to persist build state") from exc
 
 
 class WorkflowTriggerRequest(BaseModel):

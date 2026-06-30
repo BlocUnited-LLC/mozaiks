@@ -460,7 +460,7 @@ async def health_active_runs(
         transport = await SimpleTransport.get_instance()
         return transport.get_background_run_summary()
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to retrieve background run summary") from exc
 
 
 def _validate_context_for_workflow(workflow_name: str, context: dict[str, Any]) -> dict[str, Any]:
