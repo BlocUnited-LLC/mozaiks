@@ -416,8 +416,10 @@ async def health_readiness(request: Request):
         "timestamp": datetime.now(UTC).isoformat(),
         "checks": checks,
     }
+    # Expose only the count of failed modules, not the names, to avoid leaking
+    # internal app structure through an unauthenticated endpoint.
     if failed_module_names:
-        body["failed_modules"] = failed_module_names
+        body["failed_module_count"] = len(failed_module_names)
     return JSONResponse(status_code=status_code, content=body)
 
 

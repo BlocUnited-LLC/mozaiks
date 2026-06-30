@@ -484,7 +484,10 @@ def test_studio_trigger_endpoint_rejects_refinement_when_control_plane_disabled(
     )
 
     assert response.status_code == 503
-    assert "Control-plane harness is disabled" in response.json()["detail"]
+    # Internal error details are suppressed; generic message returned to callers
+    detail = response.json()["detail"]
+    assert detail == "Refinement classification unavailable"
+    assert "Control-plane harness" not in detail
 
 
 def test_studio_trigger_endpoint_can_short_circuit_to_coding_worker(monkeypatch):

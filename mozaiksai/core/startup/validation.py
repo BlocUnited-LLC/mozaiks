@@ -168,6 +168,30 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
                 extra={"check": "workflows_path", "mode": mode},
             )
 
+    # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
+    # When not set, service-to-service requests bypass the key check (dev mode).
+    # Warn operators so this is not accidentally left unset in production.
+    internal_key = os.getenv("INTERNAL_API_KEY", "").strip()
+    if not internal_key:
+        msg = (
+            "INTERNAL_API_KEY is not set. Service-to-service API key validation "
+            "will be skipped. Set INTERNAL_API_KEY to a strong random value in "
+            "production to protect internal runtime endpoints."
+        )
+        warnings.append(msg)
+        logger.warning(
+            "STARTUP_CHECK_FAILED: %s",
+            msg,
+            extra={"check": "internal_api_key", "mode": mode},
+        )
+        # Not raised in strict mode — the endpoint still requires user auth;
+        # the internal key is a defense-in-depth layer, not the only gate.
+    else:
+        logger.info(
+            "STARTUP_CHECK_OK: INTERNAL_API_KEY is configured",
+            extra={"check": "internal_api_key", "mode": mode},
+        )
+
     # ── Summary ───────────────────────────────────────────────────────────────
     if not warnings:
         logger.info(

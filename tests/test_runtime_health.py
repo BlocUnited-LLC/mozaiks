@@ -99,6 +99,7 @@ def test_readiness_returns_200_when_healthy(monkeypatch) -> None:
     assert body["checks"]["transport"] == "ok"
     assert body["checks"]["app_startup"] == "ok"
     assert "failed_modules" not in body
+    assert "failed_module_count" not in body
 
 
 def test_readiness_returns_503_when_startup_degraded(monkeypatch) -> None:
@@ -114,16 +115,18 @@ def test_readiness_returns_503_when_startup_degraded(monkeypatch) -> None:
     assert "MODULE_LOAD_PARTIAL" in body["checks"]["app_startup"]
 
 
-def test_readiness_includes_failed_modules_when_set(monkeypatch) -> None:
+def test_readiness_includes_failed_module_count_when_set(monkeypatch) -> None:
     resp = _ready_response(
         monkeypatch,
         startup_degraded=True,
-        startup_degraded_reason="MODULE_LOAD_PARTIAL: 2 module(s) failed: alpha, beta",
+        startup_degraded_reason="MODULE_LOAD_PARTIAL: 2 module(s) failed to load",
         failed_module_names=["alpha", "beta"],
     )
     assert resp.status_code == 503
     body = resp.json()
-    assert body["failed_modules"] == ["alpha", "beta"]
+    # Module names must not be exposed on unauthenticated readiness probe
+    assert "failed_modules" not in body
+    assert body["failed_module_count"] == 2
 
 
 def test_readiness_no_failed_modules_key_when_all_loaded(monkeypatch) -> None:
