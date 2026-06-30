@@ -150,11 +150,25 @@ async def handle_chat_upload(
     safe_name = Path(getattr(file_obj, "filename", None) or "upload.bin").name
     upload_root = _upload_root_from_env()
     dest_dir = (upload_root / app_id / chat_id).resolve()
+
+    # Defense-in-depth: confirm dest_dir is still inside upload_root after resolution.
+    # Path traversal via symlinks or unusual app_id/chat_id values would be caught here.
+    try:
+        dest_dir.relative_to(upload_root)
+    except ValueError as exc:
+        raise ValueError("Upload destination is outside the permitted upload directory") from exc
+
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     attachment_id = f"att_{uuid4().hex}"
     stored_name = f"{attachment_id}_{safe_name}"
     stored_path = (dest_dir / stored_name).resolve()
+
+    # Verify the final file path is also inside upload_root.
+    try:
+        stored_path.relative_to(upload_root)
+    except ValueError as exc:
+        raise ValueError("Upload destination is outside the permitted upload directory") from exc
 
     max_bytes = _max_bytes_from_env("UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
     bytes_written = 0

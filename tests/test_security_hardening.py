@@ -343,3 +343,45 @@ class TestWebhookUrlValidator:
         from pydantic import ValidationError
         with pytest.raises(ValidationError):
             self._make("example.com/webhook")
+
+    def test_rfc1918_10_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://10.0.0.1/webhook")
+
+    def test_rfc1918_172_16_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://172.16.0.1/webhook")
+
+    def test_rfc1918_172_31_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://172.31.255.255/webhook")
+
+    def test_rfc1918_192_168_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://192.168.1.1/webhook")
+
+    def test_link_local_169_254_rejected(self):
+        """Cloud metadata endpoint (AWS/GCP/Azure) must be blocked."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://169.254.169.254/latest/meta-data/")
+
+    def test_ipv6_loopback_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://[::1]/webhook")
+
+    def test_ipv6_ula_rejected(self):
+        """IPv6 Unique Local Address (fc00::/7) must be blocked."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://[fd00::1]/webhook")
+
+    def test_zero_address_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            self._make("https://0.0.0.0/webhook")

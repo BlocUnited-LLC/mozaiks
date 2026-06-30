@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -620,9 +621,23 @@ class TriggerWorkflowRequest(BaseModel):
         if not parsed.netloc:
             raise ValueError("webhook_url must include a hostname")
         hostname = parsed.hostname or ""
-        # Reject loopback and link-local addresses to prevent SSRF against localhost
-        if hostname in ("localhost", "127.0.0.1", "::1") or hostname.startswith("127."):
-            raise ValueError("webhook_url must not target localhost")
+        # Reject hostnames that are private or reserved IP addresses.
+        # Covers loopback (127.x / ::1), RFC-1918 private ranges (10.x, 172.16-31.x,
+        # 192.168.x), link-local (169.254.x — cloud metadata endpoints), and
+        # IPv6 ULA / link-local ranges.
+        _BLOCKED_HOSTNAMES = {"localhost", "::1", "0.0.0.0"}
+        if hostname in _BLOCKED_HOSTNAMES:
+            raise ValueError("webhook_url must not target a private or reserved address")
+        try:
+            addr = ipaddress.ip_address(hostname)
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast:
+                raise ValueError("webhook_url must not target a private or reserved address")
+        except ValueError as ip_exc:
+            if "webhook_url" in str(ip_exc):
+                # Re-raise our own validation error (not an ipaddress parse error)
+                raise
+            # hostname is a domain name — pass; runtime should use an egress proxy
+            # for comprehensive SSRF protection in production deployments.
         return v
 
 
