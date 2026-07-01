@@ -261,6 +261,13 @@ class AG2NetworkRunner:
             )
         except Exception as exc:
             wal = await hub.read_wal(channel_id) if channel_id else []
+            logger.error(
+                "AG2 network run failed workflow=%s chat=%s: %s",
+                request.workflow_name,
+                request.chat_id,
+                exc,
+                exc_info=True,
+            )
             return AG2NetworkRunnerResult(
                 status=RunStatus.FAILED,
                 workflow_name=request.workflow_name,
@@ -268,7 +275,7 @@ class AG2NetworkRunner:
                 app_id=request.app_id,
                 channel_id=channel_id,
                 wal=[_envelope_to_dict(envelope) for envelope in wal],
-                error=str(exc),
+                error="internal_error",
             )
         finally:
             for hub_client in reversed(hub_clients):

@@ -596,6 +596,13 @@ This project follows a practical pre-1.0 changelog format:
   Replaced with opaque `"An internal error occurred."` / `"internal_error"` strings. Full
   exception detail continues to be logged server-side via `logger.error(..., exc_info=True)`.
 
+- **AG2 adapter RunResult error detail suppression** (`mozaiksai/core/adapters/ag2_orchestration.py`, `ag2_network_runner.py`, `ag2_task_batch_runner.py`):
+  All three AG2 runner adapters returned `RunResult(error=str(exc))` on failure, which flows
+  through `runner_result.error` → `run_error` in `orchestration_patterns.py` and is included in
+  the `run_complete` WebSocket event sent to the browser. Raw Python exception text (which can
+  contain AG2 internals, stack hints, or third-party API details) is now replaced with
+  `"internal_error"`. Full exception detail is logged server-side with `exc_info=True`.
+
 - **PermissionError message suppressed in module responses** (`mozaiksai/core/runtime/composition/module_executor.py`):
   `PermissionError` caught by the module executor was returning `str(exc)` in `ModuleResult.error`,
   which could expose internal permission set names or access control details to API callers.

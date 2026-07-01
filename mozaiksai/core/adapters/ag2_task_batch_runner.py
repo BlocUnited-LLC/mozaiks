@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from autogen.beta.network.policies import CHANNEL_STATE_DEP
 
@@ -66,11 +69,18 @@ class AG2TaskBatchRunner:
                 error=f"task worker did not complete within {request.timeout_seconds or 120} seconds",
             )
         except Exception as exc:
+            logger.error(
+                "AG2 task batch run failed batch=%s task=%s: %s",
+                request.batch_id,
+                request.task_id,
+                exc,
+                exc_info=True,
+            )
             return AG2TaskBatchRunnerResult(
                 status=RunStatus.FAILED,
                 channel_id=f"{request.batch_id}:{request.task_id}",
                 close_reason="worker_failed",
-                error=str(exc),
+                error="internal_error",
             )
 
         validation = validate_agent_structured_output(

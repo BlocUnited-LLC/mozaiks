@@ -138,7 +138,7 @@ class AG2OrchestrationAdapter:
                 status=RunStatus.FAILED,
                 chat_id=request.chat_id,
                 workflow_name=request.workflow_name,
-                error=str(exc),
+                error="internal_error",
             )
 
     # ------------------------------------------------------------------
@@ -208,7 +208,7 @@ class AG2OrchestrationAdapter:
                 status=RunStatus.FAILED,
                 chat_id=request.chat_id,
                 workflow_name=request.workflow_name,
-                error=str(exc),
+                error="internal_error",
             )
 
     # ------------------------------------------------------------------
