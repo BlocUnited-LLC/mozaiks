@@ -724,14 +724,14 @@ async def run_workflow_orchestration(
                 wf_logger.debug("[%s] on_fail lifecycle trigger failed: %s", workflow_name_upper, _lc_err)
         try:
             await transport.send_event_to_ui(
-                {"kind": "error", "workflow": workflow_name, "chat_id": chat_id, "message": str(e), "error": str(e), "status": "failed"},
+                {"kind": "error", "workflow": workflow_name, "chat_id": chat_id, "message": "An internal error occurred.", "error": "internal_error", "status": "failed"},
                 chat_id,
             )
         except Exception as _ev_err:
             wf_logger.debug("[%s] Failed to emit error event: %s", workflow_name_upper, _ev_err)
         try:
             await transport.send_event_to_ui(
-                {"kind": "run_complete", "workflow": workflow_name, "chat_id": chat_id, "run_completed": False, "awaiting_user_input": False, "status": "failed", "reason": "failed", "error": str(e)},
+                {"kind": "run_complete", "workflow": workflow_name, "chat_id": chat_id, "run_completed": False, "awaiting_user_input": False, "status": "failed", "reason": "failed", "error": "internal_error"},
                 chat_id,
             )
         except Exception as _rc_err:

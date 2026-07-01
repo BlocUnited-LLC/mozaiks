@@ -134,7 +134,8 @@ def summarize_validation(result: ThemeValidationResult) -> dict[str, Any]:
         raise ThemeValidationError("Cannot summarize failed validation", errors=result.errors)
 
     theme = result.theme
-    assert theme is not None  # for type checkers
+    if theme is None:
+        raise ThemeValidationError("Validation result has no theme", errors=[])
 
     primary = theme.colors.primary
     branding = theme.branding

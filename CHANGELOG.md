@@ -589,6 +589,25 @@ This project follows a practical pre-1.0 changelog format:
   Pairwise cooccurrence patterns accumulate into a ranked module popularity index.
   Capped at 20 modules (190 pairs maximum); no-op in OSS runs.
 
+- **WebSocket error detail suppression** (`mozaiksai/core/workflow/orchestration_patterns.py`):
+  Uncaught orchestration exceptions previously sent `str(e)` in both the `error` and `message`
+  fields of WebSocket `error` and `run_complete` UI events. Raw exception text can contain DB
+  connection strings, internal paths, or third-party API error details visible to the browser.
+  Replaced with opaque `"An internal error occurred."` / `"internal_error"` strings. Full
+  exception detail continues to be logged server-side via `logger.error(..., exc_info=True)`.
+
+- **PermissionError message suppressed in module responses** (`mozaiksai/core/runtime/composition/module_executor.py`):
+  `PermissionError` caught by the module executor was returning `str(exc)` in `ModuleResult.error`,
+  which could expose internal permission set names or access control details to API callers.
+  Now returns `"Permission denied."` — a generic, non-leaky string. Full detail remains in
+  `logger.warning` server-side. Test updated to verify the generic message.
+
+- **`assert` → explicit raise in theme_validation** (`mozaiksai/core/data/themes/theme_validation.py`):
+  `summarize_validation` used `assert theme is not None` as a type-narrowing guard.
+  Under Python `-O` (optimize), bare `assert` statements are silently removed, so a broken
+  `ThemeValidationResult` would propagate `None` and raise an `AttributeError` rather than a
+  clear error. Replaced with `if theme is None: raise ThemeValidationError(...)`.
+
 - **`list_plans` action added to billing_portal template** (`factory_app/build_context/mozaikspay/templates/modules/billing_portal/`):
   New `list_plans` action (read-only, `billing_portal.read` permission, no entitlement gate) reads
   `app/config/subscriptions.yaml` and returns the safe plan catalog (plan_id, label, description,

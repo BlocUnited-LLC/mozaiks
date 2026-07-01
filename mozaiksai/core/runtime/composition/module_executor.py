@@ -376,7 +376,7 @@ class ModuleExecutor:
             )
             return ModuleResult(
                 success=False,
-                error=str(exc),
+                error="Permission denied.",
                 error_code="PERMISSION_DENIED",
             )
         except Exception as exc:

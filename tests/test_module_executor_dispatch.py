@@ -150,8 +150,8 @@ class TestActionErrorHandling:
         result = await ex.execute(_request(action="restricted", granted_permissions=["contacts.read"]))
         assert result.success is False
         assert result.error_code == "PERMISSION_DENIED"
-        # The original message is forwarded so callers can describe the missing permission.
-        assert "contacts.admin" in result.error
+        # Generic message returned — internal permission names are not leaked to callers.
+        assert result.error == "Permission denied."
 
 
 # ---------------------------------------------------------------------------
