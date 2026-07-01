@@ -239,10 +239,11 @@ class DockerSandboxAdapter:
                 stderr=stderr,
             )
         except Exception as exc:
+            logger.error("Docker sandbox run_command failed session=%s: %s", session_id, exc, exc_info=True)
             return SandboxRunResult(
                 success=False,
                 exit_code=1,
-                error=str(exc),
+                error="sandbox_error",
             )
 
     async def get_preview_url(
