@@ -11,6 +11,7 @@ from mozaiksai.core.runtime.persistence import (
     MongoPersistenceCollection,
     MongoPersistenceContext,
     PersistenceCollection,
+    app_data_from_context,
     collection_name_for,
 )
 from mozaiksai.core.runtime.persistence.mongo import DEFAULT_APP_DATABASE_NAME, MAX_FIND_MANY_LIMIT
@@ -131,6 +132,33 @@ def test_collection_uses_deterministic_collection_name() -> None:
         entity_name="projects",
     )
     assert expected in client.databases[DEFAULT_APP_DATABASE_NAME].collections
+
+
+def test_literal_collection_uses_raw_contract_collection_name() -> None:
+    context, client = _context()
+
+    collection = context.literal_collection("hosted_workspace_memberships")
+
+    assert collection is client.databases[DEFAULT_APP_DATABASE_NAME].collections["hosted_workspace_memberships"]
+
+
+def test_app_data_from_context_uses_literal_collection_resolver_for_mongo_persistence() -> None:
+    context, client = _context()
+    app_data = app_data_from_context(
+        type("Ctx", (), {"persistence": context})(),
+        contract={
+            "aliases": [
+                {
+                    "alias": "tenant_identity.memberships",
+                    "collection": "hosted_workspace_memberships",
+                }
+            ]
+        },
+    )
+
+    collection = app_data.collection("tenant_identity.memberships")
+
+    assert collection is client.databases[DEFAULT_APP_DATABASE_NAME].collections["hosted_workspace_memberships"]
 
 
 @pytest.mark.asyncio

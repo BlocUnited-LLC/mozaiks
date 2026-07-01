@@ -193,6 +193,20 @@ class MongoPersistenceContext:
             )
         return self._collections[key]
 
+    def literal_collection(self, collection_name: str) -> Any:
+        """Return a raw app-data collection by its literal Mongo collection name.
+
+        Generated module repos should use ``collection(module_id, entity_name)``.
+        App-data alias helpers use this method for explicit contract-declared
+        collections such as hosted product records, shared aggregates, and
+        migration/index targets that already own their own scope fields.
+        """
+
+        name = str(collection_name or "").strip()
+        if not name:
+            raise ValueError("collection_name is required")
+        return self._client_handle()[self._database_name][name]
+
     def scope_filter(self, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return scope_filter_for(self.app_id, extra)
 
