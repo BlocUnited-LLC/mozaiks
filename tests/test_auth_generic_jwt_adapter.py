@@ -7,9 +7,14 @@ The validate_token JWKS path is covered by integration/e2e tests.
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
 
+import mozaiksai.core.auth.adapters.jwt_adapter as jwt_adapter_module
 from mozaiksai.core.auth.adapters.base import AuthError
 from mozaiksai.core.auth.adapters.jwt_adapter import GenericJWTAdapter, JWTAdapterConfig
 
@@ -32,6 +37,8 @@ def _base_claims(**overrides: object) -> dict:
         "roles": ["user"],
         "scp": "openid read write",
         "tid": "tenant-xyz",
+        "workspace_id": "workspace-xyz",
+        "app_id": "app-xyz",
     }
     claims.update(overrides)
     return claims
@@ -74,6 +81,14 @@ class TestExtractClaims:
     def test_tenant_id_from_tid(self):
         result = _adapter()._extract_claims(_base_claims())
         assert result.tenant_id == "tenant-xyz"
+
+    def test_workspace_id_from_default_claim(self):
+        result = _adapter()._extract_claims(_base_claims())
+        assert result.workspace_id == "workspace-xyz"
+
+    def test_app_id_from_default_claim(self):
+        result = _adapter()._extract_claims(_base_claims())
+        assert result.app_id == "app-xyz"
 
     def test_tenant_id_none_when_absent(self):
         claims = _base_claims()
@@ -157,6 +172,13 @@ class TestCustomClaimMappings:
         claims = _base_claims(app_roles=["super-admin"])
         result = adapter._extract_claims(claims)
         assert "super-admin" in result.roles
+
+    def test_custom_tenant_and_workspace_claims(self):
+        adapter = _adapter(tenant_id_claim="org_id", workspace_id_claim="team_id")
+        claims = _base_claims(org_id="tenant-custom", team_id="workspace-custom")
+        result = adapter._extract_claims(claims)
+        assert result.tenant_id == "tenant-custom"
+        assert result.workspace_id == "workspace-custom"
 
     def test_missing_required_custom_claim_raises(self):
         adapter = _adapter(user_id_claim="oid")
@@ -255,6 +277,18 @@ class TestGenericJWTAdapterConfig:
         adapter = GenericJWTAdapter(config=JWTAdapterConfig())
         assert adapter.is_enabled() is False
 
+    def test_is_enabled_with_oidc_authority(self):
+        adapter = GenericJWTAdapter(config=JWTAdapterConfig(oidc_authority="https://auth.example.com"))
+        assert adapter.is_enabled() is True
+
+    def test_is_enabled_with_oidc_discovery_url(self):
+        adapter = GenericJWTAdapter(
+            config=JWTAdapterConfig(
+                oidc_discovery_url="https://auth.example.com/.well-known/openid-configuration",
+            )
+        )
+        assert adapter.is_enabled() is True
+
     def test_name_is_jwt(self):
         assert GenericJWTAdapter.name == "jwt"
 
@@ -282,19 +316,94 @@ class TestGenericJWTAdapterConfig:
 
     def test_config_from_env_defaults(self, monkeypatch):
         # Clear relevant env vars to test defaults
-        for var in ("AUTH_JWKS_URL", "AUTH_ISSUER", "AUTH_AUDIENCE", "AUTH_SCOPES_FORMAT"):
+        for var in (
+            "AUTH_JWKS_URL",
+            "AUTH_ISSUER",
+            "AUTH_AUDIENCE",
+            "AUTH_SCOPES_FORMAT",
+            "MOZAIKS_OIDC_AUTHORITY",
+            "MOZAIKS_OIDC_TENANT_ID",
+            "MOZAIKS_OIDC_DISCOVERY_URL",
+        ):
             monkeypatch.delenv(var, raising=False)
         config = JWTAdapterConfig.from_env()
         assert config.jwks_url == ""
         assert config.issuer == ""
+        assert config.oidc_authority == ""
+        assert config.oidc_tenant_id == ""
+        assert config.oidc_discovery_url == ""
         assert config.scopes_format == "space"
         assert config.user_id_claim == "sub"
 
     def test_config_from_env_reads_vars(self, monkeypatch):
         monkeypatch.setenv("AUTH_JWKS_URL", "https://auth.test/.well-known/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://auth.test/")
+        monkeypatch.setenv("MOZAIKS_OIDC_AUTHORITY", "https://login.example.com")
+        monkeypatch.setenv("MOZAIKS_OIDC_TENANT_ID", "tenant-1")
+        monkeypatch.setenv("MOZAIKS_OIDC_DISCOVERY_URL", "https://login.example.com/.well-known/openid-configuration")
         monkeypatch.setenv("AUTH_SCOPES_FORMAT", "array")
         config = JWTAdapterConfig.from_env()
         assert config.jwks_url == "https://auth.test/.well-known/jwks.json"
         assert config.issuer == "https://auth.test/"
+        assert config.oidc_authority == "https://login.example.com"
+        assert config.oidc_tenant_id == "tenant-1"
+        assert config.oidc_discovery_url == "https://login.example.com/.well-known/openid-configuration"
         assert config.scopes_format == "array"
+
+
+class TestGenericJWTAdapterValidation:
+    @pytest.mark.asyncio
+    async def test_validate_token_uses_oidc_discovery_for_jwks_and_issuer(self, monkeypatch):
+        issuer = "https://issuer.example.com"
+        jwks_url = "https://issuer.example.com/.well-known/jwks.json"
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+        public_jwk.update({"kid": "kid-1", "alg": "RS256", "use": "sig"})
+
+        token = jwt.encode(
+            {
+                **_base_claims(),
+                "iss": issuer,
+                "aud": "my-api",
+                "iat": int(time.time()),
+                "nbf": int(time.time()) - 1,
+                "exp": int(time.time()) + 300,
+            },
+            key,
+            algorithm="RS256",
+            headers={"kid": "kid-1"},
+        )
+
+        class _FakeDiscoveryClient:
+            async def get_jwks_uri(self):
+                return jwks_url
+
+            async def get_issuer(self):
+                return issuer
+
+        class _FakeJWKSClient:
+            def __init__(self, *, jwks_url: str, use_discovery: bool):
+                self.jwks_url = jwks_url
+                self.use_discovery = use_discovery
+
+            async def get_signing_key(self, kid: str):
+                assert kid == "kid-1"
+                assert self.jwks_url == jwks_url
+                assert self.use_discovery is False
+                return public_jwk
+
+        monkeypatch.setattr(jwt_adapter_module, "JWKSClient", _FakeJWKSClient)
+        adapter = GenericJWTAdapter(
+            config=JWTAdapterConfig(
+                audience="my-api",
+                oidc_authority="https://issuer.example.com",
+            )
+        )
+        monkeypatch.setattr(adapter, "_get_discovery_client", lambda: _FakeDiscoveryClient())
+
+        claims = await adapter.validate_token(token)
+
+        assert claims.user_id == "user-abc-123"
+        assert claims.tenant_id == "tenant-xyz"
+        assert claims.workspace_id == "workspace-xyz"
+        assert claims.app_id == "app-xyz"

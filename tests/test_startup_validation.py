@@ -661,6 +661,8 @@ class TestAuthProviderCheck:
         monkeypatch.delenv("KEYCLOAK_REALM", raising=False)
         monkeypatch.delenv("AUTH_JWKS_URL", raising=False)
         monkeypatch.delenv("AUTH_ISSUER", raising=False)
+        monkeypatch.delenv("MOZAIKS_OIDC_AUTHORITY", raising=False)
+        monkeypatch.delenv("MOZAIKS_OIDC_DISCOVERY_URL", raising=False)
 
     @pytest.mark.asyncio
     async def test_warns_in_production_when_auth_enabled_but_no_provider(self, monkeypatch):
@@ -705,6 +707,27 @@ class TestAuthProviderCheck:
         self._base_env(monkeypatch)
         monkeypatch.setenv("AUTH_JWKS_URL", "https://example.com/.well-known/jwks.json")
         monkeypatch.setenv("AUTH_ISSUER", "https://example.com")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_oidc_authority_configured(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv("MOZAIKS_OIDC_AUTHORITY", "https://login.example.com")
+
+        warnings = await run_startup_checks(_mongo_client=_MockPingClient())
+
+        assert not any("auth provider" in w.lower() for w in warnings)
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_oidc_discovery_url_configured(self, monkeypatch):
+        self._base_env(monkeypatch)
+        monkeypatch.setenv(
+            "MOZAIKS_OIDC_DISCOVERY_URL",
+            "https://login.example.com/.well-known/openid-configuration",
+        )
 
         warnings = await run_startup_checks(_mongo_client=_MockPingClient())
 

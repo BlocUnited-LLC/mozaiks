@@ -211,6 +211,23 @@ class TestValidateChatId:
         assert p.validate_chat_id("chat-1") is True
 
 
+class TestValidateTenantAndWorkspaceId:
+    def test_no_tenant_or_workspace_on_principal_returns_true(self):
+        p = _principal(tenant_id=None, workspace_id=None)
+        assert p.validate_tenant_id("tenant-1") is True
+        assert p.validate_workspace_id("workspace-1") is True
+
+    def test_matching_tenant_and_workspace_return_true(self):
+        p = _principal(tenant_id="tenant-1", workspace_id="workspace-1")
+        assert p.validate_tenant_id("tenant-1") is True
+        assert p.validate_workspace_id("workspace-1") is True
+
+    def test_mismatching_tenant_and_workspace_return_false(self):
+        p = _principal(tenant_id="tenant-1", workspace_id="workspace-1")
+        assert p.validate_tenant_id("tenant-2") is False
+        assert p.validate_workspace_id("workspace-2") is False
+
+
 # ---------------------------------------------------------------------------
 # 6. _extract_token
 # ---------------------------------------------------------------------------

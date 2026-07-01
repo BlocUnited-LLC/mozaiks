@@ -279,6 +279,83 @@ class TestCallModulePermissions:
         )
         assert result == ["orders.read"]
 
+
+# ---------------------------------------------------------------------------
+# 5b. call_module_scope
+# ---------------------------------------------------------------------------
+
+class TestCallModuleScope:
+    @pytest.mark.asyncio
+    async def test_returns_requested_scope_and_default_permissions_when_no_hooks(self):
+        reg = _fresh()
+        result = await reg.call_module_scope(
+            principal=None,
+            module_name="orders",
+            action_name="list",
+            requested_scope={
+                "app_id": "app",
+                "tenant_id": "tenant",
+                "workspace_id": "workspace",
+                "user_id": "user",
+            },
+            params={},
+            default_permissions=[],
+        )
+        assert result == {
+            "app_id": "app",
+            "tenant_id": "tenant",
+            "workspace_id": "workspace",
+            "user_id": "user",
+            "permissions": [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_scope_hook_can_replace_scope_and_permissions(self):
+        reg = _fresh()
+        reg._register_bundle({
+            "module_scope_resolver": lambda **kw: {
+                "tenant_id": "resolved-tenant",
+                "workspace_id": "resolved-workspace",
+                "permissions": ["orders.read", "orders.manage"],
+            },
+        })
+        result = await reg.call_module_scope(
+            principal=object(),
+            module_name="orders",
+            action_name="create",
+            requested_scope={"app_id": "app", "tenant_id": "requested", "workspace_id": None, "user_id": "user"},
+            params={"x": 1},
+            default_permissions=["access_as_user"],
+        )
+        assert result["app_id"] == "app"
+        assert result["tenant_id"] == "resolved-tenant"
+        assert result["workspace_id"] == "resolved-workspace"
+        assert result["permissions"] == ["orders.read", "orders.manage"]
+
+    @pytest.mark.asyncio
+    async def test_permission_hook_runs_after_scope_hook(self):
+        reg = _fresh()
+        reg._register_bundle({
+            "module_scope_resolver": lambda **kw: {
+                "tenant_id": "tenant",
+                "permissions": ["orders.read"],
+            },
+            "module_permission_resolver": lambda **kw: [
+                *(kw["default_permissions"] or []),
+                "orders.manage",
+            ],
+        })
+        result = await reg.call_module_scope(
+            principal=object(),
+            module_name="orders",
+            action_name="create",
+            requested_scope={"app_id": "app", "tenant_id": None, "workspace_id": None, "user_id": "user"},
+            params={},
+            default_permissions=[],
+        )
+        assert result["tenant_id"] == "tenant"
+        assert result["permissions"] == ["orders.read", "orders.manage"]
+
     @pytest.mark.asyncio
     async def test_hook_can_replace_permission_list(self):
         reg = _fresh()

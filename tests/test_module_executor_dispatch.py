@@ -52,6 +52,8 @@ def _request(
     params: dict | None = None,
     app_id: str = "app-1",
     user_id: str | None = "user-1",
+    tenant_id: str | None = None,
+    workspace_id: str | None = None,
     granted_permissions: list[str] | None = None,
 ) -> ModuleRequest:
     return ModuleRequest(
@@ -60,6 +62,8 @@ def _request(
         params=params or {},
         app_id=app_id,
         user_id=user_id,
+        tenant_id=tenant_id,
+        workspace_id=workspace_id,
         granted_permissions=granted_permissions,
     )
 
@@ -240,6 +244,34 @@ class TestEntitlementGate:
             app_id="app-1",
             user_id="user-1",
             tenant_id=None,
+            workspace_id=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_entitlement_check_receives_workspace_scope(self):
+        granted_checker = MagicMock()
+        granted_checker.check = AsyncMock(return_value=EntitlementResult(granted=True))
+        ex = ModuleExecutor(entitlement_checker=granted_checker)
+        ex.register(
+            "wallet",
+            _EchoHandler(),
+            action_entitlements={"echo": "wallet.payout"},
+        )
+        result = await ex.execute(
+            _request(
+                module="wallet",
+                tenant_id="tenant-1",
+                workspace_id="workspace-1",
+                granted_permissions=["wallet.manage"],
+            )
+        )
+        assert result.success is True
+        granted_checker.check.assert_awaited_once_with(
+            "wallet.payout",
+            app_id="app-1",
+            user_id="user-1",
+            tenant_id="tenant-1",
+            workspace_id="workspace-1",
         )
 
     @pytest.mark.asyncio

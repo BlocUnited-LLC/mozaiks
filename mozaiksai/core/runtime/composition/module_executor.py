@@ -95,6 +95,7 @@ class ModuleRequest:
         app_id:         Required — scope for multi-tenancy
         user_id:        Optional authenticated user
         tenant_id:      Optional tenant override
+        workspace_id:   Optional workspace/team scope under the tenant
         auth_token:     Optional JWT forwarded to external API calls
         correlation_id: Optional tracing ID
     """
@@ -106,6 +107,7 @@ class ModuleRequest:
     app_id: str = ""
     user_id: str | None = None
     tenant_id: str | None = None
+    workspace_id: str | None = None
     auth_token: str | None = None
     correlation_id: str | None = None
 
@@ -278,6 +280,7 @@ class ModuleExecutor:
                     app_id=request.app_id,
                     user_id=request.user_id,
                     tenant_id=request.tenant_id,
+                    workspace_id=request.workspace_id,
                 )
                 if not ent_result.granted:
                     logger.warning(
@@ -328,6 +331,7 @@ class ModuleExecutor:
                 app_id=request.app_id,
                 user_id=request.user_id,
                 tenant_id=request.tenant_id,
+                workspace_id=request.workspace_id,
                 auth_token=request.auth_token,
                 permissions=(
                     list(request.granted_permissions)
@@ -440,6 +444,13 @@ class ModuleExecutor:
             return None
 
         async def emit_module_event(event_type: str, payload: dict[str, Any]) -> None:
+            tenant_scope = {
+                "app_id": request.app_id,
+                "tenant_id": request.tenant_id,
+            }
+            if request.workspace_id:
+                tenant_scope["workspace_id"] = request.workspace_id
+
             envelope: dict[str, Any] = {
                 "id": f"evt_{uuid4().hex}",
                 "type": event_type,
@@ -451,10 +462,7 @@ class ModuleExecutor:
                     "module_id": request.module,
                     "capability_id": f"{request.module}.{request.action}",
                 },
-                "tenant": {
-                    "app_id": request.app_id,
-                    "tenant_id": request.tenant_id,
-                },
+                "tenant": tenant_scope,
                 "correlation": {
                     "correlation_id": request.correlation_id,
                 },
@@ -480,5 +488,6 @@ class ModuleExecutor:
         return MongoPersistenceContext(
             app_id=app_id,
             tenant_id=request.tenant_id,
+            workspace_id=request.workspace_id,
             user_id=request.user_id,
         )

@@ -24,6 +24,16 @@ from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserCl
 logger = get_core_logger("auth.keycloak")
 
 
+def _claim_value(raw_claims: dict[str, Any], claim_name: str) -> str | None:
+    if not claim_name:
+        return None
+    value = raw_claims.get(claim_name)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 class KeycloakAuthAdapter(BaseAuthAdapter):
     """
     Auth adapter for Keycloak authentication.
@@ -58,6 +68,9 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
         self._keycloak_url = keycloak_url or os.getenv("KEYCLOAK_URL", "")
         self._realm = realm or os.getenv("KEYCLOAK_REALM", "")
         self._client_id = client_id or os.getenv("KEYCLOAK_CLIENT_ID", "")
+        self._app_id_claim = os.getenv("KEYCLOAK_APP_ID_CLAIM", "azp")
+        self._tenant_id_claim = os.getenv("KEYCLOAK_TENANT_ID_CLAIM", "azp")
+        self._workspace_id_claim = os.getenv("KEYCLOAK_WORKSPACE_ID_CLAIM", "workspace_id")
         self._jwks_client: PyJWKClient | None = None
 
         # Clean URL (remove trailing slash)
@@ -180,7 +193,9 @@ class KeycloakAuthAdapter(BaseAuthAdapter):
             scopes=scopes,
             raw_claims=raw_claims,
             provider=self.name,
-            tenant_id=raw_claims.get("azp"),  # Authorized party
+            app_id=_claim_value(raw_claims, self._app_id_claim),
+            tenant_id=_claim_value(raw_claims, self._tenant_id_claim),
+            workspace_id=_claim_value(raw_claims, self._workspace_id_claim),
         )
 
     def _extract_roles(self, claims: dict[str, Any]) -> list[str]:

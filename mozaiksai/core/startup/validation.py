@@ -239,15 +239,21 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
         has_keycloak = bool(
             os.getenv("KEYCLOAK_URL", "").strip() and os.getenv("KEYCLOAK_REALM", "").strip()
         )
-        has_jwt = bool(
+        has_jwt_overrides = bool(
             os.getenv("AUTH_JWKS_URL", "").strip() and os.getenv("AUTH_ISSUER", "").strip()
         )
+        has_oidc_discovery = bool(
+            os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
+            or os.getenv("MOZAIKS_OIDC_AUTHORITY", "").strip()
+        )
+        has_jwt = has_jwt_overrides or has_oidc_discovery
         has_provider = bool(explicit_provider) or has_supabase or has_keycloak or has_jwt
         if not has_provider:
             msg = (
                 "AUTH_ENABLED is not false but no auth provider is configured in production. "
                 "The runtime will silently fall back to demo mode (no authentication). "
-                "Set AUTH_PROVIDER or configure SUPABASE_URL, KEYCLOAK_URL, or AUTH_JWKS_URL."
+                "Set AUTH_PROVIDER or configure SUPABASE_URL, KEYCLOAK_URL, "
+                "AUTH_JWKS_URL + AUTH_ISSUER, or MOZAIKS_OIDC_AUTHORITY."
             )
             warnings.append(msg)
             logger.warning(

@@ -35,6 +35,7 @@ def _base_claims(**overrides: object) -> dict:
         "resource_access": {"my-app": {"roles": ["app-user"]}},
         "scope": "openid email profile",
         "azp": "my-app",
+        "workspace_id": "workspace-1",
     }
     claims.update(overrides)
     return claims
@@ -92,6 +93,16 @@ class TestExtractClaims:
         adapter = _adapter()
         result = adapter._extract_claims(_base_claims())
         assert result.tenant_id == "my-app"
+
+    def test_app_id_from_azp(self):
+        adapter = _adapter()
+        result = adapter._extract_claims(_base_claims())
+        assert result.app_id == "my-app"
+
+    def test_workspace_id_from_default_claim(self):
+        adapter = _adapter()
+        result = adapter._extract_claims(_base_claims())
+        assert result.workspace_id == "workspace-1"
 
     def test_scopes_parsed_from_scope_string(self):
         adapter = _adapter()

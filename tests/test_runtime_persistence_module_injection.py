@@ -107,12 +107,13 @@ def test_module_context_has_persistence_attribute() -> None:
 
 
 def test_module_context_construction_without_persistence_remains_valid() -> None:
-    ctx = ModuleContext(app_id="app_1", user_id="user_1", tenant_id="tenant_1")
+    ctx = ModuleContext(app_id="app_1", user_id="user_1", tenant_id="tenant_1", workspace_id="workspace_1")
 
     assert ctx.persistence is None
     assert ctx.app_id == "app_1"
     assert ctx.user_id == "user_1"
     assert ctx.tenant_id == "tenant_1"
+    assert ctx.workspace_id == "workspace_1"
 
 
 @pytest.mark.asyncio
@@ -169,6 +170,7 @@ async def test_user_and_tenant_scope_are_passed_to_persistence() -> None:
             app_id="app_1",
             user_id="user_1",
             tenant_id="tenant_1",
+            workspace_id="workspace_1",
         )
     )
 
@@ -176,6 +178,7 @@ async def test_user_and_tenant_scope_are_passed_to_persistence() -> None:
     assert result.data["scope_metadata"]["app_id"] == "app_1"
     assert result.data["scope_metadata"]["user_id"] == "user_1"
     assert result.data["scope_metadata"]["tenant_id"] == "tenant_1"
+    assert result.data["scope_metadata"]["workspace_id"] == "workspace_1"
 
 
 @pytest.mark.asyncio
@@ -231,6 +234,35 @@ async def test_existing_event_emit_behavior_remains_unchanged() -> None:
     assert emitted[0][0] == "domain.tasks.task_created"
     assert emitted[0][1]["tenant"] == {"app_id": "app_1", "tenant_id": "tenant_1"}
     assert emitted[0][1]["actor"] == {"type": "user", "id": "user_1"}
+
+
+@pytest.mark.asyncio
+async def test_event_emit_includes_workspace_when_present() -> None:
+    emitted: list[tuple[str, dict[str, Any]]] = []
+
+    async def capture(event_type: str, payload: dict[str, Any]) -> None:
+        emitted.append((event_type, payload))
+
+    executor = ModuleExecutor(event_emitter=capture)
+    executor.register("tasks", EmitHandler())
+
+    result = await executor.execute(
+        ModuleRequest(
+            module="tasks",
+            action="create",
+            app_id="app_1",
+            user_id="user_1",
+            tenant_id="tenant_1",
+            workspace_id="workspace_1",
+        )
+    )
+
+    assert result.success is True
+    assert emitted[0][1]["tenant"] == {
+        "app_id": "app_1",
+        "tenant_id": "tenant_1",
+        "workspace_id": "workspace_1",
+    }
 
 
 @pytest.mark.asyncio

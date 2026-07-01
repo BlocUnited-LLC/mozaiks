@@ -234,6 +234,110 @@ async def test_tenant_specific_assignment_is_preferred() -> None:
 
 
 @pytest.mark.asyncio
+async def test_workspace_specific_assignment_is_preferred() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "app_id": "app-1",
+                "tenant_id": "tenant-1",
+                "workspace_id": None,
+                "plan_id": "free",
+                "status": "active",
+                "granted_capabilities": [],
+            },
+            {
+                "app_id": "app-1",
+                "tenant_id": "tenant-1",
+                "workspace_id": "workspace-1",
+                "plan_id": "pro",
+                "status": "active",
+                "granted_capabilities": [
+                    {"pack_id": "reports", "capability_id": "reports.export"},
+                ],
+            },
+        ]
+    )
+    adapter = ConfiguredEntitlementAdapter(
+        config=_config(),
+        collection_resolver=lambda alias: collection,
+    )
+
+    result = await adapter.check(
+        "reports.export",
+        app_id="app-1",
+        tenant_id="tenant-1",
+        workspace_id="workspace-1",
+    )
+
+    assert result.granted is True
+    assert collection.queries[0]["tenant_id"] == "tenant-1"
+    assert collection.queries[0]["workspace_id"] == "workspace-1"
+
+
+@pytest.mark.asyncio
+async def test_mismatched_workspace_assignment_does_not_grant() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "app_id": "app-1",
+                "tenant_id": "tenant-1",
+                "workspace_id": "workspace-1",
+                "plan_id": "pro",
+                "status": "active",
+                "granted_capabilities": [
+                    {"pack_id": "reports", "capability_id": "reports.export"},
+                ],
+            }
+        ]
+    )
+    adapter = ConfiguredEntitlementAdapter(
+        config=_config(),
+        collection_resolver=lambda alias: collection,
+    )
+
+    result = await adapter.check(
+        "reports.export",
+        app_id="app-1",
+        tenant_id="tenant-1",
+        workspace_id="workspace-2",
+    )
+
+    assert result.granted is False
+    assert result.reason == "no_grant"
+
+
+@pytest.mark.asyncio
+async def test_app_fallback_does_not_match_tenant_assignment() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "app_id": "app-1",
+                "tenant_id": "tenant-1",
+                "workspace_id": None,
+                "plan_id": "pro",
+                "status": "active",
+                "granted_capabilities": [
+                    {"pack_id": "reports", "capability_id": "reports.export"},
+                ],
+            }
+        ]
+    )
+    adapter = ConfiguredEntitlementAdapter(
+        config=_config(),
+        collection_resolver=lambda alias: collection,
+    )
+
+    result = await adapter.check("reports.export", app_id="app-1")
+
+    assert result.granted is False
+    assert collection.queries[0] == {
+        "app_id": "app-1",
+        "tenant_id": None,
+        "workspace_id": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_current_plan_id_uses_active_assignment() -> None:
     collection = FakeCollection(
         [
@@ -252,6 +356,33 @@ async def test_current_plan_id_uses_active_assignment() -> None:
     )
 
     plan_id = await adapter.current_plan_id(app_id="app-1")
+
+    assert plan_id == "pro"
+
+
+@pytest.mark.asyncio
+async def test_current_plan_id_uses_workspace_assignment() -> None:
+    collection = FakeCollection(
+        [
+            {
+                "app_id": "app-1",
+                "tenant_id": "tenant-1",
+                "workspace_id": "workspace-1",
+                "plan_id": "pro",
+                "status": "active",
+            }
+        ]
+    )
+    adapter = ConfiguredEntitlementAdapter(
+        config=_config(),
+        collection_resolver=lambda alias: collection,
+    )
+
+    plan_id = await adapter.current_plan_id(
+        app_id="app-1",
+        tenant_id="tenant-1",
+        workspace_id="workspace-1",
+    )
 
     assert plan_id == "pro"
 

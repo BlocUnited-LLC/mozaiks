@@ -31,6 +31,7 @@ class UserClaims:
     app_id: str | None = None
     chat_id: str | None = None
     tenant_id: str | None = None
+    workspace_id: str | None = None
 
     def has_role(self, role: str) -> bool:
         """Check if user has a specific role."""

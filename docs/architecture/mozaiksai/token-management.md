@@ -46,7 +46,8 @@ from mozaiksai.core.usage.middleware import build_ag2_usage_middleware
 The middleware captures:
 - `input_tokens` / `output_tokens` / `total_tokens`
 - `model` identifier
-- `app_id`, `user_id`, `chat_id` from workflow context variables
+- `app_id`, `tenant_id`, `workspace_id`, `user_id`, `chat_id` from workflow
+  context variables when present
 - estimated cost via `mozaiksai/core/usage/pricing.py`
 
 ### RuntimeUsageLedger
@@ -101,6 +102,11 @@ Wallet entries are idempotent by key and persisted under:
 Balances are scoped by `app_id`, `wallet_id`, and either user, tenant, or app
 scope. Debits reject by default when the balance is insufficient; wallets can
 explicitly allow negative balances for overage-style products.
+
+Workspace context participates in active-plan resolution and usage event
+metadata. It does not create a separate wallet balance scope: token balances
+still follow each wallet's declared `scope` value (`user`, `tenant`, or app
+fallback).
 
 ### summarize_usage_events
 
@@ -206,6 +212,9 @@ plans:
 When `auto_debit_usage` is true, the runtime usage event dispatcher
 materializes the active plan allowance and debits the wallet from factual
 `chat.usage_delta` events. This is accounting, not payment processing.
+If the app declares `assignment_store.workspace_id_field`, the active plan is
+resolved with app/user/tenant/workspace scope before allowances are
+materialized.
 
 Generated apps should treat this file as declarative infrastructure. They may
 display balances through `/api/me/usage` and `/api/me/tokens`, and may declare

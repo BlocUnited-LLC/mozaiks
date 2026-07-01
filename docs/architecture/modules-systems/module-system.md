@@ -137,21 +137,24 @@ replace authorization. Runtime permission checks continue to use
 `actions[].permissions` and the caller's granted permissions.
 
 The platform host starts with the authenticated principal's auth scopes as the
-granted permission list. Deployers can register a host-agnostic
-`module_permission_resolver` platform hook through `RUNTIME_PLATFORM_EXTENSIONS`
-to map principals to app-local memberships, teams, or roles. The hook returns
-the permission ids that should be enforced for the module request; the OSS
-runtime does not know about any specific tenant product. The resolved list is
-also available to module policies as `ctx.permissions` for resource-scoped
-checks inside handlers and services.
+default granted permission list. Deployers can register a host-agnostic
+`module_scope_resolver` platform hook through `RUNTIME_PLATFORM_EXTENSIONS` to
+map principals to app-local tenants, workspaces, memberships, teams, or roles.
+The hook returns the canonical `{app_id, user_id, tenant_id, workspace_id,
+permissions}` scope for the module request; the OSS runtime does not know about
+any specific tenant product. The resolved scope is available to module policies
+as `ctx.tenant_id`, `ctx.workspace_id`, and `ctx.permissions` for
+resource-scoped checks inside handlers and services. The older
+`module_permission_resolver` hook remains supported as a compatibility layer
+after scope resolution.
 
 `actions[].entitlement_gate` is optional. Set it to a `capability_id` string
 when the action belongs to the generated app's own SaaS feature-gate model and
 requires an active plan grant before executing. The `ModuleExecutor` checks
-`EntitlementPort.check(capability_id, ...)` and returns `ENTITLEMENT_REQUIRED`
-on denial. Non-SaaS apps use `NoOpEntitlementAdapter` and are entirely
-unaffected — no configuration needed. Never set `entitlement_gate` on
-`admin_internal` actions.
+`EntitlementPort.check(capability_id, app_id=..., user_id=..., tenant_id=...,
+workspace_id=...)` and returns `ENTITLEMENT_REQUIRED` on denial. Non-SaaS apps
+use `NoOpEntitlementAdapter` and are entirely unaffected — no configuration
+needed. Never set `entitlement_gate` on `admin_internal` actions.
 
 ```yaml
 actions:
@@ -169,7 +172,10 @@ For SaaS apps, `app/config/subscriptions.yaml` declares the plan catalog and,
 when runtime enforcement needs persisted assignments, an `assignment_store`
 data-contract alias. The platform wires the OSS `ConfiguredEntitlementAdapter`
 at startup and the adapter checks active assignment records before dispatch.
-For non-SaaS apps, no subscription config is needed.
+When `assignment_store.workspace_id_field` is declared, assignment lookup is
+workspace-aware: exact app/tenant/workspace/user records are checked before
+broader tenant, workspace, user, or app-level fallback records. For non-SaaS
+apps, no subscription config is needed.
 
 This OSS primitive is not hosted-product licensing. Hosted products such as
 Mozaiks App may decide whether an app/workspace can use a proprietary hosted
@@ -648,11 +654,11 @@ runtime state.
 | `contracts/` subdirectory path | Fully wired — `ModuleLoader` loads from `contracts/` subdir |
 | `contracts/reactions.yaml` | Canonical event reaction contract |
 | All companion manifests optional | Fully wired — absent files yield `None`, not empty defaults |
-| `settings.py` injected into ctx | Not yet injected; add `ctx.settings` |
+| `settings.py` injected into ctx | Settings manifest data is injected into `ModuleContext.settings`; module-local Python settings hooks remain future work |
 | `contracts/reactions.yaml` handler routing | Fully wired — `ModuleEventRouter` resolves handler, capability, and notification targets from canonical reactions |
 | `notifications.py` audience hooks | Stored but not called by `ModuleEventRouter` |
-| Module permissions enforcement | Declared but not enforced by `ModuleExecutor` |
-| Input/output schema validation | Declared but not validated by `ModuleExecutor` |
+| Module permissions enforcement | Fully wired in `ModuleExecutor` for external calls with concrete granted permissions |
+| Input/output schema validation | Fully wired in `ModuleExecutor`; input failures block dispatch and output failures warn |
 
 Until the runtime is updated, generated modules should still follow the canonical
 contract shape. The runtime loader will be updated to support the new paths.

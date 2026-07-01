@@ -102,6 +102,7 @@ class ConfiguredEntitlementAdapter:
         app_id: str,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> EntitlementResult:
         capability_id = str(capability_id or "").strip()
         app_id = str(app_id or "").strip()
@@ -118,6 +119,7 @@ class ConfiguredEntitlementAdapter:
                 app_id=app_id,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
             if not record:
                 return self._check_default_plan(capability_id)
@@ -153,6 +155,7 @@ class ConfiguredEntitlementAdapter:
         app_id: str,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> str | None:
         """Return the effective active plan id for this scope.
 
@@ -175,6 +178,7 @@ class ConfiguredEntitlementAdapter:
                 app_id=app_id,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
             if not record:
                 return self._config.default_plan_id
@@ -214,6 +218,7 @@ class ConfiguredEntitlementAdapter:
         app_id: str,
         user_id: str | None,
         tenant_id: str | None,
+        workspace_id: str | None,
     ) -> Mapping[str, Any] | None:
         collection = await self._collection(store)
         projection = {"_id": 0}
@@ -222,6 +227,7 @@ class ConfiguredEntitlementAdapter:
             app_id=app_id,
             user_id=user_id,
             tenant_id=tenant_id,
+            workspace_id=workspace_id,
         ):
             record = await collection.find_one(query, projection)
             if record:
@@ -235,35 +241,46 @@ class ConfiguredEntitlementAdapter:
         app_id: str,
         user_id: str | None,
         tenant_id: str | None,
+        workspace_id: str | None,
     ) -> list[dict[str, Any]]:
         base = {store.app_id_field: app_id}
         candidates: list[dict[str, Any]] = []
 
         def add_query(
             *,
-            include_tenant: bool,
             tenant_value: str | None = None,
-            include_user: bool,
+            workspace_value: str | None = None,
             user_value: str | None = None,
         ) -> None:
             query = dict(base)
-            if store.tenant_id_field and include_tenant:
+            if store.tenant_id_field:
                 query[store.tenant_id_field] = tenant_value
-            if store.user_id_field and include_user:
-                query[store.user_id_field] = user_value
             if store.workspace_id_field:
-                query[store.workspace_id_field] = None
+                query[store.workspace_id_field] = workspace_value
+            if store.user_id_field:
+                query[store.user_id_field] = user_value
             if query not in candidates:
                 candidates.append(query)
 
-        if tenant_id and user_id:
-            add_query(include_tenant=True, tenant_value=tenant_id, include_user=True, user_value=user_id)
-        if tenant_id:
-            add_query(include_tenant=True, tenant_value=tenant_id, include_user=False)
-        if user_id:
-            add_query(include_tenant=False, include_user=True, user_value=user_id)
-        add_query(include_tenant=True, tenant_value=None, include_user=True, user_value=None)
-        add_query(include_tenant=False, include_user=False)
+        tenant = str(tenant_id or "").strip() or None
+        workspace = str(workspace_id or "").strip() or None
+        user = str(user_id or "").strip() or None
+
+        if tenant and workspace and user:
+            add_query(tenant_value=tenant, workspace_value=workspace, user_value=user)
+        if tenant and workspace:
+            add_query(tenant_value=tenant, workspace_value=workspace, user_value=None)
+        if tenant and user:
+            add_query(tenant_value=tenant, workspace_value=None, user_value=user)
+        if tenant:
+            add_query(tenant_value=tenant, workspace_value=None, user_value=None)
+        if workspace and user:
+            add_query(tenant_value=None, workspace_value=workspace, user_value=user)
+        if workspace:
+            add_query(tenant_value=None, workspace_value=workspace, user_value=None)
+        if user:
+            add_query(tenant_value=None, workspace_value=None, user_value=user)
+        add_query(tenant_value=None, workspace_value=None, user_value=None)
         return candidates
 
     def _capabilities_for_record(

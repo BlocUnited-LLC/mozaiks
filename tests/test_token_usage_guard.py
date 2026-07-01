@@ -75,6 +75,24 @@ class _AssignmentCollection:
         return None
 
 
+class _WorkspaceAssignmentCollection:
+    async def find_one(self, query: dict[str, Any], projection: dict[str, int] | None = None):
+        if (
+            query.get("app_id") == "app_1"
+            and query.get("tenant_id") == "tenant_1"
+            and query.get("workspace_id") == "workspace_1"
+            and query.get("user_id") is None
+        ):
+            return {
+                "app_id": "app_1",
+                "tenant_id": "tenant_1",
+                "workspace_id": "workspace_1",
+                "plan_id": "operator_workspace",
+                "status": "active",
+            }
+        return None
+
+
 @pytest.mark.asyncio
 async def test_token_usage_guard_allows_when_wallet_has_required_balance(tmp_path: Path) -> None:
     _write_subscriptions(tmp_path)
@@ -135,6 +153,56 @@ async def test_token_usage_guard_preserves_dynamic_assignment_without_default_al
     decision = await guard.check(
         app_id="app_1",
         user_id="user_1",
+        required_tokens=25,
+    )
+
+    assert decision.allowed is True
+    assert ledger.ensure_calls == []
+
+
+@pytest.mark.asyncio
+async def test_token_usage_guard_uses_workspace_assignment_for_plan_resolution(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_dir.joinpath("subscriptions.yaml").write_text(
+        textwrap.dedent(
+            """
+            schema_version: mozaiks.subscriptions.v1
+            label: Token SaaS
+            default_plan_id: pro
+            assignment_store:
+              data_alias: subscriptions.assignments
+              user_id_field: user_id
+              workspace_id_field: workspace_id
+              active_statuses: [active]
+            token_wallets:
+              - wallet_id: ai_tokens
+                label: AI tokens
+                unit: tokens
+                usage_meter_id: ai_tokens
+                scope: user
+                auto_debit_usage: true
+                allow_negative_balance: false
+            plans:
+              - plan_id: pro
+                label: Pro
+                capabilities: [ai.chat]
+            """
+        ),
+        encoding="utf-8",
+    )
+    ledger = _Ledger(balance=50)
+    guard = TokenUsageGuard(
+        app_root=tmp_path,
+        ledger=ledger,
+        collection_resolver=lambda alias: _WorkspaceAssignmentCollection(),
+    )
+
+    decision = await guard.check(
+        app_id="app_1",
+        user_id="user_1",
+        tenant_id="tenant_1",
+        workspace_id="workspace_1",
         required_tokens=25,
     )
 

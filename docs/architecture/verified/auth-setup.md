@@ -47,11 +47,13 @@ KEYCLOAK_CLIENT_ID=my-app  # optional, for audience validation
 
 ```bash
 AUTH_PROVIDER=jwt
-AUTH_JWKS_URL=https://your-tenant.auth0.com/.well-known/jwks.json
-AUTH_ISSUER=https://your-tenant.auth0.com/
+MOZAIKS_OIDC_AUTHORITY=https://your-tenant.auth0.com
 AUTH_AUDIENCE=your-api-identifier
 AUTH_SCOPES_FORMAT=array
 ```
+
+Set `AUTH_JWKS_URL` and `AUTH_ISSUER` only when you want to override OIDC
+discovery explicitly.
 
 ---
 
@@ -59,9 +61,27 @@ AUTH_SCOPES_FORMAT=array
 
 ```bash
 AUTH_PROVIDER=jwt
+MOZAIKS_OIDC_AUTHORITY=https://your-provider
+AUTH_AUDIENCE=your-api
+```
+
+For providers that require a tenant segment in the discovery URL, set:
+
+```bash
+MOZAIKS_OIDC_TENANT_ID=your-tenant-or-directory-id
+```
+
+You can also bypass authority composition with:
+
+```bash
+MOZAIKS_OIDC_DISCOVERY_URL=https://your-provider/.well-known/openid-configuration
+```
+
+Explicit overrides remain supported:
+
+```bash
 AUTH_JWKS_URL=https://your-provider/.well-known/jwks.json
 AUTH_ISSUER=https://your-provider/
-AUTH_AUDIENCE=your-api
 ```
 
 ---
@@ -91,6 +111,7 @@ If `AUTH_PROVIDER` is not set, the system auto-detects based on environment vari
 | `SUPABASE_URL` | `supabase` |
 | `KEYCLOAK_URL` + `KEYCLOAK_REALM` | `keycloak` |
 | `AUTH_JWKS_URL` + `AUTH_ISSUER` | `jwt` |
+| `MOZAIKS_OIDC_AUTHORITY` or `MOZAIKS_OIDC_DISCOVERY_URL` | `jwt` |
 | Nothing | `none` (demo mode) |
 
 ---

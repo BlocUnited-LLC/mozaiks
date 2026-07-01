@@ -481,6 +481,8 @@ class TestRecordUsageDeltaGuards:
         await ledger.record_usage_delta({
             "app_id": "app-1",
             "chat_id": "chat-1",
+            "tenant_id": "tenant-1",
+            "workspace_id": "workspace-1",
             "workflow_name": "AppGenerator",
             "prompt_tokens": 12,
             "completion_tokens": 8,
@@ -489,6 +491,8 @@ class TestRecordUsageDeltaGuards:
         doc = inserted_docs[0]
         assert doc["app_id"] == "app-1"
         assert doc["chat_id"] == "chat-1"
+        assert doc["tenant_id"] == "tenant-1"
+        assert doc["workspace_id"] == "workspace-1"
         assert doc["prompt_tokens"] == 12
         assert doc["completion_tokens"] == 8
         assert doc["total_tokens"] == 20

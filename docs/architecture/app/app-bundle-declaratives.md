@@ -34,6 +34,9 @@ startup and wires the OSS `ConfiguredEntitlementAdapter` into
 subscription assignment state. Non-SaaS apps omit this file; all entitlement
 gates pass unconditionally via `NoOpEntitlementAdapter`. Schema:
 `mozaiks.subscriptions.v1`.
+Assignment stores may declare `tenant_id_field`, `workspace_id_field`, and
+`user_id_field`; the configured adapter checks exact scoped assignments before
+falling back to broader tenant, workspace, user, or app-level records.
 
 Plans may also declare `usage_limits` for meters such as `ai_tokens`. These
 limits are deterministic app intent used by profile, admin, billing, and

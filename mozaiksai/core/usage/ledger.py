@@ -69,6 +69,7 @@ class RuntimeUsageLedger:
         workflow_name = _text(payload.get("workflow_name"))
         user_id = _text(payload.get("user_id")) or "anonymous"
         tenant_id = _text(payload.get("tenant_id"))
+        workspace_id = _text(payload.get("workspace_id"))
         if not app_id or not chat_id or not workflow_name:
             return
 
@@ -109,6 +110,7 @@ class RuntimeUsageLedger:
             "chat_id": chat_id,
             "user_id": user_id,
             "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
             "workflow_name": workflow_name,
             "agent_name": _text(payload.get("agent_name")),
             "model_name": model_name,

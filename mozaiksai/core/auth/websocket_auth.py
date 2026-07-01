@@ -63,6 +63,7 @@ class WebSocketUser:
     app_id: str | None = None
     chat_id: str | None = None
     tenant_id: str | None = None
+    workspace_id: str | None = None
 
     def has_role(self, role: str) -> bool:
         return role in self.roles
@@ -82,6 +83,18 @@ class WebSocketUser:
             return True  # No chat_id claim - session not bound
         return str(self.chat_id) == str(path_chat_id)
 
+    def validate_tenant_id(self, path_tenant_id: str) -> bool:
+        """Validate that token tenant_id matches path/payload tenant_id."""
+        if not self.tenant_id:
+            return True
+        return str(self.tenant_id) == str(path_tenant_id)
+
+    def validate_workspace_id(self, path_workspace_id: str) -> bool:
+        """Validate that token workspace_id matches path/payload workspace_id."""
+        if not self.workspace_id:
+            return True
+        return str(self.workspace_id) == str(path_workspace_id)
+
     @classmethod
     def from_claims(cls, claims: UserClaims) -> "WebSocketUser":
         """Create WebSocketUser from adapter UserClaims."""
@@ -96,6 +109,7 @@ class WebSocketUser:
             app_id=claims.app_id,
             chat_id=claims.chat_id,
             tenant_id=claims.tenant_id,
+            workspace_id=claims.workspace_id,
         )
 
 
@@ -212,6 +226,9 @@ def _bind_user_to_websocket(websocket: WebSocket, user: WebSocketUser) -> None:
     websocket.state.name = user.name
     websocket.state.roles = user.roles
     websocket.state.user = user
+    websocket.state.app_id = user.app_id
+    websocket.state.tenant_id = user.tenant_id
+    websocket.state.workspace_id = user.workspace_id
 
 
 def verify_user_owns_resource(

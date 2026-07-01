@@ -9,6 +9,16 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from mozaiksai.hosts import platform as platform_host
+from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
+
+
+class _OrdersHandler:
+    async def list(self, ctx):
+        return {"permissions": ctx.permissions}
+
+    async def whoami(self, ctx):
+        return {"user_id": ctx.user_id}
 
 
 def _client(*, failed_module_names: list[str] | None = None) -> TestClient:
@@ -111,3 +121,106 @@ def test_module_dispatch_idor_guard_fires_on_mismatched_app_id(monkeypatch) -> N
         headers={"Authorization": "Bearer fake-token"},
     )
     assert resp.status_code == 403
+
+
+def test_unauthenticated_module_dispatch_uses_empty_permissions_not_internal_bypass(monkeypatch) -> None:
+    executor = ModuleExecutor()
+    executor.register(
+        "orders",
+        _OrdersHandler(),
+        action_permissions={"list": ["orders.read"]},
+    )
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+
+    client = _client(failed_module_names=[])
+    resp = client.get("/api/modules/orders/list")
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["error_code"] == "PERMISSION_DENIED"
+
+
+def test_unauthenticated_module_dispatch_ignores_user_id_override(monkeypatch) -> None:
+    executor = ModuleExecutor()
+    executor.register("orders", _OrdersHandler())
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+
+    client = _client(failed_module_names=[])
+    resp = client.get("/api/modules/orders/whoami?user_id=attacker")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"user_id": None}
+
+
+def test_module_dispatch_rejects_authenticated_user_id_override(monkeypatch) -> None:
+    from mozaiksai.core.auth.adapters.base import UserClaims
+
+    class _MockAdapter:
+        name = "mock"
+
+        async def validate_token(self, token: str):
+            return UserClaims(
+                user_id="u1",
+                email=None,
+                name=None,
+                roles=[],
+                scopes=[],
+                raw_claims={},
+                provider="mock",
+            )
+
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setattr(
+        "mozaiksai.core.auth.dependencies.get_auth_adapter",
+        lambda: _MockAdapter(),
+    )
+
+    client = _client(failed_module_names=[])
+    resp = client.post(
+        "/api/modules/contacts/list",
+        headers={"Authorization": "Bearer fake-token"},
+        json={"context": {"user_id": "u2"}},
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Token user_id does not match request user_id"
+
+
+def test_module_dispatch_rejects_token_bound_tenant_workspace_override(monkeypatch) -> None:
+    from mozaiksai.core.auth.adapters.base import UserClaims
+
+    class _MockAdapter:
+        name = "mock"
+
+        async def validate_token(self, token: str):
+            return UserClaims(
+                user_id="u1",
+                email=None,
+                name=None,
+                roles=[],
+                scopes=[],
+                raw_claims={},
+                provider="mock",
+                tenant_id="tenant-1",
+                workspace_id="workspace-1",
+            )
+
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setattr(
+        "mozaiksai.core.auth.dependencies.get_auth_adapter",
+        lambda: _MockAdapter(),
+    )
+
+    client = _client(failed_module_names=[])
+    resp = client.get(
+        "/api/modules/contacts/list?tenant_id=tenant-1&workspace_id=workspace-2",
+        headers={"Authorization": "Bearer fake-token"},
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Token workspace_id does not match request workspace_id"

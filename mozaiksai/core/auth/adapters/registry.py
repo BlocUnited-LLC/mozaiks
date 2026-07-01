@@ -16,6 +16,13 @@ _adapter_registry: dict[str, type[BaseAuthAdapter]] = {}
 _adapter_instance: AuthAdapter | None = None
 
 
+def _has_oidc_discovery_config() -> bool:
+    return bool(
+        os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", "").strip()
+        or os.getenv("MOZAIKS_OIDC_AUTHORITY", "").strip()
+    )
+
+
 def register_adapter(name: str, adapter_class: type[BaseAuthAdapter]) -> None:
     """
     Register an auth adapter.
@@ -59,7 +66,7 @@ def _auto_detect_provider() -> str:
     2. AUTH_ENABLED=false -> "none"
     3. SUPABASE_URL set -> "supabase"
     4. KEYCLOAK_URL set -> "keycloak"
-    5. AUTH_JWKS_URL set -> "jwt"
+    5. Generic JWT config set -> "jwt"
     6. Default to "none" (demo mode)
     """
     # Explicit provider takes precedence
@@ -79,7 +86,7 @@ def _auto_detect_provider() -> str:
     if os.getenv("KEYCLOAK_URL") and os.getenv("KEYCLOAK_REALM"):
         return "keycloak"
 
-    if os.getenv("AUTH_JWKS_URL") and os.getenv("AUTH_ISSUER"):
+    if (os.getenv("AUTH_JWKS_URL") and os.getenv("AUTH_ISSUER")) or _has_oidc_discovery_config():
         return "jwt"
 
     # Default to no auth for easy getting started

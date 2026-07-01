@@ -13,8 +13,37 @@ from jwt import PyJWKClient
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.auth.adapters.base import AuthError, BaseAuthAdapter, UserClaims
+from mozaiksai.core.auth.discovery import OIDCDiscoveryClient
+from mozaiksai.core.auth.jwks import JWKSClient
 
 logger = get_core_logger("auth.jwt_adapter")
+
+
+def _claim_value(raw_claims: dict[str, Any], claim_name: str, *fallbacks: str) -> str | None:
+    """Return the first non-empty claim value as a string."""
+    for key in (claim_name, *fallbacks):
+        if not key:
+            continue
+        value = raw_claims.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _discovery_url(*, authority: str, tenant_id: str, explicit_url: str) -> str | None:
+    """Resolve the OIDC discovery URL from provider-neutral config."""
+    if explicit_url.strip():
+        return explicit_url.strip()
+    base = authority.strip().rstrip("/")
+    tenant = tenant_id.strip()
+    if base and tenant:
+        return f"{base}/{tenant}/v2.0/.well-known/openid-configuration"
+    if base:
+        return f"{base}/.well-known/openid-configuration"
+    return None
 
 
 @dataclass
@@ -30,12 +59,21 @@ class JWTAdapterConfig:
     issuer: str = ""
     audience: str = ""
 
+    # OIDC discovery (used when jwks_url or issuer are not explicitly set)
+    oidc_authority: str = ""
+    oidc_tenant_id: str = ""
+    oidc_discovery_url: str = ""
+
     # Claim mappings - which JWT claims map to our UserClaims
     user_id_claim: str = "sub"
     email_claim: str = "email"
     name_claim: str = "name"
     roles_claim: str = "roles"
     scopes_claim: str = "scp"  # Azure uses "scp", others use "scope"
+    app_id_claim: str = "app_id"
+    chat_id_claim: str = "chat_id"
+    tenant_id_claim: str = "tid"
+    workspace_id_claim: str = "workspace_id"
 
     # Scope format: "space" (space-separated string) or "array" (JSON array)
     scopes_format: str = "space"
@@ -63,11 +101,18 @@ class JWTAdapterConfig:
             jwks_url=os.getenv("AUTH_JWKS_URL", ""),
             issuer=os.getenv("AUTH_ISSUER", ""),
             audience=os.getenv("AUTH_AUDIENCE", ""),
+            oidc_authority=os.getenv("MOZAIKS_OIDC_AUTHORITY", ""),
+            oidc_tenant_id=os.getenv("MOZAIKS_OIDC_TENANT_ID", ""),
+            oidc_discovery_url=os.getenv("MOZAIKS_OIDC_DISCOVERY_URL", ""),
             user_id_claim=os.getenv("AUTH_USER_ID_CLAIM", "sub"),
             email_claim=os.getenv("AUTH_EMAIL_CLAIM", "email"),
             name_claim=os.getenv("AUTH_NAME_CLAIM", "name"),
             roles_claim=os.getenv("AUTH_ROLES_CLAIM", "roles"),
             scopes_claim=os.getenv("AUTH_SCOPES_CLAIM", "scp"),
+            app_id_claim=os.getenv("AUTH_APP_ID_CLAIM", "app_id"),
+            chat_id_claim=os.getenv("AUTH_CHAT_ID_CLAIM", "chat_id"),
+            tenant_id_claim=os.getenv("AUTH_TENANT_ID_CLAIM", "tid"),
+            workspace_id_claim=os.getenv("AUTH_WORKSPACE_ID_CLAIM", "workspace_id"),
             scopes_format=os.getenv("AUTH_SCOPES_FORMAT", "space"),
             algorithms=algorithms,
             clock_skew_seconds=int(os.getenv("AUTH_CLOCK_SKEW", "120")),
@@ -82,12 +127,16 @@ class GenericJWTAdapter(BaseAuthAdapter):
     Features:
     - Configurable claim mappings
     - JWKS-based signature validation
+    - OIDC discovery for issuer and JWKS URL when explicit overrides are absent
     - Flexible scope extraction (space-separated or array)
     - Clock skew tolerance
 
     Configuration via environment variables:
-        AUTH_JWKS_URL: URL to fetch JWKS (required)
-        AUTH_ISSUER: Expected issuer claim (required)
+        AUTH_JWKS_URL: Optional explicit URL to fetch JWKS
+        AUTH_ISSUER: Optional explicit expected issuer claim
+        MOZAIKS_OIDC_AUTHORITY: OIDC authority used for discovery when overrides are absent
+        MOZAIKS_OIDC_TENANT_ID: Optional tenant appended to the authority discovery URL
+        MOZAIKS_OIDC_DISCOVERY_URL: Optional explicit discovery document URL
         AUTH_AUDIENCE: Expected audience claim
         AUTH_USER_ID_CLAIM: Claim for user ID (default: sub)
         AUTH_EMAIL_CLAIM: Claim for email (default: email)
@@ -105,19 +154,67 @@ class GenericJWTAdapter(BaseAuthAdapter):
     def __init__(self, config: JWTAdapterConfig | None = None):
         super().__init__()
         self._config = config or JWTAdapterConfig.from_env()
-        self._jwks_client: PyJWKClient | None = None
+        self._pyjwk_client: PyJWKClient | None = None
+        self._discovery_client: OIDCDiscoveryClient | None = None
+        self._jwks_client: JWKSClient | None = None
+
+    def _configured_discovery_url(self) -> str | None:
+        return _discovery_url(
+            authority=self._config.oidc_authority,
+            tenant_id=self._config.oidc_tenant_id,
+            explicit_url=self._config.oidc_discovery_url,
+        )
+
+    def _get_discovery_client(self) -> OIDCDiscoveryClient:
+        if self._discovery_client is None:
+            self._discovery_client = OIDCDiscoveryClient(
+                discovery_url=self._configured_discovery_url(),
+                cache_ttl=None,
+            )
+        return self._discovery_client
 
     def _get_jwks_client(self) -> PyJWKClient:
-        """Get or create JWKS client."""
-        if self._jwks_client is None:
+        """Get or create the explicit-URL PyJWT client for compatibility."""
+        if self._pyjwk_client is None:
             if not self._config.jwks_url:
                 raise AuthError(
-                    "JWKS URL not configured. Set AUTH_JWKS_URL.",
+                    "JWKS URL not configured. Set AUTH_JWKS_URL or configure OIDC discovery.",
                     500,
                     self.name,
                 )
-            self._jwks_client = PyJWKClient(self._config.jwks_url)
+            self._pyjwk_client = PyJWKClient(self._config.jwks_url)
+        return self._pyjwk_client
+
+    async def _get_jwks_client_async(self) -> JWKSClient:
+        """Get the async cached JWKS client, resolving discovery when needed."""
+        if self._jwks_client is None:
+            if self._config.jwks_url:
+                jwks_url = self._config.jwks_url
+            else:
+                try:
+                    jwks_url = await self._get_discovery_client().get_jwks_uri()
+                except RuntimeError as exc:
+                    raise AuthError(
+                        "JWKS URL not configured. Set AUTH_JWKS_URL or configure OIDC discovery.",
+                        500,
+                        self.name,
+                    ) from exc
+            self._jwks_client = JWKSClient(jwks_url=jwks_url, use_discovery=False)
         return self._jwks_client
+
+    async def _get_expected_issuer(self) -> str:
+        """Resolve the expected issuer from explicit config or discovery."""
+        issuer = str(self._config.issuer or "").strip()
+        if issuer:
+            return issuer
+        try:
+            return await self._get_discovery_client().get_issuer()
+        except RuntimeError as exc:
+            raise AuthError(
+                "Issuer not configured. Set AUTH_ISSUER or configure OIDC discovery.",
+                500,
+                self.name,
+            ) from exc
 
     async def validate_token(self, token: str) -> UserClaims:
         """
@@ -137,13 +234,27 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
         token = token.strip()
 
-        # Get signing key
+        # Decode header to get key id, then resolve signing key from explicit
+        # JWKS URL or OIDC discovery.
         try:
-            jwks_client = self._get_jwks_client()
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
-        except jwt.PyJWKClientError as e:
-            logger.warning("JWKS error: %s", e)
-            raise AuthError("Failed to verify token signature", 401, self.name) from e
+            unverified_header = jwt.get_unverified_header(token)
+        except jwt.DecodeError as e:
+            logger.warning("Invalid token header: %s", e)
+            raise AuthError("Invalid token format", 401, self.name) from e
+
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise AuthError("Token missing key ID (kid)", 401, self.name)
+
+        try:
+            jwks_client = await self._get_jwks_client_async()
+            jwk = await jwks_client.get_signing_key(str(kid))
+            if not jwk:
+                raise AuthError("Invalid signing key", 401, self.name)
+            signing_key = jwt.PyJWK.from_dict(jwk).key
+            expected_issuer = await self._get_expected_issuer()
+        except AuthError:
+            raise
         except Exception as e:
             logger.error("Unexpected JWKS error: %s", e, exc_info=True)
             raise AuthError("Token validation failed", 401, self.name) from e
@@ -166,10 +277,10 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
             claims = jwt.decode(
                 token,
-                signing_key.key,
+                signing_key,
                 algorithms=self._config.algorithms,
                 audience=self._config.audience if self._config.audience else None,
-                issuer=self._config.issuer if self._config.issuer else None,
+                issuer=expected_issuer,
                 leeway=self._config.clock_skew_seconds,
                 options=decode_options,  # type: ignore[arg-type]
             )
@@ -241,7 +352,10 @@ class GenericJWTAdapter(BaseAuthAdapter):
             scopes=scopes,
             raw_claims=raw_claims,
             provider=self.name,
-            tenant_id=raw_claims.get("tid"),
+            app_id=_claim_value(raw_claims, self._config.app_id_claim, "mozaiks_app_id"),
+            chat_id=_claim_value(raw_claims, self._config.chat_id_claim, "mozaiks_chat_id"),
+            tenant_id=_claim_value(raw_claims, self._config.tenant_id_claim, "tenant_id", "mozaiks_tenant_id"),
+            workspace_id=_claim_value(raw_claims, self._config.workspace_id_claim, "mozaiks_workspace_id"),
         )
 
     def _extract_scopes(self, claims: dict[str, Any]) -> list[str]:
@@ -270,4 +384,5 @@ class GenericJWTAdapter(BaseAuthAdapter):
 
     def is_enabled(self) -> bool:
         """Check if the adapter has required configuration."""
-        return bool(self._config.jwks_url and self._config.issuer)
+        explicit_configured = bool(self._config.jwks_url and self._config.issuer)
+        return explicit_configured or bool(self._configured_discovery_url())

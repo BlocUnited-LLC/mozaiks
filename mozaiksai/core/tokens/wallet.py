@@ -757,6 +757,7 @@ class TokenWalletLedger:
             metadata={
                 "event_id": event_id,
                 "chat_id": _text(payload.get("chat_id")) or None,
+                "workspace_id": _text(payload.get("workspace_id")) or None,
                 "workflow_name": _text(payload.get("workflow_name")) or None,
                 "agent_name": _text(payload.get("agent_name")) or None,
                 "model_name": _text(payload.get("model_name")) or None,

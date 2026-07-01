@@ -56,6 +56,7 @@ class TokenWalletUsageIngestClient:
         app_id = str(payload.get("app_id") or "").strip()
         user_id = str(payload.get("user_id") or "").strip() or None
         tenant_id = str(payload.get("tenant_id") or "").strip() or None
+        workspace_id = str(payload.get("workspace_id") or "").strip() or None
         if not app_id:
             return
 
@@ -64,6 +65,7 @@ class TokenWalletUsageIngestClient:
                 app_id=app_id,
                 user_id=user_id,
                 tenant_id=tenant_id,
+                workspace_id=workspace_id,
             )
             ledger = self._ledger or get_token_wallet_ledger()
             await ledger.ensure_plan_allowances(

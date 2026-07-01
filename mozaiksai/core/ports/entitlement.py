@@ -4,7 +4,7 @@
 #              entitlement checks at module action dispatch time.
 #
 #              This port gives the platform a consistent enforcement hook
-#              ("is this capability granted for this tenant?") without coupling
+#              ("is this capability granted for this scope?") without coupling
 #              the runtime to any billing system or plan catalog.
 #
 #              Default implementation: NoOpEntitlementAdapter — grants every
@@ -82,6 +82,7 @@ class EntitlementPort(Protocol):
         app_id: str,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> EntitlementResult:
         """Check whether capability_id is currently granted for the given scope.
 
@@ -91,6 +92,7 @@ class EntitlementPort(Protocol):
             app_id:        Application scope — required, must be non-empty.
             user_id:       Optional authenticated user for user-scoped grants.
             tenant_id:     Optional tenant for tenant-scoped grants.
+            workspace_id:  Optional workspace for workspace-scoped grants.
 
         Returns:
             EntitlementResult with granted=True when the capability is active.
@@ -125,6 +127,7 @@ class NoOpEntitlementAdapter:
         app_id: str,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> EntitlementResult:
         return EntitlementResult(granted=True, reason="not_configured")
 

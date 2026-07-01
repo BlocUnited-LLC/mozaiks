@@ -91,6 +91,7 @@ class TokenUsageGuard:
         app_id: str | None,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        workspace_id: str | None = None,
         required_tokens: int = 1,
     ) -> TokenUsageDecision:
         config = self._load_config()
@@ -111,6 +112,7 @@ class TokenUsageGuard:
 
         user_id_text = _text(user_id) or None
         tenant_id_text = _text(tenant_id) or None
+        workspace_id_text = _text(workspace_id) or None
         required = _positive_int(required_tokens)
         ledger = self._ledger or get_token_wallet_ledger()
 
@@ -121,6 +123,7 @@ class TokenUsageGuard:
             app_id=app_id_text,
             user_id=user_id_text,
             tenant_id=tenant_id_text,
+            workspace_id=workspace_id_text,
         )
 
         plan_declared = any(plan.plan_id == plan_id for plan in config.plans)
@@ -173,12 +176,14 @@ class TokenUsageGuard:
         app_id: str | None,
         user_id: str | None = None,
         tenant_id: str | None = None,
+        workspace_id: str | None = None,
         required_tokens: int = 1,
     ) -> TokenUsageDecision:
         decision = await self.check(
             app_id=app_id,
             user_id=user_id,
             tenant_id=tenant_id,
+            workspace_id=workspace_id,
             required_tokens=required_tokens,
         )
         if not decision.allowed:

@@ -351,6 +351,7 @@ class TestAdapterRegistryAutoDetection:
                 "AUTH_PROVIDER", "AUTH_ENABLED",
                 "SUPABASE_URL", "KEYCLOAK_URL", "KEYCLOAK_REALM",
                 "AUTH_JWKS_URL", "AUTH_ISSUER",
+                "MOZAIKS_OIDC_AUTHORITY", "MOZAIKS_OIDC_DISCOVERY_URL",
             }
         }
         clean.update(env_overrides)
@@ -377,6 +378,16 @@ class TestAdapterRegistryAutoDetection:
         assert self._detect({
             "AUTH_JWKS_URL": "https://idp.example.com/.well-known/jwks.json",
             "AUTH_ISSUER": "https://idp.example.com",
+        }) == "jwt"
+
+    def test_oidc_authority_selects_jwt(self) -> None:
+        assert self._detect({
+            "MOZAIKS_OIDC_AUTHORITY": "https://idp.example.com",
+        }) == "jwt"
+
+    def test_oidc_discovery_url_selects_jwt(self) -> None:
+        assert self._detect({
+            "MOZAIKS_OIDC_DISCOVERY_URL": "https://idp.example.com/.well-known/openid-configuration",
         }) == "jwt"
 
     def test_no_config_defaults_to_none(self) -> None:

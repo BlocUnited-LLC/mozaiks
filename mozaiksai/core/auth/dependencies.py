@@ -51,6 +51,7 @@ class UserPrincipal:
     app_id: str | None = None
     chat_id: str | None = None
     tenant_id: str | None = None
+    workspace_id: str | None = None
 
     def has_role(self, role: str) -> bool:
         """Check if user has a specific role."""
@@ -76,6 +77,18 @@ class UserPrincipal:
             return True  # No chat_id claim - session not bound
         return str(self.chat_id) == str(path_chat_id)
 
+    def validate_tenant_id(self, path_tenant_id: str) -> bool:
+        """Validate that token tenant_id matches path/payload tenant_id."""
+        if not self.tenant_id:
+            return True
+        return str(self.tenant_id) == str(path_tenant_id)
+
+    def validate_workspace_id(self, path_workspace_id: str) -> bool:
+        """Validate that token workspace_id matches path/payload workspace_id."""
+        if not self.workspace_id:
+            return True
+        return str(self.workspace_id) == str(path_workspace_id)
+
     @classmethod
     def from_claims(cls, claims: UserClaims) -> "UserPrincipal":
         """Create UserPrincipal from adapter UserClaims."""
@@ -90,6 +103,7 @@ class UserPrincipal:
             app_id=claims.app_id,
             chat_id=claims.chat_id,
             tenant_id=claims.tenant_id,
+            workspace_id=claims.workspace_id,
         )
 
 
@@ -136,6 +150,9 @@ async def _validate_and_attach(
     # Attach to request state for downstream access
     request.state.user = principal
     request.state.user_id = principal.user_id
+    request.state.app_id = principal.app_id
+    request.state.tenant_id = principal.tenant_id
+    request.state.workspace_id = principal.workspace_id
 
     return principal
 
@@ -169,6 +186,9 @@ async def require_user(
             )
         request.state.user = principal
         request.state.user_id = principal.user_id
+        request.state.app_id = principal.app_id
+        request.state.tenant_id = principal.tenant_id
+        request.state.workspace_id = principal.workspace_id
         return principal
 
     token = _extract_token(authorization, request)

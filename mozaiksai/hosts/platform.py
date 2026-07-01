@@ -1301,6 +1301,7 @@ async def get_current_user_usage(
             app_id=resolved_app_id,
             user_id=user_id,
             tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+            workspace_id=str(principal.workspace_id) if principal.workspace_id else None,
             ensure_allowances=False,
         ),
     }
@@ -1320,6 +1321,7 @@ async def get_current_user_tokens(
         app_id=resolved_app_id,
         user_id=user_id,
         tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+        workspace_id=str(principal.workspace_id) if principal.workspace_id else None,
         ensure_allowances=False,
     )
 
@@ -1338,6 +1340,7 @@ async def sync_current_user_token_allowances(
         app_id=resolved_app_id,
         user_id=user_id,
         tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+        workspace_id=str(principal.workspace_id) if principal.workspace_id else None,
         ensure_allowances=True,
     )
 
@@ -1794,6 +1797,7 @@ async def _current_user_token_wallet_summary(
     app_id: str,
     user_id: str,
     tenant_id: str | None = None,
+    workspace_id: str | None = None,
     ensure_allowances: bool = False,
 ) -> dict[str, Any]:
     if config is None or not getattr(config, "token_wallets", None):
@@ -1811,6 +1815,7 @@ async def _current_user_token_wallet_summary(
             app_id=app_id,
             user_id=user_id,
             tenant_id=tenant_id,
+            workspace_id=workspace_id,
         )
         if resolved_plan_id:
             plan_id = resolved_plan_id
@@ -2237,7 +2242,7 @@ def _extract_bearer_token(request: Request) -> str | None:
     return auth_header.strip() or None
 
 
-async def _resolve_module_granted_permissions(
+async def _resolve_module_dispatch_scope(
     *,
     request: Request | None,
     principal: UserPrincipal | None,
@@ -2245,17 +2250,21 @@ async def _resolve_module_granted_permissions(
     action_name: str,
     app_id: str,
     tenant_id: str | None,
+    workspace_id: str | None,
     user_id: str | None,
     params: dict[str, Any],
-) -> list[str] | None:
-    default_permissions = list(principal.scopes) if principal else None
-    return await get_platform_hooks().call_module_permissions(
+) -> dict[str, Any]:
+    default_permissions = list(principal.scopes) if principal else []
+    return await get_platform_hooks().call_module_scope(
         principal=principal,
         module_name=module_name,
         action_name=action_name,
-        app_id=str(app_id),
-        tenant_id=str(tenant_id) if tenant_id else None,
-        user_id=str(user_id) if user_id else None,
+        requested_scope={
+            "app_id": str(app_id),
+            "tenant_id": str(tenant_id) if tenant_id else None,
+            "workspace_id": str(workspace_id) if workspace_id else None,
+            "user_id": str(user_id) if user_id else None,
+        },
         params=params,
         request=request,
         default_permissions=default_permissions,
@@ -2289,6 +2298,32 @@ async def _execute_module_action(
         from mozaiksai.core.auth.dependencies import validate_path_app_id
         validate_path_app_id(principal, str(explicit_app_id))
 
+    app_id = (
+        explicit_app_id
+        or (principal.app_id if principal else None)
+        or "default"
+    )
+
+    requested_user_id = context_overrides.get("user_id") or request.query_params.get("user_id")
+    if principal is not None and requested_user_id and str(requested_user_id).strip() != str(principal.user_id):
+        raise HTTPException(status_code=403, detail="Token user_id does not match request user_id")
+
+    tenant_id = (
+        context_overrides.get("tenant_id")
+        or request.query_params.get("tenant_id")
+        or (principal.tenant_id if principal else None)
+    )
+    if tenant_id and principal is not None and not principal.validate_tenant_id(str(tenant_id)):
+        raise HTTPException(status_code=403, detail="Token tenant_id does not match request tenant_id")
+
+    workspace_id = (
+        context_overrides.get("workspace_id")
+        or request.query_params.get("workspace_id")
+        or (principal.workspace_id if principal else None)
+    )
+    if workspace_id and principal is not None and not principal.validate_workspace_id(str(workspace_id)):
+        raise HTTPException(status_code=403, detail="Token workspace_id does not match request workspace_id")
+
     failed_at_startup: list[str] = getattr(request.app.state, "failed_module_names", [])
     if module_name in failed_at_startup:
         raise HTTPException(
@@ -2303,44 +2338,36 @@ async def _execute_module_action(
             detail="Module runtime is not available. Verify modules/*/module.yaml handlers are loaded.",
         )
 
-    app_id = (
-        explicit_app_id
-        or (principal.app_id if principal else None)
-        or "default"
-    )
-
-    tenant_id = (
-        context_overrides.get("tenant_id")
-        or request.query_params.get("tenant_id")
-        or (principal.tenant_id if principal else None)
-    )
     correlation_id = context_overrides.get("correlation_id") or request.query_params.get("correlation_id") or str(uuid4())
     auth_token = context_overrides.get("auth_token") or _extract_bearer_token(request)
-    user_id = context_overrides.get("user_id") or (principal.user_id if principal else None)
+    user_id = principal.user_id if principal else None
 
-    granted_permissions = await _resolve_module_granted_permissions(
+    dispatch_scope = await _resolve_module_dispatch_scope(
         request=request,
         principal=principal,
         module_name=module_name,
         action_name=action_name,
         app_id=str(app_id),
         tenant_id=str(tenant_id) if tenant_id else None,
+        workspace_id=str(workspace_id) if workspace_id else None,
         user_id=str(user_id) if user_id else None,
         params=params,
     )
+    granted_permissions = list(dispatch_scope.get("permissions") or [])
 
     module_request = ModuleRequest(
         module=module_name,
         action=action_name,
         params=params,
-        app_id=str(app_id),
-        user_id=str(user_id) if user_id else None,
-        tenant_id=str(tenant_id) if tenant_id else None,
+        app_id=str(dispatch_scope.get("app_id") or app_id),
+        user_id=str(dispatch_scope.get("user_id") or user_id) if (dispatch_scope.get("user_id") or user_id) else None,
+        tenant_id=str(dispatch_scope.get("tenant_id") or tenant_id) if (dispatch_scope.get("tenant_id") or tenant_id) else None,
+        workspace_id=str(dispatch_scope.get("workspace_id") or workspace_id) if (dispatch_scope.get("workspace_id") or workspace_id) else None,
         auth_token=str(auth_token) if auth_token else None,
         correlation_id=str(correlation_id) if correlation_id else None,
-        # Resolve permissions from OAuth2 scopes plus optional host-provided
-        # membership bridges.  When no principal is present (unauthenticated /
-        # trusted-internal call path), None bypasses enforcement as before.
+        # HTTP module dispatch is always external-facing, so it supplies a
+        # concrete permission list. Internal trusted calls can still bypass by
+        # invoking ModuleExecutor directly with granted_permissions=None.
         granted_permissions=granted_permissions,
     )
 
@@ -2377,7 +2404,7 @@ async def execute_module_action_get(
     request: Request,
     principal: UserPrincipal | None = Depends(optional_user),
 ):
-    reserved_keys = {"app_id", "user_id", "tenant_id", "correlation_id", "auth_token"}
+    reserved_keys = {"app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token"}
     params = {key: value for key, value in request.query_params.items() if key not in reserved_keys}
     return await _execute_module_action(
         module_name=module_name,
@@ -2409,7 +2436,7 @@ async def execute_module_action_post(
 
     # Route reserved execution-context fields away from action params.
     # This keeps handler signatures clean while still honoring explicit scope overrides.
-    reserved_context_keys = ("app_id", "user_id", "tenant_id", "correlation_id", "auth_token")
+    reserved_context_keys = ("app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token")
     for key in reserved_context_keys:
         if key in params and key not in context_overrides:
             context_overrides[key] = params[key]

@@ -32,6 +32,7 @@ class ModuleContext:
     app_id: str
     user_id: str | None = None
     tenant_id: str | None = None
+    workspace_id: str | None = None
 
     # Request tracing
     correlation_id: str | None = None

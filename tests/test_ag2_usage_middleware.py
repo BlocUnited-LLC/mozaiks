@@ -15,6 +15,8 @@ class _ContextBridge:
         "app_id": "app-1",
         "chat_id": "chat-1",
         "user_id": "user-1",
+        "tenant_id": "tenant-1",
+        "workspace_id": "workspace-1",
         "workflow_name": "AppGenerator",
     }
 
@@ -53,6 +55,8 @@ async def test_ag2_usage_middleware_emits_usage_delta(monkeypatch):
     assert emitted["app_id"] == "app-1"
     assert emitted["chat_id"] == "chat-1"
     assert emitted["user_id"] == "user-1"
+    assert emitted["tenant_id"] == "tenant-1"
+    assert emitted["workspace_id"] == "workspace-1"
     assert emitted["workflow_name"] == "AppGenerator"
     assert emitted["agent_name"] == "PlannerAgent"
     assert emitted["model_name"] == "gpt-test"

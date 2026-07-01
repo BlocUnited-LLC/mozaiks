@@ -46,6 +46,15 @@ Bundle keys (all optional):
         to app-local memberships without teaching OSS runtime about a specific
         tenant product.
 
+    module_scope_resolver
+                          async (*, principal, module_name, action_name,
+                                  requested_scope, params, request,
+                                  default_permissions)
+                              -> Optional[Dict[str, Any]]
+        Optional host scope bridge for module action dispatch. Return any of
+        app_id, user_id, tenant_id, workspace_id, permissions after validating
+        the requested scope against app-local memberships.
+
     workflow_ordering     (workflow_names: List[str]) -> List[str]
         Reorder the workflow list returned to the frontend (e.g. by journey
         step sequence).
@@ -65,11 +74,18 @@ from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("platform_hooks")
 
+
+def _clean_optional(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 _BUNDLE_KEYS = (
     "on_startup",
     "chat_prereqs",
     "chat_session_fields",
     "module_permission_resolver",
+    "module_scope_resolver",
     "workflow_ordering",
     "workflow_name_resolver",
 )
@@ -101,6 +117,7 @@ class PlatformHookRegistry:
         self._chat_prereqs_hooks: list[Callable] = []
         self._chat_session_fields_hooks: list[Callable] = []
         self._module_permission_resolver_hooks: list[Callable] = []
+        self._module_scope_resolver_hooks: list[Callable] = []
         self._workflow_ordering_hooks: list[Callable] = []
         self._workflow_name_resolver_hooks: list[Callable] = []
         self._loaded = False
@@ -161,6 +178,7 @@ class PlatformHookRegistry:
             "chat_prereqs": self._chat_prereqs_hooks,
             "chat_session_fields": self._chat_session_fields_hooks,
             "module_permission_resolver": self._module_permission_resolver_hooks,
+            "module_scope_resolver": self._module_scope_resolver_hooks,
             "workflow_ordering": self._workflow_ordering_hooks,
             "workflow_name_resolver": self._workflow_name_resolver_hooks,
         }
@@ -282,6 +300,63 @@ class PlatformHookRegistry:
                 logger.warning("PLATFORM_HOOKS_MODULE_PERMISSIONS_ERROR: %s", exc)
         return current
 
+    async def call_module_scope(
+        self,
+        *,
+        principal: Any,
+        module_name: str,
+        action_name: str,
+        requested_scope: dict[str, Any],
+        params: dict[str, Any],
+        request: Any = None,
+        default_permissions: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve canonical module dispatch scope through optional host hooks."""
+
+        scope = {
+            "app_id": str(requested_scope.get("app_id") or ""),
+            "user_id": _clean_optional(requested_scope.get("user_id")),
+            "tenant_id": _clean_optional(requested_scope.get("tenant_id")),
+            "workspace_id": _clean_optional(requested_scope.get("workspace_id")),
+            "permissions": list(default_permissions) if default_permissions is not None else [],
+        }
+
+        for hook in self._module_scope_resolver_hooks:
+            try:
+                res = hook(
+                    principal=principal,
+                    module_name=module_name,
+                    action_name=action_name,
+                    requested_scope=dict(scope),
+                    params=dict(params or {}),
+                    request=request,
+                    default_permissions=list(scope["permissions"]),
+                )
+                if inspect.isawaitable(res):
+                    res = await res
+                if isinstance(res, dict):
+                    for key in ("app_id", "user_id", "tenant_id", "workspace_id"):
+                        if key in res:
+                            scope[key] = _clean_optional(res.get(key)) if key != "app_id" else str(res.get(key) or "")
+                    permissions = res.get("permissions")
+                    if isinstance(permissions, (list, tuple, set)):
+                        scope["permissions"] = [str(item) for item in permissions if str(item).strip()]
+            except Exception as exc:
+                logger.warning("PLATFORM_HOOKS_MODULE_SCOPE_ERROR: %s", exc)
+
+        scope["permissions"] = await self.call_module_permissions(
+            principal=principal,
+            module_name=module_name,
+            action_name=action_name,
+            app_id=str(scope["app_id"] or ""),
+            tenant_id=scope.get("tenant_id"),
+            user_id=scope.get("user_id"),
+            params=params,
+            request=request,
+            default_permissions=list(scope["permissions"]),
+        ) or []
+        return scope
+
     def call_workflow_ordering(self, workflow_names: list[str]) -> list[str]:
         """Reorder the workflow list for frontend display."""
         result = list(workflow_names)
@@ -334,6 +409,10 @@ class PlatformHookRegistry:
         return bool(self._module_permission_resolver_hooks)
 
     @property
+    def has_module_scope_resolver(self) -> bool:
+        return bool(self._module_scope_resolver_hooks)
+
+    @property
     def has_startup(self) -> bool:
         return bool(self._startup_hooks)
 
@@ -343,6 +422,7 @@ class PlatformHookRegistry:
             "chat_prereqs_hooks": len(self._chat_prereqs_hooks),
             "chat_session_fields_hooks": len(self._chat_session_fields_hooks),
             "module_permission_resolver_hooks": len(self._module_permission_resolver_hooks),
+            "module_scope_resolver_hooks": len(self._module_scope_resolver_hooks),
             "workflow_ordering_hooks": len(self._workflow_ordering_hooks),
             "workflow_name_resolver_hooks": len(self._workflow_name_resolver_hooks),
         }
