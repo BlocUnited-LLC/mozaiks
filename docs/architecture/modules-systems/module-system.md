@@ -129,12 +129,24 @@ to an action, workflow, page, or transition `target`. The runtime validates
 that `capability_id` values are unique within the module and that `target`
 references a declared action.
 
-`actions[].api_surface` is optional descriptive metadata for the intended
-exposure surface of an action. Common values include `public`,
-`public_readonly`, `internal`, and `admin_internal`. The runtime preserves this
-metadata for tooling, generated admin surfaces, and planning, but it does not
-replace authorization. Runtime permission checks continue to use
-`actions[].permissions` and the caller's granted permissions.
+`actions[].api_surface` declares the intended external HTTP exposure of an
+action. Common values include `public`, `public_readonly`, `internal`, and
+`admin_internal`. When auth is enabled, the platform requires an authenticated
+principal for every external module HTTP action unless the action is explicitly
+declared `public` or `public_readonly`. Missing or different values are
+token-required by default. Local development with auth disabled still permits
+anonymous calls, but those calls use a concrete empty permission list.
+
+`api_surface` does not replace authorization. Runtime permission checks still
+use `actions[].permissions`, entitlement checks still use
+`actions[].entitlement_gate`, and the caller's granted permissions still come
+from the authenticated principal plus the platform `module_scope_resolver`.
+Anonymous public calls receive an empty permission list unless the app hook
+intentionally grants permissions, so a public action with declared permissions
+will still be denied for anonymous callers. Use `public` or `public_readonly`
+only for actions that are safe to expose without a user token, such as a plan
+catalog or landing-page read model. Use `internal` with `permissions: []` for
+event-bus reactions and trusted runtime calls, not for anonymous HTTP traffic.
 
 The platform host starts with the authenticated principal's auth scopes as the
 default granted permission list. Deployers can register a host-agnostic
@@ -658,6 +670,7 @@ runtime state.
 | `contracts/reactions.yaml` handler routing | Fully wired — `ModuleEventRouter` resolves handler, capability, and notification targets from canonical reactions |
 | `notifications.py` audience hooks | Stored but not called by `ModuleEventRouter` |
 | Module permissions enforcement | Fully wired in `ModuleExecutor` for external calls with concrete granted permissions |
+| Auth-enabled HTTP module default | Fully wired — external HTTP calls require auth unless `actions[].api_surface` is `public` or `public_readonly` |
 | Input/output schema validation | Fully wired in `ModuleExecutor`; input failures block dispatch and output failures warn |
 
 Until the runtime is updated, generated modules should still follow the canonical

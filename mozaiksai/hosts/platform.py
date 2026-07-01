@@ -30,6 +30,7 @@ from mozaiksai.core.auth import (
     require_any_auth,
     require_user_scope,
 )
+from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import (
     validate_path_app_id,
     validate_path_id,
@@ -293,7 +294,9 @@ async def _platform_startup() -> None:
                 event_emitter=dispatcher.emit,
                 entitlement_checker=entitlement_checker,
             )
+            module_action_surfaces: dict[str, dict[str, str | None]] = {}
             for loaded_module in load_result.modules:
+                module_action_surfaces[loaded_module.name] = loaded_module.action_api_surface_map
                 module_executor.register(
                     loaded_module.name,
                     loaded_module.handler,
@@ -308,6 +311,7 @@ async def _platform_startup() -> None:
                     action_entitlements=loaded_module.action_entitlement_map,
                 )
             executor_registry.register(module_executor)
+            app.state.module_action_surfaces = module_action_surfaces
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
 
             if load_result.failed_module_names:
@@ -2272,6 +2276,22 @@ async def _resolve_module_dispatch_scope(
 
 
 _MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_PUBLIC_MODULE_API_SURFACES = {"public", "public_readonly"}
+
+
+def _module_action_api_surface(request: Request, module_name: str, action_name: str) -> str | None:
+    surfaces = getattr(request.app.state, "module_action_surfaces", None)
+    if not isinstance(surfaces, dict):
+        return None
+    module_surfaces = surfaces.get(module_name)
+    if not isinstance(module_surfaces, dict):
+        return None
+    value = module_surfaces.get(action_name)
+    return str(value or "").strip() or None
+
+
+def _is_public_module_action(request: Request, module_name: str, action_name: str) -> bool:
+    return _module_action_api_surface(request, module_name, action_name) in _PUBLIC_MODULE_API_SURFACES
 
 
 async def _execute_module_action(
@@ -2287,6 +2307,9 @@ async def _execute_module_action(
         raise HTTPException(status_code=400, detail="Invalid module name")
     if not _MODULE_NAME_RE.fullmatch(action_name):
         raise HTTPException(status_code=400, detail="Invalid action name")
+
+    if is_auth_enabled() and principal is None and not _is_public_module_action(request, module_name, action_name):
+        raise HTTPException(status_code=401, detail="Missing authorization token")
 
     # IDOR gate: when an explicit app_id was supplied (not derived from the token),
     # verify it matches the authenticated principal's token claim. This prevents a

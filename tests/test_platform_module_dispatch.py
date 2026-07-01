@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from mozaiksai.hosts import platform as platform_host
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
 from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor
+from mozaiksai.hosts import platform as platform_host
 
 
 class _OrdersHandler:
@@ -21,8 +21,13 @@ class _OrdersHandler:
         return {"user_id": ctx.user_id}
 
 
-def _client(*, failed_module_names: list[str] | None = None) -> TestClient:
+def _client(
+    *,
+    failed_module_names: list[str] | None = None,
+    action_surfaces: dict[str, dict[str, str | None]] | None = None,
+) -> TestClient:
     platform_host.app.state.failed_module_names = failed_module_names or []
+    platform_host.app.state.module_action_surfaces = action_surfaces or {}
     return TestClient(platform_host.app, raise_server_exceptions=False)
 
 
@@ -76,20 +81,6 @@ def test_module_dispatch_idor_guard_fires_on_mismatched_app_id(monkeypatch) -> N
     to exercise the IDOR guard added to _execute_module_action.
     """
     from mozaiksai.core.auth.adapters.base import UserClaims
-    from mozaiksai.core.auth.dependencies import UserPrincipal
-
-    # Build a principal scoped to "app-1".
-    principal = UserPrincipal(
-        user_id="u1",
-        app_id="app-1",
-        email=None,
-        name=None,
-        roles=[],
-        scopes=[],
-        tenant_id=None,
-        raw_claims={},
-    )
-
     class _MockAdapter:
         name = "mock"
 
@@ -139,6 +130,41 @@ def test_unauthenticated_module_dispatch_uses_empty_permissions_not_internal_byp
 
     assert resp.status_code == 403
     assert resp.json()["detail"]["error_code"] == "PERMISSION_DENIED"
+
+
+def test_auth_enabled_module_dispatch_requires_token_by_default(monkeypatch) -> None:
+    executor = ModuleExecutor()
+    executor.register("orders", _OrdersHandler())
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+
+    client = _client(failed_module_names=[])
+    resp = client.get("/api/modules/orders/whoami")
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Missing authorization token"
+
+
+def test_auth_enabled_public_module_dispatch_allows_anonymous_call(monkeypatch) -> None:
+    executor = ModuleExecutor()
+    executor.register("orders", _OrdersHandler())
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+
+    client = _client(
+        failed_module_names=[],
+        action_surfaces={"orders": {"whoami": "public"}},
+    )
+    resp = client.get("/api/modules/orders/whoami")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"user_id": None}
 
 
 def test_unauthenticated_module_dispatch_ignores_user_id_override(monkeypatch) -> None:

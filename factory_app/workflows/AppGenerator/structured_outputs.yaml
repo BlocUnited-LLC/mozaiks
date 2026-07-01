@@ -1854,6 +1854,14 @@ models:
       handler_method:
         type: str
         description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
+      api_surface:
+        type: optional_str
+        description: >
+          External HTTP exposure posture for this action. Use public or
+          public_readonly only for anonymous-safe HTTP actions. Omit it or use
+          internal/admin_internal for actions that require an authenticated token
+          when AUTH_ENABLED=true. This does not bypass permissions or
+          entitlement_gate checks.
       input_schema:
         type: JsonSchemaContract
         description: Typed JSON-schema-like input contract.

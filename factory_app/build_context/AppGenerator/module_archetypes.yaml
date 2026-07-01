@@ -40,6 +40,8 @@ archetypes:
       - Keep the handler layer thin — dispatch only, no business logic.
       - Put business logic in the service layer, persistence in the repo layer.
       - Publish only declared domain events.
+      - Use public/public_readonly api_surface only for anonymous-safe read actions. Tenant, workspace, user, mutation, and admin actions require authenticated HTTP dispatch by default.
+      - Build resource scope filters from ctx.app_id, ctx.tenant_id, ctx.workspace_id, ctx.user_id, and ctx.permissions in backend/policy.py rather than trusting request payload scope fields.
       - list_* service methods must serialize repo records through an allowlist helper defined in backend/schemas.py before returning. Never pass raw repo documents to callers. The allowlist returns only the fields declared in module.yaml output_schema items.properties; unknown or future DB fields are excluded by default.
 
   messaging:
@@ -208,6 +210,8 @@ archetypes:
         runtime utility and returns the plan catalog with labels, capability ids, and
         usage limits. This is the canonical data source for the /pricing page — never
         hardcode plan data in JSX or page schemas, always derive from subscriptions config.
+        It must return only catalog data, never tenant/workspace subscription assignment
+        records, invoices, payment secrets, or customer identity data.
       - The service layer never checks entitlements itself — entitlement_gate on
         the action declaration is the authorization boundary.
       - Subscription state transitions are driven by payment provider webhook events

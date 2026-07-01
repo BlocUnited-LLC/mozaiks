@@ -98,6 +98,9 @@ task_contracts:
       - Emit only files declared by owned_paths or explicit file_manifest.
       - Omit YAML files that would serialize to empty arrays or null objects.
       - YAML declares the contract; downstream agents implement Python and JS stubs.
+      - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use internal/admin_internal for actions that require an authenticated token when AUTH_ENABLED=true.
+      - Public/public_readonly actions are only anonymous entrypoints; they still receive a concrete granted_permissions list and still run actions[].permissions and actions[].entitlement_gate checks.
+      - External HTTP dispatch and internal runtime dispatch are separate paths. Internal event reactions may use api_surface=internal and permissions=[] because the event bus is the authorization boundary; do not mark internal reaction handlers public.
       - JS stubs are allowed only for declared customization surfaces.
       - Emit contracts/profile.yaml only when a module has user-scoped data worth surfacing on the profile page (e.g. account summary, notification preferences, usage stats). Do not emit profile.yaml for every module.
       - profile.yaml panels must bind to module actions declared in module.yaml. Do not expose admin-only actions or secrets through profile panels.
@@ -107,6 +110,7 @@ task_contracts:
       - backend/repo.py owns persistence operations and must not contain product policy.
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.
       - backend/policy.py owns scope query helpers.
+      - backend/policy.py should derive tenant/workspace/user resource filters from ctx.app_id, ctx.tenant_id, ctx.workspace_id, ctx.user_id, and ctx.permissions. Generated modules must not trust request-supplied tenant_id, workspace_id, or user_id params as authorization.
       - backend/repo.py may use ctx.persistence.collection(module_id, entity_name) for generated module persistence.
       - backend/repo.py must use module_id/entity_name values aligned with data_contract and data/contract.json.
       - Generated repo code must not use ctx.db.
@@ -219,6 +223,7 @@ task_contracts:
     hard_constraints:
       - Default module access is /api/modules/{module_name}/{action_name}.
       - Page api_endpoint values must use /api/modules/{module_name}/{action_name} without query strings or fragments. Put pagination limits in page_size and filters in payload/input schemas.
+      - Auth for /api/modules/** is platform-owned. Custom API adapters must not bypass module action auth, permissions, entitlement checks, or module_scope_resolver scope validation.
       - Emit bespoke REST adapters only when explicitly requested.
       - Delegate behavior to backend/handler.py instead of duplicating business logic.
       - Service admin config is a separate contract and must expose only GET /api/admin/config.

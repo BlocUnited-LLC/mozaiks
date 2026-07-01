@@ -232,6 +232,11 @@ class ModuleDefinition(ModuleContractModel):
         return {action.id: list(action.permissions) for action in self.actions}
 
     @property
+    def action_api_surface_map(self) -> dict[str, str | None]:
+        """Maps each action id to its declared external API surface metadata."""
+        return {action.id: action.api_surface for action in self.actions}
+
+    @property
     def action_schemas_map(self) -> dict[str, dict[str, dict[str, Any]]]:
         """Maps each action id to its declared input/output JSON Schemas."""
         return {
@@ -669,6 +674,10 @@ class LoadedModule:
         return self.definition.action_permissions_map
 
     @property
+    def action_api_surface_map(self) -> dict[str, str | None]:
+        return self.definition.action_api_surface_map
+
+    @property
     def action_schemas_map(self) -> dict[str, dict[str, dict[str, Any]]]:
         return self.definition.action_schemas_map
 
@@ -772,10 +781,10 @@ class ModuleLoader:
         # also catches symlink-based escapes that static analysis cannot prevent.
         try:
             handler_path.resolve().relative_to(module_dir.resolve())
-        except ValueError:
+        except ValueError as exc:
             raise ModuleLoadError(
                 f"handler path escapes module directory: {handler_path_rel}"
-            )
+            ) from exc
 
         handler = self._import_handler(name, module_dir, handler_path, class_name, definition)
 

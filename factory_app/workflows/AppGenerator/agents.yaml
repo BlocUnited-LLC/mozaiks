@@ -1559,12 +1559,12 @@ agents:
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
          - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
          - Do not put `schema_version`, `module`, `actions`, or `capabilities` directly under `module_contract`; those belong inside `module_contract.module_yaml`.
-      5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, `event_pipeline`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `event_pipeline` if the module reacts to external or domain events through an automated lifecycle; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
+      5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, `event_pipeline`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, `api_surface`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `event_pipeline` if the module reacts to external or domain events through an automated lifecycle; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
          - `module_contract.module_yaml` must use the runtime loader shape exactly:
            - `schema_version: mozaiks.module.v1`
            - `module`: `{id, display_name, version, type, description, owner, visibility, handler}`
            - `permissions`: list of `{id, description}` objects
-           - `actions`: list of `{id, description, handler_method, input_schema, output_schema, permissions, emits, entitlement_gate}` objects
+           - `actions`: list of `{id, description, handler_method, api_surface, input_schema, output_schema, permissions, emits, entitlement_gate}` objects
            - `capabilities`: list of `{capability_id, kind, target, title, permissions, input_schema}` objects
          - `input_schema` and `output_schema` must be typed `JsonSchemaContract` objects, not raw JSON Schema maps. Include `type`, `description`, `required`, `properties`, and `items_type`. `properties` is a list of `{name, type, description, required, enum_values, items_type}` objects, not a dictionary keyed by property name.
          - Every `JsonSchemaProperty` must include all six fields: `name`, `type`, `description`, `required`, `enum_values`, and `items_type`. Use `enum_values: []` when there is no enum and `items_type: null` when the property is not an array.
@@ -1572,6 +1572,8 @@ agents:
          - `permissions`, `actions`, and `capabilities` are top-level siblings of `module` inside `module_yaml`; never nest them under `module`.
          - Capabilities do not use `id` or `grants`. For an action capability, set `capability_id` to the public capability id, `kind: "action"`, and `target` to the action id.
          - `actions[].handler_method` is the Python method name only, not an import path. Use `generate_report`, not `backend.handler:generate_report`. For generated durable modules, the handler method must equal the action id unless `current_build_task.initial_message` explicitly names a different method.
+         - `actions[].api_surface` controls anonymous HTTP eligibility when auth is enabled. Use `public` or `public_readonly` only for anonymous-safe actions such as catalog reads. Omit it or set `internal`/`admin_internal` for actions that require a token. Do not mark tenant, workspace, user, mutation, or admin actions public. Permissions and `entitlement_gate` still run after api_surface, so public actions that declare permissions are still denied to anonymous callers unless a host hook grants those permissions.
+         - Internal event-reaction actions should use `api_surface: internal` and `permissions: []`; the event bus is the authorization boundary. Do not expose reaction handlers by marking them public.
          - If `subscription_contract.module_contract_updates` names this
            module/action, set that action's `entitlement_gate` to the exact
            update value. Leave `entitlement_gate` null/absent for actions not
@@ -1623,7 +1625,7 @@ agents:
          - When emitted, set `schema_version: mozaiks.runtime_extensions.v1` and populate `extensions[]`.
       14. Also serialize the typed contract to `code_files` entries with YAML content strings at the exact `modules/{capability_pack_id}/...` paths. Include `modules/{capability_pack_id}/runtime_extensions.yaml` in code_files only when `runtime_extensions_yaml` is non-null.
          - YAML `code_files[].content` must be valid YAML serialized from the same typed object. Preserve indentation under `module:`, `permissions:`, `actions:`, and `capabilities:`; do not flatten nested fields or emit list item markers outside their parent list.
-         - In `modules/{module_id}/module.yaml`, every action field (`description`, `handler_method`, `input_schema`, `output_schema`, `permissions`, `emits`, and `entitlement_gate`) must be indented inside that action's `actions:` list item. Never place `entitlement_gate`, `permissions`, or `emits` at the YAML root.
+         - In `modules/{module_id}/module.yaml`, every action field (`description`, `handler_method`, `api_surface`, `input_schema`, `output_schema`, `permissions`, `emits`, and `entitlement_gate`) must be indented inside that action's `actions:` list item. Never place `api_surface`, `entitlement_gate`, `permissions`, or `emits` at the YAML root.
       15. Set `service_foundation_bundle` to null in module_contract mode.
 
       **If `current_build_task_type == "service_foundation"` (Mode B)**:
@@ -2229,11 +2231,12 @@ agents:
         - `module_contract.module_yaml.module.type` selects the cookie-cutter backend conventions from the injected `[MODULE ARCHETYPES CONTEXT]`. Do not invent a parallel module taxonomy or restate a different set of type rules.
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
-      - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `context.events.publish(...)` for event emission.
+      - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `context.events.publish(...)` for event emission.
       - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
       - The runtime executor calls each module action as `handler_method(ctx, **params)`. Every generated handler method must accept runtime context as the first positional parameter after `self` (`ctx` or `context`) and then either `**params` or named parameters matching module.yaml input_schema fields.
       - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `data/contract.json`.
       - Generated module code must not use `ctx.db` or `context.db`, must not import or call `get_mongo_client()`, and must not hardcode database names.
+      - External HTTP module dispatch validates request-supplied tenant/workspace/user scope before this code runs. Generated module code must still build resource filters from `context.app_id`, `context.tenant_id`, `context.workspace_id`, `context.user_id`, and `context.permissions`; never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization.
       - Publish events through the runtime context: `await context.events.publish("domain.task_manager.task_created", payload)`.
       - Event types must exactly match `events.yaml.events[].type`.
       - Generated service methods must consume runtime input from `**params` using the exact fields declared in `module.yaml.actions[].input_schema.required`. Do not wrap request fields under a synthetic `payload` key unless the module action input schema explicitly declares a required `payload` field.
@@ -2252,7 +2255,7 @@ agents:
       6a. Handler signatures must match the runtime executor: `async def action_name(self, ctx, **params)` or `async def action_name(self, ctx, field: Type = ...)`. Do not put `context` last.
       7. Put state transitions and event publication in `backend/service.py` when that file is declared.
       8. Put persistence queries/writes in `backend/repo.py` when that file is declared.
-      9. Put authorization, ownership, and transition checks in `backend/policy.py` when that file is declared.
+      9. Put authorization, ownership, tenant/workspace resource filters, and transition checks in `backend/policy.py` when that file is declared. The policy layer should derive scope from the runtime context, not from caller-supplied params.
       10. Put DTOs, enums, and normalization helpers in `backend/schemas.py` only when that file is included in `current_build_task.owned_paths`. Otherwise import and use the schemas.py helpers produced by the upstream `data_models` task.
       10a. Align every repo collection call with `data_contract` ownership. Non-persistent modules should not invent database logic.
       11. After every mutating action, publish the corresponding event from `events.yaml` using the exact namespaced event type declared there.

@@ -198,12 +198,14 @@ def test_module_loader_loads_action_api_surface_metadata(tmp_path: Path) -> None
 
     assert loaded.definition.actions[0].api_surface == "public_readonly"
     assert loaded.action_permissions_map == {"create": ["tasks.write"]}
+    assert loaded.action_api_surface_map == {"create": "public_readonly"}
 
 
 def test_module_loader_loads_without_action_api_surface(tmp_path: Path) -> None:
     loaded = ModuleLoader(str(tmp_path)).load(_write_canonical_module(tmp_path).name)
 
     assert loaded.definition.actions[0].api_surface is None
+    assert loaded.action_api_surface_map == {"create": None}
 
 
 @pytest.mark.parametrize("api_surface", ["public", "public_readonly", "internal", "admin_internal"])

@@ -62,9 +62,12 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
   explicit overrides.
 - Keycloak auth can map configurable app, tenant, and workspace claim names
   through `KEYCLOAK_*_CLAIM` env vars.
+- When auth is enabled, external HTTP module dispatch requires an authenticated
+  principal by default. The only anonymous HTTP module actions are those whose
+  `actions[].api_surface` is explicitly `public` or `public_readonly`.
 - External HTTP module dispatch never uses the trusted internal
   `granted_permissions=None` bypass. It passes a concrete permission list,
-  even when unauthenticated.
+  including an empty list for anonymous public actions.
 - Authenticated HTTP module dispatch rejects request-supplied `user_id`,
   `tenant_id`, or `workspace_id` values that conflict with token-bound claims.
 - `PlatformHookRegistry` exposes `module_scope_resolver`, a provider-neutral
@@ -86,7 +89,8 @@ The OSS runtime now provides the foundational tenant/auth scope contract:
 
 The platform should resolve external requests in this order:
 
-1. Authenticate the token into a `UserPrincipal`.
+1. Authenticate the token into a `UserPrincipal`, unless the action is
+   explicitly declared as `api_surface: public` or `public_readonly`.
 2. Build a requested scope from route/query/body context without trusting it.
 3. Ask the app/platform extension hook to validate or complete the scope.
 4. Return a canonical identity scope plus granted module permissions.
@@ -102,19 +106,13 @@ HTTP user traffic.
 
 ## Remaining Production Work
 
-1. Decide the final auth posture for module HTTP routes.
-   The runtime now avoids trusted-permission bypass for HTTP traffic. Product
-   hosts should still decide whether all module HTTP routes require an
-   authenticated principal by default or whether public action declarations are
-   sufficient.
-
-2. Update generator contracts.
+1. Update generator contracts.
    If generated modules rely on tenant/workspace scope, AppGenerator file
    contracts and module docs should explicitly describe `ctx.workspace_id`,
    request-scope validation, and the external-versus-internal dispatch
    distinction.
 
-3. Add an end-to-end hosted smoke.
+2. Add an end-to-end hosted smoke.
    A production readiness gate should exercise token auth, scope hook
    resolution, module permission enforcement, tenant/workspace persistence
    scope, and event metadata in one hosted-product flow.

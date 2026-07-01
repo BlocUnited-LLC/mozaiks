@@ -149,6 +149,11 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert models["AppPageSchema"]["fields"]["shell_mode"]["variants"] == ["AppShellMode", "null"]
     assert models["AppBuildPage"]["fields"]["shell_mode_hint"]["variants"] == ["str", "null"]
     assert models["AppBuildPlan"]["fields"]["shell_preset_hint"]["variants"] == ["str", "null"]
+    module_action_fields = models["ModuleAction"]["fields"]
+    assert "api_surface" in module_action_fields
+    assert module_action_fields["api_surface"]["type"] == "optional_str"
+    assert "public_readonly" in module_action_fields["api_surface"]["description"]
+    assert "AUTH_ENABLED=true" in module_action_fields["api_surface"]["description"]
     assert models["AppShellMode"]["values"] == [
         "standard",
         "workspace",
@@ -340,6 +345,35 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, `BackendFoundationBundle`, and `SubscriptionConfigBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControlPlaneOutput` and `ControlPlanePackBundle` in `structured_outputs.yaml`." in source
     assert "Exact nested field shapes come from `ControllerOutput` and `AppBackendAdminConfig` in `structured_outputs.yaml`." in source
+
+
+def test_appgenerator_guides_module_auth_surface_and_scope_contract() -> None:
+    source = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    file_contracts = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
+    module_archetypes = _read_yaml("factory_app/build_context/AppGenerator/module_archetypes.yaml")
+    structured_outputs = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+
+    module_action = structured_outputs["models"]["ModuleAction"]["fields"]
+    assert module_action["api_surface"]["type"] == "optional_str"
+    assert "public_readonly" in module_action["api_surface"]["description"]
+    assert "entitlement_gate" in module_action["api_surface"]["description"]
+
+    module_constraints = "\n".join(file_contracts["task_contracts"]["module_contract"]["hard_constraints"])
+    api_constraints = "\n".join(file_contracts["task_contracts"]["api_surface"]["hard_constraints"])
+    standard_constraints = "\n".join(module_archetypes["archetypes"]["standard"]["hard_constraints"])
+
+    assert "actions[].api_surface is part of the module contract" in module_constraints
+    assert "AUTH_ENABLED=true" in module_constraints
+    assert "External HTTP dispatch and internal runtime dispatch are separate paths" in module_constraints
+    assert "ctx.workspace_id" in module_constraints
+    assert "Custom API adapters must not bypass module action auth" in api_constraints
+    assert "Tenant, workspace, user, mutation, and admin actions require authenticated HTTP dispatch" in standard_constraints
+
+    assert "`actions`: list of `{id, description, handler_method, api_surface" in source
+    assert "`actions[].api_surface` controls anonymous HTTP eligibility" in source
+    assert "Do not mark tenant, workspace, user, mutation, or admin actions public" in source
+    assert "`context.workspace_id`" in source
+    assert "never trust `tenant_id`, `workspace_id`, or `user_id` values from params as authorization" in source
 
 
 def test_control_plane_pack_codegen_seeds_runtime_yaml() -> None:
