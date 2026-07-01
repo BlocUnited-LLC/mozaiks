@@ -382,6 +382,27 @@ This project follows a practical pre-1.0 changelog format:
   `tenant_identity.admin` permission declared in `module.yaml`. 3 new tests cover
   admin allowed, non-admin rejected, and no-permissions rejected.
 
+- **Admin-only guards for build_intelligence, health, and hosted_billing** (`mozaiks-app`):
+  - `build_intelligence`: `get_domain_patterns`, `list_all_builds`, and `get_intelligence_summary` had no
+    service-layer permission check. These return unscoped build data across all users. Added
+    `require_build_intelligence_admin(ctx)` to `policy.py` and wired it into all three methods. 4 new tests.
+  - `health`: `get_app_health_summary` had `api_surface: admin_internal` and `permissions: [ops.admin]`
+    in `module.yaml` but no service-layer guard. Created `backend/policy.py` with `require_ops_admin(ctx)`
+    and wired it in. 1 new test.
+  - `hosted_billing`: All 19 `admin_internal` actions relied on a stub `is_admin_context()` that
+    unconditionally returned `True`. Replaced with `require_billing_admin(ctx)` (same `ModuleContext`
+    pass-through pattern). Wired into all 19 service methods. Updated 10 affected test files.
+
+- **Defense-in-depth admin guards for hosting admin_internal actions** (`mozaiks-app/app/modules/hosting/backend/service.py`, `policy.py`, `routes_webhooks.py`):
+  `list_requests`, `approve_request`, `get_hosting_summary`, `get_domain_pipeline_status`,
+  and `record_build_result_callback` are `api_surface: admin_internal` actions with
+  `permissions: [hosting.admin]` declared in `module.yaml`. Previously enforcement relied
+  solely on the module executor. Added `require_hosting_admin(ctx)` to `policy.py`
+  (same `ModuleContext` pass-through pattern as other modules) and wired it into all five
+  methods. The webhook route `_WebhookCtx` carries `permissions = ["hosting.admin"]` after
+  HMAC authentication passes, so the webhook path is not blocked by the service guard.
+  Updated all affected test contexts to supply the required permission.
+
 ### Fixed
 
 - **AG2 stream events TTL index** (`mozaiksai/core/adapters/ag2_stream_storage.py`):
