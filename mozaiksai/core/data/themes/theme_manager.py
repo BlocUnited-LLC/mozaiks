@@ -254,7 +254,8 @@ class ThemeManager:
             if self._collection is not None:
                 return self._collection
             await self._persistence._ensure_client()
-            assert self._persistence.client is not None
+            if self._persistence.client is None:
+                raise RuntimeError("Mongo client not initialized")
 #################################################################################
             db = self._persistence.client["mozaiksai"]
             self._collection = db["Themes"]

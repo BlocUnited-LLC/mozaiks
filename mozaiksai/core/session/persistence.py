@@ -174,7 +174,8 @@ class SessionStateStore:
             raise TypeError("Persistence backend does not expose SessionRouterState collection access")
 
         await persistence_root._ensure_client()
-        assert persistence_root.client is not None, "Mongo client not initialized"
+        if persistence_root.client is None:
+            raise RuntimeError("Mongo client not initialized")
         return persistence_root.client["mozaiksai"]["SessionRouterState"]
 
     async def load(self, *, app_id: str, user_id: str) -> SessionState | None:

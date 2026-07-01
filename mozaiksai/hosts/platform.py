@@ -1715,14 +1715,16 @@ def _default_username(principal: UserPrincipal, user_id: str) -> str:
 async def _account_profile_collection():
     await persistence_manager.persistence._ensure_client()
     client = persistence_manager.persistence.client
-    assert client is not None, "Mongo client not initialized"
+    if client is None:
+        raise RuntimeError("Mongo client not initialized")
     return client["mozaiksai"][_ACCOUNT_PROFILE_COLLECTION]
 
 
 async def _account_preferences_collection():
     await persistence_manager.persistence._ensure_client()
     client = persistence_manager.persistence.client
-    assert client is not None, "Mongo client not initialized"
+    if client is None:
+        raise RuntimeError("Mongo client not initialized")
     return client["mozaiksai"][_ACCOUNT_PREFERENCES_COLLECTION]
 
 

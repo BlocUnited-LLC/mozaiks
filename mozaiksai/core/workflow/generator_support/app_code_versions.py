@@ -202,7 +202,8 @@ def compute_patchset_document(
 async def _collection(name: str):
     pm = AG2PersistenceManager()
     await pm.persistence._ensure_client()
-    assert pm.persistence.client is not None, "Mongo client not initialized"
+    if pm.persistence.client is None:
+        raise RuntimeError("Mongo client not initialized")
     return pm.persistence.client["mozaiksai"][name]
 
 

@@ -193,7 +193,8 @@ class ConfiguredEntitlementAdapter:
             return self._config.default_plan_id
 
     def _check_default_plan(self, capability_id: str) -> EntitlementResult:
-        assert self._config is not None
+        if self._config is None:
+            raise RuntimeError("EntitlementAdapter config not initialized")
         capabilities = self._config.capabilities_for_plan(self._config.default_plan_id)
         if capability_id in capabilities:
             return EntitlementResult(granted=True, reason="default_plan")

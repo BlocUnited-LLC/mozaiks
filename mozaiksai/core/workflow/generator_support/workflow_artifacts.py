@@ -18,7 +18,8 @@ async def record_workflow_artifacts(
 ) -> dict[str, Any]:
     pm = AG2PersistenceManager()
     await pm.persistence._ensure_client()
-    assert pm.persistence.client is not None, "Mongo client not initialized"
+    if pm.persistence.client is None:
+        raise RuntimeError("Mongo client not initialized")
     now = datetime.now(UTC).isoformat()
     doc = {
         "app_id": app_id,

@@ -291,17 +291,20 @@ class AG2PersistenceManager:
 
     async def _coll(self):
         await self.persistence._ensure_client()
-        assert self.persistence.client is not None, "Mongo client not initialized"
+        if self.persistence.client is None:
+            raise RuntimeError("Mongo client not initialized")
         return self.persistence.client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
 
     async def _general_coll(self):
         await self.persistence._ensure_client()
-        assert self.persistence.client is not None, "Mongo client not initialized"
+        if self.persistence.client is None:
+            raise RuntimeError("Mongo client not initialized")
         return self.persistence.client[SYSTEM_DATABASE][_GENERAL_CHAT_COLLECTION]
 
     async def _general_counter_coll(self):
         await self.persistence._ensure_client()
-        assert self.persistence.client is not None, "Mongo client not initialized"
+        if self.persistence.client is None:
+            raise RuntimeError("Mongo client not initialized")
         return self.persistence.client[SYSTEM_DATABASE][_GENERAL_CHAT_COUNTER_COLLECTION]
 
     async def get_or_assign_cache_seed(
