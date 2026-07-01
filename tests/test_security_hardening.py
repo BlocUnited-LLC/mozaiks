@@ -385,3 +385,48 @@ class TestWebhookUrlValidator:
         from pydantic import ValidationError
         with pytest.raises(ValidationError):
             self._make("https://0.0.0.0/webhook")
+
+
+# ---------------------------------------------------------------------------
+# _sanitize_agent_query
+# ---------------------------------------------------------------------------
+
+class TestSanitizeAgentQuery:
+    """Verify that $where and $expr operators are stripped from agent-generated queries."""
+
+    def _sanitize(self, query: dict) -> dict:
+        from mozaiksai.core.data.persistence.db_manager import _sanitize_agent_query
+        return _sanitize_agent_query(query)
+
+    def test_safe_query_is_returned_unchanged(self):
+        q = {"status": "active", "user_id": "u1"}
+        assert self._sanitize(q) == q
+
+    def test_comparison_operators_in_value_are_kept(self):
+        """$gte/$lt/$in inside value dicts are legitimate and must not be removed."""
+        q = {"created_at": {"$gte": "2024-01-01"}, "count": {"$lt": 10}}
+        assert self._sanitize(q) == q
+
+    def test_where_operator_stripped(self):
+        """$where allows arbitrary JS execution and must be blocked."""
+        q = {"$where": "this.a == this.b", "user_id": "u1"}
+        result = self._sanitize(q)
+        assert "$where" not in result
+        assert result["user_id"] == "u1"
+
+    def test_expr_operator_stripped(self):
+        """$expr allows server-side expression evaluation and must be blocked."""
+        q = {"$expr": {"$eq": ["$a", "$b"]}, "status": "ok"}
+        result = self._sanitize(q)
+        assert "$expr" not in result
+        assert result["status"] == "ok"
+
+    def test_both_blocked_operators_stripped(self):
+        q = {"$where": "1==1", "$expr": {"$gt": ["$x", 0]}, "field": "value"}
+        result = self._sanitize(q)
+        assert "$where" not in result
+        assert "$expr" not in result
+        assert result == {"field": "value"}
+
+    def test_empty_query_returned_unchanged(self):
+        assert self._sanitize({}) == {}

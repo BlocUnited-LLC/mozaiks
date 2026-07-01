@@ -62,6 +62,10 @@ class TransitionLaunchResult:
     workflow_launch: WorkflowLaunchResult | None = None
 
 
+_CONTEXT_MAX_KEYS = 50
+_CONTEXT_MAX_VALUE_BYTES = 65_536  # 64 KB per value
+
+
 def validate_context_for_workflow(workflow_id: str, merged_context: dict[str, Any]) -> dict[str, Any]:
     validated_context: dict[str, Any] = {}
     if not merged_context:
@@ -81,6 +85,22 @@ def validate_context_for_workflow(workflow_id: str, merged_context: dict[str, An
         if declared_keys and key not in declared_keys:
             logger.warning("SESSION_LAUNCH_CONTEXT_KEY_REJECTED: key=%s workflow=%s", key, workflow_id)
             continue
+        if isinstance(value, str) and len(value.encode()) > _CONTEXT_MAX_VALUE_BYTES:
+            logger.warning(
+                "SESSION_LAUNCH_CONTEXT_VALUE_TOO_LARGE: key=%s workflow=%s size=%d limit=%d",
+                key,
+                workflow_id,
+                len(value.encode()),
+                _CONTEXT_MAX_VALUE_BYTES,
+            )
+            continue
+        if len(validated_context) >= _CONTEXT_MAX_KEYS:
+            logger.warning(
+                "SESSION_LAUNCH_CONTEXT_TOO_MANY_KEYS: workflow=%s limit=%d",
+                workflow_id,
+                _CONTEXT_MAX_KEYS,
+            )
+            break
         validated_context[key] = value
     return validated_context
 

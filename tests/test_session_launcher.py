@@ -633,3 +633,36 @@ async def test_emit_workflow_launch_navigation_sends_chat_navigate_envelope(monk
         )
     ]
 
+
+# ---------------------------------------------------------------------------
+# validate_context_for_workflow — size limit tests
+# ---------------------------------------------------------------------------
+
+def test_validate_context_too_many_keys_truncates_at_limit() -> None:
+    """context_variables with more than _CONTEXT_MAX_KEYS entries are silently capped."""
+    limit = _session_launcher._CONTEXT_MAX_KEYS
+    # All keys are undeclared so they pass the declared-key filter (declared_keys is empty when
+    # the workflow isn't found). Use a non-existent workflow so no key filter applies.
+    context = {f"key_{i}": "value" for i in range(limit + 10)}
+    validated = _session_launcher.validate_context_for_workflow("unknown_wf", context)
+    assert len(validated) <= limit
+
+
+def test_validate_context_large_string_value_is_dropped() -> None:
+    """Values exceeding _CONTEXT_MAX_VALUE_BYTES are silently dropped."""
+    max_bytes = _session_launcher._CONTEXT_MAX_VALUE_BYTES
+    oversized = "x" * (max_bytes + 1)
+    context = {"small": "ok", "big": oversized}
+    validated = _session_launcher.validate_context_for_workflow("unknown_wf", context)
+    assert "small" in validated
+    assert "big" not in validated
+
+
+def test_validate_context_value_at_exact_limit_is_accepted() -> None:
+    """Values exactly at the byte limit are accepted (boundary condition)."""
+    max_bytes = _session_launcher._CONTEXT_MAX_VALUE_BYTES
+    at_limit = "x" * max_bytes
+    context = {"key": at_limit}
+    validated = _session_launcher.validate_context_for_workflow("unknown_wf", context)
+    assert "key" in validated
+

@@ -17,6 +17,26 @@ from mozaiksai.core.core_config import get_mongo_client
 
 _logger = logging.getLogger(__name__)
 
+# MongoDB operators that must never appear in agent-generated queries because they
+# allow arbitrary JS execution ($where) or server-side expression evaluation ($expr)
+# that could be leveraged for injection. Legitimate comparison operators ($gte, $in,
+# etc.) may appear inside value dicts and are not blocked here.
+_BLOCKED_TOP_LEVEL_OPERATORS = frozenset({"$where", "$expr"})
+
+
+def _sanitize_agent_query(query: dict[str, Any]) -> dict[str, Any]:
+    """Strip dangerous top-level MongoDB operators from an agent-generated query.
+
+    Blocks $where (arbitrary JS execution) and $expr (server-side expression evaluation)
+    at the top level. Value-level comparison operators ($gte, $lt, $in, $regex, etc.)
+    inside field filter dicts are intentional and left untouched.
+    """
+    blocked = _BLOCKED_TOP_LEVEL_OPERATORS & query.keys()
+    if not blocked:
+        return query
+    _logger.warning("AGENT_QUERY_BLOCKED_OPERATORS: operators=%s", sorted(blocked))
+    return {k: v for k, v in query.items() if k not in _BLOCKED_TOP_LEVEL_OPERATORS}
+
 
 class DatabaseManagerError(Exception):
     """Custom exception for database manager errors."""
@@ -173,8 +193,8 @@ async def load_from_database(
     except Exception as e:
         return {"status": "error", "message": f"Configuration error: {e}"}
 
-    # Build secure query (always scope to app)
-    secure_query = dict(query)
+    # Build secure query (always scope to app; strip dangerous top-level operators)
+    secure_query = _sanitize_agent_query(dict(query))
     if app_id:
         try:
             secure_query["app_id"] = ObjectId(app_id)

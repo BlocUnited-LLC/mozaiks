@@ -410,6 +410,23 @@ This project follows a practical pre-1.0 changelog format:
   either mode — the key is a defense-in-depth layer, not the only auth gate.
   Tests updated to use adequately long keys; added `test_warns_when_internal_api_key_too_short`.
 
+- **$where/$expr blocked in agent-generated MongoDB queries** (`mozaiksai/core/data/persistence/db_manager.py`):
+  `load_from_database`, the agent tool for MongoDB reads, passed agent-generated query dicts
+  directly to MongoDB without sanitization. Operators `$where` (arbitrary JavaScript execution)
+  and `$expr` (server-side expression evaluation) are now stripped before the query reaches
+  MongoDB. Value-level comparison operators (`$gte`, `$lt`, `$in`, `$regex`) inside field
+  filter dicts are legitimate and are not affected. Logged as `AGENT_QUERY_BLOCKED_OPERATORS`
+  for observability. 6 tests cover safe queries, value-operator pass-through, and blocking
+  of both forbidden operators individually and combined.
+
+- **context_variables size limits on workflow launch** (`mozaiksai/core/session/launcher.py`):
+  `validate_context_for_workflow` accepted unbounded context dicts: no limit on the number
+  of keys or the size of string values. Large payloads would be stored in MongoDB per session.
+  Added: max 50 keys (`_CONTEXT_MAX_KEYS`); string values exceeding 64 KB per entry
+  (`_CONTEXT_MAX_VALUE_BYTES`) are silently dropped with a structured warning log.
+  Non-string values (dicts, lists, etc.) are not bounded by the byte check and pass through
+  unchanged. 3 boundary tests cover: key cap, oversized value drop, and exact-limit acceptance.
+
 - **PermissionError from service-layer guards now maps to HTTP 403** (`mozaiksai/core/runtime/composition/module_executor.py`):
   Added a specific `except PermissionError` handler before the generic `except Exception`
   handler in `ModuleExecutor.execute()`. Previously, `PermissionError` raised by service-layer
