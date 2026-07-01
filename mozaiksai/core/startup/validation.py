@@ -19,7 +19,8 @@ Checks performed:
   Auth provider        — warns when ``ENV=production``, auth is not explicitly disabled,
                          and no auth provider env vars are configured (silently falls
                          back to demo mode without this check).
-  INTERNAL_API_KEY     — warns when the key is absent (defense-in-depth; not a hard gate).
+  INTERNAL_API_KEY     — warns when the key is absent or shorter than 32 chars
+                         (defense-in-depth; not a hard gate).
   RATE_LIMIT_ENABLED   — warns when ``ENV=production`` and ``RATE_LIMIT_ENABLED=false``.
   Redis connectivity   — when ``REDIS_URL`` is set, validates TCP reachability on startup.
 
@@ -270,6 +271,7 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
     # ── INTERNAL_API_KEY ─────────────────────────────────────────────────────
     # When not set, service-to-service requests bypass the key check (dev mode).
     # Warn operators so this is not accidentally left unset in production.
+    # Also warn when the key is too short to provide meaningful entropy (< 32 chars).
     internal_key = os.getenv("INTERNAL_API_KEY", "").strip()
     if not internal_key:
         msg = (
@@ -285,6 +287,17 @@ async def run_startup_checks(*, _mongo_client: Any = None) -> list[str]:
         )
         # Not raised in strict mode — the endpoint still requires user auth;
         # the internal key is a defense-in-depth layer, not the only gate.
+    elif len(internal_key) < 32:
+        msg = (
+            f"INTERNAL_API_KEY is set but may be too short ({len(internal_key)} chars). "
+            "Use a randomly generated key of at least 32 characters for adequate entropy."
+        )
+        warnings.append(msg)
+        logger.warning(
+            "STARTUP_CHECK_FAILED: %s",
+            msg,
+            extra={"check": "internal_api_key", "mode": mode},
+        )
     else:
         logger.info(
             "STARTUP_CHECK_OK: INTERNAL_API_KEY is configured",

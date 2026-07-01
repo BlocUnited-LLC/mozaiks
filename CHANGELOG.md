@@ -403,6 +403,13 @@ This project follows a practical pre-1.0 changelog format:
   HMAC authentication passes, so the webhook path is not blocked by the service guard.
   Updated all affected test contexts to supply the required permission.
 
+- **INTERNAL_API_KEY minimum-length check in startup validation** (`mozaiksai/core/startup/validation.py`):
+  Added a warning when `INTERNAL_API_KEY` is set but shorter than 32 characters. The
+  previous check only detected the key being absent; a short key offers insufficient entropy
+  as a defense-in-depth secret. Minimum length is 32 characters. Not a hard failure in
+  either mode — the key is a defense-in-depth layer, not the only auth gate.
+  Tests updated to use adequately long keys; added `test_warns_when_internal_api_key_too_short`.
+
 ### Fixed
 
 - **Bare assert replaced with explicit RuntimeError in MongoDB guards** (`mozaiksai/`):
