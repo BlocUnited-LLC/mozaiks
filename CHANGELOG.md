@@ -596,6 +596,32 @@ This project follows a practical pre-1.0 changelog format:
   Replaced with opaque `"An internal error occurred."` / `"internal_error"` strings. Full
   exception detail continues to be logged server-side via `logger.error(..., exc_info=True)`.
 
+- **Studio ValueError HTTP response suppression** (`mozaiksai/hosts/studio.py`):
+  Eight endpoints that caught `ValueError` from internal helpers were returning `detail=str(exc)`,
+  exposing artifact version IDs, internal state names, file paths, or config key names in 400/409
+  responses. All eight now log the exception at WARNING level and return safe static messages
+  (`"Invalid app parameters."`, `"Invalid workspace snapshot parameters."`, etc.). Context and
+  full exception text remain in server logs.
+
+- **Sandbox validation command safety check applied to all strategies** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
+  `_is_safe_build_command` was only wired into the `local` strategy path. The `e2b` and `docker`
+  sandbox paths passed AI-agent-generated commands directly to `adapter.run_command` which executes
+  via `sh -c`. An injected command containing `;`, `&&`, or `$(...)` could achieve RCE inside the
+  sandbox container. Guard now applied in `_run_sandbox_validation` before every `adapter.run_command`
+  call, mirroring the local path. Unsafe commands are skipped with a warning entry (same behavior).
+
+- **Sandbox adapter acquisition error suppression** (`factory_app/workflows/AppGenerator/tools/app_validation.py`):
+  `_run_sandbox_validation` returned `errors=[str(exc)]` when adapter acquisition failed, which could
+  include Docker daemon errors, network details, or E2B internal messages that then propagated into
+  Studio workflow context. Replaced with `"Validation infrastructure unavailable."` and logged with
+  `exc_info=True`. Added `import logging` / module-level `logger` which the file previously lacked.
+
+- **Docker sandbox env key validation** (`mozaiksai/core/adapters/docker_sandbox.py`):
+  `run_command` passed caller-supplied `envs` dict keys to `-e key=val` in `docker exec` args without
+  validation. Keys that contain spaces, `=`, or other special characters could break the Docker arg
+  vector in unexpected ways. Keys are now validated against `[A-Z_][A-Z0-9_]*` (case-insensitive)
+  before inclusion; invalid keys are logged and skipped.
+
 - **AG2 adapter RunResult error detail suppression** (`mozaiksai/core/adapters/ag2_orchestration.py`, `ag2_network_runner.py`, `ag2_task_batch_runner.py`):
   All three AG2 runner adapters returned `RunResult(error=str(exc))` on failure, which flows
   through `runner_result.error` → `run_error` in `orchestration_patterns.py` and is included in

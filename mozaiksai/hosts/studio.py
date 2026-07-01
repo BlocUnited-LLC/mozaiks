@@ -628,7 +628,8 @@ async def create_workspace_app(
             app_id=body.app_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("create_app_record validation error: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid app parameters.") from exc
     except Exception as exc:
         logger.exception("Failed to create app record")
         raise HTTPException(status_code=500, detail="Failed to create app record") from exc
@@ -848,7 +849,8 @@ async def create_studio_workspace_snapshot_context(
             make_current=body.make_current,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("register_workspace_snapshot validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid workspace snapshot parameters.") from exc
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
@@ -897,7 +899,8 @@ async def create_studio_app_context_refresh_plan(
             request=request,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("build_context_refresh_plan validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid context refresh parameters.") from exc
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
@@ -929,7 +932,8 @@ async def launch_studio_app_context_refresh(
             session_router=get_session_router(),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("launch_context_refresh_plan validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid context refresh launch parameters.") from exc
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
@@ -956,7 +960,8 @@ async def complete_studio_app_context_refresh(
             workflow_context_variables=dict(body.workflow_context_variables or {}),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("complete_context_refresh validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid context refresh completion parameters.") from exc
     return _redact_secret_fields(
         {
             "app_id": resolved_app_id,
@@ -1316,7 +1321,8 @@ async def accept_build_artifact_version(
                 accepted_by=principal.user_id,
             )
         except (AcceptedStagedAppBundleArtifactVersionError, ValueError) as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            logger.warning("accept_staged_refinement conflict app=%s version=%s: %s", app_id, artifact_version_id, exc)
+            raise HTTPException(status_code=409, detail="Conflict accepting artifact version.") from exc
         accepted = accepted_result.artifact_version
     else:
         accepted = await artifact_store.accept_artifact_version(app_id=app_id, artifact_version_id=artifact_version_id)
@@ -1480,7 +1486,8 @@ async def promote_build_artifact_version(
                 promoted_by=user_id,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            logger.warning("promote_build conflict app=%s build=%s: %s", app_id, promotion_build_registry_id, exc)
+            raise HTTPException(status_code=409, detail="Conflict promoting build.") from exc
 
     payload = await _build_artifact_review_payload(
         app_id=app_id,
@@ -1683,7 +1690,8 @@ async def save_build_surface(
     except HTTPException:
         raise
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("build state validation error app=%s: %s", app_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid build state parameters.") from exc
     except Exception as exc:
         logger.exception("Failed to persist build state")
         raise HTTPException(status_code=500, detail="Failed to persist build state") from exc

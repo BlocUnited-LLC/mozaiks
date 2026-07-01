@@ -13,10 +13,13 @@ import ast
 import asyncio
 import builtins
 import json
+import logging
 import os
 import re
 import sys
 import tempfile
+
+logger = logging.getLogger(__name__)
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -843,9 +846,10 @@ async def _run_sandbox_validation(
     try:
         adapter = get_sandbox_adapter(strategy)
     except Exception as exc:
+        logger.error("Failed to acquire sandbox adapter strategy=%s: %s", strategy, exc, exc_info=True)
         return {
             **_base_result(strategy=strategy, status="failed"),
-            "errors": [str(exc)],
+            "errors": ["Validation infrastructure unavailable."],
         }
 
     result = _base_result(strategy=strategy, status="passed")
@@ -857,6 +861,11 @@ async def _run_sandbox_validation(
         await adapter.write_files(session_id=session_id, files=resolved_files)
 
         for cmd in commands:
+            if not _is_safe_build_command(cmd):
+                result["warnings"].append(
+                    f"Skipped unsafe validation command (contains shell metacharacters): {cmd!r}"
+                )
+                continue
             run_result = await adapter.run_command(
                 session_id=session_id,
                 command=cmd,

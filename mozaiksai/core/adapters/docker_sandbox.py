@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path, PurePosixPath
+
+_ENV_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$", re.IGNORECASE)
 from typing import Any
 
 from logs.logging_config import get_core_logger
@@ -199,6 +202,9 @@ class DockerSandboxAdapter:
         workdir = cwd or _DEFAULT_WORKDIR
         env_args: list[str] = []
         for key, val in (envs or {}).items():
+            if not _ENV_KEY_RE.match(key):
+                logger.warning("Skipping env var with invalid key name: %r", key)
+                continue
             env_args += ["-e", f"{key}={val}"]
 
         if background:
