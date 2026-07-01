@@ -405,6 +405,13 @@ This project follows a practical pre-1.0 changelog format:
 
 ### Fixed
 
+- **Bare assert replaced with explicit RuntimeError in MongoDB guards** (`mozaiksai/`):
+  Eight bare `assert client is not None` / `assert config is not None` statements across
+  `persistence_manager.py`, `theme_manager.py`, `entitlements.py`, `session/persistence.py`,
+  `app_code_versions.py`, `workflow_artifacts.py`, and `platform.py` were silently removed
+  when Python runs with the `-O` flag, causing downstream `AttributeError: 'NoneType' ...`
+  instead of a clear error. Replaced with `if ... is None: raise RuntimeError(...)`.
+
 - **AG2 stream events TTL index** (`mozaiksai/core/adapters/ag2_stream_storage.py`):
   `_ensure_indexes` now creates a TTL index on `created_at` for the AG2 stream events
   collection, capped at 30 days by default. Without this index, every workflow run's
