@@ -369,6 +369,16 @@ class ModuleExecutor:
                 error=f"Invalid parameters for action '{request.action}'",
                 error_code="INVALID_PARAMS",
             )
+        except PermissionError as exc:
+            logger.warning(
+                "MODULE_ACTION_PERMISSION_DENIED: module=%s action=%s user=%s error=%s",
+                request.module, request.action, request.user_id, exc,
+            )
+            return ModuleResult(
+                success=False,
+                error=str(exc),
+                error_code="PERMISSION_DENIED",
+            )
         except Exception as exc:
             logger.error(
                 "MODULE_ACTION_ERROR: module=%s action=%s error=%s", request.module, request.action, exc,

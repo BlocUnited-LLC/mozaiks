@@ -410,6 +410,45 @@ This project follows a practical pre-1.0 changelog format:
   either mode — the key is a defense-in-depth layer, not the only auth gate.
   Tests updated to use adequately long keys; added `test_warns_when_internal_api_key_too_short`.
 
+- **PermissionError from service-layer guards now maps to HTTP 403** (`mozaiksai/core/runtime/composition/module_executor.py`):
+  Added a specific `except PermissionError` handler before the generic `except Exception`
+  handler in `ModuleExecutor.execute()`. Previously, `PermissionError` raised by service-layer
+  `require_X_admin(ctx)` guards was caught by the generic handler and returned with
+  `error_code="EXECUTION_ERROR"`, which the platform host maps to HTTP 500. The correct
+  status is 403; the platform host already routes `PERMISSION_DENIED` → 403.
+  Added `test_permission_error_from_service_layer_returns_permission_denied` to ensure this
+  routing holds regardless of the executor's generic catch-all order.
+
+- **Defense-in-depth admin guards for investor_marketplace placement management** (`mozaiks-app/app/modules/investor_marketplace/backend/service.py`, `policy.py`):
+  Nine placement-management methods (`get_placement_performance_summary`, `list_placement_performance`,
+  `get_marketplace_revenue_summary`, `list_marketplace_rail_monetization`,
+  `list_marketplace_sponsor_cohorts`, `upsert_marketplace_placement`,
+  `schedule_marketplace_placement`, `list_marketplace_placement_audit_trail`,
+  `set_marketplace_placement_status`) previously had no service-layer permission check and relied
+  solely on module executor enforcement. Added `require_marketplace_admin(ctx)` as the first call
+  in each method. Added ModuleContext pass-through to `require_marketplace_admin` in `policy.py`.
+  Added `test_admin_actions_require_marketplace_approve` covering all nine methods.
+
+- **Defense-in-depth admin guard for messages.create_announcement** (`mozaiks-app/app/modules/messages/backend/service.py`, `policy.py`):
+  `create_announcement` is an `admin_internal` action with `permissions: [messages.admin]`
+  declared in `module.yaml` but had no service-layer enforcement. Added `require_messages_admin(ctx)`
+  to `policy.py` (same ModuleContext pass-through pattern) and wired it into `create_announcement`.
+  Updated 3 announcement tests to supply the required permission in context.
+
+- **Service-layer admin guards completed for app_registry, schema_migrations, tenant_identity** (`mozaiks-app`):
+  - `app_registry.register_brownfield_app` and `get_registry_summary` now call `require_app_registry_admin(ctx)`.
+    Added ModuleContext pass-through and `ops.admin` fallback to `require_app_registry_admin` in `policy.py`.
+  - `schema_migrations.get_schema_version` and `list_migrations` now call `require_schema_migrations_admin(ctx)`.
+    2 new tests cover non-admin rejection for each read method.
+  - `tenant_identity.list_all_tenants` guard upgraded from soft return-error pattern to
+    `require_tenant_identity_admin(ctx)` which raises `PermissionError`. 2 test assertions updated.
+
+- **ModuleContext pass-through added to community_revenue_participation policy** (`mozaiks-app/app/modules/community_revenue_participation/backend/policy.py`):
+  `require_revenue_admin` and `require_revenue_read` were missing the
+  `if permissions is None and type(ctx).__name__ == "ModuleContext": return` pass-through,
+  which would block event-driven internal calls despite no active callers relying on it.
+  Aligned with the defensive standard applied to all other `require_X` guards in the codebase.
+
 ### Fixed
 
 - **Bare assert replaced with explicit RuntimeError in MongoDB guards** (`mozaiksai/`):

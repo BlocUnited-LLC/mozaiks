@@ -42,6 +42,9 @@ class _ErrorHandler:
     def bad_params(self, ctx, *, required_arg: str) -> dict:
         return {"ok": required_arg}
 
+    async def restricted(self, ctx) -> None:
+        raise PermissionError("contacts.admin permission required")
+
 
 def _request(
     module: str = "contacts",
@@ -138,6 +141,17 @@ class TestActionErrorHandling:
         result = await ex.execute(_request(action="bad_params", params={}))
         assert result.success is False
         assert result.error_code == "INVALID_PARAMS"
+
+    @pytest.mark.asyncio
+    async def test_permission_error_from_service_layer_returns_permission_denied(self):
+        """PermissionError raised inside a handler maps to PERMISSION_DENIED (403), not EXECUTION_ERROR (500)."""
+        ex = ModuleExecutor()
+        ex.register("contacts", _ErrorHandler())
+        result = await ex.execute(_request(action="restricted", granted_permissions=["contacts.read"]))
+        assert result.success is False
+        assert result.error_code == "PERMISSION_DENIED"
+        # The original message is forwarded so callers can describe the missing permission.
+        assert "contacts.admin" in result.error
 
 
 # ---------------------------------------------------------------------------
