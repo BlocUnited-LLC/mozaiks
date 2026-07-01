@@ -16,7 +16,24 @@ from .namespaces import SYSTEM_DATABASE, PlatformCollections
 from .persistence_manager import AG2PersistenceManager
 
 IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
-SECRET_METADATA_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
+SECRET_METADATA_KEYS = {
+    "secret_value",
+    "secret",
+    "secret_hash",
+    "secret_salt",
+    "api_key",
+    "apikey",
+    "token",
+    "access_token",
+    "refresh_token",
+    "auth_token",
+    "bearer_token",
+    "client_secret",
+    "client_secret_hash",
+    "password",
+    "private_key",
+    "private_cert",
+}
 
 
 def _redact_public_config(value: dict[str, Any] | None) -> dict[str, Any] | None:

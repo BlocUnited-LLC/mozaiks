@@ -128,11 +128,14 @@ HTTP user traffic.
 - hosted AI/model access policy
 - product plan assignment records in `hosted_billing.subscriptions`
 
-Initial hosted launch should be managed-only for tenant workspaces:
-Mozaiks-hosted auth, hosted AI, MozaiksPay, and managed hosting. Bring-your-own
-auth, LLM/model provider, and alternate payment providers should be added later
-as explicit hosted product features with their own UI, validation, secret
-policy, tests, and rollout plan.
+Hosted launch should be preset for tenant workspaces: Mozaiks-hosted auth,
+hosted AI, MozaiksPay, and managed hosting are available by default so builders
+can create apps without provider setup. Auth and payments may expose
+bring-your-own provider metadata as hosted product settings, while secrets stay
+in the external provider or connector vault. Hosted AI/model access and managed
+hosting remain platform-owned by default unless `mozaiks-app` later ships
+explicit product features, UI, validation, secret policy, tests, and rollout
+plans for those areas.
 
 ## Related Docs
 

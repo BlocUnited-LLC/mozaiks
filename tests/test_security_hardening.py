@@ -430,3 +430,55 @@ class TestSanitizeAgentQuery:
 
     def test_empty_query_returned_unchanged(self):
         assert self._sanitize({}) == {}
+
+
+# ---------------------------------------------------------------------------
+# Secret response key blocklist coverage
+# ---------------------------------------------------------------------------
+
+class TestSecretResponseKeysCoverage:
+    """_SECRET_RESPONSE_KEYS in studio.py and SECRET_METADATA_KEYS in connector_store.py
+    should cover extended secret field names like client_secret_hash, private_key, etc."""
+
+    def _studio_redact(self, value):
+        from mozaiksai.hosts.studio import _redact_secret_fields
+        return _redact_secret_fields(value)
+
+    def _connector_redact(self, value):
+        from mozaiksai.core.data.persistence.connector_store import _redact_public_config
+        return _redact_public_config(value)
+
+    def test_studio_redacts_original_keys(self):
+        record = {"name": "x", "secret_value": "s", "api_key": "k", "password": "p"}
+        result = self._studio_redact(record)
+        assert result == {"name": "x"}
+
+    def test_studio_redacts_extended_secret_keys(self):
+        record = {
+            "name": "x",
+            "client_secret": "cs",
+            "client_secret_hash": "csh",
+            "secret_salt": "ss",
+            "refresh_token": "rt",
+            "access_token": "at",
+            "private_key": "pk",
+            "private_cert": "pc",
+        }
+        result = self._studio_redact(record)
+        assert result == {"name": "x"}
+
+    def test_connector_redacts_extended_secret_keys(self):
+        record = {
+            "service": "stripe",
+            "client_secret_hash": "csh",
+            "secret_salt": "ss",
+            "private_key": "pk",
+            "refresh_token": "rt",
+        }
+        result = self._connector_redact(record)
+        assert result == {"service": "stripe"}
+
+    def test_safe_fields_pass_through(self):
+        record = {"service": "stripe", "status": "active", "created_at": "2025-01-01"}
+        result = self._studio_redact(record)
+        assert result == record

@@ -720,7 +720,24 @@ class AppContextPolicyOverrideRequest(BaseModel):
     plan: dict[str, Any] | None = None
 
 
-_SECRET_RESPONSE_KEYS = {"secret_value", "secret", "api_key", "apikey", "token", "password"}
+_SECRET_RESPONSE_KEYS = {
+    "secret_value",
+    "secret",
+    "secret_hash",
+    "secret_salt",
+    "api_key",
+    "apikey",
+    "token",
+    "access_token",
+    "refresh_token",
+    "auth_token",
+    "bearer_token",
+    "client_secret",
+    "client_secret_hash",
+    "password",
+    "private_key",
+    "private_cert",
+}
 
 
 def _redact_secret_fields(value: Any) -> Any:
