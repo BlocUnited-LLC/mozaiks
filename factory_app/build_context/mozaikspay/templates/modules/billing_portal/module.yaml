@@ -58,6 +58,32 @@ actions:
         source: {type: string}
     permissions: [billing_portal.read]
 
+  - id: list_plans
+    description: >
+      Return the available plan catalog declared in app/config/subscriptions.yaml.
+      Safe plan display fields only — never exposes managed-capability internals
+      or granted capability identifiers.
+    handler_method: list_plans
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        plans:
+          type: array
+          items:
+            type: object
+            properties:
+              plan_id: {type: string}
+              label: {type: string}
+              description: {type: string}
+              capabilities: {type: array, items: {type: string}}
+              usage_limits: {type: object}
+    permissions: [billing_portal.read]
+
   - id: open_billing_portal
     description: >
       Create a hosted billing portal session through MozaiksPayClient and

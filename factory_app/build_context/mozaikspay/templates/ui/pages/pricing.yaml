@@ -1,0 +1,37 @@
+schema_version: mozaiks.page.v1
+name: Pricing
+route: /pricing
+title: Pricing
+page_type: landing
+layout: stack
+shell_mode: standard
+navigation:
+  id: pricing
+  label: Pricing
+  icon: CreditCard
+  scope: global
+  order: 90
+  visible: false
+sections:
+  - id: plan-catalog
+    primitive: DataTable
+    title: Plans
+    config:
+      api_endpoint: /api/modules/billing_portal/list_plans
+      method: POST
+      fields:
+        - plan_id
+        - label
+        - description
+        - capabilities
+        - usage_limits
+  - id: upgrade-cta
+    primitive: ActionButton
+    title: Upgrade
+    config:
+      label: Manage Billing
+      api_endpoint: /api/modules/billing_portal/open_billing_portal
+      method: POST
+      response_url_field: portal_url
+roles: null
+extensions: null

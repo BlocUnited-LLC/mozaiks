@@ -534,10 +534,13 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(tm
     assert "services/integrations/mozaikspay_client.py" in files
     assert "modules/billing_portal/module.yaml" in files
     assert "ui/pages/billing.yaml" in files
+    assert "ui/pages/pricing.yaml" in files
     assert "ui/pages/usage.yaml" in files
     assert "import stripe" not in files["services/integrations/mozaikspay_client.py"]
     assert not any(path.startswith("modules/mozaikspay/") for path in files)
     assert "/api/modules/billing_portal/get_subscription_status" in files["ui/pages/billing.yaml"]
+    assert "/api/modules/billing_portal/list_plans" in files["ui/pages/pricing.yaml"]
+    assert "/api/modules/billing_portal/open_billing_portal" in files["ui/pages/pricing.yaml"]
     assert "/api/modules/mozaikspay/" not in files["ui/pages/billing.yaml"]
     assert scan_generated_bundle(files, capability_packs=cached_plan["capability_packs"]) == []
 
@@ -565,6 +568,6 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(tm
     assert loaded.definition.name == "MozaiksPay Replay"
     assert [module.name for module in loaded.modules] == ["billing_portal"]
     assert loaded.failed_module_names == []
-    assert [page.name for page in loaded.definition.pages] == ["billing", "usage"]
+    assert [page.name for page in loaded.definition.pages] == ["billing", "pricing", "usage"]
     assert loaded.subscriptions_config is not None
     assert loaded.subscriptions_config.default_plan_id == "free"

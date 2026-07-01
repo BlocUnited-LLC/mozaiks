@@ -589,6 +589,19 @@ This project follows a practical pre-1.0 changelog format:
   Pairwise cooccurrence patterns accumulate into a ranked module popularity index.
   Capped at 20 modules (190 pairs maximum); no-op in OSS runs.
 
+- **`list_plans` action added to billing_portal template** (`factory_app/build_context/mozaikspay/templates/modules/billing_portal/`):
+  New `list_plans` action (read-only, `billing_portal.read` permission, no entitlement gate) reads
+  `app/config/subscriptions.yaml` and returns the safe plan catalog (plan_id, label, description,
+  capabilities, usage_limits). This is the canonical data source for the `/pricing` page — plan
+  data is never hardcoded in page schemas or JSX. Handler and service stubs added.
+
+- **MozaiksPay pricing page template** (`factory_app/build_context/mozaikspay/templates/ui/pages/pricing.yaml`):
+  Pricing page template added to the mozaikspay capability pack, materialized into every app built
+  with this pack. Shows plan catalog via `billing_portal/list_plans` (DataTable) and upgrade CTA
+  via `billing_portal/open_billing_portal` (ActionButton). Fixed prior incorrect endpoint references
+  (`/api/modules/billing/get_plans`, `/api/modules/billing/create_portal_session`) to the correct
+  `billing_portal` module actions.
+
 - **Quality gate corrections recording** (`tools/platform/gate_corrections_recorder.py`)
   — AppGenerator `on_complete` and `on_fail` lifecycle tool that reads the final status
   of all three quality gates (UI, module contract, module runtime) from context. For

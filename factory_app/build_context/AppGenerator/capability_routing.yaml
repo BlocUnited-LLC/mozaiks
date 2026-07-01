@@ -175,20 +175,31 @@ layers:
             notes: >
               Plan-gated actions, subscription lifecycle, portal session creation.
               entitlement_gate on every plan-gated action declaration is mandatory.
+              get_plans public_readonly action is required — it reads config/subscriptions.yaml
+              and is the canonical data source for the /pricing page.
           - surface_kind: page
             page_type: pricing
             route: /pricing
-            notes: Plan comparison and upgrade CTA page. Public-facing.
+            notes: >
+              Plan comparison and upgrade CTA page. Public-facing (no auth required).
+              Populate plan data by calling billing.get_plans (reads config/subscriptions.yaml
+              via load_subscriptions_config). Never hardcode plan data in the page schema —
+              always derive from the subscriptions config so adding a plan tier is a config
+              change only.
         event_flows_required:
           - event: hosted.billing.subscription.activated
             reaction: sync token allowances and entitlements
           - event: hosted.billing.subscription.cancelled
             reaction: revoke gated capabilities
         operator_pack_note: >
-          When the hosted platform's hosted_billing pack is available in
-          capability_packs, use it instead of generating a custom billing module.
-          hosted_billing owns plan assignment and the subscription lifecycle;
-          the generated app owns entitlement_gate declarations and the pricing page.
+          When the hosted platform's hosted_billing pack is available in capability_packs,
+          use it for plan assignment, checkout session creation, and subscription lifecycle.
+          Still generate a thin billing module that includes: (1) get_plans reading
+          config/subscriptions.yaml for the pricing page; (2) a checkout facade that
+          delegates to hosted_billing.create_checkout_session. Do not regenerate webhook
+          handlers, invoice logic, or portal session management — hosted_billing owns those.
+          The generated app owns: entitlement_gate declarations on plan-gated actions,
+          the get_plans action, and the /pricing page.
 
       - revenue_model: pay_per_use
         capability_pack: usage_metering

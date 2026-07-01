@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -59,6 +60,31 @@ class BillingPortalService:
             "runtime_ai_usage": runtime_ai_usage,
             "source": "mozaikspay_facade",
         }
+
+    async def list_plans(self, ctx: Any) -> dict[str, Any]:
+        subs_path = Path.cwd() / "app" / "config" / "subscriptions.yaml"
+        if not subs_path.exists():
+            return {"success": True, "plans": []}
+        try:
+            import yaml
+            raw = yaml.safe_load(subs_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"success": True, "plans": []}
+        if not isinstance(raw, dict):
+            return {"success": True, "plans": []}
+        plans = raw.get("plans", [])
+        safe_plans = [
+            {
+                "plan_id": p.get("plan_id", ""),
+                "label": p.get("label", ""),
+                "description": p.get("description", ""),
+                "capabilities": p.get("capabilities", []),
+                "usage_limits": p.get("usage_limits", {}),
+            }
+            for p in plans
+            if isinstance(p, dict)
+        ]
+        return {"success": True, "plans": safe_plans}
 
     async def open_billing_portal(
         self,

@@ -23,6 +23,13 @@ class BillingPortalHandler:
     ) -> dict[str, Any]:
         return await self.service.get_usage_status(ctx, **params)
 
+    async def list_plans(
+        self,
+        ctx: Any,
+        **params: Any,
+    ) -> dict[str, Any]:
+        return await self.service.list_plans(ctx)
+
     async def open_billing_portal(
         self,
         ctx: Any,

@@ -81,6 +81,12 @@ agents:
           11. The contract must not reference concrete hosted products, hosted
               billing admin actions, payment-provider product ids, price ids,
               API keys, secrets, invoices, or settlement.
+          12. When contract_required is true, include an app_generator_instruction
+              targeting AppPlanAgent that says: the billing module must expose a
+              public_readonly get_plans action (no permissions, no entitlement_gate)
+              that reads config/subscriptions.yaml using load_subscriptions_config
+              and returns the plan catalog. This is the canonical data source for
+              the /pricing page — never hardcode plan data in JSX or YAML.
       - id: output_format
         heading: '[OUTPUT FORMAT]'
         content: |-

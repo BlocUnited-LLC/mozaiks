@@ -203,6 +203,11 @@ archetypes:
     hard_constraints:
       - Every plan-gated module action must declare entitlement_gate in module.yaml
         referencing a capability_id from config/subscriptions.yaml.
+      - Include a public_readonly get_plans action (no permissions, no entitlement_gate)
+        that reads config/subscriptions.yaml using the OSS load_subscriptions_config
+        runtime utility and returns the plan catalog with labels, capability ids, and
+        usage limits. This is the canonical data source for the /pricing page — never
+        hardcode plan data in JSX or page schemas, always derive from subscriptions config.
       - The service layer never checks entitlements itself — entitlement_gate on
         the action declaration is the authorization boundary.
       - Subscription state transitions are driven by payment provider webhook events
