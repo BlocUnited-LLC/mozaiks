@@ -80,6 +80,84 @@ module-local helper files declared for that module. Do not turn an adapter into
 a module just to give it a place in the tree. Modules own actions, events,
 lifecycle state, authorization, and persistence; adapters do not.
 
+### Startup service helper pattern
+
+Use for:
+
+- background polling loops that must run for the process lifetime
+- timeout watchdogs for async operations
+- periodic reconciliation jobs tied to a module's lifecycle state
+
+Register in `runtime_extensions.yaml` alongside the module:
+
+```yaml
+startup_services:
+  - kind: startup_service
+    entrypoint: backend.<helper_module>:<ClassName>
+```
+
+The canonical shape:
+
+```python
+import asyncio
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+_POLL_INTERVAL = int(os.environ.get("MY_POLL_INTERVAL_SECONDS", "60"))
+_INITIAL_DELAY = 45
+
+
+class MyPollerService:
+    """Process-lifetime startup service. Idle unless the relevant feature flag is set."""
+
+    def __init__(self) -> None:
+        self._running = False
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._running = True
+        if not _feature_enabled():
+            logger.info("MY_POLLER_SKIPPED: feature flag not set")
+            return
+        loop = asyncio.get_event_loop()
+        self._task = loop.create_task(self._run_loop())
+
+    def stop(self) -> None:
+        self._running = False
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    async def _run_loop(self) -> None:
+        await asyncio.sleep(_INITIAL_DELAY)
+        while self._running:
+            try:
+                await self._poll_once()
+            except Exception:
+                logger.exception("MY_POLLER_ERROR: unhandled exception in poll loop")
+            await asyncio.sleep(_POLL_INTERVAL)
+
+    async def _poll_once(self) -> None:
+        # deferred imports prevent circular import at module load time
+        from .service import MyService
+        ...
+```
+
+Rules:
+
+- Use deferred imports inside `_poll_once` to prevent circular imports at module load.
+- Gate the background task on an environment variable so the service stays idle in test and dev environments.
+- Use an initial delay (e.g., 45 s) to allow the process to finish startup before first poll.
+- Keep polling interval configurable via environment variable with a safe default.
+- `stop()` must be idempotent — cancel and clear `self._task` unconditionally.
+- Never emit domain events or mutate module state directly from the poller helper. Call the module `service.py` method that owns the state transition.
+- Log start, skip, and unhandled errors with consistent prefix tokens (e.g., `MY_POLLER_SKIPPED`, `MY_POLLER_ERROR`) for grep-ability.
+
+The `DeploymentTimeoutWatcher` and `DeploymentStatusPoller` in the hosting module
+are the canonical App Zero examples of this pattern.
+
 ### Managed-capability facade pattern
 
 Use for host-provided capabilities that should appear in generated apps without

@@ -207,6 +207,37 @@ Adapter layers outside AppGenerator handle:
 - secret delivery and rotation
 - persistence of build outputs in host deployment records
 - mapping names-only CI secret requirements to provider-specific secret stores
+- async deployment status polling (see below)
+
+### Async Provider Deployment Status
+
+Some deployment providers (for example Azure Container Apps) return
+`status="deploying"` with no `hosted_url` on the initial `deploy()` call.
+The hosted product must poll the provider until the deployment completes or fails.
+
+The canonical `DeploymentProviderAdapter` protocol for hosted products exposes two
+lifecycle methods:
+
+```
+deploy(request) → DeploymentProviderResult
+  status: "hosted" | "deploying" | "failed"
+  hosted_url: str | None        # present only when status == "hosted"
+  provider_deployment_id: str | None
+
+get_status(provider_deployment_id, ...) → DeploymentProviderResult
+  (same shape as deploy())
+```
+
+Rules:
+
+1. When `deploy()` returns `status="deploying"`, do **not** mark the app as hosted.
+   Persist the `provider_deployment_id` and let the polling loop call `get_status()`.
+2. When `get_status()` returns `status="hosted"`, mark the app hosted and record the URL.
+3. When `get_status()` returns `status="failed"`, record the failure and stop polling.
+4. The polling loop is owned by the hosted product module (a startup service helper),
+   not by the adapter. Adapters are stateless per-call; the hosted module owns lifecycle state.
+5. Adapters that deploy synchronously may return `status="hosted"` directly from `deploy()`.
+   The hosted module must handle both synchronous and asynchronous adapters uniformly.
 
 For Mozaiks-hosted apps, the generated bundle may include `Dockerfile`,
 `env.example`, `.github/workflows/deploy.yml`, and
