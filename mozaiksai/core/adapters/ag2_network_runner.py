@@ -20,8 +20,9 @@ from autogen.beta.network import (
     EV_CHANNEL_CLOSED,
     EV_CONTEXT_SET,
     EV_PACKET,
+    EV_TEXT,
     AgentTarget,
-    FromSpeaker,
+    Envelope,
     Hub,
     HubClient,
     LocalLink,
@@ -29,9 +30,11 @@ from autogen.beta.network import (
     Resume,
     Transition,
     TransitionGraph,
+    WorkflowAdapter,
 )
 from autogen.beta.network.client.handlers import default_handler
 
+from mozaiksai.core.adapters.ag2_transition_conditions import BootstrapInitialDispatch
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.execution.network_graph import compile_transition_rules_to_graph
 from mozaiksai.core.workflow.outputs.runtime_validation import validate_agent_structured_output
@@ -382,7 +385,9 @@ class AG2NetworkRunner:
             initial_speaker=initiator_id,
             transitions=[
                 Transition(
-                    when=FromSpeaker(initiator_id),
+                    when=BootstrapInitialDispatch(
+                        source_agent_id=initiator_id,
+                    ),
                     then=AgentTarget(initial_agent_id),
                     priority=-1,
                 ),
@@ -444,6 +449,10 @@ class _AG2LiveWorkflowRun:
 
             prior_wal = await self._hub.read_wal(self.channel_id)
             self._wal_cursor = max(self._wal_cursor, len(prior_wal))
+            seen_envelope_ids = {
+                str(getattr(envelope, "envelope_id", "") or "")
+                for envelope in prior_wal
+            }
 
             if context_updates:
                 await self._channel.send(
@@ -451,9 +460,10 @@ class _AG2LiveWorkflowRun:
                     event_type=EV_CONTEXT_SET,
                     event_data={"set": dict(context_updates or {}), "delete": []},
                 )
-            await self._channel.send(str(message or "."))
+            audience = self._next_agent_audience_for_user_text(str(message or "."))
+            await self._channel.send(str(message or "."), audience=audience)
 
-            result = await self._wait_for_settlement()
+            result = await self._wait_for_settlement(seen_envelope_ids=seen_envelope_ids)
             result.wal = list(result.wal[self._wal_cursor :])
             self._wal_cursor += len(result.wal)
             if result.status is RunStatus.PAUSED:
@@ -462,7 +472,11 @@ class _AG2LiveWorkflowRun:
                 await self.close()
             return result
 
-    async def _wait_for_settlement(self) -> AG2NetworkRunnerResult:
+    async def _wait_for_settlement(
+        self,
+        *,
+        seen_envelope_ids: set[str],
+    ) -> AG2NetworkRunnerResult:
         failure_task = asyncio.create_task(
             self._turn_failure_listener.wait_for_failure(self.channel_id)
         )
@@ -487,7 +501,9 @@ class _AG2LiveWorkflowRun:
                     self._initiator.wait_for_channel_event(
                         channel_id=self.channel_id,
                         predicate=lambda envelope: envelope.event_type
-                        in {EV_CHANNEL_CLOSED, EV_PACKET},
+                        in {EV_CHANNEL_CLOSED, EV_PACKET}
+                        and str(getattr(envelope, "envelope_id", "") or "")
+                        not in seen_envelope_ids,
                         timeout=remaining,
                     )
                 )
@@ -535,6 +551,27 @@ class _AG2LiveWorkflowRun:
         finally:
             failure_task.cancel()
             await asyncio.gather(failure_task, return_exceptions=True)
+
+    def _next_agent_audience_for_user_text(self, message: str) -> list[str] | None:
+        state = self._hub.adapter_state(self.channel_id)
+        next_state = WorkflowAdapter().fold(
+            Envelope(
+                channel_id=self.channel_id,
+                sender_id=self._initiator.agent_id,
+                audience=[],
+                event_type=EV_TEXT,
+                event_data={"text": message},
+            ),
+            state,
+        )
+        next_speaker = str(getattr(next_state, "expected_next_speaker", "") or "").strip()
+        if not next_speaker:
+            # Termination state — send to nobody; the fold closes the channel
+            # without any registered agent intercepting the EV_TEXT envelope.
+            return []
+        if next_speaker in {"user", self._initiator.agent_id}:
+            return None
+        return [next_speaker]
 
     async def close(self) -> None:
         if self._closed:
