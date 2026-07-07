@@ -492,9 +492,9 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         """Forward a free-form user message into the active workflow orchestration.
 
         This is used by both WebSocket (user.input.submit without request_id) and
-        HTTP input endpoint. AG2 persists canonical run input when the resumed or
-        newly started workflow executes, so transport only emits the local UI echo
-        here instead of shadow-writing a separate chat-session message row.
+        HTTP input endpoint. The orchestration bridge persists canonical run input
+        to the AG2 stream before this method is called, so transport only emits
+        the local UI echo here.
         """
         if not content:
             return
@@ -1267,12 +1267,12 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
                 except Exception:
                     workflow_startup_mode = None
 
-            # Use the AG2-aligned resumer so visibility filtering and UI tool replay
+            # Use the AG2-aligned replayer so visibility filtering and UI tool replay
             # semantics stay consistent with live events (no leaking hidden agents).
-            from mozaiksai.core.transport.resume_run import AgentRunResumer
+            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
 
-            resumer = AgentRunResumer()
-            summary = await resumer.handle_resume_request(
+            replayer = WorkflowRunReplayer()
+            summary = await replayer.handle_resume_request(
                 chat_id=str(chat_id),
                 app_id=str(app_id),
                 last_client_index=int(last_client_index),
@@ -1484,7 +1484,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self._pre_connection_buffer_overflow_counts.pop(chat_id, None)
 
         # H5: Auto-resume for IN_PROGRESS chats (check status and restore chat history)
-        await self._auto_resume_if_needed(chat_id, websocket, app_id)
+        await self._replay_run_on_connect_if_needed(chat_id, websocket, app_id)
         
         try:
             # Inbound loop: receive JSON control messages from client
@@ -1624,7 +1624,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     # NOTE: The following methods are provided by mixins:
     # - WebSocketProtocolMixin: _get_next_sequence, _check_backpressure, _queue_message_with_backpressure,
     #   _flush_message_queue, _schedule_flush_retry, _start_heartbeat, _heartbeat_loop, _stop_heartbeat,
-    #   _auto_resume_if_needed, _cleanup_connection
+    #   _replay_run_on_connect_if_needed, _cleanup_connection
     # - WorkflowBridgeMixin: handle_user_input_from_api, _run_workflow_background, pause_background_workflow,
     #   send_chat_message
     # - GeneralModeMixin: _ensure_general_chat_context, _handle_general_agent_exchange,

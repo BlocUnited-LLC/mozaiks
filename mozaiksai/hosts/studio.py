@@ -611,6 +611,14 @@ class CreateWorkspaceAppRequest(BaseModel):
     name: str = Field(default="New App", min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=1000)
     app_id: str | None = Field(default=None, max_length=160)
+    status: str = Field(default="draft", max_length=40)
+    active_chat_id: str | None = Field(default=None, max_length=160)
+    active_workflow_id: str | None = Field(default=None, max_length=160)
+
+
+class UpdateWorkspaceAppStatusRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=40)
+    bundle_path: str | None = Field(default=None, max_length=1000)
 
 
 @app.post("/api/studio/apps")
@@ -624,8 +632,10 @@ async def create_workspace_app(
             owner_user_id=user_id,
             name=body.name,
             description=body.description,
-            status="draft",
+            status=body.status,
             app_id=body.app_id,
+            active_chat_id=body.active_chat_id,
+            active_workflow_id=body.active_workflow_id,
         )
     except ValueError as exc:
         logger.warning("create_app_record validation error: %s", exc)
@@ -633,6 +643,27 @@ async def create_workspace_app(
     except Exception as exc:
         logger.exception("Failed to create app record")
         raise HTTPException(status_code=500, detail="Failed to create app record") from exc
+
+
+@app.put("/api/studio/apps/{build_registry_id}/status")
+async def update_workspace_app_status(
+    build_registry_id: str,
+    body: UpdateWorkspaceAppStatusRequest,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    _, _user_id = _resolve_studio_scope(principal)
+    try:
+        return await _get_app_registry_service().update_build_status(
+            build_registry_id=build_registry_id,
+            status=body.status,
+            bundle_path=body.bundle_path,
+        )
+    except ValueError as exc:
+        logger.warning("update_app_status validation error: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid app status parameters.") from exc
+    except Exception as exc:
+        logger.exception("Failed to update app status")
+        raise HTTPException(status_code=500, detail="Failed to update app status") from exc
 
 
 @app.get("/api/studio/integrations")

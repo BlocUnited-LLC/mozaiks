@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from mozaiksai.core.runtime.app.paths import APP_SECURITY_SECRETS_PATH
 from mozaiksai.core.workflow.paths import resolve_active_app_root
@@ -48,7 +48,7 @@ def build_secret_client(vault_url: str) -> _SecretClient:
     from azure.identity import DefaultAzureCredential  # type: ignore
     from azure.keyvault.secrets import SecretClient  # type: ignore
 
-    return SecretClient(vault_url=vault_url, credential=DefaultAzureCredential())
+    return cast(_SecretClient, SecretClient(vault_url=vault_url, credential=DefaultAzureCredential()))
 
 
 def _candidate_app_roots(app_root: str | os.PathLike[str] | None = None) -> list[Path]:

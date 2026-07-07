@@ -52,7 +52,7 @@ Generated apps author only this compact shell surface:
   },
   "shortcuts": {
     "profile": ["profile", "signout"],
-    "mobile": ["dashboard", "notifications", "profile"],
+    "mobile": ["home", "notifications", "profile"],
     "footer": ["legal", "terms", "cookies"],
     "footerHideOnMobile": true
   },
@@ -167,18 +167,25 @@ objects for `/api/shell-config`.
 ```json
 {
   "shortcuts": {
-    "header": ["dashboard"],
+    "header": ["home"],
     "profile": ["profile", "settings", "signout"],
-    "mobile": ["dashboard", "notifications", "profile"],
+    "mobile": ["home", "notifications", "profile"],
     "footer": ["legal", "terms", "cookies"],
     "footerHideOnMobile": true
   }
 }
 ```
 
-Common ids include `dashboard`, `create`, `profile`, `messages`,
-`notifications`, `settings`, `admin`, `support`, `signout`,
-`signin`, `legal`, `terms`, `cookies`, and `privacy`.
+Common ids include `home`, `apps`, `workspace`, `create`, `profile`,
+`messages`, `notifications`, `settings`, `admin`, `support`, `signout`,
+`signin`, `legal`, `terms`, `cookies`, and `privacy`. Use `dashboard` only
+when the app declares a route or page with id `dashboard`; it is not a built-in
+framework shortcut.
+
+`create` is a fresh-start shortcut. The platform resolves it to
+`/create?new=1`; it must not resume the user's last workflow chat. Continue or
+resume actions belong in Studio/App Studio build history or direct `chat_id`
+links.
 
 `admin` targets a generated app's framework admin shell. Do NOT include
 `admin_portal` in any shortcuts list — it is automatically injected by the

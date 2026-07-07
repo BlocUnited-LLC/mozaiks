@@ -38,7 +38,6 @@ export class DynamicUIHandler {
     this.registerHandler(UI_UPDATE, this.handleUIUpdate.bind(this));
     this.registerHandler(UI_DISMISS, this.handleUIDismiss.bind(this));
 
-    console.log('✅ Dynamic UI Handler initialized');
   }
 
   /**
@@ -77,7 +76,6 @@ export class DynamicUIHandler {
       console.warn(`⚠️ Rejecting non-lowercase UI event type '${type}' (expected canonical lowercase)`);
       return;
     }
-    console.log(`🎯 Processing UI event: ${originalType}`, data);
 
     // Resolve agent attribution in a workflow-agnostic way. Prefer explicit fields, then payload keys,
     // then previously tracked last speaker for the chat/workflow.
@@ -146,7 +144,6 @@ export class DynamicUIHandler {
    * @param {Object} data - Component update data
    */
   async handleComponentUpdate(data) {
-    console.log('🔄 Handling component update:', data);
     
     if (data.component_id && data.updates) {
       this.notifyUIUpdate({
@@ -163,7 +160,6 @@ export class DynamicUIHandler {
    * @param {Object} data - Status data
    */
   handleStatusUpdate(data) {
-    console.log('📊 Handling status update:', data);
     
     this.notifyUIUpdate({
       type: 'status_update',
@@ -187,18 +183,6 @@ export class DynamicUIHandler {
    * @param {Object} updateData - Update data
    */
   notifyUIUpdate(updateData) {
-    console.log('📢 Notifying UI update:', updateData);
-    if (updateData?.type === 'tool_call') {
-      const { tool_name, tool_call_id, workflow_name, payload } = updateData;
-      console.log('🧭 tool_call routed to UI callbacks', {
-        tool_name,
-        tool_call_id,
-        workflow_name,
-        hasOnResponse: !!updateData.onResponse,
-        payloadKeys: payload ? Object.keys(payload) : []
-      });
-    }
-    
     for (const callback of this.uiUpdateCallbacks) {
       try {
         callback(updateData);
@@ -206,17 +190,6 @@ export class DynamicUIHandler {
         console.error('❌ Error in UI update callback:', error);
       }
     }
-  }
-
-  /**
-   * Get app context for dynamic UI
-   * @param {string} appId - App ID
-   * @returns {Object} - App context
-   */
-  getappContext(appId) {
-    return {
-      app_id: appId
-    };
   }
 
   /**
@@ -238,7 +211,6 @@ export class DynamicUIHandler {
       const config = response.data;
       
       this.workflowCache.set(cacheKey, config);
-      console.log(`✅ Loaded workflow config for UI: ${workflowname}`);
       
       return config;
       
@@ -344,7 +316,6 @@ export class DynamicUIHandler {
 
       // Skip auto-tool events without an explicit display surface
       if (interactionType === 'auto_tool' && !display) {
-        console.log(`⏭️ DynamicUIHandler: Skipping auto-tool ui.render (${toolName}) — no display`);
         return true;
       }
 
@@ -375,7 +346,6 @@ export class DynamicUIHandler {
         agent: agentName || undefined,
       });
 
-      console.log(`✅ DynamicUIHandler: Notified UI callbacks for ui.render ${toolName} (display=${display})`);
       return true;
     } catch (error) {
       console.error('❌ DynamicUIHandler: Error handling ui.render event', error);
@@ -420,8 +390,6 @@ export class DynamicUIHandler {
    */
   async handleToolCall(eventData, responseCallback) {
     try {
-      console.log('🎯 DynamicUIHandler: Processing tool_call', eventData);
-      console.log('🎯 DynamicUIHandler: responseCallback type:', typeof responseCallback);
 
       const {
         tool_name,
@@ -475,7 +443,6 @@ export class DynamicUIHandler {
       const onResponse = async (response) => {
         const tlog = createToolsLogger({ tool: toolName, toolCallId, workflowName: workflow_name, agentMessageId: payload?.agent_message_id });
         tlog.event('ui_response', response?.status || 'unknown');
-        console.log(`📤 DynamicUIHandler: Sending UI tool response for ${toolName}`, response);
         
         if (responseCallback && typeof responseCallback === 'function') {
           await responseCallback({
@@ -497,7 +464,6 @@ export class DynamicUIHandler {
       // CRITICAL: Skip rendering for auto-tool events without explicit display mode
       // Auto-tool events are followed by explicit tool calls with proper display settings
       if (payload?.interaction_type === 'auto_tool' && !display) {
-        console.log(`⏭️ DynamicUIHandler: Skipping auto-tool event without display mode (${toolName}) - waiting for explicit tool call`);
         return true; // Successful processing, just not rendering yet
       }
 
@@ -520,7 +486,6 @@ export class DynamicUIHandler {
         agent: agentName || undefined
       });
 
-  console.log(`✅ DynamicUIHandler: Notified UI callbacks for ${toolName} (display=${finalDisplay})`);
 
       return true; // Indicate successful processing
 

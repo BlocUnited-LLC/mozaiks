@@ -190,6 +190,35 @@ def test_extract_code_file_map_omits_profile_yaml_when_null() -> None:
     assert "modules/projects/contracts/profile.yaml" not in file_map
 
 
+def test_extract_code_file_map_materializes_module_contract_with_relationships_yaml() -> None:
+    payload = {
+        "module_contract": {
+            "module_id": "projects",
+            "module_yaml": {"schema_version": "mozaiks.module.v1", "id": "projects", "actions": []},
+            "relationships_yaml": {
+                "schema_version": "mozaiks.relationships.v1",
+                "providers": [
+                    {
+                        "id": "owned-projects",
+                        "label": "Owned Projects",
+                        "action": "list_user_project_relationships",
+                        "resource_types": ["project"],
+                        "relationship_types": ["owner"],
+                    }
+                ],
+            },
+        }
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert "modules/projects/contracts/relationships.yaml" in file_map
+    parsed = yaml.safe_load(file_map["modules/projects/contracts/relationships.yaml"])
+    assert parsed["schema_version"] == "mozaiks.relationships.v1"
+    assert parsed["providers"][0]["id"] == "owned-projects"
+    assert parsed["providers"][0]["resource_types"] == ["project"]
+
+
 def test_extract_code_file_map_materializes_app_schema_output() -> None:
     payload = {
         "AppSchemaOutput": {

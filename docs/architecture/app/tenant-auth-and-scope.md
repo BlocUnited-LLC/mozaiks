@@ -129,10 +129,11 @@ HTTP user traffic.
 
 Hosted launch should be preset for tenant workspaces: Mozaiks-hosted auth,
 hosted AI, MozaiksPay, and managed hosting are available by default so builders
-can create apps without provider setup. The hosted product may also choose to
-lock those defaults. For example, `mozaiks-app` hosted v1 requires
-Mozaiks-hosted auth and MozaiksPay for its monetized product path. That is
-hosted-product policy, not an OSS runtime rule.
+can create apps without provider setup. The hosted product may also choose which
+provider areas can carry bring-your-own metadata. For example, `mozaiks-app`
+hosted v1 presets Mozaiks-hosted auth and MozaiksPay, allows secret-free
+external auth/payment metadata, and keeps hosted AI plus managed hosting
+platform-owned. That is hosted-product policy, not an OSS runtime rule.
 
 The OSS contract remains modular: auth adapters, connector storage, module
 permissions, entitlement checks, and generated app facades stay provider-neutral

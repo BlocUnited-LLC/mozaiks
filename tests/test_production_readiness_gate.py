@@ -56,3 +56,9 @@ def test_source_hygiene_scan_passes_current_repo() -> None:
 
     assert gate.run_source_hygiene_scan() == []
 
+
+def test_source_hygiene_excludes_release_local_virtualenv() -> None:
+    gate = _load_gate_module()
+
+    assert ".release-local-venv" in gate.SOURCE_HYGIENE_EXCLUDED_DIRS
+

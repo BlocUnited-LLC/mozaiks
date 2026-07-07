@@ -39,6 +39,7 @@ DEFAULT_EXCLUDED_DIR_NAMES = frozenset(
         "site",
         "__pycache__",
         ".pytest_cache",
+        ".release-local-venv",
         ".mypy_cache",
         ".ruff_cache",
         ".next",

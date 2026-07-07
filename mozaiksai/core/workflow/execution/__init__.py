@@ -14,7 +14,7 @@ from .network_graph import (
     compile_transition_rules_to_graph,
     resolve_next_agent,
 )
-from .resume import merge_persisted_extra_context, resume_or_initialize_chat
+from .run_bootstrap import bootstrap_run_messages, merge_persisted_extra_context
 
 __all__ = [
     "LifecycleTrigger",
@@ -27,6 +27,6 @@ __all__ = [
     "WorkflowGraphCompileError",
     "compile_transition_rules_to_graph",
     "resolve_next_agent",
+    "bootstrap_run_messages",
     "merge_persisted_extra_context",
-    "resume_or_initialize_chat",
 ]

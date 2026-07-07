@@ -49,3 +49,84 @@ capabilities:
         generator_notes:
           - Generate strict app-owned facade contracts and adapter stubs only.
           - Keep provider-specific mechanics under app/services/adapters/payments/.
+
+  - id: messaging_pack
+    label: Messaging and Real-Time Chat
+    capability_kind: operator_pack
+    recommendation_rank: 2
+    domains:
+      - messaging
+      - chat
+      - direct_messages
+      - threads
+      - real_time
+    intent_signals:
+      - App needs users to send messages to each other.
+      - App needs DM threads, group channels, or real-time conversation.
+      - Product spec mentions chat, inbox, messaging, conversations, or threads.
+      - App needs read/unread state, typing indicators, or delivery receipts.
+    selection_aliases:
+      - messaging
+      - messaging_pack
+      - chat
+      - dm
+      - direct messages
+      - threads
+    generator_notes:
+      - Select the messaging operator_pack when messaging is in the product brief.
+      - Generate only the app-specific page composition and facade wiring — never regenerate pack module internals.
+      - The messages module owns threads and messages persistence; page actions call module actions directly.
+      - Pair with the contacts module (included in this pack) to give users a DM-ready contact list.
+      - Use notifications pack for email/push delivery of new message alerts — wire via reactions.yaml.
+      - Admin panel for thread moderation is declared in contracts/admin.yaml; never generate a custom admin route.
+    capabilities_provided:
+      - messaging.threads.list
+      - messaging.messages.send
+      - messaging.contacts.list
+      - messaging.contacts.add
+
+  - id: commerce_pack
+    label: Commerce Storefront
+    capability_kind: operator_pack
+    recommendation_rank: 4
+    domains:
+      - commerce
+      - ecommerce
+      - storefront
+      - catalog
+      - cart
+      - checkout
+      - orders
+      - inventory
+    intent_signals:
+      - App sells products, digital goods, merch, tickets, bookings, or one-time purchasable items.
+      - App needs a product catalog, storefront, cart, checkout request flow, order history, or inventory tracking.
+      - Product spec mentions ecommerce, e-commerce, online store, shop, storefront, cart, checkout, orders, or inventory.
+      - App needs a generated commerce module that can pair with a managed payment capability or a bring-your-own payment adapter.
+    selection_aliases:
+      - commerce
+      - commerce_pack
+      - ecommerce
+      - e-commerce
+      - online store
+      - shop
+      - storefront
+      - product catalog
+      - cart
+      - checkout
+      - orders
+      - inventory
+    generator_notes:
+      - Select commerce_pack when the generated app needs product selling, cart, checkout request, orders, or inventory.
+      - The commerce module owns catalog, cart, checkout request, order, and fulfillment state.
+      - Use the generated module templates from build_context/commerce; do not invent modules/ecommerce, modules/shop, modules/marketplace, managed payment provider modules, or provider-specific payment modules.
+      - Payment processor mechanics remain outside commerce. Pair with a selected managed payment pack for the default managed checkout path, or create an app-owned services/adapters/payments integration only when the user explicitly brings a provider.
+      - Use commerce as a single-merchant pack. Do not add seller onboarding, seller payouts, commissions, disputes, or multi-vendor dashboards unless a future commerce_marketplace overlay pack is selected.
+      - Product detail routes that require route-param API binding or post-payment confirmation routes that poll provider state should use custom_route_bundle until declarative page schemas support those runtime needs.
+    capabilities_provided:
+      - commerce.products.browse
+      - commerce.products.manage
+      - commerce.inventory.manage
+      - commerce.cart.manage
+      - commerce.checkout.start
+      - commerce.orders.manage

@@ -133,7 +133,6 @@ max_turns: 20
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: Pipeline
-initial_message_to_user: null
 initial_message: "Start with ExampleHostAgent."
 initial_agent: ExampleHostAgent
 triggers:
@@ -151,7 +150,6 @@ Rules:
   - `UserDriven`
   - `BackendOnly`
 - `initial_message` is a hidden AG2/runtime seed. It is not user-facing transcript content and should not be used as visible copy.
-- `initial_message_to_user` is the optional user-facing startup prompt. When it is null, the first visible chat message should come from the workflow's actual initial agent output.
 
 ### `agents.yaml`
 

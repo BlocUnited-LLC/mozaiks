@@ -476,7 +476,7 @@ Registered in `chat-ui/src/registry/coreComponents.js` — every app gets them a
 |-----------|-------|---------|
 | `ChatPage` | `/chat` | Main AI workflow interface |
 | `SchemaPage` | `/{page}` | Renders declarative AppPageSchema from `/api/pages/{name}` |
-| `ProfilePage` | `/profile` | User profile view/edit — identity panel (framework), module-declared panels via `contracts/profile.yaml`, app preferences panel |
+| `ProfilePage` | `/profile` | Account view/edit for the signed-in person — identity panel (framework), account-scoped module panels via `contracts/profile.yaml`, personal preferences panel |
 
 ### Platform-Management Surfaces
 
@@ -848,7 +848,7 @@ These invariants guide every implementation decision in this repo.
 | module manifest system | `module.yaml` (required) + optional `contracts/` companion manifests: `events.yaml`, `reactions.yaml`, `notifications.yaml`, `settings.yaml`, `admin.yaml`, `profile.yaml` |
 | module.yaml | handler/action manifest — identity, capabilities, and action definitions; event declarations live in `events.yaml` |
 | admin.yaml (platform) | module admin panels rendered inside unified `/admin` |
-| profile.yaml (platform) | module-contributed panels on the user profile page (`/profile`) — kinds: `metrics`, `list`, `component`; hydrated via `GET /api/me/profile-panels` |
+| profile.yaml (platform) | account-scoped module-contributed panels on the user profile page (`/profile`) — kinds: `metrics`, `list`, `component`; hydrated via `GET /api/me/profile-panels`; must not contain app/workspace management, billing, build, deployment, or admin operations |
 | runtime ingress | boundary that accepts validated app/domain events and routes them to workflow triggers |
 | triggers | workflow start/resume declarations in `orchestrator.yaml` |
 | AppGenerator | workflow that generates deterministic app bundle artifacts: `app.json`, pages, config, brand patches, module manifest families, and backend code |

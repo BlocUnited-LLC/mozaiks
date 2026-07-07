@@ -97,7 +97,6 @@ class WorkflowConfig {
         try {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 5000);
-          console.log('� WorkflowRegistry: Fetching workflows from', url);
           const response = await fetch(url, { signal: controller.signal, headers });
           clearTimeout(timeout);
           if (!response.ok) {
@@ -107,14 +106,8 @@ class WorkflowConfig {
             continue;
           }
           const data = await response.json();
-          console.log('🔍 Raw workflow data from backend:', data);
           const workflows = extractWorkflowRecords(data);
 
-          console.log('🔍 Normalized workflow configs:', workflows.map((workflow) => ({
-            workflow_name: workflow.workflow_name,
-            display_name: workflow.display_name,
-            entry_point: workflow.entry_point === true,
-          })));
 
           this.configs.clear();
           for (const workflow of workflows) {
@@ -122,11 +115,9 @@ class WorkflowConfig {
             const lowerKey = workflow.workflow_name.toLowerCase();
             if (!this.configs.has(lowerKey)) this.configs.set(lowerKey, workflow);
           }
-          console.log('✅ Loaded workflow configs:', workflows.map(w => w.workflow_name));
           if (workflows.length > 0) {
             const entryPointWorkflow = workflows.find((workflow) => workflow?.entry_point === true)?.workflow_name;
             this.defaultWorkflow = entryPointWorkflow || workflows[0].workflow_name;
-            console.log('🎯 Default workflow set to:', this.defaultWorkflow);
           } else {
             this.defaultWorkflow = null;
           }

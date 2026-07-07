@@ -146,6 +146,48 @@ models:
         items: TokenAllowance
         description: Token allowances granted by this plan.
 
+  PricingCatalogGroup:
+    type: model
+    fields:
+      group_id:
+        type: str
+        description: Stable pricing display group id for a tab or service selector.
+      label:
+        type: str
+        description: Human-readable group label.
+      description:
+        type: union
+        variants: [str, 'null']
+        description: Short display description, or null.
+      kind:
+        type: literal
+        values: [subscription, service, add_on, mixed]
+        description: Display category only; does not grant capabilities.
+      plan_ids:
+        type: list
+        items: str
+        description: Declared subscription plan ids shown in this group.
+      capability_groups:
+        type: list
+        items: str
+        description: Semantic capability families represented by this group.
+      add_on_ids:
+        type: list
+        items: str
+        description: App/provider-owned add-on ids displayed in this group.
+
+  PricingCatalog:
+    type: model
+    fields:
+      default_group_id:
+        type: union
+        variants: [str, 'null']
+        description: Default pricing display group id, or null.
+      groups:
+        type: list
+        items: PricingCatalogGroup
+        description: Pricing display groups for tabs or service selectors.
+
   SubscriptionConfigFile:
     type: model
     fields:
@@ -167,6 +209,10 @@ models:
         type: list
         items: TokenWallet
         description: Provider-neutral token wallets.
+      pricing_catalog:
+        type: union
+        variants: [PricingCatalog, 'null']
+        description: Optional display metadata for grouped pricing tabs or service selectors.
       plans:
         type: list
         items: SubscriptionPlan
@@ -277,6 +323,38 @@ models:
         type: str
         description: Complete file contents.
 
+  PlanDesignRationale:
+    type: model
+    fields:
+      source_context:
+        type: literal
+        values:
+          - concept_overview
+          - concept_blueprint
+          - backend_design_document
+          - design_surface_map
+          - experience_spec
+          - monetization_enabled
+          - builder_options
+          - refinement_request
+          - change_intent
+          - impact_set
+        description: Upstream context variable that provided the signal.
+      signal:
+        type: str
+        description: Concrete source signal used for a subscription design decision.
+      decision:
+        type: str
+        description: Subscription, entitlement, quota, or pricing-catalog decision derived from the signal.
+      affected_plan_ids:
+        type: list
+        items: str
+        description: Plan ids affected by this decision.
+      affected_pricing_group_ids:
+        type: list
+        items: str
+        description: Pricing catalog group ids affected by this decision.
+
   SubscriptionContractOutput:
     type: model
     fields:
@@ -289,6 +367,10 @@ models:
       rationale:
         type: str
         description: Why the contract is or is not required.
+      plan_design_rationale:
+        type: list
+        items: PlanDesignRationale
+        description: Traceable semantic reasoning from upstream context variables to plan, quota, entitlement, and pricing group decisions.
       app_id:
         type: union
         variants: [str, 'null']

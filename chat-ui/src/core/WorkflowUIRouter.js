@@ -48,7 +48,6 @@ const WorkflowUIRouter = ({
   const loadWorkflowComponent = React.useCallback(async (workflow, component) => {
     setIsLoading(true);
     setError(null);
-    console.log('🛰️ WorkflowUIRouter: Loading component', { workflow, component, toolName, toolCallId });
 
     try {
       // Deterministic resolution order:
@@ -66,12 +65,6 @@ const WorkflowUIRouter = ({
       for (const candidate of candidates) {
         const matched = getComponent(candidate);
         if (matched) {
-          console.log('✅ WorkflowUIRouter: Using registered component', {
-            resolved: candidate,
-            requested_component: component,
-            requested_tool: toolName,
-            workflow,
-          });
           setComponent(() => matched);
           return;
         }
@@ -83,7 +76,6 @@ const WorkflowUIRouter = ({
         const coreComponents = coreModule.default || coreModule;
         const coreComponent = coreComponents[component] || coreComponents[toolName];
         if (coreComponent) {
-          console.log(`✅ WorkflowUIRouter: Using core component ${component || toolName}`);
           setComponent(() => coreComponent);
           return;
         }
@@ -170,21 +162,9 @@ const WorkflowUIRouter = ({
   }
 
   // Success state - render the dynamically loaded component
-  console.log('🛰️ WorkflowUIRouter: Rendering state:', {
-    Component: Component ? 'loaded' : 'null',
-    ComponentType: typeof Component,
-    payload: payload ? 'present' : 'null',
-    payloadType: typeof payload,
-    payloadKeys: payload ? Object.keys(payload) : []
-  });
 
   // CRITICAL: Verify payload structure before passing to component
   if (payload && typeof payload === 'object') {
-    console.log('🔍 [WorkflowUIRouter] Payload structure check:', {
-      hasWorkflow: 'workflow' in payload,
-      workflowType: typeof payload.workflow,
-      payloadSample: JSON.stringify(payload, null, 2).substring(0, 500)
-    });
   }
 
   // Render with error boundary

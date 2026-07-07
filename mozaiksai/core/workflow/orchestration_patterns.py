@@ -2,13 +2,13 @@
 # FILE: mozaiksai/core/workflow/orchestration_patterns.py
 # DESCRIPTION: Workflow orchestration entry point.
 #
-# Wires together the AG2 beta agent factory, chat resume/init, AG2 Network
+# Wires together the AG2 beta agent factory, run bootstrap, AG2 Network
 # execution, persistence, transport, lifecycle, and observability into a single
-# async function that callers use to start or resume a workflow run.
+# async function that callers use to start or re-enter a workflow run.
 #
 # Internals are in focused execution sub-modules:
 #   execution/stream_bridge.py  — AG2 MemoryStream → UI transport bridge
-#   execution/resume.py         — chat resume / session init logic
+#   execution/run_bootstrap.py  — run start / event-history bootstrap logic
 # ==============================================================================
 
 from __future__ import annotations
@@ -28,28 +28,17 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from mozaiksai.core.ports.orchestration import RunStatus
 
 from .context import DerivedContextManager
-from .execution.resume import merge_persisted_extra_context, resume_or_initialize_chat
+from .execution.run_bootstrap import bootstrap_run_messages, merge_persisted_extra_context
 from .messages import normalize_to_strict_ag2 as _normalize_to_strict_ag2
 from .orchestration_utils import _load_workflow_config
 
 logger = logging.getLogger(__name__)
 
 chat_logger = get_workflow_logger("orchestration")
-workflow_logger = get_workflow_logger("orchestration")
 performance_logger = get_workflow_logger("performance.orchestration")
-
-# ---------------------------------------------------------------------------
-# Public re-exports — existing callers import these names from this module
-# ---------------------------------------------------------------------------
-
-# _merge_persisted_extra_context keeps its underscore-prefixed name for callers
-# that import it (tests, ag2_orchestration adapter).
-_merge_persisted_extra_context = merge_persisted_extra_context
-_resume_or_initialize_chat = resume_or_initialize_chat
 
 __all__ = [
     "run_workflow_orchestration",
-    "_merge_persisted_extra_context",
 ]
 
 
@@ -113,46 +102,15 @@ def _next_agent_after_trigger(
     return None
 
 
-async def _emit_startup_greeting_if_needed(
-    *,
-    config: dict[str, Any],
-    resumed_messages: list[dict[str, Any]],
-    workflow_startup_mode: str,
-    initial_agent_name: str,
-    transport: Any,
-    persistence_manager: AG2PersistenceManager,
-    chat_id: str,
-    app_id: str,
-    workflow_name_upper: str,
-    wf_logger: Any,
-) -> int:
-    """Emit the static UserDriven greeting before AG2 owns agent turns."""
-
-    if resumed_messages or workflow_startup_mode != "UserDriven":
-        return 0
-    greeting = str(config.get("initial_message_to_user") or "").strip()
-    if not greeting:
-        return 0
-
-    await transport.send_event_to_ui(
-        {
-            "kind": "chat.text",
-            "agent": initial_agent_name,
-            "role": "assistant",
-            "content": greeting,
-            "sequence": 0,
-        },
-        chat_id,
-    )
-    await persistence_manager.append_run_assistant_message(
-        chat_id=chat_id,
-        app_id=app_id,
-        content=greeting,
-        agent_name=initial_agent_name,
-        metadata={"source": "startup_greeting"},
-    )
-    wf_logger.debug("[%s] UserDriven greeting sent", workflow_name_upper)
-    return 1
+def _last_agent_name_from_runner_result(runner_result: Any) -> str | None:
+    for envelope in reversed(runner_result.wal or []):
+        if not isinstance(envelope, dict) or envelope.get("event_type") != "ag2.packet":
+            continue
+        sender_id = str(envelope.get("sender_id") or "")
+        agent_name = runner_result.agent_name_by_id.get(sender_id)
+        if agent_name:
+            return str(agent_name)
+    return None
 
 
 async def _project_ag2_wal_to_mozaiks_transport(
@@ -292,8 +250,8 @@ async def run_workflow_orchestration(
             workflow_name_upper, workflow_startup_mode, initial_agent_name,
         )
 
-        # 2) Resume or start chat
-        resumed_messages, initial_messages = await resume_or_initialize_chat(
+        # 2) Bootstrap run from canonical AG2 event history or launch input
+        has_persisted_events, initial_messages = await bootstrap_run_messages(
             persistence_manager=persistence_manager,
             config=config,
             chat_id=chat_id,
@@ -304,7 +262,7 @@ async def run_workflow_orchestration(
             initial_agent_name=initial_agent_name,
             wf_logger=wf_logger,
         )
-        resumed_mode = bool(resumed_messages)
+        resumed_mode = bool(has_persisted_events)
 
         # 3) Cache seed
         try:
@@ -452,19 +410,24 @@ async def run_workflow_orchestration(
                         var_name = payload.get("variable")
                         value = payload.get("value")
                         if var_name and transport:
+                            def _derived_emit_done(task: asyncio.Task[Any]) -> None:
+                                if task.cancelled():
+                                    return
+                                exc = task.exception()
+                                if exc is not None:
+                                    wf_logger.debug(
+                                        "[%s] DERIVED_CONTEXT_UI_EMIT_FAILED var=%s: %s",
+                                        workflow_name_upper,
+                                        var_name,
+                                        exc,
+                                    )
+
                             _ui_task = asyncio.create_task(transport.send_event_to_ui({
                                 "kind": "context_update",
                                 "variable": var_name,
                                 "value": value,
                             }, chat_id))
-                            _ui_task.add_done_callback(
-                                lambda t, _v=var_name: wf_logger.debug(
-                                    "[%s] DERIVED_CONTEXT_UI_EMIT_FAILED var=%s: %s",
-                                    workflow_name_upper, _v, t.exception(),
-                                )
-                                if not t.cancelled() and t.exception() is not None
-                                else None
-                            )
+                            _ui_task.add_done_callback(_derived_emit_done)
                     except Exception as _dl_err:
                         wf_logger.debug("[%s] Derived context listener error var=%s: %s", workflow_name_upper, payload.get("variable"), _dl_err)
 
@@ -508,20 +471,8 @@ async def run_workflow_orchestration(
         )
 
         # 10) Execute AG2 Network workflow channel
-        startup_sequence = await _emit_startup_greeting_if_needed(
-            config=config,
-            resumed_messages=resumed_messages,
-            workflow_startup_mode=workflow_startup_mode,
-            initial_agent_name=initial_agent_name,
-            transport=transport,
-            persistence_manager=persistence_manager,
-            chat_id=chat_id,
-            app_id=app_id,
-            workflow_name_upper=workflow_name_upper,
-            wf_logger=wf_logger,
-        )
         network_prompt = _messages_to_network_prompt(initial_messages)
-        projected_sequence = startup_sequence
+        projected_sequence = 0
         project_final_runner_result = True
         if task_batches_config is not None:
             trigger_agent_name = initial_agent_name
@@ -628,12 +579,26 @@ async def run_workflow_orchestration(
         run_error = runner_result.error
         awaiting_user_input = runner_result.status is RunStatus.PAUSED
         run_completed = runner_result.status is RunStatus.COMPLETED
+        pause_agent = _last_agent_name_from_runner_result(runner_result) if awaiting_user_input else None
         run_status = (
             "failed" if run_failed
             else "paused" if awaiting_user_input
             else "completed" if run_completed
             else "in_progress"
         )
+        if awaiting_user_input:
+            await transport.send_event_to_ui(
+                {
+                    "kind": "awaiting_reply",
+                    "workflow": workflow_name,
+                    "chat_id": chat_id,
+                    "source_agent": pause_agent or initial_agent_name,
+                    "reason": "awaiting_user_reply",
+                    "display": "composer",
+                    "interaction_type": "input_request",
+                },
+                chat_id,
+            )
         await transport.send_event_to_ui(
             {
                 "kind": "run_complete",
@@ -643,6 +608,7 @@ async def run_workflow_orchestration(
                 "awaiting_user_input": awaiting_user_input,
                 "status": run_status,
                 "reason": "failed" if run_failed else ("awaiting_user_input" if awaiting_user_input else "finished"),
+                **({"agent": pause_agent} if pause_agent else {}),
                 **({"error": run_error} if run_error else {}),
             },
             chat_id,
@@ -683,8 +649,10 @@ async def run_workflow_orchestration(
                     )
                 except Exception as fail_lifecycle_err:
                     wf_logger.debug("[%s] Lifecycle on_fail failed: %s", workflow_name_upper, fail_lifecycle_err)
-        else:
+        elif awaiting_user_input:
             wf_logger.info("[%s] Run paused awaiting user input", workflow_name_upper)
+        else:
+            wf_logger.info("[%s] Run completed", workflow_name_upper)
 
         duration_sec = perf_counter() - start_time
         wf_logger.info("[EXECUTION_COMPLETE] Duration: %.2fs", duration_sec)

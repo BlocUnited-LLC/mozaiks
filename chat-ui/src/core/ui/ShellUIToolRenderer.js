@@ -38,13 +38,6 @@ const ShellUIToolRenderer = ({
   try {
     // Prefer explicit agentName when available to attribute UI tools correctly
     const resolvedAgentName = event.agentName || event.agent_name || event.payload?.agentName || event.payload?.agent_name || event.agent || null;
-    console.log('🧩 UIToolRenderer: Rendering', {
-      tool_name: event.tool_name,
-      tool_call_id: event.tool_call_id,
-      workflow_name: event.workflow_name,
-      agentName: resolvedAgentName,
-      payloadKeys: event.payload ? Object.keys(event.payload) : []
-    });
     const payload = event.payload || {};
     const isCore = isCoreArtifact(payload) || (typeof event.tool_name === 'string' && event.tool_name.startsWith('core.'));
     const hasArtifactType = payload?.artifact_type || payload?.data?.artifact_type;

@@ -66,9 +66,7 @@ partial startup without the process crashing.
 |---|---|---|
 | `GET` | `/api/chats/{app_id}/{workflow_name}` | List chats for a workflow |
 | `GET` | `/api/chats/exists/{app_id}/{workflow_name}/{chat_id}` | Check if a chat exists |
-| `GET` | `/api/sessions/list/{app_id}/{user_id}` | List sessions for a user |
-| `GET` | `/api/sessions/recent/{app_id}/{user_id}` | Most recent sessions |
-| `GET` | `/api/sessions/oldest/{app_id}/{user_id}` | Oldest sessions |
+| `GET` | `/api/sessions/list/{app_id}/{user_id}` | In-progress workflow sessions for explicit continuation |
 | `DELETE` | `/api/sessions/{app_id}/{user_id}` | Delete user sessions |
 | `DELETE` | `/api/general_chats/{app_id}/{user_id}` | Delete general chats |
 

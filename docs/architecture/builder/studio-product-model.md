@@ -39,7 +39,9 @@ not appear as primary customer-facing product language:
 
 **Mozaiks Studio** is the browser product. It owns app creation, build
 continuation, artifact review, app workspace status, usage, health, users, and
-integrations.
+integrations. Creation and continuation are separate intents: the shell Create
+entrypoint always starts a fresh build journey, while continuation happens from
+Studio/App Studio build history or an explicit chat/build record.
 
 The **Studio host** is the internal FastAPI composition layer that serves the
 browser Studio and mounts the factory builder/control-plane capabilities. Keep
@@ -92,7 +94,7 @@ product billing routes.
 | `/apps` | Workspace Apps | Primary workspace home and app portfolio |
 | `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
 | `/health` | Workspace Health | Cross-app health posture and app-level risk visibility |
-| `/create` | Workflow entrypoint | Workflow-owned create path; not part of the persistent Studio nav |
+| `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |
 | `/apps/:appId` | App Studio | Redirects to app overview |
 | `/apps/:appId/overview` | App Overview | App-scoped summary and next actions |
 | `/apps/:appId/health` | App Health | Overall app health across runtime, workflows, hosting, and integrations |
@@ -119,6 +121,8 @@ Behavior expectations:
 - All apps route into `Open App Studio` rather than a separate build page.
 - App Studio routes remain available before deployment.
 - Pre-live sections show lifecycle-aware guidance instead of disappearing.
+- Continue-build actions are launched from the app/build record, not from
+  Profile or the shell Create button.
 
 ## Studio Separation
 

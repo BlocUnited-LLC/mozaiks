@@ -972,6 +972,7 @@ def _optional_task_output_paths(task: dict[str, Any]) -> set[str]:
     return {
         f"{prefix}/contracts/notifications.yaml",
         f"{prefix}/contracts/profile.yaml",
+        f"{prefix}/contracts/relationships.yaml",
         f"{prefix}/contracts/reactions.yaml",
         f"{prefix}/runtime_extensions.yaml",
     }

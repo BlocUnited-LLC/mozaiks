@@ -108,7 +108,7 @@ agents:
       - `frontend_design_document`, `backend_design_document`, `database_design_document`: current design docs when available.
       - `experience_spec`: typed ExperienceSpec from DesignDocs — the authoritative page structure. When present with a non-empty `pages[]`, use these designed pages as the canonical page list. Map each `experience_spec.pages[i]` directly to your `pages[]` output, preserving name, route, layout, intent, and mapping `sections[j]` to `sections_hint[]`. Do not invent page structure from capability packs when `experience_spec.pages[]` is present.
       - `experience_spec_document`: human-readable YAML version of the ExperienceSpec. Use as a readable fallback or secondary reference only when `experience_spec` is null.
-      - `concept_api_endpoints`, `concept_blueprint`: optional structured hints from upstream planning, including `capability_pack_hints` and `agentic_capabilities`.
+      - `concept_api_endpoints`, `concept_blueprint`: optional structured hints from upstream planning, including `capability_pack_hints`, `monetization_intent`, and `agentic_capabilities`.
 
       **Optional integration context**:
       - `agent_api_url`, `agent_websocket_url`, `available_agents`, `available_tools` indicate that a separate agent backend already exists and may need to be integrated into the generated app.
@@ -156,7 +156,7 @@ agents:
              - OMIT a carry-forward module if it is domain-specific to the old concept (old CRM contacts/pipeline, old domain pages, concept-specific workflows). Note the omission in build plan rationale.
              - Do not reference or copy files from `previous_app_bundle_ref`. No merge or file-copy behavior exists.
              - `preserve_families` and `pivot_description` are additional advisory context — use them to understand what the user intends to keep and what the pivot is about.
-             - **Module contract read-back** (when `previous_app_bundle_ref` is present): for modules classified `needs_adaptation`, call `read_carry_forward_module_contract` to inspect their prior contracts before deciding. Allowed files: `module.yaml`, `runtime_extensions.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`, `contracts/notifications.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`, `contracts/profile.yaml`. Do NOT request `backend/*.py` — backend source is not accessible in this phase. Do NOT copy or merge file content into the new app bundle. Contract content is advisory context only.
+             - **Module contract read-back** (when `previous_app_bundle_ref` is present): for modules classified `needs_adaptation`, call `read_carry_forward_module_contract` to inspect their prior contracts before deciding. Allowed files: `module.yaml`, `runtime_extensions.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`, `contracts/notifications.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`, `contracts/profile.yaml`, `contracts/relationships.yaml`. Do NOT request `backend/*.py` — backend source is not accessible in this phase. Do NOT copy or merge file content into the new app bundle. Contract content is advisory context only.
              - **carry_forward_decisions output** (when `carry_forward_modules` is present): emit one `CarryForwardDecision` per carry-forward candidate in the `carry_forward_decisions` field of your `AppBuildPlan`. For each candidate choose one of:
                - `reuse`: module role preserved in the new plan. Does not copy old files. Explain why the role fits.
                - `adapt`: create a new/updated module task inspired by the prior contract. Reference what changes.
@@ -183,13 +183,27 @@ agents:
          - Use `concept_blueprint.capability_pack_hints` and `build_plan.capability_packs` when available.
          - Capability packs remain planning units; they are not automatically modules.
          - Every capability pack must declare `surface_id` and `surface_kind`.
-         - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `notifications_pack`, `analytics_pack`, and `agent_backend_integration`.
-         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS monetization, subscription billing, usage billing, checkout, billing portal, or wallet/account connection, use the `billing_pack` capability pack or generate a provider-neutral `external_adapter` path when the user names a specific provider.
+         - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `commerce_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `notifications_pack`, `analytics_pack`, and `agent_backend_integration`.
+         - Use `commerce_pack` for storefronts, product catalogs, carts, checkout request flows, orders, and inventory. Keep payment provider mechanics outside the commerce module; pair with a selected managed payment pack or a user-requested provider adapter when checkout processing is required.
+         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS subscriptions, plan-gated access, seats, billing portal, or usage budgets, use the `billing_pack` capability pack or generate a provider-neutral `external_adapter` path when the user names a specific provider. For transactional checkout, use `commerce_pack` plus the selected payment/operator pack. For multi-party seller/buyer flows, use `marketplace_pack` or a custom-owned marketplace boundary. Do not collapse all revenue into billing.
          - **NEVER include these as capability packs** — they are first-class runtime features already provided by the Mozaiks platform host and must not be scaffolded:
            `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `websocket`, `token_usage_ledger`, `ai_token_metering`
            If the product spec mentions any of these, reference them as existing runtime capabilities in `service_scope`, not as packs to generate.
          - If the product needs domain-specific profile records (for example investor profiles, founder profiles, vendor profiles, or creator profiles), model them as module-owned entities/actions/events inside the relevant capability pack. They do not replace the host-owned `/api/me` account/profile contract.
          - Distinguish deterministic product behavior from optional agentic augmentation.
+      4a. Resolve monetization before deriving monetization build tasks.
+         - `monetization_enabled=true`, `builder_options.monetization.enabled=true`, or `builder_options.provider_backed_capabilities[].intent_id == "monetization"` means only that a revenue model is desired. It does not mean subscriptions.
+         - Set `revenue_model` to one concrete taxonomy value: `free`, `subscriptions`, `usage_based`, `transactional`, `marketplace`, `sponsored`, `donations`, `community_funded`, or `hybrid`. Never set it to `monetized`.
+         - Populate `monetization_plan` whenever `revenue_model` is not `free`. Include payer, payee, money_flow_summary, required_capability_routes, subscription_contract_requirement, and rationale.
+         - Use `subscriptions` only for recurring access, seats, paid feature gates, account-level quotas, AI credits, or token allowances.
+         - Treat `concept_blueprint.monetization_intent` as advisory input. It helps choose the revenue model, but the final `revenue_model`, `monetization_plan`, build tasks, and subscription-contract requirement must still match the actual module/page/workflow surfaces in the current app plan.
+         - Use `usage_based` for pay-per-meter, pay-per-token, pay-per-job, API-call, export, render, or credit flows. It requires `config/subscriptions.yaml` only when the app grants plan allowances, token wallets, prepaid credits, or quotas.
+         - Use `transactional` for ecommerce, bookings, paid downloads, invoices, event tickets, or one-time service checkout. Route this through commerce/checkout. Do not create `config/subscriptions.yaml` unless the app also sells access tiers or quotas.
+         - Use `marketplace` for multi-party buyer/seller, creator/customer, provider/client, commission, payout, dispute, or platform-fee flows. Do not use `config/subscriptions.yaml` to model orders, ownership, payouts, commissions, or settlement.
+         - Use `sponsored` for ad slots, promoted listings, boosted placement, paid visibility, or marketing packages. Treat campaign windows, placement inventory, and performance records as app/operator module state, not subscriptions.
+         - Use `donations` for optional tips, pledges, patron support, or contributions. Add subscriptions only if the app also sells recurring memberships or access tiers.
+         - Use `community_funded` for campaign-style backing/funding windows with app/operator-specific policy. Do not model investment-like terms, returns, or settlement as OSS subscription primitives.
+         - Use `hybrid` only when multiple money flows are truly present. Split each route into its owning capability pack, and generate exactly one `config/subscriptions.yaml` only for the access/quota/credit part when SubscriptionContractDesigner requires it.
       5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
       5a. **When `experience_spec.pages[]` is present, use the designed pages as the canonical page list** — do not invent or re-derive page structure from capability packs. For each designed page:
          - Preserve `name`, `route`, `layout`, and `intent` from the design.
@@ -1557,7 +1571,7 @@ agents:
          - Treat event declarations as explicit only. Do not invent events from action verbs. If `current_build_task.initial_message` does not name event types, set `actions[].emits: []` and `events_yaml.events: []`.
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
-         - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
+         - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `relationships_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
          - Do not put `schema_version`, `module`, `actions`, or `capabilities` directly under `module_contract`; those belong inside `module_contract.module_yaml`.
       5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, `event_pipeline`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, `api_surface`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `event_pipeline` if the module reacts to external or domain events through an automated lifecycle; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
          - `module_contract.module_yaml` must use the runtime loader shape exactly:
@@ -1594,6 +1608,13 @@ agents:
          - **Field constraint**: `metrics` and `list` panels require a non-empty `fields[]`. `component` panels must have a `component` key and no `fields[]`.
          - **Field types**: use only `string`, `number`, `currency`, `date`, `boolean`, or `status` — unknown types are rejected at load time.
          - **Boundaries**: profile panels must not expose admin-only actions or secrets. Profile panels do not replace `/api/me` identity — auth identity and core account data remain platform-owned.
+      9b. **relationships.yaml** (optional — emit only when warranted): set `relationships_yaml` to a `ModuleRelationshipsManifest` object when the module can enumerate current-user relationships to module-owned resources. Otherwise set `relationships_yaml` to null.
+         - **When to emit**: owned resources, administered resources, joined memberships, watched/followed resources, invitations, or other current-user relationships that should appear in generic My Apps, Portfolio, or My Resources surfaces.
+         - **When to omit**: UI-only modules, admin-only modules, modules without user/resource relationships, and modules where another module already owns the relationship.
+         - **Schema version**: always `mozaiks.relationships.v1`.
+         - **Provider binding**: each provider's `action` field must reference an action id declared in `module.yaml`. The platform calls that action at `/api/me/relationships` request time.
+         - **Provider output**: actions should return a `relationships` array whose rows include `resource_type`, `resource_id`, `resource_label`, `relationship_type`, `status`, `capabilities`, `primary_route`, optional `secondary_routes`, and optional `metadata`.
+         - **Boundaries**: keep the contract host-agnostic. Do not expose payment-provider implementation details, ownership-rights claims, hosted monetization policy, secrets, or cross-tenant data through relationships providers.
       10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. **Derive admin panels from the module's declared actions** — do not leave `panels[]` empty for durable module surfaces. Apply this derivation:
          - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
          - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action. Use `value_key` only for fields declared by the action output schema. Use `trend_key` only when the action contract explicitly describes a real historical comparison or metrics snapshot; otherwise omit trend fields so the UI renders no fake change value.
@@ -1750,6 +1771,7 @@ agents:
           "settings_yaml": { "schema_version": "mozaiks.settings.v1", "settings": [], "features": [] },
           "admin_yaml": { "schema_version": "mozaiks.admin.v2", "panels": [], "hooks": [] },
           "profile_yaml": null,
+          "relationships_yaml": null,
           "python_stubs": [],
           "js_stubs": [],
           "runtime_extensions_yaml": null
@@ -2210,7 +2232,7 @@ agents:
       **Inputs**:
       - Code Context: `config_config`, `database_config`, `model_context` (injected by hook).
       - `app_backend_url`: Base URL of the active Mozaiks app host. Non-null means a live backend exists and services must publish real events. Null still requires runtime-safe code: guard `context.events` before publishing instead of leaving TODO comments.
-      - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml.
+      - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml/contracts/profile.yaml/contracts/relationships.yaml.
       - `dependency_task_outputs`: completed upstream task outputs keyed by task_id. Read the module contract, data model, and persistence outputs from this map before generating backend implementation files.
       - `app_task_batch_results`: the current batch result map, including completed upstream task outputs and `_meta`.
       - `[MODULE ARCHETYPES CONTEXT]` is injected into your system message. Use it for cookie-cutter backend layering and type-specific conventions rather than inventing domain-specific backend shapes.

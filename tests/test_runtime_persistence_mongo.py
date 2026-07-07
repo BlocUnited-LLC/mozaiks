@@ -44,6 +44,7 @@ class FakeMongoCollection:
         self.inserted: list[dict[str, Any]] = []
         self.update_calls: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
         self.count_queries: list[dict[str, Any]] = []
+        self.aggregate_pipelines: list[list[Mapping[str, Any]]] = []
         self.create_index_calls: list[tuple[list[tuple[str, int]], dict[str, Any]]] = []
         self.index_rows: list[dict[str, Any]] = []
         self.last_cursor: FakeCursor | None = None
@@ -68,6 +69,10 @@ class FakeMongoCollection:
     async def count_documents(self, query: dict[str, Any]):
         self.count_queries.append(query)
         return 7
+
+    def aggregate(self, pipeline: list[Mapping[str, Any]]):
+        self.aggregate_pipelines.append(pipeline)
+        return FakeCursor([{"count": 1}])
 
     def list_indexes(self):
         return FakeCursor(self.index_rows)
@@ -255,6 +260,18 @@ async def test_count_injects_app_id() -> None:
 
     assert count == 7
     assert collection._collection.count_queries[0] == {"app_id": "app_1", "status": "open"}  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_aggregate_prepends_app_scope_match() -> None:
+    context, _ = _context()
+    collection = context.collection("projects", "projects")
+
+    rows = await collection.aggregate([{"$match": {"status": "open"}}, {"$group": {"_id": "$status"}}])
+
+    assert rows == [{"count": 1}]
+    assert collection._collection.aggregate_pipelines[0][0] == {"$match": {"app_id": "app_1"}}  # noqa: SLF001
+    assert collection._collection.aggregate_pipelines[0][1] == {"$match": {"status": "open"}}  # noqa: SLF001
 
 
 @pytest.mark.asyncio

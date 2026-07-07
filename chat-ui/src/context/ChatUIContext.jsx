@@ -196,14 +196,12 @@ export const ChatUIProvider = ({
         // Optional: allow host to initialize workflow/tool registry without bundling
         // any workflow implementation into this package.
         if (typeof workflowInitializer === 'function') {
-          console.log('🔧 Initializing workflow registry (host-provided)...');
           try {
             await Promise.race([
               Promise.resolve(workflowInitializer()),
               new Promise((_, reject) => setTimeout(() => reject(new Error('workflow_init_timeout')), WORKFLOW_INIT_TIMEOUT_MS))
             ]);
             setWorkflowsInitialized(true);
-            console.log('✅ Workflow registry initialized');
           } catch (wfErr) {
             if (wfErr?.message === 'workflow_init_timeout') {
               console.warn('⚠️ Workflow initialization timed out – continuing with partial UI.');

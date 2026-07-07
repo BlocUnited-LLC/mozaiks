@@ -12,7 +12,7 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
     (app_root / "config").mkdir(parents=True)
     (app_root / "ui").mkdir(parents=True)
     (app_root / "app.json").write_text(
-        json.dumps({"appName": "Shortcut App", "startup": {"landing_spot": "/dashboard"}}),
+        json.dumps({"appName": "Shortcut App", "startup": {"landing_spot": "/"}}),
         encoding="utf-8",
     )
     (app_root / "config" / "ai.json").write_text(
@@ -24,10 +24,10 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
             {
                 "pages": [
                     {
-                        "id": "dashboard",
-                        "label": "Dashboard",
-                        "path": "/dashboard",
-                        "component": "DashboardPage",
+                        "id": "home",
+                        "label": "Home",
+                        "path": "/",
+                        "component": "HomePage",
                         "order": 1,
                         "meta": {"requiresAuth": True},
                     },
@@ -47,11 +47,11 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
     (app_root / "config" / "shell.json").write_text(
         json.dumps(
             {
-                "header": {"logo": {"href": "/dashboard"}},
+                "header": {"logo": {"href": "/"}},
                 "shortcuts": {
-                    "header": ["dashboard", "wallet"],
+                    "header": ["home", "wallet"],
                     "profile": ["profile", "wallet", "signout"],
-                    "mobile": ["dashboard", "wallet", "profile"],
+                    "mobile": ["home", "apps", "profile"],
                     "footer": ["legal", "terms"],
                     "footerHideOnMobile": True,
                 },
@@ -64,17 +64,51 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
 
     shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
 
-    assert shell["header"]["logo"]["href"] == "/dashboard"
-    assert [item["path"] for item in shell["header"]["pages"]] == ["/dashboard", "/wallet"]
+    assert shell["header"]["logo"]["href"] == "/"
+    assert [item["path"] for item in shell["header"]["pages"]] == ["/", "/wallet"]
     assert [item["id"] for item in shell["profile"]["menu"]] == [
         "profile",
         "wallet",
         "admin-portal",
         "signout",
     ]
-    assert [item["path"] for item in shell["mobile"]["bottomBar"]["items"]] == ["/dashboard", "/wallet", "/profile"]
+    assert [item["path"] for item in shell["mobile"]["bottomBar"]["items"]] == ["/", "/apps", "/profile"]
     assert shell["footer"]["links"][0] == {"label": "Legal Notice", "href": "/legal"}
     assert shell["footer"]["hideOnMobile"] is True
+
+
+def test_shell_shortcut_catalog_uses_workspace_home_primitives_without_dashboard_builtin() -> None:
+    from mozaiksai.hosts import platform as platform_app
+
+    catalog = platform_app._shell_shortcut_catalog([], {})
+
+    assert catalog["home"]["path"] == "/"
+    assert catalog["apps"]["path"] == "/apps"
+    assert catalog["workspace"]["path"] == "/apps"
+    assert catalog["profile"]["label"] == "Account"
+    assert catalog["account"]["path"] == "/profile"
+    assert catalog["account"]["label"] == "Account"
+    assert "dashboard" not in catalog
+    assert "admin_portal" not in catalog
+
+
+def test_shell_shortcut_catalog_allows_app_owned_dashboard_routes() -> None:
+    from mozaiksai.hosts import platform as platform_app
+
+    catalog = platform_app._shell_shortcut_catalog(
+        [
+            {
+                "id": "dashboard",
+                "label": "Dashboard",
+                "path": "/dashboard",
+                "component": "DashboardPage",
+            }
+        ],
+        {},
+    )
+
+    assert catalog["dashboard"]["path"] == "/dashboard"
+    assert catalog["dashboard"]["label"] == "Dashboard"
 
 
 def test_platform_shell_config_resolves_page_navigation_policy(monkeypatch, tmp_path: Path) -> None:

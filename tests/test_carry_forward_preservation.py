@@ -6,7 +6,7 @@ Coverage (28 tests):
  2.  no previous_app_bundle_ref → no-op, no warning
  3.  workspace unavailable → no-op with warning
  4.  reuse copies module.yaml
- 5.  reuse copies all 7 allowlisted contract files
+ 5.  reuse copies all allowlisted contract files
  6.  reuse does NOT copy backend/handler.py
  7.  reuse does NOT copy backend/service.py
  8.  reuse does NOT copy runtime_extensions.yaml
@@ -59,6 +59,7 @@ _PRIOR_FILE_MAP = {
     "modules/settings/contracts/settings.yaml": "settings: []\n",
     "modules/settings/contracts/admin.yaml": "panels: []\n",
     "modules/settings/contracts/profile.yaml": "panels: []\n",
+    "modules/settings/contracts/relationships.yaml": "providers: []\n",
     "modules/settings/backend/handler.py": "class Handler: pass\n",
     "modules/settings/backend/service.py": "class Service: pass\n",
     "modules/settings/runtime_extensions.yaml": "api_router: ...\n",
@@ -193,7 +194,7 @@ async def test_reuse_copies_module_yaml():
 
 
 # ---------------------------------------------------------------------------
-# 5. reuse copies all 7 allowlisted contract files
+# 5. reuse copies all allowlisted contract files
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -212,6 +213,7 @@ async def test_reuse_copies_all_allowlisted_contracts():
         "modules/settings/contracts/settings.yaml",
         "modules/settings/contracts/admin.yaml",
         "modules/settings/contracts/profile.yaml",
+        "modules/settings/contracts/relationships.yaml",
     }
     assert expected.issubset(set(report["preserved_paths"]))
 

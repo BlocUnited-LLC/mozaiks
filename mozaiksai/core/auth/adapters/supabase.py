@@ -123,7 +123,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
                     "verify_aud": True,
                 },
             )
-            return claims
+            return dict(claims)
         except jwt.ExpiredSignatureError as exc:
             raise AuthError("Token has expired", 401, self.name) from exc
         except jwt.InvalidAudienceError as exc:
@@ -157,7 +157,7 @@ class SupabaseAuthAdapter(BaseAuthAdapter):
                     "verify_iss": True,
                 },
             )
-            return claims
+            return dict(claims)
         except jwt.PyJWKClientError as e:
             logger.warning("JWKS error: %s", e)
             raise AuthError("Failed to verify token signature", 401, self.name) from e

@@ -17,6 +17,8 @@ from mozaiksai.core.workflow.execution.network_graph import (
     compile_transition_rules_to_graph,
     resolve_next_agent,
 )
+from mozaiksai.core.workflow.agents.transition_graph import wire_transition_graph_with_debugging
+from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 
 def test_transition_graph_uses_only_canonical_terminate_literal():
@@ -377,4 +379,35 @@ def test_factory_workflow_transition_rules_compile_to_ag2_network_graphs():
         )
 
         assert isinstance(graph, TransitionGraph), transition_path
+
+
+def test_transition_graph_validator_accepts_user_as_special_source(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        workflow_manager,
+        "get_config",
+        lambda _workflow_name: {
+            "transition_graph": {
+                "transition_rules": [
+                    {
+                        "source_agent": "user",
+                        "target_agent": "PlannerAgent",
+                        "transition_type": "condition",
+                        "condition_type": "context_equals",
+                        "condition_key": "plan_ready",
+                        "condition_value": False,
+                    }
+                ]
+            },
+            "initial_agent": "PlannerAgent",
+        },
+    )
+
+    summary = wire_transition_graph_with_debugging(
+        "UserSourceWorkflow",
+        {"PlannerAgent": object()},
+    )
+
+    assert summary["missing_source_agents"] == []
+    assert summary["missing_target_agents"] == []
+    assert summary["errors"] == []
 

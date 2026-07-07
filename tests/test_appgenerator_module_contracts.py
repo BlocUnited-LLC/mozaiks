@@ -46,6 +46,8 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "ModuleProfileField",
         "ModuleProfilePanel",
         "ModuleProfileManifest",
+        "ModuleRelationshipProvider",
+        "ModuleRelationshipsManifest",
         "ModulePythonStub",
         "ModuleJsStub",
         "DatabaseArtifactFile",
@@ -118,6 +120,8 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     assert contract_fields["js_stubs"]["items"] == "ModuleJsStub"
     assert "profile_yaml" in contract_fields
     assert contract_fields["profile_yaml"]["variants"] == ["ModuleProfileManifest", "null"]
+    assert "relationships_yaml" in contract_fields
+    assert contract_fields["relationships_yaml"]["variants"] == ["ModuleRelationshipsManifest", "null"]
 
     profile_field_types = models["ModuleProfileField"]["fields"]["type"]["values"]
     assert profile_field_types == ["string", "number", "currency", "date", "boolean", "status"]
@@ -126,6 +130,12 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     profile_manifest = models["ModuleProfileManifest"]["fields"]
     assert profile_manifest["schema_version"]["values"] == ["mozaiks.profile.v1"]
     assert profile_manifest["panels"]["items"] == "ModuleProfilePanel"
+    relationship_provider = models["ModuleRelationshipProvider"]["fields"]
+    assert relationship_provider["resource_types"]["items"] == "str"
+    assert relationship_provider["relationship_types"]["items"] == "str"
+    relationships_manifest = models["ModuleRelationshipsManifest"]["fields"]
+    assert relationships_manifest["schema_version"]["values"] == ["mozaiks.relationships.v1"]
+    assert relationships_manifest["providers"]["items"] == "ModuleRelationshipProvider"
     assert models["ConfigMiddlewareOutput"]["fields"]["mode"]["values"] == [
         "module_contract_bundle",
         "service_foundation",
@@ -326,6 +336,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "modules/{pack_name}/contracts/subscriptions.yaml" not in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/admin.yaml" in module_contract["optional_outputs"]
     assert "modules/{pack_name}/contracts/profile.yaml" in module_contract["optional_outputs"]
+    assert "modules/{pack_name}/contracts/relationships.yaml" in module_contract["optional_outputs"]
     assert "backend/handler.py" in module_contract["downstream_backend_defaults"]
     assert "backend/notifications.py" in module_contract["optional_backend_hooks"]
     assert "backend/subscriptions.py" not in module_contract["optional_backend_hooks"]
@@ -340,6 +351,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
         archetype = module_archetypes["archetypes"][archetype_name]
         optional_family = archetype["canonical_yaml_family"]["optional"]
         assert "profile.yaml" in optional_family, f"{archetype_name} archetype missing profile.yaml in optional family"
+        assert "relationships.yaml" in optional_family, f"{archetype_name} archetype missing relationships.yaml in optional family"
     assert "Use one of these exact top-level shapes:" in source
     assert "Use one of these exact bounded shapes:" in source
     assert "Exact nested field shapes come from `ConfigMiddlewareOutput`, `ModuleContractBundle`, `BackendFoundationBundle`, and `SubscriptionConfigBundle` in `structured_outputs.yaml`." in source

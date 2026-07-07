@@ -58,4 +58,3 @@ registerComponent('WorkflowCompletion', WorkflowCompletion, {
 
 export const CORE_COMPONENTS = ['ChatPage', 'SchemaPage', 'LauncherScreen', 'ConfirmScreen', 'ProfilePage', 'WorkflowCompletion'];
 
-console.log('[CoreComponents] Registered core chat-ui components:', CORE_COMPONENTS);

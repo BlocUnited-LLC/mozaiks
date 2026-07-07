@@ -9,6 +9,11 @@ transition_rules:
 # DiscoveryHostAgent
 # ---------------------------------------------------------------------------
 - source_agent: DiscoveryHostAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+- source_agent: DiscoveryHostAgent
   target_agent: CapabilityMapperAgent
   transition_type: condition
   condition_type: context_equals
@@ -16,14 +21,14 @@ transition_rules:
   condition_value: true
   transition_target: AgentTarget
 
-- source_agent: DiscoveryHostAgent
+# ---------------------------------------------------------------------------
+# CapabilityMapperAgent
+# ---------------------------------------------------------------------------
+- source_agent: CapabilityMapperAgent
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
 
-# ---------------------------------------------------------------------------
-# CapabilityMapperAgent
-# ---------------------------------------------------------------------------
 - source_agent: CapabilityMapperAgent
   target_agent: IntegrationPlannerAgent
   transition_type: condition
@@ -32,14 +37,14 @@ transition_rules:
   condition_value: true
   transition_target: AgentTarget
 
-- source_agent: CapabilityMapperAgent
+# ---------------------------------------------------------------------------
+# IntegrationPlannerAgent
+# ---------------------------------------------------------------------------
+- source_agent: IntegrationPlannerAgent
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
 
-# ---------------------------------------------------------------------------
-# IntegrationPlannerAgent
-# ---------------------------------------------------------------------------
 - source_agent: IntegrationPlannerAgent
   target_agent: ModuleDecomposerAgent
   transition_type: condition
@@ -72,14 +77,14 @@ transition_rules:
   condition_value: bridge
   transition_target: AgentTarget
 
-- source_agent: IntegrationPlannerAgent
+# ---------------------------------------------------------------------------
+# ModuleDecomposerAgent
+# ---------------------------------------------------------------------------
+- source_agent: ModuleDecomposerAgent
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
 
-# ---------------------------------------------------------------------------
-# ModuleDecomposerAgent
-# ---------------------------------------------------------------------------
 - source_agent: ModuleDecomposerAgent
   target_agent: DiscoveryArtifactAssemblerAgent
   transition_type: condition
@@ -87,11 +92,6 @@ transition_rules:
   condition_key: decomposition_complete
   condition_value: true
   transition_target: AgentTarget
-
-- source_agent: ModuleDecomposerAgent
-  target_agent: user
-  transition_type: after_turn
-  transition_target: RevertToUserTarget
 
 # ---------------------------------------------------------------------------
 # DiscoveryArtifactAssemblerAgent

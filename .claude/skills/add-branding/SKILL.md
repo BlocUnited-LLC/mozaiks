@@ -46,16 +46,16 @@ For assets:
 - Prefer route-level `ui/pages/*.yaml -> navigation` for page-owned navigation entries; use `app/config/shell.json -> navigation.policy` for app-wide placement rules.
 - Prefer route-level `ui/pages/*.yaml -> shell_mode` for per-route header/footer/bottom-bar behavior; use `app/config/shell.json -> chrome` only for app-wide mode defaults.
 - Use explicit `header`, `profile`, `notifications`, `footer`, or `mobile` objects only when labels, icons, roles, or paths need custom overrides.
-- Common shortcut ids include `dashboard`, `wallet`, `create`, `profile`, `messages`, `notifications`, `settings`, `admin`, `support`, `signout`, `signin`, `legal`, `terms`, `cookies`, and `privacy`.
+- Common shortcut ids include `home`, `apps`, `workspace`, `wallet`, `create`, `profile`, `messages`, `notifications`, `settings`, `admin`, `support`, `signout`, `signin`, `legal`, `terms`, `cookies`, and `privacy`. Use `dashboard` only when the app declares a page or route with id `dashboard`.
 
 ## Shell Shortcuts
 
 ```json
 {
   "shortcuts": {
-    "header": ["dashboard", "wallet"],
+    "header": ["home", "wallet"],
     "profile": ["profile", "wallet", "signout", "signin"],
-    "mobile": ["dashboard", "wallet", "create", "profile"],
+    "mobile": ["home", "apps", "create", "profile"],
     "footer": ["legal", "terms", "cookies"],
     "footerHideOnMobile": true
   }

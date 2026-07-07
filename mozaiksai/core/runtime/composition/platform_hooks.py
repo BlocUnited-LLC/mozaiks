@@ -313,13 +313,11 @@ class PlatformHookRegistry:
     ) -> dict[str, Any]:
         """Resolve canonical module dispatch scope through optional host hooks."""
 
-        scope = {
-            "app_id": str(requested_scope.get("app_id") or ""),
-            "user_id": _clean_optional(requested_scope.get("user_id")),
-            "tenant_id": _clean_optional(requested_scope.get("tenant_id")),
-            "workspace_id": _clean_optional(requested_scope.get("workspace_id")),
-            "permissions": list(default_permissions) if default_permissions is not None else [],
-        }
+        app_id = str(requested_scope.get("app_id") or "")
+        user_id = _clean_optional(requested_scope.get("user_id"))
+        tenant_id = _clean_optional(requested_scope.get("tenant_id"))
+        workspace_id = _clean_optional(requested_scope.get("workspace_id"))
+        permissions: list[str] = list(default_permissions) if default_permissions is not None else []
 
         for hook in self._module_scope_resolver_hooks:
             try:
@@ -327,35 +325,52 @@ class PlatformHookRegistry:
                     principal=principal,
                     module_name=module_name,
                     action_name=action_name,
-                    requested_scope=dict(scope),
+                    requested_scope={
+                        "app_id": app_id,
+                        "user_id": user_id,
+                        "tenant_id": tenant_id,
+                        "workspace_id": workspace_id,
+                        "permissions": list(permissions),
+                    },
                     params=dict(params or {}),
                     request=request,
-                    default_permissions=list(scope["permissions"]),
+                    default_permissions=list(permissions),
                 )
                 if inspect.isawaitable(res):
                     res = await res
                 if isinstance(res, dict):
-                    for key in ("app_id", "user_id", "tenant_id", "workspace_id"):
-                        if key in res:
-                            scope[key] = _clean_optional(res.get(key)) if key != "app_id" else str(res.get(key) or "")
-                    permissions = res.get("permissions")
-                    if isinstance(permissions, (list, tuple, set)):
-                        scope["permissions"] = [str(item) for item in permissions if str(item).strip()]
+                    if "app_id" in res:
+                        app_id = str(res.get("app_id") or "")
+                    if "user_id" in res:
+                        user_id = _clean_optional(res.get("user_id"))
+                    if "tenant_id" in res:
+                        tenant_id = _clean_optional(res.get("tenant_id"))
+                    if "workspace_id" in res:
+                        workspace_id = _clean_optional(res.get("workspace_id"))
+                    raw_permissions = res.get("permissions")
+                    if isinstance(raw_permissions, (list, tuple, set)):
+                        permissions = [str(item) for item in raw_permissions if str(item).strip()]
             except Exception as exc:
                 logger.warning("PLATFORM_HOOKS_MODULE_SCOPE_ERROR: %s", exc)
 
-        scope["permissions"] = await self.call_module_permissions(
+        permissions = await self.call_module_permissions(
             principal=principal,
             module_name=module_name,
             action_name=action_name,
-            app_id=str(scope["app_id"] or ""),
-            tenant_id=scope.get("tenant_id"),
-            user_id=scope.get("user_id"),
+            app_id=app_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
             params=params,
             request=request,
-            default_permissions=list(scope["permissions"]),
+            default_permissions=list(permissions),
         ) or []
-        return scope
+        return {
+            "app_id": app_id,
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "workspace_id": workspace_id,
+            "permissions": permissions,
+        }
 
     def call_workflow_ordering(self, workflow_names: list[str]) -> list[str]:
         """Reorder the workflow list for frontend display."""

@@ -107,6 +107,12 @@ class MongoPersistenceCollection:
     async def count(self, query: Query) -> int:
         return int(await self._collection.count_documents(self._scoped_query(query)))
 
+    async def aggregate(self, pipeline: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        scoped_pipeline: list[Mapping[str, Any]] = [{"$match": self._scoped_query({})}]
+        scoped_pipeline.extend(dict(stage) for stage in pipeline or [])
+        cursor = self._collection.aggregate(scoped_pipeline)
+        return await cursor.to_list(length=None)  # type: ignore[no-any-return]
+
     async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> None:
         if not indexes:
             return

@@ -98,7 +98,8 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
         record = await AppConnectorStore().get_connector(app_id=str(app_id), service=_CONNECTOR_SERVICE)
         if not isinstance(record, dict):
             return None
-        public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
+        raw_public_config = record.get("public_config")
+        public_config: dict[str, Any] = raw_public_config if isinstance(raw_public_config, dict) else {}
         secret_result = await get_connector_vault_backend().get_secret(
             app_id=str(app_id),
             service=_CONNECTOR_SERVICE,
@@ -106,13 +107,14 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
         client_secret = _clean(secret_result.get("secret_value")) if isinstance(secret_result, dict) else ""
         api_base = _clean(public_config.get("api_base")) or _clean(public_config.get("base_url")) or None
         client_id = _clean(public_config.get("client_id")) or None
+        runtime_base = _clean(public_config.get("runtime_base")) or _clean(os.getenv("MOZAIKS_APP_URL")) or None
         if not any([api_base, client_id, client_secret]):
             return None
         return MozaiksPayConnectorSettings(
             api_base=api_base,
             client_id=client_id,
             client_secret=client_secret or None,
-            runtime_base=_clean(public_config.get("runtime_base")) or _clean(os.getenv("MOZAIKS_APP_URL")) or None,
+            runtime_base=runtime_base,
             source="connector",
         )
     except Exception:
@@ -161,9 +163,12 @@ class MozaiksPayClient:
         """Return safe plan display fields for an app-owned billing scope."""
         settings = await self._settings()
         self._require_provider_credentials(settings)
+        api_base = settings.api_base
+        if not api_base:
+            raise MozaiksPayConfigurationError("MozaiksPay provider API base is required.")
         return await self._request(
             "GET",
-            f"{settings.api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/subscription/status",
+            f"{api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/subscription/status",
             params=_scope_params(user_id=user_id, tenant_id=tenant_id, workspace_id=workspace_id),
             settings=settings,
             provider_auth=True,
@@ -201,13 +206,16 @@ class MozaiksPayClient:
         """Create a hosted billing portal redirect session."""
         settings = await self._settings()
         self._require_provider_credentials(settings)
+        api_base = settings.api_base
+        if not api_base:
+            raise MozaiksPayConfigurationError("MozaiksPay provider API base is required.")
         payload = {
             "return_url": return_url,
             **_scope_params(user_id=user_id, tenant_id=tenant_id, workspace_id=workspace_id),
         }
         return await self._request(
             "POST",
-            f"{settings.api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/billing-portal/session",
+            f"{api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/billing-portal/session",
             json=payload,
             settings=settings,
             provider_auth=True,

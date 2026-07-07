@@ -61,19 +61,16 @@ def test_control_plane_rejects_unknown_llm_profile_id() -> None:
         raise AssertionError("unknown profile id should fail validation")
 
 
-def test_control_plane_rejects_legacy_runtime_profile_field() -> None:
-    try:
-        ControlPlaneConfig.model_validate(
-            {
-                "schema_version": "mozaiks.control_plane.runtime",
-                "enabled": True,
-                "profile": "default",
-            }
-        )
-    except ValueError as exc:
-        assert "profile" in str(exc)
-    else:
-        raise AssertionError("profile is not a recognized ControlPlaneConfig field")
+def test_control_plane_accepts_runtime_profile_metadata() -> None:
+    config = ControlPlaneConfig.model_validate(
+        {
+            "schema_version": "mozaiks.control_plane.runtime",
+            "enabled": True,
+            "profile": "mozaiks_app",
+        }
+    )
+
+    assert config.profile == "mozaiks_app"
 
 
 def test_control_plane_rejects_unknown_capability_profile_reference() -> None:

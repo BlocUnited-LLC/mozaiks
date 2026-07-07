@@ -29,6 +29,20 @@ import { useChatUI } from '../context/ChatUIContext';
 
 const CHAT_TRIGGER_SOURCE = 'chat';
 
+const buildWorkflowChatUrl = (workflowId, chatId = null, contextVariables = null) => {
+  const params = new URLSearchParams({
+    mode: 'workflow',
+    workflow: String(workflowId || ''),
+  });
+  if (chatId) {
+    params.set('chat_id', String(chatId));
+  }
+  if (contextVariables && Object.keys(contextVariables).length > 0) {
+    params.set('context', JSON.stringify(contextVariables));
+  }
+  return `/chat?${params.toString()}`;
+};
+
 const resolveWorkflowAppId = (config, user, overrideAppId) => {
   return (
     overrideAppId ||
@@ -71,13 +85,10 @@ export function useWorkflowStart() {
 
       setError(null);
 
-      // Chat trigger — use existing URL-based flow (ChatPage owns the session start)
+      // Chat trigger — always start a fresh session (no stored chat_id resume)
       if (trigger_source === CHAT_TRIGGER_SOURCE) {
-        const params = new URLSearchParams({ workflow: workflowId });
-        if (contextVariables && Object.keys(contextVariables).length > 0) {
-          params.set('context', JSON.stringify(contextVariables));
-        }
-        navigate(`/chat?${params.toString()}`);
+        const url = buildWorkflowChatUrl(workflowId, null, contextVariables);
+        navigate(url + '&new=1');
         return { execution_mode: 'chat_navigation', workflow_id };
       }
 
@@ -111,7 +122,7 @@ export function useWorkflowStart() {
         const payload = await res.json();
         const { chat_id, workflow_id } = payload || {};
         if (chat_id && workflow_id) {
-          navigate(`/chat?workflow=${encodeURIComponent(workflow_id)}&chat_id=${encodeURIComponent(chat_id)}`);
+          navigate(buildWorkflowChatUrl(workflow_id, chat_id));
         }
         return payload;
       } catch (err) {

@@ -37,6 +37,8 @@ import { Empty } from './Skeleton.jsx';
 import { useAppEvent } from '../hooks/useAppEventBus.js';
 import { cn } from '../lib/cn.js';
 
+const EMPTY_ARRAY = Object.freeze([]);
+
 function statusTone(value) {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (['active', 'approved', 'complete', 'completed', 'connected', 'hosted', 'live', 'paid', 'ready', 'success'].includes(normalized)) {
@@ -122,13 +124,13 @@ function MobileRowCard({
 
 export function DataTable({
   id,
-  columns = [],
-  data: initialData = [],
+  columns = EMPTY_ARRAY,
+  data: initialData = EMPTY_ARRAY,
   selection = 'none',
   pagination = true,
   page_size = 20,
   search = true,
-  actions = [],
+  actions = EMPTY_ARRAY,
   onAction,
   onRefresh,
   loading: initialLoading = false,

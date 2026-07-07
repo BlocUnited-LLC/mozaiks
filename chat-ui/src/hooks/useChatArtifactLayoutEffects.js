@@ -40,7 +40,6 @@ export function useChatArtifactLayoutEffects({
       const cached = readStoredLastArtifact(currentChatId);
       if (!cached || !cached.tool_name) return;
 
-      console.log('[RESTORE] Restoring cached artifact for chat', currentChatId, cached.tool_name);
       restoreStoredArtifactForChat(currentChatId, currentWorkflowName);
     } catch (error) {
       console.warn('[RESTORE] Failed to restore artifact:', error);
@@ -63,7 +62,6 @@ export function useChatArtifactLayoutEffects({
         const mobile = width < 768;
         const shortViewport = height < 500;
 
-        console.log('📱 [MOBILE] Detection:', { width, height, isMobile: mobile, isShort: shortViewport });
         setIsMobileView(mobile);
         setForceOverlay(mobile || shortViewport);
 

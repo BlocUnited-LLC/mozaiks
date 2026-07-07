@@ -38,6 +38,7 @@ from uuid import uuid4
 import jsonschema
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.audit.audit_logger import get_audit_logger
 from mozaiksai.core.ports.entitlement import EntitlementPort, NoOpEntitlementAdapter
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorType
 from mozaiksai.core.runtime.composition.module_context import ModuleContext
@@ -130,6 +131,28 @@ class ModuleResult:
 # Schema validation helper
 # ---------------------------------------------------------------------------
 
+def _normalize_nullable_schema(schema: Any) -> Any:
+    """Translate OpenAPI-style nullable fields into JSON Schema."""
+    if isinstance(schema, list):
+        return [_normalize_nullable_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+
+    normalized = {key: _normalize_nullable_schema(value) for key, value in schema.items()}
+    if normalized.get("nullable") is True:
+        schema_type = normalized.get("type")
+        if isinstance(schema_type, str):
+            normalized["type"] = [schema_type, "null"] if schema_type != "null" else schema_type
+        elif isinstance(schema_type, list) and "null" not in schema_type:
+            normalized["type"] = [*schema_type, "null"]
+
+        enum_values = normalized.get("enum")
+        if isinstance(enum_values, list) and None not in enum_values:
+            normalized["enum"] = [*enum_values, None]
+
+    return normalized
+
+
 def _validate_schema(value: Any, schema: dict[str, Any]) -> str | None:
     """Validate *value* against a JSON Schema dict.
 
@@ -139,7 +162,7 @@ def _validate_schema(value: Any, schema: dict[str, Any]) -> str | None:
     if not schema or not isinstance(schema, dict):
         return None
     try:
-        jsonschema.validate(instance=value, schema=schema)
+        jsonschema.validate(instance=value, schema=_normalize_nullable_schema(schema))
         return None
     except jsonschema.ValidationError as exc:
         return exc.message  # type: ignore[no-any-return]
@@ -332,6 +355,8 @@ class ModuleExecutor:
                 user_id=request.user_id,
                 tenant_id=request.tenant_id,
                 workspace_id=request.workspace_id,
+                module_id=request.module,
+                action_id=request.action,
                 auth_token=request.auth_token,
                 permissions=(
                     list(request.granted_permissions)
@@ -355,7 +380,7 @@ class ModuleExecutor:
                 )
             else:
                 result = action_fn(context, **request.params)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "MODULE_ACTION_TIMEOUT: module=%s action=%s timeout=%.1fs user=%s",
                 request.module, request.action, timeout, request.user_id,
@@ -387,6 +412,18 @@ class ModuleExecutor:
             logger.error(
                 "MODULE_ACTION_ERROR: module=%s action=%s error=%s", request.module, request.action, exc,
                 exc_info=True,
+            )
+            asyncio.create_task(
+                get_audit_logger().log_module_action(
+                    actor_id=request.user_id or "system",
+                    app_id=request.app_id or None,
+                    module_id=request.module,
+                    action_id=request.action,
+                    outcome="fail",
+                    error=type(exc).__name__,
+                    tenant_id=request.tenant_id,
+                    workspace_id=request.workspace_id,
+                )
             )
             return ModuleResult(
                 success=False,
@@ -424,6 +461,19 @@ class ModuleExecutor:
         logger.debug(
             "MODULE_ACTION_OK: module=%s action=%s app_id=%s",
             request.module, request.action, request.app_id)
+        # Audit trail — fire-and-forget; never blocks the action response.
+        asyncio.create_task(
+            get_audit_logger().log_module_action(
+                actor_id=request.user_id or "system",
+                app_id=request.app_id or None,
+                module_id=request.module,
+                action_id=request.action,
+                params=None,  # Do not log params — may contain PII
+                outcome="ok",
+                tenant_id=request.tenant_id,
+                workspace_id=request.workspace_id,
+            )
+        )
         return ModuleResult(success=True, data=result)
 
     async def health(self) -> dict[str, Any]:

@@ -116,6 +116,36 @@ models:
         type: str
         description: One-sentence explanation for why this surface is likely needed.
 
+  MonetizationIntentHint:
+    type: model
+    description: >
+      Advisory concept-level monetization taxonomy. This is not a final build
+      contract; AppGenerator resolves the final revenue_model and
+      SubscriptionContractDesigner decides whether config/subscriptions.yaml is
+      required.
+    fields:
+      monetized:
+        type: bool
+        description: True when the concept has any revenue, payment, contribution, sponsored, or paid-access flow.
+      likely_revenue_models:
+        type: optional_list
+        items: str
+        description: >
+          Candidate models from the OSS taxonomy: subscriptions, usage_based,
+          transactional, marketplace, sponsored, donations, community_funded,
+          or hybrid. Use free or an empty list when no revenue flow is implied.
+      subscription_contract_likely:
+        type: bool
+        description: >
+          True only when the concept likely sells recurring access, paid feature
+          gates, seats, quotas, credits, or token allowances.
+      money_flow_summary:
+        type: str
+        description: One-sentence explanation of what is being paid for and when value is delivered.
+      rationale:
+        type: str
+        description: Short reasoning from the concept and research context.
+
   ConceptBlueprint:
     type: model
     description: Structured output for the ConceptBlueprint UI artifact
@@ -187,9 +217,20 @@ models:
         items: str
         description: >
           High-level capability pack recommendations inferred from the concept.
-          Examples: "messaging_pack", "marketplace_pack", "campaigns_pack",
+          Examples: "messaging_pack", "commerce_pack", "marketplace_pack", "campaigns_pack",
           "billing_pack", "crud_pack". These are planning hints for AppPlanAgent,
           not executable tasks.
+      monetization_intent:
+        type: union
+        variants:
+        - MonetizationIntentHint
+        - 'null'
+        description: >
+          Advisory revenue-model signal for downstream planning. Set this when
+          monetization_enabled is true or the concept itself mentions payment,
+          subscription, usage credits, checkout, marketplace fees, sponsored
+          placement, donations, or community funding. Use null when no revenue
+          flow is implied.
       surface_candidate_hints:
         type: optional_list
         items: SurfaceCandidateHint
@@ -234,6 +275,7 @@ models:
           - crud_pack
           - admin_pack
           - messaging_pack
+          - commerce_pack
           - marketplace_pack
           - campaigns_pack
           - billing_pack

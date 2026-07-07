@@ -239,8 +239,17 @@ class WorkflowBridgeMixin:
                         route = "existing_session_resume" if resume_signal else "existing_session"
                         # Don't persist/echo resume signal messages - they're internal coordination only
                         if not resume_signal:
-                            # Only persist actual user messages to database
+                            # Persist actual user messages to the canonical AG2 run stream.
                             try:
+                                pm = self._get_or_create_persistence_manager()
+                                append_user_message = getattr(pm, "append_run_user_message", None)
+                                if append_user_message is not None:
+                                    await append_user_message(
+                                        chat_id=chat_id,
+                                        app_id=app_id,
+                                        content=str(message or ""),
+                                        metadata={"source": "workflow_user", "user_id": user_id},
+                                    )
                                 await self.process_incoming_user_message(
                                     chat_id=chat_id,
                                     user_id=user_id,
@@ -294,6 +303,15 @@ class WorkflowBridgeMixin:
                 except Exception as trigger_err:
                     logger.debug("[SMART_ROUTING] user_text trigger update skipped for new run %s: %s", chat_id, trigger_err)
                 try:
+                    pm = self._get_or_create_persistence_manager()
+                    append_user_message = getattr(pm, "append_run_user_message", None)
+                    if append_user_message is not None:
+                        await append_user_message(
+                            chat_id=chat_id,
+                            app_id=app_id,
+                            content=str(message or ""),
+                            metadata={"source": "workflow_user", "user_id": user_id},
+                        )
                     await self.process_incoming_user_message(
                         chat_id=chat_id,
                         user_id=user_id,

@@ -3,7 +3,6 @@ max_turns: 6
 human_in_the_loop: false
 workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
-initial_message_to_user: null
 initial_message: >-
   ContractDesignerAgent: read the app concept, design docs, and monetization
   context. Emit one SubscriptionContractOutput. If the app does not sell plans,

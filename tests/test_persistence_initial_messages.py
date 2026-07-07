@@ -158,7 +158,7 @@ async def test_append_run_assistant_message_persists_model_response_to_ag2_strea
         app_id="app-1",
         content="Tell me about your idea.",
         agent_name="ValueInterviewAgent",
-        metadata={"source": "orchestrator.initial_message_to_user"},
+        metadata={"source": "orchestrator.initial_message"},
     )
 
     assert captured["app_id"] == "app-1"
@@ -167,7 +167,36 @@ async def test_append_run_assistant_message_persists_model_response_to_ag2_strea
     assert isinstance(event, ModelResponse)
     assert event.content == "Tell me about your idea."
     assert event.metadata["agent_name"] == "ValueInterviewAgent"
-    assert event.metadata["source"] == "orchestrator.initial_message_to_user"
+    assert event.metadata["source"] == "orchestrator.initial_message"
+
+
+@pytest.mark.asyncio
+async def test_append_run_user_message_persists_text_input_to_ag2_stream(monkeypatch):
+    manager = AG2PersistenceManager()
+    captured: dict[str, object] = {}
+
+    class _FakeStorage:
+        def __init__(self, *, app_id: str):
+            captured["app_id"] = app_id
+
+        async def save_event(self, event, context):  # noqa: ANN001
+            captured["event"] = event
+            captured["stream_id"] = context.stream.id
+
+    monkeypatch.setattr(_stream_storage_mod, "MongoAG2StreamStorage", _FakeStorage)
+
+    await manager.append_run_user_message(
+        chat_id="chat-1",
+        app_id="app-1",
+        content="launch demand maybe",
+        metadata={"source": "workflow_user"},
+    )
+
+    assert captured["app_id"] == "app-1"
+    assert captured["stream_id"] == manager._run_stream_id(chat_id="chat-1", app_id="app-1")
+    event = captured["event"]
+    assert isinstance(event, TextInput)
+    assert event.content == "launch demand maybe"
 
 
 @pytest.mark.asyncio

@@ -186,7 +186,7 @@ class TestShellConfig:
         shortcuts = shell["shortcuts"]
         assert shortcuts["profile"] == ["profile", "signout"]
         assert "admin_portal" not in shortcuts["profile"]
-        assert "mobile" in shortcuts
+        assert shortcuts["mobile"] == ["create", "profile"]
         assert shortcuts["footer"] == ["legal", "terms", "cookies"]
         assert shortcuts["footerHideOnMobile"] is True
 

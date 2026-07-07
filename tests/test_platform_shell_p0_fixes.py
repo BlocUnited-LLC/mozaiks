@@ -59,7 +59,7 @@ def _make_app_root(tmp_path: Path, pages: list[dict]) -> Path:
     return app_root
 
 
-def _write_control_plane_startup(tmp_path: Path, *, chat_startup_mode: str, entry_point: str, resume_policy: str) -> None:
+def _write_control_plane_startup(tmp_path: Path, *, chat_startup_mode: str, entry_point: str) -> None:
     control_plane_root = tmp_path / "control_plane" / "config"
     control_plane_root.mkdir(parents=True)
     (control_plane_root / "control_plane.yaml").write_text(
@@ -78,7 +78,6 @@ def _write_control_plane_startup(tmp_path: Path, *, chat_startup_mode: str, entr
                 f"    chat_startup_mode: {chat_startup_mode}",
                 "  workflows:",
                 f"    entry_point: {entry_point}",
-                f"    resume_policy: {resume_policy}",
             ]
         ),
         encoding="utf-8",

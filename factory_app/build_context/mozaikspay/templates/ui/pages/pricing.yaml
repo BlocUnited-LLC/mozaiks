@@ -14,17 +14,19 @@ navigation:
   visible: false
 sections:
   - id: plan-catalog
-    primitive: DataTable
-    title: Plans
+    primitive: PricingCatalog
     config:
+      title: Plans
+      subtitle: Choose the plan that matches the app usage you need.
       api_endpoint: /api/modules/billing_portal/list_plans
-      method: POST
-      fields:
-        - plan_id
-        - label
-        - description
-        - capabilities
-        - usage_limits
+      plans_key: plans
+      groups_key: pricing_catalog.groups
+      default_group_key: pricing_catalog.default_group_id
+      plan_action_label: Manage billing
+      plan_action:
+        label: Manage billing
+        action_type: navigate
+        href: /billing
   - id: upgrade-cta
     primitive: ActionButton
     title: Upgrade

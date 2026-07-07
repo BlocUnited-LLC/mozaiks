@@ -151,13 +151,15 @@ class AG2OrchestrationAdapter:
         Under the hood this is the same orchestration entrypoint, with
         ``initial_agent_name_override`` set to ``resume_agent``.
 
-        In the current runtime, Mozaiks reloads prior chat state from
-        ``ChatSessions`` and re-enters the orchestration loop for the same
-        ``chat_id``. If ``injected_context`` is provided, it is persisted before
-        re-entry so the next agent sees it in ``context_variables``.
+        In the current runtime, Mozaiks re-enters the orchestration loop for the
+        same ``chat_id`` after loading canonical AG2 run-stream events through
+        the workflow bootstrap layer. If ``injected_context`` is provided, it is
+        persisted before re-entry so the next agent sees it in
+        ``context_variables``.
 
-        This is a runtime-managed resume boundary, not a direct wrapper over an
-        AG2-native ``Hub.resume()`` API.
+        The installed AG2 Network API does not expose durable channel resume, so
+        this remains a runtime-managed re-entry boundary rather than a wrapper
+        over ``Hub.resume()``.
         """
         try:
             # If injected_context is provided (e.g. task batch results),

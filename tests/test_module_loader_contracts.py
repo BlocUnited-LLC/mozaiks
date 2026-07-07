@@ -857,3 +857,37 @@ extensions:
     with pytest.raises(ModuleLoadError, match="module-local"):
         ModuleLoader(str(tmp_path)).load("tasks")
 
+
+# ---------------------------------------------------------------------------
+# module.yaml extra-field guard (changelog / schema drift)
+# ---------------------------------------------------------------------------
+
+def test_module_yaml_rejects_changelog_field(tmp_path: Path) -> None:
+    """A top-level `changelog:` field must be rejected (extra="forbid").
+
+    The correct convention is a YAML block comment before schema_version.
+    Accepting unknown top-level keys silently would mask contract drift.
+    """
+    module_dir = _write_canonical_module(tmp_path)
+    yaml_path = module_dir / "module.yaml"
+    original = yaml_path.read_text(encoding="utf-8")
+    # Prepend a changelog key that is NOT part of ModuleDefinition
+    yaml_path.write_text(
+        "changelog:\n  - v1.0.0: Initial release\n" + original,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError, match="changelog"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+def test_module_yaml_rejects_unknown_top_level_field(tmp_path: Path) -> None:
+    """Any undeclared top-level key in module.yaml must cause a load error."""
+    module_dir = _write_canonical_module(tmp_path)
+    yaml_path = module_dir / "module.yaml"
+    original = yaml_path.read_text(encoding="utf-8")
+    yaml_path.write_text(original + "\nhistory:\n  - bumped version\n", encoding="utf-8")
+
+    with pytest.raises(ModuleLoadError):
+        ModuleLoader(str(tmp_path)).load("tasks")
+

@@ -132,6 +132,15 @@ def test_app_review_revision_harness_decision_uses_existing_pending_decision_ui(
     assert "setPendingHarnessDecisionError(" in source
 
 
+def test_chat_page_declares_workflow_completion_reset_state() -> None:
+    source = _read("chat-ui/src/pages/ChatPage.js")
+
+    assert "const [workflowCompleted, setWorkflowCompleted] = useState(false);" in source
+    assert "const [, setCompletionData] = useState(null);" in source
+    assert "setWorkflowCompleted(false);" in source
+    assert "setCompletionData(null);" in source
+
+
 def test_app_review_summary_promotes_reviewed_artifact_version() -> None:
     source = _read("factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx")
 

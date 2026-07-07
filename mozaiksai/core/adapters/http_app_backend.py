@@ -11,12 +11,18 @@ from typing import Any
 
 import httpx
 
+from mozaiksai.core.adapters.circuit_breaker import (
+    CircuitOpenError,
+    get_circuit_breaker_sync,
+)
 from mozaiksai.core.ports.app_backend import (
     BackendHealth,
     BackendResponse,
 )
 
 logger = logging.getLogger("mozaiksai.adapters.http_app_backend")
+
+_BACKEND_CIRCUIT_NAME = "app_backend"
 
 _DEFAULT_BASE_URL = "http://localhost:8000"
 
@@ -65,6 +71,44 @@ class HttpAppBackendAdapter:
     # AppBackendPort.request
     # ------------------------------------------------------------------
 
+    async def _do_request(
+        self,
+        method: str,
+        url: str,
+        merged_headers: dict[str, str],
+        json_body: dict[str, Any] | None,
+    ) -> BackendResponse:
+        """Inner HTTP call — wrapped by circuit breaker."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.request(
+                method=method,
+                url=url,
+                headers=merged_headers,
+                json=json_body,
+            )
+        if 200 <= resp.status_code < 300:
+            try:
+                data = resp.json()
+            except Exception as _json_exc:
+                logger.warning(
+                    "BACKEND_RESPONSE_NON_JSON method=%s url=%s status=%d: %s",
+                    method, url, resp.status_code, _json_exc,
+                )
+                data = {"raw": resp.text}
+            return BackendResponse(success=True, status_code=resp.status_code, data=data)
+        # Treat 5xx as errors so the circuit breaker counts them.
+        if resp.status_code >= 500:
+            raise httpx.HTTPStatusError(
+                f"HTTP {resp.status_code}",
+                request=resp.request,
+                response=resp,
+            )
+        return BackendResponse(
+            success=False,
+            status_code=resp.status_code,
+            error=f"HTTP {resp.status_code}: {resp.text[:500]}",
+        )
+
     async def request(
         self,
         method: str,
@@ -76,32 +120,13 @@ class HttpAppBackendAdapter:
     ) -> BackendResponse:
         url = f"{self._base_url}{path}"
         merged_headers = self._build_headers(user_token=user_token, extra=headers)
+        breaker = get_circuit_breaker_sync(_BACKEND_CIRCUIT_NAME)
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.request(
-                    method=method,
-                    url=url,
-                    headers=merged_headers,
-                    json=json_body,
-                )
-            if 200 <= resp.status_code < 300:
-                try:
-                    data = resp.json()
-                except Exception as _json_exc:
-                    logger.warning(
-                        "BACKEND_RESPONSE_NON_JSON method=%s path=%s status=%d: %s",
-                        method,
-                        path,
-                        resp.status_code,
-                        _json_exc,
-                    )
-                    data = {"raw": resp.text}
-                return BackendResponse(success=True, status_code=resp.status_code, data=data)
-            return BackendResponse(
-                success=False,
-                status_code=resp.status_code,
-                error=f"HTTP {resp.status_code}: {resp.text[:500]}",
-            )
+            result = await breaker.call(self._do_request, method, url, merged_headers, json_body)
+            return result  # type: ignore[no-any-return]
+        except CircuitOpenError as exc:
+            logger.warning("BACKEND_CIRCUIT_OPEN path=%s: %s", path, exc)
+            return BackendResponse(success=False, error="backend_circuit_open")
         except httpx.HTTPError as exc:
             logger.error("Backend request failed %s %s: %s", method, path, exc)
             return BackendResponse(success=False, error="backend_unavailable")

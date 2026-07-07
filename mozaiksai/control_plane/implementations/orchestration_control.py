@@ -30,6 +30,7 @@ from mozaiksai.control_plane.metrics import (
     check_token_usage,
     log_build_outcome,
 )
+from mozaiksai.control_plane.refinement_tracking import record_refinement_event
 from mozaiksai.control_plane.runtime import ControlPlaneCheckpointRuntime
 from mozaiksai.core.artifacts import ArtifactStore
 from mozaiksai.core.session.model import TriggerInput
@@ -156,18 +157,46 @@ class OrchestrationControlHarness:
 
         if not self.enabled():
             raise RuntimeError("Control-plane harness is disabled in app/config/ai.json")
-        with ControlPlaneBuildTimer(
-            "route_refinement",
+
+        _app_id = str(request.app_id or "")
+        await record_refinement_event(
+            event_kind="request_received",
             request_id=request.request_id,
-            app_id=request.app_id,
-        ):
-            decision = await self._refinement_resolver.route(request)
+            app_id=_app_id,
+            intent=str(request.raw_user_request or ""),
+        )
+
+        try:
+            with ControlPlaneBuildTimer(
+                "route_refinement",
+                request_id=request.request_id,
+                app_id=request.app_id,
+            ):
+                decision = await self._refinement_resolver.route(request)
+        except Exception as exc:
+            await record_refinement_event(
+                event_kind="failed",
+                request_id=request.request_id,
+                app_id=_app_id,
+                outcome="error",
+                error=str(exc),
+            )
+            raise
+
         log_build_outcome(
             outcome="ok",
             request_id=request.request_id,
             app_id=request.app_id,
             change_class=decision.change_class,
             workflow_sequence=decision.workflow_sequence,
+        )
+        await record_refinement_event(
+            event_kind="classified",
+            request_id=request.request_id,
+            app_id=_app_id,
+            change_class=decision.change_class,
+            workflow_sequence=decision.workflow_sequence,
+            outcome="ok",
         )
         return decision
 
@@ -340,16 +369,46 @@ class OrchestrationControlHarness:
     async def execute_coding_request(self, request: CodingWorkerRequest) -> CodingWorkerResult:
         if not self.coding_enabled():
             raise RuntimeError("Control-plane coding worker is disabled in app/config/ai.json")
-        with ControlPlaneBuildTimer(
-            "coding_worker",
-            request_id=getattr(request, "app_id", None),
-            app_id=request.app_id,
-        ):
-            result = await self._coding_worker.execute(request)
+
+        request_id: str | None = None
+        try:
+            seed = request.context_seed or {}
+            refinement_payload = seed.get("refinement_request")
+            if isinstance(refinement_payload, dict):
+                request_id = str(refinement_payload.get("request_id") or "").strip() or None
+        except Exception:
+            pass
+
+        try:
+            with ControlPlaneBuildTimer(
+                "coding_worker",
+                request_id=request_id,
+                app_id=request.app_id,
+            ):
+                result = await self._coding_worker.execute(request)
+        except Exception as exc:
+            await record_refinement_event(
+                event_kind="failed",
+                request_id=request_id or "unknown",
+                app_id=request.app_id,
+                change_class=request.change_class,
+                outcome="error",
+                error=str(exc),
+            )
+            raise
+
         check_token_usage(
             stage="coding_worker",
             token_count=getattr(result, "token_count", None),
             app_id=request.app_id,
+        )
+        await record_refinement_event(
+            event_kind="completed",
+            request_id=request_id or "unknown",
+            app_id=request.app_id,
+            change_class=request.change_class,
+            outcome="ok",
+            metadata={"token_count": getattr(result, "token_count", None)},
         )
         return result
 

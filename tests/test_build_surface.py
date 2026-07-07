@@ -32,6 +32,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
     assert '@app.get("/api/studio/apps")' in studio_source
     assert '@app.post("/api/studio/apps")' in studio_source
+    assert '@app.put("/api/studio/apps/{build_registry_id}/status")' in studio_source
     assert '@app.get("/api/studio/build")' in studio_source
     assert '@app.put("/api/studio/build")' in studio_source
     assert 'build_shell_config(surface="studio")' in studio_source
@@ -151,12 +152,27 @@ def test_app_overview_does_not_link_to_removed_routes() -> None:
 def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     source = _read("factory_app/app/admin/pages/AppsPage.jsx")
     hook_source = _read("factory_app/app/admin/pages/useWorkspaceApps.js")
+    create_hook_source = _read("factory_app/workflows/ValueEngine/tools/create_app_record.py")
+    update_hook_source = _read("factory_app/workflows/AppGenerator/tools/update_app_record.py")
     layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
+    assert "/api/studio/apps" in create_hook_source
+    assert "/api/modules/app_registry" not in create_hook_source
+    assert "/api/studio/apps/{record_id}/status" in update_hook_source
+    assert "/api/modules/app_registry" not in update_hook_source
     assert "Mozaiks Studio" in layout_source
     assert "Import App" in source
     assert "/apps/new" in source
     assert "row.primaryAction?.href" in source
+    assert "active_chat_id" in _read("chat-ui/src/admin/appStudioModel.js")
+    assert "active_chat_id" in _read("mozaiksai/core/runtime/app/studio_summary.py")
+
+
+def test_building_app_list_entry_routes_to_active_chat() -> None:
+    source = _read("mozaiksai/core/runtime/app/studio_summary.py")
+    assert 'f"/chat?workflow={active_workflow_id}&mode=workflow&chat_id={active_chat_id}"' in source
+    assert '"active_chat_id": active_chat_id or None' in source
+    assert '"active_workflow_id": active_workflow_id if active_chat_id else None' in source
 
 
 def test_workspace_layout_links_studio_and_hosting_sections() -> None:

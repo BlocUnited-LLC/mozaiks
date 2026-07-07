@@ -49,12 +49,19 @@ from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceMa
 from mozaiksai.core.events.unified_event_dispatcher import get_event_dispatcher
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.startup.validation import run_startup_checks
+from mozaiksai.core.cache.redis_cache import get_redis_cache
+from mozaiksai.core.metrics.prometheus_exporter import build_metrics_router
+from mozaiksai.core.ports.event_bus import get_event_bus
+from mozaiksai.core.runtime.persistence.artifact_version import ensure_artifact_version_indexes
+from mozaiksai.core.runtime.persistence.distributed_lock import ensure_lock_indexes
+from mozaiksai.core.workflow.idempotency import ensure_idempotency_indexes
 from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
 from mozaiksai.core.transport.request_middleware import (
     RequestBodySizeLimitMiddleware,
     RequestIDMiddleware,
 )
 from mozaiksai.core.transport.security_headers import SecurityHeadersMiddleware
+from mozaiksai.core.transport.handlers.workflow_handlers import _background_task_failure_callback
 from mozaiksai.core.transport.simple_transport import SimpleTransport
 from mozaiksai.core.workflow.workflow_manager import (
     get_workflow_tools,
@@ -152,6 +159,11 @@ app = FastAPI(
     version=__version__,
 )
 app.state.persistence_manager = persistence_manager
+
+# Prometheus /metrics endpoint — disabled by PROMETHEUS_METRICS_ENABLED=false.
+_metrics_router = build_metrics_router()
+if _metrics_router is not None:
+    app.include_router(_metrics_router)
 
 
 @app.exception_handler(HTTPException)
@@ -325,6 +337,20 @@ async def _runtime_startup() -> None:
             "tools_count": status.get("total_tools", 0),
         },
     )
+
+    # Ensure enterprise infrastructure indexes exist.
+    await asyncio.gather(
+        ensure_lock_indexes(),
+        ensure_idempotency_indexes(),
+        ensure_artifact_version_indexes(),
+    )
+
+    # Connect distributed cache (Redis) — falls back to in-memory silently.
+    await get_redis_cache().connect()
+
+    # Start inter-instance event bus.
+    event_bus = get_event_bus()
+    await event_bus.start()
 
     await event_dispatcher.emit_business_event(
         log_event_type="RUNTIME_STARTUP_COMPLETED",
@@ -933,6 +959,11 @@ async def websocket_endpoint(
             else:
                 session_state = {}
 
+        # Capture session version at the point of resume.  This baseline is used
+        # later to detect silent concurrent writes (a soft staleness guard that
+        # complements the distributed lock's hard mutual-exclusion boundary).
+        _resume_session_version = await persistence_manager.get_session_version(resolved_chat_id, app_id)
+
         cache_seed = await persistence_manager.get_or_assign_cache_seed(resolved_chat_id, app_id)
         ws_id = id(websocket)
         session_registry.add_workflow(
@@ -961,33 +992,47 @@ async def websocket_endpoint(
             "run_history_count": run_history_count,
             "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else created_at,
             "session_state": session_state or {},
+            "session_version": _resume_session_version,
         }
         await simple_transport.send_event_to_ui(chat_meta, resolved_chat_id)
 
         config = workflow_manager.get_config(resolved_workflow_name) or {}
         startup_mode = str(config.get("workflow_startup_mode") or "").strip().lower()
-        if startup_mode == "agentdriven" and run_history_count == 0:
-            conn = simple_transport.connections.setdefault(resolved_chat_id, {})
-            conn["autostarted"] = True
-            _agent_start_task = asyncio.create_task(
-                simple_transport.handle_user_input_from_api(
-                    chat_id=resolved_chat_id,
-                    user_id=user_id,
-                    workflow_name=resolved_workflow_name,
-                    message=None,
-                    app_id=app_id,
+        if startup_mode in ("agentdriven", "userdriven") and run_history_count == 0:
+            existing_task = simple_transport._background_tasks.get(resolved_chat_id)
+            if not (existing_task and not existing_task.done()):
+                conn = simple_transport.connections.setdefault(resolved_chat_id, {})
+                conn["autostarted"] = True
+                _agent_start_task = asyncio.create_task(
+                    simple_transport.handle_user_input_from_api(
+                        chat_id=resolved_chat_id,
+                        user_id=user_id,
+                        workflow_name=resolved_workflow_name,
+                        message=None,
+                        app_id=app_id,
+                    )
                 )
-            )
-            _agent_start_task.add_done_callback(
-                lambda t: logger.error(
-                    "AGENTDRIVEN_AUTO_START_FAILED workflow=%s chat=%s: %s",
-                    resolved_workflow_name,
-                    resolved_chat_id,
-                    t.exception(),
+                simple_transport._background_tasks[resolved_chat_id] = _agent_start_task
+                _agent_start_task.add_done_callback(
+                    _background_task_failure_callback(resolved_workflow_name, resolved_chat_id)
                 )
-                if not t.cancelled() and t.exception() is not None
-                else None
+
+        # Staleness guard: verify the session hasn't been concurrently modified
+        # between when we read the document and now.  Any version advance means
+        # another instance (or code path) wrote to this session in the interim.
+        # The distributed lock in core/runtime/persistence/distributed_lock.py
+        # provides the hard mutual-exclusion boundary during execution; this check
+        # catches modifications that arrive before lock acquisition.
+        if not created_resolved_chat and _resume_session_version is not None:
+            is_fresh = await persistence_manager.check_session_not_stale(
+                resolved_chat_id, app_id, known_version=_resume_session_version
             )
+            if not is_fresh:
+                await websocket.close(
+                    code=WS_CLOSE_POLICY_VIOLATION,
+                    reason="Session was concurrently modified; please retry",
+                )
+                return
 
         try:
             await simple_transport.handle_websocket(
@@ -1177,12 +1222,15 @@ async def get_workflows(
     workflows = []
     for workflow_name in sorted(workflow_manager.get_all_workflow_names()):
         config = workflow_manager.get_config(workflow_name)
+        startup_mode = str(config.get("workflow_startup_mode") or "").strip() or "AgentDriven"
         workflows.append(
             {
                 "name": workflow_name,
                 "display_name": config.get("display_name") or config.get("name") or workflow_name,
                 "initial_agent": config.get("initial_agent"),
                 "visual_agents": config.get("visual_agents") or [],
+                "startup_mode": startup_mode,
+                "workflow_startup_mode": startup_mode,
                 "status": "ready",
             }
         )

@@ -29,7 +29,6 @@ import { useChatArtifactLayoutEffects } from '../hooks/useChatArtifactLayoutEffe
 import { useChatSessionHistory } from '../hooks/useChatSessionHistory';
 import { useEmbeddedViewController } from '../hooks/useEmbeddedViewController';
 import { useConversationModeController } from '../hooks/useConversationModeController';
-import { useWorkflowResumePolicy } from '../hooks/useWorkflowResumePolicy';
 import { useChatStartupEffects } from '../hooks/useChatStartupEffects';
 import { useWorkflowStart } from '../hooks/useWorkflowStart';
 import {
@@ -57,7 +56,6 @@ import {
   debugFlag,
   getAccessToken,
   getUserIdFromToken,
-  logAgentOutput,
 } from './chatPageHelpers';
 
 // Extracted hooks for gradual migration
@@ -71,10 +69,10 @@ const ChatPage = () => {
   const navContext = useContext(NavigationContext);
   const configuredStartupMode = navContext?.chat_startup_mode || 'ask';  // "ask" or "workflow"
   const configuredEntryWorkflow = navContext?.entry_point || null;
-  const configuredResumePolicy = 'last_active_then_oldest_then_entry_point';
   const navigationLoading = navContext?.loading ?? false;
   // Core state
   const [messages, setMessages] = useState([]);
+  const [connectionRetryNonce, setConnectionRetryNonce] = useState(0);
   // Ref mirror to access latest messages inside callbacks without stale closure
   const messagesRef = useRef([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
@@ -115,8 +113,10 @@ const ChatPage = () => {
   const queryWorkflowName = searchParams.get('workflow');
   const queryChatId = searchParams.get('chat_id');
   const queryMode = searchParams.get('mode'); // 'ask' or 'workflow'
+  const queryFreshStart = ['1', 'true', 'yes', 'on'].includes(
+    String(searchParams.get('new') || searchParams.get('fresh') || searchParams.get('force_new') || '').toLowerCase()
+  );
   const queryEmbeddedView = searchParams.get('view');
-  const queryResume = searchParams.get('resume');
   // Gate / action / refinement context — set by useWorkflowStart
   // e.g. /chat?workflow=AppGenerator&context={"app_type":"new"}&trigger_source=gate
   const queryContextRaw = searchParams.get('context');
@@ -128,6 +128,18 @@ const ChatPage = () => {
   const queryActionId = searchParams.get('action_id') || null;
   const queryChangeClass = searchParams.get('change_class') || null;
   const queryArtifactVersionId = searchParams.get('artifact_version_id') || null;
+
+  useEffect(() => {
+    if (!queryWorkflowName) {
+      return;
+    }
+    if (queryMode === 'workflow' || queryMode === 'ask') {
+      return;
+    }
+    const nextParams = new URLSearchParams(location.search || '');
+    nextParams.set('mode', 'workflow');
+    navigate(`${location.pathname}?${nextParams.toString()}`, { replace: true });
+  }, [location.pathname, location.search, navigate, queryMode, queryWorkflowName]);
 
   const appId = pathAppId || queryAppId;
   const urlWorkflowName = pathWorkflowName || queryWorkflowName;
@@ -195,6 +207,8 @@ const ChatPage = () => {
   const [hasUnseenArtifact, setHasUnseenArtifact] = useState(false);
   const [actionStatusMap, setActionStatusMap] = useState({});
   const [pendingWorkflowReply, setPendingWorkflowReply] = useState(null);
+  const [workflowCompleted, setWorkflowCompleted] = useState(false);
+  const [, setCompletionData] = useState(null);
   const [pendingHarnessDecision, setPendingHarnessDecision] = useState(null);
   const [pendingHarnessDecisionError, setPendingHarnessDecisionError] = useState(null);
   const optimisticSnapshotsRef = useRef(new Map());
@@ -219,7 +233,6 @@ const ChatPage = () => {
   const workflowReplayPendingRef = useRef(false);
   const workflowMessagesSharedRef = useRef([]);
   const generalMessagesCacheRef = useRef([]);
-  const resumeOldestFromWidgetRef = useRef(false);
   const layoutModeForConversation = conversationMode === 'ask' ? 'full' : layoutMode;
   // Respect explicit layout state in workflow mode; force full in ask mode.
   const effectiveLayoutMode = conversationMode === 'ask' ? 'full' : layoutMode;
@@ -565,7 +578,6 @@ const ChatPage = () => {
       return;
     }
 
-    console.log(`🧹 [ASK_SANITIZE] Removing ${messages.length - sanitizedMessages.length} workflow message(s) from ask transcript`);
     generalMessagesCacheRef.current = sanitizedMessages;
     setAskMessages(sanitizedMessages);
     setMessagesWithLogging(sanitizedMessages);
@@ -584,7 +596,6 @@ const ChatPage = () => {
       return;
     }
 
-    console.log(`🧹 [WORKFLOW_SANITIZE] Removing ${messages.length - sanitizedMessages.length} hidden seed message(s) from workflow transcript`);
     workflowMessagesCacheRef.current = sanitizedMessages;
     workflowMessagesSharedRef.current = sanitizedMessages;
     setWorkflowMessages(sanitizedMessages);
@@ -852,14 +863,12 @@ const ChatPage = () => {
   // This must happen regardless of connection status so the UI doesn't show stale widget state.
   useEffect(() => {
     if (isPrimaryChatRoute && isInWidgetMode) {
-      console.log('🧭 [WIDGET_MODE] ChatPage mounted on primary route - clearing widget mode immediately');
       setIsInWidgetMode(false);
     }
   }, [isPrimaryChatRoute, isInWidgetMode, setIsInWidgetMode]);
 
   useEffect(() => {
     if (urlWorkflowName && urlWorkflowName !== currentWorkflowName) {
-      console.log('🧭 [WORKFLOW_ROUTE] Updating workflow from URL param:', urlWorkflowName);
       setCurrentWorkflowName(urlWorkflowName);
     }
   }, [urlWorkflowName, currentWorkflowName]);
@@ -883,11 +892,9 @@ const ChatPage = () => {
     }
 
     if (nextWorkflowName !== currentWorkflowName) {
-      console.log('🧭 [WORKFLOW_SYNC] Normalizing current workflow to loaded config:', nextWorkflowName);
       setCurrentWorkflowName(nextWorkflowName);
     }
     if (nextWorkflowName !== activeWorkflowName) {
-      console.log('🧭 [WORKFLOW_SYNC] Normalizing active workflow to loaded config:', nextWorkflowName);
       setActiveWorkflowName(nextWorkflowName);
     }
   }, [workflowConfigLoaded, urlWorkflowName, currentWorkflowName, activeWorkflowName, setActiveWorkflowName]);
@@ -1321,10 +1328,6 @@ const ChatPage = () => {
 
   // Simplified incoming handler (namespaced chat.* only)
   const handleIncoming = useCallback((data) => {
-    // Log all incoming events for debugging - you can filter this later if needed
-    if (data?.type) {
-      try { logAgentOutput('INCOMING', extractAgentName(data), data, { type: data?.type }); } catch {}
-    }
     if (!data?.type) return;
     if (dispatchSurfaceEvent) {
       dispatchSurfaceEvent(data);
@@ -1340,21 +1343,12 @@ const ChatPage = () => {
         const serializedText = !isText && typeof data.content === 'string' && data.content.includes('"type":"chat.text"');
         if (isText || isMeta || isStreamChunk || serializedText) {
           initSpinnerHiddenOnceRef.current = true;
-          if (showInitSpinner) console.log('🧹 [SPINNER] Hiding spinner (ready event). text?', isText, 'meta?', isMeta, 'serialized?', serializedText);
           setShowInitSpinner(false);
         }
       }
     } catch {}
     if (debugFlag('mozaiks.debug_pipeline')) {
       const agentDbg = data.agent || data.agent_name;
-      console.log('[PIPELINE] raw event', {
-        type: data.type,
-        agent: agentDbg,
-        visual: data.is_visual,
-        structuredCapable: data.is_structured_capable,
-        hasStructuredOutput: !!data.structured_output,
-        contentPreview: (data.content||'').slice(0,120)
-      });
       if ((data.type === 'chat.print' || data.type === 'chat.text') && data.is_visual === false) {
         console.warn('[PIPELINE] Non-visual agent message received (unexpected?)', agentDbg);
       }
@@ -1363,21 +1357,17 @@ const ChatPage = () => {
     // Handle chat_meta events (which may not have chat. prefix)
     if (data.type === 'chat_meta' || data.type === 'chat.chat_meta') {
       // Initial metadata handshake from backend
-      console.log('🧬 [META] Received chat_meta event:', data);
       applySessionStatePendingHarnessDecision(data.session_state);
       if (data.cache_seed !== undefined && data.cache_seed !== null) {
         setCacheSeed(data.cache_seed);
         if (currentChatId) {
           setStoredChatCacheSeed(currentChatId, data.cache_seed);
         }
-        console.log('🧬 [META] Received cache_seed', data.cache_seed, 'for chat', currentChatId);
       }
       if (data.chat_exists === false) {
         // Backend indicates this chat_id had no persisted session (fresh after client-side reuse)
         setChatExists(false);
-        console.log('🧬 [META] Backend reports chat did NOT previously exist. Suppressing artifact restore. chat_id=', currentChatId);
         clearStoredArtifactState(currentChatId);
-        console.log('🧼 [META] Purged stale artifacts for non-existent chat');
         // Reset any prior artifact state
         setCurrentArtifactMessages([]);
         lastArtifactEventRef.current = null;
@@ -1385,7 +1375,6 @@ const ChatPage = () => {
         artifactRestoredOnceRef.current = true; // prevent later restore effect
       } else if (data.chat_exists === true) {
         setChatExists(true);
-        console.log('🧬 [META] Backend confirms chat exists. Artifact restore allowed.');
         if (!data.last_artifact || !data.last_artifact.tool_name) {
           clearStoredArtifactState(currentChatId);
           setCurrentArtifactMessages([]);
@@ -1405,7 +1394,6 @@ const ChatPage = () => {
               display: data.last_artifact.display || 'artifact',
               ts: Date.now(),
             });
-            console.log('🧬 [META] Cached last_artifact from server meta event');
             artifactCacheValidRef.current = true;
           } catch (e) { console.warn('Failed to cache server last_artifact', e); }
         }
@@ -1421,11 +1409,9 @@ const ChatPage = () => {
         const inner = JSON.parse(data.content);
         if (inner && inner.type) {
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] unwrapped nested envelope', { originalType: data.type, innerType: inner.type });
           }
           // If this is chat_meta, handle it directly
           if (inner.type === 'chat_meta') {
-            console.log('🧬 [META] Received chat_meta event (unwrapped):', inner);
             const metaData = inner.data || {};
             applySessionStatePendingHarnessDecision(metaData.session_state);
             if (metaData.cache_seed !== undefined && metaData.cache_seed !== null) {
@@ -1433,20 +1419,16 @@ const ChatPage = () => {
               if (currentChatId) {
                 setStoredChatCacheSeed(currentChatId, metaData.cache_seed);
               }
-              console.log('🧬 [META] Received cache_seed', metaData.cache_seed, 'for chat', currentChatId);
             }
             if (metaData.chat_exists === false) {
               setChatExists(false);
-              console.log('🧬 [META] Backend reports chat did NOT previously exist. Suppressing artifact restore. chat_id=', currentChatId);
               clearStoredArtifactState(currentChatId);
-              console.log('🧼 [META] Purged stale artifacts for non-existent chat');
               setCurrentArtifactMessages([]);
               lastArtifactEventRef.current = null;
               artifactRestoredOnceRef.current = true;
               artifactCacheValidRef.current = false;
             } else if (metaData.chat_exists === true) {
               setChatExists(true);
-              console.log('🧬 [META] Backend confirms chat exists. Artifact restore allowed.');
               if (!metaData.last_artifact || !metaData.last_artifact.tool_name) {
                 clearStoredArtifactState(currentChatId);
                 setCurrentArtifactMessages([]);
@@ -1464,7 +1446,6 @@ const ChatPage = () => {
                     display: metaData.last_artifact.display || 'artifact',
                     ts: Date.now(),
                   });
-                  console.log('🧬 [META] Cached last_artifact from server meta event');
                   artifactCacheValidRef.current = true;
                 } catch (e) { console.warn('Failed to cache server last_artifact', e); }
               }
@@ -1493,13 +1474,6 @@ const ChatPage = () => {
           if (innerData.structured_output !== undefined) data.structured_output = innerData.structured_output;
           if (innerData.structured_schema !== undefined) data.structured_schema = innerData.structured_schema;
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] unwrap summary', {
-              finalType: data.type,
-              agent: data.agent || data.agent_name,
-              visual: data.is_visual,
-              structuredCapable: data.is_structured_capable,
-              contentPreview: (data.content||'').slice(0,120)
-            });
           }
         }
       }
@@ -1535,7 +1509,7 @@ const ChatPage = () => {
         if (inner.structured_output !== undefined && data.structured_output === undefined) data.structured_output = inner.structured_output;
         if (inner.structured_schema !== undefined && data.structured_schema === undefined) data.structured_schema = inner.structured_schema;
         // UI tool / component hints (input_request etc.) + error messages
-        ['component_type','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata'].forEach(f => {
+        ['component_type','tool_name','tool_call_id','request_id','progress_percent','prompt','success','interaction_type','status','corr','call_id','payload','message','error_code','ui_visibility','trace_reason','trace_agent','sequence','stream_id','full_content','metadata','role','replay','index','timestamp'].forEach(f => {
           if (inner[f] !== undefined && data[f] === undefined) data[f] = inner[f];
         });
       }
@@ -1557,14 +1531,6 @@ const ChatPage = () => {
       }
       if (!data.agent && !data.agent_name && data.sender) data.agent = data.sender;
       if (debugFlag('mozaiks.debug_pipeline')) {
-        console.log('[PIPELINE] resolved event pre-dispatch', {
-          type: data.type,
-          agent: data.agent || data.agent_name,
-          visual: data.is_visual,
-          structuredCapable: data.is_structured_capable,
-          hasStructuredOutput: !!data.structured_output,
-          contentPreview: (typeof data.content === 'string' ? data.content : JSON.stringify(data.content || '')).slice(0,120)
-        });
       }
     } catch {}
 
@@ -1805,9 +1771,6 @@ const ChatPage = () => {
         }
         if (shouldSuppressHiddenSeedEvent(data)) {
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] suppressing hidden seed print event', {
-              seedKind: getSeedKindFromEvent(data),
-            });
           }
           if (showInitSpinner) setShowInitSpinner(false);
           return;
@@ -1815,10 +1778,6 @@ const ChatPage = () => {
         const printMetadata = data.metadata || data.data?.metadata || {};
         if (conversationMode === 'ask' && printMetadata?.source !== 'general_agent') {
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] suppressing workflow print while in ask mode', {
-              source: printMetadata?.source || null,
-              agent: data.agent || data.agent_name || data.sender || null,
-            });
           }
           return;
         }
@@ -1832,7 +1791,6 @@ const ChatPage = () => {
               if (m.__streaming && m.agentName === agentName) {
                 m.content += chunk;
                 if (debugFlag('mozaiks.debug_pipeline')) {
-                  console.log('[PIPELINE] appended chunk to existing stream', { agent: agentName, newLength: m.content.length });
                 }
                 return updated;
               }
@@ -1853,7 +1811,6 @@ const ChatPage = () => {
             isToolAgent
           });
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] created new streaming message', { agent: agentName, chunkLen: chunk.length, isStructuredCapable, isVisual });
           }
           return updated;
         });
@@ -1867,12 +1824,8 @@ const ChatPage = () => {
         }
         if (shouldSuppressHiddenSeedEvent(data)) {
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] suppressing hidden seed text event', {
-              seedKind: getSeedKindFromEvent(data),
-            });
           }
           if (showInitSpinner) {
-            console.log('🧹 [SPINNER] Hiding spinner due to suppressed hidden seed message');
             setShowInitSpinner(false);
           }
           return;
@@ -1902,43 +1855,27 @@ const ChatPage = () => {
         );
         if (conversationMode === 'ask' && metadataSource?.source !== 'general_agent') {
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] suppressing workflow text while in ask mode', {
-              source: metadataSource?.source || null,
-              agent: data.agent || data.agent_name || data.sender || null,
-              replay: isReplayEvent,
-            });
           }
           return;
         }
         try {
           const wfCfg = workflowConfig?.getWorkflowConfig(currentWorkflowName);
           const startupMode = String(wfCfg?.startup_mode || '').trim().toLowerCase();
-          const hasInitialGreeting = Boolean(String(wfCfg?.initial_message_to_user || '').trim());
           const isSyntheticUserDrivenReplay = (
             isReplayEvent &&
             isWorkflowUserMessage &&
             startupMode === 'userdriven' &&
-            hasInitialGreeting &&
             String(content).trim() === '.' &&
             replayIndex === 0
           );
           if (isSyntheticUserDrivenReplay) {
             if (debugFlag('mozaiks.debug_pipeline')) {
-              console.log('[PIPELINE] suppressing replayed synthetic UserDriven trigger', {
-                workflow: currentWorkflowName,
-                replayIndex,
-              });
             }
             return;
           }
         } catch {}
         if (isReplayEvent && conversationMode !== 'workflow' && metadataSource?.source !== 'general_agent') {
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] skipping workflow replay while not in workflow mode', {
-              conversationMode,
-              agent: data.agent || data.agent_name || data.sender || null,
-              index: replayIndex,
-            });
           }
           return;
         }
@@ -1971,7 +1908,6 @@ const ChatPage = () => {
                   const smallDiff = lengthDiff <= 3; // allow small typos / spacing differences
                   const identical = normUser === normContent;
                   if (normUser && (identical || (containsRel && smallDiff))) {
-                    if (debugFlag('mozaiks.debug_pipeline')) console.log('[PIPELINE] suppressing assistant echo/fuzzy repeat of user content');
                     return; // skip echo-like repetition
                   }
                 }
@@ -1990,7 +1926,6 @@ const ChatPage = () => {
           // Remove any thinking messages when agent actually speaks
           const thinkingMessages = prev.filter(m => m.isThinking);
           if (thinkingMessages.length > 0) {
-            console.log('💭 [THINKING] Text event received - removing', thinkingMessages.length, 'thinking bubble(s)');
           }
           const filtered = prev.filter(m => !m.isThinking);
           const updated = [...filtered];
@@ -2058,7 +1993,6 @@ const ChatPage = () => {
             serverSequence,
           });
           if (debugFlag('mozaiks.debug_pipeline')) {
-            console.log('[PIPELINE] appended final text message', { agent: agentName, len: content.length, isStructuredCapable, hasStructuredOutput: !!structuredOutput });
           }
           return updated;
         });
@@ -2088,14 +2022,6 @@ const ChatPage = () => {
           
           // Only auto-open if explicitly marked as artifact display (not inline)
           if ((hasStructuredOutput || data.is_visual) && displayMode === 'artifact') {
-            console.log('📊 [TELEMETRY] Auto-opening artifact panel for text event:', {
-              agent: agentName,
-              is_visual: data.is_visual,
-              has_structured_output: hasStructuredOutput,
-              display: displayMode,
-              workflow: currentWorkflowName,
-              chat_id: currentChatId
-            });
             setLayoutMode && setLayoutMode('split');
             setIsSidePanelOpen && setIsSidePanelOpen(true);
           }
@@ -2110,16 +2036,12 @@ const ChatPage = () => {
           const componentType = envelope.component_type || detail.component_type || detail.component || toolName;
           const basePayload = detail.payload || envelope.payload || {};
           const payloadKeys = Object.keys(basePayload);
-          console.log('🛠️ [TOOL_CALL] Processing UI tool event:', toolName, 'component:', componentType);
-          console.log('🛠️ [TOOL_CALL] Raw tool_call data:', envelope);
-          console.log('🛠️ [TOOL_CALL] Payload keys received:', payloadKeys);
           const derivedDisplay = envelope.display || envelope.display_type || envelope.mode || detail.display || detail.display_type || detail.mode || basePayload.display || basePayload.mode || null;
           const toolCallId = envelope.tool_call_id || envelope.corr || detail.tool_call_id || detail.corr || null;
           const awaiting = envelope.awaiting_response !== undefined ? envelope.awaiting_response : detail.awaiting_response;
           const resolvedWorkflowName = envelope.workflow_name || detail.workflow_name || basePayload.workflow_name || currentWorkflowName;
           const interactionType = envelope.interaction_type || detail.interaction_type || basePayload.interaction_type || (awaiting ? 'ui_tool' : 'ui_surface');
           const sendResponse = (responseData) => {
-            console.log('dY"O ChatPage: Sending WebSocket response for tool_call:', responseData);
             const activeWs = wsRef.current;
             if (activeWs && activeWs.send) {
               return activeWs.send(responseData);
@@ -2149,13 +2071,6 @@ const ChatPage = () => {
           // Auto-open artifact panel ONLY for display === 'artifact'
           try {
             if (derivedDisplay === 'artifact') {
-              console.log('📊 [TELEMETRY] Auto-opening artifact panel for tool_call:', {
-                tool_name: toolName,
-                component_type: componentType,
-                display: derivedDisplay,
-                workflow: currentWorkflowName,
-                chat_id: currentChatId
-              });
               setLayoutMode && setLayoutMode('split');
               setIsSidePanelOpen && setIsSidePanelOpen(true);
             }
@@ -2181,7 +2096,6 @@ const ChatPage = () => {
         const toolName    = inner.tool_name || component;
         const interactionType = inner.interaction_type || (awaiting ? 'ui_tool' : 'ui_surface');
 
-        console.log('🛠️ [UI_RENDER] Received ui.render:', { toolName, component, displayMode, toolCallId });
 
         const sendResponse = (responseData) => {
           const activeWs = wsRef.current;
@@ -2283,7 +2197,6 @@ const ChatPage = () => {
         const completedTool = detail.tool_name || envelope.tool_name || null;
         const status = detail.status || envelope.status || 'completed';
         
-        console.log('✓ [UI_COMPLETE] Inline tool completed:', { completedId, completedTool, status });
 
         if (completedId) {
           // Mark matching tool-call messages complete so composer requests do not
@@ -2326,7 +2239,6 @@ const ChatPage = () => {
         const detail = envelope.data || {};
         const dismissedId = detail.tool_call_id || envelope.tool_call_id || null;
         const dismissedTool = detail.tool_name || envelope.tool_name || null;
-        console.log('🧩 [UI] Received tool_call_dismiss event:', { dismissedId, dismissedTool });
 
         if (dismissedId) {
           setMessagesWithLogging((prev) =>
@@ -2344,7 +2256,6 @@ const ChatPage = () => {
         }
 
         if (lastArtifactEventRef.current && (!dismissedId || dismissedId === lastArtifactEventRef.current)) {
-          try { console.log('🧹 [UI] Backend-dismissed artifact event -> collapsing panel'); } catch {}
           setIsSidePanelOpen(false);
           lastArtifactEventRef.current = null;
           artifactCacheValidRef.current = false;
@@ -2423,7 +2334,6 @@ const ChatPage = () => {
         // Suppress intermediate auto-tool responses (already handled by dynamicUIHandler)
         // Only show failures or non-auto-tool responses
         if (data.interaction_type === 'auto_tool' && data.success) {
-          console.log(`⏭️ Skipping auto-tool success response (${data.tool_name}) - handled by UI renderer`);
           return;
         }
         if (showSystemMessages) {
@@ -2542,14 +2452,12 @@ const ChatPage = () => {
         // Speaker selection marks a new agent taking over - inject thinking state
         const nextAgentName = data.agent || data.agent_name || data.selected_speaker || 'Agent';
         
-        console.log('💭 [THINKING] Speaker selected:', nextAgentName, '- adding thinking bubble');
         
         // Add a temporary "thinking" message that will be removed when next agent speaks
         setMessagesWithLogging(prev => {
           // Remove any existing thinking messages first
           const existingThinking = prev.filter(m => m.isThinking);
           if (existingThinking.length > 0) {
-            console.log('💭 [THINKING] Removing', existingThinking.length, 'existing thinking bubble(s) before adding new one');
           }
           
           const filtered = prev.filter(m => !m.isThinking);
@@ -2570,7 +2478,6 @@ const ChatPage = () => {
         // from a prior sequence, collapse it now and clear the cache.
         if (lastArtifactEventRef.current && isSidePanelOpen) {
           try {
-            console.log('🧹 [UI] New sequence detected; collapsing ArtifactPanel (event:', lastArtifactEventRef.current, ')');
           } catch {}
           setIsSidePanelOpen(false);
           lastArtifactEventRef.current = null;
@@ -2739,7 +2646,6 @@ const ChatPage = () => {
         return;
       }
       case 'run_complete': {
-        console.log('🎉 [COMPLETION] Workflow run settled:', data);
         
         // Extract completion metadata
         const reason = data.reason || data.data?.reason || 'finished';
@@ -2892,12 +2798,10 @@ const ChatPage = () => {
         
         // Prevent duplicate errors (React StrictMode or event replay)
         if (lastErrorIdRef.current === errorId) {
-          console.log('🔴 [ERROR_EVENT] Duplicate error detected, skipping:', errorId);
           return;
         }
         lastErrorIdRef.current = errorId;
         
-        console.log('🔴 [ERROR_EVENT] Received error event:', { message: errorMsg, error_code: errorCode, raw_data: data });
         setMessagesWithLogging(prev => [...prev, { id:`err-${Date.now()}`, sender:'system', agentName:'System', content:`❌ Error: ${errorMsg}`, isStreaming:false }]);
         return;
       }
@@ -2912,7 +2816,6 @@ const ChatPage = () => {
           if (replayedCount <= 0 && messagesRef.current.length === 0) {
             const cachedWorkflow = sanitizeVisibleWorkflowMessages(workflowMessagesSharedRef.current || []);
             if (cachedWorkflow.length > 0) {
-              console.log(`📦 [WORKFLOW_RESTORE] Replay empty; restoring ${cachedWorkflow.length} cached workflow messages`);
               setMessagesWithLogging(cachedWorkflow);
             }
           }
@@ -2932,7 +2835,6 @@ const ChatPage = () => {
 
   // Debug: Log spinner state changes
   useEffect(() => {
-    console.log('🧹 [SPINNER] State changed to:', showInitSpinner);
   }, [showInitSpinner]);
 
   // Failsafe: never leave the one-time init spinner on indefinitely.
@@ -2941,7 +2843,6 @@ const ChatPage = () => {
 
     const timer = setTimeout(() => {
       if (!initSpinnerHiddenOnceRef.current) {
-        console.log('🧹 [SPINNER] Auto-hiding spinner (failsafe timeout)');
         initSpinnerHiddenOnceRef.current = true;
         setShowInitSpinner(false);
       }
@@ -2971,18 +2872,24 @@ const ChatPage = () => {
     workflowConfig.fetchWorkflowConfigs().finally(() => {
       setWorkflowConfigLoaded(true);
     });
-    if (!currentChatId) {
+    // When the URL explicitly targets a chat or requests a fresh start,
+    // clear any stale activeChatId that was hydrated from localStorage so it
+    // doesn't drive the first WS connection before the URL params are consumed.
+    if (queryChatId || queryFreshStart) {
+      setActiveChatId(null);
+    }
+
+    if (!currentChatId && !queryChatId && !queryFreshStart) {
       const stored = getStoredActiveChatId();
       if (stored) {
         setCurrentChatId(stored);
         const seedStored = getStoredChatCacheSeed(stored);
         if (seedStored !== null) {
           setCacheSeed(seedStored);
-          console.log('🧬 [RESUME] Loaded cached cache_seed for resumed chat', stored, seedStored);
         }
       }
     }
-  }, [api, currentChatId, currentAppId]);
+  }, [api, currentChatId, currentAppId, queryChatId, queryFreshStart, setActiveChatId]);
 
   // NEW: Preflight chat existence + cache clearing logic
 useEffect(() => {
@@ -2994,12 +2901,9 @@ useEffect(() => {
   pendingStartRef.current = true;
   (async () => {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const chatIdParam = urlParams.get('chat_id');
-      let reuseChatId = chatIdParam;
+      let reuseChatId = queryFreshStart ? null : queryChatId;
 
       if (reuseChatId) {
-        console.log('[EXISTS] Checking existence of chat', reuseChatId);
         const wfName = resolveKnownWorkflowName(currentWorkflowName);
         if (!wfName) {
           console.warn('[EXISTS] No runnable workflow resolved; skipping chat reuse check');
@@ -3011,7 +2915,6 @@ useEffect(() => {
           if (resp.ok) {
             const data = await resp.json();
             if (data.exists) {
-              console.log('[EXISTS] Chat exists; adopting chat_id and skipping startChat');
               setCurrentChatId(reuseChatId);
               setChatExists(true);
               
@@ -3023,7 +2926,6 @@ useEffect(() => {
               pendingStartRef.current = false;
               return;
             }
-            console.log('[EXISTS] Chat does NOT exist; clearing any cached artifacts for that id');
             clearStoredArtifactState(reuseChatId);
             clearStoredChatCacheSeed(reuseChatId);
             if (getStoredActiveChatId() === reuseChatId) {
@@ -3052,7 +2954,6 @@ useEffect(() => {
         }
       }
 
-      console.log('[INIT] Creating new chat via startChat');
       const startWorkflowName = resolveKnownWorkflowName(currentWorkflowName);
       if (!startWorkflowName) {
         console.warn('[INIT] No runnable workflow resolved; skipping startChat');
@@ -3065,6 +2966,10 @@ useEffect(() => {
         ...(queryArtifactVersionId ? { artifact_version_id: queryArtifactVersionId } : {}),
       };
       const askCarrierMode = queryMode === 'ask' || conversationMode === 'ask';
+      const sessionOptions = {
+        ...(askCarrierMode ? { transportPurpose: 'ask_carrier' } : {}),
+        ...(queryFreshStart ? { forceNew: true } : {}),
+      };
       const result = await api.startChat(
         currentAppId,
         startWorkflowName,
@@ -3072,7 +2977,7 @@ useEffect(() => {
         {},
         queryContext,
         triggerMeta,
-        askCarrierMode ? { transportPurpose: 'ask_carrier' } : null,
+        Object.keys(sessionOptions).length > 0 ? sessionOptions : null,
       );
       if (result && (result.chat_id || result.id)) {
         const newId = result.chat_id || result.id;
@@ -3081,13 +2986,18 @@ useEffect(() => {
         setCurrentChatId(newId);
         setChatExists(reused);
 
-        // Remove ?context= param after seeding — prevent re-injection on refresh
-        if (queryContextRaw) {
-          const cleanParams = new URLSearchParams(location.search || '');
-          cleanParams.delete('context');
-          const nextSearch = cleanParams.toString();
-          navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
-        }
+        // Keep URL session context canonical after chat creation so refresh/resume
+        // paths always keep the concrete chat_id for this workflow run.
+        const nextParams = new URLSearchParams(location.search || '');
+        nextParams.delete('context');
+        nextParams.delete('new');
+        nextParams.delete('fresh');
+        nextParams.delete('force_new');
+        nextParams.set('workflow', resolvedWorkflowName);
+        nextParams.set('chat_id', newId);
+        nextParams.set('mode', 'workflow');
+        const nextSearch = nextParams.toString();
+        navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
 
         // Update global chat context for persistent bubble
         setActiveChatId(newId);
@@ -3098,7 +3008,6 @@ useEffect(() => {
         if (!reused) {
           clearStoredArtifactState(newId);
         }
-        console.log('[INIT] startChat complete', { newId, reused, contextSeeded: !!queryContext });
       }
     } catch (e) {
       console.error('[INIT] Failed to initialize chat:', e);
@@ -3108,6 +3017,61 @@ useEffect(() => {
   })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, resolveKnownWorkflowName, consumeNavigationQueryParams]);
+
+  // Ensure resumed workflow chats always keep a canonical URL session context.
+  // This prevents ambiguous reconnect behavior when the page was loaded with only ?workflow=...
+  // and currentChatId came from storage or metadata.
+  useEffect(() => {
+    if (queryFreshStart) {
+      return;
+    }
+    const canonicalChatId = currentChatId || activeChatId;
+    if (!canonicalChatId) {
+      return;
+    }
+    if (conversationMode !== 'workflow') {
+      return;
+    }
+
+    const workflowForUrl =
+      resolveKnownWorkflowName(currentWorkflowName)
+      || resolveKnownWorkflowName(urlWorkflowName)
+      || workflowConfig.getDefaultWorkflow();
+    if (!workflowForUrl) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search || '');
+    const chatParam = params.get('chat_id');
+    const modeParam = params.get('mode');
+    const workflowParam = params.get('workflow');
+
+    if (
+      chatParam === String(canonicalChatId)
+      && modeParam === 'workflow'
+      && workflowParam === workflowForUrl
+    ) {
+      return;
+    }
+
+    params.set('workflow', workflowForUrl);
+    params.set('chat_id', String(canonicalChatId));
+    params.set('mode', 'workflow');
+    const nextSearch = params.toString();
+    navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
+  }, [
+    activeChatId,
+    conversationMode,
+    currentChatId,
+    currentWorkflowName,
+    location.pathname,
+    location.search,
+    navigate,
+    queryFreshStart,
+    resolveKnownWorkflowName,
+    urlWorkflowName,
+    workflowConfig,
+  ]);
 
   // Guard against stale chat IDs restored from local storage (e.g. after cleanse).
   // If the chat does not exist anymore, clear it so preflight can create a new one.
@@ -3183,7 +3147,6 @@ useEffect(() => {
       clearStoredArtifactState(current);
       clearStoredChatCacheSeed(current);
     }
-    console.log('🧼 [CACHE] Manual force reset invoked; clearing in-memory state');
     setCurrentArtifactMessages([]);
     lastArtifactEventRef.current = null;
     artifactRestoredOnceRef.current = false;
@@ -3206,7 +3169,6 @@ useEffect(() => {
       window.__mozaiksInspectArtifacts = () => {
         const keys = [];
         const chatId = currentChatId || getStoredActiveChatId();
-        console.log('🔍 [DEBUG] Inspecting artifact session cache for chat:', chatId);
         if (chatId) {
           const currentArtifact = readStoredCurrentArtifact(chatId);
           const lastArtifact = readStoredLastArtifact(chatId);
@@ -3298,11 +3260,9 @@ useEffect(() => {
             setLoading(false);
             // Show one-time spinner ONLY if it has never been shown and never been hidden
             if (!initSpinnerHiddenOnceRef.current && !initSpinnerShownRef.current) {
-              console.log('🧹 [SPINNER] Showing initial spinner on WebSocket connect');
               setShowInitSpinner(true);
               initSpinnerShownRef.current = true;
             } else {
-              console.log('🧹 [SPINNER] Skipping show on reconnect (hiddenOnce=', initSpinnerHiddenOnceRef.current, 'shownRef=', initSpinnerShownRef.current, ')');
               // Ensure we never regress into showing again this session
               if (initSpinnerHiddenOnceRef.current) {
                 initSpinnerShownRef.current = true; // lock state
@@ -3325,7 +3285,12 @@ useEffect(() => {
             }
             console.error("WebSocket error:", error);
             setConnectionStatus('error');
+            setConnectionInitialized(false);
+            connectionInProgressRef.current = false;
             setLoading(false);
+            setTimeout(() => {
+              setConnectionRetryNonce((prev) => prev + 1);
+            }, 250);
           },
           onClose: () => {
             if (!connection || wsRef.current !== connection) {
@@ -3333,8 +3298,13 @@ useEffect(() => {
             }
             // console.debug('WebSocket connection closed');
             setConnectionStatus('disconnected');
+            setConnectionInitialized(false);
+            connectionInProgressRef.current = false;
             wsRef.current = null;
             setWs(null);
+            setTimeout(() => {
+              setConnectionRetryNonce((prev) => prev + 1);
+            }, 250);
           }
         },
         workflowName,
@@ -3433,7 +3403,7 @@ useEffect(() => {
       // Reset the in-progress flag when component unmounts
       connectionInProgressRef.current = false;
     };
-  }, [api, currentAppId, currentUserId, workflowConfigLoaded, currentChatId, urlWorkflowName, currentWorkflowName, resolveKnownWorkflowName]);
+  }, [api, currentAppId, currentUserId, workflowConfigLoaded, currentChatId, urlWorkflowName, currentWorkflowName, resolveKnownWorkflowName, connectionRetryNonce]);
 
   // Retry connection function
   const retryConnection = useCallback(() => {
@@ -3505,7 +3475,6 @@ useEffect(() => {
             dispatchSurfaceEvent(update);
           }
           const { tool_name, payload = {}, tool_call_id, workflow_name, onResponse, display } = update;
-          console.log('🧩 [UI] ChatPage received tool_call -> inserting into messages', { tool_name, tool_call_id, workflow_name });
           // If this UI tool requests artifact display, auto-open the ArtifactPanel like OpenAI/Claude canvases
           const displayMode = (display || payload.display || payload.mode);
           const resolvedAgentName =
@@ -3582,7 +3551,6 @@ useEffect(() => {
           }
           const shouldRenderArtifact = displayMode === 'artifact' || isViewDisplay;
           if (shouldRenderArtifact) {
-            console.log('🖼️ [UI] Auto-opening ArtifactPanel for artifact-mode event');
             if (isMobileView) {
               setMobileDrawerState('expanded');
               setHasUnseenArtifact(false);
@@ -3624,7 +3592,6 @@ useEffect(() => {
                 isStreaming: false,
                 toolCall: { tool_name, payload: artifactPayload, tool_call_id, workflow_name, onResponse, display: displayMode, component_type: update.component_type || payload.component_type || tool_name }
               };
-              console.log('🖼️ [UI] Setting currentArtifactMessages', artifactMsg.id);
               setCurrentArtifactMessages([artifactMsg]);
               artifactCacheValidRef.current = true;
               
@@ -3640,7 +3607,6 @@ useEffect(() => {
                     }
                   };
                   writeStoredCurrentArtifact(currentChatId, serializableArtifact);
-                  console.log('🖼️ [UI] Cached artifact to platform storage');
                 }
               } catch (e) { console.warn('Failed to cache artifact', e); }
             } catch (e) { console.warn('Failed to set artifact message', e); }
@@ -3693,7 +3659,6 @@ useEffect(() => {
           setMessagesWithLogging((prev) => {
             const thinkingMessages = prev.filter(m => m.isThinking);
             if (thinkingMessages.length > 0) {
-              console.log('💭 [THINKING] UI tool event (inline) received - removing', thinkingMessages.length, 'thinking bubble(s)');
             }
             
             const withoutThinking = prev.filter(m => !m.isThinking); // Remove thinking bubbles when UI tool event arrives
@@ -3798,12 +3763,6 @@ useEffect(() => {
   };
 
   const sendMessage = async (messageContent) => {
-    console.log('🚀 [SEND] Sending message:', messageContent);
-    console.log('🚀 [SEND] Current chat ID:', currentChatId);
-    console.log('🚀 [SEND] Transport type:', transportType);
-    console.log('🚀 [SEND] App ID:', currentAppId);
-    console.log('🚀 [SEND] User ID:', currentUserId);
-    console.log('🚀 [SEND] Workflow name:', currentWorkflowName);
 
     const artifactContextPayload = messageContent?.artifactContext || currentArtifactContext || null;
     
@@ -3817,13 +3776,11 @@ useEffect(() => {
       isStreaming: false
     };
     
-    console.log('💭 [THINKING] User message sent, adding thinking bubble');
     
     // Optimistic add: add user message to chat immediately, then add thinking indicator
     setMessagesWithLogging(prevMessages => {
       const existingThinking = prevMessages.filter(m => m.isThinking);
       if (existingThinking.length > 0) {
-        console.log('💭 [THINKING] Removing', existingThinking.length, 'existing thinking bubble(s)');
       }
       
       const thinkingBubble = {
@@ -3835,7 +3792,6 @@ useEffect(() => {
         timestamp: Date.now()
       };
       
-      console.log('💭 [THINKING] Adding thinking bubble:', thinkingBubble.id);
       
       return [
         ...prevMessages.filter(m => !m.isThinking), // Remove any existing thinking bubbles
@@ -3872,10 +3828,6 @@ useEffect(() => {
 
       const pendingComposerInputRequestToolCall = findPendingComposerInputRequestToolCall(messagesRef.current);
       if (pendingComposerInputRequestToolCall?.tool_call_id) {
-        console.log(
-          '📤 [SEND] Routing workflow reply through tool_call_response:',
-          pendingComposerInputRequestToolCall.tool_call_id
-        );
         await handleAgentAction(
           buildToolCallTextResponseAction(
             pendingComposerInputRequestToolCall,
@@ -3894,7 +3846,6 @@ useEffect(() => {
         return;
       }
       
-      console.log('📤 [SEND] Sending via WebSocket to workflow...');
       const success = await api.sendMessageToWorkflow(
         messageContent.content, 
         currentAppId, 
@@ -3903,7 +3854,6 @@ useEffect(() => {
         currentChatId, // Pass the chat ID
         artifactContextPayload ? { artifact_context: artifactContextPayload } : null
       );
-      console.log('📤 [SEND] WebSocket send result:', success);
       if (success) {
         if (pendingWorkflowReply) {
           setPendingWorkflowReply(null);
@@ -3977,24 +3927,11 @@ useEffect(() => {
     }
   };
 
-  const {
-    resolveResumePolicyOrder,
-    describeApiError,
-    resolveWorkflowSessionByStrategy,
-  } = useWorkflowResumePolicy({
-    configuredResumePolicy,
-    resolveKnownWorkflowName,
-    activeWorkflowName,
-    currentWorkflowName,
-    configuredEntryWorkflow,
-    api,
-    currentAppId,
-    currentUserId,
-    workflowSessions,
-    conversationMode,
-    activeChatId,
-    currentChatId,
-  });
+  const describeApiError = useCallback((error) => ({
+    status: error?.status || null,
+    message: error?.message || String(error),
+    body: error?.body || null,
+  }), []);
   const {
     ensureGeneralMode,
     startNewGeneralSession,
@@ -4046,12 +3983,9 @@ useEffect(() => {
     currentAppId,
     currentUserId,
     refreshWorkflowSessions,
-    resolveResumePolicyOrder,
-    resolveWorkflowSessionByStrategy,
     describeApiError,
     modeChangeInProgressRef,
     setModeChangePending,
-    resumeOldestFromWidgetRef,
     queryResumeHandledRef,
     consumeNavigationQueryParams,
     isMobileView,
@@ -4089,8 +4023,6 @@ useEffect(() => {
     setCurrentArtifactMessages,
     setLayoutMode,
     queryChatId,
-    queryResume,
-    resumeOldestFromWidgetRef,
     workflowArtifactSnapshotRef,
     currentChatId,
     activeChatId,
@@ -4116,7 +4048,6 @@ useEffect(() => {
     layoutModeForConversation,
     widgetOverlayOpen,
     setWidgetOverlayOpen,
-    handleConversationModeChange,
     queryResumeHandledRef,
     currentWorkflowName,
     resumeWorkflowSession,
@@ -4203,22 +4134,18 @@ useEffect(() => {
 
   // Handle agent UI actions
   const handleAgentAction = async (action) => {
-    console.log('Agent action received in chat page:', action);
     
     try {
       // Handle UI tool responses for the dynamic UI system
       if (action.type === 'tool_call_response') {
-        console.log('🎯 Processing UI tool response:', action);
 
         // If this response corresponds to the most recent artifact event, close the panel immediately
         if (lastArtifactEventRef.current && (!action.tool_call_id || action.tool_call_id === lastArtifactEventRef.current)) {
-          try { console.log('🧹 [UI] Artifact response received; collapsing ArtifactPanel now'); } catch {}
           setIsSidePanelOpen(false);
           if (dispatchSurfaceAction) {
             dispatchSurfaceAction({ type: 'ARTIFACT_CLEARED' });
           }
             lastArtifactEventRef.current = null;
-          console.log('🖼️ [UI] Clearing currentArtifactMessages due to response');
           setCurrentArtifactMessages([]);
           // Clear persisted artifact cache for this chat
           if (currentChatId) {
@@ -4227,7 +4154,6 @@ useEffect(() => {
         }
         // If we lack a real tool_call_id (e.g., restored artifact), don't submit to backend; just close locally
         if (!action.tool_call_id) {
-          console.log('ℹ️ Skipping backend submission for restored UI tool response (no tool_call_id)');
           return;
         }
 
@@ -4258,7 +4184,6 @@ useEffect(() => {
           });
           if (response.ok) {
             const result = await response.json();
-            console.log('✅ UI tool response submitted successfully:', result);
           } else {
             console.error('❌ Failed to submit UI tool response:', response.statusText);
           }
@@ -4378,12 +4303,10 @@ useEffect(() => {
           if (artifactMsg) {
             if (artifactMsg.toolCall && !artifactMsg.toolCall.onResponse) {
               artifactMsg.toolCall.onResponse = (response) => {
-                console.log('🔌 [UI] Cached artifact response (no longer functional):', response);
                 console.warn('⚠️ This is a restored artifact - responses may not work until next interaction');
               };
             }
 
-            console.log('🖼️ [UI] Restored artifact from cache on panel open');
             setCurrentArtifactMessages([artifactMsg]);
             lastArtifactEventRef.current = artifactMsg.toolCall?.tool_call_id || 'cached';
           } else {
@@ -4397,7 +4320,6 @@ useEffect(() => {
         artifactCacheValidRef.current = false;
       }
       
-      console.log(`🖼️ [UI] Panel ${next ? 'opening' : 'closing'} - keeping artifact cached`);
       return next;
     });
   };
@@ -4455,11 +4377,6 @@ useEffect(() => {
       workflowName={currentWorkflowName}
       structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
       startupMode={workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode}
-      initialMessageToUser={
-        workflowConfig?.getWorkflowConfig(currentWorkflowName)?.startup_mode === 'UserDriven'
-          ? null
-          : workflowConfig?.getWorkflowConfig(currentWorkflowName)?.initial_message_to_user
-      }
       onRetry={retryConnection}
       conversationMode={conversationMode}
       onConversationModeChange={handleConversationModeChange}
@@ -4531,10 +4448,6 @@ useEffect(() => {
 
   const currentWorkflowConfig = workflowConfig?.getWorkflowConfig(currentWorkflowName) || {};
   const uiStartupMode = currentWorkflowConfig?.startup_mode;
-  const headerInitialMessageToUser =
-    uiStartupMode === 'UserDriven'
-      ? null
-      : currentWorkflowConfig?.initial_message_to_user;
 
   const handlePendingTransitionNavigate = useCallback(
     async (option_id = null, contextVariables = {}) => {
@@ -4595,9 +4508,12 @@ useEffect(() => {
           setCurrentWorkflowName(data.workflow_id);
           setActiveWorkflowName(data.workflow_id);
           setConversationMode('workflow');
-          navigate(
-            `/chat?workflow=${encodeURIComponent(data.workflow_id)}&chat_id=${encodeURIComponent(data.chat_id)}`
-          );
+          const chatParams = new URLSearchParams({
+            mode: 'workflow',
+            workflow: String(data.workflow_id),
+            chat_id: String(data.chat_id),
+          });
+          navigate(`/chat?${chatParams.toString()}`);
           return;
         }
 
@@ -4644,7 +4560,6 @@ useEffect(() => {
         workflowName={currentWorkflowName}
         structuredOutputs={getWorkflow(currentWorkflowName)?.structuredOutputs || {}}
         startupMode={uiStartupMode}
-        initialMessageToUser={headerInitialMessageToUser}
         onRetry={retryConnection}
         onBrandClick={undefined}
         conversationMode={conversationMode}
@@ -4676,7 +4591,6 @@ useEffect(() => {
     </ErrorBoundary>
   );
 
-  console.log('📱 [RENDER] ChatPage render:', { isInWidgetMode, isMobileView, workflowCompleted, mobileDrawerState });
 
   // Widget mode has its own UI (persistent widget on non-ChatPage routes), so render that
   if (isInWidgetMode) {

@@ -127,6 +127,38 @@ surface for tooling and generated UI/API documentation, for example `public`,
 `public_readonly`, `internal`, or `admin_internal`. It is not an authorization
 mechanism; backend access remains governed by the action's `permissions`.
 
+Actions declared `internal` or `admin_internal` **cannot be dispatched through
+the external HTTP module route** (`/api/modules/{name}/{action}`). The runtime
+rejects those requests with 404 regardless of authentication status. This
+prevents external callers from triggering event-bus reaction handlers directly.
+Use these surfaces for event reactions and trusted internal runtime calls; invoke
+them through `ModuleExecutor` with `granted_permissions=None` when needed from
+trusted code paths.
+
+## module.yaml Schema Rules
+
+`module.yaml` is validated by a strict Pydantic model with `extra="forbid"`.
+Only the declared top-level keys are permitted: `schema_version`, `module`,
+`permissions`, `actions`, `capabilities`. Any other top-level key causes a
+validation error at startup.
+
+**Do not add a `changelog:` field** — it is not a declared key and will break
+module loading with an `extra_forbidden` error. Record version promotion notes
+as a YAML block comment before the `schema_version` line instead:
+
+```yaml
+# v1.0.0 (2026-07-01): Promoted to stable. Wired settlement reaction.
+schema_version: mozaiks.module.v1
+module:
+  id: {name}
+  version: 1.0.0
+  ...
+```
+
+Bump `module.version` (a semver string inside the `module:` block, not
+`schema_version`) when promoting a module to stable or making a breaking
+contract change.
+
 ## Events
 
 Declare domain events in `contracts/events.yaml` when other modules or
@@ -177,6 +209,30 @@ result = await backend_request(
     context_variables=context_variables,
 )
 ```
+
+## Track App Metrics
+
+Use `ctx.metrics.track(...)` when a module needs durable usage telemetry such as
+views, clicks, conversions, or feature usage. Keep payment, payout, and campaign
+pricing logic in the owning app module.
+
+```python
+await ctx.metrics.track(
+    "app.viewed",
+    subject_type="app",
+    subject_id=app_id,
+    session_id=session_id,
+    attribution_id=attribution_id,
+    dimensions={"surface": "discover"},
+)
+```
+
+Use `ctx.metrics.record_snapshot(...)` when the module owns a real numeric KPI
+value such as active users, revenue, retention, usage, or conversion totals for
+a reporting period. Use `ctx.metrics.summarize_values(...)` behind a
+module-owned facade action for UI or admin reads. Do not use metric snapshots as
+payment, billing, entitlement, or payout truth; those facts belong in the
+module that owns the business state.
 
 ## Admin Panel
 

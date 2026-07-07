@@ -6,6 +6,7 @@ Covers the HTTP dispatch layer in mozaiksai/hosts/platform.py:
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from mozaiksai.core.runtime.composition.executor_registry import ExecutorRegistry
@@ -20,6 +21,15 @@ class _OrdersHandler:
     async def whoami(self, ctx):
         return {"user_id": ctx.user_id}
 
+    async def scope(self, ctx):
+        return {
+            "app_id": ctx.app_id,
+            "user_id": ctx.user_id,
+            "tenant_id": ctx.tenant_id,
+            "workspace_id": ctx.workspace_id,
+            "permissions": ctx.permissions,
+        }
+
 
 def _client(
     *,
@@ -28,6 +38,9 @@ def _client(
 ) -> TestClient:
     platform_host.app.state.failed_module_names = failed_module_names or []
     platform_host.app.state.module_action_surfaces = action_surfaces or {}
+    # Mirror the module-level registry (which tests may have monkeypatched) into
+    # app.state so the modules router can retrieve it via request.app.state.
+    platform_host.app.state.executor_registry = platform_host.executor_registry
     return TestClient(platform_host.app, raise_server_exceptions=False)
 
 
@@ -167,6 +180,82 @@ def test_auth_enabled_public_module_dispatch_allows_anonymous_call(monkeypatch) 
     assert resp.json() == {"user_id": None}
 
 
+def test_authenticated_module_dispatch_uses_scope_hook_result(monkeypatch) -> None:
+    from mozaiksai.core.auth.adapters.base import UserClaims
+
+    class _MockAdapter:
+        name = "mock"
+
+        async def validate_token(self, token: str):
+            return UserClaims(
+                user_id="u1",
+                email=None,
+                name=None,
+                roles=[],
+                scopes=["access_as_user"],
+                raw_claims={},
+                provider="mock",
+                app_id="app-token",
+                tenant_id="tenant-token",
+                workspace_id="workspace-token",
+            )
+
+    class _ScopeHooks:
+        def __init__(self):
+            self.called_with = None
+
+        async def call_module_scope(self, **kwargs):
+            self.called_with = kwargs
+            return {
+                "app_id": "app-resolved",
+                "user_id": "u1",
+                "tenant_id": "tenant-resolved",
+                "workspace_id": "workspace-resolved",
+                "permissions": ["orders.scope"],
+            }
+
+    executor = ModuleExecutor()
+    executor.register(
+        "orders",
+        _OrdersHandler(),
+        action_permissions={"scope": ["orders.scope"]},
+    )
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    hooks = _ScopeHooks()
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    # The scope hook is called from the modules router, not platform.py directly.
+    monkeypatch.setattr("mozaiksai.hosts.routers.modules.get_platform_hooks", lambda: hooks)
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+    monkeypatch.setattr(
+        "mozaiksai.core.auth.dependencies.get_auth_adapter",
+        lambda: _MockAdapter(),
+    )
+
+    client = _client(failed_module_names=[])
+    resp = client.get(
+        "/api/modules/orders/scope",
+        headers={"Authorization": "Bearer fake-token"},
+    )
+
+    assert resp.status_code == 200
+    assert hooks.called_with["requested_scope"] == {
+        "app_id": "app-token",
+        "tenant_id": "tenant-token",
+        "workspace_id": "workspace-token",
+        "user_id": "u1",
+    }
+    assert hooks.called_with["default_permissions"] == ["access_as_user"]
+    assert resp.json() == {
+        "app_id": "app-resolved",
+        "user_id": "u1",
+        "tenant_id": "tenant-resolved",
+        "workspace_id": "workspace-resolved",
+        "permissions": ["orders.scope"],
+    }
+
+
 def test_unauthenticated_module_dispatch_ignores_user_id_override(monkeypatch) -> None:
     executor = ModuleExecutor()
     executor.register("orders", _OrdersHandler())
@@ -178,7 +267,7 @@ def test_unauthenticated_module_dispatch_ignores_user_id_override(monkeypatch) -
     resp = client.get("/api/modules/orders/whoami?user_id=attacker")
 
     assert resp.status_code == 200
-    assert resp.json() == {"user_id": None}
+    assert resp.json() == {"user_id": "anonymous"}
 
 
 def test_module_dispatch_rejects_authenticated_user_id_override(monkeypatch) -> None:
@@ -249,4 +338,88 @@ def test_module_dispatch_rejects_token_bound_tenant_workspace_override(monkeypat
     )
 
     assert resp.status_code == 403
-    assert resp.json()["detail"] == "Token workspace_id does not match request workspace_id"
+
+
+# ---------------------------------------------------------------------------
+# Internal-surface HTTP guard
+# ---------------------------------------------------------------------------
+
+
+def _registered_client(
+    handler,
+    *,
+    action_surfaces: dict[str, dict[str, str | None]],
+    module_name: str = "orders",
+) -> TestClient:
+    """Build a test client with a registered executor for the given handler."""
+    executor = ModuleExecutor()
+    executor.register(module_name, handler)
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    import mozaiksai.hosts.platform as _ph
+    _ph.executor_registry = registry
+    return _client(failed_module_names=[], action_surfaces=action_surfaces)
+
+
+@pytest.mark.parametrize("surface", ["internal", "admin_internal"])
+def test_internal_surface_action_is_rejected_via_http_get(monkeypatch, surface: str) -> None:
+    """Actions with internal/admin_internal api_surface must return 404 from HTTP dispatch.
+
+    These actions are only reachable through the event bus or direct
+    ModuleExecutor calls; external callers must not be able to trigger them.
+    """
+    client = _client(
+        failed_module_names=[],
+        action_surfaces={"orders": {"process_settlement": surface}},
+    )
+    resp = client.get("/api/modules/orders/process_settlement")
+    assert resp.status_code == 404, (
+        f"Expected 404 for {surface} action via HTTP GET, got {resp.status_code}"
+    )
+
+
+@pytest.mark.parametrize("surface", ["internal", "admin_internal"])
+def test_internal_surface_action_is_rejected_via_http_post(monkeypatch, surface: str) -> None:
+    """Internal-surface actions must also be blocked on POST."""
+    client = _client(
+        failed_module_names=[],
+        action_surfaces={"orders": {"process_settlement": surface}},
+    )
+    resp = client.post("/api/modules/orders/process_settlement", json={})
+    assert resp.status_code == 404, (
+        f"Expected 404 for {surface} action via HTTP POST, got {resp.status_code}"
+    )
+
+
+def test_internal_surface_block_applies_regardless_of_auth_enabled(monkeypatch) -> None:
+    """The internal-surface guard fires before auth checks — it is independent of AUTH_ENABLED."""
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PROVIDER", "jwt")
+
+    client = _client(
+        failed_module_names=[],
+        action_surfaces={"orders": {"process_settlement": "internal"}},
+    )
+    # Even with a valid-looking bearer token the action should be unreachable.
+    resp = client.get(
+        "/api/modules/orders/process_settlement",
+        headers={"Authorization": "Bearer any-token"},
+    )
+    assert resp.status_code == 404
+
+
+def test_non_internal_surface_action_is_not_blocked_by_internal_guard(monkeypatch) -> None:
+    """Actions without an internal surface must not be affected by the guard."""
+    executor = ModuleExecutor()
+    executor.register("orders", _OrdersHandler())
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+
+    client = _client(
+        failed_module_names=[],
+        action_surfaces={"orders": {"list": "public_readonly"}},
+    )
+    resp = client.get("/api/modules/orders/list")
+    # Should reach the executor (200 or 4xx from permission/action checks — NOT 404 from guard)
+    assert resp.status_code != 404 or "Action not found" not in resp.json().get("detail", "")

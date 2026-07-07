@@ -592,6 +592,61 @@ class ModuleProfileManifest(ModuleContractModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# User relationship contract — modules/{module}/contracts/relationships.yaml
+# ---------------------------------------------------------------------------
+
+
+class ModuleRelationshipProvider(ModuleContractModel):
+    id: str
+    label: str
+    description: str | None = None
+    order: int = 100
+    action: str
+    resource_types: list[str] = Field(default_factory=list)
+    relationship_types: list[str] = Field(default_factory=list)
+
+    @field_validator("id", "label", "action", mode="before")
+    @classmethod
+    def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
+        return _required_text(value, field_name=f"relationship provider {info.field_name}")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _optional(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def _order(cls, value: Any) -> int:
+        if value in (None, ""):
+            return 100
+        return int(value)
+
+    @field_validator("resource_types", "relationship_types", mode="before")
+    @classmethod
+    def _lists(cls, value: Any) -> list[str]:
+        return _string_list(value)
+
+    @model_validator(mode="after")
+    def _validate_provider_contract(self) -> ModuleRelationshipProvider:
+        if not self.resource_types:
+            raise ValueError("relationship providers must declare at least one resource_type")
+        return self
+
+
+class ModuleRelationshipsManifest(ModuleContractModel):
+    schema_version: Literal["mozaiks.relationships.v1"] = "mozaiks.relationships.v1"
+    providers: list[ModuleRelationshipProvider] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_provider_ids(self) -> ModuleRelationshipsManifest:
+        provider_ids = [provider.id for provider in self.providers]
+        if len(provider_ids) != len(set(provider_ids)):
+            raise ValueError("relationships.yaml providers must have unique id values")
+        return self
+
+
 class ModuleRuntimeExtension(ModuleContractModel):
     kind: Literal["api_router", "startup_service"]
     entrypoint: str
@@ -643,6 +698,7 @@ class ModuleCompanionManifests(ModuleContractModel):
     settings: ModuleSettingsManifest | None = None
     admin: ModuleAdminManifest | None = None
     profile: ModuleProfileManifest | None = None
+    relationships: ModuleRelationshipsManifest | None = None
     runtime_extensions: ModuleRuntimeExtensionsManifest | None = None
 
 
@@ -705,6 +761,7 @@ class ModuleLoader:
         "settings": ("settings.yaml", ModuleSettingsManifest),
         "admin": ("admin.yaml", ModuleAdminManifest),
         "profile": ("profile.yaml", ModuleProfileManifest),
+        "relationships": ("relationships.yaml", ModuleRelationshipsManifest),
     }
 
     def __init__(self, base_path: str) -> None:

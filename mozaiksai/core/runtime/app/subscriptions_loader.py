@@ -45,6 +45,13 @@ Example::
         usage_meter_id: ai_tokens
         scope: user
         auto_debit_usage: true
+    pricing_catalog:
+      default_group_id: platform
+      groups:
+        - group_id: platform
+          label: Platform
+          description: App access, collaboration, and hosted operations.
+          plan_ids: [free, pro]
 """
 
 import re
@@ -64,6 +71,8 @@ _METER_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _WALLET_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _DATA_ALIAS_RE = re.compile(r"^[a-z0-9_.-]+$")
 _FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+_CATALOG_ID_RE = re.compile(r"^[a-z0-9_-]+$")
+_CAPABILITY_GROUP_RE = re.compile(r"^[a-z0-9_.-]+$")
 
 _CONFIG_PATH = Path("config") / "subscriptions.yaml"
 
@@ -250,6 +259,145 @@ class PlanDef(BaseModel):
         return result
 
 
+class PricingCatalogGroupDef(BaseModel):
+    """Display grouping for public pricing and plan comparison surfaces.
+
+    Pricing catalog groups are UI metadata only. They do not grant capabilities,
+    create prices, or replace the plan catalog. Runtime entitlement enforcement
+    still reads ``plans[].capabilities`` and active assignment records.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    group_id: str
+    label: str
+    description: str | None = None
+    kind: Literal["subscription", "service", "add_on", "mixed"] = "subscription"
+    plan_ids: list[str] = Field(default_factory=list)
+    capability_groups: list[str] = Field(default_factory=list)
+    add_on_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("group_id")
+    @classmethod
+    def _validate_group_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _CATALOG_ID_RE.match(value):
+            raise ValueError(
+                f"group_id must match [a-z0-9_-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("label must be non-empty")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def _validate_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("plan_ids", mode="before")
+    @classmethod
+    def _validate_plan_ids(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("plan_ids must be a list")
+        result: list[str] = []
+        for raw in value:
+            plan_id = str(raw or "").strip()
+            if not plan_id:
+                continue
+            if not _PLAN_ID_RE.match(plan_id):
+                raise ValueError(
+                    f"plan_id must match [a-z0-9_-]+, got {plan_id!r}"
+                )
+            result.append(plan_id)
+        return result
+
+    @field_validator("capability_groups", mode="before")
+    @classmethod
+    def _validate_capability_groups(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("capability_groups must be a list")
+        result: list[str] = []
+        for raw in value:
+            group = str(raw or "").strip()
+            if not group:
+                continue
+            if not _CAPABILITY_GROUP_RE.match(group):
+                raise ValueError(
+                    f"capability_group must match [a-z0-9_.-]+, got {group!r}"
+                )
+            result.append(group)
+        return result
+
+    @field_validator("add_on_ids", mode="before")
+    @classmethod
+    def _validate_add_on_ids(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("add_on_ids must be a list")
+        result: list[str] = []
+        for raw in value:
+            add_on_id = str(raw or "").strip()
+            if not add_on_id:
+                continue
+            if not _CATALOG_ID_RE.match(add_on_id):
+                raise ValueError(
+                    f"add_on_id must match [a-z0-9_-]+, got {add_on_id!r}"
+                )
+            result.append(add_on_id)
+        return result
+
+
+class PricingCatalogDef(BaseModel):
+    """Optional display catalog for grouping plans into pricing tabs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_group_id: str | None = None
+    groups: list[PricingCatalogGroupDef] = Field(default_factory=list)
+
+    @field_validator("default_group_id")
+    @classmethod
+    def _validate_default_group_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if not _CATALOG_ID_RE.match(value):
+            raise ValueError(
+                f"default_group_id must match [a-z0-9_-]+, got {value!r}"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _validate_groups(self) -> PricingCatalogDef:
+        if not self.groups:
+            raise ValueError("pricing_catalog.groups must be non-empty")
+        group_ids = [group.group_id for group in self.groups]
+        if len(group_ids) != len(set(group_ids)):
+            raise ValueError("pricing_catalog group_ids must be unique")
+        if self.default_group_id and self.default_group_id not in set(group_ids):
+            raise ValueError(
+                f"default_group_id {self.default_group_id!r} must reference a "
+                f"declared pricing_catalog group_id; known group_ids: {group_ids}"
+            )
+        return self
+
+
 class SubscriptionAssignmentStoreDef(BaseModel):
     """Data-contract backed subscription assignment store definition.
 
@@ -341,6 +489,7 @@ class SubscriptionsConfig(BaseModel):
     default_plan_id: str
     assignment_store: SubscriptionAssignmentStoreDef | None = None
     token_wallets: list[TokenWalletDef] = Field(default_factory=list)
+    pricing_catalog: PricingCatalogDef | None = None
     plans: list[PlanDef]
 
     @field_validator("label")
@@ -372,6 +521,19 @@ class SubscriptionsConfig(BaseModel):
                 if declared_wallet_ids and allowance.wallet_id not in declared_wallet_ids:
                     raise ValueError(
                         f"token_allowance wallet_id {allowance.wallet_id!r} must reference token_wallets"
+                    )
+        if self.pricing_catalog:
+            declared_plan_ids = set(plan_ids)
+            for group in self.pricing_catalog.groups:
+                unknown_plan_ids = [
+                    plan_id
+                    for plan_id in group.plan_ids
+                    if plan_id not in declared_plan_ids
+                ]
+                if unknown_plan_ids:
+                    raise ValueError(
+                        f"pricing_catalog group {group.group_id!r} references "
+                        f"unknown plan_ids: {unknown_plan_ids}"
                     )
         return self
 
@@ -453,6 +615,8 @@ def load_subscriptions_config(app_root: Path) -> SubscriptionsConfig | None:
 
 __all__ = [
     "PlanDef",
+    "PricingCatalogDef",
+    "PricingCatalogGroupDef",
     "SubscriptionAssignmentStoreDef",
     "SubscriptionsConfig",
     "SubscriptionsLoadError",

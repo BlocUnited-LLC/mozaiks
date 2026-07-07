@@ -48,6 +48,11 @@ export const PRIMITIVE_CATALOG = {
     use: 'Use for 2-4 genuinely useful portfolio metrics above a collection.',
     avoid: 'Do not create generic KPI strips or more than four stats.',
   },
+  PricingCatalog: {
+    tier: 'default',
+    use: 'Use for public pricing pages that render subscription plans or add-ons from app/config/subscriptions.yaml and pricing catalog groups.',
+    avoid: 'Do not use for payment-provider setup, invoices, settlement logic, or pages with hardcoded plan data when a subscription config exists.',
+  },
   Panel: {
     tier: 'support',
     use: 'Use for one purposeful supporting section on a detail page.',

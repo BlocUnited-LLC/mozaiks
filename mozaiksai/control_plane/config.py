@@ -54,6 +54,7 @@ class ControlPlaneConfig(BaseModel):
 
     schema_version: Literal["mozaiks.control_plane.runtime"] = "mozaiks.control_plane.runtime"
     enabled: bool = False
+    profile: str | None = None
     llm_profiles: dict[ControlPlaneLLMProfileId, ControlPlaneLLMProfileConfig] = Field(default_factory=dict)
     classifier: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)
     coding: ControlPlaneCapabilityConfig = Field(default_factory=ControlPlaneCapabilityConfig)

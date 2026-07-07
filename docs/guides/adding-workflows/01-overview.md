@@ -74,14 +74,10 @@ them as contract references, not as full workflow examples.
     orchestration_pattern: ag2_network
     initial_agent: IntakeAgent
     initial_message: "Start with IntakeAgent."
-    initial_message_to_user: null
     triggers:
       - type: chat
         description: Start from the chat UI.
     ```
-
-    `initial_message` is a hidden runtime seed. Use `initial_message_to_user` only
-    when the workflow needs a visible startup message.
 
 === "context_variables.yaml"
 

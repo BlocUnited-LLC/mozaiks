@@ -285,6 +285,10 @@ class TestSkipReasonForPath:
         reason = skip_reason_for_path(".venv/lib/python3.12/site.py")
         assert reason == "excluded_dir"
 
+    def test_excluded_dir_release_local_virtualenv(self):
+        reason = skip_reason_for_path(".release-local-venv/Lib/site-packages/foo.py")
+        assert reason == "excluded_dir"
+
     def test_min_in_filename(self):
         reason = skip_reason_for_path("static/app.min.js")
         assert reason == "excluded_file"
@@ -328,6 +332,9 @@ class TestIsExcludedSourceDirectoryPath:
 
     def test_path_in_venv(self):
         assert is_excluded_source_directory_path(".venv/site-packages/foo.py") is True
+
+    def test_path_in_release_local_virtualenv(self):
+        assert is_excluded_source_directory_path(".release-local-venv/site-packages/foo.py") is True
 
     def test_safe_relative_path(self):
         assert is_excluded_source_directory_path("app/modules/handler.py") is False

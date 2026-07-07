@@ -210,7 +210,6 @@ export function applyBrand(brand) {
   }
   if (brand.assets?.logo)            root.style.setProperty('--brand-logo-url', brand.assets.logo);
 
-  console.log(`🎨 Brand applied: ${brand.name}`);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

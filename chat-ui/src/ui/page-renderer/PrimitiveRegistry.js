@@ -33,6 +33,7 @@ import { AlertBanner }     from '../primitives/AlertBanner.jsx';
 import { ActionButton }    from '../primitives/ActionButton.jsx';
 import { FileList }        from '../primitives/FileList.jsx';
 import { PageHeader }      from '../primitives/PageHeader.jsx';
+import { PricingCatalog }  from '../primitives/PricingCatalog.jsx';
 import { ResourceTable }   from '../primitives/ResourceTable.jsx';
 import { SummaryStrip }    from '../primitives/SummaryStrip.jsx';
 import {
@@ -64,6 +65,7 @@ const PRIMITIVES = {
   ActionButton:    { Component: ActionButton,    schema: PRIMITIVE_SCHEMAS.ActionButton },
   FileList:        { Component: FileList,        schema: PRIMITIVE_SCHEMAS.FileList },
   PageHeader:      { Component: PageHeader,      schema: PRIMITIVE_SCHEMAS.PageHeader },
+  PricingCatalog:  { Component: PricingCatalog,  schema: PRIMITIVE_SCHEMAS.PricingCatalog },
   ResourceTable:   { Component: ResourceTable,   schema: PRIMITIVE_SCHEMAS.ResourceTable },
   SummaryStrip:    { Component: SummaryStrip,    schema: PRIMITIVE_SCHEMAS.SummaryStrip },
   InlineEmptyState:{ Component: InlineEmptyState,schema: PRIMITIVE_SCHEMAS.InlineEmptyState },

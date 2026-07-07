@@ -273,7 +273,7 @@ async def optional_user(
     Raises HTTPException if token is present but invalid.
     """
     if not is_auth_enabled():
-        return None
+        return await require_user(request, authorization)
 
     token = _extract_token(authorization, request)
     if not token:
@@ -370,6 +370,37 @@ def validate_path_id(value: str, field_name: str = "id") -> str:
             detail=f"Invalid {field_name} format",
         )
     return value
+
+
+def resolve_scope_from_principal(
+    principal: "UserPrincipal",
+    *,
+    app_id: str | None = None,
+    user_id: str | None = None,
+    default_user_id: str | None = None,
+    default_app_id: str = "default",
+) -> tuple[str, str]:
+    """Resolve and validate the (app_id, user_id) scope from an authenticated principal.
+
+    Validates that any caller-supplied *app_id* or *user_id* match the
+    authenticated principal's claims, then returns the canonical resolved pair.
+    Raises :class:`fastapi.HTTPException` on a mismatch or missing required value.
+    """
+    effective_user_id = user_id
+    if principal.user_id == "anonymous" and not effective_user_id:
+        effective_user_id = str(default_user_id or "").strip() or None
+
+    resolved_user_id = validate_user_id_against_principal(principal, body_user_id=effective_user_id)
+
+    provided_app_id = str(app_id or "").strip() or None
+    principal_app_id = str(principal.app_id or "").strip() or None
+    if principal_app_id and provided_app_id and provided_app_id != principal_app_id:
+        raise HTTPException(status_code=403, detail="app_id in request body does not match authenticated app scope")
+
+    resolved_app_id = principal_app_id or provided_app_id or default_app_id
+    if not resolved_app_id:
+        raise HTTPException(status_code=400, detail="app_id is required")
+    return resolved_app_id, resolved_user_id
 
 
 def validate_user_id_against_principal(

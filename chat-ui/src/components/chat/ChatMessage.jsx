@@ -14,13 +14,6 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
   // Debug (disabled by default): uncomment to trace renders
   if (debugFlag('mozaiks.debug_render')) {
     try {
-      console.log('[RENDER] ChatMessage component', {
-        from: message_from,
-        agent: agentName,
-        len: (message||'').length,
-        structured: isStructuredCapable,
-        latest: isLatest
-      });
     } catch {}
   }
 

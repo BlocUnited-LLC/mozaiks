@@ -42,7 +42,8 @@ async def read_carry_forward_module_contract(
                 "Allowed values: 'module.yaml', 'runtime_extensions.yaml', "
                 "'contracts/events.yaml', 'contracts/reactions.yaml', "
                 "'contracts/notifications.yaml', 'contracts/settings.yaml', "
-                "'contracts/admin.yaml', 'contracts/profile.yaml'. "
+                "'contracts/admin.yaml', 'contracts/profile.yaml', "
+                "'contracts/relationships.yaml'. "
                 "When null, all allowed files present in the workspace are returned. "
                 "Backend Python files (backend/*.py) are disallowed in this phase."
             )

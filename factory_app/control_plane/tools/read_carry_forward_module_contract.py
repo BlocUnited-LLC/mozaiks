@@ -44,6 +44,7 @@ Allowed files (relative to ``modules/{module_id}/``):
 - ``contracts/settings.yaml``
 - ``contracts/admin.yaml``
 - ``contracts/profile.yaml``
+- ``contracts/relationships.yaml``
 
 Disallowed:
 - ``backend/*.py`` — backend source is not exposed in this phase.
@@ -74,6 +75,7 @@ _ALLOWED_CONTRACT_FILES: frozenset[str] = frozenset({
     "contracts/settings.yaml",
     "contracts/admin.yaml",
     "contracts/profile.yaml",
+    "contracts/relationships.yaml",
 })
 
 

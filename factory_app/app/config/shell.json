@@ -12,10 +12,10 @@
         "id": "create-app",
         "intent": "create_app",
         "label": "Create App",
-        "path": "/create",
+        "path": "/create?new=1",
         "path_by_role": {
-          "admin": "/create",
-          "default": "/create"
+          "admin": "/create?new=1",
+          "default": "/create?new=1"
         },
         "variants": [
           {

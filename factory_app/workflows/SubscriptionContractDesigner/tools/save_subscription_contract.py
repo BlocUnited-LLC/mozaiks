@@ -92,18 +92,19 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
 
 
 def _yaml_file_content(config: dict[str, Any]) -> str:
-    return yaml.safe_dump(
+    return str(yaml.safe_dump(
         config,
         sort_keys=False,
         allow_unicode=False,
         default_flow_style=False,
-    )
+    ))
 
 
 def _normalized_noop(output: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(output)
     normalized["contract_required"] = False
     normalized["subscription_config_file"] = None
+    normalized["plan_design_rationale"] = []
     normalized["metering_declarations"] = []
     normalized["module_contract_updates"] = []
     normalized["workflow_contract_updates"] = []
@@ -127,6 +128,7 @@ def _normalize_required(output: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(output)
     config = _normalize_subscription_config(normalized.get("subscription_config_file"))
     normalized["subscription_config_file"] = config
+    normalized["plan_design_rationale"] = list(normalized.get("plan_design_rationale") or [])
     normalized["code_files"] = [
         {
             "filename": "config/subscriptions.yaml",

@@ -32,6 +32,7 @@ _PHASE_7A_ALLOWLIST = {
     "contracts/settings.yaml",
     "contracts/admin.yaml",
     "contracts/profile.yaml",
+    "contracts/relationships.yaml",
 }
 _MARKETPLACE_TOKENS = (
     "listing", "listings", "seller", "sellers", "buyer", "buyers",

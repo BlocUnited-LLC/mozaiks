@@ -253,9 +253,6 @@ function ProfilePanel({ backendUrl, auth }) {
           )}
           <p className="text-sm text-muted-foreground mt-1">{profile.email}</p>
           <div className="flex gap-2 mt-2 flex-wrap">
-            {profile.subscription_tier && (
-              <Badge variant="primary">{profile.subscription_tier}</Badge>
-            )}
             {(profile.roles || []).map(role => (
               <Badge key={role} variant={role === 'admin' ? 'warning' : 'default'}>{role}</Badge>
             ))}
@@ -624,7 +621,7 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-background px-4 py-8 sm:px-8">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8">
-          <h1 className="text-2xl font-bold text-foreground">Profile</h1>
+          <h1 className="text-2xl font-bold text-foreground">Account</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {user?.email || user?.name || 'Your account'}
           </p>

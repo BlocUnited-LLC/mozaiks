@@ -3,6 +3,5 @@ max_turns: 50
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
-initial_message_to_user: null
 initial_agent: ReviewAgent
 

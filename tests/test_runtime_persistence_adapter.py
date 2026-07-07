@@ -36,6 +36,9 @@ class FakeCollection:
     async def count(self, query: Mapping[str, Any]) -> int:
         return 1 if query else 0
 
+    async def aggregate(self, pipeline: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [{"pipeline": list(pipeline)}]
+
     async def ensure_indexes(self, indexes: Sequence[Mapping[str, Any]]) -> None:
         self.indexes = list(indexes)
 

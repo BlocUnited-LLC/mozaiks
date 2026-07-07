@@ -78,15 +78,15 @@ def test_app_loader_discovers_platform_bundle_without_app_yaml() -> None:
     assert "ValueEngine" not in workflow_names
 
 
-def test_mozaiks_platform_route_manifest_owns_dashboard_route() -> None:
+def test_mozaiks_platform_route_manifest_owns_home_route() -> None:
     app_root = _product_app_root()
     manifest_path = app_root / "ui" / "route_manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    dashboard_route = next(item for item in data["pages"] if item["path"] == "/dashboard")
-    assert dashboard_route["component"] == "PlatformDashboard"
-    assert dashboard_route["requiresAuth"] is False
-    assert "showInHeader" not in dashboard_route
+    home_route = next(item for item in data["pages"] if item["path"] == "/home")
+    assert home_route["component"] == "HomePage"
+    assert home_route["meta"]["requiresAuth"] is True
+    assert "showInHeader" not in home_route
 
 
 def test_mozaiks_platform_workflow_registry_owns_create_route() -> None:
@@ -97,6 +97,17 @@ def test_mozaiks_platform_workflow_registry_owns_create_route() -> None:
     assert create_route["transition"] == "app_type_selector"
     assert create_route["sequence"] == "build"
     assert create_route["requiresAuth"] is False
+    assert create_route["meta"]["freshStart"] is True
+
+
+def test_factory_shell_create_action_requests_fresh_build() -> None:
+    shell_path = _FACTORY_APP_ROOT / "config" / "shell.json"
+    data = json.loads(shell_path.read_text(encoding="utf-8"))
+
+    header_actions = {item["id"]: item for item in data["header"]["actions"]}
+    assert header_actions["create-app"]["path"] == "/create?new=1"
+    assert header_actions["create-app"]["path_by_role"]["admin"] == "/create?new=1"
+    assert header_actions["create-app"]["path_by_role"]["default"] == "/create?new=1"
 
 
 def test_mozaiks_platform_workflow_registry_uses_shared_base_and_local_overlay() -> None:
@@ -137,15 +148,16 @@ def test_mozaiks_platform_shell_config_owns_shell_ui() -> None:
     header_actions = {item["id"]: item for item in data["header"]["actions"]}
     assert "landing_spot" not in data
     assert data["header"]["logo"]["href"] == "/marketplace"
-    assert "notifications" not in data
+    assert data["notifications"]["show"] is True
     assert "profile" not in data
-    assert data["shortcuts"]["header"] == ["dashboard", "wallet"]
+    assert data["shortcuts"]["header"] == []
+    assert data["shortcuts"]["profile"] == ["profile", "home", "wallet", "messages", "signout"]
+    assert data["shortcuts"]["mobile"] == ["home", "create", "profile"]
     assert data["shortcuts"]["footer"] == ["legal", "terms", "cookies"]
     assert data["shortcuts"]["footerHideOnMobile"] is True
     assert header_actions["create-app"]["path"] == "/create"
     assert "route_overrides" not in header_actions["create-app"]
-    assert header_actions["create-app"]["intent"] == "create_app"
-    assert header_actions["create-app"]["variants"][0]["when"]["surface"] == "workflow_session"
+    assert header_actions["create-app"]["path_by_role"]["default"] == "/create"
 
 
 def test_mozaiks_platform_theme_config_keeps_chat_ui_only() -> None:

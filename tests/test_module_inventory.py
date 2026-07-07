@@ -88,6 +88,7 @@ _FULL_FILE_MAP: dict[str, str] = {
     "modules/projects/contracts/admin.yaml": "schema_version: mozaiks.admin.v1\npanels: []",
     # profile and runtime_extensions
     "modules/projects/contracts/profile.yaml": "schema_version: mozaiks.profile.v1\npanels: []",
+    "modules/projects/contracts/relationships.yaml": "schema_version: mozaiks.relationships.v1\nproviders: []",
     "modules/projects/runtime_extensions.yaml": "api_router: backend.router:router",
     # backend
     "modules/projects/backend/handler.py": "class ProjectsModule: pass",
@@ -157,6 +158,9 @@ class TestFullModule:
     def test_has_profile(self):
         assert self.entries[0].has_profile is True
 
+    def test_has_relationships(self):
+        assert self.entries[0].has_relationships is True
+
     def test_has_runtime_extensions(self):
         assert self.entries[0].has_runtime_extensions is True
 
@@ -186,6 +190,7 @@ class TestFullModule:
             "modules/projects/contracts/events.yaml",
             "modules/projects/contracts/notifications.yaml",
             "modules/projects/contracts/profile.yaml",
+            "modules/projects/contracts/relationships.yaml",
             "modules/projects/contracts/reactions.yaml",
             "modules/projects/contracts/settings.yaml",
         }
@@ -443,6 +448,20 @@ def test_profile_contract_detected():
 
 
 # ---------------------------------------------------------------------------
+# relationships.yaml detection
+# ---------------------------------------------------------------------------
+
+def test_relationships_contract_detected():
+    file_map = {
+        "modules/projects/module.yaml": "schema_version: mozaiks.module.v1\nactions: []",
+        "modules/projects/contracts/relationships.yaml": "schema_version: mozaiks.relationships.v1\nproviders: []",
+        "modules/projects/backend/handler.py": "",
+    }
+    entries = extract_module_inventory(file_map)
+    assert entries[0].has_relationships is True
+
+
+# ---------------------------------------------------------------------------
 # file_map immutability
 # ---------------------------------------------------------------------------
 
@@ -610,6 +629,7 @@ def _make_entry(**kwargs) -> ModuleInventoryEntry:
         has_settings=False,
         has_admin=False,
         has_profile=False,
+        has_relationships=False,
         has_runtime_extensions=False,
         backend_files=[],
         contract_files=[],
@@ -864,6 +884,18 @@ class TestClassifyInfrastructureSignals:
         entry = _make_entry(
             module_id="user_profile_display",
             has_profile=True,
+            has_persistence=False,
+            has_admin=False,
+            has_reactions=False,
+            event_types=[],
+        )
+        cls, _ = classify_module_carry_forward(entry)
+        assert cls == "safe_carry_forward"
+
+    def test_unknown_relationships_only_module_is_safe(self) -> None:
+        entry = _make_entry(
+            module_id="resource_relationships",
+            has_relationships=True,
             has_persistence=False,
             has_admin=False,
             has_reactions=False,

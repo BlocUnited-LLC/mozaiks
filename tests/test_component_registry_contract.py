@@ -17,3 +17,10 @@ def test_mozaiks_app_keeps_workflow_initializer_stable() -> None:
     assert "const moduleInitializer = useCallback(" in source
     assert "workflowInitializer={moduleInitializer}" in source
 
+
+def test_mozaiks_app_opts_into_react_router_future_flags() -> None:
+    source = (REPO_ROOT / "chat-ui/src/app/MozaiksApp.jsx").read_text()
+
+    assert "v7_startTransition: true" in source
+    assert "v7_relativeSplatPath: true" in source
+

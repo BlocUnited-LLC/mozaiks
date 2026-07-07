@@ -35,6 +35,7 @@ _PHASE_7A_MODULE_ALLOWLIST: frozenset[str] = frozenset({
     "contracts/settings.yaml",
     "contracts/admin.yaml",
     "contracts/profile.yaml",
+    "contracts/relationships.yaml",
 })
 
 # ---------------------------------------------------------------------------

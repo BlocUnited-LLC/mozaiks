@@ -161,6 +161,11 @@ export function isAppDeployReady(status) {
 }
 
 export function getAppStudioDestination(app) {
+  if (isAppInBuild(app?.status || app?.lifecycle_state) && app?.active_chat_id) {
+    const workflowId = encodeURIComponent(app?.active_workflow_id || 'ValueEngine')
+    const chatId = encodeURIComponent(app.active_chat_id)
+    return `/chat?workflow=${workflowId}&mode=workflow&chat_id=${chatId}`
+  }
   const appId = encodeURIComponent(app?.app_id || app?.id || '')
   if (!appId) return '/apps'
   return `/apps/${appId}/overview`

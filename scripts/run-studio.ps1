@@ -42,9 +42,11 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-$shellExe = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source
+$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+$shellExe = if ($_pwsh) { $_pwsh.Source } else { $null }
 if (-not $shellExe) {
-    $shellExe = (Get-Command powershell -ErrorAction SilentlyContinue)?.Source
+    $_ps = Get-Command powershell -ErrorAction SilentlyContinue
+    $shellExe = if ($_ps) { $_ps.Source } else { $null }
 }
 if (-not $shellExe) {
     Write-Host "[studio] No PowerShell executable found on PATH." -ForegroundColor Red

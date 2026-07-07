@@ -1429,12 +1429,6 @@ models:
         type: str
         default: ag2_network
         description: Selected AG2 Network patternbook label for this workflow, or ag2_network when not specialized.
-      initial_message_to_user:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: Message shown to user (UserDriven only)
       initial_message:
         type: union
         variants:

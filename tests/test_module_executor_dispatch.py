@@ -402,6 +402,21 @@ class TestSchemaValidation:
         assert error is not None
         assert isinstance(error, str)
 
+    def test_validate_schema_accepts_openapi_nullable_properties(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "string", "nullable": True},
+                "status": {
+                    "type": "string",
+                    "nullable": True,
+                    "enum": ["active", "pending", "disabled"],
+                },
+            },
+        }
+
+        assert _validate_schema({"plan_id": None, "status": None}, schema) is None
+
 
 # ---------------------------------------------------------------------------
 # 6. Event emitter envelope

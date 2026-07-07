@@ -559,6 +559,27 @@ service.py → ctx.emit(event_type, payload)
 Modules do not know which workflows they trigger. The trigger contract is owned by
 the workflow's `orchestrator.yaml`.
 
+## App Metric Signals
+
+Use `ctx.metrics.track(...)` for durable usage signals that are measurements
+rather than domain state changes: app views, feature usage, campaign
+impressions, campaign clicks, conversions, and funnel steps.
+
+```python
+await ctx.metrics.track(
+    "feature.used",
+    subject_type="feature",
+    subject_id="search",
+    dimensions={"surface": "workspace"},
+)
+```
+
+Metric events are generic and app-scoped. They should not encode hosted-product
+business rules such as payout percentages, sponsor pricing, subscription
+entitlements, or payment settlement. Modules that expose metric summaries to UI
+should wrap `ctx.metrics.summarize(...)` or `ctx.metrics.funnel(...)` behind an
+app-owned action so permissions and visibility stay explicit.
+
 ---
 
 ## Capability Ownership Classification

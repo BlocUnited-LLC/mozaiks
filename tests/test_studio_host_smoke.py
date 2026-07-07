@@ -109,11 +109,22 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
                 "owner_user_id": kwargs.get("owner_user_id", "demo-user"),
                 "updated_at": "2025-01-01T00:00:00+00:00",
                 "build_registry_id": "appreg_smoke",
+                "active_chat_id": kwargs.get("active_chat_id"),
+                "active_workflow_id": kwargs.get("active_workflow_id"),
             }
             return {"success": True, "app": self._app}
 
         async def get_app_record(self, **_kwargs):
             return {"app": self._app}
+
+        async def update_build_status(self, **kwargs):  # noqa: ANN003
+            self._app = {
+                **(self._app or {}),
+                "build_registry_id": kwargs.get("build_registry_id"),
+                "lifecycle_state": kwargs.get("status"),
+                "bundle_path": kwargs.get("bundle_path"),
+            }
+            return {"success": True, "app": self._app}
 
     service = _AppRegistryService()
 
@@ -124,14 +135,30 @@ def test_studio_endpoints_work_without_auth_user_id(monkeypatch):
     reset_auth_adapter()
 
     client = TestClient(studio_app.app)
-    create_response = client.post("/api/studio/apps", json={"name": "Smoke App"})
+    create_response = client.post(
+        "/api/studio/apps",
+        json={
+            "name": "Smoke App",
+            "active_chat_id": "chat-smoke",
+            "active_workflow_id": "ValueEngine",
+        },
+    )
     assert create_response.status_code == 200
     app_id = create_response.json()["app"]["app_id"]
+    build_registry_id = create_response.json()["app"]["build_registry_id"]
+    assert create_response.json()["app"]["active_chat_id"] == "chat-smoke"
+    assert create_response.json()["app"]["active_workflow_id"] == "ValueEngine"
 
     build_response = client.get(f"/api/studio/build?app_id={app_id}")
+    status_response = client.put(
+        f"/api/studio/apps/{build_registry_id}/status",
+        json={"status": "review", "bundle_path": "generated/apps/smoke"},
+    )
     history_response = client.get("/api/studio/build/history?limit=10")
 
     assert build_response.status_code == 200
+    assert status_response.status_code == 200
+    assert status_response.json()["app"]["lifecycle_state"] == "review"
     assert history_response.status_code == 200
 
 
@@ -152,7 +179,7 @@ def test_runtime_cors_uses_declared_frontend_origins(monkeypatch):
 
 def test_notification_count_query_uses_platform_notification_intents():
     from mozaiksai.core.auth.dependencies import UserPrincipal
-    from mozaiksai.hosts import platform as platform_app
+    from mozaiksai.hosts.routers import notifications as notifications_router
 
     principal = UserPrincipal(
         user_id="user_1",
@@ -164,7 +191,7 @@ def test_notification_count_query_uses_platform_notification_intents():
         app_id="app_1",
     )
 
-    assert platform_app._notification_query_for_principal(principal) == {
+    assert notifications_router._notification_query_for_principal(principal) == {
         "status": "unread",
         "app_id": "app_1",
         "$or": [
@@ -175,18 +202,20 @@ def test_notification_count_query_uses_platform_notification_intents():
     }
 
 
-def test_product_dashboard_uses_canonical_module_route():
+def test_product_home_uses_canonical_module_actions():
     from tests.import_utils import active_app_root
 
     app_root = active_app_root()
-    dashboard_path = app_root / "ui" / "pages" / "custom" / "Dashboard.jsx"
-    if not dashboard_path.exists():
-        pytest.skip("Product-specific Dashboard.jsx not present in active app workspace")
-    source = dashboard_path.read_text(encoding="utf-8")
+    home_path = app_root / "ui" / "pages" / "custom" / "HomePage.jsx"
+    if not home_path.exists():
+        pytest.skip("Product-specific HomePage.jsx not present in active app workspace")
+    source = home_path.read_text(encoding="utf-8")
 
-    assert "/api/modules/investor_marketplace/list_listings" in source
-    assert "/api/modules/communications/list_threads" in source
+    assert "moduleAction('app_registry', 'list_user_apps'" in source
+    assert "moduleAction('messages', 'list_threads'" in source
+    assert "moduleAction('wallet', 'get_wallet_summary'" in source
     assert "/api/modules/platform_apps/list_apps" not in source
+    assert "/api/modules/" not in source
     assert "/api/operations/" not in source
 
 

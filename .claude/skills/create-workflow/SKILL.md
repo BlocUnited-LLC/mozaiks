@@ -85,7 +85,6 @@ max_turns: 20
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: Pipeline
-initial_message_to_user: null
 initial_message: "Start with ExampleHostAgent."
 initial_agent: ExampleHostAgent
 triggers:
@@ -97,7 +96,6 @@ Rules:
 
 - Use `workflow_startup_mode`, not `startup_mode`.
 - `initial_message` is a hidden runtime seed, not visible UI copy.
-- `initial_message_to_user` is optional visible startup copy.
 
 ### 2. `structured_outputs.yaml`
 

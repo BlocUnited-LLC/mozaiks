@@ -163,6 +163,14 @@ def _iter_dicts(value: Any) -> Iterable[dict[str, Any]]:
                 yield item
 
 
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    return list(_iter_dicts(value))
+
+
 def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
     needs: list[dict[str, Any]] = []
     if not isinstance(app_build_plan, dict):
@@ -187,6 +195,11 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
         pack_id = pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id")
         for requirement in pack.get("required_integrations") or []:
             if isinstance(requirement, dict):
+                required_by = {
+                    "source": "capability_pack",
+                    "capability_pack_id": pack_id,
+                }
+                required_by.update(_dict_or_empty(requirement.get("required_by")))
                 _append_need(
                     needs,
                     service=requirement.get("service") or requirement.get("name"),
@@ -201,15 +214,7 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
                         else None
                     ),
                     optional=bool(requirement.get("optional", False)),
-                    required_by={
-                        "source": "capability_pack",
-                        "capability_pack_id": pack_id,
-                        **(
-                            requirement.get("required_by")
-                            if isinstance(requirement.get("required_by"), dict)
-                            else {}
-                        ),
-                    },
+                    required_by=required_by,
                 )
                 continue
             _append_need(
@@ -223,6 +228,11 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
     for task in _iter_dicts(app_build_plan.get("build_tasks")):
         task_id = task.get("task_id")
         for need in _iter_dicts(task.get("integration_needs")):
+            required_by = {
+                "source": "build_task",
+                "task_id": task_id,
+            }
+            required_by.update(_dict_or_empty(need.get("required_by")))
             _append_need(
                 needs,
                 service=need.get("service") or need.get("name"),
@@ -233,11 +243,7 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
                 required_at=need.get("required_at") or "runtime",
                 required_fields=need.get("required_fields") if isinstance(need.get("required_fields"), list) else None,
                 optional=bool(need.get("optional", False)),
-                required_by={
-                    "source": "build_task",
-                    "task_id": task_id,
-                    **(need.get("required_by") if isinstance(need.get("required_by"), dict) else {}),  # type: ignore[dict-item]
-                },
+                required_by=required_by,
             )
     return needs
 
@@ -249,6 +255,11 @@ def _extract_needs_from_nested(value: Any, *, source: str) -> list[dict[str, Any
         if isinstance(node, dict):
             raw_needs = node.get("integration_needs") or node.get("connector_needs")
             for need in _iter_dicts(raw_needs):
+                required_by = {
+                    "source": source,
+                    "path": path,
+                }
+                required_by.update(_dict_or_empty(need.get("required_by")))
                 _append_need(
                     needs,
                     service=need.get("service") or need.get("name"),
@@ -259,11 +270,7 @@ def _extract_needs_from_nested(value: Any, *, source: str) -> list[dict[str, Any
                     required_at=need.get("required_at") or "runtime",
                     required_fields=need.get("required_fields") if isinstance(need.get("required_fields"), list) else None,
                     optional=bool(need.get("optional", False)),
-                    required_by={
-                        "source": source,
-                        "path": path,
-                        **(need.get("required_by") if isinstance(need.get("required_by"), dict) else {}),  # type: ignore[dict-item]
-                    },
+                    required_by=required_by,
                 )
             for key, child in node.items():
                 if key in {"integration_needs", "connector_needs"}:
@@ -303,7 +310,7 @@ def dedupe_integration_needs(needs: Iterable[dict[str, Any]]) -> list[dict[str, 
             existing["purpose"] = need.get("purpose")
         next_required_fields = _normalize_required_fields(need) if need.get("required_fields") else []
         if next_required_fields:
-            existing_fields = existing.get("required_fields") if isinstance(existing.get("required_fields"), list) else []
+            existing_fields = _dict_list(existing.get("required_fields"))
             existing_names = {str(field.get("name") or "") for field in existing_fields if isinstance(field, dict)}
             next_names = {str(field.get("name") or "") for field in next_required_fields if isinstance(field, dict)}
             if not existing_fields or next_names - existing_names or len(next_required_fields) > len(existing_fields):

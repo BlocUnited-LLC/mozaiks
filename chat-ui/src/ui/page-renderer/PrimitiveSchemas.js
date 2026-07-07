@@ -132,6 +132,49 @@ export const SHARED_DEFINITIONS = {
       tone:  { type: 'string', enum: ['default', 'primary', 'success', 'warning', 'destructive'] },
     },
   },
+  pricingCatalogGroup: {
+    type: 'object',
+    required: ['group_id', 'label'],
+    properties: {
+      group_id:          { type: 'string' },
+      label:             { type: 'string' },
+      description:       { type: 'string' },
+      kind:              { type: 'string', enum: ['subscription', 'service', 'add_on', 'mixed'] },
+      plan_ids:          { type: 'array', items: { type: 'string' } },
+      capability_groups: { type: 'array', items: { type: 'string' } },
+      add_on_ids:        { type: 'array', items: { type: 'string' } },
+    },
+  },
+  pricingCatalogPlan: {
+    type: 'object',
+    required: ['plan_id', 'label'],
+    properties: {
+      plan_id:       { type: 'string' },
+      label:         { type: 'string' },
+      description:   { type: 'string' },
+      price_display: { type: 'string' },
+      cta_label:     { type: 'string' },
+      highlights:    { type: 'array', items: { type: 'string' } },
+      managed_ai:    { type: 'object' },
+      usage_limits:  { type: 'array', items: { type: 'object' } },
+      pricing:       { type: 'object' },
+      is_default:    { type: 'boolean' },
+    },
+  },
+  pricingCatalogAddOn: {
+    type: 'object',
+    required: ['label'],
+    properties: {
+      id:            { type: 'string' },
+      add_on_id:     { type: 'string' },
+      label:         { type: 'string' },
+      description:   { type: 'string' },
+      price_display: { type: 'string' },
+      price:         { type: 'object' },
+      cta_label:     { type: 'string' },
+      highlights:    { type: 'array', items: { type: 'string' } },
+    },
+  },
 };
 
 /** Per-primitive config schemas. Keys match PrimitiveRegistry names exactly. */
@@ -184,6 +227,29 @@ export const PRIMITIVE_SCHEMAS = {
     required: ['items'],
     properties: {
       items: { type: 'array', minItems: 1, maxItems: 4, items: SHARED_DEFINITIONS.summaryItem },
+    },
+  },
+
+  PricingCatalog: {
+    type: 'object',
+    properties: {
+      title:               { type: 'string' },
+      subtitle:            { type: 'string' },
+      api_endpoint:        { type: 'string', description: 'Optional endpoint returning plans, pricing_catalog, and add-on data.' },
+      plans_key:           { type: 'string', description: 'Path to plan array in endpoint response.' },
+      groups_key:          { type: 'string', description: 'Path to pricing group array in endpoint response.' },
+      add_ons_key:         { type: 'string', description: 'Path to add-on array in endpoint response.' },
+      default_group_id:    { type: 'string' },
+      default_group_key:   { type: 'string', description: 'Path to default group id in endpoint response.' },
+      current_plan_key:    { type: 'string', description: 'Path to current plan id in endpoint response.' },
+      highlighted_plan_id: { type: 'string' },
+      plan_action_label:   { type: 'string' },
+      add_on_action_label: { type: 'string' },
+      plans:               { type: 'array', items: SHARED_DEFINITIONS.pricingCatalogPlan },
+      groups:              { type: 'array', items: SHARED_DEFINITIONS.pricingCatalogGroup },
+      add_ons:             { type: 'array', items: SHARED_DEFINITIONS.pricingCatalogAddOn },
+      plan_action:         SHARED_DEFINITIONS.action,
+      add_on_action:       SHARED_DEFINITIONS.action,
     },
   },
 

@@ -17,6 +17,7 @@ class _FakePersistenceManager:
         self.pending_lookups: list[dict[str, str]] = []
         self.pending_clears: list[dict[str, str]] = []
         self.pending_input_request: dict[str, str] | None = {"request_id": "req-1"}
+        self.run_user_messages: list[dict[str, object]] = []
 
     async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
         self.pending_lookups.append(kwargs)
@@ -24,6 +25,9 @@ class _FakePersistenceManager:
 
     async def clear_pending_input_request(self, **kwargs):  # noqa: ANN003
         self.pending_clears.append(kwargs)
+
+    async def append_run_user_message(self, **kwargs):  # noqa: ANN003
+        self.run_user_messages.append(kwargs)
 
 
 class _FakeAdapter:
@@ -134,7 +138,53 @@ async def test_handle_user_input_from_api_clears_persisted_pending_input_before_
             "source": "http",
         }
     ]
+    assert persistence_manager.run_user_messages == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "content": "Proceed with the refinement.",
+            "metadata": {"source": "workflow_user", "user_id": "user-1"},
+        }
+    ]
     assert transport.errors == []
+
+
+@pytest.mark.asyncio
+async def test_handle_user_input_from_api_persists_existing_session_user_reply_to_run_stream(monkeypatch) -> None:
+    persistence_manager = _FakePersistenceManager()
+    persistence_manager.pending_input_request = None
+    transport = _DummyTransport(persistence_manager)
+    transport._input_request_registries["chat-1"] = {"req-pending": object()}
+
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _workflow_name: {})
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1",
+        user_id="user-1",
+        workflow_name="ValueEngine",
+        message="launch demand maybe",
+        app_id="app-1",
+    )
+
+    assert result["status"] == "success"
+    assert result["route"] == "existing_session"
+    assert transport.submitted_inputs == [{"request_id": "req-pending", "user_input": "launch demand maybe"}]
+    assert persistence_manager.run_user_messages == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "content": "launch demand maybe",
+            "metadata": {"source": "workflow_user", "user_id": "user-1"},
+        }
+    ]
+    assert transport.persisted_messages == [
+        {
+            "chat_id": "chat-1",
+            "user_id": "user-1",
+            "content": "launch demand maybe",
+            "source": "http",
+        }
+    ]
 
 
 @pytest.mark.asyncio

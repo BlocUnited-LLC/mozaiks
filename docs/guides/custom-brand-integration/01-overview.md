@@ -186,7 +186,7 @@ Controls the logo, wordmark, and header action buttons.
       "src": "my_logo.svg",
       "wordmark": "my_wordmark.png",
       "alt": "My App",
-      "href": "/dashboard"
+      "href": "/"
     },
     "actions": [
       {
@@ -230,9 +230,14 @@ expands these into the full config returned by `/api/shell-config`.
 | `footer` | Footer links |
 | `header` | Header icon strip (optional) |
 
-Common shortcut ids: `dashboard`, `create`, `profile`, `settings`, `signout`,
-`signin`, `notifications`, `wallet`, `admin`, `support`, `legal`, `terms`,
-`cookies`, `privacy`.
+Common shortcut ids: `home`, `apps`, `workspace`, `create`, `profile`,
+`settings`, `signout`, `signin`, `notifications`, `wallet`, `admin`,
+`support`, `legal`, `terms`, `cookies`, `privacy`. Use `dashboard` only when
+the app declares a page or route with id `dashboard`.
+
+`create` always means a fresh app-build journey and resolves to
+`/create?new=1`. Continue-build or resume behavior belongs in Studio/App Studio
+history, not in the shell shortcut.
 
 ### navigation
 
@@ -316,7 +321,7 @@ Set the landing page in `app/app.json`:
 
 ```json
 {
-  "startupRoute": "/dashboard"
+  "startupRoute": "/"
 }
 ```
 

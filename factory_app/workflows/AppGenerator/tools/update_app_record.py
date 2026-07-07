@@ -4,7 +4,8 @@ update_app_record — called at the end of the AppGenerator pipeline.
 Updates the app lifecycle record to 'review' once the bundle is written, so the
 Studio reflects a completed build that is ready for inspection.
 
-Best-effort: never raises.
+Best-effort: never raises. Studio owns app-registry management endpoints; this
+tool intentionally does not call the permissioned module action route.
 """
 
 from __future__ import annotations
@@ -32,10 +33,10 @@ async def update_build_status(
         payload: dict = {"build_registry_id": record_id, "status": status}
         if bundle_path:
             payload["bundle_path"] = bundle_path
-        url = f"{_API_BASE}/api/modules/app_registry/update_build_status"
+        url = f"{_API_BASE}/api/studio/apps/{record_id}/status"
         async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(url, json=payload)
+            await client.put(url, json=payload)
         logger.info("Updated build registry record %s → %s", record_id, status)
     except Exception as exc:
-        logger.debug("app_registry status update failed (non-fatal): %s", exc)
+        logger.debug("Studio app registry status update failed (non-fatal): %s", exc)
 

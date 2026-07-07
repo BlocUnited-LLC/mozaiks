@@ -927,7 +927,6 @@ def build_default_ai_config(app_name: str, *, starter: bool = False) -> dict:
 
   chat["chat_startup_mode"] = "workflow" if starter else (chat.get("chat_startup_mode") or "ask")
   workflows["entry_point"] = "HelloWorkflow" if starter else (workflows.get("entry_point") or "ValueEngine")
-  workflows.setdefault("resume_policy", "last_active_then_oldest_then_entry_point")
 
   return {
     "ask": ask,
@@ -1069,7 +1068,6 @@ max_turns: 10
 human_in_the_loop: true
 workflow_startup_mode: UserDriven
 orchestration_pattern: ag2_network
-initial_message_to_user: "Hello. I am a starter workflow. Replace me when you know the real product behavior."
 initial_message: null
 initial_agent: GreeterAgent
 triggers:

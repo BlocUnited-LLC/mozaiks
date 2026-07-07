@@ -13,6 +13,32 @@ description: >
   Archetypes do not change the canonical structured outputs. They guide selection
   of module.type and the behavior conventions that follow from it.
 
+module_yaml_schema_notes:
+  description: >
+    module.yaml is validated by a strict Pydantic model (extra="forbid"). Only
+    declared top-level keys are permitted: schema_version, module, permissions,
+    actions, capabilities. Any other top-level key causes a validation error at
+    startup.
+
+  version_changelog_convention: >
+    Do NOT add a top-level changelog: or history: field to module.yaml — those
+    keys are not declared in ModuleDefinition and will cause an extra_forbidden
+    validation error. Record version promotion notes as YAML block comments
+    immediately before the schema_version line instead:
+
+      # v1.0.0 (2026-07-01): Promoted to stable. Wired settlement reaction.
+      schema_version: mozaiks.module.v1
+
+    This preserves change history in a human-readable form without adding
+    undeclared fields that break module loading.
+
+  version_field: >
+    Bump module.version (a semver string under the module: block) when
+    promoting a module to stable or making a breaking contract change. The
+    value is recorded in startup logs and is the canonical module version the
+    runtime reports. Do not conflate the schema_version (always
+    "mozaiks.module.v1") with the module identity version.
+
 archetypes:
   standard:
     summary: Default deterministic module for CRUD and ordinary business logic.
@@ -30,6 +56,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py
       - backend/service.py
@@ -59,6 +86,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py
       - backend/service.py
@@ -87,6 +115,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py
       - backend/service.py
@@ -163,6 +192,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py
       - backend/service.py

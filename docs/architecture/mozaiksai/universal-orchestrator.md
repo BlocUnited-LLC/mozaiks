@@ -6,10 +6,10 @@ runtime surfaces:
 - `SessionRouter` decides which execution context should receive a user event.
 - The control plane classifies build/refinement intent against durable artifact
   state.
-- `OrchestrationPort` starts, resumes, or cancels a concrete workflow run.
-  In the current runtime, `resume` means Mozaiks re-enters a persisted
-  chat/run after restoring runtime-owned session routing plus AG2 run-stream
-  state; it is not an AG2-native `Hub.resume()` call.
+- `OrchestrationPort` starts, re-enters, or cancels a concrete workflow run.
+  In the current runtime, re-entry means Mozaiks restores runtime-owned session
+  routing plus canonical AG2 run-stream events; the installed AG2 Network API
+  does not expose durable channel resume.
 
 There is no global agent mesh and no workflow-local router that owns product
 intent. Workflow-local handoffs stay inside one workflow bundle and compile to
@@ -55,7 +55,7 @@ Current implementation note:
   stored through a persistent `MemoryStream` backed by runtime-owned stream
   storage keyed per `app_id + chat_id`.
 - `OrchestrationPort.resume(...)` re-enters the workflow using that persisted
-  AG2 run history plus runtime-managed session routing state.
+  AG2 event history plus runtime-managed session routing state.
 - This is separate from control-plane resume, which is builder-session
   continuity over artifacts, checkpoints, and routing decisions.
 
@@ -86,9 +86,9 @@ workflow-local transition can read deterministic context variables, tool results
 or typed structured-output state. Natural-language intent classification belongs
 in the control plane before the workflow run is started or resumed.
 
-For AG2 beta specifically, be careful with the word `resume`: AG2 Hub/network
-durability is a lower-level engine concern. Mozaiks may map to that boundary in
-the future, but the current implementation restores runtime-owned session
+For AG2 beta specifically, be careful with the word `resume`: AG2 typed events
+are the runtime source of truth, while durable AG2 Network channel continuation
+is not available in the installed API. Mozaiks restores runtime-owned session
 routing state plus persistent AG2 run-stream history first and then re-enters
 the workflow through `OrchestrationPort`.
 

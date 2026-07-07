@@ -15,25 +15,6 @@ from ..workflow_manager import workflow_manager
 log = get_workflow_logger("transition_graph")
 
 
-def wire_transition_graph(workflow_name: str, agents: dict[str, Any]) -> None:
-    """Pre-validate transition rules for the workflow.
-
-    Routing is compiled to an AG2 beta Network TransitionGraph. This function
-    runs at agent-creation time to surface misconfigured rules early.
-    """
-    summary = _validate_transition_rules(workflow_name, agents)
-    log.info(
-        "TRANSITION_GRAPH_VALIDATED workflow=%s rules=%d agents_covered=%d errors=%d",
-        workflow_name,
-        summary["rules_total"],
-        len(summary["agents_with_rules"]),
-        len(summary["errors"]),
-    )
-    if summary["errors"]:
-        for err in summary["errors"]:
-            log.warning("[TRANSITION_GRAPH] Validation issue: %s", err)
-
-
 def wire_transition_graph_with_debugging(workflow_name: str, agents: dict[str, Any]) -> dict[str, Any]:
     """Validate transition rules and return a summary dict."""
     return _validate_transition_rules(workflow_name, agents)
@@ -54,7 +35,8 @@ def _validate_transition_rules(workflow_name: str, agents: dict[str, Any]) -> di
         "errors": [],
     }
 
-    _special = {"user", "terminate", "User", "Terminate", "TERMINATE"}
+    _special_sources = {"user", "User", "user_proxy", "userproxy", "userproxyagent"}
+    _special_targets = _special_sources | {"terminate", "Terminate", "TERMINATE"}
 
     for rule in rules:
         src = rule.get("source_agent")
@@ -64,11 +46,11 @@ def _validate_transition_rules(workflow_name: str, agents: dict[str, Any]) -> di
             summary["errors"].append(f"Rule missing source/target: {rule}")
             continue
 
-        if src not in agents:
+        if src not in _special_sources and src not in agents:
             summary["missing_source_agents"].append(src)
             log.warning("[TRANSITION_GRAPH] Source agent '%s' not present in workflow '%s'", src, workflow_name)
 
-        if tgt not in _special and tgt not in agents:
+        if tgt not in _special_targets and tgt not in agents:
             summary["missing_target_agents"].append(tgt)
             log.warning("[TRANSITION_GRAPH] Target agent '%s' not present in workflow '%s'", tgt, workflow_name)
 
@@ -98,6 +80,5 @@ def _initial_agent_for_workflow(workflow_name: str, agents: dict[str, Any]) -> s
 
 
 __all__ = [
-    "wire_transition_graph",
     "wire_transition_graph_with_debugging",
 ]

@@ -56,12 +56,11 @@ After the initial bootstrap, the mode is changed by:
 
 When the user clicks the workflow toggle from ask mode, the handler (`handleConversationModeChange`) follows this sequence:
 
-1. Checks for an existing IN_PROGRESS workflow session (`GET /api/sessions/oldest/{appId}/{userId}`)
-2. **If one exists** — resumes it (restores the chat_id, reconnects the WebSocket)
-3. **If none exists** — looks up the configured entry-point workflow (from `app/config/ai.json`, projected through `/api/workflows`) and starts a fresh session for it
-4. **If no entry_point workflow is configured** — the toggle does nothing (logs a warning)
+1. Looks up the configured entry-point workflow from `app/config/ai.json`, projected through `/api/workflows`
+2. Starts a fresh session for that workflow
+3. If no `entry_point` workflow is configured, the toggle does nothing and logs a warning
 
-The toggle is always safe to click. It either picks up where the user left off or starts a clean session for the designated entry_point workflow.
+The toggle is always safe to click. It starts a clean session for the designated `entry_point` workflow. Continuing an existing workflow is an explicit navigation path using a concrete `chat_id` selected from session history or an admin/build surface.
 
 ---
 

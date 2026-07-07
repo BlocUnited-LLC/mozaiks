@@ -5,6 +5,11 @@
 
 transition_rules:
 - source_agent: ThemeInterviewAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
+
+- source_agent: ThemeInterviewAgent
   target_agent: ThemeAnalysisAgent
   transition_type: condition
   condition_type: context_equals
@@ -12,7 +17,7 @@ transition_rules:
   condition_value: true
   transition_target: AgentTarget
 
-- source_agent: ThemeInterviewAgent
+- source_agent: ThemeAnalysisAgent
   target_agent: user
   transition_type: after_turn
   transition_target: RevertToUserTarget
@@ -24,11 +29,6 @@ transition_rules:
   condition_key: analysis_complete
   condition_value: true
   transition_target: AgentTarget
-
-- source_agent: ThemeAnalysisAgent
-  target_agent: user
-  transition_type: after_turn
-  transition_target: RevertToUserTarget
 
 - source_agent: ThemeConfigAssemblerAgent
   target_agent: user

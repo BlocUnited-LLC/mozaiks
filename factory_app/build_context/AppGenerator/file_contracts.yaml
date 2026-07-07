@@ -33,7 +33,7 @@ task_contracts:
       - Persistent app pages stay declarative by default.
       - "Workflow launches from pages use action_type: workflow."
       - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
-      - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as dashboard, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy. Do NOT include admin_portal in any shortcuts list — it is framework-injected automatically for admin users and must not be declared by app config or generated output.
+      - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as home, apps, workspace, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy. Use dashboard only when the app declares a route/page with id dashboard; it is not a built-in shortcut. Do NOT include admin_portal in any shortcuts list — it is framework-injected automatically for admin users and must not be declared by app config or generated output.
       - Prefer route-level AppPageSchema.navigation for page-owned global/local/profile/footer nav contributions; keep config/shell.json focused on app-wide navigation policy and built-in chrome shortcuts.
       - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
       - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
@@ -63,6 +63,8 @@ task_contracts:
       - token_wallets live at the config root and are provider-neutral.
       - token_allowances live under plans[] and every wallet_id must reference a declared token_wallet.
       - assignment_store declares where active app-owned subscription assignments are read by ConfiguredEntitlementAdapter.
+      - Optional pricing_catalog groups are display metadata for public pricing tabs/service selectors only. They may group declared plan_ids and app/provider-owned add_on_ids, but they must not grant capabilities or carry payment-provider price IDs.
+      - Use pricing_catalog when an app sells multiple service lines on one pricing surface, such as platform access, token packs, hosting, domains, marketing, or support.
       - Generated module actions that require paid access must declare actions[].entitlement_gate with a capability_id granted by at least one plan.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
 
@@ -78,6 +80,7 @@ task_contracts:
       - modules/{pack_name}/contracts/settings.yaml
       - modules/{pack_name}/contracts/admin.yaml
       - modules/{pack_name}/contracts/profile.yaml
+      - modules/{pack_name}/contracts/relationships.yaml
       - modules/{pack_name}/runtime_extensions.yaml
     downstream_backend_defaults:
       - backend/handler.py
@@ -106,6 +109,9 @@ task_contracts:
       - profile.yaml panels must bind to module actions declared in module.yaml. Do not expose admin-only actions or secrets through profile panels.
       - Do not emit profile.yaml with kind=form — that kind is reserved and not yet implemented.
       - profile.yaml does not replace /api/me identity. Auth identity and core account data remain platform-owned.
+      - Emit contracts/relationships.yaml only when a module can enumerate current-user relationships to its own resources for generic My Apps, Portfolio, or My Resources surfaces.
+      - relationships.yaml providers must bind to module actions declared in module.yaml. Provider actions must return normalized relationship rows with resource_type, resource_id, relationship_type, primary_route, capabilities, status, and metadata as needed.
+      - Do not encode app-specific monetization, payment-provider, ownership-rights, or hosted-product policy in relationships.yaml. Keep it to generic resource relationship discovery.
       - Persistent modules express collection ownership through data_contract, not ad hoc database files.
       - backend/repo.py owns persistence operations and must not contain product policy.
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.

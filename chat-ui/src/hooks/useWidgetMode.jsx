@@ -53,7 +53,6 @@ export function useWidgetMode(options = {}) {
 
     // Enter widget mode when component mounts
     if (!isInWidgetMode) {
-      console.log('🧭 [WIDGET_MODE] Entering widget mode (persistent chat on non-ChatPage route)');
       setPreviousLayoutMode(layoutMode);
       setIsInWidgetMode(true);
     }

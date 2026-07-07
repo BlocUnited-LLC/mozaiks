@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from mozaiksai.core.auth.adapters.base import AuthError, UserClaims
 from mozaiksai.core.auth.dependencies import (
     UserPrincipal,
+    optional_user,
     require_role,
     require_user,
     validate_path_app_id,
@@ -298,6 +299,10 @@ def _make_app(claims: UserClaims | None = None, raise_error: AuthError | None = 
     async def admin_only(user: UserPrincipal = Depends(require_role("admin"))):
         return {"user_id": user.user_id}
 
+    @app.get("/optional")
+    async def optional(user: UserPrincipal | None = Depends(optional_user)):
+        return {"user_id": user.user_id if user else None}
+
     # Patch adapter inside the app scope
     app.state.mock_adapter = adapter
     return app
@@ -398,5 +403,17 @@ class TestAuthDisabledBypass:
              patch("mozaiksai.core.auth.dependencies.is_auth_enabled", return_value=False):
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/protected")
+        assert response.status_code == 200
+        assert response.json()["user_id"] == "anonymous"
+
+    def test_optional_user_returns_anonymous_when_auth_disabled(self):
+        claims = _claims(user_id="any")
+        app = _make_app(claims=claims)
+        adapter = _MockAdapter(claims=UserClaims(user_id="anonymous", provider="none"))
+
+        with patch("mozaiksai.core.auth.dependencies.get_auth_adapter", return_value=adapter), \
+             patch("mozaiksai.core.auth.dependencies.is_auth_enabled", return_value=False):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/optional")
         assert response.status_code == 200
         assert response.json()["user_id"] == "anonymous"

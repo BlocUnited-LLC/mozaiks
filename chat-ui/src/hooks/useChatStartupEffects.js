@@ -26,8 +26,6 @@ export function useChatStartupEffects({
   setCurrentArtifactMessages,
   setLayoutMode,
   queryChatId,
-  queryResume,
-  resumeOldestFromWidgetRef,
   workflowArtifactSnapshotRef,
   currentChatId,
   activeChatId,
@@ -54,7 +52,6 @@ export function useChatStartupEffects({
   layoutModeForConversation,
   widgetOverlayOpen,
   setWidgetOverlayOpen,
-  handleConversationModeChange,
   queryResumeHandledRef,
   currentWorkflowName,
   resumeWorkflowSession,
@@ -88,10 +85,8 @@ export function useChatStartupEffects({
       return;
     }
     conversationBootstrapRef.current = true;
-    console.log('🧭 [BOOTSTRAP] chat_startup_mode resolved to:', configuredStartupMode);
 
     if (queryMode === 'ask') {
-      console.log('🧭 [BOOTSTRAP] Explicit ask mode requested via URL param');
       setConversationMode('ask');
       consumeNavigationQueryParams(['mode', 'resume', 'chat_id']);
       if (askMessages && askMessages.length > 0) {
@@ -100,7 +95,6 @@ export function useChatStartupEffects({
         setMessagesWithLogging(generalMessagesCacheRef.current);
       }
       setTimeout(() => {
-        console.log('🧹 [BOOTSTRAP] Closing artifact panel for Ask mode');
         setIsSidePanelOpen(false);
         setCurrentArtifactMessages([]);
         if (setLayoutMode) setLayoutMode('full');
@@ -109,16 +103,11 @@ export function useChatStartupEffects({
     }
 
     if (queryMode === 'workflow') {
-      console.log('🧭 [BOOTSTRAP] Explicit workflow mode requested via URL param');
       setConversationMode('workflow');
       consumeNavigationQueryParams(['mode', 'resume']);
-      if (!queryChatId && queryResume === 'oldest') {
-        resumeOldestFromWidgetRef.current = true;
-      }
 
       const snapshot = workflowArtifactSnapshotRef.current;
       if (snapshot?.isOpen && snapshot?.messages?.length > 0) {
-        console.log('🎨 [BOOTSTRAP] Restoring artifact panel from in-memory snapshot');
         setTimeout(() => {
           setIsSidePanelOpen(true);
           setCurrentArtifactMessages(snapshot.messages);
@@ -131,7 +120,6 @@ export function useChatStartupEffects({
         if (restoreChatId) {
           const restored = restoreStoredArtifactForChat(restoreChatId, urlWorkflowName);
           if (restored) {
-            console.log('🎨 [BOOTSTRAP] Restored artifact from stored session', restoreChatId);
           }
         }
       }
@@ -140,7 +128,6 @@ export function useChatStartupEffects({
 
     const startupDefault = configuredStartupMode;
     if (startupDefault === 'ask') {
-      console.log('🧭 [BOOTSTRAP] chat_startup_mode is "ask" — entering Ask mode');
       setConversationMode('ask');
       setTimeout(() => {
         setIsSidePanelOpen(false);
@@ -162,9 +149,7 @@ export function useChatStartupEffects({
     navigationLoading,
     queryChatId,
     queryMode,
-    queryResume,
     restoreStoredArtifactForChat,
-    resumeOldestFromWidgetRef,
     setConversationMode,
     setCurrentArtifactMessages,
     setIsSidePanelOpen,
@@ -186,13 +171,11 @@ export function useChatStartupEffects({
     const sent = activeWs.send({ type: 'chat.enter_general_mode', chat_id: currentChatId });
     if (sent) {
       askModeSyncedChatRef.current = currentChatId;
-      console.log('🧭 [ASK_SYNC] chat.enter_general_mode sent for chat:', currentChatId);
     }
   }, [askModeSyncedChatRef, connectionStatus, conversationMode, currentChatId, wsRef]);
 
   useEffect(() => {
     if (conversationMode === 'ask' && (isSidePanelOpen || layoutMode !== 'full')) {
-      console.log('🧹 [ASK_MODE_ENFORCER] Closing artifact panel (Ask mode should not have artifacts)');
       setIsSidePanelOpen(false);
       setCurrentArtifactMessages([]);
       if (setLayoutMode) setLayoutMode('full');
@@ -201,10 +184,6 @@ export function useChatStartupEffects({
 
   useEffect(() => {
     if (conversationMode === 'workflow') {
-      const cached = sanitizeVisibleWorkflowMessages(workflowMessagesCacheRef.current);
-      if (cached) {
-        setMessagesWithLogging(cached);
-      }
       return;
     }
     if (conversationMode !== 'ask') {
@@ -238,25 +217,9 @@ export function useChatStartupEffects({
 
   useEffect(() => {
     if (conversationMode !== 'workflow') return;
-    if (workflowReplayPendingRef.current) return;
-    if (messagesRef.current && messagesRef.current.length > 0) return;
-    const restoredWorkflowMessages = sanitizeVisibleWorkflowMessages(workflowMessages);
-    if (restoredWorkflowMessages.length > 0) {
-      console.log(`📦 [WORKFLOW_RESTORE] Restoring ${restoredWorkflowMessages.length} shared workflow messages`);
-      setMessagesWithLogging(restoredWorkflowMessages);
-    }
-  }, [conversationMode, messagesRef, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, workflowMessages, workflowReplayPendingRef]);
-
-  useEffect(() => {
-    if (!resumeOldestFromWidgetRef.current) {
-      return;
-    }
-    if (conversationMode !== 'workflow') {
-      return;
-    }
-    resumeOldestFromWidgetRef.current = false;
-    handleConversationModeChange('workflow');
-  }, [conversationMode, handleConversationModeChange, resumeOldestFromWidgetRef]);
+    // Workflow transcript restoration is server-owned via websocket replay.
+    // Do not reseed workflow messages from client caches on startup/reconnect.
+  }, [conversationMode]);
 
   useEffect(() => {
     if (!queryChatId) {
@@ -321,9 +284,7 @@ export function useChatStartupEffects({
         }
       }
 
-      console.log('🧭 [ROUTE_RESUME] Detected chat_id in URL, attempting resume:', { queryChatId, workflowFromQuery });
       if (isInWidgetMode) {
-        console.log('🧭 [ROUTE_RESUME] Exiting widget mode for direct resume');
         setIsInWidgetMode(false);
       }
 

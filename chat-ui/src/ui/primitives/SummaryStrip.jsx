@@ -32,7 +32,7 @@ export function SummaryStrip({ items = [], className }) {
                 {item.value}
               </div>
               {item.detail ? (
-                <div className="pb-0.5 text-[11px] text-muted-foreground/88 sm:pb-1">{item.detail}</div>
+                <div className="hidden pb-0.5 text-[11px] text-muted-foreground/88 sm:block sm:pb-1">{item.detail}</div>
               ) : null}
             </div>
           </div>

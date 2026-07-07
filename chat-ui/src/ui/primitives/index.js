@@ -36,6 +36,7 @@ export { ActionButton }    from './ActionButton.jsx';
 export { CollectionToolbar } from './CollectionToolbar.jsx';
 export { FileList }        from './FileList.jsx';
 export { PageHeader }      from './PageHeader.jsx';
+export { PricingCatalog }  from './PricingCatalog.jsx';
 export { ResourceList }    from './ResourceList.jsx';
 export { ResourceTable }   from './ResourceTable.jsx';
 export { SummaryStrip }    from './SummaryStrip.jsx';

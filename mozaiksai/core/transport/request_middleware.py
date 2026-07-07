@@ -29,6 +29,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from mozaiksai.core.tracing.context import bind_trace_id
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_BYTES = 1_048_576  # 1 MB
@@ -130,6 +132,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             request_id = str(uuid.uuid4())
 
         request.state.request_id = request_id
+        # Propagate into async context so child tasks (audit, fire-and-forget)
+        # inherit the trace ID without requiring explicit parameter threading.
+        bind_trace_id(request_id)
 
         response = await call_next(request)
         try:

@@ -86,7 +86,6 @@ export function useChatSessionHistory({
       if (conversationMode === 'ask') {
         setMessagesWithLogging([]);
       }
-      console.log('🧹 [ASK] Cleared general chat sessions');
     } catch (err) {
       console.error('Failed to clear general chat sessions:', err);
     } finally {
@@ -136,7 +135,6 @@ export function useChatSessionHistory({
         setMessagesWithLogging([]);
         setCurrentArtifactMessages([]);
       }
-      console.log('🧹 [WORKFLOW] Cleared workflow sessions');
     } catch (err) {
       console.error('Failed to clear workflow sessions:', err);
     } finally {

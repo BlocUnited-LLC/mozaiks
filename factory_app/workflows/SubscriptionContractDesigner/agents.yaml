@@ -23,6 +23,8 @@ agents:
           If the app is a SaaS app or needs paid access, emit a deterministic
           generated-app contract covering:
           - app/config/subscriptions.yaml content as subscription_config_file
+          - optional pricing_catalog display groups inside subscription_config_file
+            when the app has multiple service lines on one pricing surface
           - provider-neutral token_wallets and token_allowances when the app sells
             token budgets or AI usage quotas
           - module action entitlement gates for plan-gated features
@@ -49,6 +51,83 @@ agents:
           Generated app code declares what is sold and what costs tokens. It must
           not implement a custom token ledger, a duplicate usage ledger, hosted
           billing internals, checkout provider internals, or payment settlement.
+      - id: semantic_plan_reasoning
+        heading: '[SEMANTIC PLAN REASONING]'
+        content: |-
+          Derive plans from upstream context variables before writing fields.
+          Record the reasoning in plan_design_rationale so downstream review can
+          trace each tier, quota, entitlement, and pricing group back to source
+          context instead of accepting arbitrary pricing copy.
+
+          Use this decision flow:
+
+          1. Need for contract:
+             - monetization_enabled or builder_options may explicitly request monetization.
+             - "monetized" is only a broad intent signal. It is not enough to
+               create app/config/subscriptions.yaml.
+             - concept_overview and concept_blueprint may imply paid access,
+               subscriptions, usage quotas, teams, memberships, marketplace
+               seller tools, ecommerce operations, AI credits, or premium reports.
+             - backend_design_document and design_surface_map identify the actual
+               module actions and workflows that can be gated or metered.
+             - experience_spec identifies the pricing, billing, account, usage,
+               plan-management, upgrade, or admin surfaces the UI expects.
+             - Require a subscription contract only when the app sells recurring
+               access, paid feature gates, seats, account-level quotas, prepaid
+               usage/credits, token allowances, or usage budgets.
+             - Do not emit a subscription contract for ordinary ecommerce,
+               one-time checkout, marketplace orders, seller payouts,
+               sponsored listings, ad campaigns, tips, donations, or
+               community-funding/campaign-backing flows unless those flows also
+               include paid access tiers, usage quotas, credits, or token
+               allowances.
+             - If none of those signals exist, emit contract_required=false.
+
+          2. Plan ladder:
+             - Prefer the smallest ladder that matches the app's real value axes.
+             - Add a free or trial plan only when discovery, public browsing,
+               onboarding, or low-volume evaluation is part of the product.
+             - Add a main paid plan for the primary job-to-be-done, not because
+               SaaS templates usually have a "pro" tier.
+             - Add team, business, or enterprise plans only when upstream context
+               includes collaboration, admin controls, high usage, compliance,
+               support, custom limits, integrations, or procurement.
+             - Name plans in the app's domain when upstream context makes that
+               clearer; otherwise use stable labels like Free, Pro, Team, Business,
+               or Enterprise with snake_case ids.
+
+          3. Capability and quota mapping:
+             - Capabilities must map to generated-app module actions, workflow
+               capabilities, or page surfaces already present in design_surface_map,
+               backend_design_document, or experience_spec.
+             - Do not invent capabilities just to make tiers look different.
+             - Put entitlement gates only on actions that truly require paid
+               access. Public readonly plan browsing must stay ungated.
+             - Use usage_limits and token_allowances only for AI, request, credit,
+               or resource budgets that are visible in upstream workflow/module
+               context or explicitly requested by builder_options.
+
+          4. Pricing catalog groups:
+             - Keep one canonical subscription_config_file. Do not create pricing.yaml.
+             - Use pricing_catalog only when upstream context shows distinct
+               service lines or pricing tabs such as platform access, AI usage,
+               storage, seats, ecommerce, marketplace tools, integrations, support,
+               marketing, domains, or hosting.
+             - pricing_catalog.groups are display metadata for pricing pages.
+               They group declared plan_ids and optional app/provider-owned
+               add_on_ids; they never grant capabilities, create prices, or encode
+               payment-provider ids.
+             - If the app has one simple subscription ladder, set pricing_catalog
+               to null and let AppSchemaAgent render the default plan cards.
+
+          5. UI customization:
+             - Do not hardcode visual layout or plan data in JSX/YAML.
+             - Use page_surface_requirements and app_generator_instructions to
+               tell AppSchemaAgent which semantic pricing surface is needed.
+             - AppSchemaAgent may choose different pricing primitive variants
+               based on experience_spec and design_surface_map, but the data source
+               remains the billing module's get_plans action reading
+               config/subscriptions.yaml.
       - id: contract_rules
         heading: '[CONTRACT RULES]'
         content: |-
@@ -78,10 +157,15 @@ agents:
           10. Workflow metering declarations tell AgentGenerator/AppGenerator which
               generated workflow actions should reserve/commit tokens once the OSS
               metering service is available. Do not implement the meter in the workflow.
-          11. The contract must not reference concrete hosted products, hosted
+          11. pricing_catalog is optional display metadata inside
+              subscription_config_file. pricing_catalog.groups[].plan_ids must
+              reference declared plans. pricing_catalog must not replace
+              plans[].capabilities, usage_limits, token_allowances, or
+              assignment_store.
+          12. The contract must not reference concrete hosted products, operator
               billing admin actions, payment-provider product ids, price ids,
               API keys, secrets, invoices, or settlement.
-          12. When contract_required is true, include an app_generator_instruction
+          13. When contract_required is true, include an app_generator_instruction
               targeting AppPlanAgent that says: the billing module must expose a
               public_readonly get_plans action (no permissions, no entitlement_gate)
               that reads config/subscriptions.yaml using load_subscriptions_config
@@ -92,6 +176,8 @@ agents:
         content: |-
           Output ONLY valid JSON matching SubscriptionContractOutput.
           Use null for subscription_config_file when contract_required is false.
+          Include plan_design_rationale entries when contract_required is true,
+          with source_context values matching the context variable names above.
           Keep lists empty instead of inventing placeholder entries.
     max_consecutive_auto_reply: 3
     structured_outputs_required: true

@@ -121,6 +121,7 @@ def test_create_route_enters_canonical_build_transition() -> None:
     assert create_page["transition"] == "app_type_selector"
     assert create_page["sequence"] == "build"
     assert create_page["requiresAuth"] is False
+    assert create_page["meta"]["freshStart"] is True
     assert "showInHeader" not in create_page
     assert "journey" not in create_page
 

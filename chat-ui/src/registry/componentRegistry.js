@@ -46,7 +46,6 @@ export function registerComponent(name, component, options = {}) {
   });
 
   if (process.env.NODE_ENV === 'development') {
-    console.log(`[ComponentRegistry] Registered: ${name}`, options.core ? '(core)' : '');
   }
 }
 

@@ -64,7 +64,6 @@ export const BrandingProvider = ({
         applyTheme(unifiedTheme);
 
         if (process.env.NODE_ENV === 'development') {
-          console.log('[BrandingProvider] Loaded unified theme config');
         }
       } catch (err) {
         if (cancelled) return;

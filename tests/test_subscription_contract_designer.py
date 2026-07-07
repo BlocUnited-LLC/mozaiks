@@ -33,6 +33,22 @@ def _sample_contract() -> dict:
         "agent_message": "Contract ready.",
         "contract_required": True,
         "rationale": "The app sells AI usage plans.",
+        "plan_design_rationale": [
+            {
+                "source_context": "concept_blueprint",
+                "signal": "The concept sells AI report generation with monthly usage budgets.",
+                "decision": "Create free and pro plans with ai_tokens allowances.",
+                "affected_plan_ids": ["free", "pro"],
+                "affected_pricing_group_ids": ["platform", "ai_usage"],
+            },
+            {
+                "source_context": "design_surface_map",
+                "signal": "ReportAnalysis is the metered workflow and reports.generate is the gated action.",
+                "decision": "Gate report generation and meter the analysis workflow with ai_tokens.",
+                "affected_plan_ids": ["pro"],
+                "affected_pricing_group_ids": ["ai_usage"],
+            },
+        ],
         "app_id": "app_test",
         "app_name": "AI Reports",
         "subscription_config_file": {
@@ -64,6 +80,29 @@ def _sample_contract() -> dict:
                     "allow_negative_balance": False,
                 }
             ],
+            "pricing_catalog": {
+                "default_group_id": "platform",
+                "groups": [
+                    {
+                        "group_id": "platform",
+                        "label": "Platform",
+                        "description": "Core report workspace access.",
+                        "kind": "subscription",
+                        "plan_ids": ["free", "pro"],
+                        "capability_groups": ["reports"],
+                        "add_on_ids": [],
+                    },
+                    {
+                        "group_id": "ai_usage",
+                        "label": "AI Usage",
+                        "description": "Included monthly AI report analysis tokens.",
+                        "kind": "service",
+                        "plan_ids": ["free", "pro"],
+                        "capability_groups": ["ai_tokens"],
+                        "add_on_ids": [],
+                    },
+                ],
+            },
             "plans": [
                 {
                     "plan_id": "free",
@@ -174,6 +213,34 @@ def test_subscription_contract_designer_pack_is_host_agnostic() -> None:
     assert "hosted billing" not in text
 
 
+def test_subscription_contract_designer_schema_supports_semantic_pricing_catalog() -> None:
+    structured_outputs = _read_yaml(SUBSCRIPTION_WORKFLOW / "structured_outputs.yaml")
+    models = structured_outputs["models"]
+
+    assert "PricingCatalog" in models
+    assert "PricingCatalogGroup" in models
+    assert "PlanDesignRationale" in models
+
+    subscription_fields = models["SubscriptionConfigFile"]["fields"]
+    assert subscription_fields["pricing_catalog"]["variants"] == ["PricingCatalog", "null"]
+
+    output_fields = models["SubscriptionContractOutput"]["fields"]
+    assert output_fields["plan_design_rationale"]["items"] == "PlanDesignRationale"
+
+
+def test_subscription_contract_designer_prompt_maps_plans_to_upstream_context() -> None:
+    agents_text = (SUBSCRIPTION_WORKFLOW / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "[SEMANTIC PLAN REASONING]" in agents_text
+    assert "concept_blueprint" in agents_text
+    assert "design_surface_map" in agents_text
+    assert "experience_spec" in agents_text
+    assert "builder_options" in agents_text
+    assert "pricing_catalog.groups are display metadata" in agents_text
+    assert "Do not create pricing.yaml" in agents_text
+    assert "plan_design_rationale" in agents_text
+
+
 def test_appgenerator_and_agentgenerator_receive_subscription_contract_context() -> None:
     app_context = _read_yaml(WORKFLOWS_ROOT / "AppGenerator" / "context_variables.yaml")
     agent_context = _read_yaml(WORKFLOWS_ROOT / "AgentGenerator" / "context_variables.yaml")
@@ -195,6 +262,16 @@ def test_appgenerator_and_agentgenerator_receive_subscription_contract_context()
     rendered_agent_middleware = yaml.safe_dump(agent_middleware)
     assert "../_shared/subscription_contract_context.py" in rendered_app_middleware
     assert "../_shared/subscription_contract_context.py" in rendered_agent_middleware
+
+
+def test_subscription_context_injection_preserves_plan_design_reasoning() -> None:
+    from factory_app.workflows._shared.subscription_contract_context import _trim_contract
+
+    trimmed = _trim_contract(_sample_contract())
+
+    assert "plan_design_rationale" in trimmed
+    assert trimmed["plan_design_rationale"][0]["source_context"] == "concept_blueprint"
+    assert trimmed["subscription_config_file"]["pricing_catalog"]["groups"][0]["group_id"] == "platform"
 
 
 def test_appgenerator_declares_subscription_config_task_contract() -> None:
@@ -334,7 +411,11 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     parsed = yaml.safe_load(context["subscription_contract_files"][0]["content"])
     config = SubscriptionsConfig.model_validate(parsed)
     assert config.token_wallets[0].wallet_id == "ai_tokens"
+    assert config.pricing_catalog is not None
+    assert config.pricing_catalog.default_group_id == "platform"
+    assert config.pricing_catalog.groups[1].group_id == "ai_usage"
     assert config.plans[1].token_allowances[0].amount == 250000
+    assert context["subscription_contract"]["plan_design_rationale"][0]["source_context"] == "concept_blueprint"
 
     assert persisted["artifact_kind"] == "subscription_contract"
     assert persisted["artifact_key"] == "subscription_contract"

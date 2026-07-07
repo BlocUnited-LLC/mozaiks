@@ -47,6 +47,15 @@ class FakeMongoCollection:
         return {"matched_count": 1}
 
 
+class FakeMotorCollectionWithCallableSubcollection(FakeMongoCollection):
+    @property
+    def ensure_indexes(self):  # noqa: ANN201
+        return self
+
+    def __call__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("MotorCollection object is not callable")
+
+
 class FakeDatabase:
     def __init__(self) -> None:
         self.collections: dict[str, FakeMongoCollection] = {}
@@ -129,6 +138,42 @@ async def test_apply_database_indexes_applies_single_field_index() -> None:
 
     assert count == 1
     assert _collection(client).create_index_calls == [([("project_id", 1)], {"name": "project_id_idx"})]
+
+
+@pytest.mark.asyncio
+async def test_apply_database_indexes_supports_literal_contract_collection() -> None:
+    context, client = _context()
+    intent = _intent(
+        [{"name": "workspace_id_idx", "keys": [{"field": "workspace_id", "order": 1}]}],
+        collection_name="memberships",
+    )
+    intent["surfaces"][0]["collections"][0]["mongo_collection"] = "hosted_workspace_memberships"
+
+    count = await apply_database_indexes(intent, persistence=context)
+
+    assert count == 1
+    collection = client[DEFAULT_APP_DATABASE_NAME]["hosted_workspace_memberships"]
+    assert collection.create_index_calls == [([("workspace_id", 1)], {"name": "workspace_id_idx"})]
+
+
+@pytest.mark.asyncio
+async def test_apply_database_indexes_ignores_motor_callable_subcollection_proxy() -> None:
+    raw_collection = FakeMotorCollectionWithCallableSubcollection()
+
+    class LiteralContext:
+        def literal_collection(self, name: str) -> FakeMotorCollectionWithCallableSubcollection:
+            return raw_collection
+
+    intent = _intent(
+        [{"name": "workspace_id_idx", "keys": [{"field": "workspace_id", "order": 1}]}],
+        collection_name="memberships",
+    )
+    intent["surfaces"][0]["collections"][0]["mongo_collection"] = "hosted_workspace_memberships"
+
+    count = await apply_database_indexes(intent, persistence=LiteralContext())  # type: ignore[arg-type]
+
+    assert count == 1
+    assert raw_collection.create_index_calls == [([("workspace_id", 1)], {"name": "workspace_id_idx"})]
 
 
 @pytest.mark.asyncio

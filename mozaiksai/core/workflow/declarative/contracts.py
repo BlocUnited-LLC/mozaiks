@@ -74,7 +74,6 @@ class OrchestratorConfig(DeclarativeModel):
     human_in_the_loop: bool = False
     workflow_startup_mode: Literal["AgentDriven", "UserDriven", "BackendOnly"]
     orchestration_pattern: str = "ag2_network"
-    initial_message_to_user: str | None = None
     initial_message: str | None = None
     initial_agent: str | None = None
     triggers: list[OrchestratorTriggerSpec] = Field(default_factory=list)
@@ -83,7 +82,7 @@ class OrchestratorConfig(DeclarativeModel):
     def _required_text_fields(cls, value: Any, info):  # type: ignore[no-untyped-def]
         return _required_text(value, field_name=info.field_name)
 
-    @field_validator("initial_message_to_user", "initial_message", "initial_agent", mode="before")
+    @field_validator("initial_message", "initial_agent", mode="before")
     @classmethod
     def _optional_text_fields(cls, value: Any) -> str | None:
         return _optional_text(value)

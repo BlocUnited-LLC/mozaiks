@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
@@ -16,6 +17,25 @@ from .base import logger, utc_timestamp
 
 if TYPE_CHECKING:
     from mozaiksai.core.transport.simple_transport import SimpleTransport
+
+
+def _background_task_failure_callback(
+    workflow_name: str,
+    chat_id: str,
+) -> Callable[[asyncio.Task[Any]], None]:
+    def _callback(task: asyncio.Task[Any]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
+                workflow_name,
+                chat_id,
+                exc,
+            )
+
+    return _callback
 
 
 async def handle_switch_workflow(
@@ -78,21 +98,30 @@ async def handle_switch_workflow(
 
     logger.debug("WORKFLOW_CONTEXT_SWITCHED from=%s to=%s ws_id=%s", chat_id, target_chat_id, ws_id)
 
-    await websocket.send_json({
-        "type": "chat.context_switched",
-        "data": {
-            "from_chat_id": chat_id,
-            "to_chat_id": target_chat_id,
-            "workflow_name": active_context.workflow_name,
-            "artifact_id": active_context.artifact_id,
-            "app_id": active_context.app_id
-        },
-        "timestamp": utc_timestamp()
-    })
+    try:
+        await websocket.send_json({
+            "type": "chat.context_switched",
+            "data": {
+                "from_chat_id": chat_id,
+                "to_chat_id": target_chat_id,
+                "workflow_name": active_context.workflow_name,
+                "artifact_id": active_context.artifact_id,
+                "app_id": active_context.app_id
+            },
+            "timestamp": utc_timestamp()
+        })
+    except Exception as send_err:
+        logger.debug(
+            "WORKFLOW_CONTEXT_SWITCH_ACK_SKIPPED from=%s to=%s ws_id=%s: %s",
+            chat_id,
+            target_chat_id,
+            ws_id,
+            send_err,
+        )
 
     # UserDriven auto-start: start the AG2 run immediately so the initial
-    # agent's register_reply can emit the static greeting as a native AG2 event.
-    # On resume that greeting is already present in AG2 run history — auto_resume handles it.
+    # agent can produce the first visible message from its prompt. The
+    # orchestration layer supplies a hidden seed when no explicit seed exists.
     try:
         from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
@@ -103,11 +132,8 @@ async def handle_switch_workflow(
             pass
         cfg = workflow_manager.get_config(str(active_context.workflow_name)) or {}
         workflow_startup_mode = str(cfg.get("workflow_startup_mode", "AgentDriven")).strip().lower()
-        has_native_seed = bool(
-            str(cfg.get("initial_message_to_user") or cfg.get("initial_message") or "").strip()
-        )
         existing_task = transport._background_tasks.get(target_chat_id_str)
-        if workflow_startup_mode == "userdriven" and has_native_seed:
+        if workflow_startup_mode == "userdriven":
             if not (existing_task and not existing_task.done()):
                 pm = transport._get_or_create_persistence_manager()
                 coll = await pm._coll()
@@ -134,12 +160,10 @@ async def handle_switch_workflow(
                         name=f"workflow:{active_context.workflow_name}:{target_chat_id_str}",
                     )
                     _t.add_done_callback(
-                        lambda t, _wf=str(active_context.workflow_name), _cid=target_chat_id_str: logger.error(
-                            "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
-                            _wf, _cid, t.exception(),
+                        _background_task_failure_callback(
+                            str(active_context.workflow_name),
+                            target_chat_id_str,
                         )
-                        if not t.cancelled() and t.exception() is not None
-                        else None
                     )
                     transport._background_tasks[target_chat_id_str] = _t
     except Exception as native_start_err:
@@ -154,9 +178,9 @@ async def handle_switch_workflow(
     # UI can reliably reconstruct workflow messages after Ask-mode transitions.
     if replay_on_switch:
         try:
-            from mozaiksai.core.transport.resume_run import AgentRunResumer
+            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
 
-            resumer = AgentRunResumer()
+            replayer = WorkflowRunReplayer()
 
             async def send_event_wrapper(event_dict: dict[str, Any], _target_chat_id: str | None) -> None:
                 if not isinstance(event_dict, dict):
@@ -194,22 +218,13 @@ async def handle_switch_workflow(
                     }
                     await websocket.send_json(transport._serialize_ag2_events(envelope))
 
-            await resumer.handle_resume_request(
+            await replayer.handle_resume_request(
                 chat_id=str(target_chat_id),
                 app_id=str(active_context.app_id),
                 last_client_index=-1,
                 send_event=send_event_wrapper,
                 workflow_startup_mode=workflow_startup_mode,
             )
-            # Mark greeting as visible so orchestration_patterns.py suppresses the
-            # register_reply greeting (prevents double message on mode switch)
-            target_chat_id_str = str(target_chat_id)
-            if target_chat_id_str in transport.connections:
-                transport.connections[target_chat_id_str]["userdriven_bootstrap_visible"] = True
-                logger.debug(
-                    "USERDRIVEN_BOOTSTRAP_VISIBLE_SET chat=%s after replay",
-                    target_chat_id_str,
-                )
         except Exception as replay_err:
             logger.warning(
                 "Workflow switch replay failed for chat %s (ws_id=%s): %s",
@@ -338,12 +353,7 @@ async def handle_start_workflow(
             name=f"workflow:{resolved_workflow}:{new_chat_id}",
         )
         _wf_task.add_done_callback(
-            lambda t, _wf=str(resolved_workflow), _cid=new_chat_id: logger.error(
-                "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
-                _wf, _cid, t.exception(),
-            )
-            if not t.cancelled() and t.exception() is not None
-            else None
+            _background_task_failure_callback(str(resolved_workflow), new_chat_id)
         )
         transport._background_tasks[new_chat_id] = _wf_task
 
@@ -484,12 +494,7 @@ async def handle_start_workflow_batch(
                 name=f"workflow:{resolved_workflow}:{new_chat_id}",
             )
             _batch_task.add_done_callback(
-                lambda t, _wf=str(resolved_workflow), _cid=new_chat_id: logger.error(
-                    "WORKFLOW_BACKGROUND_TASK_FAILED workflow=%s chat=%s: %s",
-                    _wf, _cid, t.exception(),
-                )
-                if not t.cancelled() and t.exception() is not None
-                else None
+                _background_task_failure_callback(str(resolved_workflow), new_chat_id)
             )
             transport._background_tasks[new_chat_id] = _batch_task
 

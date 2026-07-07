@@ -1,26 +1,3 @@
-const DEBUG_LOG_ALL_AGENT_OUTPUT = true;
-
-const shouldDebugAllAgents = () => {
-  try {
-    const value = localStorage.getItem('mozaiks.debug_all_agents');
-    if (value != null) {
-      return value === '1' || value === 'true';
-    }
-  } catch {
-    return DEBUG_LOG_ALL_AGENT_OUTPUT;
-  }
-  return DEBUG_LOG_ALL_AGENT_OUTPUT;
-};
-
-export const logAgentOutput = (phase, agentName, content, meta = {}) => {
-  if (!shouldDebugAllAgents()) return;
-  try {
-    const preview = typeof content === 'string' ? content.slice(0, 400) : JSON.stringify(content);
-    console.log(`🛰️ [${phase}]`, { agent: agentName || 'Unknown', content: preview, ...meta });
-  } catch {
-    console.log(`🛰️ [${phase}]`, { agent: agentName || 'Unknown', content, ...meta });
-  }
-};
 
 export const debugFlag = (key) => {
   try {

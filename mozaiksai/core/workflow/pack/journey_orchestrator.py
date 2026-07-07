@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +14,25 @@ from mozaiksai.core.session.router import get_session_router
 from mozaiksai.core.transport.session_registry import session_registry
 
 logger = get_core_logger("journey_orchestrator")
+
+
+def _spawned_workflow_failure_callback(
+    workflow_name: str,
+    chat_id: str,
+) -> Callable[[asyncio.Task[Any]], None]:
+    def _callback(task: asyncio.Task[Any]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "JOURNEY_SPAWNED_WORKFLOW_FAILED workflow=%s chat=%s: %s",
+                workflow_name,
+                chat_id,
+                exc,
+            )
+
+    return _callback
 
 _CHAT_CONTEXT_INTERNAL_KEYS = {
     "_id",
@@ -332,16 +352,7 @@ class JourneyOrchestrator:
                     initial_agent_name_override=None,
                 )
             )
-            _spawned_task.add_done_callback(
-                lambda t, _wf=wf, _cid=cid: logger.error(
-                    "JOURNEY_SPAWNED_WORKFLOW_FAILED workflow=%s chat=%s: %s",
-                    _wf,
-                    _cid,
-                    t.exception(),
-                )
-                if not t.cancelled() and t.exception() is not None
-                else None
-            )
+            _spawned_task.add_done_callback(_spawned_workflow_failure_callback(wf, cid))
             transport._background_tasks[cid] = _spawned_task
 
     async def _get_transport_conn(self, chat_id: str) -> tuple[dict[str, Any] | None, Any]:

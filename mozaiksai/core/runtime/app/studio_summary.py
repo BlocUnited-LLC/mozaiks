@@ -282,10 +282,16 @@ def build_build_summary(
 def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
     lifecycle_state = str(app_record.get("lifecycle_state") or "draft")
     app_id = str(app_record.get("app_id") or "")
+    active_chat_id = str(app_record.get("active_chat_id") or "").strip()
+    active_workflow_id = str(app_record.get("active_workflow_id") or "ValueEngine").strip() or "ValueEngine"
     destination = (
-        f"/apps/{app_id}/build"
-        if lifecycle_state in APP_BUILD_CONTINUE_STATES
-        else f"/apps/{app_id}/overview"
+        f"/chat?workflow={active_workflow_id}&mode=workflow&chat_id={active_chat_id}"
+        if lifecycle_state in APP_BUILD_CONTINUE_STATES and active_chat_id
+        else (
+            f"/apps/{app_id}/build"
+            if lifecycle_state in APP_BUILD_CONTINUE_STATES
+            else f"/apps/{app_id}/overview"
+        )
     )
     return {
         "build_registry_id": str(app_record.get("build_registry_id") or ""),
@@ -296,6 +302,8 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
         "lifecycle_label": APP_LIFECYCLE_LABELS.get(lifecycle_state, lifecycle_state.title()),
         "created_at": app_record.get("created_at"),
         "updated_at": app_record.get("updated_at"),
+        "active_chat_id": active_chat_id or None,
+        "active_workflow_id": active_workflow_id if active_chat_id else None,
         "created_label": _format_studio_timestamp_label(app_record.get("updated_at"), fallback="Just created"),
         "destination": destination,
     }

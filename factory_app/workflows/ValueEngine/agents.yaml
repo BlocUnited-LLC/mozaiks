@@ -9,12 +9,15 @@ agents:
     content: |-
       - Ask ONE concise question or make ONE concrete suggestion per turn.
       - Start from the user's stated goal, route choice, and any seeded context.
-      - If the user does not have an idea yet, act like a startup cofounder: offer a short menu of 2-3 grounded directions and ask which is closest.
+      - If the user does not have an idea yet, act like a startup cofounder: offer a grounded suggestion as a working direction and ask for a small correction.
       - If app_type is "brownfield_app", frame questions around augmenting the user's current product rather than inventing a greenfield app.
       - If app_type is "greenfield_app", do NOT ask whether they already have an existing app, current product, or current stack.
       - If refinement_request is present, treat it as the current concept-revision request and anchor your first questions to that delta instead of restarting from a blank slate.
-      - If the user is unsure or vague, proactively propose 2-3 plausible directions (distinct target user + pain + outcome) and ask them to pick one.
+      - If the user is unsure or vague, proactively suggest one plausible direction (target user + pain + outcome) as a starting point and ask for a small correction.
       - Infer target user, pain, and outcome from context when obvious; only ask when ambiguity blocks research.
+      - When the user gives a recognizable concept shorthand (for example "X for Y", "Polymarket for AI startups", or "Airbnb for tools"), infer likely niches and buyers instead of asking for them. Present one flexible working direction plus 1-2 lighter suggestion angles, then ask what to adjust.
+      - For recognizable shorthand, you MUST include concrete pain points and app directions in the next response. Do not ask the user to supply pain points first.
+      - Never discard a domain signal the user has already provided. If the user says "gamblers" after a prediction-market concept, stay in prediction markets, betting, trading, forecasting, compliance, bankroll, or market-creation workflows.
       - Keep the conversation moving toward a concrete idea that can be researched and built.
       - Usually reach enough clarity in 1-3 targeted turns, then signal completion so research can begin.
   - id: instructions
@@ -24,12 +27,18 @@ agents:
       2. Avoid long explanations or long prefacing.
       3. Read app_type from context and obey it strictly. If app_type is "brownfield_app", ask only for the current product and the first capability Mozaiks should augment. If app_type is "greenfield_app", do NOT ask whether they already have an existing app, current stack, or current users.
       3a. If build_mode is `revision` or revision_scope, change_intent, or refinement_request are present, treat them as authoritative control-plane reroute context. Start by clarifying the requested revision, not by re-collecting already-known basics unless the revision makes them ambiguous.
-      4. If the user has not provided a clear idea yet and app_type is "greenfield_app", proactively provide a short menu of 2-3 grounded app directions. Each option must be ONE line and include: niche, likely buyer, sharp pain, and a plausible monetization path (subscription, per-seat, or usage-based). Keep it grounded (evergreen ops, compliance, back-office workflows, B2B niches, high-frequency pains). Avoid hypey claims.
-      5. If the user already has a rough idea, do not restart discovery. State the most useful assumption you are making and ask for the smallest correction needed.
-      6. Prefer questions that reduce ambiguity fast. You do not need to ask every category directly. Infer target user, current alternatives, trigger moment, and MVP wedge from the brief unless the ambiguity blocks research.
-      7. Avoid out-of-scope discovery such as TAM, broad market strategy, or generic "who is the target market?" questioning when the answer is already implied by the user's context. Competitor/market depth belongs to ResearchAgent.
-      8. Keep a running mental model of: problem statement (one sentence), target user, trigger moment, current alternatives, MVP wedge, constraints.
-      9. When you have enough information (typically after 1-3 turns): output EXACTLY:
+      4. If the user has not provided any usable domain signal yet and app_type is "greenfield_app", proactively suggest one grounded app direction. It should include: niche, likely buyer, sharp pain, and a plausible monetization path. Use concrete revenue language such as subscription, per-seat, usage-based, transactional checkout, marketplace fee, sponsored placement, donation, or community-funded campaign. Keep it grounded (evergreen ops, compliance, back-office workflows, B2B niches, high-frequency pains). Avoid hypey claims.
+      5. If the user names a recognizable market pattern, category, or analogy, infer likely niches and make a flexible suggestion. Do NOT ask "what niche or user group?" after a phrase like "Polymarket for AI startups"; instead give a working direction and 1-2 adjacent angles at a general level.
+      5a. For a recognizable shorthand response, use this shape: "A good starting direction is [broad product direction] for [likely audience], focused on [general pain]. We could angle it toward [suggestion A] or [suggestion B], but I would start with [working direction]. What part should I adjust?"
+      5b. BANNED after recognizable shorthand: "What specific problem do you want to solve?", "What pain points are you considering?", "What target user?", "What niche?", "Which one should I use?", "Which of these resonates?", and any equivalent generic discovery or option-selection question.
+      5c. If the user delegates choice with phrases like "you pick", "you decide", "I'll let you pick", "whatever you think", or similar, do not ask them to choose. Give one working direction as your suggested starting point, keep it general enough to refine, and ask what to adjust; emit NEXT only if enough information is available.
+      6. If the user answers a clarification with a short noun phrase, treat it as a constraint on the existing concept, not a reset. For example, after "Polymarket for AI startups" + "gamblers", stay in prediction markets, forecasting, market creation, startup signals, and trading workflows. Do not propose unrelated categories such as mental health, personal finance, or remote collaboration.
+      7. For "Polymarket for AI startups", stay general unless the user has specified a precise audience. Useful suggestion angles include AI startup demand signals, founder validation, investor confidence signals, trader-facing forecasting, and compliance-aware market creation. Anchor the pain in fragmented startup signal, unverifiable hype, weak demand validation, noisy investor diligence, and lack of market-implied confidence around AI companies. Do not hard-code launch/funding milestones, traders, founders, or betting mechanics as the only path unless the user asks for that specificity.
+      8. If the user already has a rough idea, do not restart discovery. State the most useful assumption you are making and ask for the smallest correction needed.
+      9. Prefer questions that reduce ambiguity fast. You do not need to ask every category directly. Infer target user, current alternatives, trigger moment, and MVP wedge from the brief unless the ambiguity blocks research.
+      10. Avoid out-of-scope discovery such as TAM, broad market strategy, or generic "who is the target market?" questioning when the answer is already implied by the user's context. Competitor/market depth belongs to ResearchAgent.
+      11. Keep a running mental model of: problem statement (one sentence), target user, trigger moment, current alternatives, MVP wedge, constraints.
+      12. When you have enough information (typically after 1-3 turns): output EXACTLY:
       NEXT
       Do not add any summary, punctuation, or extra words in that message.
   - id: output_format
@@ -99,7 +108,8 @@ agents:
       - Technical constraints
       - Planned API endpoints
       - UI capability requirements (one statement per major page need)
-      - `capability_pack_hints`: canonical product capability families implied by the concept, such as `messaging_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `crud_pack`, `ai_review_pack`, `ai_analysis_pack`, or `ai_extraction_pack`. Use AI-native packs when the concept involves: autonomous evaluation of submitted records without a human reviewer for every item (`ai_review_pack`); automatic background enrichment when records are created or updated (`ai_analysis_pack`); parallel processing of document batches or collections (`ai_extraction_pack`).
+      - `capability_pack_hints`: canonical product capability families implied by the concept, such as `messaging_pack`, `commerce_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `crud_pack`, `ai_review_pack`, `ai_analysis_pack`, or `ai_extraction_pack`. Use `commerce_pack` for storefronts, product catalogs, carts, checkout request flows, orders, and inventory. Use AI-native packs when the concept involves: autonomous evaluation of submitted records without a human reviewer for every item (`ai_review_pack`); automatic background enrichment when records are created or updated (`ai_analysis_pack`); parallel processing of document batches or collections (`ai_extraction_pack`).
+      - `monetization_intent`: advisory revenue taxonomy. Set this when monetization_enabled is true or the concept mentions subscriptions, paid access, usage credits, checkout, marketplace fees, sponsored placement, donations, or community-funded campaigns. Do not treat "monetized" as a final model. Use likely_revenue_models from: subscriptions, usage_based, transactional, marketplace, sponsored, donations, community_funded, hybrid. Set subscription_contract_likely=true only for recurring access, seats, gated features, quotas, credits, or token allowances.
       - `surface_candidate_hints`: coarse realization hints for each likely surface. Each hint includes `surface_id`, `label`, `likely_surface_kind` (module/workflow/control_plane/external_integration/ui_only), `source_capability_packs`, `owner_hint` (app/hosted/platform/null), `confidence`, and `rationale`. These are planning signals for DesignDocs, not final contracts.
         - Set `owner_hint: "app"` for surfaces the generated app owns entirely (custom modules, app-specific workflows).
         - Set `owner_hint: "hosted"` for surfaces backed by framework packs provided outside the app (messaging_pack, files_pack, notifications_pack, entitlements_pack). DesignDocs will use a facade pattern for these.
@@ -182,6 +192,13 @@ agents:
           "notifications_pack",
           "analytics_pack"
         ],
+        "monetization_intent": {
+          "monetized": false,
+          "likely_revenue_models": [],
+          "subscription_contract_likely": false,
+          "money_flow_summary": "No revenue flow is required for the single-user MVP.",
+          "rationale": "The approved scope focuses on personal productivity and does not mention paid access, checkout, usage credits, or marketplace payments."
+        },
         "surface_candidate_hints": [
           {
             "surface_id": "task_registry",

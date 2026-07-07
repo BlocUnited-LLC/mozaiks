@@ -279,7 +279,7 @@ export default function AppsPage() {
 
   function handleHeaderAction(actionId) {
     if (actionId === 'create') {
-      navigate('/create')
+      navigate('/create?new=1')
     } else if (actionId === 'import') {
       setImportOpen(true)
     }

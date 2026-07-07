@@ -18,7 +18,7 @@ _CONTROL_PLANE_POLICIES = "control_plane/config/policies.yaml"
 
 
 def _dump_yaml(data: dict[str, Any]) -> str:
-    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    return str(yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
 
 
 def _safe_prompt_id(prompt_id: str) -> str:

@@ -79,14 +79,13 @@ from mozaiksai.hosts.platform import (
     _coerce_requires_role,
     _dedupe_and_sort_pages,
     _deep_get,
-    _is_ask_carrier_session,
-    _json_timestamp,
     _normalize_route_requires_role_meta,
     _normalize_shell_page_entry,
     _profile_doc_id,
     _resolve_event_context_value,
     _trigger_capability_ids,
 )
+from mozaiksai.hosts.routers.sessions import _is_ask_carrier_session, _json_timestamp
 
 # ---------------------------------------------------------------------------
 # 1. _coerce_requires_role

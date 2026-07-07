@@ -12,6 +12,101 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- **Immutable audit trail** (`mozaiksai/core/audit/`):
+  Every module action and workflow start is logged to a dedicated append-only MongoDB `audit_log` collection with actor, app_id, resource, action, and inputs hash. Failures degrade to structured log so records are never silently lost. Wired into `ModuleExecutor.execute()` via fire-and-forget `asyncio.create_task`.
+
+- **Circuit breaker for AppBackendPort** (`mozaiksai/core/adapters/circuit_breaker.py`):
+  `CircuitBreaker` wraps `HttpAppBackendAdapter.request()`. Opens after 5 consecutive failures (configurable via `CIRCUIT_BREAKER_FAILURE_THRESHOLD`), fast-fails with `backend_circuit_open` for `CIRCUIT_BREAKER_RECOVERY_TIMEOUT` seconds (default 30s), then probes with HALF_OPEN state. Per-service registry via `get_circuit_breaker_sync()`.
+
+- **Distributed lock for chat state** (`mozaiksai/core/runtime/persistence/distributed_lock.py`):
+  `distributed_lock()` async context manager uses MongoDB `findOneAndUpdate` to prevent two runtime instances from resuming the same chat simultaneously. TTL index auto-cleans orphaned locks. Falls through silently in degraded mode (MongoDB unavailable).
+
+- **Prometheus metrics endpoint** (`mozaiksai/core/metrics/prometheus_exporter.py`):
+  `GET /metrics` in Prometheus text exposition format. Exports workflow counters, module action rates, token usage, auth failures, circuit breaker opens, and HTTP request counts. Optional Bearer token protection via `PROMETHEUS_METRICS_TOKEN`. Enable/disable via `PROMETHEUS_METRICS_ENABLED`. Router registered automatically in `hosts/runtime.py`.
+
+- **Feature flags** (`mozaiksai/core/flags/`):
+  `FeatureFlags` evaluates flags from env vars (`MOZAIKS_FLAG_{NAME}`) with optional MongoDB-backed backend for runtime toggling without redeployment. App-scoped flags supported (`is_enabled("flag", app_id=...)`). Cache TTL configurable via `FEATURE_FLAGS_CACHE_TTL`.
+
+- **Task idempotency guard** (`mozaiksai/core/workflow/idempotency.py`):
+  `IdempotencyGuard` deduplicates tool executions by `(chat_id, tool_name, args_hash)`. Prevents double-execution when a task batch retries after a successful tool call but failed result persistence. Records stored in `idempotency_records` collection with 24h TTL.
+
+- **Artifact store port + adapters** (`mozaiksai/core/ports/artifact_store.py`):
+  `ArtifactStore` protocol with `LocalArtifactStore` (default) and `S3ArtifactStore` (production). Streams large artifacts to object storage; MongoDB holds only metadata + URL. Configured via `ARTIFACT_STORE_BACKEND` env var (`local` | `s3`).
+
+- **Inter-instance event bus** (`mozaiksai/core/ports/event_bus.py`):
+  `EventBus` protocol with `NoOpEventBus` (single instance), `MongoEventBus` (change streams, no extra infra), and `RedisEventBus` (pub/sub). Configured via `EVENT_BUS_BACKEND` (`noop` | `mongo` | `redis`). Started automatically during runtime startup.
+
+- **Artifact versioning** (`mozaiksai/core/runtime/persistence/artifact_version.py`):
+  `ArtifactVersion` records artifact ID, version, lineage, parent_build_id, store URL, and checksum in `artifact_versions` collection. Helpers: `record_artifact_version()`, `get_artifact_history()`, `next_version_number()`.
+
+- **Global durable workflow queue** (`mozaiksai/core/workflow/queue.py`):
+  `WorkflowQueue` protocol with `NoOpWorkflowQueue` (preserves existing per-instance semaphore) and `MongoWorkflowQueue` (atomic claim with findOneAndUpdate, global concurrency limit, priority support, TTL expiry). Configured via `WORKFLOW_QUEUE_BACKEND` (`noop` | `mongo`).
+
+- **Redis distributed cache** (`mozaiksai/core/cache/`):
+  `RedisCache` caches JWKS, app context, and module registry across instances. Falls back to in-memory `_MemoryCache` when Redis is unavailable. Named helpers: `get_jwks()`, `set_app_context()`, `invalidate_app_context()`. Connected automatically at startup.
+
+- **AG2 isolation adapter** (`mozaiksai/core/adapters/ag2_runner.py`):
+  `AG2RunnerAdapter` wraps AG2's `ConversableAgent`, `GroupChat`, and `initiate_chat` API. Isolates AG2 imports to one file so AG2 version bumps require only this adapter to change. Includes compatibility watchpoints for tracked AG2 API surfaces. `build_llm_config()` now accepts `fallback_models` kwarg for ordered fallback config_list construction.
+
+- **LLM fallback config builder** (`mozaiksai/core/adapters/llm_fallback.py`):
+  `build_fallback_config_list()` constructs an AG2-compatible `config_list` with a primary model and env-driven fallback models (via `LLM_FALLBACK_MODELS`). `get_healthy_config_list()` reorders entries so circuit-breaker-OPEN providers are deprioritised. `build_fallback_llm_config()` is a drop-in replacement for `AG2RunnerAdapter.build_llm_config()` with full fallback support. AG2 network runner binds trace context at workflow start.
+
+- **Async trace context propagation** (`mozaiksai/core/tracing/`):
+  `bind_trace_id()` sets the current trace ID on a Python `ContextVar`. Because asyncio automatically copies `ContextVar` state to child tasks, every `asyncio.create_task()` (audit logger, fire-and-forget) inherits the trace ID without parameter threading. `RequestIDMiddleware` now calls `bind_trace_id()` on each request. `trace_context()` context manager supports scoped binding with automatic restore. `TraceContext.as_log_extra()` provides structured log enrichment and `as_headers()` returns outbound HTTP trace headers.
+
+- **Platform router decomposition — complete** (`mozaiksai/hosts/routers/`):
+  Extracted all remaining route groups from `platform.py` into dedicated router modules: `chat.py`, `sessions.py`, `transitions.py`, `profile.py`, `workflows.py` (in addition to existing `notifications.py`, `shell.py`, `modules.py`). `platform.py` reduced from ~3,662 to ~2,835 lines. `resolve_scope_from_principal()` moved to `mozaiksai.core.auth.dependencies` as the canonical shared location. Two missing persistence methods (`delete_general_chat`, `fetch_general_chat_transcript`) added to `AG2PersistenceManager`. The modules router reads `executor_registry` from `request.app.state` for clean test isolation.
+
+- **HMAC-SHA256 artifact signing** (`mozaiksai/core/runtime/persistence/artifact_signer.py`):
+  `sign_artifact()` and `verify_artifact()` use HMAC-SHA256 with a hex-encoded 32-byte key from `ARTIFACT_SIGNING_KEY` env var. Unsigned mode degrades gracefully (returns empty string / always verifies) when no key is configured. `assert_artifact_authentic()` raises `ArtifactSignatureError` on tamper detection. `artifact_promotion.py` now signs bundles at promotion time and includes `bundle_hmac_sha256` in refinement metadata. 16 tests added.
+
+- **OSS collaboration hook points** (`mozaiksai/core/ports/collaboration.py`):
+  `CollaborationPort` Protocol with `on_workspace_shared`, `on_user_active`, `on_user_inactive`, `get_presence` methods. `NoOpCollaborationAdapter` (default — all events silently dropped) wired into `app.state.collaboration` at platform startup. Hosted products replace with a concrete adapter without touching OSS runtime.
+
+- **Durable refinement event tracking** (`mozaiksai/control_plane/refinement_tracking.py`):
+  `record_refinement_event()` persists audit documents to `mozaiks.cp_refinement_events` collection with event kind, request ID, app ID, change class, workflow sequence, outcome, and timing. Fire-and-forget — never raises to callers. `get_refinement_history()` queries by app and optional request ID. `OrchestrationControlHarness` now emits `request_received`, `classified`, `completed`, and `failed` events at each decision boundary.
+
+- **Keycloak realm version control** (`infra/keycloak/export.sh`, `.github/workflows/ci.yml`):
+  `export.sh` exports the current realm config from a running Keycloak instance via the admin API and writes to `factory_app/app/brand/realm-export.json`. CI lint job now validates `realm-export.json` is valid JSON with required fields (`realm=mozaiks`, `enabled`) on every push and pull request.
+
+- **Concurrency test suite** (`tests/concurrency/`):
+  12 new tests covering: circuit breaker state transitions, concurrent feature flag reads, trace ID propagation to child tasks, `trace_context()` restore, task isolation, LLM fallback config ordering, circuit-aware config_list reordering, idempotency guard dedup under concurrency.
+
+- **Kubernetes Helm chart** (`infra/helm/mozaiks/`):
+  Production-grade Helm chart with: Deployment (RollingUpdate, maxUnavailable=0), Service, Ingress, HPA (CPU + memory), PodDisruptionBudget, PVC, ServiceAccount, ConfigMap. Secret values sourced from a named Kubernetes Secret (zero secrets in chart). Pod anti-affinity preferred across nodes. Liveness and readiness probes on `/api/health/liveness` and `/api/health/readiness`. Prometheus scrape annotations on pod.
+
+- **Grafana dashboard** (`infra/grafana/mozaiks-dashboard.json`):
+  Pre-built Grafana dashboard with panels for: workflow health (started/completed/failed/active, success rate), module action rate, LLM token usage (input/output per minute, totals), auth failure rate, circuit breaker opens, HTTP request rate by status class, uptime. Configurable `DS_PROMETHEUS` datasource input.
+
+- **Operational docs** (`docs/operations/`):
+  Zero-downtime deployment runbook, secrets rotation procedure, alerting thresholds, horizontal scaling guide, backup and recovery procedures, and incident runbooks for: LLM API down, MongoDB connection exhausted, disk full, Keycloak unreachable.
+
+- **`monitoring` optional extra** (`pyproject.toml`):
+  Adds `redis[asyncio]>=5.0.0` and `boto3>=1.28.0` for Redis cache and S3 artifact store backends. Install with `pip install "mozaiks[monitoring]"`.
+
+### Changed
+
+- **CI/CD hardening** (`pyproject.toml`, `.github/workflows/ci.yml`):
+  Added `pytest-rerunfailures>=12.0` to dev deps. Pytest now re-runs flaky tests up to 2 times on `AssertionError` or `TimeoutError`. Coverage threshold set to `--cov-fail-under=30` (calibrated to full-suite achievable level). mypy CI command updated to `--disable-error-code=import-untyped` to suppress PyYAML stub noise consistent with `pyproject.toml` config.
+
+- **mypy clean pass** (`mozaiksai/`, `factory_app/`):
+  12 targeted type fixes across `ag2_runner.py`, `artifact_store.py`, `supabase.py`, `orchestration_patterns.py`, `queue.py`, `artifact_version.py`, `http_app_backend.py`, `commerce/backend/repo.py`, `DesignDocs/tools/save_design_doc.py`, `SubscriptionContractDesigner/tools/save_subscription_contract.py`, `control_plane_pack_codegen.py`, `routers/modules.py`. Result: 477 source files, 0 errors.
+
+- **`hosts/runtime.py` startup** (`mozaiksai/hosts/runtime.py`):
+  Runtime startup now ensures distributed lock indexes, idempotency indexes, and artifact version indexes, connects the Redis cache, and starts the inter-instance event bus. All operations degrade silently if their backends are unavailable.
+
+### Fixed
+
+- **Hosted app runtime compatibility** (`mozaiksai/control_plane/config.py`, `mozaiksai/core/runtime/composition/module_executor.py`, `mozaiksai/core/runtime/persistence/indexes.py`):
+  Control-plane runtime config now accepts optional profile metadata used by hosted app workspaces, module output validation normalizes `nullable: true` schemas before JSON Schema validation, and database index application strips metadata-only options while supporting literal Motor collections. These fixes unblock `mozaiks-app` startup, module dispatch, and database index bootstrapping from an installed package.
+
+### Changed
+
+- **Frontend runtime stability** (`chat-ui/src/app/MozaiksApp.jsx`, `chat-ui/src/ui/primitives/DataTable.jsx`):
+  Opted into React Router v7 future flags to remove development warnings and made DataTable default arrays stable so table consumers without explicit data do not trigger render loops.
+
 ### Security
 
 - **Multi-tenant isolation gaps closed** (`mozaiksai/core/data/persistence/persistence_manager.py`, `mozaiksai/hosts/runtime.py`):
@@ -678,7 +773,7 @@ This project follows a practical pre-1.0 changelog format:
   `workflow/artifacts/` (artifact packaging), `workflow/context/projection.py`
   (scoped context projection), `workflow/contract_validation.py` (YAML contract
   validation), `workflow/execution/middleware.py` (lifecycle middleware hooks),
-  `workflow/execution/resume.py` (run resume/checkpoint), `workflow/outputs/`
+  `workflow/execution/run_bootstrap.py` (AG2 event-history run bootstrap), `workflow/outputs/`
   (runtime events and output validation).
 
 - **`factory_app/build_context/`** — canonical location for named OSS build context

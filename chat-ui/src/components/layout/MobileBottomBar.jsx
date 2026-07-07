@@ -56,7 +56,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
   if (profile?.show !== false && profileItem) {
     items.push({
       id: profileItem.id || "profile",
-      label: profileItem.label || "Profile",
+      label: profileItem.label || "Account",
       action: "navigate",
       path: profileItem.path,
     });

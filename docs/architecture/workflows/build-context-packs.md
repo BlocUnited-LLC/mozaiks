@@ -128,6 +128,28 @@ Keep `context.yaml` structural. Do not put human guidance, semantic purpose
 text, generated file mappings, endpoint rewrites, resolver code, build tasks,
 or secrets there.
 
+## First-Party Packs
+
+The OSS factory ships several first-party build-context packs. They all follow
+the same shape above: `context.yaml` registers the pack, `contract.yaml` defines
+typed selection/output/boundary rules, and `templates/` mirrors the generated
+app bundle paths.
+
+- `messaging`: generated module templates for threads, messages, read state,
+  and message-related contracts.
+- `social_graph`: generated module templates for communities, memberships,
+  invitations, public browse, and role-scoped management.
+- `commerce`: generated module templates for single-merchant storefronts:
+  product catalog, inventory, cart, checkout requests, orders, and fulfillment
+  state. Payment processor mechanics stay outside the commerce module and are
+  connected through a selected payment pack such as `mozaikspay` or an explicit
+  bring-your-own provider adapter.
+- `mozaikspay`: managed-capability templates and connector contracts for apps
+  that consume the MozaiksPay payment/subscription boundary.
+
+UI primitives stay first-class in `chat-ui`. Build-context packs compose page
+schemas from those primitives; they do not define their own primitive layer.
+
 ## Targeting
 
 Targeting has two layers.

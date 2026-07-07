@@ -236,15 +236,15 @@ class WebSocketProtocolMixin:
             logger.debug("Stopped heartbeat for %s", chat_id)
 
     # ==================================================================================
-    # AUTO-RESUME ON RECONNECT
+    # RUN REPLAY ON RECONNECT
     # ==================================================================================
 
-    async def _auto_resume_if_needed(self, chat_id: str, websocket: WebSocket, app_id: str | None) -> None:
-        """Automatically restore chat history for IN_PROGRESS chats on WebSocket connection."""
+    async def _replay_run_on_connect_if_needed(self, chat_id: str, websocket: WebSocket, app_id: str | None) -> None:
+        """Replay chat history for IN_PROGRESS chats on WebSocket connection."""
         _ = websocket
         try:
             if not app_id:
-                logger.debug("[AUTO_RESUME] No app_id for %s, skipping auto-resume", chat_id)
+                logger.debug("[RUN_REPLAY] No app_id for %s, skipping replay", chat_id)
                 return
 
             # Get workflow name and workflow_startup_mode from connection
@@ -258,16 +258,16 @@ class WebSocketProtocolMixin:
 
                         config = workflow_manager.get_config(workflow_name)
                         workflow_startup_mode = config.get("workflow_startup_mode", "AgentDriven")
-                        logger.debug("[AUTO_RESUME] Retrieved workflow_startup_mode=%s for workflow=%s", workflow_startup_mode, workflow_name)
+                        logger.debug("[RUN_REPLAY] Retrieved workflow_startup_mode=%s for workflow=%s", workflow_startup_mode, workflow_name)
                     except Exception as cfg_err:
-                        logger.warning("[AUTO_RESUME] Failed to get workflow config: %s", cfg_err)
+                        logger.warning("[RUN_REPLAY] Failed to get workflow config: %s", cfg_err)
 
-            from mozaiksai.core.transport.resume_run import AgentRunResumer
+            from mozaiksai.core.transport.run_replay import WorkflowRunReplayer
 
-            resumer = AgentRunResumer()
+            replayer = WorkflowRunReplayer()
 
             async def send_event_wrapper(event_dict: dict[str, Any], target_chat_id: str | None) -> None:
-                """Wrapper to convert resume events to transport format."""
+                """Wrapper to convert replay events to transport format."""
                 _ = target_chat_id
                 if not isinstance(event_dict, dict):
                     return
@@ -311,8 +311,8 @@ class WebSocketProtocolMixin:
                         },
                     )
 
-            # Call the resumer with workflow_startup_mode filtering
-            await resumer.auto_resume_if_needed(
+            # Call the replayer with workflow_startup_mode filtering.
+            await replayer.replay_on_connect_if_needed(
                 chat_id=chat_id,
                 app_id=app_id,
                 send_event=send_event_wrapper,
@@ -322,132 +322,7 @@ class WebSocketProtocolMixin:
             await self._flush_message_queue(chat_id)
 
         except Exception as e:
-            logger.warning("[AUTO_RESUME] Failed to auto-resume chat %s: %s", chat_id, e)
-
-    async def _emit_userdriven_bootstrap_if_needed(
-        self,
-        chat_id: str,
-        user_id: str,
-        workflow_name: str | None,
-        app_id: str | None,
-        *,
-        ignore_sent_guard: bool = False,
-        session_dedupe_token: str | None = None,
-    ) -> None:
-        """Emit one pre-run prompt message for UserDriven workflows.
-
-        This keeps AG2 execution untouched: no workflow run is started here.
-        The first user input later triggers orchestration via existing transport flow.
-        """
-        if not workflow_name:
-            return
-
-        try:
-            conn_meta = self.connections.get(chat_id) or {}
-            if conn_meta.get("userdriven_bootstrap_visible"):
-                return
-
-            if session_dedupe_token:
-                seen_tokens = getattr(self, "_userdriven_bootstrap_session_seen", None)
-                if seen_tokens is None:
-                    seen_tokens = set()
-                    self._userdriven_bootstrap_session_seen = seen_tokens
-                if session_dedupe_token in seen_tokens:
-                    return
-
-            from mozaiksai.core.workflow.workflow_manager import workflow_manager
-
-            cfg = workflow_manager.get_config(str(workflow_name)) or {}
-            workflow_startup_mode = str(cfg.get("workflow_startup_mode", "AgentDriven")).strip().lower()
-            if workflow_startup_mode != "userdriven":
-                return
-
-            prompt = str(cfg.get("initial_message_to_user") or "").strip()
-            if not prompt:
-                return
-
-            bootstrap_agent = str(cfg.get("initial_agent") or "Assistant").strip() or "Assistant"
-
-            pm_factory = getattr(self, "_get_or_create_persistence_manager", None)
-            if not callable(pm_factory):
-                return
-
-            pm = pm_factory()
-            coll = await pm._coll()
-            if app_id:
-                run_history = await pm.load_run_history(chat_id=chat_id, app_id=str(app_id))
-                if run_history:
-                    return
-
-            # One-time send per chat, only before any AG2 run history exists.
-            query: dict[str, Any] = {
-                "_id": chat_id,
-                "user_id": user_id,
-            }
-            if not ignore_sent_guard:
-                query["userdriven_bootstrap_sent"] = {"$ne": True}
-            if app_id:
-                query["app_id"] = app_id
-
-            from pymongo import ReturnDocument
-
-            claimed = await coll.find_one_and_update(
-                query,
-                {
-                    "$set": {
-                        "userdriven_bootstrap_sent": True,
-                        "userdriven_bootstrap_sent_at": datetime.now(UTC),
-                        "last_updated_at": datetime.now(UTC),
-                    }
-                },
-                return_document=ReturnDocument.AFTER,
-                projection={"_id": 1},
-            )
-
-            if not claimed:
-                return
-
-            # Persist the bootstrap prompt as an AG2 assistant event so replay comes
-            # from the run stream rather than a separate chat-session message row.
-            try:
-                if app_id:
-                    await pm.append_run_assistant_message(
-                        chat_id=chat_id,
-                        app_id=str(app_id),
-                        content=prompt,
-                        agent_name=bootstrap_agent,
-                        metadata={"source": "orchestrator.initial_message_to_user"},
-                    )
-            except Exception as persist_err:
-                logger.warning("[USERDRIVEN] Failed to persist bootstrap prompt for %s: %s", chat_id, persist_err)
-
-            await self._queue_message_with_backpressure(
-                chat_id,
-                {
-                    "type": "chat.text",
-                    "data": {
-                        "content": prompt,
-                        "agent": bootstrap_agent,
-                        "sender": bootstrap_agent,
-                        "role": "assistant",
-                        "source": "orchestrator.initial_message_to_user",
-                        "ui_visibility": "default",
-                        "metadata": {
-                            "source": "orchestrator.initial_message_to_user",
-                            "workflow_startup_mode": "UserDriven",
-                            "pre_workflow": True,
-                        },
-                    },
-                },
-            )
-            await self._flush_message_queue(chat_id)
-            if chat_id in self.connections:
-                self.connections[chat_id]["userdriven_bootstrap_visible"] = True
-            if session_dedupe_token:
-                self._userdriven_bootstrap_session_seen.add(session_dedupe_token)
-            logger.debug("[USERDRIVEN] Emitted bootstrap prompt for chat %s (%s)", chat_id, workflow_name)
-        except Exception as e:
-            logger.warning("[USERDRIVEN] Failed bootstrap emit for chat %s: %s", chat_id, e)
+            logger.warning("[RUN_REPLAY] Failed to replay chat %s: %s", chat_id, e)
 
     # ==================================================================================
     # CONNECTION CLEANUP

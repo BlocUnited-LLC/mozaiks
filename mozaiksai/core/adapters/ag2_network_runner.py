@@ -77,6 +77,16 @@ class AG2NetworkRunner:
     """Execute one workflow as an AG2 beta Network workflow channel."""
 
     async def run(self, request: AG2NetworkRunnerRequest) -> AG2NetworkRunnerResult:
+        # Bind workflow-level trace context so all tasks spawned during this
+        # run inherit the workflow name and chat ID without parameter threading.
+        from mozaiksai.core.tracing.context import bind_trace_id
+        bind_trace_id(
+            request.chat_id,
+            workflow_name=request.workflow_name,
+            chat_id=request.chat_id,
+            app_id=request.app_id,
+        )
+
         initial_agent_name = str(request.initial_agent_name or "").strip()
         validation_error = self._validate_request(request, initial_agent_name)
         if validation_error:
@@ -148,106 +158,126 @@ class AG2NetworkRunner:
                 request.initial_message or ".",
                 audience=[agent_clients[initial_agent_name].agent_id],
             )
-
-            close_task = asyncio.create_task(
-                initiator.wait_for_channel_event(
-                    channel_id=channel.channel_id,
-                    predicate=lambda envelope: envelope.event_type == EV_CHANNEL_CLOSED,
-                    timeout=request.close_timeout_seconds,
-                )
-            )
             failure_task = asyncio.create_task(
                 turn_failure_listener.wait_for_failure(channel.channel_id)
             )
-            # Belt-and-suspenders outer timeout: close_task already has
-            # close_timeout_seconds, but failure_task has no deadline of its own.
-            # An extra 30s gives both tasks time to settle before we force cleanup.
-            _outer_timeout = (request.close_timeout_seconds or 120.0) + 30.0
-            try:
-                done, pending = await asyncio.wait_for(
-                    asyncio.wait({close_task, failure_task}, return_when=asyncio.FIRST_COMPLETED),
-                    timeout=_outer_timeout,
-                )
-            except TimeoutError:
-                logger.warning(
-                    "AG2_RUNNER_OUTER_TIMEOUT workflow=%s chat=%s timeout=%.0fs — cancelling",
-                    request.workflow_name,
-                    request.chat_id,
-                    _outer_timeout,
-                )
-                for task in [close_task, failure_task]:
-                    task.cancel()
-                await asyncio.gather(close_task, failure_task, return_exceptions=True)
-                wal = await hub.read_wal(channel.channel_id) if channel_id else []
-                return AG2NetworkRunnerResult(
-                    status=RunStatus.PAUSED,
-                    workflow_name=request.workflow_name,
-                    chat_id=request.chat_id,
-                    app_id=request.app_id,
-                    channel_id=channel_id,
-                    wal=[_envelope_to_dict(envelope) for envelope in wal],
-                    error=f"workflow timed out after {_outer_timeout:.0f}s (outer guard)",
-                )
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            if failure_task in done:
-                failure = failure_task.result()
-                wal = await hub.read_wal(channel.channel_id)
+
+            def _agent_names() -> dict[str, str]:
+                return {client.agent_id: name for name, client in agent_clients.items()}
+
+            async def _snapshot_result(
+                *,
+                status: RunStatus,
+                close_reason: str | None = None,
+                error: str | None = None,
+            ) -> AG2NetworkRunnerResult:
                 state = hub.adapter_state(channel.channel_id)
-                agent_name_by_id = {
-                    client.agent_id: name for name, client in agent_clients.items()
-                }
-                failed_agent = agent_name_by_id.get(
-                    failure["agent_id"], failure["agent_id"]
-                )
-                return AG2NetworkRunnerResult(
-                    status=RunStatus.FAILED,
-                    workflow_name=request.workflow_name,
-                    chat_id=request.chat_id,
-                    app_id=request.app_id,
-                    channel_id=channel.channel_id,
-                    context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                wal = await hub.read_wal(channel.channel_id)
+                agent_name_by_id = _agent_names()
+                structured_outputs, validation_error = _validate_wal_structured_outputs(
+                    wal=wal,
                     agent_name_by_id=agent_name_by_id,
-                    wal=[_envelope_to_dict(envelope) for envelope in wal],
-                    error=f"AG2 turn failed for {failed_agent}: {failure['error']}",
+                    structured_registry=request.structured_registry,
                 )
-            close_env = close_task.result()
-            state = hub.adapter_state(channel.channel_id)
-            wal = await hub.read_wal(channel.channel_id)
-            agent_name_by_id = {client.agent_id: name for name, client in agent_clients.items()}
-            structured_outputs, validation_error = _validate_wal_structured_outputs(
-                wal=wal,
-                agent_name_by_id=agent_name_by_id,
-                structured_registry=request.structured_registry,
-            )
-            if validation_error:
+                if validation_error:
+                    return AG2NetworkRunnerResult(
+                        status=RunStatus.FAILED,
+                        workflow_name=request.workflow_name,
+                        chat_id=request.chat_id,
+                        app_id=request.app_id,
+                        channel_id=channel.channel_id,
+                        close_reason=close_reason,
+                        context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                        structured_outputs=structured_outputs,
+                        agent_name_by_id=agent_name_by_id,
+                        wal=[_envelope_to_dict(envelope) for envelope in wal],
+                        error=validation_error,
+                    )
                 return AG2NetworkRunnerResult(
-                    status=RunStatus.FAILED,
+                    status=status,
                     workflow_name=request.workflow_name,
                     chat_id=request.chat_id,
                     app_id=request.app_id,
                     channel_id=channel.channel_id,
-                    close_reason=str(close_env.event_data.get("reason") or "") or None,
+                    close_reason=close_reason,
                     context_variables=dict(getattr(state, "context_vars", {}) or {}),
                     structured_outputs=structured_outputs,
                     agent_name_by_id=agent_name_by_id,
                     wal=[_envelope_to_dict(envelope) for envelope in wal],
-                    error=validation_error,
+                    error=error,
                 )
-            return AG2NetworkRunnerResult(
-                status=RunStatus.COMPLETED,
-                workflow_name=request.workflow_name,
-                chat_id=request.chat_id,
-                app_id=request.app_id,
-                channel_id=channel.channel_id,
-                close_reason=str(close_env.event_data.get("reason") or "") or None,
-                context_variables=dict(getattr(state, "context_vars", {}) or {}),
-                structured_outputs=structured_outputs,
-                agent_name_by_id=agent_name_by_id,
-                wal=[_envelope_to_dict(envelope) for envelope in wal],
-            )
+
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + float(request.close_timeout_seconds or 120.0)
+
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError
+
+                event_task = asyncio.create_task(
+                    initiator.wait_for_channel_event(
+                        channel_id=channel.channel_id,
+                        predicate=lambda envelope: envelope.event_type in {EV_CHANNEL_CLOSED, EV_PACKET},
+                        timeout=remaining,
+                    )
+                )
+
+                done, pending = await asyncio.wait(
+                    {event_task, failure_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if failure_task in done:
+                    event_task.cancel()
+                    await asyncio.gather(event_task, return_exceptions=True)
+                    failure = failure_task.result()
+                    wal = await hub.read_wal(channel.channel_id)
+                    state = hub.adapter_state(channel.channel_id)
+                    agent_name_by_id = _agent_names()
+                    failed_agent = agent_name_by_id.get(
+                        failure["agent_id"], failure["agent_id"]
+                    )
+                    return AG2NetworkRunnerResult(
+                        status=RunStatus.FAILED,
+                        workflow_name=request.workflow_name,
+                        chat_id=request.chat_id,
+                        app_id=request.app_id,
+                        channel_id=channel.channel_id,
+                        context_variables=dict(getattr(state, "context_vars", {}) or {}),
+                        agent_name_by_id=agent_name_by_id,
+                        wal=[_envelope_to_dict(envelope) for envelope in wal],
+                        error=f"AG2 turn failed for {failed_agent}: {failure['error']}",
+                    )
+
+                if failure_task in pending:
+                    pending.remove(failure_task)
+
+                try:
+                    event_env = event_task.result()
+                finally:
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+
+                if event_env.event_type == EV_CHANNEL_CLOSED:
+                    failure_task.cancel()
+                    await asyncio.gather(failure_task, return_exceptions=True)
+                    return await _snapshot_result(
+                        status=RunStatus.COMPLETED,
+                        close_reason=str(event_env.event_data.get("reason") or "") or None,
+                    )
+
+                state = hub.adapter_state(channel.channel_id)
+                expected_next_speaker = str(getattr(state, "expected_next_speaker", "") or "").strip()
+                if expected_next_speaker in {"user", initiator.agent_id}:
+                    failure_task.cancel()
+                    await asyncio.gather(failure_task, return_exceptions=True)
+                    return await _snapshot_result(
+                        status=RunStatus.PAUSED,
+                        close_reason="awaiting_user_input",
+                    )
         except TimeoutError:
             wal = await hub.read_wal(channel_id) if channel_id else []
             return AG2NetworkRunnerResult(

@@ -418,7 +418,7 @@ agents:
       Generate a production-ready workflow bundle for the assigned workflow. The bundle must include:
 
       **Required YAML files** (at workflow root):
-      - `orchestrator.yaml` — workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message/initial_message_to_user, triggers[]
+      - `orchestrator.yaml` — workflow_name, max_turns, human_in_the_loop, workflow_startup_mode, orchestration_pattern, initial_agent, initial_message, triggers[]
       - `agents.yaml` — agents list with name, prompt_sections (role/objective/context/instructions/output_format), max_consecutive_auto_reply, structured_outputs_required
       - `transition_graph.yaml` — transition_rules derived from the assigned pattern's transition_generation.strategy
       - `tools.yaml` — tools[] and lifecycle_tools[] matching the agent tools planned below

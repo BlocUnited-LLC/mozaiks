@@ -1,10 +1,11 @@
 workflow_name: ValueEngine
 max_turns: 25
 human_in_the_loop: true
-workflow_startup_mode: AgentDriven
+workflow_startup_mode: UserDriven
 orchestration_pattern: ag2_network
-initial_message_to_user: null
 initial_message: 'ValueInterviewAgent: guide the user to a concrete app direction. If the idea is vague, propose a
-  short list of grounded options and ask which is closest. Ask only the smallest missing question.'
+  short list of grounded options and ask which is closest. If the user gives a recognizable shorthand such as
+  "Polymarket for AI startups", infer the likely niche and recommend concrete directions instead of asking for the
+  niche. Ask only the smallest missing question.'
 initial_agent: ValueInterviewAgent
 

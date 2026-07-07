@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from typing import Any
 
 import pytest
@@ -303,6 +304,41 @@ async def test_ag2_network_runner_commits_tool_context_updates_before_routing() 
 
 
 @pytest.mark.anyio
+async def test_ag2_network_runner_pauses_immediately_on_user_handoff() -> None:
+    interviewer = _DeterministicAgent("ValueInterviewAgent", "Please describe your product.")
+
+    started_at = perf_counter()
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="PauseSmoke",
+            chat_id="chat-pause",
+            app_id="app-pause",
+            agents={
+                "ValueInterviewAgent": interviewer,
+            },
+            transition_rules=[
+                {
+                    "source_agent": "ValueInterviewAgent",
+                    "target_agent": "user",
+                    "transition_type": "after_turn",
+                },
+            ],
+            initial_agent_name="ValueInterviewAgent",
+            initial_message="Start the interview.",
+            close_timeout_seconds=10.0,
+        )
+    )
+    elapsed = perf_counter() - started_at
+
+    assert result.status is RunStatus.PAUSED
+    assert result.close_reason == "awaiting_user_input"
+    assert interviewer.ask_calls
+    assert elapsed < 2.0
+    assert any(entry["event_type"] == EV_PACKET for entry in result.wal)
+    assert not any(entry["event_type"] == EV_CHANNEL_CLOSED for entry in result.wal)
+
+
+@pytest.mark.anyio
 async def test_ag2_network_runner_commits_multiple_context_updates_and_deletes() -> None:
     context: dict[str, Any] = {"obsolete": "old", "route": "draft"}
     planner_agent = _ContextOperationAgent(
@@ -517,7 +553,10 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
             self.completed: list[tuple[str, str]] = []
             self.created_sessions: list[dict[str, Any]] = []
 
-        async def load_run_history(self, *, chat_id: str, app_id: str) -> list[dict[str, Any]]:
+        async def load_run_events(self, *, chat_id: str, app_id: str) -> list[Any]:
+            return []
+
+        def project_run_events_to_messages(self, events: list[Any]) -> list[dict[str, Any]]:
             return []
 
         async def create_chat_session(self, **kwargs: Any) -> None:
@@ -637,7 +676,10 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
             self.assistant_messages: list[dict[str, Any]] = []
             self.completed: list[tuple[str, str]] = []
 
-        async def load_run_history(self, *, chat_id: str, app_id: str) -> list[dict[str, Any]]:
+        async def load_run_events(self, *, chat_id: str, app_id: str) -> list[Any]:
+            return []
+
+        def project_run_events_to_messages(self, events: list[Any]) -> list[dict[str, Any]]:
             return []
 
         async def create_chat_session(self, **kwargs: Any) -> None:

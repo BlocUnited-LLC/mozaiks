@@ -4,20 +4,23 @@ import logging
 
 import pytest
 
-from tests.import_utils import import_module_directly
-
-_patterns_mod = import_module_directly("mozaiksai.core.workflow.orchestration_patterns")
+from mozaiksai.core.workflow.execution.run_bootstrap import bootstrap_run_messages as _bootstrap_run_messages
 
 
 class _StubPersistenceManager:
-    def __init__(self, resumed_messages=None):
-        self._resumed_messages = list(resumed_messages or [])
+    def __init__(self, run_events=None, event_messages=None):
+        self._run_events = list(run_events or [])
+        self._event_messages = list(event_messages or [])
         self.created_sessions = []
         self.persisted_batches = []
         self.persisted_run_messages = []
 
-    async def load_run_history(self, *, chat_id, app_id):
-        return list(self._resumed_messages)
+    async def load_run_events(self, *, chat_id, app_id):
+        return list(self._run_events)
+
+    def project_run_events_to_messages(self, events):
+        assert list(events) == self._run_events
+        return list(self._event_messages)
 
     async def create_chat_session(self, **kwargs):
         self.created_sessions.append(kwargs)
@@ -30,10 +33,10 @@ class _StubPersistenceManager:
 
 
 @pytest.mark.asyncio
-async def test_resume_initialize_keeps_direct_initial_message_out_of_persisted_transcript() -> None:
+async def test_run_bootstrap_keeps_direct_initial_message_out_of_persisted_transcript() -> None:
     pm = _StubPersistenceManager()
 
-    resumed_messages, initial_messages = await _patterns_mod._resume_or_initialize_chat(
+    has_persisted_events, initial_messages = await _bootstrap_run_messages(
         persistence_manager=pm,
         config={},
         chat_id="chat-new",
@@ -45,7 +48,7 @@ async def test_resume_initialize_keeps_direct_initial_message_out_of_persisted_t
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert resumed_messages == []
+    assert has_persisted_events is False
     assert initial_messages == [
         {
             "role": "user",
@@ -66,10 +69,10 @@ async def test_resume_initialize_keeps_direct_initial_message_out_of_persisted_t
 
 
 @pytest.mark.asyncio
-async def test_resume_initialize_keeps_config_seed_out_of_persisted_transcript() -> None:
+async def test_run_bootstrap_keeps_config_seed_out_of_persisted_transcript() -> None:
     pm = _StubPersistenceManager()
 
-    resumed_messages, initial_messages = await _patterns_mod._resume_or_initialize_chat(
+    has_persisted_events, initial_messages = await _bootstrap_run_messages(
         persistence_manager=pm,
         config={"initial_message": "Seed from config"},
         chat_id="chat-seed",
@@ -81,7 +84,7 @@ async def test_resume_initialize_keeps_config_seed_out_of_persisted_transcript()
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert resumed_messages == []
+    assert has_persisted_events is False
     assert initial_messages == [
         {
             "role": "user",
@@ -94,18 +97,20 @@ async def test_resume_initialize_keeps_config_seed_out_of_persisted_transcript()
 
 
 @pytest.mark.asyncio
-async def test_resume_initialize_reinjects_hidden_config_seed_on_resume_without_persisting() -> None:
+async def test_run_bootstrap_uses_latest_user_event_as_trigger_without_reinjecting_config_seed() -> None:
     pm = _StubPersistenceManager(
-        resumed_messages=[
+        run_events=[object()],
+        event_messages=[
             {
                 "role": "assistant",
                 "name": "ValueInterviewAgent",
                 "content": "Which niche do you want to explore first?",
-            }
+            },
+            {"role": "user", "name": "user", "content": "Polymarket for AI startups"},
         ]
     )
 
-    resumed_messages, initial_messages = await _patterns_mod._resume_or_initialize_chat(
+    has_persisted_events, initial_messages = await _bootstrap_run_messages(
         persistence_manager=pm,
         config={"initial_message": "Seed from config"},
         chat_id="chat-resume-seed",
@@ -117,34 +122,18 @@ async def test_resume_initialize_reinjects_hidden_config_seed_on_resume_without_
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert resumed_messages == [
-        {
-            "role": "assistant",
-            "name": "ValueInterviewAgent",
-            "content": "Which niche do you want to explore first?",
-        }
-    ]
+    assert has_persisted_events is True
     assert initial_messages == [
-        {
-            "role": "user",
-            "name": "user",
-            "content": "Seed from config",
-            "_mozaiks_seed_kind": "initial_message",
-        },
-        {
-            "role": "assistant",
-            "name": "ValueInterviewAgent",
-            "content": "Which niche do you want to explore first?",
-        },
+        {"role": "user", "name": "user", "content": "Polymarket for AI startups", "_mozaiks_seed_kind": "ag2_event_trigger"},
     ]
     assert pm.persisted_batches == []
 
 
 @pytest.mark.asyncio
-async def test_resume_initialize_skips_persist_for_userdriven_trigger_seed() -> None:
+async def test_run_bootstrap_skips_persist_for_userdriven_trigger_seed() -> None:
     pm = _StubPersistenceManager()
 
-    resumed_messages, initial_messages = await _patterns_mod._resume_or_initialize_chat(
+    has_persisted_events, initial_messages = await _bootstrap_run_messages(
         persistence_manager=pm,
         config={"workflow_startup_mode": "UserDriven"},
         chat_id="chat-userdriven",
@@ -156,7 +145,7 @@ async def test_resume_initialize_skips_persist_for_userdriven_trigger_seed() -> 
         wf_logger=logging.getLogger("test.orchestration.seed"),
     )
 
-    assert resumed_messages == []
+    assert has_persisted_events is False
     assert initial_messages == [
         {
             "role": "user",
@@ -167,41 +156,3 @@ async def test_resume_initialize_skips_persist_for_userdriven_trigger_seed() -> 
     ]
     assert pm.persisted_batches == []
 
-
-@pytest.mark.asyncio
-async def test_userdriven_greeting_persists_as_run_stream_event() -> None:
-    pm = _StubPersistenceManager()
-
-    class _Transport:
-        def __init__(self):
-            self.events = []
-
-        async def send_event_to_ui(self, event, chat_id):
-            self.events.append((chat_id, dict(event)))
-
-    transport = _Transport()
-
-    sequence = await _patterns_mod._emit_startup_greeting_if_needed(
-        config={"initial_message_to_user": "How can I help?"},
-        resumed_messages=[],
-        workflow_startup_mode="UserDriven",
-        initial_agent_name="InterviewAgent",
-        transport=transport,
-        chat_id="chat-userdriven",
-        app_id="app-1",
-        persistence_manager=pm,
-        workflow_name_upper="RUNTIMESMOKE",
-        wf_logger=logging.getLogger("test.orchestration.greeting"),
-    )
-
-    assert sequence == 1
-    assert pm.persisted_run_messages == [
-        {
-            "chat_id": "chat-userdriven",
-            "app_id": "app-1",
-            "content": "How can I help?",
-            "agent_name": "InterviewAgent",
-            "metadata": {"source": "startup_greeting"},
-        }
-    ]
-    assert transport.events[0][1]["kind"] == "chat.text"

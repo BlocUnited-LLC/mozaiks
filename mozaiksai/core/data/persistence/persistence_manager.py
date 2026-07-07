@@ -5,7 +5,7 @@
 
 """Persistence layer for mozaiksai workflows.
 
-Runtime persistence owns durable run records, resume state, artifacts, and
+Runtime persistence owns durable run records, AG2 event history, artifacts, and
 AG2 stream storage:
   * PersistenceManager: Mongo client + indexes (runtime-owned only)
   * AG2PersistenceManager: ChatSessions + AG2 run stream projections
@@ -395,6 +395,7 @@ class AG2PersistenceManager:
                 "status": int(WorkflowStatus.IN_PROGRESS),
                 "created_at": now,
                 "last_updated_at": now,
+                "session_version": 0,
                 "workflow_ui_state": build_default_workflow_ui_state(),
                 "messages": [],
             }
@@ -533,7 +534,7 @@ class AG2PersistenceManager:
             coll = await self._coll()
             await coll.update_one(
                 {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
-                {"$set": safe_updates},
+                {"$set": safe_updates, "$inc": {"session_version": 1}},
             )
         except Exception as e:  # pragma: no cover
             logger.debug("[PERSIST_CONTEXT_VARIABLES] Failed chat_id=%s: %s", chat_id, e)
@@ -620,13 +621,16 @@ class AG2PersistenceManager:
                 created_at = created_at.replace(tzinfo=UTC)
             dur = float((now - created_at).total_seconds()) if isinstance(created_at, datetime) else 0.0
             # Use dot-path write so unrecognized workflow_ui_state fields are preserved.
-            res = await coll.update_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {"$set": {
-                "status": int(WorkflowStatus.COMPLETED),
-                "completed_at": now,
-                "last_updated_at": now,
-                "duration_sec": dur,
-                "workflow_ui_state.pending_input_request": None,
-            }})
+            res = await coll.update_one({"_id": chat_id, **build_app_scope_filter(resolved_app_id)}, {
+                "$set": {
+                    "status": int(WorkflowStatus.COMPLETED),
+                    "completed_at": now,
+                    "last_updated_at": now,
+                    "duration_sec": dur,
+                    "workflow_ui_state.pending_input_request": None,
+                },
+                "$inc": {"session_version": 1},
+            })
             return res.modified_count > 0
         except Exception as e:  # pragma: no cover
             logger.error("Failed to mark chat %s as completed: %s", chat_id, e, exc_info=True)
@@ -674,7 +678,7 @@ class AG2PersistenceManager:
             }
             await coll.update_one(
                 {"_id": chat_id, **build_app_scope_filter(resolved_app_id)},
-                {"$set": {"workflow_ui_state.last_artifact": doc, "last_updated_at": now}},
+                {"$set": {"workflow_ui_state.last_artifact": doc, "last_updated_at": now}, "$inc": {"session_version": 1}},
             )
             logger.debug(
                 "[LAST_ARTIFACT] Updated",
@@ -682,6 +686,62 @@ class AG2PersistenceManager:
             )
         except Exception as e:  # pragma: no cover
             logger.debug("[LAST_ARTIFACT] Update failed chat_id=%s: %s", chat_id, e)
+
+    async def get_session_version(self, chat_id: str, app_id: str | None = None) -> int | None:
+        """Return the current session_version for a chat session, or None if not found.
+
+        Used by callers that need optimistic concurrency control — read the version
+        before starting a workflow, then call ``check_session_not_stale`` at a
+        checkpoint to verify no concurrent write has advanced the version.
+        """
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            return None
+        try:
+            coll = await self._coll()
+            doc = await coll.find_one(
+                {"_id": chat_id, **build_app_scope_filter(str(resolved_app_id))},
+                {"session_version": 1},
+            )
+            if not isinstance(doc, dict):
+                return None
+            raw = doc.get("session_version")
+            return int(raw) if raw is not None else 0
+        except Exception as e:  # pragma: no cover
+            logger.debug("[SESSION_VERSION] Failed to read version chat_id=%s: %s", chat_id, e)
+            return None
+
+    async def check_session_not_stale(
+        self,
+        chat_id: str,
+        app_id: str | None = None,
+        *,
+        known_version: int,
+    ) -> bool:
+        """Return True if the session version still matches ``known_version``.
+
+        Returns False (stale) when another instance has written to the session since
+        the caller read it.  A result of None from ``get_session_version`` (session
+        not found) is treated as stale.
+
+        This is a soft guard — the distributed lock in
+        ``core/runtime/persistence/distributed_lock.py`` provides the hard
+        mutual-exclusion boundary for concurrent execution.  Use this method to
+        detect silent concurrent writes that the lock does not cover (e.g. metadata
+        updates from a different code path while the lock-holder is running).
+        """
+        current = await self.get_session_version(chat_id, app_id)
+        if current is None:
+            return False
+        is_fresh = current == known_version
+        if not is_fresh:
+            logger.warning(
+                "[SESSION_VERSION] Stale session detected — chat_id=%s known=%s current=%s",
+                chat_id,
+                known_version,
+                current,
+            )
+        return is_fresh
 
     def _run_stream_id(self, *, chat_id: str, app_id: str):
         from mozaiksai.core.adapters.ag2_stream_storage import stream_id_for_run
@@ -737,14 +797,18 @@ class AG2PersistenceManager:
 
         return None
 
-    async def load_run_history(self, *, chat_id: str, app_id: str) -> list[dict[str, Any]]:
-        events = await self.load_run_events(chat_id=chat_id, app_id=app_id)
+    def project_run_events_to_messages(self, events: list[Any]) -> list[dict[str, Any]]:
         history: list[dict[str, Any]] = []
         for event in events:
             message = self._run_event_to_message(event)
             if isinstance(message, dict):
                 history.append(message)
         return history
+
+    async def load_run_history(self, *, chat_id: str, app_id: str) -> list[dict[str, Any]]:
+        """Return UI replay messages projected from canonical AG2 run events."""
+        events = await self.load_run_events(chat_id=chat_id, app_id=app_id)
+        return self.project_run_events_to_messages(events)
 
     async def append_run_assistant_message(
         self,
@@ -779,6 +843,39 @@ class AG2PersistenceManager:
             provider="mozaiks.runtime",
             finish_reason="stop",
         )
+        storage = MongoAG2StreamStorage(app_id=resolved_app_id)
+        stream_context = SimpleNamespace(
+            stream=SimpleNamespace(id=self._run_stream_id(chat_id=chat_id, app_id=resolved_app_id))
+        )
+        await storage.save_event(event, stream_context)
+
+    async def append_run_user_message(
+        self,
+        *,
+        chat_id: str,
+        app_id: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from autogen.beta.events.input_events import TextInput
+
+        from mozaiksai.core.adapters.ag2_stream_storage import MongoAG2StreamStorage
+
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        text = str(content or "").strip()
+        if not text:
+            return
+
+        event = TextInput(text)
+        if metadata:
+            try:
+                event.metadata = dict(metadata)
+            except Exception:
+                pass
         storage = MongoAG2StreamStorage(app_id=resolved_app_id)
         stream_context = SimpleNamespace(
             stream=SimpleNamespace(id=self._run_stream_id(chat_id=chat_id, app_id=resolved_app_id))
@@ -881,6 +978,48 @@ class AG2PersistenceManager:
                 }
             )
         return sessions
+
+    async def delete_general_chat(
+        self,
+        *,
+        general_chat_id: str,
+        app_id: str,
+        user_id: str,
+    ) -> bool:
+        """Delete a single general chat session owned by the given user."""
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        ent_id = str(resolved_app_id)
+        coll = await self._general_coll()
+        result = await coll.delete_one(
+            {"_id": general_chat_id, "user_id": user_id, **build_app_scope_filter(ent_id)}
+        )
+        return result.deleted_count > 0
+
+    async def fetch_general_chat_transcript(
+        self,
+        *,
+        general_chat_id: str,
+        app_id: str,
+        after_sequence: int = -1,
+        limit: int = 200,
+    ) -> dict[str, Any] | None:
+        """Return the general chat session document with messages filtered by sequence."""
+        resolved_app_id = coalesce_app_id(app_id=app_id)
+        if not resolved_app_id:
+            raise ValueError("app_id is required")
+        ent_id = str(resolved_app_id)
+        coll = await self._general_coll()
+        doc = await coll.find_one(
+            {"_id": general_chat_id, **build_app_scope_filter(ent_id)}
+        )
+        if doc is None:
+            return None
+        result = dict(doc)
+        messages = [m for m in (result.get("messages") or []) if int(m.get("sequence", 0) or 0) > after_sequence]
+        result["messages"] = messages[:limit]
+        return result
 
     async def get_user_workflow_statuses(self, *, app_id: str | None = None, user_id: str) -> dict[str, dict[str, Any]]:
         """Return a mapping of workflow_name -> { chat_id, status } for a given user.
@@ -1394,7 +1533,8 @@ class AG2PersistenceManager:
                             "created_at": datetime.now(UTC).isoformat(),
                         },
                         "last_updated_at": datetime.now(UTC),
-                    }
+                    },
+                    "$inc": {"session_version": 1},
                 }
             )
             logger.debug("[PENDING_INPUT] Saved pending input request %s for chat %s", request_id, chat_id)
@@ -1423,6 +1563,7 @@ class AG2PersistenceManager:
                         "workflow_ui_state.pending_input_request": None,
                         "last_updated_at": datetime.now(UTC),
                     },
+                    "$inc": {"session_version": 1},
                 }
             )
             logger.debug("[PENDING_INPUT] Cleared pending input request for chat %s", chat_id)

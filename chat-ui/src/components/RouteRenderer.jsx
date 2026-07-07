@@ -66,6 +66,15 @@ const resolveRouteUserId = (user) => {
   );
 };
 
+const buildWorkflowChatPath = (workflowId, chatId) => {
+  const params = new URLSearchParams({
+    mode: 'workflow',
+    workflow: String(workflowId),
+    chat_id: String(chatId),
+  });
+  return `/chat?${params.toString()}`;
+};
+
 const resolveShellMode = (route, chrome) => {
   const declared =
     route?.meta?.shellMode ||
@@ -190,9 +199,7 @@ function TransitionRoute({ route }) {
 
         if (data.resolution_type === 'workflow' && data.chat_id && data.workflow_id) {
           setAccumulatedContext({});
-          navigate(
-            `/chat?workflow=${encodeURIComponent(data.workflow_id)}&chat_id=${encodeURIComponent(data.chat_id)}`
-          );
+          navigate(buildWorkflowChatPath(data.workflow_id, data.chat_id));
           return;
         }
 
@@ -201,7 +208,7 @@ function TransitionRoute({ route }) {
         console.error('[TransitionRoute] transition resolution failed:', err);
       }
     },
-    [accumulatedContext, currentTransitionId, navigate, resolvedAppId, resolvedUserId]
+    [accumulatedContext, currentTransitionId, navigate, resolvedAppId, resolvedUserId, route]
   );
 
   if (!currentTransitionId) return null;
@@ -243,10 +250,7 @@ function WorkflowEntryRoute({ route }) {
 
         const data = await res.json();
         if (!cancelled && data.chat_id && data.workflow_id) {
-          navigate(
-            `/chat?workflow=${encodeURIComponent(data.workflow_id)}&chat_id=${encodeURIComponent(data.chat_id)}`,
-            { replace: true }
-          );
+          navigate(buildWorkflowChatPath(data.workflow_id, data.chat_id), { replace: true });
         }
       } catch (err) {
         if (!cancelled) setError(err);
@@ -257,7 +261,7 @@ function WorkflowEntryRoute({ route }) {
     return () => {
       cancelled = true;
     };
-  }, [workflowId, route.context_variables, navigate, resolvedAppId, resolvedUserId]);
+  }, [workflowId, route, navigate, resolvedAppId, resolvedUserId]);
 
   if (error) {
     return <ComponentNotFound componentName={`Workflow route ${workflowId}: ${error.message}`} />;

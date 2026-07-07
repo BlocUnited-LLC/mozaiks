@@ -796,7 +796,6 @@ async function applyAppThemeTokens(themeConfig) {
       }
     }
 
-    console.log(`🎨 [THEME] App UI tokens applied (primary: ${themeConfig.primary ?? 'blue'}, appearance: ${appearance})`);
   } catch (err) {
     console.warn('⚠️ [THEME] Could not apply App UI tokens:', err.message);
   }
@@ -835,14 +834,12 @@ async function loadThemeFromConfig() {
     if (config.identity || config.colors || config.fonts) {
       const theme = themeConfigToTheme(config, assetsPath);
       const src = config.theme ? 'unified' : 'config';
-      console.log(`🎨 [THEME] Loaded theme config (${src}): ${config.identity?.name || 'default'}`);
       return { theme, meta: { source: src, appId: 'default' } };
     }
 
     // Schema-only format without top-level chat-shell tokens.
     if (config.theme) {
       const theme = buildSchemaChatTheme(config, assetsPath);
-      console.log(`🎨 [THEME] Derived chat shell theme from schema config: ${theme.branding?.name || 'default'}`);
       return { theme, meta: { source: 'app-theme-bridge', appId: 'default' } };
     }
 
@@ -1020,7 +1017,6 @@ export async function getTheme(appId = 'default') {
       : overrides.theme;
     theme = deepMerge(theme, overrideTheme);
     meta  = { ...meta, ...overrides.meta, source: 'brand+api' };
-    console.log(`🎨 [THEME] Platform overrides merged for app: ${normalizedId}`);
   }
 
   cacheTheme(normalizedId, theme, meta);
@@ -1061,15 +1057,9 @@ export async function initializeTheme(appId = 'default') {
 export function applyTheme(theme) {
   try {
     const t = theme || BARE_FALLBACK_THEME;
-    console.log(`🎨 [THEME] Applying theme: ${t.branding?.name || t.name || 'custom'}`);
 
     // Fonts
     const fonts = t.fonts || BARE_FALLBACK_THEME.fonts;
-    console.log('🔤 [THEME] Font config:', {
-      body: summarizeFontConfig(fonts.body),
-      heading: summarizeFontConfig(fonts.heading),
-      logo: summarizeFontConfig(fonts.logo),
-    });
     Object.values(fonts).forEach((font) => {
       if (font?.googleFont && !font.localFont) loadGoogleFont(font.googleFont);
       if (font?.localFont && font?.src) {
@@ -1104,7 +1094,6 @@ export function applyTheme(theme) {
 
     logThemeRuntimeDiagnostics(root, fonts, t);
 
-    console.log('✅ [THEME] Theme applied');
   } catch (err) {
     console.error('❌ [THEME] Error applying theme:', err);
   }
@@ -1228,40 +1217,6 @@ function logThemeRuntimeDiagnostics(root, fonts, theme) {
     try {
       const rootStyle = window.getComputedStyle(root);
       const bodyStyle = document.body ? window.getComputedStyle(document.body) : null;
-      console.log(`🔎 [THEME] Runtime diagnostics (${phase}):`, {
-        theme: theme?.branding?.name || theme?.name || 'custom',
-        fontVars: {
-          body: rootStyle.getPropertyValue('--font-body').trim(),
-          heading: rootStyle.getPropertyValue('--font-heading').trim(),
-          logo: rootStyle.getPropertyValue('--font-logo').trim(),
-        },
-        computed: {
-          rootFontFamily: rootStyle.fontFamily,
-          bodyFontFamily: bodyStyle?.fontFamily || null,
-        },
-        elements: {
-          shellTitle: readElementFont('.chat-shell .heading-font'),
-          shellSubtitle: readElementFont('.chat-shell .transmission-typing-font'),
-          userBubble: readElementFont('.chat-shell .user-message'),
-          agentBubble: readElementFont('.chat-shell .agent-message'),
-          headerHeading: readElementFont('header .heading-font'),
-          headerNavButton: readElementFont('header nav button'),
-          footerLink: readElementFont('footer .shell-footer-link'),
-          pageBody: readElementFont('[data-page] section'),
-          pageHeading: readElementFont('[data-page] h1, [data-page] h2, [data-page] h3'),
-        },
-        assets: {
-          background: rootStyle.getPropertyValue('--brand-bg-url').trim() || null,
-          logo: rootStyle.getPropertyValue('--brand-logo-url').trim() || null,
-          wordmark: rootStyle.getPropertyValue('--brand-wordmark-url').trim() || null,
-        },
-        availability: {
-          fontFaceSetStatus: document.fonts?.status || 'unsupported',
-          body: isFontAvailable(fonts.body),
-          heading: isFontAvailable(fonts.heading),
-          logo: isFontAvailable(fonts.logo),
-        },
-      });
     } catch (error) {
       console.warn('⚠️ [THEME] Failed to collect runtime diagnostics:', error?.message || error);
     }
@@ -1285,7 +1240,6 @@ function loadLocalFont(font) {
 
   const styleId = `mozaiks-local-font-${src.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
   if (document.getElementById(styleId)) {
-    console.log('🔤 [THEME] Local font-face already registered:', { family: font.family, src });
     return;
   }
 
@@ -1293,7 +1247,6 @@ function loadLocalFont(font) {
   style.id = styleId;
   style.textContent = `@font-face { font-family: ${family}; src: url("${src}") format("${inferFontFormat(src)}"); font-display: swap; }`;
   document.head.appendChild(style);
-  console.log('🔤 [THEME] Registered local font-face:', { family: font.family, src, styleId });
 }
 
 async function ensureLocalFont(font) {
@@ -1367,12 +1320,6 @@ function applyFontVariables(root, themeFonts) {
     if (value) root.style.setProperty(cssVar, value);
   });
 
-  console.log('🔤 [THEME] Applied font CSS variables:', {
-    '--font-body': bodyStack,
-    '--font-heading': headingStack,
-    '--font-logo': logoStack,
-    ...utilityStacks,
-  });
 }
 
 function updateFavicon(faviconUrl) {

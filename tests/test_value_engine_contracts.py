@@ -16,6 +16,57 @@ def test_value_engine_interview_agent_uses_bare_next_completion_contract() -> No
     assert "Do not add any summary, punctuation, or extra words in that message." in agents_text
 
 
+def test_value_engine_interview_agent_infers_recognizable_concept_shorthand() -> None:
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+    orchestrator = yaml.safe_load((VALUE_ENGINE_DIR / "orchestrator.yaml").read_text(encoding="utf-8"))
+
+    assert "Polymarket for AI startups" in agents_text
+    assert 'Do NOT ask "what niche or user group?"' in agents_text
+    assert "For recognizable shorthand, you MUST include concrete pain points and app directions" in agents_text
+    assert "Present one flexible working direction plus 1-2 lighter suggestion angles" in agents_text
+    assert "infer the likely niche" in orchestrator["initial_message"]
+
+
+def test_value_engine_interview_agent_keeps_domain_signal_instead_of_generic_fallback() -> None:
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "Never discard a domain signal" in agents_text
+    assert '"Polymarket for AI startups" + "gamblers"' in agents_text
+    assert "Do not propose unrelated categories such as mental health, personal finance, or remote collaboration." in agents_text
+
+
+def test_value_engine_interview_agent_bans_generic_questions_after_shorthand() -> None:
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "BANNED after recognizable shorthand" in agents_text
+    assert "What specific problem do you want to solve?" in agents_text
+    assert "What pain points are you considering?" in agents_text
+    assert "What target user?" in agents_text
+    assert "What niche?" in agents_text
+    assert "Which one should I use?" in agents_text
+    assert "Which of these resonates?" in agents_text
+    assert "fragmented startup signal" in agents_text
+    assert "market-implied confidence around AI companies" in agents_text
+
+
+def test_value_engine_interview_agent_must_recommend_when_user_delegates_choice() -> None:
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "If the user delegates choice" in agents_text
+    assert "Give one working direction as your suggested starting point" in agents_text
+    assert "do not ask them to choose" in agents_text
+    assert "Do not hard-code launch/funding milestones, traders, founders, or betting mechanics as the only path" in agents_text
+
+
+def test_value_engine_interview_agent_uses_working_hypothesis_not_overconfident_assumption() -> None:
+    agents_text = (VALUE_ENGINE_DIR / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "working direction" in agents_text
+    assert "working direction as your suggested starting point" in agents_text
+    assert "I would assume [target user]" not in agents_text
+    assert "traders bet on verifiable launch/funding/traction milestones" not in agents_text
+
+
 def test_value_engine_interview_complete_trigger_still_uses_exact_next() -> None:
     context_config = yaml.safe_load((VALUE_ENGINE_DIR / "context_variables.yaml").read_text(encoding="utf-8"))
     trigger = context_config["definitions"]["interview_complete"]["source"]["triggers"][0]

@@ -193,6 +193,21 @@ function resolveTableData(config, liveData) {
   return [];
 }
 
+function resolveArrayConfig(config, liveData, staticKey, pathKey, fallbackPaths = []) {
+  if (Array.isArray(config?.[staticKey])) return config[staticKey];
+  const candidatePaths = [
+    typeof config?.[pathKey] === 'string' ? config[pathKey] : null,
+    ...fallbackPaths,
+  ].filter(Boolean);
+
+  for (const path of candidatePaths) {
+    const resolved = resolvePath(liveData, path);
+    if (Array.isArray(resolved)) return resolved;
+  }
+
+  return [];
+}
+
 function formatDataValue(value, format) {
   if (value === undefined || value === null || value === '') return '—';
 
@@ -444,6 +459,49 @@ export function SectionRenderer({
         items: materializeSummaryItems(config.items, effectiveData, effectiveLoading),
       };
       break;
+    case 'PricingCatalog': {
+      const planAction = isRecord(config.plan_action) ? config.plan_action : null;
+      const addOnAction = isRecord(config.add_on_action) ? config.add_on_action : null;
+      const currentPlanId = resolveConfigValue(
+        config,
+        effectiveData,
+        'current_plan_key',
+        'current_plan_id',
+        effectiveLoading,
+      );
+      const defaultGroupId = resolveConfigValue(
+        config,
+        effectiveData,
+        'default_group_key',
+        'default_group_id',
+        effectiveLoading,
+      ) ?? resolvePath(effectiveData, 'pricing_catalog.default_group_id');
+
+      primitiveProps = {
+        id: componentId,
+        title: config.title,
+        subtitle: config.subtitle,
+        plans: resolveArrayConfig(config, effectiveData, 'plans', 'plans_key', ['plans']),
+        groups: resolveArrayConfig(config, effectiveData, 'groups', 'groups_key', ['pricing_catalog.groups']),
+        add_ons: resolveArrayConfig(config, effectiveData, 'add_ons', 'add_ons_key', [
+          'add_ons',
+          'addons',
+          'marketplace_placements_pricing',
+        ]),
+        default_group_id: defaultGroupId,
+        current_plan_id: currentPlanId,
+        highlighted_plan_id: config.highlighted_plan_id,
+        plan_action_label: config.plan_action_label,
+        add_on_action_label: config.add_on_action_label,
+        onPlanAction: planAction
+          ? (plan) => executeAction(planAction, { selectedRows: [plan] })
+          : undefined,
+        onAddOnAction: addOnAction
+          ? (addOn) => executeAction(addOnAction, { selectedRows: [addOn] })
+          : undefined,
+      };
+      break;
+    }
     case 'InlineEmptyState': {
       const action = buildEmptyAction(config, executeAction, section.id);
       primitiveProps = {

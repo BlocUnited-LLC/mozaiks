@@ -273,7 +273,7 @@ def test_promote_restores_generated_app_bundle_as_loadable_platform_root(monkeyp
         "GeneratedApp/config/ai.json": json.dumps(
             {
                 "chat": {"chat_startup_mode": "ask"},
-                "workflows": {"entry_point": "SupportWorkflow", "resume_policy": "new"},
+                "workflows": {"entry_point": "SupportWorkflow"},
             }
         ),
         "GeneratedApp/config/shell.json": json.dumps({"shortcuts": {"header": ["dashboard"]}}),

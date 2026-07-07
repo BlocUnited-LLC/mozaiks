@@ -19,6 +19,8 @@ from pathlib import Path
 _MOZAIKS_ROOT = Path(__file__).resolve().parents[1]
 _MODULE_EVENT_ROUTER = _MOZAIKS_ROOT / "mozaiksai" / "core" / "runtime" / "composition" / "module_event_router.py"
 _PLATFORM_PY = _MOZAIKS_ROOT / "mozaiksai" / "hosts" / "platform.py"
+# Notification routes were extracted to this router module.
+_NOTIFICATIONS_ROUTER_PY = _MOZAIKS_ROOT / "mozaiksai" / "hosts" / "routers" / "notifications.py"
 
 
 # ---------------------------------------------------------------------------
@@ -139,19 +141,28 @@ class TestFlatEnvelopeFallback:
 # ---------------------------------------------------------------------------
 
 class TestNotificationsListingEndpoint:
-    """GET /api/notifications is declared in platform.py and projects source_event out."""
+    """GET /api/notifications is declared in the notifications router and projects source_event out."""
+
+    def _router_source(self) -> str:
+        return _NOTIFICATIONS_ROUTER_PY.read_text(encoding="utf-8")
 
     def _platform_source(self) -> str:
         return _PLATFORM_PY.read_text(encoding="utf-8")
 
     def test_get_notifications_endpoint_declared(self):
+        source = self._router_source()
+        assert '@router.get("/api/notifications")' in source, (
+            "GET /api/notifications must be declared in the notifications router"
+        )
+
+    def test_platform_includes_notifications_router(self):
         source = self._platform_source()
-        assert '@app.get("/api/notifications")' in source, (
-            "GET /api/notifications must be declared in platform.py"
+        assert "_notifications_router" in source or "notifications" in source, (
+            "platform.py must include the notifications router"
         )
 
     def test_notification_safe_projection_strips_source_event(self):
-        source = self._platform_source()
+        source = self._router_source()
         assert "_NOTIFICATION_SAFE_PROJECTION" in source, (
             "_NOTIFICATION_SAFE_PROJECTION constant must be defined"
         )
@@ -166,20 +177,23 @@ class TestNotificationsListingEndpoint:
         )
 
     def test_listing_applies_safe_projection(self):
-        source = self._platform_source()
+        source = self._router_source()
         # The listing endpoint must reference the safe projection constant
-        listing_start = source.index('@app.get("/api/notifications")')
-        # Find the closing function boundary (next @app. decorator)
-        listing_end = source.find("@app.", listing_start + 10)
+        listing_start = source.index('@router.get("/api/notifications")')
+        listing_end = source.find("@router.", listing_start + 10)
+        if listing_end == -1:
+            listing_end = len(source)
         listing_block = source[listing_start:listing_end]
         assert "_NOTIFICATION_SAFE_PROJECTION" in listing_block, (
             "GET /api/notifications must apply _NOTIFICATION_SAFE_PROJECTION"
         )
 
     def test_listing_does_not_return_source_event_field(self):
-        source = self._platform_source()
-        listing_start = source.index('@app.get("/api/notifications")')
-        listing_end = source.find("@app.", listing_start + 10)
+        source = self._router_source()
+        listing_start = source.index('@router.get("/api/notifications")')
+        listing_end = source.find("@router.", listing_start + 10)
+        if listing_end == -1:
+            listing_end = len(source)
         listing_block = source[listing_start:listing_end]
         # source_event must not appear in the return body (only in projection)
         assert '"source_event"' not in listing_block.split("_NOTIFICATION_SAFE_PROJECTION")[1], (
@@ -187,27 +201,33 @@ class TestNotificationsListingEndpoint:
         )
 
     def test_listing_supports_status_filter(self):
-        source = self._platform_source()
-        listing_start = source.index('@app.get("/api/notifications")')
-        listing_end = source.find("@app.", listing_start + 10)
+        source = self._router_source()
+        listing_start = source.index('@router.get("/api/notifications")')
+        listing_end = source.find("@router.", listing_start + 10)
+        if listing_end == -1:
+            listing_end = len(source)
         listing_block = source[listing_start:listing_end]
         assert "status" in listing_block, (
             "GET /api/notifications must support status filter parameter"
         )
 
     def test_listing_sorts_by_created_at_desc(self):
-        source = self._platform_source()
-        listing_start = source.index('@app.get("/api/notifications")')
-        listing_end = source.find("@app.", listing_start + 10)
+        source = self._router_source()
+        listing_start = source.index('@router.get("/api/notifications")')
+        listing_end = source.find("@router.", listing_start + 10)
+        if listing_end == -1:
+            listing_end = len(source)
         listing_block = source[listing_start:listing_end]
         assert "created_at" in listing_block and "-1" in listing_block, (
             "GET /api/notifications must sort by created_at descending"
         )
 
     def test_listing_requires_auth(self):
-        source = self._platform_source()
-        listing_start = source.index('@app.get("/api/notifications")')
-        listing_end = source.find("@app.", listing_start + 10)
+        source = self._router_source()
+        listing_start = source.index('@router.get("/api/notifications")')
+        listing_end = source.find("@router.", listing_start + 10)
+        if listing_end == -1:
+            listing_end = len(source)
         listing_block = source[listing_start:listing_end]
         assert "require_user_scope" in listing_block or "Depends" in listing_block, (
             "GET /api/notifications must require authentication"
@@ -219,23 +239,23 @@ class TestNotificationsListingEndpoint:
 # ---------------------------------------------------------------------------
 
 class TestMarkReadEndpoints:
-    def _platform_source(self) -> str:
-        return _PLATFORM_PY.read_text(encoding="utf-8")
+    def _router_source(self) -> str:
+        return _NOTIFICATIONS_ROUTER_PY.read_text(encoding="utf-8")
 
     def test_mark_single_read_endpoint_declared(self):
-        source = self._platform_source()
+        source = self._router_source()
         assert "/api/notifications/{notification_id}/read" in source, (
             "POST /api/notifications/{notification_id}/read must be declared"
         )
 
     def test_mark_all_read_endpoint_declared(self):
-        source = self._platform_source()
+        source = self._router_source()
         assert "/api/notifications/mark-all-read" in source, (
             "POST /api/notifications/mark-all-read must be declared"
         )
 
     def test_mark_single_read_requires_auth(self):
-        source = self._platform_source()
+        source = self._router_source()
         idx = source.index("/api/notifications/{notification_id}/read")
         block = source[max(0, idx - 100): idx + 400]
         assert "require_user_scope" in block or "Depends" in block
@@ -247,13 +267,13 @@ class TestMarkReadEndpoints:
 
 class TestVisibilityFilterHelper:
     def test_notification_visibility_filter_declared(self):
-        source = _PLATFORM_PY.read_text(encoding="utf-8")
+        source = _NOTIFICATIONS_ROUTER_PY.read_text(encoding="utf-8")
         assert "_notification_visibility_filter" in source, (
-            "_notification_visibility_filter helper must be declared in platform.py"
+            "_notification_visibility_filter helper must be declared in the notifications router"
         )
 
     def test_visibility_filter_checks_roles(self):
-        source = _PLATFORM_PY.read_text(encoding="utf-8")
+        source = _NOTIFICATIONS_ROUTER_PY.read_text(encoding="utf-8")
         idx = source.index("_notification_visibility_filter")
         block = source[idx: idx + 600]
         assert "audience.roles" in block, (
@@ -481,7 +501,7 @@ class TestContextFieldsPlatformProjection:
     """
 
     def test_context_not_in_safe_projection(self):
-        source = _PLATFORM_PY.read_text(encoding="utf-8")
+        source = _NOTIFICATIONS_ROUTER_PY.read_text(encoding="utf-8")
         proj_start = source.index("_NOTIFICATION_SAFE_PROJECTION")
         # Find the closing brace of the dict literal
         proj_block = source[proj_start: proj_start + 600]

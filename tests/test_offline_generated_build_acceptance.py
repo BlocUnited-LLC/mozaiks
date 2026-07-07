@@ -60,7 +60,7 @@ def _generated_build_files() -> dict[str, str]:
         "config/ai.json": json.dumps(
             {
                 "chat": {"chat_startup_mode": "ask"},
-                "workflows": {"entry_point": None, "resume_policy": "manual"},
+                "workflows": {"entry_point": None},
             }
         ),
         "config/shell.json": json.dumps(

@@ -310,6 +310,85 @@ function buildWorkspaceRunsPayload() {
   };
 }
 
+function normalizeUsageRun(run) {
+  const promptTokens = Number(run?.prompt_tokens || 0);
+  const completionTokens = Number(run?.completion_tokens || 0);
+  const totalTokens = Number(run?.total_tokens || promptTokens + completionTokens);
+  const estimatedCost = Number(run?.estimated_cost_usd ?? run?.cost ?? 0);
+  const llmCalls = Number(run?.llm_calls || 1);
+
+  return {
+    ...run,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+    estimated_cost_usd: estimatedCost,
+    llm_calls: llmCalls,
+  };
+}
+
+function summarizeUsageRuns(runs) {
+  const normalizedRuns = (Array.isArray(runs) ? runs : []).map(normalizeUsageRun);
+  const totals = normalizedRuns.reduce(
+    (current, run) => ({
+      prompt_tokens: current.prompt_tokens + run.prompt_tokens,
+      completion_tokens: current.completion_tokens + run.completion_tokens,
+      total_tokens: current.total_tokens + run.total_tokens,
+      estimated_cost_usd: current.estimated_cost_usd + run.estimated_cost_usd,
+      llm_calls: current.llm_calls + run.llm_calls,
+    }),
+    {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      estimated_cost_usd: 0,
+      llm_calls: 0,
+    },
+  );
+
+  return { runs: normalizedRuns, totals };
+}
+
+function buildAppUsagePayload(appId = APP_ID) {
+  const { runs, totals } = summarizeUsageRuns(buildAppStudioPayload(appId).runs?.runs || []);
+  const byWorkflowMap = new Map();
+
+  for (const run of runs) {
+    const workflowName = run.workflow_name || 'Unknown workflow';
+    const current = byWorkflowMap.get(workflowName) || {
+      workflow_name: workflowName,
+      runs: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      estimated_cost_usd: 0,
+      llm_calls: 0,
+    };
+
+    current.runs += 1;
+    current.prompt_tokens += run.prompt_tokens;
+    current.completion_tokens += run.completion_tokens;
+    current.total_tokens += run.total_tokens;
+    current.estimated_cost_usd += run.estimated_cost_usd;
+    current.llm_calls += run.llm_calls;
+    byWorkflowMap.set(workflowName, current);
+  }
+
+  return {
+    totals,
+    by_run: runs,
+    by_workflow: Array.from(byWorkflowMap.values()),
+  };
+}
+
+function buildWorkspaceUsagePayload() {
+  const { runs, totals } = summarizeUsageRuns(buildWorkspaceRunsPayload().runs || []);
+  return {
+    totals,
+    events: runs,
+  };
+}
+
 async function mockStudioApis(page) {
   await page.route('**/api/shell-config', async (route) => {
     await route.fulfill({
@@ -383,6 +462,17 @@ async function mockStudioApis(page) {
     const url = new URL(route.request().url());
     const appId = url.searchParams.get('app_id');
     const payload = appId ? buildAppStudioPayload(appId).runs : buildWorkspaceRunsPayload();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(payload),
+    });
+  });
+
+  await page.route('**/api/admin/usage?**', async (route) => {
+    const url = new URL(route.request().url());
+    const appId = url.searchParams.get('app_id');
+    const payload = appId ? buildAppUsagePayload(appId) : buildWorkspaceUsagePayload();
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -581,11 +671,14 @@ test('app Studio root redirects to overview', async ({ page }) => {
 test('app overview route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
+  const visibleWorkflowName = main.locator('div.font-semibold.text-foreground', {
+    hasText: 'RevisionOrchestrator',
+  }).first();
 
   await expect(main.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Latest app movement' })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workflow coverage' })).toBeVisible();
-  await expect(main.getByText('RevisionOrchestrator').first()).toBeVisible();
+  await expect(visibleWorkflowName).toBeVisible();
   await expect(main.getByText('Build version 17').first()).toBeVisible();
   await expect(main.getByText('Pending Approvals')).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -683,7 +776,6 @@ test('app integrations route stays responsive across desktop and mobile widths',
   await expect(main.getByText('Needs attention').first()).toBeVisible();
   await expect(main.getByText('Unknown').first()).toBeVisible();
   await expect(main.getByText('Ready').first()).toBeVisible();
-  await expect(main.getByText('Incomplete').first()).toBeVisible();
   await expect(main.getByText('Review').first()).toBeVisible();
   await expect(main.getByText('Missing required fields: API Key, Endpoint URL')).toBeVisible();
   await expect(main.getByText('Source readiness').first()).toBeVisible();

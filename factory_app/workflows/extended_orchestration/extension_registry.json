@@ -44,6 +44,7 @@
       "order": 2,
       "meta": {
         "title": "Create App",
+        "freshStart": true,
         "shellMode": "focused",
         "navigation": {
           "include": false

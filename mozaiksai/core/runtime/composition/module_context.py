@@ -33,6 +33,8 @@ class ModuleContext:
     user_id: str | None = None
     tenant_id: str | None = None
     workspace_id: str | None = None
+    module_id: str | None = None
+    action_id: str | None = None
 
     # Request tracing
     correlation_id: str | None = None
@@ -57,6 +59,16 @@ class ModuleContext:
     # Event emitter — async callable(event_type, payload) -> None
     # Injected by ModuleExecutor; no-op if not wired.
     _emit: Callable[[str, dict[str, Any]], Coroutine] | None = field(default=None, repr=False)
+    _metrics: Any | None = field(default=None, repr=False)
+
+    @property
+    def metrics(self) -> Any:
+        """Durable app metric tracker for host-neutral usage signals."""
+        if self._metrics is None:
+            from mozaiksai.core.metrics import AppMetrics
+
+            self._metrics = AppMetrics(self)
+        return self._metrics
 
     async def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         """Emit a domain event through the runtime event bus.

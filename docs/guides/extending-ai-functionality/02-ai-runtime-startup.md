@@ -9,7 +9,6 @@ Use it for:
 - `ask.ask_context_variables`
 - `chat.chat_startup_mode`
 - `workflows.entry_point`
-- `workflows.resume_policy`
 
 Example:
 
@@ -23,11 +22,12 @@ Example:
     "chat_startup_mode": "ask"
   },
   "workflows": {
-    "entry_point": "ValueEngine",
-    "resume_policy": "last_active_then_oldest_then_entry_point"
+    "entry_point": "ValueEngine"
   }
 }
 ```
 
-Keep `ask`, `chat`, and workflow startup here. Do not move startup behavior into
-`control_plane/config/control_plane.yaml`.
+Keep `ask`, `chat`, and workflow startup here. Continuing a previous workflow
+requires an explicit `chat_id` or a session selected from `/api/sessions/list`;
+new app creation must not infer an older session from this config. Do not move
+startup behavior into `control_plane/config/control_plane.yaml`.

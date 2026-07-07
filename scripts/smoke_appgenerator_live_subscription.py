@@ -800,7 +800,7 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
         "config/ai.json": json.dumps(
             {
                 "chat": {"chat_startup_mode": "ask"},
-                "workflows": {"entry_point": None, "resume_policy": "manual"},
+                "workflows": {"entry_point": None},
             }
         ),
         "config/shell.json": json.dumps(

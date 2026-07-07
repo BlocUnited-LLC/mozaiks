@@ -12,6 +12,7 @@ _MODULE_CONTRACT_FILENAMES = {
     "events.yaml",
     "notifications.yaml",
     "profile.yaml",
+    "relationships.yaml",
     "reactions.yaml",
     "settings.yaml",
 }
@@ -143,6 +144,7 @@ def _materialize_module_contract_file_map(payload: dict[str, Any]) -> dict[str, 
         "notifications_yaml": prefix / "contracts" / "notifications.yaml",
         "settings_yaml": prefix / "contracts" / "settings.yaml",
         "admin_yaml": prefix / "contracts" / "admin.yaml",
+        "relationships_yaml": prefix / "contracts" / "relationships.yaml",
         "runtime_extensions_yaml": prefix / "runtime_extensions.yaml",
     }
     for key, path in yaml_outputs.items():

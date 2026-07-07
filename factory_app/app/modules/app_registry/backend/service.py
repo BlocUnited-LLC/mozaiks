@@ -36,12 +36,16 @@ class AppRegistryService:
         description: str | None = None,
         status: str = "draft",
         app_id: str | None = None,
+        active_chat_id: str | None = None,
+        active_workflow_id: str | None = None,
     ) -> dict[str, Any]:
         payload = ensure_create_payload(
             name=name,
             description=description,
             status=status,
             app_id=app_id,
+            active_chat_id=active_chat_id,
+            active_workflow_id=active_workflow_id,
         )
         resolved_app_id = payload["app_id"] or _create_app_id(payload["name"])
         app = await self.repo.upsert_app_record(
@@ -50,6 +54,8 @@ class AppRegistryService:
             description=payload["description"],
             lifecycle_state=payload["status"],
             app_id=resolved_app_id,
+            active_chat_id=payload["active_chat_id"],
+            active_workflow_id=payload["active_workflow_id"],
         )
         return {"success": True, "app": app}
 

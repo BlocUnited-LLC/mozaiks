@@ -519,7 +519,6 @@ export async function validateAllConfigs() {
  */
 export function logValidationResults(issues) {
   if (!issues || issues.length === 0) {
-    console.log('✅ [CONFIG] All config files validated — no issues found.');
     return;
   }
 

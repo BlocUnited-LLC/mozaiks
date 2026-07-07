@@ -123,6 +123,7 @@ nav:
           - Platform Authoring: architecture/app/platform-authoring.md
           - Surface Model: architecture/app/surface-model.md
           - UI Surface and Layout Architecture: architecture/app/ui-surface-and-layout-architecture.md
+          - Platform Navigation Contract: architecture/app/platform-navigation-contract.md
           - Admin System: architecture/app/admin-system.md
           - Account, Admin, and Platform Services: architecture/app/account-admin-and-platform-services.md
           - Tenant Auth and Scope: architecture/app/tenant-auth-and-scope.md

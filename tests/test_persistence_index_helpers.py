@@ -195,6 +195,16 @@ class TestNormalizeIndexSpec:
         result = _normalize_index_spec(raw, "spec")
         assert "optional_opt" not in result.options
 
+    def test_metadata_options_excluded(self):
+        raw = {
+            "name": "idx_name",
+            "keys": [{"field": "name", "order": 1}],
+            "unique": True,
+            "_note": "human-only context",
+        }
+        result = _normalize_index_spec(raw, "spec")
+        assert result.options == {"unique": True}
+
 
 # ---------------------------------------------------------------------------
 # 4. _index_spec_dict

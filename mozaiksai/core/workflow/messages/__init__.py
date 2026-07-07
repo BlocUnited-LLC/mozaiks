@@ -1,20 +1,11 @@
 """
 Message handling utilities.
 
-Provides message normalization, text extraction, and serialization.
+Provides message normalization for AG2 strict format.
 """
 
-from .utils import (
-    extract_agent_name,
-    normalize_text_content,
-    normalize_to_strict_ag2,
-    serialize_event_content,
-)
+from .utils import normalize_to_strict_ag2
 
 __all__ = [
     'normalize_to_strict_ag2',
-    'normalize_text_content',
-    'serialize_event_content',
-    'extract_agent_name',
 ]
-

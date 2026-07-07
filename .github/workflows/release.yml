@@ -118,6 +118,36 @@ jobs:
           python -m mozaiks studio --help
           python -m mozaiks quickstart --help
 
+      - name: Verify installed wheel runtime contracts
+        shell: bash
+        run: |
+          . .release-venv/bin/activate
+          python - <<'PY'
+          from importlib.util import find_spec
+
+          from mozaiksai.core.runtime import persistence
+          from mozaiksai.core.runtime.app.module_loader import ActionDef
+
+          required_action_fields = {"api_surface", "entitlement_gate"}
+          missing_action_fields = required_action_fields.difference(ActionDef.model_fields)
+          if missing_action_fields:
+              raise SystemExit(f"Installed wheel ActionDef missing fields: {sorted(missing_action_fields)}")
+
+          required_persistence_exports = {"app_data_from_context", "AppData"}
+          missing_persistence_exports = [
+              name for name in required_persistence_exports if not hasattr(persistence, name)
+          ]
+          if missing_persistence_exports:
+              raise SystemExit(
+                  f"Installed wheel persistence package missing exports: {missing_persistence_exports}"
+              )
+
+          if find_spec("mozaiksai.core.runtime.app.subscriptions_loader") is None:
+              raise SystemExit("Installed wheel missing subscriptions_loader runtime module")
+
+          print("Installed wheel runtime contracts are present")
+          PY
+
       - name: Verify packaged resources
         shell: bash
         run: |
@@ -163,9 +193,25 @@ jobs:
           name: python-dist
           path: dist/*
 
-  github-release:
+  # ── Manual approval gate ─────────────────────────────────────────────────────
+  # Both github-release and publish-pypi wait for this job.
+  # Configure required reviewers on the "release-approval" GitHub environment
+  # (Settings → Environments → release-approval → Required reviewers) to make
+  # this gate block until a human explicitly approves the release.
+  # Without required reviewers set, this job passes immediately — set them up
+  # in GitHub Settings before the repo is production-ready.
+  approve-release:
     runs-on: ubuntu-latest
     needs: build
+    environment:
+      name: release
+    steps:
+      - name: Release approved
+        run: echo "Release ${{ needs.build.outputs.tag }} approved for publishing."
+
+  github-release:
+    runs-on: ubuntu-latest
+    needs: [build, approve-release]
     permissions:
       contents: write
     steps:
@@ -190,7 +236,7 @@ jobs:
 
   publish-pypi:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, approve-release]
     permissions:
       id-token: write
     environment:

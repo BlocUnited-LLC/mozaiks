@@ -11,6 +11,8 @@ def ensure_create_payload(
     description: str | None = None,
     status: str = "draft",
     app_id: str | None = None,
+    active_chat_id: str | None = None,
+    active_workflow_id: str | None = None,
 ) -> dict[str, Any]:
     normalized_name = normalize_optional_text(name)
     if not normalized_name:
@@ -20,6 +22,8 @@ def ensure_create_payload(
         "description": normalize_optional_text(description),
         "status": validate_lifecycle_state(status or "draft"),
         "app_id": normalize_optional_text(app_id),
+        "active_chat_id": normalize_optional_text(active_chat_id),
+        "active_workflow_id": normalize_optional_text(active_workflow_id),
     }
 
 

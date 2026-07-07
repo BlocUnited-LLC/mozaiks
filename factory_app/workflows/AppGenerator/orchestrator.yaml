@@ -3,7 +3,6 @@ max_turns: 25
 human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
-initial_message_to_user: null
 initial_message: 'InterviewAgent: read the existing brief, guide the user through only the missing deterministic
   app-scope details, and avoid re-interviewing from scratch before code generation begins.'
 initial_agent: InterviewAgent

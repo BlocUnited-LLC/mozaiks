@@ -89,7 +89,7 @@ async def test_create_agents_exposes_declared_context_variables_without_explicit
 
 
 def test_persisted_session_context_overrides_declared_defaults() -> None:
-    from mozaiksai.core.workflow.orchestration_patterns import _merge_persisted_extra_context
+    from mozaiksai.core.workflow.execution.run_bootstrap import merge_persisted_extra_context as _merge_persisted_extra_context
 
     class _Context:
         def __init__(self) -> None:
@@ -128,10 +128,13 @@ def test_persisted_session_context_overrides_declared_defaults() -> None:
 
 @pytest.mark.asyncio
 async def test_initial_agent_override_suppresses_orchestrator_seed() -> None:
-    from mozaiksai.core.workflow.orchestration_patterns import _resume_or_initialize_chat
+    from mozaiksai.core.workflow.execution.run_bootstrap import bootstrap_run_messages as _bootstrap_run_messages
 
     class _Persistence:
-        async def load_run_history(self, *, chat_id: str, app_id: str):
+        async def load_run_events(self, *, chat_id: str, app_id: str):
+            return []
+
+        def project_run_events_to_messages(self, events):
             return []
 
         async def create_chat_session(self, **kwargs):
@@ -139,7 +142,7 @@ async def test_initial_agent_override_suppresses_orchestrator_seed() -> None:
 
     logger = SimpleNamespace(info=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
 
-    _, initial_messages = await _resume_or_initialize_chat(
+    _, initial_messages = await _bootstrap_run_messages(
         persistence_manager=_Persistence(),
         config={
             "initial_message": "InterviewAgent: Greet the user and ask questions.",
@@ -160,10 +163,13 @@ async def test_initial_agent_override_suppresses_orchestrator_seed() -> None:
 
 @pytest.mark.asyncio
 async def test_default_workflow_start_keeps_orchestrator_seed() -> None:
-    from mozaiksai.core.workflow.orchestration_patterns import _resume_or_initialize_chat
+    from mozaiksai.core.workflow.execution.run_bootstrap import bootstrap_run_messages as _bootstrap_run_messages
 
     class _Persistence:
-        async def load_run_history(self, *, chat_id: str, app_id: str):
+        async def load_run_events(self, *, chat_id: str, app_id: str):
+            return []
+
+        def project_run_events_to_messages(self, events):
             return []
 
         async def create_chat_session(self, **kwargs):
@@ -171,7 +177,7 @@ async def test_default_workflow_start_keeps_orchestrator_seed() -> None:
 
     logger = SimpleNamespace(info=lambda *args, **kwargs: None, error=lambda *args, **kwargs: None)
 
-    _, initial_messages = await _resume_or_initialize_chat(
+    _, initial_messages = await _bootstrap_run_messages(
         persistence_manager=_Persistence(),
         config={
             "initial_message": "InterviewAgent: Greet the user and ask questions.",

@@ -31,7 +31,19 @@ const toLabel = (value) =>
 
 const MONETIZATION_SELECTION = {
   intent_id: 'monetization',
-  surfaces: ['checkout', 'billing'],
+  mode: 'auto',
+  revenue_model: 'auto',
+  allowed_revenue_models: [
+    'subscriptions',
+    'usage_based',
+    'transactional',
+    'marketplace',
+    'sponsored',
+    'donations',
+    'community_funded',
+    'hybrid',
+  ],
+  surfaces: ['pricing', 'checkout', 'billing', 'usage', 'marketplace'],
   source: 'factory_app_transition',
 };
 
@@ -40,6 +52,11 @@ function buildResolveContext(monetizationSelected) {
   return {
     monetization_enabled: true,
     builder_options: {
+      monetization: {
+        enabled: true,
+        mode: 'auto',
+        revenue_model: 'auto',
+      },
       provider_backed_capabilities: [MONETIZATION_SELECTION],
     },
   };

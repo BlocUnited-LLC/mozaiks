@@ -635,8 +635,16 @@ def test_app_type_selector_emits_generic_monetization_selection_context() -> Non
     content = _read("factory_app/workflows/extended_orchestration/ui/transitions/AppTypeSelector.js")
     assert "provider_backed_capabilities" in content
     assert "intent_id: 'monetization'" in content
-    assert "surfaces: ['checkout', 'billing']" in content
+    assert "revenue_model: 'auto'" in content
+    assert "allowed_revenue_models" in content
+    assert "'subscriptions'" in content
+    assert "'transactional'" in content
+    assert "'marketplace'" in content
+    assert "'sponsored'" in content
+    assert "surfaces: ['pricing', 'checkout', 'billing', 'usage', 'marketplace']" in content
     assert "monetization_enabled: true" in content
+    assert "builder_options: {" in content
+    assert "monetization: {" in content
     assert "onResolve(optionId, resolveContext)" in content
     assert "provider_backed_capability_selection" not in content
     assert "managed_capability_selection" not in content
@@ -648,21 +656,21 @@ def test_platform_ui_fonts_flow_through_semantic_theme_tokens() -> None:
     app_root = active_app_root()
     typography_path = app_root / "ui" / "theme" / "typography.js"
     app_card_path = app_root / "ui" / "components" / "AppCard.jsx"
-    dashboard_path = app_root / "ui" / "pages" / "custom" / "Dashboard.jsx"
-    if not (typography_path.exists() and app_card_path.exists() and dashboard_path.exists()):
+    home_path = app_root / "ui" / "pages" / "custom" / "HomePage.jsx"
+    if not (typography_path.exists() and app_card_path.exists() and home_path.exists()):
         pytest.skip("Product theme token fixtures are not present in the active app workspace")
     typography = typography_path.read_text(encoding="utf-8")
     app_card = app_card_path.read_text(encoding="utf-8")
-    dashboard = dashboard_path.read_text(encoding="utf-8")
+    home_page = home_path.read_text(encoding="utf-8")
 
     assert "var(--font-body" in typography
     assert "var(--font-heading" in typography
 
-    # Dashboard/App cards must consume shared semantic font stacks.
+    # Home/App cards must consume shared semantic font stacks.
     assert "THEME_BODY_FONT_STACK" in app_card
     assert "THEME_HEADING_FONT_STACK" in app_card
-    assert "THEME_BODY_FONT_STACK" in dashboard
-    assert "THEME_HEADING_FONT_STACK" in dashboard
+    assert "THEME_BODY_FONT_STACK" in home_page
+    assert "THEME_HEADING_FONT_STACK" in home_page
 
     # Do not regress to literal brand font names in component code.
     literal_font_names = ("Rajdhani", "Orbitron", "Fagrak")

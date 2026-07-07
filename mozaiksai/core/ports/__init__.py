@@ -8,6 +8,12 @@ from .app_backend import (
     BackendHealth,
     BackendResponse,
 )
+from .collaboration import (
+    CollaborationPort,
+    NoOpCollaborationAdapter,
+    PresenceEntry,
+    WorkspaceShareEvent,
+)
 from .entitlement import (
     ENTITLEMENT_REQUIRED,
     EntitlementPort,
@@ -40,6 +46,11 @@ __all__ = [
     "AppBackendPort",
     "BackendResponse",
     "BackendHealth",
+    # Collaboration
+    "CollaborationPort",
+    "NoOpCollaborationAdapter",
+    "PresenceEntry",
+    "WorkspaceShareEvent",
     # Sandbox
     "SandboxPort",
     "SandboxRunResult",

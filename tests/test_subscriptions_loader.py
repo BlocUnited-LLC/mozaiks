@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from mozaiksai.core.runtime.app.subscriptions_loader import (
     PlanDef,
+    PricingCatalogDef,
     SubscriptionAssignmentStoreDef,
     SubscriptionsConfig,
     SubscriptionsLoadError,
@@ -164,6 +165,74 @@ def test_load_token_wallets_and_plan_allowances(tmp_path: Path) -> None:
     assert config.plans[0].token_allowances[0].amount == 100000
     assert config.plan_by_id("missing").plan_id == "pro"
     assert config.token_wallet_by_id("ai_tokens") is config.token_wallets[0]
+
+
+def test_load_pricing_catalog_groups(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        """
+        schema_version: mozaiks.subscriptions.v1
+        label: Multi Service SaaS
+        default_plan_id: free
+        pricing_catalog:
+          default_group_id: platform
+          groups:
+            - group_id: platform
+              label: Platform
+              description: Core subscription plans.
+              kind: subscription
+              plan_ids: [free, pro]
+              capability_groups: [platform, billing]
+            - group_id: marketing
+              label: Marketing
+              kind: add_on
+              add_on_ids: [hero_weekly]
+        plans:
+          - plan_id: free
+            label: Free
+            capabilities: []
+          - plan_id: pro
+            label: Pro
+            capabilities: [billing.checkout]
+        """,
+    )
+
+    config = load_subscriptions_config(tmp_path)
+
+    assert config is not None
+    assert config.pricing_catalog is not None
+    assert config.pricing_catalog.default_group_id == "platform"
+    assert config.pricing_catalog.groups[0].plan_ids == ["free", "pro"]
+    assert config.pricing_catalog.groups[1].add_on_ids == ["hero_weekly"]
+
+
+def test_pricing_catalog_rejects_unknown_plan_id() -> None:
+    with pytest.raises(ValidationError, match="unknown plan_ids"):
+        SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Multi Service SaaS",
+                "default_plan_id": "free",
+                "pricing_catalog": {
+                    "default_group_id": "platform",
+                    "groups": [
+                        {
+                            "group_id": "platform",
+                            "label": "Platform",
+                            "plan_ids": ["free", "missing"],
+                        }
+                    ],
+                },
+                "plans": [
+                    {"plan_id": "free", "label": "Free", "capabilities": []},
+                ],
+            }
+        )
+
+
+def test_pricing_catalog_rejects_empty_groups() -> None:
+    with pytest.raises(ValidationError, match="groups must be non-empty"):
+        PricingCatalogDef.model_validate({"groups": []})
 
 
 def test_token_allowance_requires_declared_wallet_when_wallets_declared() -> None:

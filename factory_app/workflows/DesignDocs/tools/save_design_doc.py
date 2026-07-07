@@ -215,12 +215,12 @@ def _canonical_data_contract(
 
 
 def _surface_map_yaml_block(surface_map: dict[str, Any]) -> str:
-    return yaml.safe_dump(
+    return str(yaml.safe_dump(
         {"surface_map": surface_map},
         sort_keys=False,
         allow_unicode=False,
         default_flow_style=False,
-    ).strip()
+    )).strip()
 
 
 def _inject_backend_surface_map(backend_markdown: str, surface_map: dict[str, Any]) -> str:
@@ -290,12 +290,12 @@ def _experience_spec_to_yaml(experience_spec: dict[str, Any], surface_map: dict[
         "surface_map": surface_map,
         "pages": experience_spec.get("pages", []),
     }
-    return yaml.safe_dump(
+    return str(yaml.safe_dump(
         doc,
         sort_keys=False,
         allow_unicode=False,
         default_flow_style=False,
-    ).strip() + "\n"
+    )).strip() + "\n"
 
 
 async def save_design_doc(

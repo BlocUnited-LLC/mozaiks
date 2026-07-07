@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -107,6 +108,7 @@ def _normalize_index_spec(raw_spec: Any, path: str) -> _NormalizedIndexSpec:
         for key, value in raw_spec.items()
         if key not in {"name", "keys"}
         and key not in _SPEC_COMPARISON_OPTION_EXCLUSIONS
+        and not str(key).startswith("_")
         and value is not None
     }
     return _NormalizedIndexSpec(name=name, keys=keys, options=options)
@@ -162,6 +164,40 @@ def _iter_indexed_collections(contract: DataContract) -> list[_IndexedCollection
 
 def _index_spec_dict(spec: _NormalizedIndexSpec) -> dict[str, Any]:
     return {"name": spec.name, "keys": list(spec.keys), **dict(spec.options)}
+
+
+async def _ensure_collection_indexes(collection: Any, indexes: Sequence[dict[str, Any]]) -> None:
+    ensure_indexes = getattr(collection, "ensure_indexes", None)
+    if inspect.ismethod(ensure_indexes) or inspect.isfunction(ensure_indexes):
+        await ensure_indexes(indexes)
+        return
+
+    create_index = getattr(collection, "create_index", None)
+    if not callable(create_index):
+        raise DatabaseIndexApplyError("collection does not support index creation")
+
+    existing_names: set[str] = set()
+    list_indexes = getattr(collection, "list_indexes", None)
+    if callable(list_indexes):
+        try:
+            existing = await list_indexes().to_list(length=None)
+            existing_names = {
+                str(item.get("name"))
+                for item in existing
+                if isinstance(item, Mapping) and item.get("name")
+            }
+        except Exception:
+            existing_names = set()
+
+    for spec in indexes:
+        keys = list(spec.get("keys") or [])
+        name = spec.get("name")
+        kwargs = {key: value for key, value in dict(spec).items() if key not in {"keys", "name"}}
+        if name:
+            if str(name) in existing_names:
+                continue
+            kwargs["name"] = str(name)
+        await create_index(keys, **kwargs)
 
 
 def _normalize_existing_keys(raw_keys: Any) -> list[tuple[str, int]]:
@@ -250,7 +286,10 @@ async def apply_database_indexes(
             collection = context.literal_collection(indexed_collection.collection_name)  # type: ignore[attr-defined]
         else:
             collection = context.collection(indexed_collection.module_id, indexed_collection.entity_name)
-        await collection.ensure_indexes([_index_spec_dict(spec) for spec in indexed_collection.indexes])
+        await _ensure_collection_indexes(
+            collection,
+            [_index_spec_dict(spec) for spec in indexed_collection.indexes],
+        )
         applied_specs += len(indexed_collection.indexes)
     return applied_specs
 

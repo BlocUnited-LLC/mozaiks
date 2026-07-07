@@ -51,12 +51,9 @@ export function useConversationModeController({
   currentAppId,
   currentUserId,
   refreshWorkflowSessions,
-  resolveResumePolicyOrder,
-  resolveWorkflowSessionByStrategy,
   describeApiError,
   modeChangeInProgressRef,
   setModeChangePending,
-  resumeOldestFromWidgetRef,
   queryResumeHandledRef,
   consumeNavigationQueryParams,
   isMobileView,
@@ -86,31 +83,25 @@ export function useConversationModeController({
       return true;
     }
     workflowReplayPendingRef.current = false;
-    console.log('🧠 [MODE_TOGGLE] Switching to ask mode (sending chat.enter_general_mode)');
     const sent = sendWsMessage({
       type: 'chat.enter_general_mode',
       general_chat_id: preferredGeneralChatId || undefined,
     });
 
     setConversationMode('ask');
-    console.log('🧹 [MODE_TOGGLE] Caching workflow messages + artifact state, closing artifact panel, restoring ask-mode messages');
     workflowMessagesCacheRef.current = messagesRef.current;
     workflowArtifactSnapshotRef.current = {
       isOpen: isSidePanelOpen,
       layoutMode: layoutMode || 'split',
       messages: isSidePanelOpen ? [...currentArtifactMessages] : [],
     };
-    console.log('📸 [ARTIFACT_SNAPSHOT] Saved artifact state before switching to Ask:', workflowArtifactSnapshotRef.current);
     setIsSidePanelOpen(false);
     setCurrentArtifactMessages([]);
     if (askMessages && askMessages.length > 0) {
-      console.log(`📦 [MODE_TOGGLE] Restoring ${askMessages.length} cached ask-mode messages (shared)`);
       setMessagesWithLogging(askMessages);
     } else if (generalMessagesCacheRef.current && generalMessagesCacheRef.current.length > 0) {
-      console.log(`📦 [MODE_TOGGLE] Restoring ${generalMessagesCacheRef.current.length} cached ask-mode messages`);
       setMessagesWithLogging(generalMessagesCacheRef.current);
     } else {
-      console.log('📭 [MODE_TOGGLE] No cached ask-mode messages, starting fresh');
       setMessagesWithLogging([]);
     }
 
@@ -189,25 +180,20 @@ export function useConversationModeController({
     if (!currentChatId) {
       console.warn('⚠️ Cannot resume workflow mode without chat id, switching mode anyway');
     }
-    console.log(`🤖 [MODE_TOGGLE] Switching to workflow mode (${sendSwitch ? 'sending chat.switch_workflow' : 'local shell only'})`);
     const sent = sendSwitch && currentChatId
       ? sendWsMessage({ type: 'chat.switch_workflow', chat_id: currentChatId })
       : false;
 
     setConversationMode('workflow');
-    console.log('🧹 [MODE_TOGGLE] Caching ask-mode messages, restoring workflow messages + artifact panel state');
     generalMessagesCacheRef.current = messagesRef.current;
 
     const sharedWorkflowMessages = sanitizeVisibleWorkflowMessages(workflowMessages);
     const cachedWorkflowMessages = sanitizeVisibleWorkflowMessages(workflowMessagesCacheRef.current);
     if (sharedWorkflowMessages.length > 0) {
-      console.log(`📦 [MODE_TOGGLE] Restoring ${sharedWorkflowMessages.length} cached workflow messages (shared)`);
       setMessagesWithLogging(sharedWorkflowMessages);
     } else if (cachedWorkflowMessages.length > 0) {
-      console.log(`📦 [MODE_TOGGLE] Restoring ${cachedWorkflowMessages.length} cached workflow messages`);
       setMessagesWithLogging(cachedWorkflowMessages);
     } else {
-      console.log('📭 [MODE_TOGGLE] No cached workflow messages, starting fresh');
       setMessagesWithLogging([]);
     }
 
@@ -216,25 +202,20 @@ export function useConversationModeController({
       if (surfaceSnapshot?.layoutMode === 'view'
         || surfaceSnapshot?.artifact?.display === 'view'
         || surfaceSnapshot?.artifact?.display === 'fullscreen') {
-        console.log('🎨 [ARTIFACT_RESTORE] Skipping snapshot restore; view mode active');
         return;
       }
       const snapshot = workflowArtifactSnapshotRef.current;
-      console.log('🎨 [ARTIFACT_RESTORE] Checking snapshot:', snapshot);
 
       if (snapshot && typeof snapshot.isOpen === 'boolean') {
         if (snapshot.isOpen) {
-          console.log('🎨 [ARTIFACT_SNAPSHOT_RESTORE] Restoring artifact panel OPEN from snapshot');
           setIsSidePanelOpen(true);
           if (snapshot.layoutMode && setLayoutMode) {
             setLayoutMode(snapshot.layoutMode);
           }
           if (snapshot.messages?.length) {
             setCurrentArtifactMessages(snapshot.messages);
-            console.log(`📦 [ARTIFACT_SNAPSHOT_RESTORE] Restored ${snapshot.messages.length} artifact messages`);
           }
         } else {
-          console.log('🎨 [ARTIFACT_SNAPSHOT_RESTORE] Restoring artifact panel CLOSED from snapshot');
           setIsSidePanelOpen(false);
           if (setLayoutMode) setLayoutMode('full');
         }
@@ -252,7 +233,6 @@ export function useConversationModeController({
       });
 
       if (hasArtifacts) {
-        console.log('🎨 [ARTIFACT_AUTO_OPEN] Detected UI artifacts in workflow messages, opening artifact panel');
         setIsSidePanelOpen(true);
         if (setLayoutMode) setLayoutMode('split');
         const artifactMessages = cachedMessages.filter((message) => (
@@ -261,10 +241,8 @@ export function useConversationModeController({
         ));
         if (artifactMessages.length > 0) {
           setCurrentArtifactMessages(artifactMessages);
-          console.log(`📦 [ARTIFACT_AUTO_OPEN] Restored ${artifactMessages.length} artifact messages`);
         }
       } else {
-        console.log('📭 [ARTIFACT_AUTO_OPEN] No UI artifacts detected, keeping panel closed');
         setIsSidePanelOpen(false);
         if (setLayoutMode) setLayoutMode('full');
       }
@@ -296,7 +274,6 @@ export function useConversationModeController({
     }
 
     const resolvedWorkflow = targetWorkflow || currentWorkflowName || resolveWorkflow();
-    console.log('🔁 [WORKFLOW_RESUME] Attempting resume for chat:', targetChatId, 'workflow:', resolvedWorkflow);
 
     setCurrentChatId(targetChatId);
     setActiveChatId(targetChatId);
@@ -315,12 +292,10 @@ export function useConversationModeController({
       chat_id: targetChatId,
       replay_on_switch: true,
     });
-    console.log('🔁 [WORKFLOW_RESUME] chat.switch_workflow sent:', sent);
 
     if (sent) {
       setConversationMode('workflow');
       generalMessagesCacheRef.current = messagesRef.current;
-      console.log('🔁 [WORKFLOW_RESUME] Workflow mode restored, cached general messages count:', messagesRef.current.length);
       return true;
     }
 
@@ -370,39 +345,25 @@ export function useConversationModeController({
 
   const handleConversationModeChange = useCallback(async (mode) => {
     if (modeChangeInProgressRef.current) {
-      console.log('⏳ [MODE_CHANGE] Ignoring duplicate mode toggle while a transition is already in progress');
       return;
     }
 
     modeChangeInProgressRef.current = true;
     setModeChangePending(true);
 
-    console.log('🔄 [MODE_CHANGE] handleConversationModeChange called with mode:', mode);
-    console.log('🔄 [MODE_CHANGE] Current conversationMode:', conversationMode);
-    console.log('🔄 [MODE_CHANGE] Current activeChatId (from context):', activeChatId);
-    console.log('🔄 [MODE_CHANGE] Current activeWorkflowName (from context):', activeWorkflowName);
-    console.log('🔄 [MODE_CHANGE] Current currentChatId (local state):', currentChatId);
 
     try {
       if (mode === 'ask') {
-        console.log('🧠 [MODE_CHANGE] Switching to Ask mode');
-        resumeOldestFromWidgetRef.current = false;
         queryResumeHandledRef.current = null;
         consumeNavigationQueryParams(['mode', 'resume', 'chat_id']);
         ensureGeneralMode();
         if (setLayoutMode) setLayoutMode('full');
         if (isMobileView) setMobileDrawerState('peek');
       } else {
-        console.log('🤖 [MODE_CHANGE] Switching to workflow mode, resolving session with resume policy');
-        console.log('🤖 [MODE_CHANGE] isInWidgetMode:', isInWidgetMode);
-        console.log('🤖 [MODE_CHANGE] API available?', !!api);
-        console.log('🤖 [MODE_CHANGE] App ID:', currentAppId);
-        console.log('🤖 [MODE_CHANGE] User ID:', currentUserId);
 
         ensureWorkflowMode({ sendSwitch: false, forceRestore: true });
 
         if (!workflowConfigLoaded) {
-          console.log('🤖 [MODE_CHANGE] Workflow registry not ready yet, waiting for fetch');
           await workflowConfig.fetchWorkflowConfigs();
           setWorkflowConfigLoaded(true);
         }
@@ -425,7 +386,6 @@ export function useConversationModeController({
         }
 
         if (layoutMode === 'view') {
-          console.log('🧭 [MODE_CHANGE] Leaving view mode -> restoring workflow surface');
           const restored = restoreViewSnapshot();
           if (!restored) {
             clearViewArtifacts();
@@ -449,13 +409,11 @@ export function useConversationModeController({
         }
 
         if (isInWidgetMode) {
-          console.log('🚀 [MODE_CHANGE] In widget mode - navigating to /chat');
           navigate('/chat');
           setIsInWidgetMode(false);
         }
 
         const startEntryWorkflowSession = async () => {
-          console.log('📭 [MODE_CHANGE] No resumable workflow session — starting entry_point workflow');
           const entryWorkflow =
             canonicalWorkflowName
             || resolveKnownWorkflowName(configuredEntryWorkflow)
@@ -480,7 +438,6 @@ export function useConversationModeController({
             );
             if (result && (result.chat_id || result.id)) {
               const newChatId = result.chat_id || result.id;
-              console.log(`🚀 [MODE_CHANGE] Created new session for ${entryWorkflow}: ${newChatId}`);
               setCurrentChatId(newChatId);
               setActiveChatId(newChatId);
               setActiveWorkflowName(entryWorkflow);
@@ -493,7 +450,6 @@ export function useConversationModeController({
               setConversationMode('workflow');
               generalMessagesCacheRef.current = messagesRef.current;
               refreshWorkflowSessions();
-              console.log('✅ [MODE_CHANGE] Entry_point workflow session started, WS will connect on re-render');
               return true;
             }
 
@@ -506,42 +462,12 @@ export function useConversationModeController({
         };
 
         try {
-          const policyOrder = resolveResumePolicyOrder();
-          console.log('🧭 [MODE_CHANGE] Resume policy order:', policyOrder.join(' -> '));
-
-          let resumed = false;
-          for (const strategy of policyOrder) {
-            if (strategy === 'entry_point') {
-              continue;
-            }
-            const target = await resolveWorkflowSessionByStrategy(strategy);
-            if (!target?.chat_id) {
-              continue;
-            }
-            const targetWorkflowName = resolveKnownWorkflowName(target.workflow_name)
-              || canonicalWorkflowName
-              || resolveWorkflow(currentWorkflowName)
-              || resolveWorkflow(urlWorkflowName);
-            console.log(`🎯 [MODE_CHANGE] Resuming workflow via ${strategy}: ${targetWorkflowName} (${target.chat_id})`);
-            resumed = resumeWorkflowSession(target.chat_id, targetWorkflowName);
-            if (resumed) {
-              generalMessagesCacheRef.current = messagesRef.current;
-              refreshWorkflowSessions();
-              break;
-            }
-            console.warn(`⚠️ [MODE_CHANGE] Resume send failed for strategy ${strategy}; trying next option`);
-          }
-
-          if (!resumed) {
-            await startEntryWorkflowSession();
-          }
+          await startEntryWorkflowSession();
         } catch (err) {
           console.error('❌ [MODE_CHANGE] Error resolving workflow session:', describeApiError(err));
-          console.log('🔄 [MODE_CHANGE] Staying in local workflow shell while backend is unavailable');
         }
       }
 
-      console.log('✅ [MODE_CHANGE] handleConversationModeChange completed');
     } finally {
       modeChangeInProgressRef.current = false;
       setModeChangePending(false);
@@ -573,10 +499,7 @@ export function useConversationModeController({
     queryResumeHandledRef,
     refreshWorkflowSessions,
     resolveKnownWorkflowName,
-    resolveResumePolicyOrder,
-    resolveWorkflowSessionByStrategy,
     restoreViewSnapshot,
-    resumeOldestFromWidgetRef,
     resumeWorkflowSession,
     setActiveChatId,
     setActiveWorkflowName,

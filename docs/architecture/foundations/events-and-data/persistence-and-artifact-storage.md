@@ -28,12 +28,12 @@ Framework-owned operational data used by the runtime itself:
 - `RuntimeUsageEvents`
 
 This data supports session continuity, workflow execution state, AG2 stream
-replay/resume, and reconnectable UI state.
+bootstrap/replay, and reconnectable UI state.
 
 Current implemented workflow-run persistence contract:
 
 - `ChatSessions` is run metadata and UI-state projection, not canonical execution history.
-- AG2 run history is persisted separately through the AG2 stream storage adapters and is the source of truth for replay/resume.
+- AG2 run history is persisted separately through the AG2 stream storage adapters and is the source of truth for execution re-entry and UI replay.
 - AG2 agent-turn, LLM-call, tool-call, and HITL telemetry is emitted through AG2
   beta `TelemetryMiddleware` as OpenTelemetry spans.
 - LLM token usage is emitted by Mozaiks AG2 beta usage middleware as
@@ -46,7 +46,7 @@ Current implemented workflow-run persistence contract:
   - `pending_input_request`
   - `tool_calls`
 - On startup, the runtime backfills pre-migration top-level workflow UI fields such as `last_artifact` and `pending_input_request` into `workflow_ui_state` and removes the old top-level fields. Runtime readers should not depend on those pre-migration top-level fields.
-- The current source of truth for this runtime contract is `mozaiksai/core/data/persistence/persistence_manager.py`, `mozaiksai/core/transport/resume_run.py`, `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, and the focused tests `tests/test_persistence_initial_messages.py`, `tests/test_resume_run.py`, `tests/test_runtime_websocket_contract.py`, and `tests/test_platform_chat_meta_contract.py`.
+- The current source of truth for this runtime contract is `mozaiksai/core/data/persistence/persistence_manager.py`, `mozaiksai/core/workflow/execution/run_bootstrap.py`, `mozaiksai/core/transport/run_replay.py`, `mozaiksai/hosts/runtime.py`, `mozaiksai/hosts/platform.py`, and the focused tests `tests/test_persistence_initial_messages.py`, `tests/test_orchestration_seed_persistence.py`, `tests/test_run_replay.py`, `tests/test_runtime_websocket_contract.py`, and `tests/test_platform_chat_meta_contract.py`.
 
 Runtime usage surfaces:
 

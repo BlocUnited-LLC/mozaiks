@@ -93,36 +93,83 @@ def _format_managed_capabilities(packs: list[Any]) -> str:
 
 
 def _format_pack_surfaces(packs: list[Any]) -> str | None:
-    """Render surface groupings. Returns None when no surfaces are declared."""
+    """Render surface groupings and facade hints.
+
+    Accepts two data shapes:
+
+    1. ``surfaces`` list (declarative surface schema):
+       Each entry may carry ``generation_hint.facade_module_id`` and
+       ``generation_hint.pages`` / ``generation_hint.page_routes``.
+
+    2. ``facades`` list (contract.yaml facade schema):
+       Each entry has ``module_id``, ``provider_module``, and ``pages``.
+       Rendered as explicit facade-module instructions so the LLM knows
+       to generate a module_contract task for the facade rather than
+       generating the managed capability itself.
+
+    Returns None when neither key is declared on any pack.
+    """
     surface_lines: list[str] = []
     for pack in packs:
         if not isinstance(pack, dict):
             continue
-        surfaces = pack.get("surfaces") or []
-        if not surfaces:
-            continue
         pack_id = pack.get("id") or pack.get("pack_id") or "?"
         label = pack.get("display_name") or pack.get("label") or pack_id
-        surface_lines.append(f"{pack_id} ({label}) surfaces:")
-        for surface in surfaces:
-            if not isinstance(surface, dict):
-                continue
-            surface_id = surface.get("surface_id") or "?"
-            surface_label = surface.get("label") or surface_id
-            status = surface.get("status") or "unknown"
-            hint = surface.get("generation_hint") or {}
-            facade_module_id = hint.get("facade_module_id") or ""
-            pages = hint.get("pages") or []
-            page_routes = hint.get("page_routes") or {}
-            line = f"  - {surface_id} ({surface_label}) [{status}]"
-            if facade_module_id:
-                line += f" → facade_module: {facade_module_id}"
-            if pages:
-                line += f" | pages: {', '.join(str(p) for p in pages)}"
-            surface_lines.append(line)
-            if page_routes and isinstance(page_routes, dict):
-                for page_name, route in page_routes.items():
-                    surface_lines.append(f"      route: {page_name} → {route}")
+
+        # Shape 1: explicit surfaces list with optional generation_hint
+        surfaces = pack.get("surfaces") or []
+        if surfaces:
+            surface_lines.append(f"{pack_id} ({label}) surfaces:")
+            for surface in surfaces:
+                if not isinstance(surface, dict):
+                    continue
+                surface_id = surface.get("surface_id") or "?"
+                surface_label = surface.get("label") or surface_id
+                status = surface.get("status") or "unknown"
+                hint = surface.get("generation_hint") or {}
+                facade_module_id = hint.get("facade_module_id") or ""
+                pages = hint.get("pages") or []
+                page_routes = hint.get("page_routes") or {}
+                line = f"  - {surface_id} ({surface_label}) [{status}]"
+                if facade_module_id:
+                    line += f" → facade_module: {facade_module_id}"
+                if pages:
+                    line += f" | pages: {', '.join(str(p) for p in pages)}"
+                surface_lines.append(line)
+                if page_routes and isinstance(page_routes, dict):
+                    for page_name, route in page_routes.items():
+                        surface_lines.append(f"      route: {page_name} → {route}")
+
+        # Shape 2: facades list from contract.yaml build_provider_values output
+        facades = pack.get("facades") or []
+        if facades and not surfaces:
+            surface_lines.append(f"{pack_id} ({label}) facade modules (do NOT regenerate {pack_id}/):")
+            for facade in facades:
+                if not isinstance(facade, dict):
+                    continue
+                module_id = facade.get("module_id") or "?"
+                provider = facade.get("provider_module") or pack_id
+                pages = facade.get("pages") or []
+                actions = facade.get("provider_actions") or []
+                line = (
+                    f"  - Generate facade module '{module_id}' that wraps {provider}."
+                    f" Plan a module_contract task for '{module_id}', NOT for '{pack_id}'."
+                )
+                if pages:
+                    page_names = [
+                        p.get("name") if isinstance(p, dict) else str(p)
+                        for p in pages
+                    ]
+                    routes = [
+                        p.get("route") if isinstance(p, dict) else ""
+                        for p in pages
+                    ]
+                    line += f" | pages: {', '.join(str(n) for n in page_names)}"
+                    line += f" | routes: {', '.join(str(r) for r in routes if r)}"
+                if actions:
+                    line += f" | provider_actions: {', '.join(str(a) for a in actions[:4])}"
+                surface_lines.append(line)
+
     if not surface_lines:
         return None
     return "Pack surfaces:\n" + "\n".join(surface_lines)

@@ -79,7 +79,6 @@ export class ApiAdapter {
   _runStartChatRequest(key, requestFactory) {
     const existing = this._startChatInFlight.get(key);
     if (existing) {
-      console.log(`↺ startChat deduped for ${key}`);
       return existing;
     }
 
@@ -155,7 +154,6 @@ export class ApiAdapter {
 
   async sendMessageToWorkflow(message, appId, userId, workflowname = null, chatId = null, context = null) {
     const actualworkflowname = resolveWorkflow(workflowname);
-    console.log(`Sending message to workflow: ${actualworkflowname}`);
     throw new Error('sendMessageToWorkflow must be implemented');
   }
 
@@ -374,7 +372,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
 
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Message sent to workflow:', result);
         return result;
       } else {
         console.error('Failed to send message:', response.status, response.statusText);
@@ -389,12 +386,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
   createWebSocketConnection(appId, userId, callbacks = {}, workflowname = null, chatId = null) {
     const actualworkflowname = resolveWorkflow(workflowname);
     
-    console.log('🛠️ [WS-CONN] WebSocket workflow resolution:', {
-      provided: workflowname,
-      resolved: actualworkflowname,
-      entryPoint: workflowConfig.getEntryPointWorkflow(),
-      availableConfigs: workflowConfig.getAvailableWorkflows(),
-    });
     
     if (!chatId) {
       console.error('Chat ID is required for WebSocket connection');
@@ -408,9 +399,7 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const token = getAccessToken(this.config);
     if (token) {
       wsUrl += `?access_token=${encodeURIComponent(token)}`;
-      console.log(`🔗 Connecting to WebSocket with auth token: ${wsUrl.split('?')[0]}?access_token=***`);
     } else {
-      console.log(`🔗 Connecting to WebSocket (no auth token): ${wsUrl}`);
     }
     
     const socket = new WebSocket(wsUrl);
@@ -423,7 +412,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const sendResume = () => {
       if (socket.readyState === WebSocket.OPEN && !resumePending) {
         resumePending = true;
-        console.log(`📡 Sending client.resume with lastClientIndex: ${lastSequence}`);
         socket.send(JSON.stringify({
           type: 'client.resume',
           chat_id: chatId,
@@ -433,7 +421,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
     };
 
     socket.onopen = () => {
-      console.log("WebSocket connection established");
       
       // If we have a previous sequence, request resume first
       if (lastSequence > 0) {
@@ -462,7 +449,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
         
         // Handle resume boundary
         if (data.type === 'chat.resume_boundary') {
-          console.log(`✅ Resume completed: ${data.data?.replayed_messages ?? data.data?.replayed_events ?? 0} events replayed`);
           resumePending = false;
         }
         
@@ -480,7 +466,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
     };
 
     socket.onclose = () => {
-      console.log("WebSocket connection closed");
       this._chatConnections.delete(chatId);
       if (callbacks.onClose) callbacks.onClose();
     };
@@ -581,12 +566,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
     const clientRequestId = crypto?.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random().toString(36).slice(2));
     const requestKey = this._getStartChatKey(appId, actualworkflowname, userId);
 
-    console.log('🛠️ [WS-API] startChat workflow resolution:', {
-      provided: workflowname,
-      resolved: actualworkflowname,
-      entryPoint: workflowConfig.getEntryPointWorkflow(),
-      availableConfigs: workflowConfig.getAvailableWorkflows(),
-    });
 
     return this._runStartChatRequest(requestKey, async () => {
       try {
@@ -601,6 +580,9 @@ export class WebSocketApiAdapter extends ApiAdapter {
         if (sessionOptions?.transportPurpose && typeof sessionOptions.transportPurpose === 'string') {
           body.transport_purpose = sessionOptions.transportPurpose.trim();
         }
+        if (sessionOptions?.forceNew === true) {
+          body.force_new = true;
+        }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',
           headers: buildAuthHeaders(undefined, this.config),
@@ -610,7 +592,6 @@ export class WebSocketApiAdapter extends ApiAdapter {
 
         if (response.ok) {
           const result = await response.json();
-          console.log('✅ Chat started:', result);
           return result;
         } else {
           let detail = null;
@@ -687,7 +668,6 @@ export class RestApiAdapter extends ApiAdapter {
 
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Message sent to workflow:', result);
         return result;
       } else {
         console.error('Failed to send message:', response.status, response.statusText);
@@ -784,6 +764,9 @@ export class RestApiAdapter extends ApiAdapter {
         if (sessionOptions?.transportPurpose && typeof sessionOptions.transportPurpose === 'string') {
           body.transport_purpose = sessionOptions.transportPurpose.trim();
         }
+        if (sessionOptions?.forceNew === true) {
+          body.force_new = true;
+        }
         const response = await authFetch(`${baseUrl}/api/chats/${encodeURIComponent(appId)}/${encodeURIComponent(actualworkflowname)}/start`, {
           method: 'POST',
           headers: buildAuthHeaders(undefined, this.config),
@@ -793,7 +776,6 @@ export class RestApiAdapter extends ApiAdapter {
 
         if (response.ok) {
           const result = await response.json();
-          console.log('✅ Chat started:', result);
           return result;
         } else {
           console.error('Failed to start chat:', response.status, response.statusText);

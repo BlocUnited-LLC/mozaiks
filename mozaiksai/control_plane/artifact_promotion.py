@@ -42,6 +42,7 @@ from mozaiksai.core.artifacts import (
     get_artifact_content_store,
     get_artifact_store,
 )
+from mozaiksai.core.runtime.persistence.artifact_signer import sign_artifact
 
 
 class DraftAppBundleArtifactVersionResult(BaseModel):
@@ -354,12 +355,14 @@ def _build_refinement_metadata(
     content_backend: str | None,
     app_id: str,
     files_manifest: list[ArtifactFileManifestEntry],
+    bundle_hmac_sha256: str = "",
 ) -> dict[str, Any]:
     return {
         "artifact_path": bundle_path.as_posix(),
         "workspace_dir": workspace_dir.as_posix(),
         "bundle_mode": "staged_refinement_workspace_snapshot",
         "bundle_sha256": bundle_sha256,
+        "bundle_hmac_sha256": bundle_hmac_sha256,
         "bundle_size_bytes": bundle_size_bytes,
         "content_ref": content_ref,
         "content_backend": content_backend,
@@ -518,6 +521,9 @@ async def create_draft_app_bundle_from_staged_refinement(
         bundle_path=artifact_path,
     )
 
+    bundle_bytes = artifact_path.read_bytes()
+    bundle_hmac_sha256 = sign_artifact(bundle_bytes)
+
     validation = normalize_validation_evidence(validation_evidence)
     validation_status = _validation_status_from_evidence(validation)
     policy = _normalized_policy_decisions(promotion_result=promotion_result, policy_decisions=policy_decisions)
@@ -540,6 +546,7 @@ async def create_draft_app_bundle_from_staged_refinement(
         content_backend=None,
         app_id=resolved_app_id,
         files_manifest=files_manifest,
+        bundle_hmac_sha256=bundle_hmac_sha256,
     )
 
     artifact_version = await artifact_store.create_artifact_version(
@@ -599,6 +606,7 @@ async def create_draft_app_bundle_from_staged_refinement(
                 content_backend=content_store.backend_name,
                 app_id=resolved_app_id,
                 files_manifest=files_manifest,
+                bundle_hmac_sha256=bundle_hmac_sha256,
             )
             try:
                 await artifact_store.set_validation_status(

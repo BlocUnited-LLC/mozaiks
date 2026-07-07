@@ -36,7 +36,7 @@ from unittest.mock import MagicMock
 
 from pydantic import BaseModel
 
-from mozaiksai.core.workflow.execution.resume import merge_persisted_extra_context
+from mozaiksai.core.workflow.execution.run_bootstrap import merge_persisted_extra_context
 from mozaiksai.core.workflow.outputs.runtime_validation import (
     reply_body_to_data,
     validate_agent_structured_output,

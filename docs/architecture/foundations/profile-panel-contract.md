@@ -1,18 +1,23 @@
 # Profile Panel Contract
 
-The profile panel contract lets modules declare sections they contribute to
-the user profile page. A module with wallet balance data, a subscription tier
-badge, or a notification preference section can inject that content into every
-user's profile — with zero changes to the framework or `ProfilePage.jsx`.
+The profile panel contract lets modules declare account-scoped sections they
+contribute to the user profile page. Profile is the signed-in person's surface:
+identity, personal preferences, personal relationship inventory, and safe
+personal summaries. It is not an app/workspace management surface.
+
+Billing, subscriptions, entitlements, app users, collaborators, deployments,
+governance, build runs, and revenue participation belong in Admin Portal or
+Studio. Do not use profile panels to continue app builds or manage app/workspace
+operations.
 
 ## Design Goals
 
 | Goal | How it is met |
 |------|--------------|
-| Not cookie-cutter across apps | Apps with more modules get richer profiles automatically |
-| App-agnostic runtime | `ProfilePage` never imports wallet or billing — it renders what the API returns |
+| Not cookie-cutter across apps | Apps with user-owned module data can expose personal summaries automatically |
+| App-agnostic runtime | `ProfilePage` never imports app-specific modules — it renders what the API returns |
 | Deterministic | Panels are declared contracts, not arbitrary React |
-| Scalable | Simple apps: identity only. Complex apps: whatever modules declare |
+| Scalable | Simple apps: identity only. Complex apps: account-scoped module panels only |
 | Consistent | Same discovery pattern as `contracts/admin.yaml` |
 
 ---
@@ -33,19 +38,19 @@ app/modules/{module_id}/
 schema_version: mozaiks.profile.v1
 
 panels:
-  - id: wallet-balance          # unique id within this module
-    title: Wallet               # section heading shown in the UI
-    description: Your current balance and pending payouts.  # optional subtitle
+  - id: notification-summary    # unique id within this module
+    title: Notifications        # section heading shown in the UI
+    description: Personal delivery preferences and unread counts.  # optional subtitle
     order: 20                   # sort position (identity=0, preferences=999)
     kind: metrics               # metrics | list | form | component
-    action: get_wallet_summary  # module action name to hydrate the panel
+    action: get_notification_profile_summary  # module action name to hydrate the panel
     fields:                     # used by metrics and list kinds
-      - id: balance
-        label: Balance
-        type: currency          # string | number | currency | date | boolean | status
-      - id: pending
-        label: Pending
-        type: currency
+      - id: unread_count
+        label: Unread
+        type: number            # string | number | currency | date | boolean | status
+      - id: digest_enabled
+        label: Digest
+        type: boolean
 ```
 
 ### `kind` values
@@ -70,15 +75,15 @@ panels:
 
 ### Component panels
 
-For sections that can't be expressed as metrics/list (e.g. a transaction
-history with charts), set `kind: component` and declare the registered
+For sections that can't be expressed as metrics/list, set `kind: component` and
+declare the registered
 component name:
 
 ```yaml
-  - id: billing-detail
-    title: Billing
+  - id: invitations
+    title: Invitations
     kind: component
-    component: BillingProfilePanel   # registered via registerComponent()
+    component: InvitationsProfilePanel   # registered via registerComponent()
     order: 30
 ```
 
@@ -100,19 +105,19 @@ Response shape:
 
 ```json
 {
-  "panels": [
+      "panels": [
     {
-      "id": "wallet-balance",
-      "title": "Wallet",
-      "description": "Your current balance and pending payouts.",
+      "id": "notification-summary",
+      "title": "Notifications",
+      "description": "Personal delivery preferences and unread counts.",
       "order": 20,
       "kind": "metrics",
-      "module_id": "wallet",
+      "module_id": "notifications",
       "fields": [
-        { "id": "balance", "label": "Balance", "type": "currency" },
-        { "id": "pending", "label": "Pending", "type": "currency" }
+        { "id": "unread_count", "label": "Unread", "type": "number" },
+        { "id": "digest_enabled", "label": "Digest", "type": "boolean" }
       ],
-      "data": { "balance": 42.50, "pending": 5.00 },
+      "data": { "unread_count": 3, "digest_enabled": true },
       "error": null
     }
   ]
@@ -134,7 +139,7 @@ declared in `profile.yaml` — they are platform guarantees.
 | Section | Order | Editable |
 |---------|-------|---------|
 | Identity (avatar, display_name, email, roles) | 0 | display_name, avatar_url |
-| *Module panels inject here (order 1–998)* | — | — |
+| *Account-scoped module panels inject here (order 1-998)* | — | — |
 | App Preferences | 999 | settings dict |
 
 ---
@@ -150,50 +155,52 @@ declared in `profile.yaml` — they are platform guarantees.
 
 ---
 
-## Example — wallet module
+## Allowed Panel Scope
 
-```yaml
-# app/modules/wallet/contracts/profile.yaml
-schema_version: mozaiks.profile.v1
+Use `contracts/profile.yaml` only when the panel answers a question about the
+signed-in person.
 
-panels:
-  - id: wallet-summary
-    title: Wallet
-    description: Current balance and payout activity.
-    order: 20
-    kind: metrics
-    action: get_wallet_summary
-    fields:
-      - { id: balance, label: Balance, type: currency }
-      - { id: pending_payouts, label: Pending Payouts, type: currency }
-      - { id: lifetime_earned, label: Lifetime Earned, type: currency }
-```
+Allowed examples:
 
-The `wallet` module's handler must implement a `get_wallet_summary` action that
-returns a dict matching those field ids. No changes anywhere else are needed —
-the profile page picks it up automatically on next load.
+- personal notification preferences
+- personal invitations
+- personal community memberships
+- personal votes or delegations
+- personal usage summaries that do not manage an app/workspace
+
+Forbidden examples:
+
+- app build history or continue-build controls
+- app users, roles, collaborators, or team settings
+- billing plans, subscriptions, entitlement assignment, or revenue
+  participation
+- deployments, domains, hosting, health, incidents, or audit logs
+- app/workspace integrations or provider configuration
+
+Those belong in Admin Portal or Studio.
 
 ---
 
-## App-Level Profile Config — `config/profile.yaml` (optional)
-
-Apps can suppress or reorder built-in sections:
+## Example — notifications module
 
 ```yaml
-# app/config/profile.yaml
-schema_version: mozaiks.profile.app.v1
+# app/modules/notifications/contracts/profile.yaml
+schema_version: mozaiks.profile.v1
 
-sections:
-  identity:
-    enabled: true
-    order: 0
-  preferences:
-    enabled: false   # hide raw JSON prefs for end-user-facing apps
+panels:
+  - id: notification-summary
+    title: Notifications
+    description: Personal notification state.
+    order: 20
+    kind: metrics
+    action: get_notification_profile_summary
+    fields:
+      - { id: unread_count, label: Unread, type: number }
+      - { id: digest_enabled, label: Digest, type: boolean }
+      - { id: last_delivery_at, label: Last Delivery, type: date }
 ```
 
-This file is optional. When absent, all built-in sections are shown at default
-order.
-
-> **Not yet implemented.** The `config/profile.yaml` suppression mechanism is
-> reserved for a future iteration. The current implementation always renders
-> both built-in sections.
+The `notifications` module's handler must implement a
+`get_notification_profile_summary` action that returns a dict matching those
+field ids. No changes anywhere else are needed — the profile page picks it up
+automatically on next load.

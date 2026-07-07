@@ -51,7 +51,7 @@ const getDefaultProfileMenu = (user) => {
   const items = [
     {
       id: "profile",
-      label: "Profile",
+      label: "Account",
       action: "navigate",
       href: "/profile",
     },

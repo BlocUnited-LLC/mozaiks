@@ -46,6 +46,9 @@ class PersistenceCollection(Protocol):
     async def count(self, query: Query) -> int:
         ...
 
+    async def aggregate(self, pipeline: Sequence[Mapping[str, Any]]) -> list[Document]:
+        ...
+
     async def ensure_indexes(self, indexes: Sequence[IndexSpec]) -> None:
         ...
 

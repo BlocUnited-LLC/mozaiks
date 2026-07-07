@@ -73,11 +73,33 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Validate Keycloak realm config
+        run: |
+          python - <<'PY'
+          import json, sys
+          path = "factory_app/app/brand/realm-export.json"
+          try:
+              with open(path) as f:
+                  realm = json.load(f)
+          except Exception as e:
+              print(f"FAIL: {path} is not valid JSON: {e}", file=sys.stderr)
+              sys.exit(1)
+          required = ["realm", "enabled"]
+          missing = [k for k in required if k not in realm]
+          if missing:
+              print(f"FAIL: {path} is missing required fields: {missing}", file=sys.stderr)
+              sys.exit(1)
+          if realm.get("realm") != "mozaiks":
+              print(f"FAIL: expected realm='mozaiks', got '{realm.get('realm')}'", file=sys.stderr)
+              sys.exit(1)
+          print(f"OK: {path} is valid (realm={realm['realm']}, enabled={realm['enabled']})")
+          PY
+
       - name: Run ruff
         run: ruff check . --output-format=github
 
       - name: Run mypy
-        run: mypy mozaiksai/ factory_app/ --ignore-missing-imports
+        run: mypy mozaiksai/ factory_app/ --ignore-missing-imports --disable-error-code=import-untyped
 
   frontend:
     runs-on: ubuntu-latest

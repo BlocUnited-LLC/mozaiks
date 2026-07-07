@@ -17,7 +17,6 @@ function AppShell({ onAuthRequired }) {
   return (
     <RouteRenderer
       isAuthenticated={!!user}
-      onAuthRequired={onAuthRequired || ((path) => console.log(`[mozaiks] auth required: ${path}`))}
     />
   );
 }
@@ -77,7 +76,7 @@ export default function MozaiksApp({
         authAdapter={authAdapter}
         uiConfig={uiConfig}
       >
-        <Router>
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <ConfigValidationOverlay />
           <GlobalChatWidgetWrapper />
           {children || <AppShell />}

@@ -29,7 +29,7 @@ const DEFAULT_NAVIGATION = {
     defaultLabel: 'User',
     sublabel: null,
     menu: [
-      { id: 'profile', label: 'Profile', action: 'navigate', path: '/profile' },
+      { id: 'profile', label: 'Account', action: 'navigate', path: '/profile' },
     ],
   },
   notifications: { icon: null, show: true, path: '/notifications', emptyText: 'No unread notifications' },
@@ -276,7 +276,6 @@ export const NavigationProvider = ({
             ...(shellConfig.appId ? { appId: shellConfig.appId } : {}),
             entry_point: shellConfig.entry_point,
             chat_startup_mode: shellConfig.chat_startup_mode || 'ask',
-            resume_policy: shellConfig.resume_policy,
             ...(shellConfig.pages?.length ? { pages: shellConfig.pages } : {}),
             ...(shellConfig.landing_spot ? { landing_spot: shellConfig.landing_spot } : {}),
             ...(shellConfig.header ? { header: shellConfig.header } : {}),
@@ -290,7 +289,6 @@ export const NavigationProvider = ({
         } else if (response.status !== 404) {
           throw new Error(`Failed to load shell config: ${response.status}`);
         } else {
-          console.log('[NavigationProvider] No shell config found, using defaults');
         }
       } catch (err) {
         console.error('[NavigationProvider] Error loading shell config:', err);

@@ -21,6 +21,15 @@ def test_data_table_uses_mobile_card_layout() -> None:
     assert 'actionAlign="start"' in source
 
 
+def test_data_table_uses_stable_empty_array_defaults() -> None:
+    source = _read("chat-ui/src/ui/primitives/DataTable.jsx")
+
+    assert "const EMPTY_ARRAY = Object.freeze([]);" in source
+    assert "columns = EMPTY_ARRAY" in source
+    assert "data: initialData = EMPTY_ARRAY" in source
+    assert "actions = EMPTY_ARRAY" in source
+
+
 def test_summary_strip_compacts_on_mobile() -> None:
     source = _read("chat-ui/src/ui/primitives/SummaryStrip.jsx")
 
@@ -146,14 +155,28 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         # Sub-components used by route-backed pages (not directly route-backed)
         "CarryForwardReportSummary",
         "CarryForwardReportPanel",
+        # Community module pages — route-registered per-app when community module is enabled
+        "AppCommunityPage",
+        "AppGovernancePage",
+        "AppGovernanceProposalPage",
+        "AppCollaboratorsPage",
+        "AppRevenueParticipationPage",
+        "RevenueParticipationPlanReviewPage",
+        "RevenueDistributionReviewPage",
+        "MyCommunitiesPage",
+        "MyInvitationsPage",
+        "MyVotesPage",
+        "MyDelegationsPage",
     }
 
 
 def test_factory_app_react_files_are_classified() -> None:
     manifest = json.loads(_read("factory_app/app/ui/route_manifest.json"))
     react_files = {
-        path.relative_to(_workspace()).as_posix()
+        relative
         for path in (_workspace() / "factory_app").rglob("*.jsx")
+        for relative in [path.relative_to(_workspace()).as_posix()]
+        if not relative.startswith("factory_app/build_context/")
     }
     route_backed_files = {
         f"factory_app/app/admin/pages/{page['component']}.jsx"
@@ -174,6 +197,18 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         # AppReview workflow agentic UI artifact — emitted by present_review_summary
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
+        # Community module pages — route-registered per-app when community module is enabled
+        "factory_app/app/admin/pages/AppCommunityPage.jsx",
+        "factory_app/app/admin/pages/AppGovernancePage.jsx",
+        "factory_app/app/admin/pages/AppGovernanceProposalPage.jsx",
+        "factory_app/app/admin/pages/AppCollaboratorsPage.jsx",
+        "factory_app/app/admin/pages/AppRevenueParticipationPage.jsx",
+        "factory_app/app/admin/pages/RevenueParticipationPlanReviewPage.jsx",
+        "factory_app/app/admin/pages/RevenueDistributionReviewPage.jsx",
+        "factory_app/app/admin/pages/MyCommunitiesPage.jsx",
+        "factory_app/app/admin/pages/MyInvitationsPage.jsx",
+        "factory_app/app/admin/pages/MyVotesPage.jsx",
+        "factory_app/app/admin/pages/MyDelegationsPage.jsx",
     }
 
     assert react_files == route_backed_files | support_files

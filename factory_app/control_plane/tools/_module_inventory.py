@@ -129,6 +129,7 @@ class ModuleInventoryEntry(BaseModel):
     has_settings: bool = Field(default=False, description="True if contracts/settings.yaml exists.")
     has_admin: bool = Field(default=False, description="True if contracts/admin.yaml exists.")
     has_profile: bool = Field(default=False, description="True if contracts/profile.yaml exists.")
+    has_relationships: bool = Field(default=False, description="True if contracts/relationships.yaml exists.")
     has_runtime_extensions: bool = Field(default=False, description="True if runtime_extensions.yaml exists at the module root.")
 
     # File lists (relative paths as they appear in the file_map)
@@ -277,6 +278,8 @@ def classify_module_carry_forward(entry: ModuleInventoryEntry) -> tuple[str, lis
             reasons.append("has_notifications=True: notification delivery is concept-independent")
         if entry.has_profile:
             reasons.append("has_profile=True: user profile surface is generic across concepts")
+        if entry.has_relationships:
+            reasons.append("has_relationships=True: current-user resource relationships are generic across concepts")
         if entry.has_persistence:
             reasons.append(
                 "has_persistence=True: state exists but module is known-safe; "
@@ -292,6 +295,8 @@ def classify_module_carry_forward(entry: ModuleInventoryEntry) -> tuple[str, lis
         infra_signals.append("has_notifications=True with no persistence: delivery-only module")
     if entry.has_profile and not entry.has_persistence:
         infra_signals.append("has_profile=True with no persistence: display-only profile surface")
+    if entry.has_relationships and not entry.has_persistence:
+        infra_signals.append("has_relationships=True with no persistence: display-only relationship surface")
 
     if infra_signals and not entry.has_admin and not entry.has_reactions and not entry.event_types:
         reasons.extend(infra_signals)
@@ -413,6 +418,7 @@ def extract_module_inventory(file_map: dict[str, str]) -> list[ModuleInventoryEn
         has_settings = f"{contracts_prefix}settings.yaml" in file_map
         has_admin = f"{contracts_prefix}admin.yaml" in file_map
         has_profile = f"{contracts_prefix}profile.yaml" in file_map
+        has_relationships = f"{contracts_prefix}relationships.yaml" in file_map
 
         # --- Runtime extensions ---
         has_runtime_extensions = f"{prefix}runtime_extensions.yaml" in file_map
@@ -440,6 +446,7 @@ def extract_module_inventory(file_map: dict[str, str]) -> list[ModuleInventoryEn
             has_settings=has_settings,
             has_admin=has_admin,
             has_profile=has_profile,
+            has_relationships=has_relationships,
             has_runtime_extensions=has_runtime_extensions,
             backend_files=backend_files,
             contract_files=contract_files,

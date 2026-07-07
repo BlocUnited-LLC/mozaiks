@@ -171,7 +171,6 @@ const ModernChatInterface = ({
   historyMenuLabel = 'Recents',
   structuredOutputs = {},
   startupMode,
-  initialMessageToUser,
   onRetry,
   onBrandClick, // Optional callback when brand/logo clicked
   isOnChatPage = true, // Whether we're on the primary chat page (not discovery/workflows)
@@ -289,7 +288,6 @@ const ModernChatInterface = ({
 
   // Agent action handler - used by UI tool event responses
   const handleAgentAction = (action) => {
-    console.log('Agent action received:', action);
     if (onAgentAction) {
       onAgentAction(action);
     }
@@ -376,23 +374,17 @@ const ModernChatInterface = ({
       return;
     }
     if (modeTogglePending) {
-      console.log('⏳ [CHAT_INTERFACE] Mode toggle ignored because a transition is already in progress');
       return;
     }
-    console.log('🔘 [CHAT_INTERFACE] Mode toggle clicked, current mode:', conversationMode);
-    console.log('🔘 [CHAT_INTERFACE] isOnChatPage:', isOnChatPage);
-    console.log('🔘 [CHAT_INTERFACE] showModeToggle:', showModeToggle);
 
     // When NOT on chat page and switching from Ask → Workflow:
     // Immediately switch mode (which triggers most recent workflow fetch), navigation will follow
     if (!isOnChatPage && conversationMode === 'ask') {
-      console.log('🚀 [CHAT_INTERFACE] Off chat page in Ask mode → switching to workflow mode (will navigate)');
       onConversationModeChange('workflow');
       return;
     }
 
     const nextMode = conversationMode === 'workflow' ? 'ask' : 'workflow';
-    console.log('🔘 [CHAT_INTERFACE] Toggling to mode:', nextMode);
     onConversationModeChange(nextMode);
     // Note: chat.enter_general_mode automatically creates/reuses session, no need for separate call
   };
@@ -441,15 +433,6 @@ const ModernChatInterface = ({
 
       try {
         if (['1','true','on','yes'].includes((localStorage.getItem('mozaiks.debug_render')||'').toLowerCase())) {
-          console.log('[RENDER] ChatMessage', {
-            index,
-            id: chat.id,
-            agent: chat.agentName,
-            visual: chat.isVisual,
-            structured: isStructuredCapable,
-            streaming: chat.isStreaming,
-            preview: (chat.content||'').slice(0,80)
-          });
         }
       } catch {}
 
@@ -659,17 +642,6 @@ const ModernChatInterface = ({
           )}
         </div>
 
-        {/* Initial Message - only show for UserDriven workflows and if message exists */}
-        {startupMode === 'UserDriven' && initialMessageToUser && (
-          <div className="pb-2 sm:pb-3 px-3 sm:px-4 md:px-6 flex justify-center">
-            <div className="relative px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-[rgba(var(--color-secondary-rgb),0.15)] border border-[rgba(var(--color-secondary-rgb),0.3)] flex items-center justify-center space-x-1.5 sm:space-x-2 backdrop-blur-sm max-w-full sm:max-w-md">
-              <div className="relative w-1.5 h-1.5 sm:w-2 sm:h-2 bg-[var(--color-secondary)] rounded-full animate-pulse flex-shrink-0"></div>
-              <span className="relative text-[var(--color-secondary-light)] text-[10px] sm:text-xs font-semibold tracking-wide heading-font text-center truncate">
-                {initialMessageToUser}
-              </span>
-            </div>
-          </div>
-        )}
       </div>
       )}
     {/* Chat Messages Area - ONLY THIS SCROLLS */}

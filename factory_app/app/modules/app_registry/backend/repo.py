@@ -5,11 +5,13 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
+from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
+from mozaiksai.core.multitenant import build_app_scope_filter
 
 IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
 APP_REGISTRY_COLLECTION = "AppRegistryRecords"
+BUILD_CONTINUE_STATES = frozenset({"draft", "building", "review", "configuring", "needs_revision"})
 
 
 class AppRegistryRepo:
@@ -54,6 +56,8 @@ class AppRegistryRepo:
         description: str | None,
         lifecycle_state: str,
         app_id: str,
+        active_chat_id: str | None = None,
+        active_workflow_id: str | None = None,
     ) -> dict[str, Any]:
         await self.ensure_indexes()
         coll = await self._collection()
@@ -69,6 +73,10 @@ class AppRegistryRepo:
             "updated_at": now,
             "last_status_changed_at": now,
         }
+        if active_chat_id:
+            set_fields["active_chat_id"] = active_chat_id
+        if active_workflow_id:
+            set_fields["active_workflow_id"] = active_workflow_id
         await coll.update_one(
             {"_id": build_registry_id},
             {
@@ -109,7 +117,8 @@ class AppRegistryRepo:
         await self.ensure_indexes()
         coll = await self._collection()
         docs = await coll.find({"owner_user_id": owner_user_id}).sort("updated_at", -1).to_list(length=500)
-        return [normalized for doc in docs if (normalized := self._normalize_doc(doc))]
+        records = [normalized for doc in docs if (normalized := self._normalize_doc(doc))]
+        return [await self._with_active_chat_fallback(record, owner_user_id=owner_user_id) for record in records]
 
     async def get_by_app_id(self, *, app_id: str) -> dict[str, Any] | None:
         await self.ensure_indexes()
@@ -122,6 +131,36 @@ class AppRegistryRepo:
         coll = await self._collection()
         doc = await coll.find_one({"_id": build_registry_id})
         return self._normalize_doc(doc)
+
+    async def _with_active_chat_fallback(
+        self,
+        record: dict[str, Any],
+        *,
+        owner_user_id: str,
+    ) -> dict[str, Any]:
+        if record.get("active_chat_id"):
+            return record
+        if str(record.get("lifecycle_state") or "") not in BUILD_CONTINUE_STATES:
+            return record
+        app_id = str(record.get("app_id") or "").strip()
+        if not app_id:
+            return record
+        try:
+            client = await self._client()
+            coll = client[SYSTEM_DATABASE][RuntimeCollections.CHAT_SESSIONS]
+            doc = await coll.find_one(
+                {"user_id": owner_user_id, **build_app_scope_filter(app_id)},
+                {"_id": 1, "workflow_name": 1, "last_updated_at": 1, "created_at": 1},
+                sort=[("last_updated_at", -1), ("created_at", -1)],
+            )
+        except Exception:
+            return record
+        if not isinstance(doc, dict) or not doc.get("_id"):
+            return record
+        enriched = dict(record)
+        enriched["active_chat_id"] = str(doc["_id"])
+        enriched["active_workflow_id"] = str(doc.get("workflow_name") or "ValueEngine")
+        return enriched
 
     @staticmethod
     def _normalize_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:

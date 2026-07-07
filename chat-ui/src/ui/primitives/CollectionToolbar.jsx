@@ -36,7 +36,7 @@ export function CollectionToolbar({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <label className="relative block w-full max-w-2xl">
           <span className="sr-only">{searchPlaceholder}</span>
-          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground/95">
             <SearchIcon />
           </span>
           <input
@@ -44,7 +44,7 @@ export function CollectionToolbar({
             value={searchValue}
             onChange={(event) => onSearchChange?.(event.target.value)}
             placeholder={searchPlaceholder}
-            className="h-12 w-full rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/36 pl-11 pr-4 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/68 hover:border-border/70 hover:bg-card/46 focus:border-primary/42 focus:bg-card/52 focus:ring-2 focus:ring-primary/16"
+            className="h-12 w-full rounded-[var(--shell-control-radius,1rem)] border border-border/70 bg-background/72 pl-11 pr-4 text-sm text-foreground shadow-sm shadow-black/10 outline-none transition placeholder:text-muted-foreground hover:border-border hover:bg-background/84 focus:border-primary/55 focus:bg-background/90 focus:ring-2 focus:ring-primary/18"
           />
         </label>
 
@@ -56,7 +56,7 @@ export function CollectionToolbar({
               <select
                 value={sortValue}
                 onChange={(event) => onSortChange?.(event.target.value)}
-                className="h-11 rounded-[var(--shell-control-radius,1rem)] border border-border/48 bg-card/24 px-3 text-sm font-medium text-foreground outline-none transition hover:border-border/70 hover:bg-card/40 focus:border-primary/42 focus:ring-2 focus:ring-primary/16"
+                className="h-11 rounded-[var(--shell-control-radius,1rem)] border border-border/70 bg-background/72 px-3 text-sm font-medium text-foreground outline-none transition hover:border-border hover:bg-background/84 focus:border-primary/55 focus:ring-2 focus:ring-primary/18"
               >
                 {normalizedSortOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -70,7 +70,7 @@ export function CollectionToolbar({
       </div>
 
       {normalizedFilters.length > 0 ? (
-        <div className="flex flex-wrap gap-5">
+        <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:gap-5 sm:overflow-visible sm:pb-0">
           {normalizedFilters.map((filter) => {
             const selected = filter.value === activeFilter;
             return (
@@ -79,8 +79,10 @@ export function CollectionToolbar({
                 type="button"
                 onClick={() => onFilterChange?.(filter.value)}
                 className={cn(
-                  'relative -mb-[17px] border-b border-transparent pb-3 text-[13px] font-semibold transition',
-                  selected ? 'border-primary/55 text-foreground' : 'text-muted-foreground/84 hover:text-foreground',
+                  'relative shrink-0 rounded-full border px-3 py-1.5 text-[13px] font-semibold transition sm:-mb-[17px] sm:rounded-none sm:border-x-0 sm:border-t-0 sm:border-b sm:border-transparent sm:px-0 sm:pb-3 sm:pt-0',
+                  selected
+                    ? 'border-primary/55 bg-primary/10 text-foreground sm:bg-transparent'
+                    : 'border-border/58 bg-background/48 text-muted-foreground hover:border-border hover:text-foreground sm:border-transparent sm:bg-transparent',
                 )}
               >
                 {filter.label}

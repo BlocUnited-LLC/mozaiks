@@ -61,12 +61,19 @@ def run(args) -> None:
         print("Error: uvicorn is required. It is included in the mozaiks package dependencies.")
         sys.exit(1)
 
+    # uvicorn requires a lowercase log level string.  Normalize here so that
+    # LOG_LEVEL=INFO (the conventional uppercase value used in .env files,
+    # Helm values, and Dockerfile ENV declarations) does not produce a
+    # KeyError inside uvicorn's LOG_LEVELS dict lookup.
+    raw_log_level = os.environ.get("LOG_LEVEL", "info")
+    log_level = raw_log_level.strip().lower() if raw_log_level.strip() else "info"
+
     print(f"App root : {app_root}")
     print(f"Host     : {host}  ({listen}:{port})")
     if reload:
         print("Reload   : enabled")
 
-    uvicorn.run(app_module, host=listen, port=port, reload=reload)
+    uvicorn.run(app_module, host=listen, port=port, reload=reload, log_level=log_level)
 
 
 def _resolve_app_root(workspace: Path) -> Path | None:

@@ -465,6 +465,20 @@ class SessionRouter:
                 "session_state": self._serialize_state(state),
             }
 
+        if requested_chat:
+            if requested_workflow:
+                state.current_workflow_id = requested_workflow
+            state.current_chat_id = requested_chat
+            state.updated_at = datetime.now(UTC)
+            await self._store.upsert(state)
+            return {
+                "chat_id": requested_chat,
+                "workflow_id": requested_workflow or state.current_workflow_id,
+                "found": False,
+                "resolved_from": "requested_chat_missing",
+                "session_state": self._serialize_state(state),
+            }
+
         state_doc = await self._find_chat_doc(
             coll=coll,
             app_id=app,
