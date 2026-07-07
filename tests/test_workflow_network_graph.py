@@ -12,12 +12,12 @@ from autogen.beta.network import (
     WorkflowState,
 )
 
+from mozaiksai.core.workflow.agents.transition_graph import wire_transition_graph_with_debugging
 from mozaiksai.core.workflow.execution.network_graph import (
     WorkflowGraphCompileError,
     compile_transition_rules_to_graph,
     resolve_next_agent,
 )
-from mozaiksai.core.workflow.agents.transition_graph import wire_transition_graph_with_debugging
 from mozaiksai.core.workflow.workflow_manager import workflow_manager
 
 

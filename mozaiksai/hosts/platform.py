@@ -16,7 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -26,18 +26,17 @@ from mozaiksai.core.auth import (
     WS_CLOSE_POLICY_VIOLATION,
     UserPrincipal,
     authenticate_websocket_with_path_binding,
-    optional_user,
     require_any_auth,
     require_user_scope,
 )
-from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import (
     resolve_scope_from_principal,
     validate_path_app_id,
     validate_path_id,
+)
+from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal as _validate_user_id_against_principal,
 )
-from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.entitlement import EntitlementPort
 from mozaiksai.core.profile.discovery import load_profile_panels
@@ -64,12 +63,11 @@ from mozaiksai.core.runtime.persistence import (
 )
 from mozaiksai.core.session.launcher import (
     create_routed_chat_session,
-    launch_transition,
     validate_context_for_workflow,
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots, resolve_active_app_root
 from mozaiksai.hosts import runtime as runtime_app
-from mozaiksai.resources import resolve_factory_app_root, resolve_factory_brand_root
+from mozaiksai.resources import resolve_factory_app_root
 from mozaiksai.version import __version__ as _API_VERSION
 
 app = runtime_app.app
@@ -116,13 +114,14 @@ except Exception as exc:  # pragma: no cover
     logger.debug("ADMIN_ROUTER_MOUNT_FAILED: %s", exc)
 
 # Router modules extracted from platform.py for code organization.
+from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
 from mozaiksai.hosts.routers.modules import router as _modules_router  # noqa: E402
 from mozaiksai.hosts.routers.notifications import router as _notifications_router  # noqa: E402
-from mozaiksai.hosts.routers.shell import router as _shell_router  # noqa: E402
-from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
 from mozaiksai.hosts.routers.sessions import router as _sessions_router  # noqa: E402
+from mozaiksai.hosts.routers.shell import router as _shell_router  # noqa: E402
 from mozaiksai.hosts.routers.transitions import router as _transitions_router  # noqa: E402
 from mozaiksai.hosts.routers.workflows import router as _workflows_router  # noqa: E402
+
 app.include_router(_modules_router)
 app.include_router(_notifications_router)
 app.include_router(_shell_router)

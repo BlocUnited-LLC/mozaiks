@@ -7,7 +7,6 @@ import pytest
 from fastapi import HTTPException
 
 from mozaiksai.core.auth.dependencies import UserPrincipal
-from mozaiksai.hosts import platform as platform_host
 from mozaiksai.hosts.routers import sessions as sessions_module
 
 

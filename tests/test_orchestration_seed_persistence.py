@@ -4,7 +4,9 @@ import logging
 
 import pytest
 
-from mozaiksai.core.workflow.execution.run_bootstrap import bootstrap_run_messages as _bootstrap_run_messages
+from mozaiksai.core.workflow.execution.run_bootstrap import (
+    bootstrap_run_messages as _bootstrap_run_messages,
+)
 
 
 class _StubPersistenceManager:
