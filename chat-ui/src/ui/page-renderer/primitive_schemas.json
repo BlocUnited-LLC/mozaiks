@@ -209,6 +209,31 @@
       "title_font": "string: body|heading"
     }
   },
+  "PricingCatalog": {
+    "tier": "default",
+    "use": "Use for public pricing pages that render subscription plans or add-ons from app/config/subscriptions.yaml and pricing catalog groups.",
+    "avoid": "Do not use for payment-provider setup, invoices, settlement logic, or pages with hardcoded plan data when a subscription config exists.",
+    "required": [],
+    "properties": {
+      "title": "string",
+      "subtitle": "string",
+      "api_endpoint": "string — Optional endpoint returning plans, pricing_catalog, and add-on data.",
+      "plans_key": "string — Path to plan array in endpoint response.",
+      "groups_key": "string — Path to pricing group array in endpoint response.",
+      "add_ons_key": "string — Path to add-on array in endpoint response.",
+      "default_group_id": "string",
+      "default_group_key": "string — Path to default group id in endpoint response.",
+      "current_plan_key": "string — Path to current plan id in endpoint response.",
+      "highlighted_plan_id": "string",
+      "plan_action_label": "string",
+      "add_on_action_label": "string",
+      "plans": "array of {plan_id,label,description?,price_display?,cta_label?,highlights?,managed_ai?,usage_limits?,pricing?,is_default?}",
+      "groups": "array of {group_id,label,description?,kind?,plan_ids?,capability_groups?,add_on_ids?}",
+      "add_ons": "array of {id?,add_on_id?,label,description?,price_display?,price?,cta_label?,highlights?}",
+      "plan_action": "action object",
+      "add_on_action": "action object"
+    }
+  },
   "ResourceTable": {
     "tier": "default",
     "use": "Use for collection/index pages that need search, filters, sorting, status, updated time, and row actions.",

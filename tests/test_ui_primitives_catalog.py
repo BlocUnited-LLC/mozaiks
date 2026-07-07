@@ -27,6 +27,7 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
         "Modal",
         "PageHeader",
         "Panel",
+        "PricingCatalog",
         "ProgressTracker",
         "ResourceTable",
         "SegmentedBar",
@@ -125,4 +126,17 @@ def test_button_primitive_preserves_single_child_for_as_child_slot() -> None:
     as_child_branch = source.split("if (props.asChild)", 1)[1].split("return (", 2)[1]
     assert "{content}" in as_child_branch
     assert "icon &&" not in as_child_branch
+
+
+def test_collection_toolbar_keeps_search_and_mobile_filter_contrast() -> None:
+    source = (
+        REPO_ROOT / "chat-ui" / "src" / "ui" / "primitives" / "CollectionToolbar.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "bg-background/72" in source
+    assert "placeholder:text-muted-foreground" in source
+    assert "border-border/70" in source
+    assert "flex-nowrap" in source
+    assert "overflow-x-auto" in source
+    assert "sm:flex-wrap" in source
 
