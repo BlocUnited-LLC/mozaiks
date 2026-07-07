@@ -1,0 +1,71 @@
+schema_version: mozaiks.page.v1
+name: product_detail
+route: /products/:productId
+title: Product
+page_type: record_detail
+layout: full-width
+shell_mode: standard
+navigation:
+  id: product-detail
+  label: Product
+  icon: ShoppingBag
+  scope: local
+  order: 41
+  visible: false
+sections:
+  - id: product-detail-header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Product
+      subtitle: Review details, then add the product to your cart.
+      title_font: body
+      actions:
+        - id: back-to-products
+          label: Products
+          variant: secondary
+          action_type: navigate
+          href: /products
+        - id: view-cart
+          label: View Cart
+          variant: primary
+          action_type: navigate
+          href: /cart
+
+  - id: product-lookup
+    primitive: Form
+    title: Product Lookup
+    config:
+      layout: grid
+      columns: 2
+      submit_label: Load Product
+      fields:
+        - name: product_id
+          label: Product ID
+          type: text
+          required: false
+        - name: slug
+          label: Slug
+          type: text
+          required: false
+      submit_action:
+        label: Load Product
+        action_type: submit
+        href: /api/modules/commerce/get_product
+
+  - id: add-product-action
+    primitive: ActionButton
+    title: null
+    config:
+      layout: row
+      actions:
+        - id: add-product-to-cart
+          label: Add to Cart
+          variant: primary
+          action_type: submit
+          href: /api/modules/commerce/add_cart_item
+          payload:
+            product_id: "{product_id}"
+            quantity: 1
+roles: null
+extensions: null

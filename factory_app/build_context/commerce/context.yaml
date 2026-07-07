@@ -1,0 +1,29 @@
+context_id: commerce
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: commerce
+  status: active
+  capability_source: generated_module
+capabilities:
+  - capability_id: commerce.products.browse
+    facade_recommended: commerce
+  - capability_id: commerce.products.manage
+    facade_recommended: commerce
+  - capability_id: commerce.inventory.manage
+    facade_recommended: commerce
+  - capability_id: commerce.cart.manage
+    facade_recommended: commerce
+  - capability_id: commerce.checkout.start
+    facade_recommended: commerce
+  - capability_id: commerce.orders.manage
+    facade_recommended: commerce
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

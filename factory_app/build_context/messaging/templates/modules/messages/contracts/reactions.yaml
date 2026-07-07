@@ -1,0 +1,9 @@
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: message_notify_participants
+    event_type: app.messages.message.sent
+    target:
+      kind: notification
+      notification_id: message_sent
+    # Fired for every recipient_id in the event payload so each participant
+    # gets an in-app notification when they receive a new message.

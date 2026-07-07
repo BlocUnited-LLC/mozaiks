@@ -1,0 +1,94 @@
+{
+  "migration_id": "messaging_001_collections",
+  "description": "Declare messaging module collections and indexes in the app data contract.",
+  "surfaces": [
+    {
+      "surface_id": "messaging",
+      "collections": [
+        {
+          "mongo_collection": "messages_threads",
+          "data_alias": "messages.threads",
+          "indexes": [
+            {
+              "name": "threads_by_id",
+              "keys": [{"field": "thread_id", "order": 1}],
+              "unique": true
+            },
+            {
+              "name": "threads_by_participant_updated",
+              "keys": [{"field": "participant_ids", "order": 1}, {"field": "updated_at", "order": -1}]
+            },
+            {
+              "name": "threads_by_participant_type_status",
+              "keys": [
+                {"field": "participant_ids", "order": 1},
+                {"field": "thread_type", "order": 1},
+                {"field": "status", "order": 1}
+              ]
+            },
+            {
+              "name": "threads_by_participant_last_message",
+              "keys": [{"field": "participant_ids", "order": 1}, {"field": "last_message_at", "order": -1}]
+            }
+          ]
+        },
+        {
+          "mongo_collection": "messages_messages",
+          "data_alias": "messages.messages",
+          "indexes": [
+            {
+              "name": "messages_by_thread_created_asc",
+              "keys": [{"field": "thread_id", "order": 1}, {"field": "created_at", "order": 1}]
+            },
+            {
+              "name": "messages_by_thread_created_desc",
+              "keys": [{"field": "thread_id", "order": 1}, {"field": "created_at", "order": -1}]
+            },
+            {
+              "name": "messages_unread_scan",
+              "keys": [
+                {"field": "thread_id", "order": 1},
+                {"field": "sender_id", "order": 1},
+                {"field": "created_at", "order": 1}
+              ]
+            }
+          ]
+        },
+        {
+          "mongo_collection": "messages_thread_reads",
+          "data_alias": "messages.thread_reads",
+          "indexes": [
+            {
+              "name": "reads_by_thread_user",
+              "keys": [{"field": "thread_id", "order": 1}, {"field": "user_id", "order": 1}],
+              "unique": true
+            },
+            {
+              "name": "reads_by_user",
+              "keys": [{"field": "user_id", "order": 1}]
+            }
+          ]
+        },
+        {
+          "mongo_collection": "messages_notifications",
+          "data_alias": "messages.notifications",
+          "indexes": [
+            {
+              "name": "notifications_by_user_created",
+              "keys": [{"field": "user_id", "order": 1}, {"field": "created_at", "order": -1}]
+            },
+            {
+              "name": "notifications_unread_by_user",
+              "keys": [{"field": "user_id", "order": 1}, {"field": "read", "order": 1}]
+            },
+            {
+              "name": "notifications_by_id",
+              "keys": [{"field": "notification_id", "order": 1}],
+              "unique": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

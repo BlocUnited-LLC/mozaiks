@@ -1,0 +1,21 @@
+{
+  "pages": [
+    {
+      "id": "messages",
+      "label": "Messages",
+      "path": "/messages",
+      "component": "Messages",
+      "order": 50,
+      "navigation": {
+        "scope": "global",
+        "icon": "MessageCircle",
+        "order": 50
+      },
+      "meta": {
+        "title": "Messages",
+        "requiresAuth": true,
+        "shellMode": "conversation"
+      }
+    }
+  ]
+}

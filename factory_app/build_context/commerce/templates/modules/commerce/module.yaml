@@ -1,0 +1,374 @@
+schema_version: mozaiks.module.v1
+module:
+  id: commerce
+  display_name: Commerce
+  version: 1.0.0
+  description: Product catalog, inventory, cart, checkout request, order, and fulfillment state for generated commerce apps.
+  owner: app
+  visibility: app
+  type: standard
+  handler: backend.handler:CommerceHandler
+
+permissions:
+  - id: commerce.catalog.read
+    description: Browse published products and read public catalog details.
+  - id: commerce.catalog.manage
+    description: Create, edit, publish, and archive products.
+  - id: commerce.inventory.manage
+    description: Adjust stock and inventory policy for products.
+  - id: commerce.cart.manage
+    description: Read and mutate the current viewer's cart.
+  - id: commerce.checkout.start
+    description: Start checkout for the current viewer's cart.
+  - id: commerce.orders.read
+    description: Read orders owned by the current viewer.
+  - id: commerce.orders.manage
+    description: Review, fulfill, cancel, refund, or administer all orders.
+
+actions:
+  - id: list_products
+    api_surface: public_readonly
+    description: Browse products visible in the storefront. Supports search, category, status, and cursor pagination.
+    handler_method: list_products
+    input_schema:
+      type: object
+      properties:
+        search: { type: string }
+        category: { type: string }
+        status: { type: string, enum: [draft, active, archived] }
+        before: { type: string }
+        limit: { type: integer }
+    output_schema:
+      type: object
+      required: [products, count]
+      properties:
+        products:
+          type: array
+          items:
+            type: object
+            properties:
+              product_id: { type: string }
+              title: { type: string }
+              slug: { type: string, nullable: true }
+              category: { type: string }
+              sku: { type: string, nullable: true }
+              status: { type: string }
+              price_amount: { type: integer }
+              price_display: { type: string }
+              currency: { type: string }
+              inventory_quantity: { type: integer, nullable: true }
+              track_inventory: { type: boolean }
+              image_url: { type: string, nullable: true }
+        count: { type: integer }
+        next_cursor: { type: string, nullable: true }
+    permissions: [commerce.catalog.read]
+
+  - id: get_product
+    api_surface: public_readonly
+    description: Fetch one product by product_id or slug.
+    handler_method: get_product
+    input_schema:
+      type: object
+      properties:
+        product_id: { type: string }
+        slug: { type: string }
+    output_schema:
+      type: object
+      required: [product]
+      properties:
+        product: { type: object, nullable: true }
+    permissions: [commerce.catalog.read]
+
+  - id: create_product
+    api_surface: public
+    description: Create a draft or active product with price, currency, SKU, category, and inventory metadata.
+    handler_method: create_product
+    entitlement_gate: commerce.products.manage
+    input_schema:
+      type: object
+      required: [title, price_amount]
+      properties:
+        title: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        category: { type: string }
+        sku: { type: string }
+        status: { type: string, enum: [draft, active, archived] }
+        price_amount: { type: number }
+        currency: { type: string }
+        inventory_quantity: { type: integer }
+        track_inventory: { type: boolean }
+        image_url: { type: string }
+    output_schema:
+      type: object
+      required: [success, product]
+    permissions: [commerce.catalog.manage]
+    emits: [app.commerce.product.created]
+
+  - id: update_product
+    api_surface: public
+    description: Update catalog, price, status, or inventory policy fields for a product.
+    handler_method: update_product
+    input_schema:
+      type: object
+      required: [product_id]
+      properties:
+        product_id: { type: string }
+        title: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        category: { type: string }
+        sku: { type: string }
+        status: { type: string, enum: [draft, active, archived] }
+        price_amount: { type: number }
+        currency: { type: string }
+        inventory_quantity: { type: integer }
+        track_inventory: { type: boolean }
+        image_url: { type: string }
+    output_schema:
+      type: object
+      required: [success, product]
+    permissions: [commerce.catalog.manage]
+    emits: [app.commerce.product.updated]
+
+  - id: archive_product
+    api_surface: public
+    description: Archive a product so it no longer appears in storefront browse results.
+    handler_method: archive_product
+    input_schema:
+      type: object
+      required: [product_id]
+      properties:
+        product_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [commerce.catalog.manage]
+    emits: [app.commerce.product.archived]
+
+  - id: adjust_inventory
+    api_surface: public
+    description: Adjust product inventory by a signed delta and record the reason.
+    handler_method: adjust_inventory
+    input_schema:
+      type: object
+      required: [product_id, delta]
+      properties:
+        product_id: { type: string }
+        delta: { type: integer }
+        reason: { type: string }
+    output_schema:
+      type: object
+      required: [success, product]
+    permissions: [commerce.inventory.manage]
+    emits: [app.commerce.inventory.adjusted]
+
+  - id: get_cart
+    api_surface: public_readonly
+    description: Return the current viewer's active cart, including recalculated totals.
+    handler_method: get_cart
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [cart]
+    permissions: [commerce.cart.manage]
+
+  - id: add_cart_item
+    api_surface: public
+    description: Add a product to the current viewer's active cart or increment quantity.
+    handler_method: add_cart_item
+    input_schema:
+      type: object
+      required: [product_id]
+      properties:
+        product_id: { type: string }
+        quantity: { type: integer }
+    output_schema:
+      type: object
+      required: [success, cart]
+    permissions: [commerce.cart.manage]
+    emits: [app.commerce.cart.updated]
+
+  - id: update_cart_item
+    api_surface: public
+    description: Set the quantity for one cart item. Quantity 0 removes the item.
+    handler_method: update_cart_item
+    input_schema:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id: { type: string }
+        quantity: { type: integer }
+    output_schema:
+      type: object
+      required: [success, cart]
+    permissions: [commerce.cart.manage]
+    emits: [app.commerce.cart.updated]
+
+  - id: remove_cart_item
+    api_surface: public
+    description: Remove one product from the current viewer's cart.
+    handler_method: remove_cart_item
+    input_schema:
+      type: object
+      required: [product_id]
+      properties:
+        product_id: { type: string }
+    output_schema:
+      type: object
+      required: [success, cart]
+    permissions: [commerce.cart.manage]
+    emits: [app.commerce.cart.updated]
+
+  - id: clear_cart
+    api_surface: public
+    description: Clear all items from the current viewer's active cart.
+    handler_method: clear_cart
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [success, cart]
+    permissions: [commerce.cart.manage]
+    emits: [app.commerce.cart.updated]
+
+  - id: start_checkout
+    api_surface: public
+    description: Snapshot the current cart into an order and emit a checkout request for the selected payment facade.
+    handler_method: start_checkout
+    entitlement_gate: commerce.checkout.start
+    input_schema:
+      type: object
+      properties:
+        payment_provider: { type: string }
+        success_url: { type: string }
+        cancel_url: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        order: { type: object }
+        checkout_request: { type: object }
+        error: { type: string }
+    permissions: [commerce.checkout.start]
+    emits: [app.commerce.checkout.requested]
+
+  - id: record_checkout_result
+    api_surface: internal
+    description: Internal payment-facade callback that marks checkout paid, failed, cancelled, or expired.
+    handler_method: record_checkout_result
+    input_schema:
+      type: object
+      required: [order_id, status]
+      properties:
+        order_id: { type: string }
+        status: { type: string, enum: [paid, failed, cancelled, expired] }
+        provider: { type: string }
+        provider_reference: { type: string }
+        raw_event: { type: object }
+    output_schema:
+      type: object
+      required: [success, order]
+    permissions: []
+    emits: [app.commerce.order.paid, app.commerce.checkout.failed]
+
+  - id: list_orders
+    api_surface: public_readonly
+    description: List orders for the current viewer, or all orders for commerce managers.
+    handler_method: list_orders
+    input_schema:
+      type: object
+      properties:
+        status: { type: string }
+        before: { type: string }
+        limit: { type: integer }
+    output_schema:
+      type: object
+      required: [orders, count]
+      properties:
+        orders:
+          type: array
+          items:
+            type: object
+            properties:
+              order_id: { type: string }
+              actor_id: { type: string }
+              cart_id: { type: string }
+              status: { type: string }
+              items: { type: array }
+              subtotal_amount: { type: integer }
+              total_amount: { type: integer }
+              total_display: { type: string }
+              currency: { type: string }
+              payment: { type: object }
+              fulfillment: { type: object }
+              created_at: { type: string }
+              updated_at: { type: string }
+        count: { type: integer }
+        next_cursor: { type: string, nullable: true }
+    permissions: [commerce.orders.read]
+
+  - id: get_order
+    api_surface: public_readonly
+    description: Fetch one order visible to the current viewer or commerce manager.
+    handler_method: get_order
+    input_schema:
+      type: object
+      required: [order_id]
+      properties:
+        order_id: { type: string }
+    output_schema:
+      type: object
+      required: [order]
+    permissions: [commerce.orders.read]
+
+  - id: update_order_status
+    api_surface: public
+    description: Move an order through fulfillment states such as processing, fulfilled, cancelled, or refunded.
+    handler_method: update_order_status
+    input_schema:
+      type: object
+      required: [order_id, status]
+      properties:
+        order_id: { type: string }
+        status: { type: string, enum: [processing, fulfilled, cancelled, refunded] }
+        note: { type: string }
+    output_schema:
+      type: object
+      required: [success, order]
+    permissions: [commerce.orders.manage]
+    emits: [app.commerce.order.updated]
+
+capabilities:
+  - capability_id: commerce.products.browse
+    target: list_products
+  - capability_id: commerce.products.manage
+    target: create_product
+  - capability_id: commerce.products.manage
+    target: update_product
+  - capability_id: commerce.products.manage
+    target: archive_product
+  - capability_id: commerce.inventory.manage
+    target: adjust_inventory
+  - capability_id: commerce.cart.manage
+    target: get_cart
+  - capability_id: commerce.cart.manage
+    target: add_cart_item
+  - capability_id: commerce.cart.manage
+    target: update_cart_item
+  - capability_id: commerce.cart.manage
+    target: remove_cart_item
+  - capability_id: commerce.cart.manage
+    target: clear_cart
+  - capability_id: commerce.checkout.start
+    target: start_checkout
+  - capability_id: commerce.orders.manage
+    target: list_orders
+  - capability_id: commerce.orders.manage
+    target: get_order
+  - capability_id: commerce.orders.manage
+    target: update_order_status

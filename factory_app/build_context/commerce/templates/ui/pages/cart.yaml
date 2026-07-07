@@ -1,0 +1,99 @@
+schema_version: mozaiks.page.v1
+name: cart
+route: /cart
+title: Cart
+page_type: wizard
+layout: full-width
+shell_mode: focused
+navigation:
+  id: cart
+  label: Cart
+  icon: ShoppingCart
+  scope: global
+  order: 42
+  visible: true
+sections:
+  - id: cart-header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Cart
+      subtitle: Review items before checkout.
+      title_font: body
+      actions:
+        - id: keep-shopping
+          label: Products
+          variant: secondary
+          action_type: navigate
+          href: /products
+
+  - id: cart-summary
+    primitive: SummaryStrip
+    title: null
+    config:
+      api_endpoint: /api/modules/commerce/get_cart
+      items:
+        - id: subtotal
+          label: Subtotal
+          value_key: cart.subtotal_display
+        - id: status
+          label: Status
+          value_key: cart.status
+        - id: currency
+          label: Currency
+          value_key: cart.currency
+
+  - id: cart-items
+    primitive: ResourceTable
+    title: Items
+    config:
+      api_endpoint: /api/modules/commerce/get_cart
+      data_key: cart.items
+      selection: single
+      search: false
+      columns:
+        - key: title
+          label: Product
+        - key: quantity
+          label: Quantity
+          type: number
+        - key: unit_amount
+          label: Unit Amount
+          type: number
+        - key: line_total
+          label: Line Total
+          type: number
+      actions:
+        - id: remove-item
+          label: Remove
+          variant: destructive
+          action_type: submit
+          href: /api/modules/commerce/remove_cart_item
+          requires_selection: true
+          payload:
+            product_id: "{product_id}"
+      empty:
+        title: Your cart is empty
+        message: Browse products to add something.
+        action:
+          label: Browse Products
+          action_type: navigate
+          href: /products
+
+  - id: checkout-action
+    primitive: ActionButton
+    title: null
+    config:
+      layout: row
+      actions:
+        - id: start-checkout
+          label: Checkout
+          variant: primary
+          action_type: submit
+          href: /api/modules/commerce/start_checkout
+          payload:
+            payment_provider: mozaikspay
+            success_url: /checkout/success
+            cancel_url: /cart
+roles: null
+extensions: null

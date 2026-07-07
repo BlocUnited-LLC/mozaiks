@@ -1,0 +1,118 @@
+contract_id: commerce
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_ecommerce_apps
+    when:
+      intent_any:
+        - ecommerce
+        - e-commerce
+        - online store
+        - shop
+        - storefront
+        - product catalog
+        - cart
+        - checkout
+        - orders
+        - inventory
+    action: select_pack
+  - id: confirm_for_light_listing_apps
+    when:
+      intent_any:
+        - directory
+        - listings
+        - gallery
+        - showcase
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - commerce
+  - ecommerce
+  - storefront
+  - catalog
+  - orders
+  - inventory
+  - checkout
+
+required_outputs:
+  - path: data/migrations/001_commerce_collections.json
+    owner: templates
+  - path: modules/commerce/module.yaml
+    owner: templates
+  - path: modules/commerce/backend/__init__.py
+    owner: templates
+  - path: modules/commerce/backend/handler.py
+    owner: templates
+  - path: modules/commerce/backend/service.py
+    owner: templates
+  - path: modules/commerce/backend/repo.py
+    owner: templates
+  - path: modules/commerce/backend/policy.py
+    owner: templates
+  - path: modules/commerce/backend/schemas.py
+    owner: templates
+  - path: modules/commerce/contracts/events.yaml
+    owner: templates
+  - path: modules/commerce/contracts/admin.yaml
+    owner: templates
+  - path: modules/commerce/contracts/settings.yaml
+    owner: templates
+  - path: modules/commerce/contracts/reactions.yaml
+    owner: templates
+  - path: ui/pages/products.yaml
+    owner: templates
+  - path: ui/pages/product_detail.yaml
+    owner: templates
+  - path: ui/pages/cart.yaml
+    owner: templates
+  - path: ui/pages/orders.yaml
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/ecommerce/
+  - path_prefix: modules/shop/
+  - path_prefix: modules/marketplace/
+  - path_prefix: modules/mozaikspay/
+  - path_prefix: modules/stripe/
+  - path_prefix: services/payments/
+  - path_prefix: services/adapters/payments/
+  - path_prefix: app/capability_packs/
+
+runtime_boundaries:
+  - id: persistence_layer
+    rule: Generated repo.py must use app_data_from_context and data aliases. No direct Motor clients and no hardcoded database names.
+  - id: payment_provider_boundary
+    rule: Commerce owns catalog, cart, orders, checkout requests, and fulfillment state. Payment provider mechanics stay in a selected payment capability pack or app-owned services/adapters/payments when the user explicitly brings a provider.
+  - id: checkout_event_boundary
+    rule: start_checkout emits app.commerce.checkout.requested and returns an app-owned checkout request. Payment completion is recorded through the internal record_checkout_result action.
+  - id: inventory_authority
+    rule: Inventory is decremented only after successful checkout completion or an explicit inventory adjustment. Do not trust client-side totals.
+  - id: tenant_user_scope
+    rule: Cart and order queries must scope to the current actor unless the caller has commerce.orders.manage or ops.admin permission.
+  - id: idempotency
+    rule: Checkout completion handlers must accept provider_reference and avoid duplicate paid-order transitions.
+  - id: no_multi_vendor_assumptions
+    rule: This pack is single-merchant commerce. Seller onboarding, seller payouts, disputes, commissions, and seller-specific dashboards belong in a later commerce_marketplace overlay pack.
+  - id: dynamic_detail_routes
+    rule: Product detail routes that must read route params, poll checkout state, or branch on async response state should use custom_route_bundle. Declarative page schemas can still provide the products, cart, and orders operational surfaces.
+
+facades: []
+
+cross_pack_integrations:
+  - pack: mozaikspay
+    description: >
+      When both commerce and mozaikspay are selected, the generated app can route
+      app.commerce.checkout.requested to an app-owned MozaiksPay checkout facade.
+      Commerce never calls hosted payment internals directly.
+    optional: true
+    integration_surface:
+      - commerce_action: start_checkout
+        emitted_event: app.commerce.checkout.requested
+        note: >
+          The payment facade creates the hosted checkout session from the order
+          snapshot and calls record_checkout_result after provider confirmation.
+      - commerce_action: record_checkout_result
+        trigger: checkout.session.completed
+        note: >
+          Internal app action that marks the order paid, records provider
+          metadata, decrements inventory, and emits app.commerce.order.paid.

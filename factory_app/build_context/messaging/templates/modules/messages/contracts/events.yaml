@@ -1,0 +1,96 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: app.messages.thread.created
+    version: 1
+    description: Emitted after a message thread is created.
+    producer: messages
+    payload_schema:
+      type: object
+      required: [thread_id, thread_type, created_by]
+      properties:
+        thread_id:   { type: string }
+        thread_type: { type: string }  # dm | group
+        created_by:  { type: string }
+
+  - type: app.messages.message.sent
+    version: 1
+    description: >
+      Emitted after a message is saved. Includes recipient_ids and body_preview
+      so the delivery worker can push to live WebSocket connections without a
+      follow-up fetch, and the reaction system can fan out notifications.
+    producer: messages
+    payload_schema:
+      type: object
+      required: [thread_id, message_id, sender_id, body_preview, sent_at, recipient_ids]
+      properties:
+        thread_id:      { type: string }
+        message_id:     { type: string }
+        sender_id:      { type: string }
+        body_preview:   { type: string }
+        sent_at:        { type: string }
+        recipient_ids:
+          type: array
+          items: { type: string }
+        participant_ids:
+          type: array
+          items: { type: string }
+
+  - type: app.messages.thread.read
+    version: 1
+    description: Emitted when a user marks a thread as read.
+    producer: messages
+    payload_schema:
+      type: object
+      required: [thread_id, user_id]
+      properties:
+        thread_id: { type: string }
+        user_id:   { type: string }
+
+  - type: app.messages.thread.status_updated
+    version: 1
+    description: Emitted when a thread is closed or archived.
+    producer: messages
+    payload_schema:
+      type: object
+      required: [thread_id, status, updated_by]
+      properties:
+        thread_id:  { type: string }
+        status:     { type: string }  # closed | archived | open
+        updated_by: { type: string }
+
+  - type: app.messages.message.edited
+    version: 1
+    description: Emitted when a message body is edited by its sender.
+    producer: messages
+    payload_schema:
+      type: object
+      required: [thread_id, message_id, sender_id, edited_at]
+      properties:
+        thread_id:  { type: string }
+        message_id: { type: string }
+        sender_id:  { type: string }
+        edited_at:  { type: string }
+
+  - type: app.messages.message.deleted
+    version: 1
+    description: Emitted when a message is soft-deleted by its sender or the thread creator.
+    producer: messages
+    payload_schema:
+      type: object
+      required: [thread_id, message_id, deleted_by, deleted_at]
+      properties:
+        thread_id:  { type: string }
+        message_id: { type: string }
+        deleted_by: { type: string }
+        deleted_at: { type: string }
+
+  - type: app.messages.thread.left
+    version: 1
+    description: Emitted when a user leaves a thread.
+    producer: messages
+    payload_schema:
+      type: object
+      required: [thread_id, user_id]
+      properties:
+        thread_id: { type: string }
+        user_id:   { type: string }

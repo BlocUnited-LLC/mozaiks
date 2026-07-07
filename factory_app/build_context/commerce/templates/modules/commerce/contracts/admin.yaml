@@ -1,0 +1,68 @@
+schema_version: mozaiks.admin.v1
+panels:
+  - id: commerce_catalog_panel
+    title: Commerce Catalog
+    description: Manage products, publication status, prices, categories, SKUs, and inventory policy.
+    module: commerce
+    actions:
+      - id: list_products
+        label: List Products
+        input_overrides:
+          status: active
+          limit: 50
+      - id: create_product
+        label: Create Product
+      - id: update_product
+        label: Update Product
+      - id: archive_product
+        label: Archive Product
+        confirm: true
+        confirm_message: "Archive this product and remove it from storefront browsing?"
+    filters:
+      - field: status
+        label: Status
+        options: [Active, Draft, Archived]
+        map: { Active: active, Draft: draft, Archived: archived }
+      - field: category
+        label: Category
+        options: []
+    permissions: [commerce.catalog.manage, ops.admin]
+
+  - id: commerce_inventory_panel
+    title: Inventory
+    description: Review stock on tracked products and apply manual stock adjustments.
+    module: commerce
+    actions:
+      - id: list_products
+        label: List Tracked Products
+        input_overrides:
+          limit: 50
+      - id: adjust_inventory
+        label: Adjust Inventory
+    permissions: [commerce.inventory.manage, ops.admin]
+
+  - id: commerce_orders_panel
+    title: Orders
+    description: Review orders, payment state, and fulfillment status.
+    module: commerce
+    actions:
+      - id: list_orders
+        label: List Orders
+        input_overrides:
+          limit: 50
+      - id: get_order
+        label: View Order
+      - id: update_order_status
+        label: Update Fulfillment
+    filters:
+      - field: status
+        label: Status
+        options: [Paid, Processing, Fulfilled, Cancelled, Refunded, Payment Failed]
+        map:
+          Paid: paid
+          Processing: processing
+          Fulfilled: fulfilled
+          Cancelled: cancelled
+          Refunded: refunded
+          Payment Failed: payment_failed
+    permissions: [commerce.orders.manage, ops.admin]

@@ -1,0 +1,38 @@
+schema_version: mozaiks.settings.v1
+settings:
+  - id: messages.notifications.email_on_new_message
+    label: Email on new message
+    description: Receive an email when someone sends you a new message.
+    type: boolean
+    default: true
+    scope: user
+
+  - id: messages.notifications.email_on_dm
+    label: Email on direct message
+    description: Receive an email specifically when someone starts a new DM with you.
+    type: boolean
+    default: true
+    scope: user
+
+  - id: messages.notifications.in_app_on_new_message
+    label: In-app notification on new message
+    description: Show an in-app notification badge when new messages arrive.
+    type: boolean
+    default: true
+    scope: user
+
+  - id: messages.sound.enabled
+    label: Message sound
+    description: Play a sound when a new message arrives (client-side hint only).
+    type: boolean
+    default: true
+    scope: user
+
+  - id: messages.thread_preview.show_body
+    label: Show message preview in thread list
+    description: >
+      Display a short preview of the last message body in the thread list.
+      Disable for privacy (e.g. shared-screen environments).
+    type: boolean
+    default: true
+    scope: user

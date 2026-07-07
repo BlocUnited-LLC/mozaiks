@@ -1,0 +1,19 @@
+apiVersion: v2
+name: mozaiks
+description: Mozaiks AI workflow runtime and Studio-driven app framework
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/BlocUnited-LLC/mozaiks
+sources:
+  - https://github.com/BlocUnited-LLC/mozaiks
+keywords:
+  - ai
+  - agents
+  - workflows
+  - mozaiks
+  - autogen
+  - ag2
+maintainers:
+  - name: BlocUnited LLC
+    email: info@blocunited.com

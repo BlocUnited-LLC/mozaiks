@@ -1,0 +1,36 @@
+schema_version: mozaiks.settings.v1
+settings:
+  - id: commerce.catalog.default_currency
+    label: Default currency
+    description: Currency used when generated app operators create products without specifying a currency.
+    type: string
+    default: USD
+    scope: app
+
+  - id: commerce.catalog.require_inventory_for_publish
+    label: Require inventory for publish
+    description: Require tracked products to have positive inventory before publishing.
+    type: boolean
+    default: false
+    scope: app
+
+  - id: commerce.checkout.default_provider
+    label: Default checkout provider
+    description: Payment facade identifier requested by commerce checkout events.
+    type: string
+    default: mozaikspay
+    scope: app
+
+  - id: commerce.orders.email_receipts
+    label: Email receipts
+    description: Send receipts when an order is marked paid by the payment facade.
+    type: boolean
+    default: true
+    scope: app
+
+  - id: commerce.orders.operator_notifications
+    label: Operator order notifications
+    description: Notify commerce operators when paid orders need fulfillment.
+    type: boolean
+    default: true
+    scope: app

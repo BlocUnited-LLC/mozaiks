@@ -1,0 +1,25 @@
+context_id: messaging
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: messaging
+  status: active
+  capability_source: generated_module
+capabilities:
+  - capability_id: messaging.threads.list
+    facade_recommended: messages
+  - capability_id: messaging.messages.send
+    facade_recommended: messages
+  - capability_id: messaging.contacts.list
+    facade_recommended: contacts
+  - capability_id: messaging.contacts.add
+    facade_recommended: contacts
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

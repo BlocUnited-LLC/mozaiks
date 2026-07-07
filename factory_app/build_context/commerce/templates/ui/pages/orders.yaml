@@ -1,0 +1,64 @@
+schema_version: mozaiks.page.v1
+name: orders
+route: /orders
+title: Orders
+page_type: record_list
+layout: full-width
+shell_mode: workspace
+navigation:
+  id: orders
+  label: Orders
+  icon: Receipt
+  scope: global
+  order: 43
+  visible: true
+sections:
+  - id: orders-header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Orders
+      subtitle: Review purchases and fulfillment state.
+      title_font: body
+      actions:
+        - id: back-products
+          label: Products
+          variant: secondary
+          action_type: navigate
+          href: /products
+
+  - id: order-list
+    primitive: ResourceTable
+    title: null
+    config:
+      api_endpoint: /api/modules/commerce/list_orders
+      data_key: orders
+      selection: single
+      search: true
+      search_placeholder: Search orders...
+      columns:
+        - key: order_id
+          label: Order
+        - key: status
+          label: Status
+          type: status
+        - key: total_display
+          label: Total
+        - key: currency
+          label: Currency
+        - key: created_at
+          label: Created
+          type: date
+          sortable: true
+      actions:
+        - id: open-order
+          label: View Order
+          variant: secondary
+          action_type: navigate
+          href: /orders/{order_id}
+          requires_selection: true
+      empty:
+        title: No orders yet
+        message: Paid orders appear here after checkout completes.
+roles: null
+extensions: null

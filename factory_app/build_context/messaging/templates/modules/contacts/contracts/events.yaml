@@ -1,0 +1,17 @@
+schema_version: mozaiks.events.v1
+events:
+  - id: app.contacts.contact.added
+    description: Fired when a user adds another user to their contact list.
+    payload_fields:
+      - name: user_id
+        type: string
+      - name: contact_user_id
+        type: string
+
+  - id: app.contacts.contact.removed
+    description: Fired when a user removes a contact.
+    payload_fields:
+      - name: user_id
+        type: string
+      - name: contact_user_id
+        type: string

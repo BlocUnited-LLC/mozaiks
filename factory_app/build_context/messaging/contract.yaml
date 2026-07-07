@@ -1,0 +1,103 @@
+contract_id: messaging
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_messaging_apps
+    when:
+      intent_any:
+        - direct messages
+        - dm
+        - messaging
+        - chat
+        - conversations
+        - inbox
+        - threads
+    action: select_pack
+  - id: confirm_for_light_social
+    when:
+      intent_any:
+        - notifications
+        - comments
+        - activity feed
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - messaging
+  - chat
+  - social
+  - community
+  - marketplace
+
+required_outputs:
+  - path: data/migrations/001_messaging_collections.json
+    owner: templates
+  - path: modules/messages/module.yaml
+    owner: templates
+  - path: modules/messages/runtime_extensions.yaml
+    owner: templates
+  - path: modules/messages/backend/__init__.py
+    owner: templates
+  - path: modules/messages/backend/handler.py
+    owner: templates
+  - path: modules/messages/backend/service.py
+    owner: templates
+  - path: modules/messages/backend/repo.py
+    owner: templates
+  - path: modules/messages/backend/policy.py
+    owner: templates
+  - path: modules/messages/backend/schemas.py
+    owner: templates
+  - path: modules/messages/backend/event_subscriber.py
+    owner: templates
+  - path: modules/messages/contracts/events.yaml
+    owner: templates
+  - path: modules/messages/contracts/notifications.yaml
+    owner: templates
+  - path: modules/messages/contracts/reactions.yaml
+    owner: templates
+  - path: ui/pages/custom/Messages.jsx
+    owner: templates
+  - path: modules/contacts/module.yaml
+    owner: templates
+  - path: modules/contacts/backend/__init__.py
+    owner: templates
+  - path: modules/contacts/backend/handler.py
+    owner: templates
+  - path: modules/contacts/backend/service.py
+    owner: templates
+  - path: modules/contacts/backend/repo.py
+    owner: templates
+  - path: modules/contacts/backend/policy.py
+    owner: templates
+  - path: modules/contacts/backend/schemas.py
+    owner: templates
+  - path: modules/contacts/contracts/events.yaml
+    owner: templates
+  - path: modules/contacts/contracts/profile.yaml
+    owner: templates
+  - path: ui/pages/contacts.yaml
+    owner: templates
+  - path: ui/route_manifest.json
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/messaging/
+  - path_prefix: modules/chat/
+  - path_prefix: services/messaging/
+  - path_prefix: services/chat/
+
+runtime_boundaries:
+  - id: persistence_layer
+    rule: Generated repo.py must use app_data_from_context and collection aliases. No direct Motor clients.
+  - id: event_emission
+    rule: Events must be emitted via ctx.emit(), not direct dispatcher calls from service/handler.
+  - id: websocket_delivery
+    rule: Real-time delivery is handled by MessageDeliveryWorker via the OSS event dispatcher. Do not build a second delivery path.
+  - id: auth_gate
+    rule: WebSocket endpoints must use authenticate_websocket_with_path_user from mozaiksai.core.auth.
+  - id: no_announcement_leakage
+    rule: The create_announcement action is hosted-platform only. Do not add it to generated app templates.
+
+facades: []
+
+cross_pack_integrations: []

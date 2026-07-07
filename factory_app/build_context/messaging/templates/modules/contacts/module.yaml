@@ -1,0 +1,107 @@
+schema_version: mozaiks.module.v1
+module:
+  id: contacts
+  display_name: Contacts
+  version: 1.0.0
+  description: Lightweight user contact list for messaging. Users add contacts to build their DM picker roster.
+  handler: backend.handler:ContactsHandler
+
+permissions:
+  - id: contacts.read
+    description: Read your own contact list.
+  - id: contacts.manage
+    description: Add and remove contacts.
+  - id: contacts.admin
+    description: Administer all contact records.
+
+actions:
+  - id: list_contacts
+    api_surface: public_readonly
+    description: List contacts for the current user with cursor pagination.
+    handler_method: list_contacts
+    input_schema:
+      type: object
+      properties:
+        before: { type: string }
+        limit: { type: integer }
+    output_schema:
+      type: object
+      required: [contacts, count]
+      properties:
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              contact_id: { type: string }
+              contact_user_id: { type: string }
+              status: { type: string }
+              created_at: { type: string }
+        count: { type: integer }
+        next_cursor: { type: string }
+    permissions: [contacts.read]
+
+  - id: add_contact
+    api_surface: public
+    description: Add a user to the current user's contact list.
+    handler_method: add_contact
+    input_schema:
+      type: object
+      required: [contact_user_id]
+      properties:
+        contact_user_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        error: { type: string }
+    permissions: [contacts.manage]
+    emits: [app.contacts.contact.added]
+
+  - id: remove_contact
+    api_surface: public
+    description: Remove a user from the current user's contact list.
+    handler_method: remove_contact
+    input_schema:
+      type: object
+      required: [contact_user_id]
+      properties:
+        contact_user_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        error: { type: string }
+    permissions: [contacts.manage]
+    emits: [app.contacts.contact.removed]
+
+  - id: get_contact
+    api_surface: public_readonly
+    description: Check whether a specific user is in the current user's contact list.
+    handler_method: get_contact
+    input_schema:
+      type: object
+      required: [contact_user_id]
+      properties:
+        contact_user_id: { type: string }
+    output_schema:
+      type: object
+      required: [is_contact]
+      properties:
+        contact: { type: object }
+        is_contact: { type: boolean }
+    permissions: [contacts.read]
+
+capabilities:
+  - capability_id: messaging.contacts.list
+    kind: action
+    target: list_contacts
+    title: List Contacts
+    permissions: [contacts.read]
+  - capability_id: messaging.contacts.add
+    kind: action
+    target: add_contact
+    title: Add Contact
+    permissions: [contacts.manage]

@@ -1,0 +1,119 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: app.commerce.product.created
+    version: 1
+    description: Emitted after a product is created.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [product_id, status, created_by]
+      properties:
+        product_id: { type: string }
+        status: { type: string }
+        created_by: { type: string }
+
+  - type: app.commerce.product.updated
+    version: 1
+    description: Emitted after product metadata, price, status, or inventory policy changes.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [product_id, changes, updated_by]
+      properties:
+        product_id: { type: string }
+        changes:
+          type: array
+          items: { type: string }
+        updated_by: { type: string }
+
+  - type: app.commerce.product.archived
+    version: 1
+    description: Emitted after a product is removed from storefront browse results.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [product_id, archived_by]
+      properties:
+        product_id: { type: string }
+        archived_by: { type: string }
+
+  - type: app.commerce.inventory.adjusted
+    version: 1
+    description: Emitted after an operator manually changes tracked inventory.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [product_id, delta, adjusted_by]
+      properties:
+        product_id: { type: string }
+        delta: { type: integer }
+        reason: { type: string }
+        adjusted_by: { type: string }
+
+  - type: app.commerce.cart.updated
+    version: 1
+    description: Emitted after a viewer changes cart contents.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [cart_id, actor_id, item_count, subtotal_amount]
+      properties:
+        cart_id: { type: string }
+        actor_id: { type: string }
+        item_count: { type: integer }
+        subtotal_amount: { type: integer }
+
+  - type: app.commerce.checkout.requested
+    version: 1
+    description: >
+      Emitted when commerce snapshots a cart into an order and requests a
+      payment facade to create the external checkout session.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [checkout_id, order_id, actor_id, payment_provider, amount, currency]
+      properties:
+        checkout_id: { type: string }
+        order_id: { type: string }
+        actor_id: { type: string }
+        payment_provider: { type: string }
+        amount: { type: integer }
+        currency: { type: string }
+
+  - type: app.commerce.order.paid
+    version: 1
+    description: Emitted after an internal payment facade marks an order paid.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [order_id, status]
+      properties:
+        order_id: { type: string }
+        status: { type: string }
+        payment_provider: { type: string }
+        provider_reference: { type: string }
+
+  - type: app.commerce.checkout.failed
+    version: 1
+    description: Emitted after checkout fails, is cancelled, or expires.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [order_id, status]
+      properties:
+        order_id: { type: string }
+        status: { type: string }
+        payment_provider: { type: string }
+        provider_reference: { type: string }
+
+  - type: app.commerce.order.updated
+    version: 1
+    description: Emitted after fulfillment or order state changes.
+    producer: commerce
+    payload_schema:
+      type: object
+      required: [order_id, status, updated_by]
+      properties:
+        order_id: { type: string }
+        status: { type: string }
+        updated_by: { type: string }

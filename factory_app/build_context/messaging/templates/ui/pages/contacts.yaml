@@ -1,0 +1,37 @@
+schema_version: mozaiks.page.v1
+name: contacts
+route: /contacts
+title: Contacts
+page_type: record_list
+layout: full-width
+shell_mode: workspace
+navigation:
+  id: contacts
+  label: Contacts
+  icon: Users
+  scope: global
+  order: 51
+sections:
+  - id: contacts-list
+    primitive: ResourceTable
+    title: null
+    config:
+      api_endpoint: /api/modules/contacts/list_contacts
+      data_key: contacts
+      columns:
+        - key: contact_user_id
+          label: User
+        - key: created_at
+          label: Added
+          type: date
+          sortable: true
+      selection: none
+      search: false
+      pagination: true
+      page_size: 20
+      empty:
+        title: No contacts yet
+        message: Add contacts to quickly start a conversation.
+        error_title: Could not load contacts
+roles: null
+extensions: null

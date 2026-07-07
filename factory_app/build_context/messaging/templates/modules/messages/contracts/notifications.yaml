@@ -1,0 +1,11 @@
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: message_sent
+    event_type: app.messages.message.sent
+    channels: [in_app, email]
+    audience:
+      roles: [participant]
+    template:
+      title: New message
+      body: "{{sender_name}} sent you a message."
+    # Wired via reactions.yaml — fires for each recipient_id in the event payload.

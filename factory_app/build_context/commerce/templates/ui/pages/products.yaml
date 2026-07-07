@@ -1,0 +1,78 @@
+schema_version: mozaiks.page.v1
+name: products
+route: /products
+title: Products
+page_type: gallery
+layout: full-width
+shell_mode: standard
+navigation:
+  id: products
+  label: Products
+  icon: ShoppingBag
+  scope: global
+  order: 40
+  visible: true
+sections:
+  - id: products-header
+    primitive: PageHeader
+    title: null
+    config:
+      title: Products
+      subtitle: Browse the catalog and add products to your cart.
+      title_font: body
+      actions:
+        - id: view-cart
+          label: View Cart
+          variant: secondary
+          action_type: navigate
+          href: /cart
+        - id: view-orders
+          label: Orders
+          variant: ghost
+          action_type: navigate
+          href: /orders
+
+  - id: product-list
+    primitive: ResourceTable
+    title: null
+    config:
+      api_endpoint: /api/modules/commerce/list_products
+      data_key: products
+      selection: single
+      search: true
+      search_placeholder: Search products...
+      columns:
+        - key: title
+          label: Product
+          sortable: true
+        - key: category
+          label: Category
+        - key: price_display
+          label: Price
+        - key: inventory_quantity
+          label: Stock
+          type: number
+        - key: status
+          label: Status
+          type: status
+      actions:
+        - id: open-product
+          label: View Product
+          variant: secondary
+          action_type: navigate
+          href: /products/{product_id}
+          requires_selection: true
+        - id: add-to-cart
+          label: Add to Cart
+          variant: primary
+          action_type: submit
+          href: /api/modules/commerce/add_cart_item
+          requires_selection: true
+          payload:
+            product_id: "{product_id}"
+            quantity: 1
+      empty:
+        title: No products yet
+        message: Publish products from the commerce admin panel.
+roles: null
+extensions: null

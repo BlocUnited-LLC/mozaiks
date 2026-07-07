@@ -1,0 +1,264 @@
+schema_version: mozaiks.module.v1
+module:
+  id: messages
+  display_name: Messages
+  version: 1.1.0
+  description: Direct messages, group threads, real-time delivery, and notifications for app users.
+  owner: app
+  visibility: app
+  handler: backend.handler:MessageHandler
+
+permissions:
+  - id: messages.read
+    description: Read threads, messages, and notifications.
+  - id: messages.write
+    description: Create threads, send messages, and manage thread state.
+
+actions:
+  # ── Thread listing ────────────────────────────────────────────────
+  - id: list_threads
+    api_surface: public_readonly
+    description: List message threads for the current user with cursor pagination.
+    handler_method: list_threads
+    input_schema:
+      type: object
+      properties:
+        status:      { type: string, enum: [open, closed, archived] }
+        thread_type: { type: string, enum: [dm, group] }
+        limit:       { type: integer }
+        before:      { type: string, description: "ISO timestamp cursor — return threads updated before this value" }
+    output_schema:
+      type: object
+      required: [threads]
+      properties:
+        threads:     { type: array }
+        next_cursor: { type: string, nullable: true }
+    permissions: [messages.read]
+
+  - id: get_thread
+    api_surface: public_readonly
+    description: Fetch one thread with messages. Supports cursor pagination for history.
+    handler_method: get_thread
+    input_schema:
+      type: object
+      required: [thread_id]
+      properties:
+        thread_id:     { type: string }
+        message_limit: { type: integer }
+        before:        { type: string, description: "ISO timestamp cursor — return messages before this value" }
+    output_schema:
+      type: object
+      required: [thread]
+      properties:
+        thread:      {}
+        messages:    { type: array }
+        unread_count: { type: integer }
+        next_cursor:  { type: string, nullable: true }
+    permissions: [messages.read]
+
+  - id: get_unread_summary
+    api_surface: public_readonly
+    description: Return a count of threads with unread messages for the current user. Use for badge display.
+    handler_method: get_unread_summary
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required: [unread_thread_count]
+    permissions: [messages.read]
+
+  # ── Thread creation ───────────────────────────────────────────────
+  - id: find_or_create_dm
+    api_surface: public
+    description: >
+      Find or create a direct-message thread between the current user and participant_id.
+      Guarantees exactly one DM thread per pair — safe to call on every "Send DM" click.
+    handler_method: find_or_create_dm
+    input_schema:
+      type: object
+      required: [participant_id]
+      properties:
+        participant_id: { type: string }
+    output_schema:
+      type: object
+      required: [success, thread]
+      properties:
+        created: { type: boolean }
+    permissions: [messages.write]
+    emits: [app.messages.thread.created]
+
+  - id: create_thread
+    api_surface: public
+    description: Create a named group thread with optional participants.
+    handler_method: create_thread
+    input_schema:
+      type: object
+      required: [title]
+      properties:
+        title:           { type: string }
+        participant_ids: { type: array, items: { type: string } }
+        context_id:      { type: string, description: "Optional reference to a related entity (e.g. listing ID)" }
+    output_schema:
+      type: object
+      required: [success, thread]
+    permissions: [messages.write]
+    emits: [app.messages.thread.created]
+
+  # ── Thread management ─────────────────────────────────────────────
+  - id: update_thread_status
+    api_surface: public
+    description: Close or archive a thread. Only the thread creator may close/archive; any participant may re-open.
+    handler_method: update_thread_status
+    input_schema:
+      type: object
+      required: [thread_id, status]
+      properties:
+        thread_id: { type: string }
+        status:    { type: string, enum: [open, closed, archived] }
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [messages.write]
+    emits: [app.messages.thread.status_updated]
+
+  - id: leave_thread
+    api_surface: public
+    description: Remove the current user from a thread's participant list. Thread is closed if no participants remain.
+    handler_method: leave_thread
+    input_schema:
+      type: object
+      required: [thread_id]
+      properties:
+        thread_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [messages.write]
+    emits: [app.messages.thread.left]
+
+  # ── Messaging ─────────────────────────────────────────────────────
+  - id: send_message
+    api_surface: public
+    description: Send a message into an open thread.
+    handler_method: send_message
+    input_schema:
+      type: object
+      required: [thread_id, body]
+      properties:
+        thread_id:    { type: string }
+        body:         { type: string }
+        message_type: { type: string, enum: [text, system] }
+    output_schema:
+      type: object
+      required: [success, message]
+    permissions: [messages.write]
+    emits: [app.messages.message.sent]
+
+  - id: edit_message
+    api_surface: public
+    description: Edit the body of a message the current user sent. System messages cannot be edited.
+    handler_method: edit_message
+    input_schema:
+      type: object
+      required: [thread_id, message_id, body]
+      properties:
+        thread_id:  { type: string }
+        message_id: { type: string }
+        body:       { type: string }
+    output_schema:
+      type: object
+      required: [success, message]
+    permissions: [messages.write]
+    emits: [app.messages.message.edited]
+
+  - id: delete_message
+    api_surface: public
+    description: Soft-delete a message. Only the sender or thread creator may delete. Body is cleared.
+    handler_method: delete_message
+    input_schema:
+      type: object
+      required: [thread_id, message_id]
+      properties:
+        thread_id:  { type: string }
+        message_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [messages.write]
+    emits: [app.messages.message.deleted]
+
+  - id: mark_thread_read
+    api_surface: public
+    description: Mark a thread as fully read for the current user.
+    handler_method: mark_thread_read
+    input_schema:
+      type: object
+      required: [thread_id]
+      properties:
+        thread_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [messages.write]
+    emits: [app.messages.thread.read]
+
+  # ── Notifications ─────────────────────────────────────────────────
+  - id: list_notifications
+    api_surface: public_readonly
+    description: List message notifications for the current user with unread count.
+    handler_method: list_notifications
+    input_schema:
+      type: object
+      properties:
+        limit: { type: integer }
+    output_schema:
+      type: object
+      required: [notifications, unread_count]
+    permissions: [messages.read]
+
+  - id: mark_notification_read
+    api_surface: public
+    description: Mark a single notification as read.
+    handler_method: mark_notification_read
+    input_schema:
+      type: object
+      required: [notification_id]
+      properties:
+        notification_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [messages.write]
+
+  - id: mark_all_notifications_read
+    api_surface: public
+    description: Mark all notifications as read for the current user.
+    handler_method: mark_all_notifications_read
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+      required: [success]
+    permissions: [messages.write]
+
+capabilities:
+  - capability_id: messaging.threads.list
+    kind: action
+    target: list_threads
+    title: List Threads
+    permissions: [messages.read]
+  - capability_id: messaging.dm.start
+    kind: action
+    target: find_or_create_dm
+    title: Start Direct Message
+    permissions: [messages.write]
+  - capability_id: messaging.messages.send
+    kind: action
+    target: send_message
+    title: Send Message
+    permissions: [messages.write]
+  - capability_id: messaging.unread.summary
+    kind: action
+    target: get_unread_summary
+    title: Unread Summary
+    permissions: [messages.read]
