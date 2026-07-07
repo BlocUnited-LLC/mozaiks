@@ -1,3 +1,3 @@
 """Single-source package version for Mozaiks."""
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
