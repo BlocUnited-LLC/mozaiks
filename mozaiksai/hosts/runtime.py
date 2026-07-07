@@ -53,6 +53,7 @@ from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.event_bus import get_event_bus
 from mozaiksai.core.runtime.persistence.artifact_version import ensure_artifact_version_indexes
 from mozaiksai.core.runtime.persistence.distributed_lock import ensure_lock_indexes
+from mozaiksai.core.runtime.persistence.startup_policy import get_database_startup_policy
 from mozaiksai.core.startup.validation import run_startup_checks
 from mozaiksai.core.transport.handlers.workflow_handlers import _background_task_failure_callback
 from mozaiksai.core.transport.rate_limit import RateLimitMiddleware
@@ -321,7 +322,17 @@ async def _runtime_startup() -> None:
 
     if mongo_client is None:
         mongo_client = get_mongo_client()
-    await mongo_client.admin.command("ping")
+    _db_policy = get_database_startup_policy()
+    try:
+        await mongo_client.admin.command("ping")
+    except Exception as _ping_exc:
+        wf_logger.warning(
+            "RUNTIME_STARTUP_MONGO_PING_FAILED: policy=%s error=%s",
+            _db_policy,
+            _ping_exc,
+        )
+        if _db_policy == "required":
+            raise
 
     await run_startup_checks()
 
