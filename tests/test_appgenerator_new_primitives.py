@@ -69,6 +69,7 @@ _ALL_SHIPPED = (
     "Modal",
     "PageHeader",
     "Panel",
+    "PricingCatalog",
     "ProgressTracker",
     "ResourceTable",
     "SegmentedBar",

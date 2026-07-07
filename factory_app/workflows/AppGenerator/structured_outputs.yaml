@@ -30,6 +30,7 @@ models:
         - AlertBanner
         - ActionButton
         - FileList
+        - PricingCatalog
         description: >
           Primitive type name from the shipped chat-ui primitive registry.
           Must match exactly — AppSchemaAgent validates against this list.
@@ -4011,6 +4012,7 @@ models:
         - AlertBanner
         - ActionButton
         - FileList
+        - PricingCatalog
         description: Nested sections cannot themselves be Grid primitives.
       title:
         type: union
@@ -4164,6 +4166,7 @@ models:
         - AlertBanner
         - ActionButton
         - FileList
+        - PricingCatalog
         description: UI primitive type from the shipped chat-ui primitive system.
       title:
         type: union
