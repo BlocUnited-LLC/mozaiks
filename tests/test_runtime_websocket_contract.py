@@ -49,6 +49,7 @@ class _FakeTransport:
         self.handle_websocket_calls: list[dict] = []
         self.api_calls: list[dict] = []
         self.ui_events: list[tuple[dict, str]] = []
+        self._background_tasks: dict[str, object] = {}
 
     async def handle_websocket(self, **kwargs) -> None:  # noqa: ANN003
         self.handle_websocket_calls.append(kwargs)
@@ -305,6 +306,8 @@ async def test_runtime_websocket_endpoint_uses_resolved_resume_chat(monkeypatch:
                     "journey_position": 2,
                     "lifecycle_state": "active",
                 },
+                # session_version is None in test harness (no real Mongo).
+                "session_version": None,
             },
             "chat_resumed",
         )
@@ -589,6 +592,7 @@ async def test_runtime_websocket_endpoint_honors_persisted_workflow_for_stale_cl
                 "run_history_count": 1,
                 "created_at": None,
                 "session_state": {},
+                "session_version": None,
             },
             "chat_agent_1",
         )
@@ -669,6 +673,7 @@ async def test_runtime_websocket_endpoint_repairs_non_runnable_persisted_workflo
                 "run_history_count": 1,
                 "created_at": None,
                 "session_state": {},
+                "session_version": None,
             },
             "chat_agent_1",
         )
@@ -779,6 +784,7 @@ async def test_runtime_websocket_endpoint_backfills_missing_resolved_chat_before
                     "journey_position": 1,
                     "lifecycle_state": "active",
                 },
+                "session_version": None,
             },
             "chat_recovered",
         )

@@ -32,16 +32,16 @@ from mozaiksai.core.auth import (
 )
 from mozaiksai.core.auth.adapters.registry import is_auth_enabled
 from mozaiksai.core.auth.dependencies import (
+    resolve_scope_from_principal,
     validate_path_app_id,
     validate_path_id,
-)
-from mozaiksai.core.auth.dependencies import (
     validate_user_id_against_principal as _validate_user_id_against_principal,
 )
 from mozaiksai.core.chat_attachments.attachments import handle_chat_upload
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.entitlement import EntitlementPort
 from mozaiksai.core.profile.discovery import load_profile_panels
+from mozaiksai.core.relationships.discovery import load_relationship_providers
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader, AppLoadError
@@ -76,12 +76,15 @@ app = runtime_app.app
 persistence_manager = runtime_app.persistence_manager
 logger = get_workflow_logger("platform_app")
 
+from mozaiksai.core.ports.collaboration import NoOpCollaborationAdapter  # noqa: E402
+
 executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
 app.state.subscriptions_config = None
 app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
 app.state.failed_module_names: list[str] = []
+app.state.collaboration = NoOpCollaborationAdapter()
 _runtime_services: list[Any] = []
 
 
@@ -112,6 +115,22 @@ try:
 except Exception as exc:  # pragma: no cover
     logger.debug("ADMIN_ROUTER_MOUNT_FAILED: %s", exc)
 
+# Router modules extracted from platform.py for code organization.
+from mozaiksai.hosts.routers.modules import router as _modules_router  # noqa: E402
+from mozaiksai.hosts.routers.notifications import router as _notifications_router  # noqa: E402
+from mozaiksai.hosts.routers.shell import router as _shell_router  # noqa: E402
+from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
+from mozaiksai.hosts.routers.sessions import router as _sessions_router  # noqa: E402
+from mozaiksai.hosts.routers.transitions import router as _transitions_router  # noqa: E402
+from mozaiksai.hosts.routers.workflows import router as _workflows_router  # noqa: E402
+app.include_router(_modules_router)
+app.include_router(_notifications_router)
+app.include_router(_shell_router)
+app.include_router(_chat_router)
+app.include_router(_sessions_router)
+app.include_router(_transitions_router)
+app.include_router(_workflows_router)
+
 
 def resolve_app_root() -> Path:
     return resolve_active_app_root()
@@ -122,13 +141,6 @@ def _load_entitlement_adapter(config: Any) -> EntitlementPort:
     adapter = ConfiguredEntitlementAdapter(config=config)
     logger.info("ENTITLEMENT_ADAPTER_READY: configured subscriptions adapter wired")
     return adapter  # type: ignore[return-value]
-
-
-def _resolve_default_brand_root() -> Path:
-    resolved = resolve_factory_brand_root()
-    if resolved is not None:
-        return resolved
-    return (Path(__file__).resolve().parents[2] / "factory_app" / "app" / "brand").resolve()
 
 
 _NON_RUNNABLE_WORKFLOW_IDS = {"extended_orchestration"}
@@ -394,9 +406,9 @@ runtime_app.register_app_lifespan(app, platform_lifespan)
 PROFILE_SHELL_ROUTE = {
     "path": "/profile",
     "component": "ProfilePage",
-    "label": "Profile",
+    "label": "Account",
     "order": 998,
-    "title": "Profile",
+    "title": "Account",
 }
 
 
@@ -604,21 +616,18 @@ def _route_item_from_page(page: dict) -> dict[str, Any] | None:
 
 def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dict[str, dict[str, Any]]:
     catalog: dict[str, dict[str, Any]] = {
-        "profile": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/profile"},
+        "home": {"id": "home", "label": "Home", "action": "navigate", "path": "/"},
+        "apps": {"id": "apps", "label": "Apps", "action": "navigate", "path": "/apps"},
+        "workspace": {"id": "workspace", "label": "Workspace", "action": "navigate", "path": "/apps"},
+        "profile": {"id": "profile", "label": "Account", "action": "navigate", "path": "/profile"},
+        "account": {"id": "profile", "label": "Account", "action": "navigate", "path": "/profile"},
         "settings": {"id": "settings", "label": "Settings", "action": "navigate", "path": "/settings"},
         "messages": {"id": "messages", "label": "Messages", "action": "navigate", "path": "/messages"},
         "notifications": {"id": "notifications", "label": "Alerts", "action": "navigate", "path": "/notifications"},
         "marketplace": {"id": "marketplace", "label": "Marketplace", "action": "navigate", "path": "/marketplace"},
-        "dashboard": {"id": "dashboard", "label": "Dashboard", "action": "navigate", "path": "/dashboard"},
         "wallet": {"id": "wallet", "label": "Wallet", "action": "navigate", "path": "/wallet"},
-        "create": {"id": "create", "label": "Create", "action": "navigate", "path": "/create"},
+        "create": {"id": "create", "label": "Create", "action": "navigate", "path": "/create?new=1"},
         "admin": {"id": "admin", "label": "Admin", "action": "navigate", "path": "/admin", "requiresRole": "admin"},
-        "admin_portal": {
-            "id": "admin-portal",
-            "label": "Admin Portal",
-            "action": "navigate",
-            "path": "/apps",
-        },
         "support": {"id": "support", "label": "Support", "action": "navigate", "path": "/support"},
         "signin": {"id": "signin", "label": "Sign In", "action": "signin"},
         "signout": {"id": "signout", "label": "Sign Out", "action": "signout"},
@@ -1103,7 +1112,6 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
         workflows = ai.get("workflows") or {}
         result["chat_startup_mode"] = chat.get("chat_startup_mode") or chat.get("startup_mode") or "ask"
         result["entry_point"] = workflows.get("entry_point")
-        result["resume_policy"] = workflows.get("resume_policy")
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to read shell config") from exc
 
@@ -1414,6 +1422,96 @@ async def update_current_user_preferences(
     return await _load_account_preferences(app_id=resolved_app_id, user_id=user_id)
 
 
+def _relationship_result_rows(data: Any) -> list[Any]:
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in ("relationships", "rows", "items"):
+        rows = data.get(key)
+        if isinstance(rows, list):
+            return rows
+    return []
+
+
+def _normalize_relationship_routes(raw_routes: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_routes, list):
+        return []
+    routes: list[dict[str, str]] = []
+    for route in raw_routes:
+        if not isinstance(route, dict):
+            continue
+        label = str(route.get("label") or "").strip()
+        path = str(route.get("path") or route.get("href") or "").strip()
+        if not label or not path.startswith("/"):
+            continue
+        routes.append({"label": label[:80], "path": path})
+    return routes
+
+
+def _normalize_relationship_row(
+    row: Any,
+    *,
+    module_id: str,
+    provider: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+
+    provider_id = str(provider.get("id") or "").strip()
+    resource_type = str(row.get("resource_type") or "").strip()
+    resource_id = str(row.get("resource_id") or row.get("id") or "").strip()
+    relationship_type = str(row.get("relationship_type") or row.get("type") or "").strip()
+    if not resource_type or not resource_id or not relationship_type:
+        return None
+
+    provider_resource_types = provider.get("resource_types")
+    if isinstance(provider_resource_types, list) and provider_resource_types and resource_type not in provider_resource_types:
+        return None
+    provider_relationship_types = provider.get("relationship_types")
+    if (
+        isinstance(provider_relationship_types, list)
+        and provider_relationship_types
+        and relationship_type not in provider_relationship_types
+    ):
+        return None
+
+    primary_route = str(row.get("primary_route") or row.get("path") or "").strip()
+    relationship_id = str(row.get("relationship_id") or "").strip()
+    if not relationship_id:
+        relationship_id = f"{module_id}:{provider_id}:{resource_type}:{resource_id}:{relationship_type}"
+
+    capabilities = row.get("capabilities")
+    if not isinstance(capabilities, list):
+        capabilities = []
+    capabilities = [str(item).strip() for item in capabilities if str(item or "").strip()]
+
+    metadata = row.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    normalized: dict[str, Any] = {
+        "relationship_id": relationship_id,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "resource_label": str(row.get("resource_label") or row.get("label") or resource_id).strip(),
+        "relationship_type": relationship_type,
+        "status": str(row.get("status") or "active").strip() or "active",
+        "capabilities": capabilities,
+        "primary_route": primary_route if primary_route.startswith("/") else None,
+        "secondary_routes": _normalize_relationship_routes(row.get("secondary_routes")),
+        "source_module": module_id,
+        "source_provider": provider_id,
+        "updated_at": row.get("updated_at"),
+        "metadata": metadata,
+    }
+    for optional_key in ("resource_subtitle", "created_at", "expires_at"):
+        value = row.get(optional_key)
+        if value not in (None, ""):
+            normalized[optional_key] = value
+    return normalized
+
+
 @app.get("/api/me/profile-panels")
 async def get_profile_panels(
     app_id: str | None = None,
@@ -1463,6 +1561,77 @@ async def get_profile_panels(
         hydrated.append(panel_out)
 
     return {"panels": hydrated}
+
+
+@app.get("/api/me/relationships")
+async def get_current_user_relationships(
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return module-declared current-user resource relationships.
+
+    Modules opt into this surface with ``contracts/relationships.yaml``. Each
+    provider delegates hydration to a module action and returns normalized rows
+    for account, portfolio, and "my resources" surfaces. Provider failures are
+    isolated so one broken module cannot blank the whole response.
+    """
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    app_root = resolve_app_root()
+    raw_providers = load_relationship_providers(app_root)
+
+    module_executor = executor_registry.module_executor
+    relationships: list[dict[str, Any]] = []
+    providers: list[dict[str, Any]] = []
+
+    for provider in raw_providers:
+        action = str(provider.get("action") or "").strip()
+        module_id = str(provider.get("module_id") or "").strip()
+        provider_out: dict[str, Any] = {
+            **provider,
+            "count": 0,
+            "error": None,
+        }
+
+        if not action or module_executor is None:
+            providers.append(provider_out)
+            continue
+
+        try:
+            req = ModuleRequest(
+                module=module_id,
+                action=action,
+                params={},
+                app_id=resolved_app_id,
+                user_id=user_id,
+                tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+                auth_token=None,
+                correlation_id=None,
+                granted_permissions=list(principal.scopes) if principal else None,
+            )
+            result = await module_executor.execute(req, context=None)
+            if result.success:
+                for row in _relationship_result_rows(result.data):
+                    normalized = _normalize_relationship_row(row, module_id=module_id, provider=provider)
+                    if normalized is not None:
+                        relationships.append(normalized)
+                        provider_out["count"] += 1
+            else:
+                provider_out["error"] = result.error or f"Action {action!r} failed"
+        except Exception as exc:
+            logger.warning("[relationships] %s.%s failed: %s", module_id, action, exc)
+            provider_out["error"] = f"Action {action!r} failed"
+
+        providers.append(provider_out)
+
+    relationships.sort(
+        key=lambda row: (
+            str(row.get("resource_type") or ""),
+            str(row.get("relationship_type") or ""),
+            str(row.get("resource_label") or ""),
+            str(row.get("relationship_id") or ""),
+        )
+    )
+    return {"relationships": relationships, "providers": providers}
 
 
 def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> dict | None:
@@ -1660,15 +1829,6 @@ def _dedupe_and_sort_pages(pages: list[dict]) -> list[dict]:
         by_path.values(),
         key=lambda page: (page.get("order", 0), str(page.get("label") or page.get("path") or "")),
     )
-
-
-def _resolve_theme_config_path() -> Path:
-    app_root = resolve_app_root()
-    candidates = [
-        (app_root / "brand" / "theme_config.json").resolve(),
-        (_resolve_default_brand_root() / "theme_config.json").resolve(),
-    ]
-    return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
 
 
 def _resolve_shell_config_path() -> Path:
@@ -1910,70 +2070,6 @@ class ProfilePreferencesUpdateRequest(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict, description="App-scoped account preference map")
 
 
-def _resolve_pages_dir() -> Path:
-    return (resolve_app_root() / "ui" / "pages").resolve()
-
-
-def _resolve_page_schema_path(name: str) -> Path:
-    pages_dir = _resolve_pages_dir()
-    candidates = (
-        pages_dir / f"{name}.yaml",
-        pages_dir / f"{name}.yml",
-        pages_dir / name / "page.yaml",
-        pages_dir / name / "page.yml",
-    )
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
-
-
-@app.get("/api/theme-config")
-async def get_theme_config():
-    config_path = _resolve_theme_config_path()
-    if not config_path.exists():
-        raise HTTPException(status_code=404, detail="Theme config not found")
-    try:
-        return json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to read theme config") from exc
-
-
-@app.get("/api/themes/{app_id}")
-async def get_app_theme(app_id: str):
-    # Validate the path segment even though theme config is currently app-agnostic,
-    # to prevent malformed IDs (e.g., traversal sequences) from reaching future logic.
-    validate_path_id(app_id, "app_id")
-    return await get_theme_config()
-
-
-@app.get("/api/pages/{name}")
-async def get_page_schema(name: str):
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
-        raise HTTPException(status_code=400, detail="Invalid page name")
-
-    page_path = _resolve_page_schema_path(name)
-    if not page_path.exists():
-        raise HTTPException(status_code=404, detail=f"Page '{name}' not found")
-
-    try:
-        schema = yaml.safe_load(page_path.read_text(encoding="utf-8"))
-        if not isinstance(schema, dict):
-            raise ValueError("Page schema must be a YAML mapping")
-        return JSONResponse(content=schema)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to read page schema") from exc
-
-
-def _load_pack_graph_or_404():
-    from mozaiksai.core.workflow.pack.config import load_global_pack_graph
-
-    pack = load_global_pack_graph()
-    if pack is None:
-        raise HTTPException(status_code=404, detail="No extension registry found")
-    return pack
 
 
 def _load_workflow_capability_routes(app_root: Path) -> dict[str, list[dict[str, Any]]]:
@@ -2237,471 +2333,6 @@ async def _maybe_await(result: Any) -> Any:
     return result
 
 
-def _extract_bearer_token(request: Request) -> str | None:
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    if not auth_header:
-        return None
-    if auth_header.lower().startswith("bearer "):
-        return auth_header[7:].strip() or None
-    return auth_header.strip() or None
-
-
-async def _resolve_module_dispatch_scope(
-    *,
-    request: Request | None,
-    principal: UserPrincipal | None,
-    module_name: str,
-    action_name: str,
-    app_id: str,
-    tenant_id: str | None,
-    workspace_id: str | None,
-    user_id: str | None,
-    params: dict[str, Any],
-) -> dict[str, Any]:
-    default_permissions = list(principal.scopes) if principal else []
-    return await get_platform_hooks().call_module_scope(
-        principal=principal,
-        module_name=module_name,
-        action_name=action_name,
-        requested_scope={
-            "app_id": str(app_id),
-            "tenant_id": str(tenant_id) if tenant_id else None,
-            "workspace_id": str(workspace_id) if workspace_id else None,
-            "user_id": str(user_id) if user_id else None,
-        },
-        params=params,
-        request=request,
-        default_permissions=default_permissions,
-    )
-
-
-_MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-_PUBLIC_MODULE_API_SURFACES = {"public", "public_readonly"}
-
-
-def _module_action_api_surface(request: Request, module_name: str, action_name: str) -> str | None:
-    surfaces = getattr(request.app.state, "module_action_surfaces", None)
-    if not isinstance(surfaces, dict):
-        return None
-    module_surfaces = surfaces.get(module_name)
-    if not isinstance(module_surfaces, dict):
-        return None
-    value = module_surfaces.get(action_name)
-    return str(value or "").strip() or None
-
-
-def _is_public_module_action(request: Request, module_name: str, action_name: str) -> bool:
-    return _module_action_api_surface(request, module_name, action_name) in _PUBLIC_MODULE_API_SURFACES
-
-
-async def _execute_module_action(
-    *,
-    module_name: str,
-    action_name: str,
-    request: Request,
-    principal: UserPrincipal | None,
-    params: dict[str, Any],
-    context_overrides: dict[str, Any] | None = None,
-) -> Any:
-    if not _MODULE_NAME_RE.fullmatch(module_name):
-        raise HTTPException(status_code=400, detail="Invalid module name")
-    if not _MODULE_NAME_RE.fullmatch(action_name):
-        raise HTTPException(status_code=400, detail="Invalid action name")
-
-    if is_auth_enabled() and principal is None and not _is_public_module_action(request, module_name, action_name):
-        raise HTTPException(status_code=401, detail="Missing authorization token")
-
-    # IDOR gate: when an explicit app_id was supplied (not derived from the token),
-    # verify it matches the authenticated principal's token claim. This prevents a
-    # caller from executing actions scoped to a foreign app by passing ?app_id=other.
-    # Must run before executor availability checks so auth errors take priority.
-    context_overrides = context_overrides or {}
-    explicit_app_id = context_overrides.get("app_id") or request.query_params.get("app_id")
-    if explicit_app_id and principal is not None:
-        from mozaiksai.core.auth.dependencies import validate_path_app_id
-        validate_path_app_id(principal, str(explicit_app_id))
-
-    app_id = (
-        explicit_app_id
-        or (principal.app_id if principal else None)
-        or "default"
-    )
-
-    requested_user_id = context_overrides.get("user_id") or request.query_params.get("user_id")
-    if principal is not None and requested_user_id and str(requested_user_id).strip() != str(principal.user_id):
-        raise HTTPException(status_code=403, detail="Token user_id does not match request user_id")
-
-    tenant_id = (
-        context_overrides.get("tenant_id")
-        or request.query_params.get("tenant_id")
-        or (principal.tenant_id if principal else None)
-    )
-    if tenant_id and principal is not None and not principal.validate_tenant_id(str(tenant_id)):
-        raise HTTPException(status_code=403, detail="Token tenant_id does not match request tenant_id")
-
-    workspace_id = (
-        context_overrides.get("workspace_id")
-        or request.query_params.get("workspace_id")
-        or (principal.workspace_id if principal else None)
-    )
-    if workspace_id and principal is not None and not principal.validate_workspace_id(str(workspace_id)):
-        raise HTTPException(status_code=403, detail="Token workspace_id does not match request workspace_id")
-
-    failed_at_startup: list[str] = getattr(request.app.state, "failed_module_names", [])
-    if module_name in failed_at_startup:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Module '{module_name}' failed to load at startup. Check platform logs for details.",
-        )
-
-    module_executor = executor_registry.module_executor
-    if module_executor is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Module runtime is not available. Verify modules/*/module.yaml handlers are loaded.",
-        )
-
-    correlation_id = context_overrides.get("correlation_id") or request.query_params.get("correlation_id") or str(uuid4())
-    auth_token = context_overrides.get("auth_token") or _extract_bearer_token(request)
-    user_id = principal.user_id if principal else None
-
-    dispatch_scope = await _resolve_module_dispatch_scope(
-        request=request,
-        principal=principal,
-        module_name=module_name,
-        action_name=action_name,
-        app_id=str(app_id),
-        tenant_id=str(tenant_id) if tenant_id else None,
-        workspace_id=str(workspace_id) if workspace_id else None,
-        user_id=str(user_id) if user_id else None,
-        params=params,
-    )
-    granted_permissions = list(dispatch_scope.get("permissions") or [])
-
-    module_request = ModuleRequest(
-        module=module_name,
-        action=action_name,
-        params=params,
-        app_id=str(dispatch_scope.get("app_id") or app_id),
-        user_id=str(dispatch_scope.get("user_id") or user_id) if (dispatch_scope.get("user_id") or user_id) else None,
-        tenant_id=str(dispatch_scope.get("tenant_id") or tenant_id) if (dispatch_scope.get("tenant_id") or tenant_id) else None,
-        workspace_id=str(dispatch_scope.get("workspace_id") or workspace_id) if (dispatch_scope.get("workspace_id") or workspace_id) else None,
-        auth_token=str(auth_token) if auth_token else None,
-        correlation_id=str(correlation_id) if correlation_id else None,
-        # HTTP module dispatch is always external-facing, so it supplies a
-        # concrete permission list. Internal trusted calls can still bypass by
-        # invoking ModuleExecutor directly with granted_permissions=None.
-        granted_permissions=granted_permissions,
-    )
-
-    result = await module_executor.execute(module_request, context=None)
-    if result.success:
-        return result.data if result.data is not None else {}
-
-    if result.error_code in {"MODULE_NOT_FOUND", "ACTION_NOT_FOUND"}:
-        status_code = 404
-    elif result.error_code == "PERMISSION_DENIED":
-        status_code = 403
-    elif result.error_code == "ENTITLEMENT_REQUIRED":
-        status_code = 402
-    elif result.error_code == "INVALID_PARAMS":
-        status_code = 400
-    else:
-        status_code = 500
-
-    raise HTTPException(
-        status_code=status_code,
-        detail={
-            "error": result.error or "Module action failed",
-            "error_code": result.error_code or "EXECUTION_ERROR",
-            "module": module_name,
-            "action": action_name,
-        },
-    )
-
-
-@app.get("/api/modules/{module_name}/{action_name}")
-async def execute_module_action_get(
-    module_name: str,
-    action_name: str,
-    request: Request,
-    principal: UserPrincipal | None = Depends(optional_user),
-):
-    reserved_keys = {"app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token"}
-    params = {key: value for key, value in request.query_params.items() if key not in reserved_keys}
-    return await _execute_module_action(
-        module_name=module_name,
-        action_name=action_name,
-        request=request,
-        principal=principal,
-        params=params,
-    )
-
-
-@app.post("/api/modules/{module_name}/{action_name}")
-async def execute_module_action_post(
-    module_name: str,
-    action_name: str,
-    request: Request,
-    principal: UserPrincipal | None = Depends(optional_user),
-):
-    body: dict[str, Any] = {}
-    if request.headers.get("content-type", "").lower().startswith("application/json"):
-        try:
-            parsed = await request.json()
-            if isinstance(parsed, dict):
-                body = parsed
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload.") from exc
-
-    params = dict(body.get("params") or {}) if isinstance(body.get("params"), dict) else dict(body)
-    context_overrides = body.get("context") if isinstance(body.get("context"), dict) else {}
-
-    # Route reserved execution-context fields away from action params.
-    # This keeps handler signatures clean while still honoring explicit scope overrides.
-    reserved_context_keys = ("app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token")
-    for key in reserved_context_keys:
-        if key in params and key not in context_overrides:
-            context_overrides[key] = params[key]
-
-    params.pop("context", None)
-    params.pop("params", None)
-    for key in reserved_context_keys:
-        params.pop(key, None)
-
-    return await _execute_module_action(
-        module_name=module_name,
-        action_name=action_name,
-        request=request,
-        principal=principal,
-        params=params,
-        context_overrides=context_overrides,
-    )
-
-
-@app.get("/api/transitions/{transition_id}")
-async def get_transition_by_id(transition_id: str):
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", transition_id):
-        raise HTTPException(status_code=400, detail="Invalid transition id")
-
-    pack = _load_pack_graph_or_404()
-    from mozaiksai.core.workflow.pack.config import get_transition
-
-    transition = get_transition(pack, transition_id)
-    if transition is None:
-        raise HTTPException(status_code=404, detail=f"Transition '{transition_id}' not found")
-    return transition.model_dump(exclude_none=True)
-
-
-class TransitionResolveRequest(BaseModel):
-    transition_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
-    option_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
-    journey_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
-    context_variables: dict[str, Any] = Field(default_factory=dict)
-    app_id: str | None = None
-    user_id: str | None = None
-
-
-def resolve_scope_from_principal(
-    principal: UserPrincipal,
-    *,
-    app_id: str | None = None,
-    user_id: str | None = None,
-    default_user_id: str | None = None,
-    default_app_id: str = "default",
-) -> tuple[str, str]:
-    effective_user_id = user_id
-    if principal.user_id == "anonymous" and not effective_user_id:
-        effective_user_id = str(default_user_id or "").strip() or None
-
-    resolved_user_id = _validate_user_id_against_principal(principal, body_user_id=effective_user_id)
-
-    provided_app_id = str(app_id or "").strip() or None
-    principal_app_id = str(principal.app_id or "").strip() or None
-    if principal_app_id and provided_app_id and provided_app_id != principal_app_id:
-        raise HTTPException(status_code=403, detail="app_id in request body does not match authenticated app scope")
-
-    resolved_app_id = principal_app_id or provided_app_id or default_app_id
-    if not resolved_app_id:
-        raise HTTPException(status_code=400, detail="app_id is required")
-    return resolved_app_id, resolved_user_id
-
-
-@app.post("/api/transitions/resolve")
-async def resolve_transition_route(
-    body: TransitionResolveRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    try:
-        app_id, user_id = resolve_scope_from_principal(principal, app_id=body.app_id, user_id=body.user_id)
-        launch_result = await launch_transition(
-            app_id=app_id,
-            user_id=user_id,
-            transition_id=body.transition_id,
-            option_id=body.option_id,
-            journey_id=body.journey_id,
-            context_variables=body.context_variables or {},
-        )
-    except ValueError as route_err:
-        raise HTTPException(status_code=400, detail=str(route_err)) from route_err
-    except Exception as route_err:
-        logger.error("Transition resolution failed: %s", route_err, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to resolve transition") from route_err
-
-    if launch_result.resolution_type == "transition":
-        if launch_result.transition is None or not launch_result.next_transition_id:
-            raise HTTPException(status_code=500, detail="Transition launch did not return the next transition")
-        return {
-            "resolution_type": "transition",
-            "transition_id": body.transition_id,
-            "option_id": launch_result.option_id,
-            "journey_id": launch_result.journey_id,
-            "next_transition_id": launch_result.next_transition_id,
-            "transition": launch_result.transition.model_dump(exclude_none=True),
-            "context_variables": launch_result.context_variables,
-        }
-
-    workflow_launch = launch_result.workflow_launch
-    if workflow_launch is None:
-        raise HTTPException(status_code=500, detail="Workflow transition launch did not start a workflow")
-
-    if launch_result.resolution_type == "chat_session":
-        return {
-            "resolution_type": "chat_session",
-            "chat_id": workflow_launch.chat_id,
-            "workflow_id": workflow_launch.workflow_id,
-            "option_id": launch_result.option_id,
-            "journey_id": workflow_launch.journey_id,
-            "websocket_url": workflow_launch.websocket_url,
-            "context_variables": launch_result.context_variables,
-        }
-
-    return {
-        "resolution_type": "workflow",
-        "chat_id": workflow_launch.chat_id,
-        "workflow_id": workflow_launch.workflow_id,
-        "option_id": launch_result.option_id,
-        "requested_workflow_id": workflow_launch.requested_workflow_id,
-        "journey_id": workflow_launch.journey_id,
-        "websocket_url": workflow_launch.websocket_url,
-        "routing_explanation": workflow_launch.routing_explanation,
-        "rerouted_by_dependency": workflow_launch.rerouted_by_dependency,
-    }
-
-
-@app.get("/api/session/state")
-async def get_session_state(
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    from mozaiksai.core.session import get_session_router
-
-    snapshot = await get_session_router().get_session_snapshot(app_id=principal.app_id, user_id=principal.user_id)
-    return {"session_state": snapshot}
-
-
-class PendingDecisionActionPayload(BaseModel):
-    action_id: str
-    label: str
-    action_type: str = "run_workflow"
-    workflow_id: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class SessionPendingDecisionRequest(BaseModel):
-    decision_id: str
-    decision_type: str
-    message: str
-    rationale: str
-    confidence: float = 0.0
-    recommended_workflow_id: str | None = None
-    selected_paths: list[str] = Field(default_factory=list)
-    clarification_question: str | None = None
-    change_request_id: str | None = None
-    revision_id: str | None = None
-    requires_confirmation: bool = False
-    trigger_source: str = "refinement"
-    requested_workflow_id: str | None = None
-    journey_id: str | None = None
-    context_variables: dict[str, Any] = Field(default_factory=dict)
-    trigger_payload: dict[str, Any] = Field(default_factory=dict)
-    actions: list[PendingDecisionActionPayload] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    workflow_id: str | None = None
-    chat_id: str | None = None
-
-
-@app.post("/api/session/decisions/pending")
-async def mark_session_pending_decision(
-    body: SessionPendingDecisionRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    from mozaiksai.core.session import (
-        PendingDecisionAction,
-        PendingHarnessDecision,
-        get_session_router,
-    )
-
-    snapshot = await get_session_router().mark_pending_harness_decision(
-        app_id=principal.app_id,
-        user_id=principal.user_id,
-        pending_decision=PendingHarnessDecision(
-            decision_id=body.decision_id,
-            decision_type=body.decision_type,
-            message=body.message,
-            rationale=body.rationale,
-            confidence=body.confidence,
-            recommended_workflow_id=body.recommended_workflow_id,
-            selected_paths=list(body.selected_paths or []),
-            clarification_question=body.clarification_question,
-            change_request_id=body.change_request_id,
-            revision_id=body.revision_id,
-            requires_confirmation=body.requires_confirmation,
-            trigger_source=body.trigger_source,
-            requested_workflow_id=body.requested_workflow_id,
-            journey_id=body.journey_id,
-            context_variables=dict(body.context_variables or {}),
-            trigger_payload=dict(body.trigger_payload or {}),
-            actions=[
-                PendingDecisionAction(
-                    action_id=action.action_id,
-                    label=action.label,
-                    action_type=action.action_type,
-                    workflow_id=action.workflow_id,
-                    metadata=dict(action.metadata or {}),
-                )
-                for action in body.actions
-            ],
-            metadata=dict(body.metadata or {}),
-        ),
-        workflow_id=body.workflow_id,
-        chat_id=body.chat_id,
-    )
-    return {"session_state": snapshot}
-
-
-class SessionPendingDecisionResolveRequest(BaseModel):
-    decision_id: str
-    action_id: str | None = None
-    accepted: bool = True
-
-
-@app.post("/api/session/decisions/resolve")
-async def resolve_session_pending_decision(
-    body: SessionPendingDecisionResolveRequest,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    from mozaiksai.core.session import get_session_router
-
-    snapshot = await get_session_router().resolve_pending_harness_decision(
-        app_id=principal.app_id,
-        user_id=principal.user_id,
-        decision_id=body.decision_id,
-        action_id=body.action_id,
-        accepted=body.accepted,
-    )
-    return {"session_state": snapshot}
-
-
 @app.post("/api/chats/{app_id}/{workflow_name}/start")
 async def start_chat(
     app_id: str,
@@ -2845,36 +2476,51 @@ async def start_chat(
         "cache_seed": cache_seed,
     }
 
-@app.get("/api/workflows")
-async def get_workflows(
-    principal: UserPrincipal = Depends(require_any_auth),
-):
-    _ = principal
-    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+async def chat_meta(
+    *,
+    app_id: str,
+    workflow_name: str,
+    chat_id: str,
+    principal: Any,
+) -> dict[str, Any]:
+    """Return metadata dict for a chat session without emitting a WebSocket event."""
+    user_id = principal.user_id
+    exists = False
+    last_artifact = None
+    run_history_count = None
+    status = None
 
-    ordered_names = get_platform_hooks().call_workflow_ordering(sorted(workflow_manager.get_all_workflow_names()))
-    workflows = []
-    for workflow_name in ordered_names:
-        config = workflow_manager.get_config(workflow_name)
-        workflows.append({
-            "name": workflow_name,
-            "display_name": config.get("display_name") or config.get("name") or workflow_name,
-            "initial_agent": config.get("initial_agent"),
-            "visual_agents": config.get("visual_agents") or [],
-            "status": "ready",
-        })
-    return {"workflows": workflows}
+    try:
+        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
 
+        coll = await runtime_app._chat_coll()
+        doc = await coll.find_one(
+            {"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
+            {"workflow_ui_state.last_artifact": 1, "created_at": 1, "status": 1},
+        )
+        if doc:
+            exists = True
+            last_artifact = extract_last_artifact(doc)
+            status = doc.get("status")
+            run_history = await runtime_app.persistence_manager.load_run_history(
+                chat_id=chat_id,
+                app_id=app_id,
+            )
+            run_history_count = len(run_history)
+    except Exception as meta_err:
+        logger.debug("chat_meta lookup failed for %s: %s", chat_id, meta_err)
 
-@app.get("/api/workflows/config")
-async def get_workflow_configs(
-    principal: UserPrincipal = Depends(require_any_auth),
-):
-    _ = principal
-    from mozaiksai.core.workflow.workflow_manager import workflow_manager
+    return {
+        "exists": exists,
+        "chat_id": chat_id,
+        "workflow_name": workflow_name,
+        "app_id": app_id,
+        "user_id": user_id,
+        "last_artifact": last_artifact,
+        "run_history_count": run_history_count,
+        "status": status,
+    }
 
-    ordered_names = get_platform_hooks().call_workflow_ordering(sorted(workflow_manager.get_all_workflow_names()))
-    return {workflow_name: workflow_manager.get_config(workflow_name) for workflow_name in ordered_names}
 
 @app.websocket("/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}")
 async def websocket_endpoint(
@@ -3221,725 +2867,9 @@ async def websocket_endpoint(
         logger.debug("SESSION_REGISTRY_CLEANUP ws_id=%s", ws_id)
 
 
-@app.post("/api/chat/upload")
-async def upload_chat_file(
-    request: Request,
-    file: UploadFile = File(...),
-    appId: str | None = Form(None),
-    userId: str = Form(...),
-    chatId: str = Form(...),
-    intent: str = Form("context"),
-    bundle_path: str | None = Form(None),
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    _ = request
-    resolved_app_id = (appId or "").strip()
-    if not resolved_app_id:
-        raise HTTPException(status_code=400, detail="appId is required")
-    user_id = _validate_user_id_against_principal(principal, body_user_id=userId)
-    return await _handle_chat_upload(
-        file=file,
-        app_id=resolved_app_id,
-        user_id=user_id,
-        chat_id=chatId,
-        intent=intent,
-        bundle_path=bundle_path,
-    )
-
-
-@app.post("/api/chat/upload/{app_id}/{user_id}")
-async def upload_chat_file_scoped(
-    app_id: str,
-    user_id: str,
-    file: UploadFile = File(...),
-    chatId: str = Form(...),
-    intent: str = Form("context"),
-    bundle_path: str | None = Form(None),
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    return await _handle_chat_upload(
-        file=file,
-        app_id=app_id,
-        user_id=user_id,
-        chat_id=chatId,
-        intent=intent,
-        bundle_path=bundle_path,
-    )
-
-
-async def _handle_chat_upload(
-    *,
-    file: UploadFile,
-    app_id: str,
-    user_id: str,
-    chat_id: str,
-    intent: str,
-    bundle_path: str | None,
-) -> dict[str, Any]:
-    if not app_id or not user_id or not chat_id:
-        raise HTTPException(status_code=400, detail="app_id, user_id, and chat_id are required")
-    validate_path_id(app_id, "app_id")
-    validate_path_id(chat_id, "chat_id")
-
-    allowed_raw = os.getenv("CHAT_ATTACHMENTS_ALLOWED_WORKFLOWS", "").strip()
-    try:
-        coll = await runtime_app._chat_coll()
-        res = await handle_chat_upload(
-            chat_coll=coll,
-            file_obj=file,
-            app_id=app_id,
-            user_id=user_id,
-            chat_id=chat_id,
-            intent=intent,
-            bundle_path=bundle_path,
-            allowed_workflows_env=allowed_raw,
-        )
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="Chat session not found") from exc
-    except ValueError as exc:
-        message = str(exc)
-        if message.startswith("File too large"):
-            raise HTTPException(status_code=413, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
-    except Exception as exc:
-        logger.exception("UPLOAD_FAILED")
-        raise HTTPException(status_code=500, detail="Upload failed") from exc
-
-    try:
-        if runtime_app.simple_transport:
-            workflow_name = None
-            try:
-                doc = await coll.find_one(
-                    {"_id": chat_id, "user_id": user_id, **build_app_scope_filter(app_id)},
-                    {"workflow_name": 1},
-                )
-                if doc:
-                    workflow_name = doc.get("workflow_name")
-            except Exception:
-                workflow_name = None
-
-            await runtime_app.simple_transport.send_event_to_ui(
-                {
-                    "kind": "attachment_uploaded",
-                    "chat_id": chat_id,
-                    "app_id": app_id,
-                    "user_id": user_id,
-                    "workflow_name": workflow_name,
-                    "attachment": res.attachment,
-                },
-                chat_id,
-            )
-    except Exception as exc:
-        logger.debug("attachment_uploaded WS emit failed for chat %s: %s", chat_id, exc)
-
-    return {
-        "success": True,
-        "chat_id": chat_id,
-        "app_id": app_id,
-        "user_id": user_id,
-        "attachment": res.attachment,
-    }
-
-
-@app.get("/api/chats/{app_id}/{workflow_name}")
-async def list_chats(
-    app_id: str,
-    workflow_name: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    validate_path_id(workflow_name, "workflow_name")
-    try:
-        coll = await runtime_app._chat_coll()
-        query: dict[str, Any] = {"workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if principal.user_id != "anonymous":
-            query["user_id"] = principal.user_id
-        docs = await coll.find(query).sort("created_at", -1).to_list(length=20)
-        return {"chat_ids": [doc.get("_id") for doc in docs]}
-    except Exception as exc:
-        logger.error("Failed to list chats for app %s workflow %s: %s", app_id, workflow_name, exc)
-        raise HTTPException(status_code=500, detail="Failed to list chats") from exc
-
-
-def _is_ask_carrier_session(session: dict[str, Any] | None) -> bool:
-    if not isinstance(session, dict):
-        return False
-    return str(session.get("transport_purpose") or "").strip().lower() == "ask_carrier"
-
-
-def _json_timestamp(value: Any) -> Any:
-    return value.isoformat() if hasattr(value, "isoformat") else value
-
-
-@app.get("/api/chats/exists/{app_id}/{workflow_name}/{chat_id}")
-async def chat_exists(
-    app_id: str,
-    workflow_name: str,
-    chat_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    validate_path_id(workflow_name, "workflow_name")
-    validate_path_id(chat_id, "chat_id")
-    try:
-        coll = await runtime_app._chat_coll()
-        query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if principal.user_id != "anonymous":
-            query["user_id"] = principal.user_id
-        doc = await coll.find_one(query, {"_id": 1, "transport_purpose": 1})
-        if doc and _is_ask_carrier_session(doc):
-            return {"exists": False}
-        return {"exists": doc is not None}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to check chat existence") from exc
-
-
-@app.get("/api/sessions/list/{app_id}/{user_id}")
-async def list_user_sessions(
-    app_id: str,
-    user_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    try:
-        from mozaiksai.core.data.models import WorkflowStatus
-        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
-
-        coll = await runtime_app._chat_coll()
-        sessions = await coll.find({
-            "user_id": user_id,
-            "status": int(WorkflowStatus.IN_PROGRESS),
-            **build_app_scope_filter(app_id),
-        }).sort("last_updated_at", -1).to_list(length=100)
-        runnable_names = _get_ordered_workflow_names()
-        sessions = [
-            session
-            for session in sessions
-            if _is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
-            and not _is_ask_carrier_session(session)
-        ]
-
-        result = []
-        for session in sessions:
-            result.append({
-                "chat_id": session["_id"],
-                "workflow_name": session.get("workflow_name"),
-                "created_at": session.get("created_at").isoformat() if session.get("created_at") else None,
-                "last_updated_at": session.get("last_updated_at").isoformat() if session.get("last_updated_at") else None,
-                "last_artifact": extract_last_artifact(session),
-            })
-        return {"sessions": result, "count": len(result)}
-    except Exception as exc:
-        logger.error("[LIST_SESSIONS] Failed to list sessions: %s", exc)
-        raise HTTPException(status_code=500, detail="Failed to list sessions") from exc
-
-
-@app.get("/api/sessions/recent/{app_id}/{user_id}")
-async def get_most_recent_workflow_session(
-    app_id: str,
-    user_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    try:
-        from mozaiksai.core.data.models import WorkflowStatus
-        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
-
-        coll = await runtime_app._chat_coll()
-        sessions = await coll.find({
-            "user_id": user_id,
-            "status": int(WorkflowStatus.IN_PROGRESS),
-            **build_app_scope_filter(app_id),
-        }).sort("last_updated_at", -1).to_list(length=100)
-        runnable_names = _get_ordered_workflow_names()
-        sessions = [
-            session
-            for session in sessions
-            if _is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
-            and not _is_ask_carrier_session(session)
-        ]
-
-        if not sessions:
-            return {"found": False, "chat_id": None, "workflow_name": None}
-        recent = sessions[0]
-        return {
-            "found": True,
-            "chat_id": recent["_id"],
-            "workflow_name": recent.get("workflow_name"),
-            "created_at": recent.get("created_at").isoformat() if recent.get("created_at") else None,
-            "last_updated_at": recent.get("last_updated_at").isoformat() if recent.get("last_updated_at") else None,
-            "last_artifact": extract_last_artifact(recent),
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to fetch most recent session") from exc
-
-
-@app.get("/api/sessions/oldest/{app_id}/{user_id}")
-async def get_oldest_workflow_session(
-    app_id: str,
-    user_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    try:
-        from mozaiksai.core.data.models import WorkflowStatus
-        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
-
-        coll = await runtime_app._chat_coll()
-        sessions = await coll.find({
-            "user_id": user_id,
-            "status": int(WorkflowStatus.IN_PROGRESS),
-            **build_app_scope_filter(app_id),
-        }).sort("created_at", 1).to_list(length=100)
-        runnable_names = _get_ordered_workflow_names()
-        sessions = [
-            session
-            for session in sessions
-            if _is_runnable_workflow_name(session.get("workflow_name"), runnable_names)
-            and not _is_ask_carrier_session(session)
-        ]
-
-        if not sessions:
-            return {"found": False, "chat_id": None, "workflow_name": None}
-        oldest = sessions[0]
-        return {
-            "found": True,
-            "chat_id": oldest["_id"],
-            "workflow_name": oldest.get("workflow_name"),
-            "created_at": oldest.get("created_at").isoformat() if oldest.get("created_at") else None,
-            "last_updated_at": oldest.get("last_updated_at").isoformat() if oldest.get("last_updated_at") else None,
-            "last_artifact": extract_last_artifact(oldest),
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to fetch oldest session") from exc
-
-
-@app.delete("/api/sessions/{app_id}/{user_id}")
-async def delete_user_sessions(
-    app_id: str,
-    user_id: str,
-    status: str = "in_progress",
-    workflow_name: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    try:
-        from mozaiksai.core.data.models import WorkflowStatus
-
-        normalized_status = str(status or "in_progress").strip().lower()
-        query: dict[str, Any] = {"user_id": user_id, **build_app_scope_filter(app_id)}
-        if workflow_name:
-            query["workflow_name"] = str(workflow_name).strip()
-        if normalized_status in {"in_progress", "active", "open"}:
-            query["status"] = int(WorkflowStatus.IN_PROGRESS)
-        elif normalized_status in {"completed", "done", "closed"}:
-            query["status"] = int(WorkflowStatus.COMPLETED)
-        elif normalized_status in {"all", "any", "*"}:
-            pass
-        else:
-            raise HTTPException(status_code=400, detail="status must be one of: in_progress, completed, all")
-
-        result = await (await runtime_app._chat_coll()).delete_many(query)
-        return {
-            "success": True,
-            "app_id": app_id,
-            "user_id": user_id,
-            "status": normalized_status,
-            "workflow_name": workflow_name,
-            "deleted_count": int(result.deleted_count or 0),
-        }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to delete sessions") from exc
-
-
-@app.delete("/api/general_chats/{app_id}/{user_id}")
-async def delete_general_chats(
-    app_id: str,
-    user_id: str,
-    status: str = "all",
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    try:
-        from mozaiksai.core.data.models import WorkflowStatus
-
-        normalized_status = str(status or "all").strip().lower()
-        query: dict[str, Any] = {"user_id": user_id, **build_app_scope_filter(app_id)}
-        if normalized_status in {"in_progress", "active", "open"}:
-            query["status"] = int(WorkflowStatus.IN_PROGRESS)
-        elif normalized_status in {"completed", "done", "closed"}:
-            query["status"] = int(WorkflowStatus.COMPLETED)
-        elif normalized_status in {"all", "any", "*"}:
-            pass
-        else:
-            raise HTTPException(status_code=400, detail="status must be one of: in_progress, completed, all")
-
-        general_coll = await persistence_manager._general_coll()
-        result = await general_coll.delete_many(query)
-        deleted_count = int(result.deleted_count or 0)
-
-        if normalized_status in {"all", "any", "*"}:
-            try:
-                counter_coll = await persistence_manager._general_counter_coll()
-                await counter_coll.delete_many({"user_id": user_id, **build_app_scope_filter(app_id)})
-            except Exception as counter_err:
-                logger.debug("[DELETE_GENERAL_CHATS] Counter reset skipped: %s", counter_err)
-
-        return {
-            "success": True,
-            "app_id": app_id,
-            "user_id": user_id,
-            "status": normalized_status,
-            "deleted_count": deleted_count,
-        }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to delete general chats") from exc
-
-
-@app.delete("/api/general_chats/{app_id}/{user_id}/{general_chat_id}")
-async def delete_general_chat(
-    app_id: str,
-    user_id: str,
-    general_chat_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    validate_path_id(general_chat_id, "general_chat_id")
-    try:
-        deleted = await persistence_manager.delete_general_chat(
-            general_chat_id=general_chat_id,
-            app_id=app_id,
-            user_id=user_id,
-        )
-        return {
-            "success": True,
-            "deleted": bool(deleted),
-            "app_id": app_id,
-            "user_id": user_id,
-            "general_chat_id": general_chat_id,
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to delete general chat") from exc
-
-
-@app.get("/api/notifications/count")
-async def notifications_count_fallback(
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    try:
-        from mozaiksai.core.core_config import get_mongo_client
-
-        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        unread_count = await collection.count_documents(_notification_query_for_principal(principal))
-        return {"count": int(unread_count), "unread_count": int(unread_count)}
-    except Exception as exc:
-        logger.debug("NOTIFICATION_COUNT_SKIPPED: %s", exc)
-        return {"count": 0, "unread_count": 0}
-
-
-def _notification_query_for_principal(principal: UserPrincipal) -> dict[str, Any]:
-    query: dict[str, Any] = {"status": "unread"}
-    if principal.app_id:
-        query["app_id"] = principal.app_id
-
-    visibility: list[dict[str, Any]] = [{"actor.id": principal.user_id}]
-    roles = [role for role in principal.roles if role]
-    if roles:
-        visibility.append({"audience.roles": {"$in": roles}})
-    visibility.append({"audience.roles": {"$exists": False}})
-    query["$or"] = visibility
-    return query
-
-
-def _notification_visibility_filter(principal: UserPrincipal) -> list[dict[str, Any]]:
-    """Return the $or visibility filter for platform_notifications queries."""
-    visibility: list[dict[str, Any]] = [{"actor.id": principal.user_id}]
-    roles = [role for role in principal.roles if role]
-    if roles:
-        visibility.append({"audience.roles": {"$in": roles}})
-    visibility.append({"audience.roles": {"$exists": False}})
-    return visibility
-
-
-# Fields excluded from all notification list responses.
-# source_event stores the full event envelope which may contain provider IDs
-# (e.g. stripe_payment_intent_id). It must never be returned to callers.
-_NOTIFICATION_SAFE_PROJECTION: dict[str, int] = {
-    "_id": 0,
-    "source_event": 0,   # may contain Stripe/provider IDs — never returned to callers
-    "tenant_id": 0,      # internal platform scope
-    "actor": 0,          # internal actor envelope; not needed for UI display
-    "audience": 0,       # internal routing detail
-}
-
-
-@app.get("/api/notifications")
-async def list_notifications(
-    status: str = "all",
-    limit: int = 50,
-    app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    """
-    List platform notifications visible to the authenticated principal.
-
-    Returns notifications from the platform_notifications collection filtered by
-    audience roles and principal app_id scope.
-
-    Safe fields only — source_event (which may contain provider IDs) is excluded.
-
-    Query params:
-        status: "all" | "unread" | "read"  (default: "all")
-        limit:  1–200  (default: 50)
-        app_id: explicit app scope override for Studio use
-    """
-    bounded_limit = max(1, min(int(limit), 200))
-    query: dict[str, Any] = {}
-    if status in ("unread", "read"):
-        query["status"] = status
-
-    effective_app_id = app_id or (principal.app_id if principal.app_id else None)
-    if effective_app_id:
-        query["app_id"] = effective_app_id
-
-    query["$or"] = _notification_visibility_filter(principal)
-
-    try:
-        from mozaiksai.core.core_config import get_mongo_client
-
-        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        cursor = (
-            collection.find(query, _NOTIFICATION_SAFE_PROJECTION)
-            .sort("created_at", -1)
-            .limit(bounded_limit)
-        )
-        notifications = await cursor.to_list(length=bounded_limit)
-        unread_count = sum(1 for n in notifications if n.get("status") == "unread")
-        return {
-            "notifications": notifications,
-            "count": len(notifications),
-            "unread_count": unread_count,
-        }
-    except Exception as exc:
-        logger.debug("NOTIFICATION_LIST_SKIPPED: %s", exc)
-        return {"notifications": [], "count": 0, "unread_count": 0}
-
-
-@app.post("/api/notifications/{notification_id}/read")
-async def mark_notification_read(
-    notification_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    """Mark a single notification as read. Only updates records visible to the principal."""
-    validate_path_id(notification_id, "notification_id")
-    try:
-        from mozaiksai.core.core_config import get_mongo_client
-
-        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        match_query: dict[str, Any] = {
-            "notification_id": notification_id,
-            "$or": _notification_visibility_filter(principal),
-        }
-        result = await collection.update_one(match_query, {"$set": {"status": "read"}})
-        return {"success": result.modified_count > 0, "notification_id": notification_id}
-    except Exception as exc:
-        logger.debug("NOTIFICATION_MARK_READ_SKIPPED: %s", exc)
-        return {"success": False, "notification_id": notification_id}
-
-
-@app.post("/api/notifications/mark-all-read")
-async def mark_all_notifications_read(
-    app_id: str | None = None,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    """Mark all visible unread notifications as read for the authenticated principal."""
-    try:
-        from mozaiksai.core.core_config import get_mongo_client
-
-        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
-        query: dict[str, Any] = {"status": "unread"}
-        effective_app_id = app_id or (principal.app_id if principal.app_id else None)
-        if effective_app_id:
-            query["app_id"] = effective_app_id
-        query["$or"] = _notification_visibility_filter(principal)
-        result = await collection.update_many(query, {"$set": {"status": "read"}})
-        return {"success": True, "marked_count": result.modified_count}
-    except Exception as exc:
-        logger.debug("NOTIFICATION_MARK_ALL_READ_SKIPPED: %s", exc)
-        return {"success": False, "marked_count": 0}
-
-
-@app.get("/api/general_chats/list/{app_id}/{user_id}")
-async def list_general_chats_fallback(
-    app_id: str,
-    user_id: str,
-    limit: int = 50,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    user_id = _validate_user_id_against_principal(principal, path_user_id=user_id)
-    bounded_limit = max(1, min(int(limit or 50), 200))
-    try:
-        sessions = await persistence_manager.list_general_chats(
-            app_id=app_id,
-            user_id=user_id,
-            limit=bounded_limit,
-        )
-        normalized_sessions = []
-        for session in sessions:
-            item = dict(session)
-            item["created_at"] = _json_timestamp(item.get("created_at"))
-            item["last_updated_at"] = _json_timestamp(item.get("last_updated_at"))
-            normalized_sessions.append(item)
-        return {
-            "app_id": app_id,
-            "user_id": user_id,
-            "limit": bounded_limit,
-            "sessions": normalized_sessions,
-            "count": len(normalized_sessions),
-            "source": "persistence",
-        }
-    except Exception as exc:
-        logger.debug("[GENERAL_CHATS_LIST] persistence fallback failed: %s", exc)
-    return {
-        "app_id": app_id,
-        "user_id": user_id,
-        "limit": bounded_limit,
-        "sessions": [],
-        "count": 0,
-        "source": "fallback",
-    }
-
-
-@app.get("/api/general_chats/transcript/{app_id}/{general_chat_id}")
-async def general_chat_transcript_fallback(
-    app_id: str,
-    general_chat_id: str,
-    after_sequence: int = -1,
-    limit: int = 200,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    validate_path_id(general_chat_id, "general_chat_id")
-    bounded_limit = max(1, min(int(limit or 200), 2000))
-    try:
-        transcript = await persistence_manager.fetch_general_chat_transcript(
-            general_chat_id=general_chat_id,
-            app_id=app_id,
-            after_sequence=int(after_sequence or -1),
-            limit=bounded_limit,
-        )
-        if transcript:
-            owner = str(transcript.get("user_id") or "")
-            if principal.user_id != "anonymous" and owner and owner != principal.user_id:
-                raise HTTPException(status_code=403, detail="Forbidden")
-            payload = dict(transcript)
-            payload["created_at"] = _json_timestamp(payload.get("created_at"))
-            payload["last_updated_at"] = _json_timestamp(payload.get("last_updated_at"))
-            messages = []
-            for message in payload.get("messages") or []:
-                item = dict(message)
-                item["timestamp"] = _json_timestamp(item.get("timestamp"))
-                messages.append(item)
-            payload["messages"] = messages
-            payload["found"] = True
-            payload["source"] = "persistence"
-            return payload
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.debug("[GENERAL_CHAT_TRANSCRIPT] persistence fallback failed: %s", exc)
-    return {
-        "app_id": app_id,
-        "chat_id": general_chat_id,
-        "label": general_chat_id,
-        "messages": [],
-        "last_sequence": max(-1, int(after_sequence or -1)),
-        "limit": bounded_limit,
-        "found": False,
-        "source": "fallback",
-    }
-
-
-@app.get("/api/chats/meta/{app_id}/{workflow_name}/{chat_id}")
-async def chat_meta(
-    app_id: str,
-    workflow_name: str,
-    chat_id: str,
-    principal: UserPrincipal = Depends(require_user_scope),
-):
-    validate_path_id(app_id, "app_id")
-    validate_path_id(workflow_name, "workflow_name")
-    validate_path_id(chat_id, "chat_id")
-    try:
-        from mozaiksai.core.data.persistence.persistence_manager import extract_last_artifact
-
-        has_children = False
-
-        coll = await runtime_app._chat_coll()
-        projection = {"cache_seed": 1, "workflow_ui_state.last_artifact": 1, "status": 1, "_id": 1, "workflow_name": 1}
-        query: dict[str, Any] = {"_id": chat_id, "workflow_name": workflow_name, **build_app_scope_filter(app_id)}
-        if principal.user_id != "anonymous":
-            query["user_id"] = principal.user_id
-        doc = await coll.find_one(query, projection)
-        if not doc:
-            return {"exists": False}
-
-        run_history = await runtime_app.persistence_manager.load_run_history(
-            chat_id=chat_id,
-            app_id=app_id,
-        )
-        run_history_count = len(run_history)
-
-        artifact_instance_id = None
-        artifact_state = None
-        try:
-            from mozaiksai.core.workflow import session_manager
-
-            workflow_session = await session_manager.get_workflow_session(chat_id, app_id)
-            if workflow_session and workflow_session.get("artifact_instance_id"):
-                artifact_instance_id = workflow_session["artifact_instance_id"]
-                artifact_doc = await session_manager.get_artifact_instance(artifact_instance_id, app_id)
-                if artifact_doc:
-                    artifact_state = artifact_doc.get("state")
-        except Exception as artifact_err:
-            logger.warning("[CHAT_META] Failed to retrieve artifact instance for chat %s: %s", chat_id, artifact_err)
-
-        return {
-            "exists": True,
-            "chat_id": chat_id,
-            "workflow_name": workflow_name,
-            "has_children": has_children,
-            "cache_seed": doc.get("cache_seed"),
-            "status": doc.get("status"),
-            "run_history_count": run_history_count,
-            "last_artifact": extract_last_artifact(doc),
-            "artifact_instance_id": artifact_instance_id,
-            "artifact_state": artifact_state,
-            "app_id": app_id,
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to load chat meta") from exc
-
-
 _PLATFORM_OVERRIDE_PATHS = frozenset({
     "/api/chats/{app_id}/{workflow_name}/start",
     "/ws/{workflow_name}/{app_id}/{chat_id}/{user_id}",
-    "/api/workflows",
-    "/api/workflows/config",
-    "/api/chats/meta/{app_id}/{workflow_name}/{chat_id}",
 })
 
 app.router.routes[:] = sorted(
