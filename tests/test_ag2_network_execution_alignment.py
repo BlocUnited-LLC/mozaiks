@@ -336,6 +336,63 @@ async def test_ag2_network_runner_pauses_immediately_on_user_handoff() -> None:
     assert elapsed < 2.0
     assert any(entry["event_type"] == EV_PACKET for entry in result.wal)
     assert not any(entry["event_type"] == EV_CHANNEL_CLOSED for entry in result.wal)
+    assert result.live_run is not None
+    await result.live_run.close()
+
+
+@pytest.mark.anyio
+async def test_ag2_network_runner_continues_paused_channel_with_user_message() -> None:
+    interviewer = _DeterministicAgent("ValueInterviewAgent", "I recommend validating launch demand.")
+    synthesis = _DeterministicAgent("SynthesisAgent", "Build the founder validation angle.")
+
+    result = await AG2NetworkRunner().run(
+        AG2NetworkRunnerRequest(
+            workflow_name="PauseContinueSmoke",
+            chat_id="chat-pause-continue",
+            app_id="app-pause-continue",
+            agents={
+                "ValueInterviewAgent": interviewer,
+                "SynthesisAgent": synthesis,
+            },
+            transition_rules=[
+                {
+                    "source_agent": "ValueInterviewAgent",
+                    "target_agent": "user",
+                    "transition_type": "after_turn",
+                },
+                {
+                    "source_agent": "user",
+                    "target_agent": "SynthesisAgent",
+                    "transition_type": "after_turn",
+                },
+                {
+                    "source_agent": "SynthesisAgent",
+                    "target_agent": "terminate",
+                    "transition_type": "after_turn",
+                },
+            ],
+            initial_agent_name="ValueInterviewAgent",
+            initial_message="Start the interview.",
+            close_timeout_seconds=10.0,
+        )
+    )
+
+    assert result.status is RunStatus.PAUSED
+    assert result.live_run is not None
+
+    continued = await result.live_run.continue_with_user_message(
+        "founders validating launch demand",
+        context_updates={"target_user": "founders"},
+    )
+
+    assert continued.status is RunStatus.COMPLETED
+    assert continued.close_reason == "workflow_complete"
+    assert synthesis.ask_calls
+    assert continued.context_variables["target_user"] == "founders"
+    assert [entry["event_type"] for entry in continued.wal].count(EV_PACKET) == 1
+    assert continued.agent_name_by_id[
+        next(entry["sender_id"] for entry in continued.wal if entry["event_type"] == EV_PACKET)
+    ] == "SynthesisAgent"
 
 
 @pytest.mark.anyio

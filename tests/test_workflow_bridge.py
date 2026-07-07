@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mozaiksai.core.ports.orchestration import RunStatus
 from tests.import_utils import import_module_directly
 
 _bridge_mod = import_module_directly("mozaiksai.core.transport.workflow_bridge")
@@ -12,12 +13,42 @@ _ag2_mod = import_module_directly("mozaiksai.core.adapters.ag2_orchestration")
 WorkflowBridgeMixin = _bridge_mod.WorkflowBridgeMixin
 
 
+class _LiveRunResult:
+    def __init__(self, *, status: object) -> None:
+        self.status = status
+        self.agent_name_by_id = {"agent-1": "ValueInterviewAgent"}
+        self.wal = [
+            {
+                "event_type": "ag2.packet",
+                "sender_id": "agent-1",
+                "event_data": {"body": "I would start with founder validation."},
+            }
+        ]
+        self.context_variables = {"target_user": "founders"}
+        self.channel_id = "channel-1"
+        self.close_reason = "awaiting_user_input"
+        self.error = None
+
+
+class _FakeLiveRun:
+    def __init__(self, *, result: _LiveRunResult) -> None:
+        self.result = result
+        self.continued: list[dict[str, object]] = []
+
+    async def continue_with_user_message(self, message: str, **kwargs):  # noqa: ANN003
+        self.continued.append({"message": message, **kwargs})
+        return self.result
+
+
 class _FakePersistenceManager:
     def __init__(self) -> None:
         self.pending_lookups: list[dict[str, str]] = []
         self.pending_clears: list[dict[str, str]] = []
         self.pending_input_request: dict[str, str] | None = {"request_id": "req-1"}
         self.run_user_messages: list[dict[str, object]] = []
+        self.run_assistant_messages: list[dict[str, object]] = []
+        self.persisted_context: list[dict[str, object]] = []
+        self.completed: list[dict[str, str]] = []
 
     async def get_pending_input_request(self, **kwargs):  # noqa: ANN003
         self.pending_lookups.append(kwargs)
@@ -28,6 +59,16 @@ class _FakePersistenceManager:
 
     async def append_run_user_message(self, **kwargs):  # noqa: ANN003
         self.run_user_messages.append(kwargs)
+
+    async def append_run_assistant_message(self, **kwargs):  # noqa: ANN003
+        self.run_assistant_messages.append(kwargs)
+
+    async def persist_context_variables(self, **kwargs):  # noqa: ANN003
+        self.persisted_context.append(kwargs)
+
+    async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
+        self.completed.append({"chat_id": chat_id, "app_id": app_id})
+        return True
 
 
 class _FakeAdapter:
@@ -56,6 +97,7 @@ class _DummyTransport(WorkflowBridgeMixin):
         self.errors: list[dict[str, str | None]] = []
         self.sent_ui_events: list[dict[str, object]] = []
         self.submitted_inputs: list[dict[str, str]] = []
+        self._live_ag2_workflow_runs: dict[str, object] = {}
 
     def _get_or_create_persistence_manager(self):
         return self._persistence_manager
@@ -102,6 +144,15 @@ class _DummyTransport(WorkflowBridgeMixin):
 
     def _build_resume_signal(self, chat_id: str, request_id: str) -> str:
         return f"resume:{chat_id}:{request_id}"
+
+    def register_live_ag2_workflow_run(self, chat_id: str, live_run: object) -> None:
+        self._live_ag2_workflow_runs[chat_id] = live_run
+
+    def get_live_ag2_workflow_run(self, chat_id: str) -> object | None:
+        return self._live_ag2_workflow_runs.get(chat_id)
+
+    def pop_live_ag2_workflow_run(self, chat_id: str) -> object | None:
+        return self._live_ag2_workflow_runs.pop(chat_id, None)
 
 
 @pytest.mark.asyncio
@@ -184,6 +235,68 @@ async def test_handle_user_input_from_api_persists_existing_session_user_reply_t
             "content": "launch demand maybe",
             "source": "http",
         }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_user_input_from_api_prefers_live_ag2_network_channel(monkeypatch) -> None:
+    persistence_manager = _FakePersistenceManager()
+    persistence_manager.pending_input_request = None
+    transport = _DummyTransport(persistence_manager)
+    live_run = _FakeLiveRun(result=_LiveRunResult(status=RunStatus.PAUSED))
+    transport.register_live_ag2_workflow_run("chat-1", live_run)
+
+    async def _context_updates(**_kwargs):  # noqa: ANN003
+        return {"target_user": "founders"}
+
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _workflow_name: {})
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _context_updates)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-1",
+        user_id="user-1",
+        workflow_name="ValueEngine",
+        message="founders validating launch demand",
+        app_id="app-1",
+    )
+
+    assert result["status"] == "success"
+    assert result["route"] == "live_ag2_network"
+    assert live_run.continued == [
+        {
+            "message": "founders validating launch demand",
+            "context_updates": {"target_user": "founders"},
+        }
+    ]
+    assert persistence_manager.run_user_messages == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "content": "founders validating launch demand",
+            "metadata": {"source": "workflow_user", "user_id": "user-1"},
+        }
+    ]
+    assert persistence_manager.run_assistant_messages == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "content": "I would start with founder validation.",
+            "agent_name": "ValueInterviewAgent",
+            "metadata": {"source": "ag2_network_wal", "channel_id": "channel-1"},
+        }
+    ]
+    assert persistence_manager.persisted_context == [
+        {
+            "chat_id": "chat-1",
+            "app_id": "app-1",
+            "variables": {"target_user": "founders"},
+        }
+    ]
+    assert transport.get_live_ag2_workflow_run("chat-1") is live_run
+    assert [entry["event"]["kind"] for entry in transport.sent_ui_events] == [
+        "chat.text",
+        "awaiting_reply",
+        "run_complete",
     ]
 
 

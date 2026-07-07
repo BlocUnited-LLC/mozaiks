@@ -228,7 +228,7 @@ def _target_for(target_name: str, agent_ids: Mapping[str, str], transition_targe
             )
         return TerminateTarget(reason="workflow_complete")
     if normalized_target in _SPECIAL_USER:
-        return AgentTarget("user")
+        return AgentTarget(_agent_id(target_name, agent_ids))
     if target_name.strip() not in agent_ids:
         raise WorkflowGraphCompileError(
             f"transition target {target_name!r} is not a declared agent, 'user', or 'terminate'"
@@ -247,7 +247,7 @@ def _route_name(agent_id: str | None, agent_name_by_id: Mapping[str, str]) -> st
 def _agent_id(name: str, agent_ids: Mapping[str, str]) -> str:
     normalized = name.strip()
     if normalized.lower() in _SPECIAL_USER:
-        return "user"
+        return agent_ids.get("user", "user")
     return agent_ids.get(normalized, normalized)
 
 

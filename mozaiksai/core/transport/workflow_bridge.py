@@ -217,6 +217,20 @@ class WorkflowBridgeMixin:
 
             logger.debug("[SMART_ROUTING] chat=%s has_registry=%s has_callbacks=%s", chat_id, has_active_session, active_callbacks)
 
+            live_run = None
+            get_live_run = getattr(self, "get_live_ag2_workflow_run", None)
+            if callable(get_live_run):
+                live_run = get_live_run(chat_id)
+            if live_run is not None and isinstance(message, str) and message.strip():
+                return await self._continue_live_ag2_workflow_run(
+                    live_run=live_run,
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    workflow_name=workflow_name,
+                    message=message,
+                    app_id=app_id,
+                )
+
             if has_active_session and active_callbacks:
                 # Route to existing AG2 session via WebSocket callback mechanism
                 logger.debug("[SMART_ROUTING] Continuing existing AG2 session for chat %s", chat_id)
@@ -447,6 +461,150 @@ class WorkflowBridgeMixin:
                 chat_id=chat_id
             )
             return {"status": "error", "chat_id": chat_id, "message": "Workflow execution failed"}
+
+    async def _continue_live_ag2_workflow_run(
+        self,
+        *,
+        live_run: Any,
+        chat_id: str,
+        user_id: str | None,
+        workflow_name: str,
+        message: str,
+        app_id: str,
+    ) -> dict[str, Any]:
+        """Continue a process-live AG2 Network workflow channel."""
+
+        from mozaiksai.core.ports.orchestration import RunStatus
+        from mozaiksai.core.workflow.orchestration_patterns import (
+            _last_agent_name_from_runner_result,
+            _project_ag2_wal_to_mozaiks_transport,
+        )
+
+        context_updates = await self._apply_user_text_context_updates(
+            chat_id=chat_id,
+            workflow_name=workflow_name,
+            app_id=app_id,
+            user_input=message,
+        )
+        pm = self._get_or_create_persistence_manager()
+        append_user_message = getattr(pm, "append_run_user_message", None)
+        if append_user_message is not None:
+            await append_user_message(
+                chat_id=chat_id,
+                app_id=app_id,
+                content=str(message or ""),
+                metadata={"source": "workflow_user", "user_id": user_id},
+            )
+        await self.process_incoming_user_message(
+            chat_id=chat_id,
+            user_id=user_id,
+            content=message,
+            source="http",
+        )
+
+        runner_result = await live_run.continue_with_user_message(
+            message,
+            context_updates=context_updates,
+        )
+        await _project_ag2_wal_to_mozaiks_transport(
+            runner_result=runner_result,
+            transport=self,
+            persistence_manager=pm,
+            chat_id=chat_id,
+            app_id=app_id,
+            agent_name_by_id=runner_result.agent_name_by_id,
+            initial_sequence=0,
+        )
+
+        ctx = dict(getattr(runner_result, "context_variables", {}) or {})
+        if ctx:
+            try:
+                await pm.persist_context_variables(
+                    chat_id=chat_id,
+                    app_id=app_id,
+                    variables=ctx,
+                )
+            except Exception as persist_err:
+                logger.debug("LIVE_AG2_CONTEXT_PERSIST_FAILED chat=%s: %s", chat_id, persist_err)
+
+        run_failed = runner_result.status is RunStatus.FAILED
+        awaiting_user_input = runner_result.status is RunStatus.PAUSED
+        run_completed = runner_result.status is RunStatus.COMPLETED
+        pause_agent = _last_agent_name_from_runner_result(runner_result) if awaiting_user_input else None
+
+        if run_completed or run_failed:
+            pop_live_run = getattr(self, "pop_live_ag2_workflow_run", None)
+            if callable(pop_live_run):
+                pop_live_run(chat_id)
+        elif awaiting_user_input:
+            register_live_run = getattr(self, "register_live_ag2_workflow_run", None)
+            if callable(register_live_run):
+                register_live_run(chat_id, live_run)
+
+        if awaiting_user_input:
+            await self.send_event_to_ui(
+                {
+                    "kind": "awaiting_reply",
+                    "workflow": workflow_name,
+                    "chat_id": chat_id,
+                    "source_agent": pause_agent or workflow_name,
+                    "reason": "awaiting_user_reply",
+                    "display": "composer",
+                    "interaction_type": "input_request",
+                },
+                chat_id,
+            )
+
+        await self.send_event_to_ui(
+            {
+                "kind": "run_complete",
+                "workflow": workflow_name,
+                "chat_id": chat_id,
+                "run_completed": bool(run_completed and not run_failed),
+                "awaiting_user_input": awaiting_user_input,
+                "status": (
+                    "failed"
+                    if run_failed
+                    else "paused"
+                    if awaiting_user_input
+                    else "completed"
+                ),
+                "reason": (
+                    "failed"
+                    if run_failed
+                    else "awaiting_user_input"
+                    if awaiting_user_input
+                    else "finished"
+                ),
+                **({"agent": pause_agent} if pause_agent else {}),
+                **({"error": runner_result.error} if runner_result.error else {}),
+            },
+            chat_id,
+        )
+
+        if run_completed and not run_failed:
+            try:
+                await pm.mark_chat_completed(chat_id, app_id=app_id)
+            except Exception as complete_err:
+                logger.debug("LIVE_AG2_MARK_COMPLETED_FAILED chat=%s: %s", chat_id, complete_err)
+
+        return {
+            "status": "success" if not run_failed else "error",
+            "chat_id": chat_id,
+            "message": (
+                "Input passed to live AG2 workflow channel."
+                if not run_failed
+                else "Live AG2 workflow channel failed."
+            ),
+            "route": "live_ag2_network",
+            "run_status": (
+                "failed"
+                if run_failed
+                else "paused"
+                if awaiting_user_input
+                else "completed"
+            ),
+        }
 
     # ==================================================================================
     # BACKGROUND WORKFLOW EXECUTION

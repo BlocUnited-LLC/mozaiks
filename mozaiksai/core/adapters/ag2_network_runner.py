@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 from autogen.beta.knowledge import MemoryKnowledgeStore
 from autogen.beta.network import (
     EV_CHANNEL_CLOSED,
+    EV_CONTEXT_SET,
     EV_PACKET,
     AgentTarget,
     FromSpeaker,
@@ -71,6 +72,7 @@ class AG2NetworkRunnerResult:
     agent_name_by_id: dict[str, str] = field(default_factory=dict)
     wal: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
+    live_run: Any | None = None
 
 
 class AG2NetworkRunner:
@@ -108,6 +110,7 @@ class AG2NetworkRunner:
         link = LocalLink(hub)
         hub_clients: list[HubClient] = []
         channel_id: str | None = None
+        keep_live_run = False
 
         try:
             initiator_hc = HubClient(link, hub=hub)
@@ -118,7 +121,10 @@ class AG2NetworkRunner:
             )
 
             agent_clients = {}
-            agent_id_by_name: dict[str, str] = {_INITIATOR_NAME: initiator.agent_id}
+            agent_id_by_name: dict[str, str] = {
+                _INITIATOR_NAME: initiator.agent_id,
+                "user": initiator.agent_id,
+            }
             for agent_name, agent in request.agents.items():
                 name = str(agent_name or "").strip()
                 if not name:
@@ -163,7 +169,10 @@ class AG2NetworkRunner:
             )
 
             def _agent_names() -> dict[str, str]:
-                return {client.agent_id: name for name, client in agent_clients.items()}
+                return {
+                    initiator.agent_id: "user",
+                    **{client.agent_id: name for name, client in agent_clients.items()},
+                }
 
             async def _snapshot_result(
                 *,
@@ -274,10 +283,24 @@ class AG2NetworkRunner:
                 if expected_next_speaker in {"user", initiator.agent_id}:
                     failure_task.cancel()
                     await asyncio.gather(failure_task, return_exceptions=True)
-                    return await _snapshot_result(
+                    result = await _snapshot_result(
                         status=RunStatus.PAUSED,
                         close_reason="awaiting_user_input",
                     )
+                    result.live_run = _AG2LiveWorkflowRun(
+                        workflow_name=request.workflow_name,
+                        chat_id=request.chat_id,
+                        app_id=request.app_id,
+                        hub=hub,
+                        hub_clients=tuple(hub_clients),
+                        initiator=initiator,
+                        channel=channel,
+                        turn_failure_listener=turn_failure_listener,
+                        snapshot_result=_snapshot_result,
+                        close_timeout_seconds=float(request.close_timeout_seconds or 120.0),
+                    )
+                    keep_live_run = True
+                    return result
         except TimeoutError:
             wal = await hub.read_wal(channel_id) if channel_id else []
             return AG2NetworkRunnerResult(
@@ -308,25 +331,26 @@ class AG2NetworkRunner:
                 error="internal_error",
             )
         finally:
-            for hub_client in reversed(hub_clients):
+            if not keep_live_run:
+                for hub_client in reversed(hub_clients):
+                    try:
+                        await hub_client.close()
+                    except Exception as _hc_exc:
+                        logger.warning(
+                            "AG2_HUB_CLIENT_CLOSE_FAILED workflow=%s chat=%s: %s",
+                            request.workflow_name,
+                            request.chat_id,
+                            _hc_exc,
+                        )
                 try:
-                    await hub_client.close()
-                except Exception as _hc_exc:
+                    await hub.close()
+                except Exception as _hub_exc:
                     logger.warning(
-                        "AG2_HUB_CLIENT_CLOSE_FAILED workflow=%s chat=%s: %s",
+                        "AG2_HUB_CLOSE_FAILED workflow=%s chat=%s: %s",
                         request.workflow_name,
                         request.chat_id,
-                        _hc_exc,
+                        _hub_exc,
                     )
-            try:
-                await hub.close()
-            except Exception as _hub_exc:
-                logger.warning(
-                    "AG2_HUB_CLOSE_FAILED workflow=%s chat=%s: %s",
-                    request.workflow_name,
-                    request.chat_id,
-                    _hub_exc,
-                )
 
     @staticmethod
     def _validate_request(request: AG2NetworkRunnerRequest, initial_agent_name: str) -> str | None:
@@ -367,6 +391,174 @@ class AG2NetworkRunner:
             default_target=graph.default_target,
             max_turns=None if graph.max_turns is None else graph.max_turns + 1,
         )
+
+
+class _AG2LiveWorkflowRun:
+    """Process-local handle for an AG2 workflow channel paused on user input."""
+
+    def __init__(
+        self,
+        *,
+        workflow_name: str,
+        chat_id: str,
+        app_id: str,
+        hub: Any,
+        hub_clients: Sequence[Any],
+        initiator: Any,
+        channel: Any,
+        turn_failure_listener: _TurnFailureListener,
+        snapshot_result: Any,
+        close_timeout_seconds: float,
+    ) -> None:
+        self.workflow_name = workflow_name
+        self.chat_id = chat_id
+        self.app_id = app_id
+        self.channel_id = str(channel.channel_id)
+        self._hub = hub
+        self._hub_clients = tuple(hub_clients)
+        self._initiator = initiator
+        self._channel = channel
+        self._turn_failure_listener = turn_failure_listener
+        self._snapshot_result = snapshot_result
+        self._close_timeout_seconds = close_timeout_seconds
+        self._closed = False
+        self._lock = asyncio.Lock()
+        self._wal_cursor = 0
+
+    async def continue_with_user_message(
+        self,
+        message: str,
+        *,
+        context_updates: Mapping[str, Any] | None = None,
+    ) -> AG2NetworkRunnerResult:
+        async with self._lock:
+            if self._closed:
+                return AG2NetworkRunnerResult(
+                    status=RunStatus.FAILED,
+                    workflow_name=self.workflow_name,
+                    chat_id=self.chat_id,
+                    app_id=self.app_id,
+                    channel_id=self.channel_id,
+                    error="live_ag2_channel_closed",
+                )
+
+            prior_wal = await self._hub.read_wal(self.channel_id)
+            self._wal_cursor = max(self._wal_cursor, len(prior_wal))
+
+            if context_updates:
+                await self._channel.send(
+                    "",
+                    event_type=EV_CONTEXT_SET,
+                    event_data={"set": dict(context_updates or {}), "delete": []},
+                )
+            await self._channel.send(str(message or "."))
+
+            result = await self._wait_for_settlement()
+            result.wal = list(result.wal[self._wal_cursor :])
+            self._wal_cursor += len(result.wal)
+            if result.status is RunStatus.PAUSED:
+                result.live_run = self
+            else:
+                await self.close()
+            return result
+
+    async def _wait_for_settlement(self) -> AG2NetworkRunnerResult:
+        failure_task = asyncio.create_task(
+            self._turn_failure_listener.wait_for_failure(self.channel_id)
+        )
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._close_timeout_seconds
+        try:
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    result = await self._snapshot_result(
+                        status=RunStatus.PAUSED,
+                        close_reason="awaiting_user_input",
+                        error=(
+                            "workflow channel did not settle within "
+                            f"{self._close_timeout_seconds} seconds"
+                        ),
+                    )
+                    result.live_run = self
+                    return result
+
+                event_task = asyncio.create_task(
+                    self._initiator.wait_for_channel_event(
+                        channel_id=self.channel_id,
+                        predicate=lambda envelope: envelope.event_type
+                        in {EV_CHANNEL_CLOSED, EV_PACKET},
+                        timeout=remaining,
+                    )
+                )
+                done, pending = await asyncio.wait(
+                    {event_task, failure_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if failure_task in done:
+                    event_task.cancel()
+                    await asyncio.gather(event_task, return_exceptions=True)
+                    failure = failure_task.result()
+                    result = await self._snapshot_result(
+                        status=RunStatus.FAILED,
+                        error=f"AG2 turn failed for {failure['agent_id']}: {failure['error']}",
+                    )
+                    return result
+
+                if failure_task in pending:
+                    pending.remove(failure_task)
+
+                try:
+                    event_env = event_task.result()
+                finally:
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+
+                if event_env.event_type == EV_CHANNEL_CLOSED:
+                    return await self._snapshot_result(
+                        status=RunStatus.COMPLETED,
+                        close_reason=str(event_env.event_data.get("reason") or "") or None,
+                    )
+
+                state = self._hub.adapter_state(self.channel_id)
+                expected_next_speaker = str(
+                    getattr(state, "expected_next_speaker", "") or ""
+                ).strip()
+                if expected_next_speaker in {"user", self._initiator.agent_id}:
+                    return await self._snapshot_result(
+                        status=RunStatus.PAUSED,
+                        close_reason="awaiting_user_input",
+                    )
+        finally:
+            failure_task.cancel()
+            await asyncio.gather(failure_task, return_exceptions=True)
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        for hub_client in reversed(self._hub_clients):
+            try:
+                await hub_client.close()
+            except Exception as exc:
+                logger.warning(
+                    "AG2_LIVE_HUB_CLIENT_CLOSE_FAILED workflow=%s chat=%s: %s",
+                    self.workflow_name,
+                    self.chat_id,
+                    exc,
+                )
+        try:
+            await self._hub.close()
+        except Exception as exc:
+            logger.warning(
+                "AG2_LIVE_HUB_CLOSE_FAILED workflow=%s chat=%s: %s",
+                self.workflow_name,
+                self.chat_id,
+                exc,
+            )
 
 
 def _install_context_update_handler(*, agent: Any, client: Any) -> None:

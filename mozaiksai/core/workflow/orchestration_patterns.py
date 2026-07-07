@@ -587,6 +587,17 @@ async def run_workflow_orchestration(
             else "in_progress"
         )
         if awaiting_user_input:
+            live_run = getattr(runner_result, "live_run", None)
+            if live_run is not None and hasattr(transport, "register_live_ag2_workflow_run"):
+                try:
+                    transport.register_live_ag2_workflow_run(chat_id, live_run)
+                except Exception as live_reg_err:
+                    wf_logger.debug(
+                        "[%s] LIVE_AG2_RUN_REGISTER_FAILED chat=%s: %s",
+                        workflow_name_upper,
+                        chat_id,
+                        live_reg_err,
+                    )
             await transport.send_event_to_ui(
                 {
                     "kind": "awaiting_reply",

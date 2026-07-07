@@ -168,6 +168,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         # Runtime context trigger managers (per chat)
         # Used to apply declarative ui_response triggers without bespoke agents.
         self._derived_context_managers: dict[str, Any] = {}
+        self._live_ag2_workflow_runs: dict[str, Any] = {}
 
         # Background workflow execution for workflow sequence runs.
         self._background_tasks: dict[str, asyncio.Task] = {}
@@ -212,6 +213,29 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
 
         self._initialized = True
         logger.info("SimpleTransport singleton initialized")
+
+    def register_live_ag2_workflow_run(self, chat_id: str, live_run: Any) -> None:
+        previous = self._live_ag2_workflow_runs.get(chat_id)
+        if previous is not None and previous is not live_run:
+            close = getattr(previous, "close", None)
+            if callable(close):
+                task = asyncio.create_task(close())
+                task.add_done_callback(
+                    lambda t: logger.debug(
+                        "LIVE_AG2_RUN_REPLACE_CLOSE_FAILED chat=%s: %s",
+                        chat_id,
+                        t.exception(),
+                    )
+                    if not t.cancelled() and t.exception() is not None
+                    else None
+                )
+        self._live_ag2_workflow_runs[chat_id] = live_run
+
+    def get_live_ag2_workflow_run(self, chat_id: str) -> Any | None:
+        return self._live_ag2_workflow_runs.get(chat_id)
+
+    def pop_live_ag2_workflow_run(self, chat_id: str) -> Any | None:
+        return self._live_ag2_workflow_runs.pop(chat_id, None)
         
     async def _handle_usage_delta_event(self, payload: dict[str, Any]) -> None:
         chat_id = payload.get("chat_id")
