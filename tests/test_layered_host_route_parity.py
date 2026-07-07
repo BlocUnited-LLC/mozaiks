@@ -58,7 +58,11 @@ REMOVED_RUNTIME_ROUTES = {
 
 
 def _collect_routes(routes, prefix: str = "") -> set[tuple[str, str]]:
-    """Recursively collect public routes, handling FastAPI 0.116+ _IncludedRouter."""
+    """Recursively collect public routes.
+
+    Handles both pre-0.116 FastAPI (routes eagerly resolved) and 0.116+
+    (_IncludedRouter with original_router / include_context.prefix).
+    """
     result: set[tuple[str, str]] = set()
     for route in routes:
         path = getattr(route, "path", None)
@@ -73,10 +77,11 @@ def _collect_routes(routes, prefix: str = "") -> set[tuple[str, str]]:
                         result.add((method, full_path))
             else:
                 result.add(("WS", full_path))
-        elif hasattr(route, "router"):
-            # FastAPI 0.116+: _IncludedRouter — recurse into the sub-router
-            sub_prefix = prefix + getattr(route, "prefix", "")
-            result.update(_collect_routes(route.router.routes, sub_prefix))
+        elif hasattr(route, "original_router"):
+            # FastAPI 0.116+: _IncludedRouter stores included router as original_router
+            ctx = getattr(route, "include_context", None)
+            sub_prefix = prefix + (getattr(ctx, "prefix", "") or "")
+            result.update(_collect_routes(route.original_router.routes, sub_prefix))
     return result
 
 

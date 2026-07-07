@@ -77,16 +77,21 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     assert "/apps/:appId/settings" not in _read("factory_app/app/ui/route_manifest.json")
 
 
-def _all_route_paths(routes, prefix="") -> set[str]:
-    """Recursively collect route paths, handling FastAPI 0.116+ _IncludedRouter."""
+def _all_route_paths(routes, prefix: str = "") -> set[str]:
+    """Recursively collect all route paths.
+
+    Handles both pre-0.116 FastAPI and 0.116+ (_IncludedRouter with
+    original_router / include_context.prefix).
+    """
     paths: set[str] = set()
     for route in routes:
         path = getattr(route, "path", None)
         if path is not None:
             paths.add(prefix + path)
-        elif hasattr(route, "router"):
-            sub_prefix = prefix + getattr(route, "prefix", "")
-            paths.update(_all_route_paths(route.router.routes, sub_prefix))
+        elif hasattr(route, "original_router"):
+            ctx = getattr(route, "include_context", None)
+            sub_prefix = prefix + (getattr(ctx, "prefix", "") or "")
+            paths.update(_all_route_paths(route.original_router.routes, sub_prefix))
     return paths
 
 
