@@ -94,6 +94,8 @@ SOURCE_HYGIENE_EXCLUDED_DIRS = {
     ".mkdocs-tmp",
     ".mypy_cache",
     ".pytest_cache",
+    ".release-local-venv",
+    ".release-venv",
     ".ruff_cache",
     ".venv",
     "__pycache__",

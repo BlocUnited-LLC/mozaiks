@@ -545,6 +545,7 @@ models:
         - crud_pack
         - admin_pack
         - messaging_pack
+        - commerce_pack
         - marketplace_pack
         - campaigns_pack
         - billing_pack
@@ -769,6 +770,75 @@ models:
           and surface_id here so that future domain packs can substitute their
           own vocabulary without changing the harness contract.
           Must be a valid JSON object string or null.
+
+  AppMonetizationPlan:
+    type: model
+    description: >
+      Resolved monetization taxonomy for this app. "Monetized" is not a build
+      route by itself; this object records the concrete money-flow model and
+      whether the OSS subscription runtime is actually required.
+    fields:
+      monetized:
+        type: bool
+        description: True when the app has any revenue, payment, contribution, sponsored, or paid-access flow.
+      revenue_model:
+        type: literal
+        values:
+        - free
+        - subscriptions
+        - usage_based
+        - transactional
+        - marketplace
+        - sponsored
+        - donations
+        - community_funded
+        - hybrid
+        description: >
+          Concrete revenue route. Do not use "monetized" as the value. Use
+          subscriptions only for recurring access, seats, paid feature gates,
+          quotas, credits, or token allowances. Use transactional for product,
+          booking, download, invoice, or one-time checkout flows. Use marketplace
+          for multi-party buyer/seller flows. Use sponsored for paid placement,
+          ad, boost, or campaign visibility flows. Use community_funded for
+          campaign-style backing/funding windows with app/operator-specific policy.
+      subscription_contract_requirement:
+        type: literal
+        values:
+        - not_required
+        - conditional
+        - required
+        description: >
+          Whether SubscriptionContractDesigner should produce config/subscriptions.yaml.
+          Required only for subscriptions or usage models with plan gates, seats,
+          quotas, credits, or token allowances. Transactional, marketplace,
+          sponsored, donation, and community-funded apps set this to not_required
+          unless they also sell app access tiers or usage budgets.
+      primary_payer:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: User or organization expected to pay, such as customer, buyer, seller, creator, team admin, sponsor, donor, or backer.
+      primary_payee:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Recipient of funds or value flow, such as app owner, seller, creator, service provider, campaign owner, or platform.
+      money_flow_summary:
+        type: str
+        description: One-sentence explanation of what is being paid for and when value is delivered.
+      required_capability_routes:
+        type: optional_list
+        items: str
+        description: Capability routes required by the taxonomy, such as saas_subscriptions, usage_metering, commerce, marketplace, sponsored_placements, donations, or investor_marketplace.
+      rationale:
+        type: str
+        description: >
+          Reasoning that ties the selected model to concept_overview,
+          concept_blueprint, design_surface_map, experience_spec,
+          monetization_enabled, builder_options, or revenue_model context.
+
   CarryForwardDecision:
     type: model
     fields:
@@ -896,15 +966,29 @@ models:
         - 'null'
         default: free
         description: >
-          Revenue model declared during the intake interview.
-          free | subscriptions | pay_per_use | one_time_purchase | community_funded.
-          Drives which billing surfaces, entitlement gates, and plan catalog
-          artifacts are required in build_tasks:
-            subscriptions        → requires plan catalog artifact + billing surface task
-            pay_per_use          → requires usage_metering + token_wallet config task
-            one_time_purchase    → requires checkout surface task
-            community_funded     → requires investor_marketplace surface task
-          Null is treated as free (no billing surface required).
+          Resolved revenue model for the app. "Monetized" is not a valid final
+          model; it must resolve to one of:
+          free | subscriptions | usage_based | transactional | marketplace |
+          sponsored | donations | community_funded | hybrid.
+
+          Aliased values are mapped: pay_per_use -> usage_based;
+          one_time_purchase -> transactional.
+
+          This field drives which billing, checkout, usage, marketplace,
+          sponsored-placement, donation, campaign, entitlement, and plan-catalog
+          artifacts are required in build_tasks. Null is treated as free.
+      monetization_plan:
+        type: union
+        variants:
+        - AppMonetizationPlan
+        - 'null'
+        default: null
+        description: >
+          Detailed monetization taxonomy decision. Required when revenue_model is
+          not free. It records whether config/subscriptions.yaml is required or
+          whether the app should route to commerce, marketplace, sponsored,
+          donation, campaign, or custom/operator capabilities without a
+          subscription contract.
       external_integrations:
         type: optional_list
         items: AppBuildIntegration
@@ -1714,7 +1798,8 @@ models:
   # CANONICAL MODULE CONTRACT MODELS
   # ConfigMiddlewareAgent emits these typed objects before serializing them to
   # modules/{module_id}/{module.yaml,contracts/events.yaml,contracts/reactions.yaml,
-  # contracts/notifications.yaml,contracts/settings.yaml,contracts/admin.yaml}. YAML declares the contract; Python files
+  # contracts/notifications.yaml,contracts/settings.yaml,contracts/admin.yaml,
+  # contracts/profile.yaml,contracts/relationships.yaml}. YAML declares the contract; Python files
   # implement behavior through referenced handlers/hooks.
   # ===========================================================================
 
@@ -2482,6 +2567,56 @@ models:
           Emit only panels the module can meaningfully populate from its own
           declared actions. Do not expose admin-only actions or secrets.
 
+  ModuleRelationshipProvider:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable provider id. Must be unique within relationships.yaml.
+      label:
+        type: str
+        description: Human-readable group label, for example Owned Apps or Joined Communities.
+      description:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: Optional helper text describing what this provider returns.
+      order:
+        type: union
+        variants:
+          - int
+          - 'null'
+        description: Optional provider order. Lower numbers are hydrated and displayed first. Defaults to 100.
+      action:
+        type: str
+        description: Module action id that returns current-user relationship rows. Must reference an action declared in module.yaml.
+      resource_types:
+        type: list
+        items: str
+        description: Non-empty list of resource types this provider may return, for example app, community, or document.
+      relationship_types:
+        type: optional_list
+        items: str
+        description: Optional list of relationship types this provider may return, for example owner, member, watcher, or invited.
+
+  ModuleRelationshipsManifest:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+          - mozaiks.relationships.v1
+        description: Must be mozaiks.relationships.v1.
+      providers:
+        type: list
+        items: ModuleRelationshipProvider
+        description: >
+          Current-user relationship providers declared by this module. Provider
+          ids must be unique. Each provider action must return normalized
+          relationship rows for resources the current user owns, administers,
+          belongs to, watches, backs, or is invited to.
+
   ModuleContractBundle:
     type: model
     fields:
@@ -2516,6 +2651,15 @@ models:
           user-scoped data worth surfacing on the user profile page — for
           example account summary, notification preferences, or usage stats.
           Null for most modules. Do not emit for every module.
+      relationships_yaml:
+        type: union
+        variants:
+          - ModuleRelationshipsManifest
+          - 'null'
+        description: >
+          Optional contracts/relationships.yaml. Emit only when this module can
+          enumerate current-user relationships to module-owned resources for a
+          generic My Apps, Portfolio, or My Resources surface. Null for most modules.
       python_stubs:
         type: optional_list
         items: ModulePythonStub

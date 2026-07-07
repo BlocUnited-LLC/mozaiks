@@ -466,10 +466,12 @@ definitions:
     description: >
       Revenue model for the app being built. Determines which billing modules,
       entitlement gates, payment surfaces, and plan catalog artifacts are included
-      in the build plan. Captured during the intake interview. When set to
-      subscriptions or pay_per_use, AppPlanAgent must include a plan catalog
-      artifact and billing surface task.
-      Valid values: free | subscriptions | pay_per_use | one_time_purchase | community_funded.
+      in the build plan. "Monetized" is not a valid final model; it must resolve
+      to one of the concrete money-flow models.
+      Valid values: free | subscriptions | usage_based | transactional |
+      marketplace | sponsored | donations | community_funded | hybrid.
+      Aliased values are mapped: pay_per_use -> usage_based and
+      one_time_purchase -> transactional.
     source:
       type: state
       default: free
