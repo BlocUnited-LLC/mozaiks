@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from mozaiksai.core.auth.dependencies import UserPrincipal
 from mozaiksai.hosts import platform as platform_host
+from mozaiksai.hosts.routers import sessions as sessions_module
 
 
 def _workspace() -> Path:
@@ -52,9 +53,9 @@ async def test_general_chat_list_endpoint_reads_persistence_manager(monkeypatch)
             assert limit == 25
             return expected_sessions
 
-    monkeypatch.setattr(platform_host, "persistence_manager", DummyPersistenceManager())
+    monkeypatch.setattr(sessions_module, "persistence_manager", DummyPersistenceManager())
 
-    payload = await platform_host.list_general_chats_fallback(
+    payload = await sessions_module.list_general_chats_fallback(
         "app-1",
         "user-1",
         limit=25,
@@ -86,10 +87,10 @@ async def test_general_chat_transcript_endpoint_enforces_user_scope(monkeypatch)
                 "last_updated_at": None,
             }
 
-    monkeypatch.setattr(platform_host, "persistence_manager", DummyPersistenceManager())
+    monkeypatch.setattr(sessions_module, "persistence_manager", DummyPersistenceManager())
 
     with pytest.raises(HTTPException) as exc_info:
-        await platform_host.general_chat_transcript_fallback(
+        await sessions_module.general_chat_transcript_fallback(
             "app-1",
             "generalchat-app-1-other-0001",
             principal=_principal(),
@@ -107,9 +108,9 @@ async def test_delete_general_chat_endpoint_scopes_to_user(monkeypatch) -> None:
             assert user_id == "user-1"
             return True
 
-    monkeypatch.setattr(platform_host, "persistence_manager", DummyPersistenceManager())
+    monkeypatch.setattr(sessions_module, "persistence_manager", DummyPersistenceManager())
 
-    payload = await platform_host.delete_general_chat(
+    payload = await sessions_module.delete_general_chat(
         "app-1",
         "user-1",
         "generalchat-app-1-user-1-0001",
@@ -143,15 +144,16 @@ def test_ask_chat_restore_contracts_are_pinned_in_source() -> None:
 
 
 def test_ask_bootstrap_sessions_do_not_count_as_workflow_runs() -> None:
-    platform_source = _read("mozaiksai/hosts/platform.py")
+    sessions_source = _read("mozaiksai/hosts/routers/sessions.py")
+    chat_router_source = _read("mozaiksai/hosts/routers/chat.py")
     runtime_source = _read("mozaiksai/hosts/runtime.py")
     chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
     api_source = _read("chat-ui/src/adapters/api.js")
 
     assert 'transport_purpose = str(data.get("transport_purpose") or "").strip().lower()' in runtime_source
     assert 'extra_fields["transport_purpose"] = "ask_carrier"' in runtime_source
-    assert 'and not _is_ask_carrier_session(session)' in platform_source
-    assert 'if doc and _is_ask_carrier_session(doc):' in platform_source
+    assert 'and not _is_ask_carrier_session(session)' in sessions_source
+    assert 'if doc and _is_ask_carrier_session(doc):' in chat_router_source
     assert "body.transport_purpose = sessionOptions.transportPurpose.trim();" in api_source
-    assert "askCarrierMode ? { transportPurpose: 'ask_carrier' } : null" in chat_page_source
+    assert "askCarrierMode ? { transportPurpose: 'ask_carrier' } : {}" in chat_page_source
 
