@@ -55,10 +55,15 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.14.0",
+    "pytest-rerunfailures>=12.0",
     "ruff>=0.1.0",
     "watchdog",
     "types-PyYAML>=6.0",
     "mypy>=1.5.0",
+]
+monitoring = [
+    "redis[asyncio]>=5.0.0",
+    "boto3>=1.28.0",
 ]
 tracing = [
     "opentelemetry-sdk>=1.27.0",
@@ -89,6 +94,16 @@ target-version = "py311"
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.packages.find]
+include = [
+    "mozaiks", "mozaiks.*",
+    "mozaiksai", "mozaiksai.*",
+    "mozaiks_cli", "mozaiks_cli.*",
+    "factory_app", "factory_app.*",
+    "logs", "logs.*",
+    "web_shell", "web_shell.*",
+]
+
 [tool.setuptools.dynamic]
 version = {attr = "mozaiksai.version.__version__"}
 
@@ -103,6 +118,15 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = [
+    "--cov=mozaiksai",
+    "--cov-report=term-missing",
+    "--cov-fail-under=30",
+    "--reruns=2",
+    "--reruns-delay=1",
+    "--only-rerun=AssertionError",
+    "--only-rerun=TimeoutError",
+]
 
 [tool.mypy]
 python_version = "3.11"
