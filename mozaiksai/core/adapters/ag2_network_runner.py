@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -412,7 +412,7 @@ class _AG2LiveWorkflowRun:
         initiator: Any,
         channel: Any,
         turn_failure_listener: _TurnFailureListener,
-        snapshot_result: Any,
+        snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]],
         close_timeout_seconds: float,
     ) -> None:
         self.workflow_name = workflow_name
@@ -424,7 +424,7 @@ class _AG2LiveWorkflowRun:
         self._initiator = initiator
         self._channel = channel
         self._turn_failure_listener = turn_failure_listener
-        self._snapshot_result = snapshot_result
+        self._snapshot_result: Callable[..., Awaitable[AG2NetworkRunnerResult]] = snapshot_result
         self._close_timeout_seconds = close_timeout_seconds
         self._closed = False
         self._lock = asyncio.Lock()

@@ -75,12 +75,27 @@ class SourceScopedToolCalled:
         ).evaluate(state, envelope)
 
 
+@dataclass(slots=True)
+class BootstrapInitialDispatch:
+    """Bootstrap-only AG2 condition for Mozaiks' injected initial dispatch."""
+
+    source_agent_id: str
+    name: ClassVar[str] = "mozaiks_bootstrap_initial_dispatch"
+
+    def evaluate(self, state: WorkflowState, envelope: Envelope) -> bool:
+        return FromSpeaker(self.source_agent_id).evaluate(state, envelope) and int(
+            state.turn_count
+        ) == 1
+
+
 register_condition(SourceScopedContextEquals)
 register_condition(SourceScopedContextExpression)
 register_condition(SourceScopedToolCalled)
+register_condition(BootstrapInitialDispatch)
 
 
 __all__ = [
+    "BootstrapInitialDispatch",
     "SourceScopedContextEquals",
     "SourceScopedContextExpression",
     "SourceScopedToolCalled",
