@@ -57,20 +57,31 @@ REMOVED_RUNTIME_ROUTES = {
 }
 
 
+def _collect_routes(routes, prefix: str = "") -> set[tuple[str, str]]:
+    """Recursively collect public routes, handling FastAPI 0.116+ _IncludedRouter."""
+    result: set[tuple[str, str]] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        if path is not None:
+            full_path = prefix + path
+            if not full_path or full_path.startswith(("/openapi", "/docs", "/redoc")):
+                continue
+            methods = getattr(route, "methods", None)
+            if methods:
+                for method in methods:
+                    if method not in {"HEAD", "OPTIONS"}:
+                        result.add((method, full_path))
+            else:
+                result.add(("WS", full_path))
+        elif hasattr(route, "router"):
+            # FastAPI 0.116+: _IncludedRouter — recurse into the sub-router
+            sub_prefix = prefix + getattr(route, "prefix", "")
+            result.update(_collect_routes(route.router.routes, sub_prefix))
+    return result
+
+
 def _public_routes(app) -> set[tuple[str, str]]:
-    routes: set[tuple[str, str]] = set()
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        if not path or path.startswith(("/openapi", "/docs", "/redoc")):
-            continue
-        methods = getattr(route, "methods", None)
-        if methods:
-            for method in methods:
-                if method not in {"HEAD", "OPTIONS"}:
-                    routes.add((method, path))
-        else:
-            routes.add(("WS", path))
-    return routes
+    return _collect_routes(app.routes)
 
 
 def test_studio_host_contains_canonical_routes():

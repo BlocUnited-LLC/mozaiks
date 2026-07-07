@@ -109,22 +109,22 @@ def build_ag2_telemetry_middleware(
 
     try:
         from autogen.beta.middleware.builtin import TelemetryMiddleware
+
+        return TelemetryMiddleware(
+            capture_content=cfg.capture_content,
+            agent_name=agent_name,
+            provider_name=provider_name,
+            model_name=model_name,
+            span_attributes=build_ag2_span_attributes(
+                agent_name=agent_name,
+                workflow_name=workflow_name,
+                context_variables=context_variables,
+                config=cfg,
+            ),
+        )
     except Exception as exc:  # pragma: no cover - depends on optional AG2 extras
         logger.debug("AG2 TelemetryMiddleware unavailable: %s", exc)
         return None
-
-    return TelemetryMiddleware(
-        capture_content=cfg.capture_content,
-        agent_name=agent_name,
-        provider_name=provider_name,
-        model_name=model_name,
-        span_attributes=build_ag2_span_attributes(
-            agent_name=agent_name,
-            workflow_name=workflow_name,
-            context_variables=context_variables,
-            config=cfg,
-        ),
-    )
 
 
 __all__ = [

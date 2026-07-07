@@ -182,8 +182,8 @@ class TestMountModuleRouters:
             )
             result = self._mount(app, [mod])
             assert result == 1
-            # Verify router was included
-            [str(r.path) for r in app.routes]
+            # Verify router was included (filter _IncludedRouter objects in FastAPI 0.116+)
+            [str(r.path) for r in app.routes if hasattr(r, "path")]
             # The app.include_router call itself is the verification; if no exception, it worked
         finally:
             sys.modules.pop(f"{package_root}.backend.router", None)

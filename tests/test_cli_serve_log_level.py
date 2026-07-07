@@ -42,6 +42,12 @@ def _run_serve_with_captured_log_level(tmp_path, monkeypatch, log_level_env: str
     else:
         monkeypatch.setenv("LOG_LEVEL", log_level_env)
 
+    # serve.run() sets PLATFORM_PATH and MOZAIKS_APP_WORKSPACE_PATH as side effects.
+    # Register them with monkeypatch so teardown restores the originals and prevents
+    # test-order-dependent failures in workspace-dependent tests downstream.
+    monkeypatch.delenv("PLATFORM_PATH", raising=False)
+    monkeypatch.delenv("MOZAIKS_APP_WORKSPACE_PATH", raising=False)
+
     captured: dict = {}
 
     # Build a fake uvicorn module that captures the log_level argument.

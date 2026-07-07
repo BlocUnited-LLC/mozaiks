@@ -77,11 +77,24 @@ def test_platform_shell_registers_admin_section_routes() -> None:
     assert "/apps/:appId/settings" not in _read("factory_app/app/ui/route_manifest.json")
 
 
+def _all_route_paths(routes, prefix="") -> set[str]:
+    """Recursively collect route paths, handling FastAPI 0.116+ _IncludedRouter."""
+    paths: set[str] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        if path is not None:
+            paths.add(prefix + path)
+        elif hasattr(route, "router"):
+            sub_prefix = prefix + getattr(route, "prefix", "")
+            paths.update(_all_route_paths(route.router.routes, sub_prefix))
+    return paths
+
+
 def test_platform_host_mounts_admin_api_routes() -> None:
     import importlib
 
     platform_host = importlib.import_module("mozaiksai.hosts.platform")
-    routes = {route.path for route in platform_host.app.routes}
+    routes = _all_route_paths(platform_host.app.routes)
 
     assert "/api/admin/config" in routes
     assert "/api/admin/stats" in routes
