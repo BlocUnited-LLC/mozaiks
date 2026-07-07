@@ -94,16 +94,6 @@ target-version = "py311"
 [tool.setuptools]
 include-package-data = true
 
-[tool.setuptools.packages.find]
-include = [
-    "mozaiks", "mozaiks.*",
-    "mozaiksai", "mozaiksai.*",
-    "mozaiks_cli", "mozaiks_cli.*",
-    "factory_app", "factory_app.*",
-    "logs", "logs.*",
-    "web_shell", "web_shell.*",
-]
-
 [tool.setuptools.dynamic]
 version = {attr = "mozaiksai.version.__version__"}
 

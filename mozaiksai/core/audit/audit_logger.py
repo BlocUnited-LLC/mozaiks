@@ -11,7 +11,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -23,7 +23,7 @@ _AUDIT_COLLECTION = "audit_log"
 _AUDIT_DB = os.getenv("MOZAIKS_AUDIT_DATABASE_NAME", "mozaiks_audit")
 
 
-class AuditEventKind(str, Enum):
+class AuditEventKind(StrEnum):
     WORKFLOW_START = "workflow.start"
     WORKFLOW_COMPLETE = "workflow.complete"
     WORKFLOW_FAIL = "workflow.fail"

@@ -21,7 +21,7 @@ import asyncio
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
@@ -39,7 +39,7 @@ _QUEUE_COLLECTION = "workflow_queue"
 _ACTIVE_COLLECTION = "workflow_queue_active"
 
 
-class QueueItemStatus(str, Enum):
+class QueueItemStatus(StrEnum):
     PENDING = "pending"
     CLAIMED = "claimed"
     COMPLETED = "completed"

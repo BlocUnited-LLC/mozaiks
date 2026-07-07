@@ -20,7 +20,7 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from logs.logging_config import get_core_logger
@@ -35,7 +35,7 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
