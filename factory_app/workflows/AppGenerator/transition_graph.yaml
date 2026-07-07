@@ -11,15 +11,15 @@ transition_rules:
   transition_type: after_turn
   transition_target: RevertToUserTarget
 - source_agent: AppPlanAgent
+  target_agent: AppSchemaAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+- source_agent: AppPlanAgent
   target_agent: AssemblyAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: app_task_batch_status
   condition_value: completed
-  transition_target: AgentTarget
-- source_agent: AppPlanAgent
-  target_agent: AppSchemaAgent
-  transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: AppSchemaAgent
   target_agent: AppUIQualityAgent
@@ -55,28 +55,21 @@ transition_rules:
   transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: IntegrationReadinessAgent
+  target_agent: AppValidationAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+- source_agent: IntegrationReadinessAgent
   target_agent: user
   transition_type: condition
   condition_type: context_equals
   condition_key: integration_readiness_status
   condition_value: blocked
   transition_target: RevertToUserTarget
-- source_agent: IntegrationReadinessAgent
-  target_agent: AppValidationAgent
-  transition_type: after_turn
-  transition_target: AgentTarget
-- source_agent: DatabaseAgent
-  target_agent: terminate
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: task_run_mode
-  condition_value: true
-  transition_target: TerminateTarget
 - source_agent: DatabaseAgent
   target_agent: ConfigMiddlewareAgent
   transition_type: after_turn
   transition_target: AgentTarget
-- source_agent: ControlPlaneAgent
+- source_agent: DatabaseAgent
   target_agent: terminate
   transition_type: condition
   condition_type: context_equals
@@ -87,7 +80,7 @@ transition_rules:
   target_agent: AppValidationAgent
   transition_type: after_turn
   transition_target: AgentTarget
-- source_agent: ConfigMiddlewareAgent
+- source_agent: ControlPlaneAgent
   target_agent: terminate
   transition_type: condition
   condition_type: context_equals
@@ -98,6 +91,13 @@ transition_rules:
   target_agent: ModuleContractQualityAgent
   transition_type: after_turn
   transition_target: AgentTarget
+- source_agent: ConfigMiddlewareAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: task_run_mode
+  condition_value: true
+  transition_target: TerminateTarget
 - source_agent: ModuleContractQualityAgent
   target_agent: ModelAgent
   transition_type: condition
@@ -113,16 +113,16 @@ transition_rules:
   condition_value: blocked
   transition_target: RevertToUserTarget
 - source_agent: ModelAgent
+  target_agent: ServiceAgent
+  transition_type: after_turn
+  transition_target: AgentTarget
+- source_agent: ModelAgent
   target_agent: terminate
   transition_type: condition
   condition_type: context_equals
   condition_key: task_run_mode
   condition_value: true
   transition_target: TerminateTarget
-- source_agent: ModelAgent
-  target_agent: ServiceAgent
-  transition_type: after_turn
-  transition_target: AgentTarget
 - source_agent: ServiceAgent
   target_agent: ModuleRuntimeQualityAgent
   transition_type: after_turn
@@ -149,17 +149,10 @@ transition_rules:
   condition_value: blocked
   transition_target: RevertToUserTarget
 - source_agent: FrontendStubAgent
-  target_agent: terminate
-  transition_type: condition
-  condition_type: context_equals
-  condition_key: task_run_mode
-  condition_value: true
-  transition_target: TerminateTarget
-- source_agent: FrontendStubAgent
   target_agent: ControllerAgent
   transition_type: after_turn
   transition_target: AgentTarget
-- source_agent: ControllerAgent
+- source_agent: FrontendStubAgent
   target_agent: terminate
   transition_type: condition
   condition_type: context_equals
@@ -170,6 +163,17 @@ transition_rules:
   target_agent: IntegrationReadinessAgent
   transition_type: after_turn
   transition_target: AgentTarget
+- source_agent: ControllerAgent
+  target_agent: terminate
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: task_run_mode
+  condition_value: true
+  transition_target: TerminateTarget
+- source_agent: AppValidationAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
 - source_agent: AppValidationAgent
   target_agent: ConfigMiddlewareAgent
   transition_type: condition
@@ -191,10 +195,6 @@ transition_rules:
   condition_key: integration_tests_passed
   condition_value: true
   transition_target: AgentTarget
-- source_agent: AppValidationAgent
-  target_agent: user
-  transition_type: after_turn
-  transition_target: RevertToUserTarget
 - source_agent: DownloadAgent
   target_agent: terminate
   transition_type: after_turn
