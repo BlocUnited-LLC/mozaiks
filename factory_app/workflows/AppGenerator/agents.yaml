@@ -384,7 +384,7 @@ agents:
         - `owned_paths` must contain the minimal YAML family required for the pack: `module.yaml` is always required; add optional files only when the product scope actually needs them.
         - `owned_paths` must not include `backend/*.py`. Backend Python belongs to the sibling `data_models` and `business_services` tasks.
         - `initial_message` must pass the pack's entities, actions, capability ids, events, subscriptions/reactions, notifications, settings, required stubs, `app_backend_url`, and any `generated_workflow_*` metadata needed downstream.
-        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: users`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `control_plane`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
+        - **admin panels are derived from module actions**: include admin panel requirements in `initial_message` for every `module_contract` task. Derive the operator panel spec from the module's declared actions using this mapping: list/query actions (`list_*`, `search_*`) → primary `DataTable` or `ResourceTable` panel; stats/summary actions (`*_stats`, `*_summary`, `*_metrics`) → `SummaryStrip` panel alongside the record table; approval/write/status-change actions (`approve_*`, `reject_*`, `publish_*`, `update_*`) → row-level or toolbar actions inside the primary panel (not separate panels). Section placement from module domain: billing/subscription/payment/invoice entities → `section: billing`; user/account/member/profile entities → `section: access`; request/queue/approval/job entities → `section: operations`; usage/quota/limit/metric entities → `section: usage`; setting/preference/config entities → `section: settings`; all others → `section: overview`. Include this derived spec in `initial_message` so module contract generation emits non-empty `panels[]`. For any stats/summary action, state that values must be repo-backed and trend/change fields must be omitted or null unless the module has a real historical source. Exception: do NOT derive admin panels for `surface_kind` values of `control_plane`, `ui_only`, or `external_integration` — those surfaces are not durable entity modules.
         - `initial_agent` for this task is `ConfigMiddlewareAgent`.
         - For durable modules, the module contract must declare `python_stubs` for the canonical backend set (`backend/handler.py`, `backend/service.py`, `backend/repo.py`, `backend/policy.py`, `backend/schemas.py`) even though this task only emits YAML. The sibling `data_models` and `business_services` tasks implement those stubs.
         - For generated durable modules, set every `actions[].handler_method` equal to the action `id` unless a non-generated carry-forward contract already requires a different method. This keeps generated module.yaml, handler.py, and page endpoints deterministic.
@@ -1636,7 +1636,7 @@ agents:
          - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
          - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action. Use `value_key` only for fields declared by the action output schema. Use `trend_key` only when the action contract explicitly describes a real historical comparison or metrics snapshot; otherwise omit trend fields so the UI renders no fake change value.
          - **Row/toolbar actions for mutations**: approval, write, and status-change actions (`approve_*`, `reject_*`, `publish_*`, `archive_*`, `update_*`) are surfaced as `config.actions[]` entries on the primary record panel — not as separate panels.
-         - **Page placement from module domain**: billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: users`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; audit/event-log/history/timeline entities → `page: activity`; connector/webhook/OAuth/integration entities → `page: integrations`; ticket/helpdesk/support entities → `page: support`; all others → `page: overview`. The `page` value must reference a page id declared in the app's `admin/admin_registry.yaml`.
+         - **Page placement from module domain**: billing/subscription/payment/invoice entities → `page: billing`; user/account/member/profile entities → `page: access`; request/queue/approval/job entities → `page: operations`; usage/quota/limit/metric entities → `page: usage`; setting/preference/config entities → `page: settings`; audit/event-log/history/timeline entities → `page: activity`; connector/webhook/OAuth/integration entities → `page: integrations`; ticket/helpdesk/support entities → `page: support`; all others → `page: overview`. The `page` value must reference a page id declared in the app's `admin/admin_registry.yaml`.
          - **Only emit empty `panels: []` when**: (a) the module has no list or query actions, (b) the `initial_message` explicitly says "no admin panels needed", or (c) this is not a `module_contract` task.
          - Every panel must set `page` (not `section`) to a page id from `admin/admin_registry.yaml`. Use `renderer: schema` unless a custom component was explicitly requested. When declaring `hooks`, use the format `module.path:function_name` (e.g. `backend.admin:resolve_metrics`); every hook must be module-local and mirrored in `python_stubs`.
          - `renderer: schema` panels must declare `layout` plus `sections[]`, reusing the same primitive section contract as `ui/pages/*.yaml`. Bind data through section-level `config.api_endpoint` values calling `/api/modules/{module_id}/{action_id}`.
@@ -2690,15 +2690,15 @@ agents:
       You are the Admin Registry Agent. Your sole responsibility is to generate
       `admin/admin_registry.yaml` for a generated app bundle.
 
-      The admin registry declares all admin portal pages — both workspace-scope pages
-      (visible from the Studio) and app-scope pages (visible in the per-app
-      admin portal). Module admin panels reference these page ids via the `page` field
-      in `modules/{module}/contracts/admin.yaml`.
+      The admin registry declares AdminPortal extension pages for a generated
+      app bundle. It does not declare first-party Studio product routes. Module
+      admin panels reference these page ids via the `page` field in
+      `modules/{module}/contracts/admin.yaml`.
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
       Read `app_build_plan` and produce a complete `admin/admin_registry.yaml` that:
-      1. Declares the standard app-scope admin pages appropriate for this app's capability set.
+      1. Declares the standard app-scope AdminPortal pages appropriate for this app's capability set.
       2. Omits workspace-scope pages for standard generated apps (include only when the app
          explicitly targets a hosted operator/platform context).
       3. Covers all entity domains that module contract generation will assign module panels to,
@@ -2716,7 +2716,7 @@ agents:
 
       **Standard app-scope page inclusion rules** (apply per capability set):
       - `overview` — always include; path `/admin`; icon `dashboard`; order 0
-      - `users` — include when auth_strategy is not `none` or any pack manages user/account/member entities; path `/apps/:appId/users`; icon `users`; order 10
+      - `access` — include when auth_strategy is not `none` or any pack manages user/account/member entities; path `/apps/:appId/access`; icon `access`; order 10
       - `usage` — include when any pack has quota, metering, analytics, or reporting entities; path `/apps/:appId/usage`; icon `chart`; order 20
       - `billing` — include when any pack manages billing, subscription, payment, or invoice entities; path `/apps/:appId/billing`; icon `billing`; order 30
       - `activity` — include when any pack has audit trail, event log, history, or timeline entities; path `/apps/:appId/activity`; icon `history`; order 40
@@ -2735,7 +2735,7 @@ agents:
         explicitly calls for a unique operator surface with no standard analog.
 
       **Coverage requirement**: ConfigMiddlewareAgent derives panel page placement from entity
-      domain (billing/subscription → `billing`; user/member → `users`; job/queue → `operations`;
+      domain (billing/subscription → `billing`; user/member → `access`; job/queue → `operations`;
       usage/metric → `usage`; setting/preference → `settings`; all others → `overview`). Ensure
       every domain your modules cover has a matching page id in this registry.
 
@@ -2758,7 +2758,7 @@ agents:
     content: |-
       1. Read `app_build_plan.capability_packs` — map each pack's entity domains to the
          standard page inclusion rules above.
-      2. Read `app_build_plan.auth_strategy` — if `none`, skip `users` unless a pack
+      2. Read `app_build_plan.auth_strategy` — if `none`, skip `access` unless a pack
          explicitly manages member entities.
       3. Always include `overview` and `settings`.
       4. Apply the remaining standard inclusion rules to produce the base page list.
@@ -2781,7 +2781,7 @@ agents:
           "schema_version": "mozaiks.admin.registry.v1",
           "pages": [
             { "id": "overview", "label": "Overview", "path": "/admin", "icon": "dashboard", "order": 0, "enabled": true, "scope": "app" },
-            { "id": "users", "label": "Users", "path": "/apps/:appId/users", "icon": "users", "order": 10, "enabled": true, "scope": "app" },
+            { "id": "access", "label": "Access", "path": "/apps/:appId/access", "icon": "access", "order": 10, "enabled": true, "scope": "app" },
             { "id": "settings", "label": "Settings", "path": "/apps/:appId/settings", "icon": "settings", "order": 60, "enabled": true, "scope": "app" }
           ]
         },

@@ -28,9 +28,9 @@ def test_app_backend_admin_contract_accepts_explicit_builtin_and_schema_panels()
         schema_version: 'mozaiks.admin.app_backend.v1',
         panels: [
           {{
-            id: 'app.users',
-            label: 'Users',
-            section: 'users',
+            id: 'app.access',
+            label: 'Access',
+            section: 'access',
             renderer: 'builtin',
             builtin_panel: 'users'
           }},

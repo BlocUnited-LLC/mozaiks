@@ -34,7 +34,7 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
     assert "WorkspaceLayout" in source
     assert "AdminOverviewPanel" in source
     assert "AdminSectionRoute" in source
-    # Routing now handles all canonical sections, not just users/usage
+    # Routing now handles all canonical sections, not just access/usage
     assert "^\\/apps\\/[^/]+\\/([^/]+)\\/?$" in source
     assert "raw === 'activity'" not in source
     assert "raw === 'audit'" not in source
@@ -56,25 +56,26 @@ def test_admin_portal_embeds_app_admin_panels() -> None:
 def test_platform_shell_registers_admin_section_routes() -> None:
     platform_source = _read("mozaiksai/hosts/platform.py")
     registry_source = _read("factory_app/app/admin/admin_registry.yaml")
+    route_manifest = _read("factory_app/app/ui/route_manifest.json")
 
-    # Admin portal pages are now declared in admin_registry.yaml, not hardcoded in contract.py
-    for path in ["/apps/:appId/overview", "/apps/:appId/users", "/apps/:appId/usage"]:
-        assert path in registry_source
+    # First-party Studio product routes live in route_manifest.json.
+    assert "pages: []" in registry_source
+    for path in ["/apps/:appId/overview", "/apps/:appId/access", "/apps/:appId/usage", "/apps/:appId/activity"]:
+        assert path in route_manifest
+        assert path not in registry_source
 
     # The first-party Studio does not expose a standalone /admin page.
     assert "path: /admin" not in registry_source
-    assert "surfaces: [studio]" in registry_source
     # /apps/:appId/admin is not a valid path — overview uses the app Studio route.
     assert "/apps/:appId/admin" not in registry_source
 
     assert '"component": "AdminPortal"' in platform_source
     assert "build_admin_shell_routes" in platform_source
     assert "load_admin_registry" in platform_source
-    # Admin portal routes are separate from custom app routes in route_manifest.json
-    assert "/apps/:appId/users" in _read("factory_app/app/ui/route_manifest.json")
-    assert "/apps/:appId/usage" in _read("factory_app/app/ui/route_manifest.json")
-    assert "/apps/:appId/operations" not in _read("factory_app/app/ui/route_manifest.json")
-    assert "/apps/:appId/settings" not in _read("factory_app/app/ui/route_manifest.json")
+    # Admin portal extension routes stay separate from first-party Studio routes.
+    assert "/apps/:appId/users" not in route_manifest
+    assert "/apps/:appId/operations" not in route_manifest
+    assert "/apps/:appId/settings" not in route_manifest
 
 
 def _all_route_paths(routes, prefix: str = "") -> set[str]:

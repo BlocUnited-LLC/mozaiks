@@ -40,7 +40,7 @@ function AdminSectionRoute(pathname) {
 // ---------------------------------------------------------------------------
 
 const BUILTIN_PAGES = {
-  users:      (props) => <UsersSection {...props} />,
+  access:     (props) => <UsersSection {...props} />,
   usage:      (props) => <UsageSection title="Usage" {...props} />,
   operations: (props) => <OperationsSection {...props} />,
   settings:   (props) => <SettingsSection {...props} />,

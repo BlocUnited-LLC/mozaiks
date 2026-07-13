@@ -9,7 +9,7 @@ test.
 Account identity, relationship inventory, settings, notifications, and admin
 are not workflow products. They are platform and app-backend responsibilities
 with explicit UI, API, and module-contract boundaries. Billing, subscriptions,
-entitlements, deployment, governance, build history, app users, and workspace
+entitlements, deployment, governance, build history, app access, and workspace
 operations are app/workspace management concerns and belong in Admin Portal or
 Studio, not in Profile.
 
@@ -126,7 +126,7 @@ Important boundary:
 - `/profile` is not a workflow artifact
 - `contracts/profile.yaml` is only for module-contributed account/profile
   panels; it does not replace identity, preferences, My Apps, Portfolio, build
-  history, billing, app users, deployment, governance, or admin operations
+  history, billing, app access, deployment, governance, or admin operations
 
 Do not overload `settings.yaml`, `reactions.yaml`, `admin.yaml`, or
 `relationships.yaml` as a proxy for account identity UI composition.

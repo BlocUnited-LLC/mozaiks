@@ -21,13 +21,13 @@ def _valid_admin_config() -> dict:
         "schema_version": "mozaiks.admin.app_backend.v1",
         "panels": [
             {
-                "id": "app.users",
-                "label": "Users",
-                "section": "users",
+                "id": "app.access",
+                "label": "Access",
+                "section": "access",
                 "order": 10,
                 "renderer": "builtin",
                 "builtin_panel": "users",
-                "permissions": ["admin.users.read"],
+                "permissions": ["admin.access.read"],
             },
             {
                 "id": "billing.summary",

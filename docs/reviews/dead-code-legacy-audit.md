@@ -22,55 +22,19 @@ These were local, high-confidence dead-code items with no current contract value
 - Removed unused reserved arguments from `assemble_features()` in `factory_app/workflows/AppGenerator/tools/assembly_phase.py`.
 - Removed the unused local `pattern_num` callback parameter in `mozaiks_cli/commands/gen.py`.
 - Removed the unused `transition_graph_factory` parameter from `run_workflow_orchestration()` in `mozaiksai/core/workflow/orchestration_patterns.py`.
+- Removed active demo `messages` and `contacts` modules from the first-party
+  Studio app bundle. The reusable generated-app messaging build context remains
+  available under `factory_app/build_context/messaging`.
+- Made `factory_app/app/ui/route_manifest.json` the first-party Studio route
+  source for app pages, including `/apps/:appId/activity` -> `AppBuildHistoryPage`.
+- Reduced `factory_app/app/admin/admin_registry.yaml` to an AdminPortal
+  extension-page registry and removed duplicate Studio route declarations.
+- Removed hosted/social page registrations and unrouted page files from the OSS
+  Studio app bundle.
 
 ## Remaining Findings
 
-### 1. Active Stub/Demo Modules In The First-Party App Bundle
-
-`factory_app/app/modules/messages` and `factory_app/app/modules/contacts` are active modules, not test fixtures. They are explicitly described as stubs and return hardcoded demo data:
-
-- `factory_app/app/modules/messages/module.yaml`
-- `factory_app/app/modules/messages/backend/handler.py`
-- `factory_app/app/modules/contacts/module.yaml`
-- `factory_app/app/modules/contacts/backend/handler.py`
-- `factory_app/app/ui/pages/custom/MessagesPage.jsx`
-- `factory_app/app/ui/pages/custom/MessageThreadPage.jsx`
-- `factory_app/app/ui/components/MessagingTab.jsx`
-- `factory_app/app/ui/components/ContactsTab.jsx`
-
-Production recommendation: either promote these into real persisted social modules or remove them from the default Studio app bundle. Keeping active demo modules conflicts with the no-placeholder runtime rule.
-
-### 2. Studio App Routes Are Split Across Two Sources
-
-`factory_app/app/ui/route_manifest.json` declares concrete Studio page components for several app pages, while `factory_app/app/admin/admin_registry.yaml` also declares admin pages for the same area. Because `mozaiksai/hosts/platform.py` dedupes by first path, route-manifest entries win when paths overlap.
-
-Current drift:
-
-- `/apps/:appId/activity` exists in `admin_registry.yaml` but not in `route_manifest.json`.
-- `AppBuildHistoryPage` is registered in `factory_app/app/admin/index.js`, and `AppOverviewPage` links to `/apps/:appId/activity`, but the route currently falls through to generic `AdminPortal` rather than the custom build-history page.
-- `operations` and `settings` are declared in `admin_registry.yaml` but have no first-party custom route-manifest pages.
-
-Production recommendation: make `route_manifest.json` the first-party Studio page route source and keep `admin_registry.yaml` for AdminPortal/panel pages, or move all app-level Studio pages into AdminPortal. The current hybrid creates unreachable custom components and confusing nav behavior.
-
-### 3. Registered But Unrouted Hosted/Social Pages
-
-Several components are registered in `factory_app/app/admin/index.js` and contain route comments, but no current route manifest or admin registry entry exposes those routes:
-
-- `AppCommunityPage`
-- `AppGovernancePage`
-- `AppGovernanceProposalPage`
-- `AppCollaboratorsPage`
-- `AppRevenueParticipationPage`
-- `RevenueParticipationPlanReviewPage`
-- `RevenueDistributionReviewPage`
-- `MyCommunitiesPage`
-- `MyInvitationsPage`
-- `MyVotesPage`
-- `MyDelegationsPage`
-
-Production recommendation: these should move to `mozaiks-app` if they are hosted-product capabilities, or be backed by real OSS modules and routes if they are intended to ship in the first-party Studio bundle. Do not leave them registered but unreachable.
-
-### 4. Intentional Signature Slots Still Flagged By Vulture
+### 1. Intentional Signature Slots Still Flagged By Vulture
 
 After cleanup, high-confidence vulture findings are signature slots:
 
@@ -80,7 +44,7 @@ After cleanup, high-confidence vulture findings are signature slots:
 
 Recommendation: keep these unless the hook/tool/protocol call contracts are changed. They are not dead behavior in the same sense as unreachable code.
 
-### 5. Standalone Stripe References
+### 2. Standalone Stripe References
 
 No active standalone `Stripe`/`STRIPE` payment references were found in the checked source paths. The only `stripe` hits came from generated LiteLLM model/provider names such as `pinstripes` inside the usage pricing catalog.
 
@@ -96,4 +60,3 @@ No active standalone `Stripe`/`STRIPE` payment references were found in the chec
 - `ruff check factory_app\workflows\AppGenerator\tools\app_validation.py factory_app\workflows\AppGenerator\tools\assembly_phase.py mozaiks_cli\commands\gen.py mozaiksai\core\workflow\orchestration_patterns.py`
 - `python -m pytest tests\test_appgenerator_canonical_generation.py tests\test_appgenerator_managed_capability_smoke.py tests\test_ag2_network_execution_alignment.py -q --no-cov`
 - `python -m pytest --collect-only -q --no-cov`
-

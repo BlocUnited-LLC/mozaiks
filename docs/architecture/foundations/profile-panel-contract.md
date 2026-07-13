@@ -5,7 +5,7 @@ contribute to the user profile page. Profile is the signed-in person's surface:
 identity, personal preferences, personal relationship inventory, and safe
 personal summaries. It is not an app/workspace management surface.
 
-Billing, subscriptions, entitlements, app users, collaborators, deployments,
+Billing, subscriptions, entitlements, app access, collaborators, deployments,
 governance, build runs, and revenue participation belong in Admin Portal or
 Studio. Do not use profile panels to continue app builds or manage app/workspace
 operations.
@@ -171,7 +171,7 @@ Allowed examples:
 Forbidden examples:
 
 - app build history or continue-build controls
-- app users, roles, collaborators, or team settings
+- app access, roles, collaborators, or team settings
 - billing plans, subscriptions, entitlement assignment, or revenue
   participation
 - deployments, domains, hosting, health, incidents, or audit logs

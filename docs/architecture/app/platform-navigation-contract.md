@@ -8,8 +8,8 @@ object being managed, then route to the surface that owns that object.
 
 | Surface | Owns | Examples | Must not own |
 | --- | --- | --- | --- |
-| Profile | The signed-in person | identity, avatar, display name, email, personal preferences, personal social graph, personal invitations, personal votes and delegations | app builds, app users, app billing, deployments, workspace settings, team or org operations |
-| Admin Portal | An app, workspace, team, or org | users, roles, usage, health, integrations, billing, governance, collaborators, revenue participation, audit, deployment and domain posture | personal identity, personal preferences, direct app creation |
+| Profile | The signed-in person | identity, avatar, display name, email, personal preferences, personal social graph, personal invitations, personal votes and delegations | app builds, app access, app billing, deployments, workspace settings, team or org operations |
+| Admin Portal | An app, workspace, team, or org | access, roles, usage, health, integrations, billing, governance, collaborators, revenue participation, audit, deployment and domain posture | personal identity, personal preferences, direct app creation |
 | Studio | Build lifecycle and generated artifacts | create app, import app, build runs, artifact review, promotion, refinement, build history | user profile data, app runtime business behavior, hosted-only provider operations |
 | App Shell | The app's domain work | dashboards, module pages, customer workflows, operational records | account identity, Studio build state, app/workspace administration |
 | Chat Route | A specific conversation or workflow session | direct `chat_id` resume, live workflow interaction, replay of a selected session | global create intent, app portfolio management |
@@ -45,7 +45,7 @@ Profile may render:
   delegations when the relationship follows the user across apps
 
 Profile must not render app/workspace management. Billing plans, subscriptions,
-entitlements, collaborators, deployments, build runs, app users, audit logs, and
+entitlements, collaborators, deployments, build runs, app access, audit logs, and
 team/org settings belong in Admin Portal or Studio.
 
 ## Admin And Studio Boundary
@@ -55,7 +55,7 @@ They can link to each other, but they do not replace each other.
 
 - Use Studio for build runs, generated artifacts, refinement, promotion, and
   unfinished app creation.
-- Use Admin Portal for app users, roles, health, usage, integrations,
+- Use Admin Portal for app access, roles, health, usage, integrations,
   governance, billing, and deployment posture.
 - Use App Shell for the app's normal domain workflow once the app is running.
 

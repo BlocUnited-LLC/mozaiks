@@ -20,17 +20,20 @@ async def test_studio_shell_config_injects_studio_routes():
     assert "/apps/:appId/billing" not in page_paths
     assert "/apps/:appId/hosting" not in page_paths
     assert "/apps/:appId/integrations" in page_paths
-    assert "/apps/:appId/users" in page_paths
+    assert "/apps/:appId/access" in page_paths
+    assert "/apps/:appId/users" not in page_paths
     assert "/apps/:appId/usage" in page_paths
+    assert "/apps/:appId/activity" in page_paths
     assert "/billing" not in page_paths
     assert "/hosting" not in page_paths
     assert "/apps/:appId/build" not in page_paths
     assert "/apps/:appId/deploy" not in page_paths
     assert "/apps/:appId/admin" not in page_paths
     assert "/me" in page_paths
-    # admin_registry.yaml declares operations and settings as app-scope admin pages.
-    assert "/apps/:appId/operations" in page_paths
-    assert "/apps/:appId/settings" in page_paths
+    # admin_registry.yaml is reserved for AdminPortal extension pages, so
+    # unfinished operations/settings pages do not leak into Studio shell routes.
+    assert "/apps/:appId/operations" not in page_paths
+    assert "/apps/:appId/settings" not in page_paths
     assert "/apps" not in header_paths
     assert "/me" not in header_paths
 

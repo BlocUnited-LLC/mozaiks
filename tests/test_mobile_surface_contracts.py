@@ -111,7 +111,8 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "app usage route stays responsive across desktop and mobile widths" in smoke_source
     assert "app support route stays responsive across desktop and mobile widths" in smoke_source
     assert "app billing route stays responsive across desktop and mobile widths" not in smoke_source
-    assert "app users route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app access route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app build history route stays responsive across desktop and mobile widths" in smoke_source
     assert "app hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "mobile app Studio navigation keeps route transitions stable" in smoke_source
     assert "mobile workspace Studio navigation keeps route transitions stable" in smoke_source
@@ -135,19 +136,21 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         "StudioPage": "app Studio root redirects to overview",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
-        "AppUsersPage": "app users route stays responsive across desktop and mobile widths",
+        "AppAccessPage": "app access route stays responsive across desktop and mobile widths",
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",
         "AppIntegrationsPage": "app integrations route stays responsive across desktop and mobile widths",
         "AppSupportPage": "app support route stays responsive across desktop and mobile widths",
+        "AppBuildHistoryPage": "app build history route stays responsive across desktop and mobile widths",
     }
     # Components served from chat-ui or custom pages — not admin console pages
     # covered by the Playwright studio smoke suite.
-    _chat_ui_components = {"ProfilePage", "MessagesPage", "MessageThreadPage"}
+    _chat_ui_components = {"ProfilePage"}
     route_components = {
         page["component"]
         for page in manifest["pages"]
         if page.get("component")
         and page["component"] != "AdminPortal"
+        and page["component"] != "CreateAppRedirectPage"
         and page["component"] not in _chat_ui_components
     }
 
@@ -159,24 +162,10 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         "AppStudioChrome",
         "CreateAppRedirectPage",
         "RefinementControls",
-        # StudioPage-routed pages (no component: in admin_registry; routed via path matching)
-        "AppBuildHistoryPage",
         # Sub-components used by route-backed pages (not directly route-backed)
         "CarryForwardReportSummary",
         "CarryForwardReportPanel",
         "PricingHealthPanel",
-        # Community module pages — route-registered per-app when community module is enabled
-        "AppCommunityPage",
-        "AppGovernancePage",
-        "AppGovernanceProposalPage",
-        "AppCollaboratorsPage",
-        "AppRevenueParticipationPage",
-        "RevenueParticipationPlanReviewPage",
-        "RevenueDistributionReviewPage",
-        "MyCommunitiesPage",
-        "MyInvitationsPage",
-        "MyVotesPage",
-        "MyDelegationsPage",
     }
 
 
@@ -189,20 +178,19 @@ def test_factory_app_react_files_are_classified() -> None:
         if not relative.startswith("factory_app/build_context/")
     }
     # Components registered from chat-ui or custom pages/ (not factory_app/admin/pages/)
-    _non_admin_page_components = {"MessagesPage", "MessageThreadPage", "ProfilePage"}
+    _non_admin_page_components = {"ProfilePage"}
     route_backed_files = {
         f"factory_app/app/admin/pages/{page['component']}.jsx"
         for page in manifest["pages"]
         if page.get("component")
         and page["component"] != "AdminPortal"
+        and page["component"] != "CreateAppRedirectPage"
         and page["component"] not in _non_admin_page_components
     }
     support_files = {
         "factory_app/app/admin/pages/AppStudioChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
         "factory_app/app/admin/pages/RefinementControls.jsx",
-        # StudioPage-routed pages (no component: in admin_registry; routed via path matching)
-        "factory_app/app/admin/pages/AppBuildHistoryPage.jsx",
         # Carry-forward display sub-components (used by route-backed pages)
         "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
         "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",
@@ -212,25 +200,6 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         # AppReview workflow agentic UI artifact — emitted by present_review_summary
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
-        # Community module pages — route-registered per-app when community module is enabled
-        "factory_app/app/admin/pages/AppCommunityPage.jsx",
-        "factory_app/app/admin/pages/AppGovernancePage.jsx",
-        "factory_app/app/admin/pages/AppGovernanceProposalPage.jsx",
-        "factory_app/app/admin/pages/AppCollaboratorsPage.jsx",
-        "factory_app/app/admin/pages/AppRevenueParticipationPage.jsx",
-        "factory_app/app/admin/pages/RevenueParticipationPlanReviewPage.jsx",
-        "factory_app/app/admin/pages/RevenueDistributionReviewPage.jsx",
-        "factory_app/app/admin/pages/MyCommunitiesPage.jsx",
-        "factory_app/app/admin/pages/MyInvitationsPage.jsx",
-        "factory_app/app/admin/pages/MyVotesPage.jsx",
-        "factory_app/app/admin/pages/MyDelegationsPage.jsx",
-        # Messages/contacts pages — custom route-backed pages for the messages module
-        "factory_app/app/ui/pages/custom/MessagesPage.jsx",
-        "factory_app/app/ui/pages/custom/MessageThreadPage.jsx",
-        "factory_app/app/ui/components/ContactsProfilePanel.jsx",
-        "factory_app/app/ui/components/ContactsTab.jsx",
-        "factory_app/app/ui/components/MessagingProfilePanel.jsx",
-        "factory_app/app/ui/components/MessagingTab.jsx",
     }
 
     assert react_files == route_backed_files | support_files

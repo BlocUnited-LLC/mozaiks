@@ -142,6 +142,26 @@ function buildDashboardMetrics(snapshot, totalCost, totalRuns) {
 }
 
 
+// ─── Next Step Callout ────────────────────────────────────────────────────────
+
+function NextStepCallout({ nextStep, action }) {
+  if (!nextStep && !action) return null
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/6 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-primary/55">Next step</div>
+        <p className="mt-1 text-sm leading-relaxed text-foreground">{nextStep}</p>
+      </div>
+      {action?.href && action?.label ? (
+        <LinkButton to={action.href} variant="secondary" size="sm" className="shrink-0 font-semibold">
+          {action.label}
+        </LinkButton>
+      ) : null}
+    </div>
+  )
+}
+
+
 // ─── KPI Icons ────────────────────────────────────────────────────────────────
 
 function IconRevenue({ className = '' }) {
@@ -436,15 +456,14 @@ export default function AppOverviewPage() {
           summary={data.summary}
           dataMode={dataMode}
           showBanner
-          nextStep={nextStep}
-          nextStepAction={primaryAction}
           title="Overview"
-          subtitle="Top-level app performance, cost, access, usage, and build state."
-          currentSection="overview"
+          subtitle="Top-level performance, cost, access, usage, and build state."
           summaryItems={[]}
           actions={[{ id: 'refresh', label: 'Refresh', variant: 'outline' }]}
           onAction={(id) => id === 'refresh' && refresh()}
         />
+
+        {nextStep && <NextStepCallout nextStep={nextStep} action={primaryAction} />}
 
         <KpiGrid items={kpiItems} />
 

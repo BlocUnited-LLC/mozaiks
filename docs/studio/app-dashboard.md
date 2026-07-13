@@ -144,7 +144,7 @@ operator follow-up?
 
 ## Access
 
-**Route:** `/apps/:appId/users`
+**Route:** `/apps/:appId/access`
 
 **Visible label:** `Access`
 
@@ -189,8 +189,7 @@ actions are implemented.
 
 **UX rules:**
 
-- Keep the route stable for now, but user-facing copy should say `Access`, not
-  `Users`.
+- User-facing copy should say `Access`, not `Users`.
 - Do not make Overview a user-management screen. Overview only needs a compact
   access summary and alert count.
 - Access statuses should be operational: active, invited, suspended, blocked,
@@ -243,6 +242,8 @@ specific reason the user opened them:
 | Page | Route | When to link |
 | --- | --- | --- |
 | Integration setup | `/apps/:appId/integrations` | From Overview connected-services blockers or workspace Integrations. |
+| Health diagnostics | `/apps/:appId/health` | From Overview or Support when runtime, workflow, or integration posture needs investigation. |
+| Build history | `/apps/:appId/activity` | From Overview or Support when the operator needs artifact versions, validation state, or carry-forward audit detail. |
 
 Detail pages can use stronger diagnostic density because the user arrives with
 a specific problem.

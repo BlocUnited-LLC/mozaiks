@@ -235,14 +235,14 @@ class TestBuildAdminShellRoutes:
         assert build_admin_shell_routes(registry) == []
 
     def test_enabled_page_produces_route(self):
-        registry = _make_registry(_page(id="users", label="Users", path="/admin/users"))
+        registry = _make_registry(_page(id="access", label="Access", path="/admin/access"))
         routes = build_admin_shell_routes(registry)
         assert len(routes) == 1
         r = routes[0]
-        assert r["path"] == "/admin/users"
-        assert r["label"] == "Users"
-        assert r["admin_page"] == "users"
-        assert r["title"] == "Users"
+        assert r["path"] == "/admin/access"
+        assert r["label"] == "Access"
+        assert r["admin_page"] == "access"
+        assert r["title"] == "Access"
 
     def test_disabled_page_excluded(self):
         registry = _make_registry(

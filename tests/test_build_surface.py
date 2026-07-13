@@ -45,9 +45,13 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert '"path": "/settings"' not in manifest_source
     assert '"path": "/apps"' in manifest_source
     assert '"component": "AppsPage"' in manifest_source
-    assert '"path": "/apps/:appId/users"' in manifest_source
+    assert '"path": "/apps/:appId/access"' in manifest_source
+    assert '"component": "AppAccessPage"' in manifest_source
+    assert '"path": "/apps/:appId/users"' not in manifest_source
     assert '"path": "/apps/:appId/usage"' in manifest_source
     assert '"path": "/apps/:appId/health"' in manifest_source
+    assert '"path": "/apps/:appId/activity"' in manifest_source
+    assert '"component": "AppBuildHistoryPage"' in manifest_source
     assert '"path": "/apps/:appId/billing"' not in manifest_source
     assert '"path": "/apps/:appId/hosting"' not in manifest_source
     assert '"path": "/apps/:appId/build"' not in manifest_source
@@ -76,8 +80,10 @@ def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -
     assert "registerComponent('WorkspaceIntegrationsPage'" in admin_source
     assert "registerComponent('WorkspaceHostingPage'" not in admin_source
     assert "registerComponent('AppHealthPage'" in admin_source
+    assert "registerComponent('AppAccessPage'" in admin_source
     assert "registerComponent('AppHostingPage'" not in admin_source
     assert "./pages/AppHealthPage.jsx" in admin_source
+    assert "./pages/AppAccessPage.jsx" in admin_source
     assert "./pages/AppHostingPage.jsx" not in admin_source
     assert "AppBuildPage" not in source
     assert "AppDeployPage" not in source
@@ -280,9 +286,10 @@ def test_integrations_routes_have_global_management_and_app_detail() -> None:
     assert '"/apps/:appId/integrations"' in manifest_source
     assert '"component": "WorkspaceIntegrationsPage"' in manifest_source
     assert '"include": false' in manifest_source
-    assert "path: /integrations" in admin_registry
-    assert "path: /apps/:appId/integrations" in admin_registry
-    assert "show_in_navigation: false" in admin_registry
+    assert "pages: []" in admin_registry
+    assert "path: /integrations" not in admin_registry
+    assert "path: /apps/:appId/integrations" not in admin_registry
+    assert "show_in_navigation: false" not in admin_registry
     assert "page.goto(`/apps/${APP_ID}/integrations`)" in playwright_source
     assert "page.goto('/integrations')" in playwright_source
 

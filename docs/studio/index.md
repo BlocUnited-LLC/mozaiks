@@ -13,7 +13,7 @@ Studio has two scopes:
 | Scope | Routes | Purpose |
 | --- | --- | --- |
 | Workspace Studio | `/apps`, `/usage`, `/integrations` | Manage the portfolio: app records, workspace-wide usage, and shared provider setup. |
-| App Studio | `/apps/:appId/overview`, `/apps/:appId/users`, `/apps/:appId/usage` | Manage one app: current state, access, and usage. |
+| App Studio | `/apps/:appId/overview`, `/apps/:appId/access`, `/apps/:appId/usage`, `/apps/:appId/support` | Manage one app: current state, access, usage, and support follow-up. |
 
 Hidden detail routes can exist when a task needs deeper diagnostics:
 
@@ -21,6 +21,7 @@ Hidden detail routes can exist when a task needs deeper diagnostics:
 | --- | --- |
 | `/apps/:appId/health` | Deep operational diagnostics linked from Overview only when needed. |
 | `/apps/:appId/integrations` | App-specific integration setup details linked from Overview or workspace Integrations. |
+| `/apps/:appId/activity` | Build history and artifact preservation audit linked from Overview or Support when needed. |
 
 `/create` and `/apps/new` are workflow entrypoints, not persistent Studio
 navigation. Create always starts a new app journey. Continue-build belongs on
@@ -38,6 +39,7 @@ Every Studio page should answer a concrete operator question:
 | Overview | What is happening with this app, and what should I do next? |
 | Access | Who can use this app, what can they do, and who is blocked? |
 | App Usage | Which chats and workflows are driving this app's tokens and cost? |
+| Support | Which user-facing issues, escalations, or stalled runs need operator follow-up? |
 
 If information does not help answer that page's question, it should move to a
 drill-down, hover/detail state, or a different page.
@@ -48,8 +50,8 @@ drill-down, hover/detail state, or a different page.
   `Integrations`, `Create App`, `Continue Build`.
 - Keep internal terms out of primary UI copy: `factory_app`, `Control Plane`,
   `workflow_sequence`, `extension_registry`, `adapter`.
-- Show health as a compact operational signal, not a standalone primary app
-  tab.
+- Keep Health and Build History routable as diagnostics, but do not make them
+  primary navigation unless the operator is following a specific issue.
 - Show integration setup globally first. App-specific integration detail is a
   secondary route.
 - Use `Chats` for end-user activity counts. Avoid `tracked executions` in the
@@ -78,7 +80,9 @@ large explanatory blocks inside the app.
 The current Studio routes are declared in:
 
 - `factory_app/app/ui/route_manifest.json`
-- `factory_app/app/admin/admin_registry.yaml`
+
+`factory_app/app/admin/admin_registry.yaml` is reserved for AdminPortal extension
+pages and should not duplicate first-party Studio routes.
 
 Reusable UI primitives are owned by `chat-ui` and re-exported through:
 

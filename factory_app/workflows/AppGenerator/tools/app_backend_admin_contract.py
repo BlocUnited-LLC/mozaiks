@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 APP_BACKEND_ADMIN_SCHEMA_VERSION = "mozaiks.admin.app_backend.v1"
 APP_BACKEND_ADMIN_SECTION_IDS = (
     "overview",
-    "users",
+    "access",
     "billing",
     "usage",
     "operations",
@@ -58,7 +58,7 @@ class AppBackendAdminPanel(AppBackendAdminContractModel):
     description: str | None = None
     section: Literal[
         "overview",
-        "users",
+        "access",
         "billing",
         "usage",
         "operations",

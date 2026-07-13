@@ -98,17 +98,17 @@ const DEMO_RUNTIME_SUMMARY = {
 
 const DEMO_APP_CONNECTORS = {
   'member-growth-studio': [
-    { service: 'mozaikspay', display_name: 'MozaiksPay', secret_available: true, status: 'active' },
     { service: 'slack', display_name: 'Slack', secret_available: true, status: 'active' },
+    { service: 'segment', display_name: 'Segment', secret_available: true, status: 'active' },
   ],
   'support-ops-assistant': [
-    { service: 'salesforce', display_name: 'Salesforce', secret_available: true, status: 'active' },
+    { service: 'resend', display_name: 'Resend', secret_available: true, status: 'active' },
   ],
   'revenue-review-studio': [
-    { service: 'mozaikspay', display_name: 'MozaiksPay', secret_available: false, status: 'metadata_only' },
+    { service: 's3', display_name: 'AWS S3', secret_available: false, status: 'metadata_only' },
   ],
   'campaign-revision-workbench': [
-    { service: 'mailchimp', display_name: 'Mailchimp', secret_available: false, status: 'metadata_only' },
+    { service: 'slack', display_name: 'Slack', secret_available: false, status: 'metadata_only' },
   ],
 }
 

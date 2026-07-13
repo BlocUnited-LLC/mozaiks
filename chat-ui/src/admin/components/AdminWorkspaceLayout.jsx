@@ -33,7 +33,7 @@ const ICON_MAP = {
   billing:    RiMoneyDollarCircleFill,
   server:     RiServerFill,
   dashboard:  RiDashboardFill,
-  users:      RiUser3Fill,
+  access:     RiUser3Fill,
   operations: RiServerFill,
   settings:   RiSettings3Fill,
   plug:       RiPlugLine,

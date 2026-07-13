@@ -953,8 +953,8 @@ test('app support route stays responsive across desktop and mobile widths', asyn
   }
 });
 
-test('app users route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto(`/apps/${APP_ID}/users`);
+test('app access route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto(`/apps/${APP_ID}/access`);
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Access', exact: true })).toBeVisible();
@@ -962,6 +962,26 @@ test('app users route stays responsive across desktop and mobile widths', async 
   await expect(main.getByPlaceholder('Search by name, email, status, or plan')).toBeVisible();
   await expect(main.getByRole('button', { name: 'Export' }).first()).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Access state' })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
+test('app build history route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto(`/apps/${APP_ID}/activity`);
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Build History', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Artifact versions' })).toBeVisible();
+  await expect(main.getByText('Build artifact').first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Recent workflow runs' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -987,7 +1007,7 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
       detail: async () => expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible(),
     },
     {
-      href: `/apps/${APP_ID}/users`,
+      href: `/apps/${APP_ID}/access`,
       heading: 'Access',
       detail: async () => expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible(),
     },

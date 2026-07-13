@@ -20,9 +20,9 @@ def test_python_app_backend_admin_contract_accepts_builtin_and_schema_panels() -
             "schema_version": "mozaiks.admin.app_backend.v1",
             "panels": [
                 {
-                    "id": "app.users",
-                    "label": "Users",
-                    "section": "users",
+                    "id": "app.access",
+                    "label": "Access",
+                    "section": "access",
                     "renderer": "builtin",
                     "builtin_panel": "users",
                 },
@@ -73,9 +73,9 @@ def test_python_app_backend_admin_contract_rejects_builtin_without_builtin_panel
                 "schema_version": "mozaiks.admin.app_backend.v1",
                 "panels": [
                     {
-                        "id": "app.users",
-                        "label": "Users",
-                        "section": "users",
+                        "id": "app.access",
+                        "label": "Access",
+                        "section": "access",
                         "renderer": "builtin",
                     }
                 ],
@@ -94,7 +94,7 @@ def test_appgenerator_structured_output_contract_matches_runtime_schema_version_
     ]
     assert models["AppBackendAdminPanel"]["fields"]["section"]["values"] == [
         "overview",
-        "users",
+        "access",
         "billing",
         "usage",
         "operations",

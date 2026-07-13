@@ -8,18 +8,19 @@ App Studio keeps these pages visible instead:
 
 ```text
 /apps/:appId/overview
-/apps/:appId/users
+/apps/:appId/access
 /apps/:appId/usage
+/apps/:appId/support
 ```
 
 Framework-owned admin composition remains internal and host-owned. Build,
-Usage, and app access are product surfaces; they are not admin
-sections. App health is summarized inside Overview. Deep diagnostic routes such
-as `/apps/:appId/health` and `/apps/:appId/integrations` may remain routable but
-hidden from primary navigation when they are needed for support or setup
-detail. Hosted deployments may provide billing or hosting surfaces through
-their own workspace routes or capability packs; the OSS factory Studio does
-not hardcode those hosted product routes.
+Usage, app access, and support are product surfaces; they are not admin
+sections. Deep diagnostic routes such as `/apps/:appId/health`,
+`/apps/:appId/activity`, and `/apps/:appId/integrations` may remain routable but
+hidden from primary navigation when they are needed for support, build history,
+or setup detail. Hosted deployments may provide billing or hosting surfaces
+through their own workspace routes or capability packs; the OSS factory Studio
+does not hardcode those hosted product routes.
 
 Terminology note:
 
@@ -104,7 +105,7 @@ taxonomy for:
 The canonical built-in ids are:
 
 ```text
-overview | users | usage | operations | settings
+overview | access | usage | operations | settings
 ```
 
 The taxonomy is fixed by the framework today. If a future product genuinely
@@ -119,9 +120,11 @@ Implementation rule:
 - Studio navigation stays deterministic and product-scoped; admin panels do
   not add, rename, or reorder Studio nav items
 
-First-party Studio admin registry entries must declare `surfaces: [studio]` so
-they do not leak into the generic platform shell. Generated app admin registries
-normally omit `surfaces` and are mounted by the platform host.
+First-party Studio routes must be declared in
+`factory_app/app/ui/route_manifest.json`. The first-party
+`factory_app/app/admin/admin_registry.yaml` is reserved for AdminPortal
+extension pages and should not duplicate Studio product routes. Generated app
+admin registries normally omit `surfaces` and are mounted by the platform host.
 
 ## Feature Admin Contract
 
@@ -130,7 +133,7 @@ Feature-owned admin UI lives in `modules/{module}/contracts/admin.yaml`.
 Each panel must declare one semantic section:
 
 ```text
-overview | users | billing | usage | activity | settings | integrations | support
+overview | access | billing | usage | activity | settings | integrations | support
 ```
 
 The canonical module admin schema is `mozaiks.admin.v2`.

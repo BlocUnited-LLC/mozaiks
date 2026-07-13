@@ -2,7 +2,7 @@ export const APP_BACKEND_ADMIN_SCHEMA_VERSION = 'mozaiks.admin.app_backend.v1';
 
 export const APP_ADMIN_SECTION_IDS = Object.freeze([
   'overview',
-  'users',
+  'access',
   'billing',
   'usage',
   'operations',

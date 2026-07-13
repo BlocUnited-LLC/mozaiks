@@ -57,7 +57,6 @@ _PANEL_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForw
 _SUMMARY_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "CarryForwardReportSummary.jsx"
 _HISTORY_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppBuildHistoryPage.jsx"
 _OVERVIEW_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "AppOverviewPage.jsx"
-_CONSOLE_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "pages" / "StudioPage.jsx"
 _INDEX_PATH = REPO_ROOT / "factory_app" / "app" / "admin" / "index.js"
 
 
@@ -558,16 +557,16 @@ def test_overview_carry_forward_panel_still_mounted():
 
 
 # ---------------------------------------------------------------------------
-# 32. StudioPage routes /activity to AppBuildHistoryPage
+# 32. route_manifest routes /activity to AppBuildHistoryPage
 # ---------------------------------------------------------------------------
 
 def test_console_page_routes_activity_to_build_history():
-    src = _CONSOLE_PATH.read_text(encoding="utf-8")
+    src = (REPO_ROOT / "factory_app" / "app" / "ui" / "route_manifest.json").read_text(encoding="utf-8")
     assert "AppBuildHistoryPage" in src, (
-        "StudioPage must import and route to AppBuildHistoryPage"
+        "route_manifest.json must route /activity to AppBuildHistoryPage"
     )
-    assert "activity" in src, (
-        "StudioPage must match /activity path"
+    assert '"/apps/:appId/activity"' in src, (
+        "route_manifest.json must declare /apps/:appId/activity"
     )
 
 

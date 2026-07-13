@@ -4,15 +4,15 @@ import { AppAdminPanels } from '../../pages/AppAdminDashboard.jsx'
 export function UsersSection({ extensionPanels }) {
   return (
     <SectionFrame
-      title="Users"
+      title="Access"
       description="Members, roles, permissions, and account-level access controls."
     >
       <AppAdminPanels
         embedded
-        section="users"
+        section="access"
         showNoBackend={false}
         emptyState={
-          <EmptyState>No user management backend is connected for this app yet.</EmptyState>
+          <EmptyState>No access management backend is connected for this app yet.</EmptyState>
         }
       />
       <AdminExtensionPanels panels={extensionPanels} />

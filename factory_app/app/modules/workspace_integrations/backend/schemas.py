@@ -10,24 +10,6 @@ from typing import Any
 
 INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
     {
-        "id": "mozaikspay",
-        "name": "MozaiksPay",
-        "category": "payments",
-        "description": "Managed payment, subscription, and billing portal provider for Mozaiks apps.",
-        "required_secrets": [
-            "MOZAIKSPAY_API_BASE",
-            "MOZAIKSPAY_CLIENT_ID",
-            "MOZAIKSPAY_CLIENT_SECRET",
-        ],
-        "optional_secrets": ["MOZAIKSPAY_API_KEY"],
-        "setup_steps": [
-            "Provision a MozaiksPay client for this app from the hosted billing/admin flow.",
-            "Copy the MozaiksPay API base URL and generated client ID.",
-            "Store the client secret in the app connector vault or MOZAIKSPAY_CLIENT_SECRET.",
-            "Use the mozaikspay managed capability pack for generated billing and usage pages.",
-        ],
-    },
-    {
         "id": "resend",
         "name": "Resend",
         "category": "email",
@@ -38,19 +20,6 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Sign in to resend.com → API Keys",
             "Create an API key with Send access",
             "Verify your sending domain under Domains",
-        ],
-    },
-    {
-        "id": "sendgrid",
-        "name": "SendGrid",
-        "category": "email",
-        "description": "Email delivery, marketing campaigns, and analytics.",
-        "required_secrets": ["SENDGRID_API_KEY"],
-        "optional_secrets": ["SENDGRID_FROM_EMAIL"],
-        "setup_steps": [
-            "Sign in to SendGrid → Settings → API Keys",
-            "Create an API key with Mail Send permission",
-            "Verify your sender identity under Sender Authentication",
         ],
     },
     {
@@ -103,18 +72,6 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "In AWS IAM, create a user with a scoped S3 policy",
             "Generate Access Key ID and Secret Access Key under Security Credentials",
             "Create or identify the S3 bucket this app will use",
-        ],
-    },
-    {
-        "id": "cloudinary",
-        "name": "Cloudinary",
-        "category": "storage",
-        "description": "Image and video upload, transformation, and delivery CDN.",
-        "required_secrets": ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"],
-        "optional_secrets": [],
-        "setup_steps": [
-            "Sign in to Cloudinary Console → Settings → API Keys",
-            "Copy the Cloud Name, API Key, and API Secret",
         ],
     },
     {

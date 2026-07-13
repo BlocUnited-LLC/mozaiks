@@ -33,9 +33,9 @@ _ADMIN_CONFIG = {
     "schema_version": "mozaiks.admin.app_backend.v1",
     "panels": [
         {
-            "id": "app.users",
-            "label": "Users",
-            "section": "users",
+            "id": "app.access",
+            "label": "Access",
+            "section": "access",
             "order": 10,
             "renderer": "builtin",
             "builtin_panel": "users",
@@ -78,9 +78,9 @@ async def _get_admin_config():
   "schema_version": "mozaiks.admin.app_backend.v1",
   "panels": [
     {
-      "id": "app.users",
-      "label": "Users",
-      "section": "users",
+      "id": "app.access",
+      "label": "Access",
+      "section": "access",
       "order": 10,
       "renderer": "builtin",
       "builtin_panel": "users",
@@ -124,7 +124,7 @@ Shared panel fields:
 - `id`: stable panel id
 - `label`: human-facing label
 - `section`: one of
-  `overview | users | billing | usage | activity | settings | integrations | support`
+  `overview | access | billing | usage | activity | settings | integrations | support`
 - `order`: sort order within section
 - `renderer`: one of `builtin | schema | custom_component`
 - `permissions`: optional permission or role ids enforced by the backend

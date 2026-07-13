@@ -65,15 +65,18 @@ App-level routes:
 - `/apps/:appId` -> redirects to `/apps/:appId/overview`
 - `/apps/:appId/overview` -> App Studio overview with operational health summary
 - `/apps/:appId/health` -> deep app health diagnostics, hidden from primary navigation
-- `/apps/:appId/users` -> app access
+- `/apps/:appId/access` -> app access
 - `/apps/:appId/usage` -> app usage
 - `/apps/:appId/integrations` -> app integration setup detail, hidden from primary navigation
+- `/apps/:appId/support` -> app support follow-up, help desk notes, and stalled run triage
+- `/apps/:appId/activity` -> app build history, artifact versions, and carry-forward audit detail, hidden from primary navigation
 
 Primary app navigation is:
 
 - Overview
 - Access
 - Usage
+- Support
 
 The Studio route model is canonical. Do not add route aliases for
 retired customer-facing terms such as `Hub`, `Treasury`, `Adapters`,
@@ -95,9 +98,11 @@ product billing routes.
 | `/apps/:appId` | App Studio | Redirects to app overview |
 | `/apps/:appId/overview` | App Overview | App-scoped summary, next actions, operational health, connected services, build state, and activity |
 | `/apps/:appId/health` | App Health Diagnostics | Deep diagnostics across runtime, workflows, hosting, and integrations; routable but hidden from primary navigation |
-| `/apps/:appId/users` | App Access | App-scoped account access, plan assignment, and access blockers |
+| `/apps/:appId/access` | App Access | App-scoped account access, plan assignment, and access blockers |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
 | `/apps/:appId/integrations` | App Integration Setup | App-declared integration needs with workspace provider status; routable but hidden from primary navigation |
+| `/apps/:appId/support` | App Support | App-scoped help desk, escalations, stalled runs, and support diagnostics |
+| `/apps/:appId/activity` | Build History | Build artifact versions, validation state, and carry-forward audit detail; routable but hidden from primary navigation |
 
 ## Lifecycle States
 
@@ -134,6 +139,7 @@ Behavior expectations:
 - overview
 - access
 - usage
+- support
 
 ## Non-Canonical Terms
 

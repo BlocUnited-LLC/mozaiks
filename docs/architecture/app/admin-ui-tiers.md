@@ -9,7 +9,7 @@ components and broken Studio layouts.
 ## Tier 1 — AdminPortal Schema Panels
 
 **What it is:** Panels rendered inside the framework-owned AdminPortal shell at
-`/admin`. Panels slot into semantic admin sections (`overview`, `users`,
+`/admin`. Panels slot into semantic admin sections (`overview`, `access`,
 `billing`, `usage`, `activity`, `operations`, `settings`, `integrations`,
 `support`) without owning their own route.
 

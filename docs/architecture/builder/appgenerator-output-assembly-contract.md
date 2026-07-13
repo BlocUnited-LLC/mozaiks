@@ -202,7 +202,7 @@ It produces `AdminRegistryOutput` with two payloads:
 Rules:
 
 - Always emits `overview` and `settings` app-scope pages
-- Includes additional **standard** pages (`users`, `billing`, `usage`, `activity`, `operations`, `integrations`, `support`) based on `app_build_plan.capability_packs` entity domains and `auth_strategy`
+- Includes additional **standard** pages (`access`, `billing`, `usage`, `activity`, `operations`, `integrations`, `support`) based on `app_build_plan.capability_packs` entity domains and `auth_strategy`
 - Includes **operator-only** pages (e.g. `hosting`) only when `capability_packs` is non-empty and explicitly targets hosted/operator app management — never in plain OSS contexts without workspace build context
 - Uses `scope: app` for all generated app pages; workspace-scope pages only for hosted operator contexts
 - Hosted global operator registries belong to hosted product workspaces and must not be emitted into standard generated app bundles
