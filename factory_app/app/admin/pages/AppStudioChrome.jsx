@@ -151,7 +151,7 @@ function AppIdentityMark({ summary, appId, size = 'md', logoOverride = null, cla
   const sizeClasses = {
     sm: 'h-8 w-8 text-xs rounded-lg',
     md: 'h-11 w-11 text-sm rounded-xl',
-    lg: 'h-[5rem] w-[5rem] text-xl rounded-2xl',
+    lg: 'h-24 w-24 text-2xl rounded-2xl',
   }
   const sz = sizeClasses[size] || sizeClasses.md
   const appName = getAppName(summary, appId)
@@ -213,7 +213,7 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
     <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-md shadow-black/8">
 
       {/* ── Banner strip ──────────────────────────────────────────────────── */}
-      <div className="relative h-44 sm:h-52">
+      <div className="relative h-32 sm:h-40">
 
         {bannerSrc ? (
           <img
@@ -248,7 +248,7 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
       <div className="px-5 pb-5 sm:px-6 sm:pb-6">
 
         {/* Logo row — negative margin pulls it up over the banner edge */}
-        <div className="-mt-7 mb-4 flex items-end justify-between">
+        <div className="-mt-12 mb-4 flex items-end justify-between">
 
           {/* Logo with inline camera button */}
           <div className="relative shrink-0">
