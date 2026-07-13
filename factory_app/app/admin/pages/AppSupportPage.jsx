@@ -256,18 +256,6 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
         className="flex-1 min-h-0"
       />
 
-      {/* Stats bar */}
-      <div className="flex items-center gap-3 border-t border-border/10 px-4 py-1.5 text-[11px] text-muted-foreground/45">
-        <span>{formatCompactNumber(run.agent_turns, '0')} turns</span>
-        <span className="text-border/30">·</span>
-        <span>{formatCompactNumber(run.tool_calls, '0')} tools</span>
-        {Number(run.errors || 0) > 0 && (
-          <>
-            <span className="text-border/30">·</span>
-            <span className="text-destructive/60">{run.errors} errors</span>
-          </>
-        )}
-      </div>
     </div>
   )
 }
