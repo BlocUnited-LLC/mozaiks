@@ -58,6 +58,14 @@ class _FakeChatSessionsCollection:
         return _FakeAsyncCursor(docs)
 
 
+class _FakeAppRegistryCollection:
+    def __init__(self, docs):
+        self.docs = list(docs)
+
+    def find(self, _query, _projection):
+        return _FakeAsyncCursor(self.docs)
+
+
 @pytest.mark.asyncio
 async def test_build_persisted_admin_stats_reads_chat_session_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
     collection = _FakeChatSessionsCollection(
@@ -213,10 +221,22 @@ async def test_admin_usage_endpoint_delegates_to_runtime_usage_ledger(monkeypatc
                 "totals": {"total_tokens": 123},
             }
 
+    class _FakeAlertLedger:
+        async def query_alerts(self, *, app_id=None, user_id=None, limit=100):
+            return [{"app_id": app_id, "user_id": user_id, "limit": limit}]
+
     monkeypatch.setattr(
         "mozaiksai.core.usage.get_runtime_usage_ledger",
         lambda: _FakeLedger(),
     )
+    monkeypatch.setattr(
+        "mozaiksai.core.usage.get_runtime_token_budget_alert_ledger",
+        lambda: _FakeAlertLedger(),
+    )
+    async def passthrough_usage(usage):  # noqa: ANN001
+        return usage
+
+    monkeypatch.setattr(admin_router, "_enrich_usage_with_app_registry", passthrough_usage)
 
     response = await admin_router.get_admin_usage(
         app_id="app-1",
@@ -230,4 +250,35 @@ async def test_admin_usage_endpoint_delegates_to_runtime_usage_ledger(monkeypatc
         "user_id": "user-1",
         "limit": 50,
         "totals": {"total_tokens": 123},
+        "token_budget_alerts": [{"app_id": "app-1", "user_id": "user-1", "limit": 50}],
     }
+
+
+@pytest.mark.asyncio
+async def test_admin_usage_enrichment_infers_app_from_active_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _FakeAppRegistryCollection(
+        [
+            {
+                "_id": "appreg_1",
+                "app_id": "registry-app",
+                "name": "Client Intake",
+                "name_status": "named",
+                "name_source": "value_engine_concept",
+                "lifecycle_state": "building",
+                "active_chat_id": "chat-1",
+            }
+        ]
+    )
+    monkeypatch.setattr(admin_router, "_get_app_registry_collection", lambda: registry)
+
+    usage = await admin_router._enrich_usage_with_app_registry(
+        {
+            "by_run": [{"chat_id": "chat-1", "prompt_tokens": 10}],
+            "events": [{"chat_id": "chat-1", "completion_tokens": 3}],
+        }
+    )
+
+    assert usage["by_run"][0]["app_id"] == "registry-app"
+    assert usage["by_run"][0]["app_name"] == "Client Intake"
+    assert usage["events"][0]["app_id"] == "registry-app"
+    assert usage["events"][0]["lifecycle_state"] == "building"

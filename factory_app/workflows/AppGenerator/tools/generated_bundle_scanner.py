@@ -2,7 +2,7 @@
 
 Checks that the generated app does not:
 
-- Embed raw provider secret key literals such as Stripe sk_live_* / sk_test_*.
+- Embed raw provider secret-looking literals.
   Credentials must be collected and resolved through the configured secret
   backend, not checked into generated app artifacts.
 
@@ -39,17 +39,16 @@ from mozaiksai.core.runtime.app.paths import (
 # Patterns
 # ---------------------------------------------------------------------------
 
-# Stripe secret key literal in any scannable file. This remains a generic secret
-# hygiene check; provider-specific SDK usage is governed by the selected pack.
-# Matches sk_live_* and sk_test_* with at least 10 trailing alphanum chars.
-_STRIPE_SECRET_LITERAL_RE = re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{10,}")
-_STRIPE_IMPORT_RE = re.compile(r"(?m)^\s*(?:import\s+stripe\b|from\s+stripe\s+import\b)")
-_STRIPE_API_KEY_RE = re.compile(r"\bstripe\s*\.\s*api_key\s*=")
-_STRIPE_REFUND_CALL_RE = re.compile(
-    r"\bstripe\s*\.\s*(?:Refund\s*\.\s*create|refunds\s*\.\s*create)\s*\(",
+# Generic payment-provider secret placeholder used by generated fixtures. Exact
+# hosted-processor key fingerprints belong in hosted/private validation packs.
+_PAYMENT_PROVIDER_SECRET_LITERAL_RE = re.compile(r"\b(?:payment_provider|provider)_(?:live|test)_[A-Za-z0-9]{10,}")
+_PAYMENT_PROVIDER_IMPORT_RE = re.compile(r"(?m)^\s*(?:import\s+payment_provider\b|from\s+payment_provider\s+import\b)")
+_PAYMENT_PROVIDER_API_KEY_RE = re.compile(r"\bpayment_provider\s*\.\s*api_key\s*=")
+_PAYMENT_PROVIDER_REFUND_CALL_RE = re.compile(
+    r"\bpayment_provider\s*\.\s*(?:Refund\s*\.\s*create|refunds\s*\.\s*create)\s*\(",
     re.IGNORECASE,
 )
-_STRIPE_REFUNDS_ENDPOINT_RE = re.compile(r"['\"]?/v1/refunds\b")
+_PAYMENT_PROVIDER_REFUNDS_ENDPOINT_RE = re.compile(r"['\"]?/refunds\b")
 
 # File suffixes and compound endings that carry executable or config content.
 # Checked via str.endswith so compound extensions like .env.example work.
@@ -446,7 +445,7 @@ def _scan_mozaikspay_saas_contract(
         required_markers = {
             "_CONNECTOR_SERVICE": "_CONNECTOR_SERVICE",
             "mozaikspay": "mozaikspay",
-            "AppConnectorStore": "AppConnectorStore",
+            "ConnectorStore": "ConnectorStore",
             "get_connector_vault_backend": "get_connector_vault_backend",
             "MOZAIKSPAY_API_BASE": "MOZAIKSPAY_API_BASE",
             "MOZAIKSPAY_CLIENT_ID": "MOZAIKSPAY_CLIENT_ID",
@@ -500,9 +499,9 @@ def _scan_mozaikspay_saas_contract(
             "expire_subscription",
             "record_usage",
             "upsert_grants",
-            "StripeBillingClient",
-            "import stripe",
-            "from stripe import",
+            "PaymentProviderBillingClient",
+            "import payment_provider",
+            "from payment_provider import",
         ]
         leaked_terms = sorted(term for term in forbidden_terms if term in service_content)
         if leaked_terms:
@@ -619,38 +618,38 @@ def scan_generated_bundle(
 
         # ---- checks that apply to all scannable file types ----
 
-        if _STRIPE_SECRET_LITERAL_RE.search(content):
+        if _PAYMENT_PROVIDER_SECRET_LITERAL_RE.search(content):
             errors.append(
                 f"{path}: contains a raw provider secret key literal "
-                "(sk_live_* or sk_test_*). Generated apps must not embed "
+                "in generated source. Generated apps must not embed "
                 "raw credentials. Store credential values only through the "
                 "configured secret backend."
             )
 
-        if _STRIPE_API_KEY_RE.search(content):
+        if _PAYMENT_PROVIDER_API_KEY_RE.search(content):
             errors.append(
-                f"{path}: assigns stripe.api_key directly. Generated apps must "
+                f"{path}: assigns payment_provider.api_key directly. Generated apps must "
                 "resolve provider credentials through the configured secret "
                 "backend or managed capability adapter boundary."
             )
 
-        if _STRIPE_REFUND_CALL_RE.search(content):
+        if _PAYMENT_PROVIDER_REFUND_CALL_RE.search(content):
             errors.append(
-                f"{path}: calls Stripe refunds APIs directly. Generated apps "
+                f"{path}: calls payment provider refunds APIs directly. Generated apps "
                 "must route refund mutations through an app-owned facade or "
                 "managed payment adapter."
             )
 
-        if _STRIPE_REFUNDS_ENDPOINT_RE.search(content):
+        if _PAYMENT_PROVIDER_REFUNDS_ENDPOINT_RE.search(content):
             errors.append(
-                f"{path}: references /v1/refunds directly. Generated apps must "
+                f"{path}: references a refunds endpoint (/refunds) directly. Generated apps must "
                 "route refund mutations through an app-owned facade or managed "
                 "payment adapter."
             )
 
-        if path.lower().endswith(".py") and _STRIPE_IMPORT_RE.search(content):
+        if path.lower().endswith(".py") and _PAYMENT_PROVIDER_IMPORT_RE.search(content):
             errors.append(
-                f"{path}: imports the Stripe SDK directly. Generated apps must "
+                f"{path}: imports the payment provider SDK directly. Generated apps must "
                 "use generated service boundaries or managed capability adapter clients "
                 "instead of provider SDKs in app business code."
             )

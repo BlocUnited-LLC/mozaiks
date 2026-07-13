@@ -1,6 +1,6 @@
 # AG2 Execution Alignment Plan
 
-This document audits Mozaiks workflow execution against AG2 beta Network and
+This document audits Mozaiks workflow execution against AG2 1.0 beta Network and
 Task APIs. The goal is to shrink Mozaiks-owned agentic runtime code and keep
 Mozaiks focused on deterministic contracts around AG2.
 
@@ -18,7 +18,7 @@ Reviewed against:
   - <https://docs.ag2.ai/latest/docs/beta/network/task_observation/>
   - <https://docs.ag2.ai/latest/docs/beta/tasks/>
   - <https://docs.ag2.ai/latest/docs/beta/task_delegation/>
-- Installed AG2 package inspected locally: `autogen==0.13.2`.
+- Installed AG2 package inspected locally: `ag2==1.0.0b0`.
 
 Important AG2 facts:
 
@@ -97,6 +97,10 @@ Required behavior:
 - compile `transition_graph.yaml` into `TransitionGraph.to_dict()`;
 - open a `workflow` channel with `knobs.graph`;
 - seed the channel with the startup message;
+- keep process-live paused channels open for the next user reply when the
+  backend process still owns the AG2 Hub;
+- route the next user reply through the same AG2 workflow channel before
+  falling back to persisted event bootstrap;
 - wait for `EV_CHANNEL_CLOSED`, HITL pause, failure, or cancellation;
 - replay/read channel WAL for persistence and UI summary.
 
@@ -122,8 +126,9 @@ Preferred mapping:
 | simple context equality | AG2 `ContextEquals` |
 | route after tool call | AG2 `ToolCalled` |
 | source-scoped context equality | Mozaiks adapter over AG2 `FromSpeaker` + `ContextEquals` until AG2 has native condition composition |
-| source-scoped composite context expression | Mozaiks adapter over AG2 `FromSpeaker` + classic AG2 `ContextExpression` until AG2 has beta-native expression conditions or composition |
+| source-scoped composite context expression | Mozaiks adapter over AG2 `FromSpeaker` plus a Mozaiks expression evaluator until AG2 has native expression conditions or composition |
 | source-scoped tool route | Mozaiks adapter over AG2 `FromSpeaker` + `ToolCalled` until AG2 has native condition composition |
+| one-shot bootstrap dispatch | `BootstrapInitialDispatch`, a Mozaiks adapter scoped to the injected human-initiator first turn so that bootstrap routing cannot steal later user replies |
 
 Workflow generation emits only the canonical deterministic condition types:
 `condition_type: context_equals`, `condition_type: context_expression`, or

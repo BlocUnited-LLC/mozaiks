@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 import yaml
-from autogen.beta.network import EV_PACKET, Envelope, WorkflowAdapter, WorkflowState
-from autogen.beta.network.policies import CHANNEL_STATE_DEP
+from ag2.network import EV_PACKET, Envelope, WorkflowAdapter, WorkflowState
+from ag2.network.policies import CHANNEL_STATE_DEP
 
 from mozaiksai.core.workflow.execution.network_graph import (
     compile_transition_rules_to_graph,

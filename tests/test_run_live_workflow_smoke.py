@@ -41,7 +41,7 @@ def test_smoke_result_as_dict_serializes_nested_datetimes() -> None:
             "nested": {"when": datetime(2026, 3, 31, 23, 31, tzinfo=UTC)},
         },
         final_context={},
-        app_connectors=[{"service": "stripe", "status": "active"}],
+        app_connectors=[{"service": "payment_provider", "status": "active"}],
         event_count=2,
         observed_event_types=["chat.text", "chat.workflow_complete"],
     )
@@ -50,7 +50,7 @@ def test_smoke_result_as_dict_serializes_nested_datetimes() -> None:
 
     assert payload["structured_output"]["ended_at"] == "2026-03-31T23:30:00+00:00"
     assert payload["structured_output"]["nested"]["when"] == "2026-03-31T23:31:00+00:00"
-    assert payload["app_connectors"] == [{"service": "stripe", "status": "active"}]
+    assert payload["app_connectors"] == [{"service": "payment_provider", "status": "active"}]
 
 
 def test_resolve_assistant_message_falls_back_to_structured_output() -> None:

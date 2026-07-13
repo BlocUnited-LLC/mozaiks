@@ -1,7 +1,7 @@
 """
 AG2 wrapper for the Phase 7A carry-forward preservation resolver.
 
-Thin wrapper with autogen dependency-injection annotation that delegates to
+Thin wrapper with Pydantic tool metadata annotations that delegates to
 the core implementation in
 ``factory_app.control_plane.tools.resolve_carry_forward_preservation``.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
     resolve_carry_forward_preservation as _core,

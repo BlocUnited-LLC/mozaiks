@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from mozaiksai.core.workflow.generator_support import connector_request, connector_service
-from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 
 SECRET_VALUE = "test-secret-value"
 
@@ -134,29 +134,29 @@ class FakeVaultBackend:
     def __init__(self) -> None:
         self.secrets = {}
 
-    async def store_secret(self, *, app_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
+    async def store_secret(self, *, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
         del display_name, ttl_days
-        self.secrets[(app_id, service)] = secret_value
+        self.secrets[(scope_id, service)] = secret_value
         return {
             "success": True,
             "provider": "fake_vault",
-            "secret_name": f"fake-{app_id}-{service}",
+            "secret_name": f"fake-{scope_id}-{service}",
             "expires_at": "2026-06-01T00:00:00+00:00",
         }
 
-    async def get_secret(self, *, app_id: str, service: str):
-        value = self.secrets.get((app_id, service))
+    async def get_secret(self, *, scope_id: str, service: str):
+        value = self.secrets.get((scope_id, service))
         return {
             "success": value is not None,
             "provider": "fake_vault",
-            "secret_name": f"fake-{app_id}-{service}",
+            "secret_name": f"fake-{scope_id}-{service}",
             "secret_value": value,
             "expires_at": "2026-06-01T00:00:00+00:00" if value is not None else None,
         }
 
-    async def delete_secret(self, *, app_id: str, service: str):
-        existed = (app_id, service) in self.secrets
-        self.secrets.pop((app_id, service), None)
+    async def delete_secret(self, *, scope_id: str, service: str):
+        existed = (scope_id, service) in self.secrets
+        self.secrets.pop((scope_id, service), None)
         return {"success": existed, "provider": "fake_vault"}
 
 
@@ -216,32 +216,33 @@ def redact(value: Any) -> Any:
 
 
 async def run_smoke() -> dict[str, Any]:
-    connector_store = AppConnectorStore(pm=FakePersistenceManager())
+    connector_store = ConnectorStore(pm=FakePersistenceManager())
     vault = FakeVaultBackend()
     ui_events: list[dict[str, Any]] = []
 
     original_inventory = connector_request.get_connector_inventory
-    original_record_metadata = connector_request.record_connector_metadata
-    original_store_connector = connector_request.store_connector
+    original_save_connector_draft = connector_request.save_connector_draft
+    original_save_connector = connector_request.save_connector
     original_use_ui_tool = connector_request.use_ui_tool
     original_vault_backend = connector_service.get_connector_vault_backend
 
-    async def inventory(app_id: str, required_services=None, store=None):
+    async def inventory(*, scope, scope_id, required_services=None, store=None):
         del store
         return await connector_service.get_connector_inventory(
-            app_id,
+            scope=scope,
+            scope_id=scope_id,
             required_services=required_services,
             store=connector_store,
         )
 
-    async def record_metadata(**kwargs):
-        return await connector_service.record_connector_metadata(
+    async def patched_save_connector_draft(**kwargs):
+        return await connector_service.save_connector_draft(
             **kwargs,
             store=connector_store,
         )
 
-    async def save_connector(**kwargs):
-        return await connector_service.store_connector(
+    async def patched_save_connector(**kwargs):
+        return await connector_service.save_connector(
             **kwargs,
             store=connector_store,
         )
@@ -275,8 +276,8 @@ async def run_smoke() -> dict[str, Any]:
 
     try:
         connector_request.get_connector_inventory = inventory
-        connector_request.record_connector_metadata = record_metadata
-        connector_request.store_connector = save_connector
+        connector_request.save_connector_draft = patched_save_connector_draft
+        connector_request.save_connector = patched_save_connector
         connector_request.use_ui_tool = fake_use_ui_tool
         connector_service.get_connector_vault_backend = lambda: vault
 
@@ -294,8 +295,9 @@ async def run_smoke() -> dict[str, Any]:
 
         blocked = await connector_request.collect_missing_connector_needs(context_variables=context, prompt=False)
         ready = await connector_request.collect_missing_connector_needs(context_variables=context, prompt=True)
-        connector = await connector_store.get_connector(
-            app_id="app-integration-readiness-smoke",
+        connector = await connector_store.get(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id="app-integration-readiness-smoke",
             service="analytics_provider",
         )
         generated_output = (
@@ -341,8 +343,8 @@ async def run_smoke() -> dict[str, Any]:
         return safe_payload
     finally:
         connector_request.get_connector_inventory = original_inventory
-        connector_request.record_connector_metadata = original_record_metadata
-        connector_request.store_connector = original_store_connector
+        connector_request.save_connector_draft = original_save_connector_draft
+        connector_request.save_connector = original_save_connector
         connector_request.use_ui_tool = original_use_ui_tool
         connector_service.get_connector_vault_backend = original_vault_backend
 

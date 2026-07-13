@@ -12,6 +12,14 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     [:octicons-arrow-right-24: Add Workflows](adding-workflows/01-overview.md)
 
+-   :material-view-dashboard: **Use Studio**
+
+    ---
+
+    Understand the Studio workspace and app-dashboard pages.
+
+    [:octicons-arrow-right-24: Studio](../studio/index.md)
+
 -   :material-puzzle-outline: **Add a Module**
 
     ---

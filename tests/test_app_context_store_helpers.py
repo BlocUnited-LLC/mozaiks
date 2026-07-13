@@ -408,12 +408,12 @@ class TestCollectStringValues:
 
 class TestIntegrationIdsFromStructuredValue:
     def test_integration_key(self):
-        result = _integration_ids_from_structured_value({"integration": "stripe"})
-        assert "stripe" in result
+        result = _integration_ids_from_structured_value({"integration": "payment_provider"})
+        assert "payment_provider" in result
 
     def test_integrations_key_list(self):
-        result = _integration_ids_from_structured_value({"integrations": ["stripe", "sendgrid"]})
-        assert "stripe" in result
+        result = _integration_ids_from_structured_value({"integrations": ["payment_provider", "sendgrid"]})
+        assert "payment_provider" in result
         assert "sendgrid" in result
 
     def test_connector_key(self):
@@ -425,14 +425,14 @@ class TestIntegrationIdsFromStructuredValue:
         assert "aws" in result
 
     def test_nested_dict_recurses(self):
-        data = {"config": {"integration": "stripe"}}
+        data = {"config": {"integration": "payment_provider"}}
         result = _integration_ids_from_structured_value(data)
-        assert "stripe" in result
+        assert "payment_provider" in result
 
     def test_list_recurses(self):
-        data = [{"integration": "stripe"}, {"integration": "sendgrid"}]
+        data = [{"integration": "payment_provider"}, {"integration": "sendgrid"}]
         result = _integration_ids_from_structured_value(data)
-        assert "stripe" in result
+        assert "payment_provider" in result
         assert "sendgrid" in result
 
     def test_non_dict_non_list_returns_empty(self):
@@ -441,8 +441,8 @@ class TestIntegrationIdsFromStructuredValue:
         assert _integration_ids_from_structured_value(42) == []
 
     def test_ids_normalized(self):
-        result = _integration_ids_from_structured_value({"integration": "Stripe"})
-        assert "stripe" in result
+        result = _integration_ids_from_structured_value({"integration": "payment provider"})
+        assert "payment_provider" in result
 
 
 # ---------------------------------------------------------------------------

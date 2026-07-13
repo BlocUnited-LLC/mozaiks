@@ -109,10 +109,10 @@ class TestIsSecretDetailKey:
         assert _is_secret_detail_key("admin_password") is True
 
     def test_key_containing_api_key(self):
-        assert _is_secret_detail_key("stripe_api_key") is True
+        assert _is_secret_detail_key("payment_provider_api_key") is True
 
     def test_key_containing_apikey(self):
-        assert _is_secret_detail_key("stripe_apikey") is True
+        assert _is_secret_detail_key("payment_provider_apikey") is True
 
     # safe keys
     def test_safe_key_returns_false(self):

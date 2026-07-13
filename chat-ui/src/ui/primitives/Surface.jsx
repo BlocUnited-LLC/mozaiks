@@ -1,27 +1,78 @@
-import { useEffect, useState } from 'react';
+import { isValidElement, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { Button } from './Button.jsx';
 import { cn } from '../lib/cn.js';
 
-export function StatusPill({ children, label, tone = 'default', className = '' }) {
-  const tones = {
-    default: 'border-border/50 bg-muted/22 text-muted-foreground',
-    primary: 'border-primary/28 bg-primary/8 text-primary',
-    success: 'border-success/28 bg-success/8 text-success',
-    warning: 'border-warning/28 bg-warning/8 text-warning',
-    destructive: 'border-destructive/28 bg-destructive/8 text-destructive',
-  };
+const STATUS_TONES = {
+  default: 'border-border/70 bg-muted/28 text-muted-foreground',
+  muted: 'border-border/55 bg-background/35 text-muted-foreground',
+  info: 'border-primary/30 bg-primary/10 text-primary',
+  primary: 'border-primary/30 bg-primary/10 text-primary',
+  success: 'border-success/30 bg-success/10 text-success',
+  warning: 'border-warning/35 bg-warning/12 text-warning',
+  destructive: 'border-destructive/35 bg-destructive/12 text-destructive',
+};
+
+const STATUS_SIZES = {
+  sm: 'min-h-6 px-2 py-1 text-[11px]',
+  md: 'min-h-7 px-2.5 py-1 text-xs',
+};
+
+function PrimitiveAction({ action, defaultVariant = 'secondary' }) {
+  if (!action) return null;
+  if (isValidElement(action)) return action;
+
+  if (typeof action === 'string') {
+    return <Button variant={defaultVariant}>{action}</Button>;
+  }
+
+  if (typeof action !== 'object') return action;
+
+  const label = action.label || action.title || 'Continue';
+  const variant = action.variant || defaultVariant;
+  const size = action.size || 'default';
+
+  if (action.to) {
+    return <LinkButton to={action.to} variant={variant} size={size}>{label}</LinkButton>;
+  }
+
+  if (action.href) {
+    return (
+      <Button variant={variant} size={size} asChild>
+        <a href={action.href}>{label}</a>
+      </Button>
+    );
+  }
+
+  if (typeof action.onClick === 'function') {
+    return <Button variant={variant} size={size} onClick={action.onClick}>{label}</Button>;
+  }
+
+  return null;
+}
+
+export function StatusPill({
+  children,
+  label,
+  tone = 'default',
+  size = 'sm',
+  dot = false,
+  className = '',
+}) {
+  const content = label ?? children;
 
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium leading-none',
-        tones[tone] || tones.default,
+        'inline-flex max-w-full items-center gap-1.5 rounded-md border font-semibold leading-none',
+        STATUS_SIZES[size] || STATUS_SIZES.sm,
+        STATUS_TONES[tone] || STATUS_TONES.default,
         className,
       )}
     >
-      {label ?? children}
+      {dot ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" aria-hidden="true" /> : null}
+      <span className="truncate">{content}</span>
     </span>
   );
 }
@@ -38,8 +89,8 @@ export function SurfaceCard({
   return (
     <section
       className={cn(
-        'rounded-[calc(var(--core-primitive-radius,1rem)+0.45rem)] border p-5 shadow-sm shadow-black/5 sm:p-6',
-        accent ? 'border-primary/18 bg-card/62' : 'border-border/45 bg-card/34',
+        'rounded-lg border p-4 shadow-sm shadow-black/5 sm:p-5',
+        accent ? 'border-primary/24 bg-card/72' : 'border-border/55 bg-card/40',
         className,
       )}
     >
@@ -49,7 +100,7 @@ export function SurfaceCard({
       {(title || subtitle || headerAction) ? (
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            {title ? <h2 className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h2> : null}
+            {title ? <h2 className="text-lg font-semibold text-foreground">{title}</h2> : null}
             {subtitle ? <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground/88">{subtitle}</p> : null}
           </div>
           {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
@@ -62,9 +113,9 @@ export function SurfaceCard({
 
 export function Metric({ label, value, detail = null, className = '' }) {
   return (
-    <div className={cn('rounded-2xl border border-border/42 bg-background/34 p-4', className)}>
+    <div className={cn('min-h-[6.75rem] rounded-lg border border-border/55 bg-background/38 p-4', className)}>
       <div className="text-[12px] font-medium text-muted-foreground/82">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">{value}</div>
+      <div className="mt-2 break-words text-2xl font-semibold text-foreground">{value}</div>
       {detail ? <div className="mt-2 text-sm leading-6 text-muted-foreground/86">{detail}</div> : null}
     </div>
   );
@@ -72,7 +123,7 @@ export function Metric({ label, value, detail = null, className = '' }) {
 
 export function Panel({ title, eyebrow = null, subtitle = null, action = null, children, className = '' }) {
   return (
-    <section className={cn('rounded-[1.35rem] border border-border/42 bg-background/28 p-4 shadow-sm shadow-black/5', className)}>
+    <section className={cn('min-w-0 rounded-lg border border-border/55 bg-background/30 p-4 shadow-sm shadow-black/5', className)}>
       {(eyebrow || action) ? (
         <div className="mb-3 flex items-start justify-between gap-3">
           {eyebrow ? <div className="text-[11px] font-medium text-muted-foreground/78">{eyebrow}</div> : <span />}
@@ -137,7 +188,7 @@ export function SegmentedControl({ options = [], value, onChange, className = ''
             type="button"
             onClick={() => onChange?.(option.value)}
             className={cn(
-              'relative -mb-px border-b border-transparent pb-2 text-[13px] font-semibold transition',
+              'relative -mb-px border-b border-transparent pb-2 text-[13px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
               active ? 'border-primary/45 text-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
@@ -151,11 +202,11 @@ export function SegmentedControl({ options = [], value, onChange, className = ''
 
 export function InlineEmptyState({ title, description, action = null, className = '' }) {
   return (
-    <div className={cn('rounded-[1.35rem] border border-border/42 bg-background/24 px-6 py-6', className)}>
+    <div className={cn('rounded-lg border border-border/55 bg-background/28 px-5 py-5', className)}>
       <div className="max-w-2xl">
         <div className="text-base font-semibold text-foreground">{title}</div>
         {description ? <p className="mt-2 text-sm leading-6 text-muted-foreground/86">{description}</p> : null}
-        {action ? <div className="mt-4">{action}</div> : null}
+        {action ? <div className="mt-4"><PrimitiveAction action={action} /></div> : null}
       </div>
     </div>
   );
@@ -169,7 +220,7 @@ export function IconButton({ onClick, label, disabled = false, className = '' })
       aria-label={label}
       disabled={disabled}
       className={cn(
-        'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/70 bg-muted/30 text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex h-9 w-9 items-center justify-center rounded-md border border-border/70 bg-muted/30 text-muted-foreground transition hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
         className,
       )}
     >
@@ -310,7 +361,7 @@ export function SlideOver({
         />
         <section
           className={cn(
-            'relative flex max-h-full w-full flex-col overflow-hidden rounded-t-[2rem] border border-border border-b-0 bg-card shadow-2xl md:h-full md:rounded-3xl md:border-b',
+            'relative flex max-h-full w-full flex-col overflow-hidden rounded-t-xl border border-border border-b-0 bg-card shadow-xl md:h-full md:rounded-xl md:border-b',
             maxWidthClass,
           )}
         >
@@ -333,23 +384,34 @@ export function SlideOver({
   );
 }
 
-export function LoadingState({ label = 'Loading...', className = '' }) {
+export function LoadingState({ label, message, className = '' }) {
+  const displayLabel = label ?? message ?? 'Loading...';
+
   return (
-    <div className={cn('flex min-h-full flex-1 items-center justify-center bg-background px-6 py-10', className)}>
-      <div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-4 text-sm text-muted-foreground shadow-sm">
-        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        {label}
+    <div
+      className={cn('flex min-h-full flex-1 items-center justify-center bg-background px-6 py-10', className)}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex max-w-full items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm">
+        <div className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+        <span className="min-w-0 break-words">{displayLabel}</span>
       </div>
     </div>
   );
 }
 
-export function ErrorState({ title = 'Unavailable', message, className = '' }) {
+export function ErrorState({ title = 'Unavailable', message, action = null, className = '' }) {
   return (
-    <div className={cn('flex min-h-full flex-1 items-center justify-center bg-background px-6 py-10', className)}>
-      <div className="max-w-xl rounded-3xl border border-destructive/30 bg-destructive/10 p-6 shadow-sm">
+    <div
+      className={cn('flex min-h-full flex-1 items-center justify-center bg-background px-6 py-10', className)}
+      role="alert"
+      aria-live="assertive"
+    >
+      <div className="max-w-xl rounded-lg border border-destructive/35 bg-destructive/10 p-5 shadow-sm">
         <div className="text-xs font-semibold text-destructive">{title}</div>
         {message ? <p className="mt-3 text-sm leading-6 text-foreground">{message}</p> : null}
+        {action ? <div className="mt-5"><PrimitiveAction action={action} /></div> : null}
       </div>
     </div>
   );

@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.workflows._shared.generated_ui_contract import audit_app_ui_bundle_integrity
 

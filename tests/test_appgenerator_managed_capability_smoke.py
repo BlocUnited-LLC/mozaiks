@@ -13,8 +13,8 @@ Four validation levels:
 Drift checks fail if the final generated artifact tree contains:
     - app/modules/wallet/
     - app/capability_packs/
-    - STRIPE_SECRET_KEY
-    - import stripe
+    - PAYMENT_PROVIDER_SECRET_KEY
+    - import payment_provider
     - mozaikspay_client.py
     - managed_entitlements mutation adapter
 """
@@ -130,7 +130,7 @@ class TestManagedWalletContextInjection:
                     "capabilities": [
                         {"capability_id": "wallet.view"},
                         {"capability_id": "wallet.payout"},
-                        {"capability_id": "wallet.connect_stripe"},
+                        {"capability_id": "wallet.connect_provider"},
                     ],
                 }
             ],
@@ -170,13 +170,13 @@ class TestManagedWalletContextInjection:
         hook.inject_managed_capabilities_context(agent, [])
         assert agent.system_message == ""
 
-    def test_hook_oss_mode_does_not_mention_wallet_or_stripe(self) -> None:
+    def test_hook_oss_mode_does_not_mention_wallet_or_payment_provider(self) -> None:
         hook = _load_hook()
         agent = _FakeAgent("AppPlanAgent", context_variables={})
         hook.inject_managed_capabilities_context(agent, [])
         msg = agent.system_message.lower()
         assert "wallet" not in msg
-        assert "stripe" not in msg
+        assert "payment_provider" not in msg
 
     def test_agents_yaml_adapter_path_is_backend_integrations(self) -> None:
         source = _read("factory_app/workflows/AppGenerator/agents.yaml")
@@ -208,7 +208,7 @@ class TestManagedWalletContextInjection:
         fc = _read_yaml("factory_app/build_context/AppGenerator/file_contracts.yaml")
         constraints = fc["task_contracts"]["api_surface"]["hard_constraints"]
         # The contract must prohibit embedding host secrets
-        assert any("secret" in c.lower() or "stripe" in c.lower() for c in constraints)
+        assert any("secret" in c.lower() or "payment_provider" in c.lower() for c in constraints)
 
 
 # ---------------------------------------------------------------------------
@@ -237,19 +237,19 @@ _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK: dict[str, Any] = {
     "description": (
         "Generate a thin app-side client for the managed wallet capability. "
         "Copy the managed wallet adapter template to services/integrations/wallet_client.py. "
-        "Do not implement wallet business logic or reference Stripe directly."
+        "Do not implement wallet business logic or reference payment provider directly."
     ),
     "initial_message": (
         "Generate a thin adapter in services/integrations/wallet_client.py that wraps the "
         "managed wallet module at POST {MOZAIKS_APP_URL}/api/modules/wallet/{action_id}. "
-        "Do not import stripe. Do not reference STRIPE_SECRET_KEY. "
+        "Do not import payment_provider. Do not reference PAYMENT_PROVIDER_SECRET_KEY. "
         "Do not implement balance calculation or settlement logic."
     ),
     "owned_paths": ["services/integrations/wallet_client.py"],
     "depends_on": [],
     "acceptance_criteria": [
         "services/integrations/wallet_client.py exists",
-        "No Stripe imports in adapter file",
+        "No payment provider imports in adapter file",
         "No managed wallet internals copied",
     ],
 }
@@ -321,7 +321,7 @@ _CREATOR_DASHBOARD_SERVICES_TASK: dict[str, Any] = {
     "depends_on": ["creator_dashboard.wallet_dashboard_models"],
     "acceptance_criteria": [
         "service.py imports ManagedWalletClient from services.integrations.wallet_client",
-        "No Stripe imports or STRIPE_SECRET_KEY references",
+        "No payment provider imports or PAYMENT_PROVIDER_SECRET_KEY references",
     ],
 }
 
@@ -421,13 +421,13 @@ class TestCreatorDashboardBuildPlan:
     def test_wallet_adapter_initial_agent_is_controller(self) -> None:
         assert _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK["initial_agent"] == "ControllerAgent"
 
-    def test_wallet_adapter_initial_message_prohibits_stripe(self) -> None:
+    def test_wallet_adapter_initial_message_prohibits_payment_provider(self) -> None:
         msg = _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK["initial_message"]
-        assert "Do not import stripe" in msg or "not import stripe" in msg.lower()
+        assert "Do not import payment_provider" in msg or "not import payment_provider" in msg.lower()
 
-    def test_wallet_adapter_initial_message_prohibits_stripe_key(self) -> None:
+    def test_wallet_adapter_initial_message_prohibits_payment_provider_key(self) -> None:
         msg = _CREATOR_DASHBOARD_WALLET_ADAPTER_TASK["initial_message"]
-        assert "STRIPE_SECRET_KEY" in msg
+        assert "PAYMENT_PROVIDER_SECRET_KEY" in msg
 
     def test_build_plan_validates_with_app_build_plan_tool(self) -> None:
         mod = _load_module(
@@ -689,7 +689,7 @@ class TestCreatorDashboardAssembly:
         for entry in template_files:
             assert "capability_packs" not in entry["filename"]
 
-    def test_wallet_adapter_content_has_no_stripe_import(
+    def test_wallet_adapter_content_has_no_payment_provider_import(
         self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
@@ -698,19 +698,19 @@ class TestCreatorDashboardAssembly:
             content = entry["content"]
             import_lines = [ln.strip() for ln in content.splitlines()
                             if ln.strip().startswith(("import ", "from "))]
-            stripe_imports = [ln for ln in import_lines if "stripe" in ln.lower()]
-            assert not stripe_imports, (
-                f"Drift: stripe import in wallet adapter: {stripe_imports}"
+            payment_provider_imports = [ln for ln in import_lines if "payment_provider" in ln.lower()]
+            assert not payment_provider_imports, (
+                f"Drift: payment_provider import in wallet adapter: {payment_provider_imports}"
             )
 
-    def test_wallet_adapter_content_has_no_stripe_secret_key(
+    def test_wallet_adapter_content_has_no_payment_provider_secret_key(
         self, pack_sources: list[dict[str, Any]]
     ) -> None:
         resolver = _load_resolver()
         template_files = resolver.resolve_managed_capability_templates(pack_sources)
         for entry in template_files:
-            assert "STRIPE_SECRET_KEY" not in entry["content"], (
-                "Drift: STRIPE_SECRET_KEY found in wallet adapter content"
+            assert "PAYMENT_PROVIDER_SECRET_KEY" not in entry["content"], (
+                "Drift: PAYMENT_PROVIDER_SECRET_KEY found in wallet adapter content"
             )
 
     def test_wallet_adapter_content_has_no_managed_module_import(
@@ -783,20 +783,20 @@ class TestRealWalletTemplateDriftGuards:
             if ln.strip().startswith(("import ", "from "))
         ]
 
-    def test_real_template_has_no_stripe_import(self) -> None:
-        bad = [ln for ln in self.import_lines if "stripe" in ln.lower()]
-        assert not bad, f"Real wallet template imports stripe: {bad}"
+    def test_real_template_has_no_payment_provider_import(self) -> None:
+        bad = [ln for ln in self.import_lines if "payment_provider" in ln.lower()]
+        assert not bad, f"Real wallet template imports payment_provider: {bad}"
 
-    def test_real_template_has_no_stripe_secret_key(self) -> None:
+    def test_real_template_has_no_payment_provider_secret_key(self) -> None:
         # Exclude docstring/comment lines — the template may mention the key
-        # as a negative rule ("Never reference STRIPE_SECRET_KEY").
+        # as a negative rule ("Never reference PAYMENT_PROVIDER_SECRET_KEY").
         # Only executable code lines must not contain it.
         code_lines = [
             ln for ln in self.content.splitlines()
             if ln.strip() and not ln.strip().startswith(("#", "-", '"', "'"))
         ]
-        assert not any("STRIPE_SECRET_KEY" in ln for ln in code_lines), (
-            "STRIPE_SECRET_KEY referenced in executable code of wallet adapter template"
+        assert not any("PAYMENT_PROVIDER_SECRET_KEY" in ln for ln in code_lines), (
+            "PAYMENT_PROVIDER_SECRET_KEY referenced in executable code of wallet adapter template"
         )
 
     def test_real_template_has_no_managed_wallet_module_import(self) -> None:
@@ -816,7 +816,7 @@ class TestRealWalletTemplateDriftGuards:
     def test_real_template_uses_mozaiks_app_url(self) -> None:
         assert "MOZAIKS_APP_URL" in self.content
 
-    def test_real_template_uses_httpx_not_stripe_sdk(self) -> None:
+    def test_real_template_uses_httpx_not_payment_provider_sdk(self) -> None:
         assert "httpx" in self.content
 
     def test_real_template_expands_correctly_via_resolver(self) -> None:
@@ -846,7 +846,7 @@ class TestWalletPageBinding:
 
     Full UI binding conventions for managed capability adapter pages are a follow-up:
       - wallet.yaml should reference /api/modules/wallet/{action} or the adapter path
-      - no direct Stripe API calls from page actions
+      - no direct payment provider API calls from page actions
       - no app/modules/wallet/ path references in page schema
 
     These tests check the static shape of a minimal wallet page fixture and
@@ -888,10 +888,10 @@ sections:
             "Page binds directly to managed wallet pack — must use façade module wallet_dashboard"
         )
 
-    def test_wallet_page_has_no_direct_stripe_reference(self) -> None:
-        """Page schema must not reference Stripe directly."""
-        assert "stripe.com" not in self._WALLET_PAGE_YAML.lower()
-        assert "STRIPE_SECRET_KEY" not in self._WALLET_PAGE_YAML
+    def test_wallet_page_has_no_direct_payment_provider_reference(self) -> None:
+        """Page schema must not reference payment provider directly."""
+        assert "payment_provider.com" not in self._WALLET_PAGE_YAML.lower()
+        assert "PAYMENT_PROVIDER_SECRET_KEY" not in self._WALLET_PAGE_YAML
 
     def test_wallet_page_has_no_modules_wallet_path(self) -> None:
         """Page schema must not reference app/modules/wallet internal paths."""

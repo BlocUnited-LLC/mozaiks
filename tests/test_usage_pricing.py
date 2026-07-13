@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import pytest
 
+from mozaiksai.core.usage import pricing
 from mozaiksai.core.usage.pricing import (
     UsageCostEstimate,
     _env_float,
@@ -95,8 +96,12 @@ def _clear_rates(monkeypatch):
         "MOZAIKS_USAGE_DEFAULT_OUTPUT_PER_1K_USD",
         "MOZAIKS_USAGE_CLAUDE_3_5_SONNET_INPUT_PER_1K_USD",
         "MOZAIKS_USAGE_CLAUDE_3_5_SONNET_OUTPUT_PER_1K_USD",
+        "MOZAIKS_USAGE_PRICING_CATALOG_PATH",
+        "MOZAIKS_USAGE_PRICING_OVERRIDE_PATH",
+        "MOZAIKS_USAGE_PRICING_DISABLE_DEFAULT_CATALOG",
     ]:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MOZAIKS_USAGE_PRICING_DISABLE_DEFAULT_CATALOG", "1")
 
 
 class TestEstimateTokenCost:
@@ -142,10 +147,20 @@ class TestEstimateTokenCost:
         )
         assert result.cost_source == "not_configured"
 
-    def test_no_rates_not_configured(self, monkeypatch):
+    def test_no_rates_known_model_uses_default_table(self, monkeypatch):
         _clear_rates(monkeypatch)
         result = estimate_token_cost(
             model_name="gpt-4",
+            prompt_tokens=1000,
+            completion_tokens=500,
+        )
+        assert result.cost_source == "default_table"
+        assert result.estimated_cost_usd > 0.0
+
+    def test_no_rates_unknown_model_not_configured(self, monkeypatch):
+        _clear_rates(monkeypatch)
+        result = estimate_token_cost(
+            model_name="totally-unknown-model-xyz",
             prompt_tokens=1000,
             completion_tokens=500,
         )
@@ -259,6 +274,271 @@ class TestEstimateTokenCost:
         )
         assert result.cost_source == "estimated"
         assert result.estimated_cost_usd == pytest.approx(0.01)
+
+    def test_catalog_rates_used_when_env_absent(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "pricing.yaml"
+        catalog.write_text(
+            """
+schema_version: mozaiks.usage_pricing.v1
+models:
+  gpt-5-nano:
+    input_per_1k_usd: 0.001
+    output_per_1k_usd: 0.004
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+
+        result = estimate_token_cost(
+            model_name="gpt-5-nano",
+            prompt_tokens=2000,
+            completion_tokens=500,
+        )
+
+        assert result.cost_source == "catalog"
+        assert result.estimated_cost_usd == pytest.approx(0.004)
+
+    def test_catalog_matches_provider_prefixed_model_name(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "pricing.yaml"
+        catalog.write_text(
+            """
+schema_version: mozaiks.usage_pricing.v1
+models:
+  gpt-5-nano:
+    input_per_1k_usd: 0.001
+    output_per_1k_usd: 0.004
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+
+        result = estimate_token_cost(
+            model_name="openai/gpt-5-nano",
+            prompt_tokens=2000,
+            completion_tokens=500,
+        )
+
+        assert result.cost_source == "catalog"
+        assert result.estimated_cost_usd == pytest.approx(0.004)
+
+    def test_catalog_supports_per_million_rates(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "pricing.json"
+        catalog.write_text(
+            """
+{
+  "models": {
+    "gpt-5-mini": {
+      "input_per_1m_usd": 0.25,
+      "output_per_1m_usd": 2.0
+    }
+  }
+}
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+
+        result = estimate_token_cost(
+            model_name="gpt-5-mini",
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+
+        assert result.cost_source == "catalog"
+        assert result.estimated_cost_usd == pytest.approx(0.00225)
+
+    def test_catalog_supports_cached_input_rates(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "pricing.yaml"
+        catalog.write_text(
+            """
+models:
+  gpt-5-nano:
+    input_per_1m_usd: 0.05
+    cached_input_per_1m_usd: 0.005
+    output_per_1m_usd: 0.40
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+
+        result = estimate_token_cost(
+            model_name="gpt-5-nano",
+            prompt_tokens=2000,
+            cached_prompt_tokens=1500,
+            completion_tokens=1000,
+        )
+
+        assert result.cost_source == "catalog"
+        assert result.estimated_cost_usd == pytest.approx(0.0004325)
+
+    def test_env_supports_zero_model_specific_rate(self, monkeypatch):
+        _clear_rates(monkeypatch)
+        monkeypatch.setenv("MOZAIKS_USAGE_GPT_5_NANO_INPUT_PER_1K_USD", "0")
+        monkeypatch.setenv("MOZAIKS_USAGE_INPUT_PER_1K_USD", "0.01")
+
+        result = estimate_token_cost(
+            model_name="gpt-5-nano",
+            prompt_tokens=1000,
+            completion_tokens=0,
+        )
+
+        assert result.cost_source == "estimated"
+        assert result.estimated_cost_usd == 0.0
+
+    def test_catalog_default_model_fallback(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "pricing.yaml"
+        catalog.write_text(
+            """
+models:
+  default:
+    input_per_1k_usd: 0.01
+    output_per_1k_usd: 0.02
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+
+        result = estimate_token_cost(
+            model_name="new-provider-model",
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+
+        assert result.cost_source == "catalog"
+        assert result.estimated_cost_usd == pytest.approx(0.03)
+
+    def test_packaged_default_catalog_used_when_repo_catalog_absent(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        monkeypatch.delenv("MOZAIKS_USAGE_PRICING_DISABLE_DEFAULT_CATALOG", raising=False)
+        pricing._load_pricing_catalog.cache_clear()
+        pricing._load_pricing_catalog_payload.cache_clear()
+        missing_repo_catalog = tmp_path / "missing" / "usage-pricing.generated.json"
+        packaged_catalog = tmp_path / "package" / "usage-pricing.generated.json"
+        packaged_catalog.parent.mkdir(parents=True)
+        packaged_catalog.write_text(
+            """
+{
+  "models": {
+    "gpt-5-nano": {
+      "input_per_1m_usd": 0.05,
+      "output_per_1m_usd": 0.40
+    }
+  }
+}
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(pricing, "_DEFAULT_GENERATED_CATALOG_PATH", missing_repo_catalog)
+        monkeypatch.setattr(pricing, "_PACKAGE_GENERATED_CATALOG_PATH", packaged_catalog)
+
+        result = estimate_token_cost(
+            model_name="gpt-5-nano",
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+
+        assert result.cost_source == "catalog"
+        assert result.estimated_cost_usd == pytest.approx(0.00045)
+
+    def test_env_rates_override_catalog(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "pricing.yaml"
+        catalog.write_text(
+            """
+models:
+  gpt-5-nano:
+    input_per_1k_usd: 0.001
+    output_per_1k_usd: 0.004
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+        monkeypatch.setenv("MOZAIKS_USAGE_GPT_5_NANO_INPUT_PER_1K_USD", "0.1")
+        monkeypatch.setenv("MOZAIKS_USAGE_GPT_5_NANO_OUTPUT_PER_1K_USD", "0.2")
+
+        result = estimate_token_cost(
+            model_name="gpt-5-nano",
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+
+        assert result.cost_source == "estimated"
+        assert result.estimated_cost_usd == pytest.approx(0.3)
+
+    def test_override_catalog_wins_over_generated_catalog(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "generated.json"
+        override = tmp_path / "override.json"
+        catalog.write_text(
+            """
+{
+  "models": {
+    "gpt-5-nano": {
+      "input_per_1m_usd": 0.05,
+      "output_per_1m_usd": 0.40
+    }
+  }
+}
+""",
+            encoding="utf-8",
+        )
+        override.write_text(
+            """
+{
+  "models": {
+    "gpt-5-nano": {
+      "input_per_1m_usd": 1.0,
+      "output_per_1m_usd": 3.0
+    }
+  }
+}
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_OVERRIDE_PATH", str(override))
+
+        result = estimate_token_cost(
+            model_name="gpt-5-nano",
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+
+        assert result.cost_source == "override"
+        assert result.estimated_cost_usd == pytest.approx(0.004)
+
+    def test_raw_litellm_catalog_fields_are_supported(self, monkeypatch, tmp_path):
+        _clear_rates(monkeypatch)
+        catalog = tmp_path / "litellm.json"
+        catalog.write_text(
+            """
+{
+  "gpt-example": {
+    "litellm_provider": "openai",
+    "input_cost_per_token": 0.0000005,
+    "cache_read_input_token_cost": 0.00000005,
+    "output_cost_per_token": 0.0000015
+  }
+}
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MOZAIKS_USAGE_PRICING_CATALOG_PATH", str(catalog))
+
+        result = estimate_token_cost(
+            model_name="gpt-example",
+            prompt_tokens=2000,
+            cached_prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+
+        assert result.cost_source == "catalog"
+        assert result.estimated_cost_usd == pytest.approx(0.00205)
 
     def test_returns_usage_cost_estimate_instance(self, monkeypatch):
         _clear_rates(monkeypatch)

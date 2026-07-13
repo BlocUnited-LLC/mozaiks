@@ -12,7 +12,7 @@ models:
         - str
         - 'null'
         description: 'Third-party service this tool interacts with (PascalCase).
-          Examples: ''Stripe'', ''Slack'', ''OpenAI'', ''GitHub''. Use null for
+          Examples: ''payment provider'', ''Slack'', ''OpenAI'', ''GitHub''. Use null for
           tools that don''t require external API calls.'
       purpose:
         type: str
@@ -68,7 +68,7 @@ models:
         type: literal
         values:
         - prompt_middleware
-        description: Mozaiks prompt-injection trigger compiled to AG2 beta middleware. Runtime lifecycle work belongs in lifecycle_tools, not prompt middleware.
+        description: Mozaiks prompt-injection trigger compiled to AG2 1.0 beta middleware. Runtime lifecycle work belongs in lifecycle_tools, not prompt middleware.
       purpose:
         type: str
         description: Brief explanation of why this middleware is needed (<=140 chars).
@@ -349,7 +349,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Third-party service name (external sources only, e.g., 'Stripe',
+        description: Third-party service name (external sources only, e.g., 'payment provider',
           'OpenAI').
       operation:
         type: union
@@ -724,7 +724,7 @@ models:
           Condition evaluation method for transition_type=condition. Use
           context_equals for AG2 ContextEquals routing over a declared
           context variable, context_expression for composite AG2
-          ContextExpression routing over declared `${context_variable}`
+          context-expression routing over declared `${context_variable}`
           references, tool_called for AG2 ToolCalled routing, and null only for
           unconditional after_turn transitions.
       condition_key:
@@ -746,7 +746,7 @@ models:
         variants:
         - str
         - 'null'
-        description: AG2 ContextExpression string for condition_type=context_expression; null otherwise.
+        description: Mozaiks context_expression string for condition_type=context_expression; null otherwise.
       tool_name:
         type: union
         variants:
@@ -1438,7 +1438,7 @@ models:
       initial_agent:
         type: str
         description: Name of the first agent that receives control when the workflow
-          starts (maps to the AG2 beta Network initial speaker).
+          starts (maps to the AG2 1.0 beta Network initial speaker).
       visual_agents:
         type: optional_list
         items: str

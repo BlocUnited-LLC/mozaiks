@@ -1,4 +1,4 @@
-"""AG2 beta Network runner for Mozaiks workflow execution.
+"""AG2 1.0 beta Network runner for Mozaiks workflow execution.
 
 This module is the narrow boundary where Mozaiks drives AG2 Network primitives
 directly. It does not load workflow YAML or create agents; callers pass already
@@ -15,8 +15,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from autogen.beta.knowledge import MemoryKnowledgeStore
-from autogen.beta.network import (
+from ag2.knowledge import MemoryKnowledgeStore
+from ag2.network import (
     EV_CHANNEL_CLOSED,
     EV_CONTEXT_SET,
     EV_PACKET,
@@ -32,7 +32,7 @@ from autogen.beta.network import (
     TransitionGraph,
     WorkflowAdapter,
 )
-from autogen.beta.network.client.handlers import default_handler
+from ag2.network.client.handlers import default_handler
 
 from mozaiksai.core.adapters.ag2_transition_conditions import BootstrapInitialDispatch
 from mozaiksai.core.ports.orchestration import RunStatus
@@ -79,7 +79,7 @@ class AG2NetworkRunnerResult:
 
 
 class AG2NetworkRunner:
-    """Execute one workflow as an AG2 beta Network workflow channel."""
+    """Execute one workflow as an AG2 1.0 beta Network workflow channel."""
 
     async def run(self, request: AG2NetworkRunnerRequest) -> AG2NetworkRunnerResult:
         # Bind workflow-level trace context so all tasks spawned during this

@@ -46,7 +46,30 @@ class SimpleLLMCapabilityService:
         ui_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute a single chat completion call and return content + usage."""
-        messages: list[dict[str, str]] = [{"role": "user", "content": str(prompt or "")}]
+        from mozaiksai.core.runtime.app.ai_config import load_runtime_ai_config
+
+        ai_config = load_runtime_ai_config()
+        system_prompt = str(ai_config.get("ask", {}).get("ask_mode_prompt") or "").strip()
+
+        # Append workspace context so the LLM knows what the user has access to
+        context_parts: list[str] = []
+        if app_id:
+            context_parts.append(f"Current app ID: {app_id}")
+        if user_id:
+            context_parts.append(f"User: {user_id}")
+        if workflows:
+            active = [w.get("workflow_name") for w in workflows if w.get("workflow_name")]
+            if active:
+                context_parts.append(f"Active workflows: {', '.join(active)}")
+
+        if context_parts:
+            system_prompt = (system_prompt + "\n\n" if system_prompt else "") + "\n".join(context_parts)
+
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": str(prompt or "")})
+
         return await self.generate_chat_completion(
             messages=messages,
             temperature=0.3,

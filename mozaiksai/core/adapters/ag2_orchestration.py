@@ -16,7 +16,7 @@ Responsibilities:
     - cancel() → delegates to SimpleTransport.pause_background_workflow()
     - capabilities() → reports engine version and supported features
 
-This adapter does not own workflow-specific task planning. AG2 beta provides the
+This adapter does not own workflow-specific task planning. AG2 1.0 beta provides the
 agent and network execution substrate; Mozaiks owns deterministic contracts
 around AG2, such as workflow YAML loading, structured-output validation, context
 persistence, artifact materialization, and task-batch dependency contracts.
@@ -63,13 +63,13 @@ logger = get_core_logger("ag2_orchestration_adapter")
 
 def _ag2_version() -> str:
     """Return the installed AG2 version string."""
-    import autogen
+    import ag2
 
-    return str(getattr(autogen, "__version__", "unknown"))
+    return str(getattr(ag2, "__version__", "unknown"))
 
 
 class AG2OrchestrationAdapter:
-    """Implements :class:`OrchestrationPort` for the AG2 (autogen ≥0.11) engine.
+    """Implements :class:`OrchestrationPort` for the AG2 engine.
 
     Lifecycle:
         1. Singleton per process — the runtime host creates one instance at startup.

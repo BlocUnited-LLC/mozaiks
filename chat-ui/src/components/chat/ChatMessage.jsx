@@ -6,7 +6,8 @@ import "./ChatMessage.css";
 // Local debug flag helper (duplicated intentionally to avoid cross-file import churn)
 const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localStorage.getItem(k)||'').toLowerCase()); } catch { return false; } };
 
- function ChatMessage({ message, message_from, agentName, isTokenMessage, isWarningMessage, isLatest = false, isStructuredCapable = false, structuredOutput = null, structuredSchema = null, isThinking = false, attachment = null, trace = null }) {
+ function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMessage, isWarningMessage, isLatest = false, isStructuredCapable = false, structuredOutput = null, structuredSchema = null, isThinking = false, attachment = null, trace = null }) {
+  const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : (agentNameRaw ? String(agentNameRaw) : null);
   // No local state needed: always show pretty structured output
   const traceItems = Array.isArray(trace) ? trace : [];
   const [traceOpen, setTraceOpen] = React.useState(false);

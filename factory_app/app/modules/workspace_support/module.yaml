@@ -1,0 +1,108 @@
+schema_version: mozaiks.module.v1
+module:
+  id: workspace_support
+  display_name: Workspace Support
+  version: 1.0.0
+  description: Handles support requests from operators and users. Stores requests in MongoDB and emits a domain event so any integration can react.
+  owner: app
+  visibility: private
+  handler: backend.handler:WorkspaceSupportModule
+permissions:
+  - id: workspace_support.read
+    description: View support requests.
+  - id: workspace_support.manage
+    description: Create and manage support requests.
+actions:
+  - id: create_support_request
+    description: Submit a support request from an operator or user.
+    handler_method: create_support_request
+    input_schema:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: The support request message.
+        page_url:
+          type: string
+          description: URL of the page where the request was submitted.
+        page_title:
+          type: string
+          description: Title of the page where the request was submitted.
+        severity:
+          type: string
+          enum: [low, medium, high]
+          default: low
+          description: Severity level of the support request.
+    output_schema:
+      type: object
+      properties:
+        request_id:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+    permissions:
+      - workspace_support.manage
+    emits:
+      - domain.workspace_support.request_created
+
+  - id: list_support_requests
+    description: List support requests for this workspace.
+    handler_method: list_support_requests
+    input_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [open, resolved, all]
+          default: open
+          description: Filter by request status.
+        limit:
+          type: integer
+          default: 50
+          description: Maximum number of requests to return.
+    output_schema:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+    permissions:
+      - workspace_support.read
+
+  - id: submit_session_feedback
+    description: Submit a post-session satisfaction rating from the user.
+    handler_method: submit_session_feedback
+    input_schema:
+      type: object
+      properties:
+        session_id:
+          type: string
+          description: The chat session or run ID being rated.
+        workflow_name:
+          type: string
+          description: Name of the workflow that was running.
+        rating:
+          type: integer
+          enum: [0, 1]
+          default: 1
+          description: "0 = poor experience, 1 = good experience."
+    output_schema:
+      type: object
+      properties:
+        feedback_id:
+          type: string
+        rating:
+          type: integer
+        created_at:
+          type: string
+    permissions:
+      - workspace_support.manage
+    emits:
+      - domain.workspace_support.negative_feedback

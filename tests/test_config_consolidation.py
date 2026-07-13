@@ -184,7 +184,7 @@ class TestShellConfig:
 
     def test_has_compact_shell_shortcuts(self, shell):
         shortcuts = shell["shortcuts"]
-        assert shortcuts["profile"] == ["profile", "signout"]
+        assert shortcuts["profile"] == ["profile", "messages", "signout"]
         assert "admin_portal" not in shortcuts["profile"]
         assert shortcuts["mobile"] == ["create", "profile"]
         assert shortcuts["footer"] == ["legal", "terms", "cookies"]
@@ -196,7 +196,7 @@ class TestShellConfig:
         result = {"profile": {"show": True, "menu": [{"id": item} for item in shell["shortcuts"]["profile"]]}}
         _inject_admin_portal(result)
         ids = [item["id"] for item in result["profile"]["menu"]]
-        assert ids == ["profile", "admin-portal", "signout"]
+        assert ids == ["profile", "messages", "admin-portal", "signout"]
 
 
 # ── Framework-only tests (no app workspace needed) ──────────────────────────

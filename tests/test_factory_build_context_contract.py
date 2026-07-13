@@ -27,6 +27,10 @@ EXPECTED_WEBAPP_BUILDER_CATALOGS = {
     "language_profile.yaml",
 }
 
+EXPECTED_INTEGRATIONS_CATALOGS = {
+    "catalog.yaml",
+}
+
 LEGACY_WORKFLOW_ROOT_CATALOGS = [
     *(f"factory_app/workflows/AppGenerator/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
     *(f"factory_app/workflows/AppGenerator/tools/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
@@ -69,6 +73,8 @@ def test_factory_build_context_uses_named_context_roots() -> None:
             allowed |= EXPECTED_AGENTGENERATOR_PATTERNBOOKS
         if context_root.name == "webapp_builder":
             allowed |= EXPECTED_WEBAPP_BUILDER_CATALOGS
+        if context_root.name == "integrations":
+            allowed |= EXPECTED_INTEGRATIONS_CATALOGS
         actual = {item.name for item in context_root.iterdir()}
         assert actual <= allowed, f"{context_root} has non-canonical build-context entries: {sorted(actual - allowed)}"
 

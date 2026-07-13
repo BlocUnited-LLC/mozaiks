@@ -17,21 +17,37 @@
  * </ChatUIProvider>
  * ```
  */
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
+import { useNavigation } from '../providers/NavigationProvider';
 import PersistentChatWidget from '../components/chat/PersistentChatWidget';
 
 /**
+ * Match a route pattern (e.g. /apps/:appId/overview) against a concrete pathname.
+ * Returns true if every segment matches (param segments start with :).
+ */
+function matchRoutePattern(pattern, pathname) {
+  const patternParts = pattern.split('/').filter(Boolean);
+  const pathParts = pathname.split('/').filter(Boolean);
+  if (patternParts.length !== pathParts.length) return false;
+  return patternParts.every((part, i) => part.startsWith(':') || part === pathParts[i]);
+}
+
+/**
  * GlobalChatWidgetWrapper
- * 
+ *
  * Conditionally renders the chat widget UI based on:
  * - isInWidgetMode: User is on a non-ChatPage route
  * - isWidgetVisible: Page hasn't suppressed the widget
  * - isChatOverlayOpen: User expanded the widget to overlay mode
+ *
+ * Resolves page-level AI context from route_manifest meta.ai_context so the
+ * widget can surface what page the user is on when starting an Ask conversation.
  */
 const GlobalChatWidgetWrapper = () => {
   const location = useLocation();
+  const { pages } = useNavigation();
   const {
     isInWidgetMode,
     setIsInWidgetMode,
@@ -41,6 +57,12 @@ const GlobalChatWidgetWrapper = () => {
     activeWorkflowName,
     conversationMode,
   } = useChatUI();
+
+  const pageContext = useMemo(() => {
+    if (!Array.isArray(pages) || !location.pathname) return null;
+    const matched = pages.find((p) => p.path && matchRoutePattern(p.path, location.pathname));
+    return matched?.meta?.ai_context || null;
+  }, [pages, location.pathname]);
 
   // Determine if we're on the primary chat routes (don't show widget there)
   const pathSegments = location.pathname.split('/').filter(Boolean);
@@ -78,6 +100,7 @@ const GlobalChatWidgetWrapper = () => {
         chatId={activeChatId}
         workflowName={activeWorkflowName}
         conversationMode={conversationMode}
+        pageContext={pageContext}
       />
     </>
   );

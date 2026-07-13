@@ -8,7 +8,7 @@ from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 import yaml
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.workflows._shared.generated_ui_contract import (
     audit_app_ui_bundle_integrity,
@@ -1394,6 +1394,14 @@ def _persist_to_filesystem(
         "authRequired": bool(auth_strategy and auth_strategy != "public"),
         "admins": [],
     }
+    for manifest_key, app_json_key in (
+        ("description", "description"),
+        ("tagline", "tagline"),
+        ("value_proposition", "value_proposition"),
+    ):
+        value = manifest_dict.get(manifest_key)
+        if _is_non_empty_string(value):
+            app_json[app_json_key] = str(value).strip()
     app_json_path = output_dir / "app.json"
     app_json_path.parent.mkdir(parents=True, exist_ok=True)
     app_json_path.write_text(json.dumps(app_json, indent=2, ensure_ascii=False), encoding="utf-8")

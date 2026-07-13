@@ -75,7 +75,7 @@ function buildNavGroups(adminPages, appId) {
 
   if (appId) {
     const appPages = adminPages
-      .filter((p) => p.scope === 'app' && p.enabled !== false)
+      .filter((p) => p.scope === 'app' && p.enabled !== false && p.show_in_navigation !== false)
       .sort((a, b) => a.order - b.order)
       .map((p) => ({
         id: p.id,
@@ -88,7 +88,7 @@ function buildNavGroups(adminPages, appId) {
   }
 
   const workspacePages = adminPages
-    .filter((p) => p.scope === 'workspace' && p.enabled !== false)
+    .filter((p) => p.scope === 'workspace' && p.enabled !== false && p.show_in_navigation !== false)
     .sort((a, b) => a.order - b.order)
     .map((p) => ({
       id: p.id,

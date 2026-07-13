@@ -662,7 +662,7 @@ The same loop applies to generated apps after their first accepted
 `AppContextVersion` exists. Greenfield and brownfield diverge during onboarding;
 they converge once the control plane has current app context.
 
-## Placeholder Concepts To Replace Later
+## Concepts To Replace During App-Context Consolidation
 
 The following current concepts are implementation evidence, not canonical
 architecture. Do not preserve them as source of truth when the app-context

@@ -16,14 +16,15 @@ import { lazy } from 'react'
 const AdminPage          = lazy(() => import('@mozaiks/chat-ui/pages/AdminPage.jsx'))
 const StudioPage        = lazy(() => import('./pages/StudioPage.jsx'))
 const AppsPage           = lazy(() => import('./pages/AppsPage.jsx'))
-const WorkspaceUsagePage = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
-const WorkspaceHealthPage  = lazy(() => import('./pages/WorkspaceHealthPage.jsx'))
+const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage.jsx'))
+const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
 const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
 const AppBuildHistoryPage = lazy(() => import('./pages/AppBuildHistoryPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
+const AppSupportPage      = lazy(() => import('./pages/AppSupportPage.jsx'))
 const AppCommunityPage    = lazy(() => import('./pages/AppCommunityPage.jsx'))
 const AppGovernancePage   = lazy(() => import('./pages/AppGovernancePage.jsx'))
 const AppGovernanceProposalPage = lazy(() => import('./pages/AppGovernanceProposalPage.jsx'))
@@ -35,6 +36,9 @@ const MyCommunitiesPage   = lazy(() => import('./pages/MyCommunitiesPage.jsx'))
 const MyInvitationsPage   = lazy(() => import('./pages/MyInvitationsPage.jsx'))
 const MyVotesPage         = lazy(() => import('./pages/MyVotesPage.jsx'))
 const MyDelegationsPage   = lazy(() => import('./pages/MyDelegationsPage.jsx'))
+const ProfilePage         = lazy(() => import('@mozaiks/chat-ui/pages/ProfilePage.jsx'))
+const MessagesPage        = lazy(() => import('../ui/pages/custom/MessagesPage.jsx'))
+const MessageThreadPage   = lazy(() => import('../ui/pages/custom/MessageThreadPage.jsx'))
 
 export function registerAdminComponents(registerComponent) {
   if (typeof registerComponent !== 'function') return
@@ -55,8 +59,8 @@ export function registerAdminComponents(registerComponent) {
     description: 'Workspace usage surface — portfolio-level usage, capacity, and value trends across all apps.',
   })
 
-  registerComponent('WorkspaceHealthPage', WorkspaceHealthPage, {
-    description: 'Workspace health surface — cross-app runtime, workflow, and hosting health in one portfolio view.',
+  registerComponent('WorkspaceIntegrationsPage', WorkspaceIntegrationsPage, {
+    description: 'Workspace integrations surface — catalog of third-party services with live env-derived configuration status and operator notes.',
   })
 
   registerComponent('AppOverviewPage', AppOverviewPage, {
@@ -78,7 +82,11 @@ export function registerAdminComponents(registerComponent) {
   })
 
   registerComponent('AppIntegrationsPage', AppIntegrationsPage, {
-    description: 'Integrations surface — focused third-party connector inventory and CRUD controls for app-scoped integrations.',
+    description: 'App integration setup detail — app-declared service requirements with workspace-managed provider status.',
+  })
+
+  registerComponent('AppSupportPage', AppSupportPage, {
+    description: 'App support surface — help desk notes, escalations, stalled runs, and support-facing diagnostics.',
   })
 
   registerComponent('AppBuildHistoryPage', AppBuildHistoryPage, {
@@ -127,5 +135,17 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('MyDelegationsPage', MyDelegationsPage, {
     description: 'My delegations surface — outgoing and incoming voting delegations, with revoke action for active outgoing delegations.',
+  })
+
+  registerComponent('ProfilePage', ProfilePage, {
+    description: 'User profile surface — public profile view with avatar, bio, community memberships, and social links.',
+  })
+
+  registerComponent('MessagesPage', MessagesPage, {
+    description: 'Messages surface — DM threads and announcements for the current user.',
+  })
+
+  registerComponent('MessageThreadPage', MessageThreadPage, {
+    description: 'Message thread surface — conversation view for a single DM or announcement thread.',
   })
 }

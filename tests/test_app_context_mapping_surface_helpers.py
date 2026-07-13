@@ -245,33 +245,33 @@ class TestIntegrationInventory:
         assert _integration_inventory({}) == []
 
     def test_connector_with_provider_id(self):
-        spec = {"detected_connectors": [{"provider_id": "stripe", "category": "payments"}]}
+        spec = {"detected_connectors": [{"provider_id": "payment_provider", "category": "payments"}]}
         result = _integration_inventory(spec)
         assert len(result) == 1
-        assert "stripe" in result[0].integration_id
+        assert "payment_provider" in result[0].integration_id
 
     def test_secret_required_when_has_secret_envs(self):
-        spec = {"detected_connectors": [{"provider_id": "stripe", "likely_secret_envs": ["STRIPE_KEY"]}]}
+        spec = {"detected_connectors": [{"provider_id": "payment_provider", "likely_secret_envs": ["PAYMENT_PROVIDER_KEY"]}]}
         result = _integration_inventory(spec)
         assert result[0].secret_required is True
 
     def test_no_secrets_when_empty_secret_envs(self):
-        spec = {"detected_connectors": [{"provider_id": "stripe"}]}
+        spec = {"detected_connectors": [{"provider_id": "payment_provider"}]}
         result = _integration_inventory(spec)
         assert result[0].secret_required is False
 
     def test_config_required_always_true_for_non_empty_connector(self):
-        spec = {"detected_connectors": [{"provider_id": "stripe"}]}
+        spec = {"detected_connectors": [{"provider_id": "payment_provider"}]}
         result = _integration_inventory(spec)
         assert result[0].config_required is True
 
     def test_provider_type_from_category(self):
-        spec = {"detected_connectors": [{"provider_id": "stripe", "category": "payments"}]}
+        spec = {"detected_connectors": [{"provider_id": "payment_provider", "category": "payments"}]}
         result = _integration_inventory(spec)
         assert result[0].provider_type == "payments"
 
     def test_multiple_connectors(self):
-        spec = {"detected_connectors": [{"provider_id": "stripe"}, {"provider_id": "sendgrid"}]}
+        spec = {"detected_connectors": [{"provider_id": "payment_provider"}, {"provider_id": "sendgrid"}]}
         result = _integration_inventory(spec)
         assert len(result) == 2
 

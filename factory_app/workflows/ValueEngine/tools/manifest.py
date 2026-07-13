@@ -10,8 +10,11 @@ Tools are dumb. LLMs reason. This tool just saves and emits.
 """
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Annotated, Any
+
+_API_BASE = os.getenv("MOZAIKSAI_URL") or os.getenv("VITE_API_URL") or "http://localhost:8000"
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,7 @@ except ImportError:
     _HAS_PERSISTENCE = False
     BuilderArtifactStore = None  # type: ignore[assignment,misc]
 
+from factory_app.app.modules.app_registry.backend.policy import is_generic_app_name
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.workflow.ui_tools import emit_ui_surface
 
@@ -147,7 +151,12 @@ async def save_value_manifest(
         return {"success": False, "error": "app_id required in context"}
 
     # Extract fields from structured output
-    app_name = structured_output.get("app_name", "Unnamed App")
+    app_name = str(structured_output.get("app_name") or "").strip()
+    if is_generic_app_name(app_name):
+        return {
+            "success": False,
+            "error": "ConceptBlueprint.app_name must be a specific product name before the app registry can be named.",
+        }
     value_proposition = structured_output.get("value_proposition", "")
     concept_overview = structured_output.get("concept_overview", "")
     target_user = structured_output.get("target_user", "")
@@ -273,6 +282,25 @@ async def save_value_manifest(
     _set_context_value(context_variables, "api_endpoints", api_endpoints)
     _set_context_value(context_variables, "surface_candidate_hints", surface_candidate_hints)
     _set_context_value(context_variables, "concept_presented", True)
+
+    # Update the registry record with the actual app name now that the concept is known.
+    # Uses the unique build app_id set by create_app_record so the upsert finds the right record.
+    try:
+        import httpx
+        registry_payload = {
+            "name": app_name,
+            "name_source": "value_engine_concept",
+            "description": concept_overview,
+            "app_id": str(app_id),
+            "status": "building",
+            "active_chat_id": str(chat_id) if chat_id else None,
+            "active_workflow_id": str(workflow_name or "ValueEngine"),
+        }
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(f"{_API_BASE}/api/studio/apps", json=registry_payload)
+        logger.debug("[ValueEngine] Registry record renamed to '%s'", app_name)
+    except Exception as exc:
+        logger.debug("[ValueEngine] Registry name update failed (non-fatal): %s", exc)
 
     return {
         "success": True,

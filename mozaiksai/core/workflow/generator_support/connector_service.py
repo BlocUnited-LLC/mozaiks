@@ -1,10 +1,9 @@
-"""App-connector metadata contract used by workflow API-key tools and Studio.
+"""Scoped connector metadata contract used by workflow API-key tools and Studio.
 
-The local generator runtime does not own a production secret vault. It does,
-however, own sanitized connector metadata so Studio/Admin surfaces can show
-which integrations were requested for an app and operators can manage those
-records. Secrets remain ephemeral unless a vault-backed implementation is
-provided later.
+Connectors are identified by (scope, scope_id, service). Workspace-scoped
+credentials can fall back as a default for apps in that workspace via
+resolve_connector. Secrets remain in the vault-backed backend; this module
+manages metadata in MongoDB via ConnectorStore.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from mozaiksai.core.data.persistence import AppConnectorStore
+from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
 from mozaiksai.core.workflow.generator_support.connector_health import (
     connector_health_check_supported,
@@ -22,8 +21,34 @@ from mozaiksai.core.workflow.generator_support.connector_health import (
 SECRET_FIELD_TYPES = {"secret", "password", "api_key", "token"}
 
 
-def _get_store(store: AppConnectorStore | None = None) -> AppConnectorStore:
-    return store or AppConnectorStore()
+def _get_store(store: ConnectorStore | None = None) -> ConnectorStore:
+    return store or ConnectorStore()
+
+
+async def _vault_store_secret(
+    backend: Any,
+    *,
+    scope_id: str,
+    service: str,
+    secret_value: str,
+    display_name: str | None = None,
+    ttl_days: int = 30,
+) -> dict[str, Any]:
+    return await backend.store_secret(
+        scope_id=scope_id,
+        service=service,
+        secret_value=secret_value,
+        display_name=display_name,
+        ttl_days=ttl_days,
+    )
+
+
+async def _vault_get_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
+    return await backend.get_secret(scope_id=scope_id, service=service)
+
+
+async def _vault_delete_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
+    return await backend.delete_secret(scope_id=scope_id, service=service)
 
 
 def _normalize_service(service: str) -> str:
@@ -270,30 +295,33 @@ def _summarize_connector_inventory(
     }
 
 
-async def record_connector_metadata(
+async def save_connector_draft(
     *,
-    app_id: str,
-    user_id: str | None,
+    scope: str,
+    scope_id: str,
     service: str,
-    display_name: str | None,
-    key_length: int,
-    workflow_name: str | None,
-    chat_id: str | None,
-    agent_message_id: str | None,
-    ui_event_id: str | None,
+    display_name: str | None = None,
+    user_id: str | None = None,
+    key_length: int = 0,
     public_config: dict[str, Any] | None = None,
     required_fields: Sequence[dict[str, Any]] | None = None,
     provider: str | None = None,
     integration_id: str | None = None,
-    logger: Any | None = None,
+    workflow_name: str | None = None,
+    chat_id: str | None = None,
+    agent_message_id: str | None = None,
+    ui_event_id: str | None = None,
     status_reason: str | None = None,
-    store: AppConnectorStore | None = None,
+    logger: Any | None = None,
+    store: ConnectorStore | None = None,
 ) -> dict[str, Any]:
+    """Save connector metadata without vault storage (draft/workflow-inline state)."""
     normalized_service = _normalize_service(service)
     connector_store = _get_store(store)
     now = datetime.now(UTC).isoformat()
-    record = await connector_store.upsert_connector(
-        app_id=str(app_id),
+    record = await connector_store.upsert(
+        scope=scope,
+        scope_id=str(scope_id),
         service=normalized_service,
         display_name=display_name,
         user_id=str(user_id) if user_id else None,
@@ -312,88 +340,44 @@ async def record_connector_metadata(
             "submitted_at": now,
         },
         status_reason=status_reason or "Secret captured for the current workflow run only; no vault-backed connector store is configured.",
-        extra_fields=_connector_identity_fields(
+        extra=_connector_identity_fields(
             service=normalized_service,
             provider=provider,
             integration_id=integration_id,
         ),
     )
     if logger:
-        logger.debug("CONNECTOR_METADATA_SAVED service=%s app_id=%s", normalized_service, app_id)
+        logger.debug("CONNECTOR_DRAFT_SAVED service=%s scope=%s scope_id=%s", normalized_service, scope, scope_id)
     return {
         "saved": True,
         "connector": record,
     }
 
 
-async def get_connector_status(
-    app_id: str,
-    service: str,
-    logger: Any | None = None,
-    store: AppConnectorStore | None = None,
-) -> dict[str, Any]:
-    connector_store = _get_store(store)
-    record = await connector_store.get_connector(app_id=str(app_id), service=_normalize_service(service))
-    record = _with_connector_health(record)
-    classified = _classify_connector_status(record)
-    if logger:
-        if classified["exists"]:
-            logger.debug(
-                "CONNECTOR_STATUS service=%s app_id=%s status=%s",
-                service,
-                app_id,
-                classified["status"],
-            )
-        else:
-            logger.debug("CONNECTOR_NOT_FOUND service=%s app_id=%s", service, app_id)
-    return classified
-
-
-async def get_secret_for_e2b(app_id: str, service: str, logger: Any | None = None) -> dict[str, Any]:
-    backend = get_connector_vault_backend()
-    result = await backend.get_secret(app_id=str(app_id), service=_normalize_service(service))
-    if logger:
-        if result.get("success"):
-            logger.debug("CONNECTOR_SECRET_RESOLVED service=%s provider=%s", service, result.get("provider"))
-        else:
-            logger.debug(
-                "CONNECTOR_SECRET_UNAVAILABLE service=%s provider=%s: %s",
-                service,
-                result.get("provider"),
-                result.get("error"),
-            )
-    return {
-        "success": bool(result.get("success")),
-        "service": service,
-        "secret_value": result.get("secret_value"),
-        "provider": result.get("provider"),
-        "secret_name": result.get("secret_name"),
-        "expires_at": result.get("expires_at"),
-        "error": result.get("error"),
-    }
-
-
-async def store_connector(
+async def save_connector(
     *,
-    app_id: str,
-    user_id: str,
+    scope: str,
+    scope_id: str,
     service: str,
     secret_value: str,
     display_name: str | None = None,
+    user_id: str | None = None,
     ttl_days: int = 30,
     public_config: dict[str, Any] | None = None,
     required_fields: Sequence[dict[str, Any]] | None = None,
     provider: str | None = None,
     integration_id: str | None = None,
     logger: Any | None = None,
-    store: AppConnectorStore | None = None,
+    store: ConnectorStore | None = None,
 ) -> dict[str, Any]:
+    """Store secret in vault and save connector metadata."""
     connector_store = _get_store(store)
     normalized_service = _normalize_service(service)
     now = datetime.now(UTC)
     backend = get_connector_vault_backend()
-    backend_result = await backend.store_secret(
-        app_id=str(app_id),
+    backend_result = await _vault_store_secret(
+        backend,
+        scope_id=str(scope_id),
         service=normalized_service,
         secret_value=secret_value,
         display_name=display_name,
@@ -409,8 +393,9 @@ async def store_connector(
     expires_at = backend_result.get("expires_at")
     error = backend_result.get("error")
 
-    record = await connector_store.upsert_connector(
-        app_id=str(app_id),
+    record = await connector_store.upsert(
+        scope=scope,
+        scope_id=str(scope_id),
         service=normalized_service,
         display_name=display_name,
         user_id=str(user_id) if user_id else None,
@@ -426,7 +411,7 @@ async def store_connector(
             if success
             else "Connector metadata saved, but secret storage is not available for the current runtime."
         ),
-        extra_fields={
+        extra={
             **identity_fields,
             "ttl_days_requested": int(ttl_days),
             "last_submitted_at": now.isoformat(),
@@ -436,55 +421,99 @@ async def store_connector(
     )
     if logger:
         if success:
-            logger.debug("CONNECTOR_SECRET_PERSISTED service=%s app_id=%s provider=%s", normalized_service, app_id, vault_provider)
+            logger.debug("CONNECTOR_SECRET_PERSISTED service=%s scope=%s scope_id=%s provider=%s", normalized_service, scope, scope_id, vault_provider)
         else:
             logger.warning(
-                "CONNECTOR_SECRET_PERSIST_FAILED service=%s app_id=%s provider=%s: %s",
+                "CONNECTOR_SECRET_PERSIST_FAILED service=%s scope=%s scope_id=%s provider=%s: %s",
                 normalized_service,
-                app_id,
+                scope,
+                scope_id,
                 vault_provider,
                 error,
             )
     return {
         "success": success,
-        "metadata_saved": True,
-        "app_id": app_id,
-        "user_id": user_id,
-        "service": normalized_service,
-        "display_name": display_name or normalized_service,
-        "expires_at": expires_at,
-        "created_at_utc": now.isoformat(),
-        "connector_status": "active" if success else "metadata_only",
-        "secret_available": success,
-        "provider": vault_provider,
-        "connector_provider": identity_fields["provider"],
-        "integration_id": identity_fields["integration_id"],
-        "secret_name": backend_result.get("secret_name"),
-        "record": record,
+        "connector": record,
         "error": error,
     }
 
 
-async def list_connectors(app_id: str, store: AppConnectorStore | None = None) -> list[dict[str, Any]]:
+async def get_connector(
+    *,
+    scope: str,
+    scope_id: str,
+    service: str,
+    store: ConnectorStore | None = None,
+) -> dict[str, Any] | None:
+    """Get a single connector with health enrichment."""
     connector_store = _get_store(store)
-    connectors = await connector_store.list_connectors(app_id=str(app_id))
+    record = await connector_store.get(scope=scope, scope_id=str(scope_id), service=_normalize_service(service))
+    return _with_connector_health(record)
+
+
+async def resolve_connector(
+    *,
+    service: str,
+    app_id: str,
+    workspace_id: str,
+    store: ConnectorStore | None = None,
+) -> dict[str, Any] | None:
+    """Resolve the effective connector: app-scoped first, workspace fallback.
+
+    Returns the connector record (enriched with health) and adds a
+    'resolved_scope' key ('app' or 'workspace') to the result.
+    """
+    connector_store = _get_store(store)
+    normalized_service = _normalize_service(service)
+
+    app_record = await connector_store.get(scope=ConnectorStore.SCOPE_APP, scope_id=str(app_id), service=normalized_service)
+    enriched_app = _with_connector_health(app_record)
+    if enriched_app and enriched_app.get("ready"):
+        enriched_app["resolved_scope"] = ConnectorStore.SCOPE_APP
+        return enriched_app
+
+    ws_record = await connector_store.get(scope=ConnectorStore.SCOPE_WORKSPACE, scope_id=str(workspace_id), service=normalized_service)
+    enriched_ws = _with_connector_health(ws_record)
+    if enriched_ws:
+        enriched_ws["resolved_scope"] = ConnectorStore.SCOPE_WORKSPACE
+        return enriched_ws
+
+    if enriched_app:
+        enriched_app["resolved_scope"] = ConnectorStore.SCOPE_APP
+        return enriched_app
+
+    return None
+
+
+async def list_connectors(
+    *,
+    scope: str,
+    scope_id: str,
+    store: ConnectorStore | None = None,
+) -> list[dict[str, Any]]:
+    """List connectors for a scope with health enrichment."""
+    connector_store = _get_store(store)
+    connectors = await connector_store.list(scope=scope, scope_id=str(scope_id))
     return [_with_connector_health(connector) or connector for connector in connectors]
 
 
 async def get_connector_inventory(
-    app_id: str,
     *,
+    scope: str,
+    scope_id: str,
     required_services: Sequence[str] | None = None,
-    store: AppConnectorStore | None = None,
+    store: ConnectorStore | None = None,
 ) -> dict[str, Any]:
+    """Summarize connector inventory for a scope."""
     connector_store = _get_store(store)
-    connectors = await connector_store.list_connectors(app_id=str(app_id))
+    connectors = await connector_store.list(scope=scope, scope_id=str(scope_id))
     return _summarize_connector_inventory(connectors, required_services=required_services)
 
 
-async def update_connector_metadata(
+async def patch_connector(
     *,
-    app_id: str,
+    scope: str,
+    scope_id: str,
     service: str,
     user_id: str | None = None,
     display_name: str | None = None,
@@ -493,11 +522,13 @@ async def update_connector_metadata(
     expires_at: str | None = None,
     public_config: dict[str, Any] | None = None,
     required_fields: Sequence[dict[str, Any]] | None = None,
-    store: AppConnectorStore | None = None,
+    store: ConnectorStore | None = None,
 ) -> dict[str, Any] | None:
+    """Update connector metadata fields."""
     connector_store = _get_store(store)
-    return await connector_store.patch_connector(
-        app_id=str(app_id),
+    return await connector_store.patch(
+        scope=scope,
+        scope_id=str(scope_id),
         service=_normalize_service(service),
         user_id=str(user_id) if user_id else None,
         display_name=display_name,
@@ -509,39 +540,51 @@ async def update_connector_metadata(
     )
 
 
-async def delete_connector_metadata(
-    *,
-    app_id: str,
-    service: str,
-    store: AppConnectorStore | None = None,
-) -> bool:
-    connector_store = _get_store(store)
-    return await connector_store.delete_connector(app_id=str(app_id), service=_normalize_service(service))
-
-
 async def delete_connector(
     *,
-    app_id: str,
+    scope: str,
+    scope_id: str,
     service: str,
-    store: AppConnectorStore | None = None,
+    store: ConnectorStore | None = None,
 ) -> dict[str, Any]:
+    """Delete connector metadata and vault secret."""
     connector_store = _get_store(store)
     normalized_service = _normalize_service(service)
-    existing = await connector_store.get_connector(app_id=str(app_id), service=normalized_service)
+    existing = await connector_store.get(scope=scope, scope_id=str(scope_id), service=normalized_service)
 
-    provider = str((existing or {}).get("secret_storage") or "")
     secret_result: dict[str, Any] | None = None
     if existing and existing.get("secret_available"):
-        secret_result = await get_connector_vault_backend().delete_secret(app_id=str(app_id), service=normalized_service)
-        provider = str(secret_result.get("provider") or provider or "unknown")
+        secret_result = await _vault_delete_secret(
+            get_connector_vault_backend(),
+            scope_id=str(scope_id),
+            service=normalized_service,
+        )
 
-    metadata_deleted = await connector_store.delete_connector(app_id=str(app_id), service=normalized_service)
+    metadata_deleted = await connector_store.delete(scope=scope, scope_id=str(scope_id), service=normalized_service)
     return {
         "deleted": metadata_deleted,
         "service": normalized_service,
-        "provider": provider or None,
         "secret_deleted": bool(secret_result and secret_result.get("success")),
-        "secret_error": secret_result.get("error") if secret_result and not secret_result.get("success") else None,
+        "error": secret_result.get("error") if secret_result and not secret_result.get("success") else None,
+    }
+
+
+async def get_secret(*, scope_id: str, service: str) -> dict[str, Any]:
+    """Retrieve a vault secret by scope_id and service."""
+    backend = get_connector_vault_backend()
+    result = await _vault_get_secret(
+        backend,
+        scope_id=str(scope_id),
+        service=_normalize_service(service),
+    )
+    return {
+        "success": bool(result.get("success")),
+        "service": service,
+        "secret_value": result.get("secret_value"),
+        "provider": result.get("provider"),
+        "secret_name": result.get("secret_name"),
+        "expires_at": result.get("expires_at"),
+        "error": result.get("error"),
     }
 
 
@@ -551,14 +594,14 @@ async def get_connector_backend_summary() -> dict[str, Any]:
 
 __all__ = [
     "compute_connector_health",
-    "delete_connector_metadata",
     "delete_connector",
-    "get_connector_inventory",
-    "get_connector_status",
+    "get_connector",
     "get_connector_backend_summary",
-    "get_secret_for_e2b",
+    "get_connector_inventory",
+    "get_secret",
     "list_connectors",
-    "record_connector_metadata",
-    "store_connector",
-    "update_connector_metadata",
+    "patch_connector",
+    "resolve_connector",
+    "save_connector",
+    "save_connector_draft",
 ]

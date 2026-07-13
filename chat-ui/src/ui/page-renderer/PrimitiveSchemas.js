@@ -267,6 +267,7 @@ export const PRIMITIVE_SCHEMAS = {
     type: 'object',
     properties: {
       label: { type: 'string' },
+      message: { type: 'string', description: 'alias for label' },
     },
   },
 
@@ -276,6 +277,7 @@ export const PRIMITIVE_SCHEMAS = {
     properties: {
       title:   { type: 'string' },
       message: { type: 'string' },
+      action:  SHARED_DEFINITIONS.action,
     },
   },
 
@@ -303,7 +305,9 @@ export const PRIMITIVE_SCHEMAS = {
     required: ['label'],
     properties: {
       label: { type: 'string' },
-      tone:  { type: 'string', enum: ['default', 'primary', 'success', 'warning', 'destructive'] },
+      tone:  { type: 'string', enum: ['default', 'muted', 'info', 'primary', 'success', 'warning', 'destructive'] },
+      size:  { type: 'string', enum: ['sm', 'md'] },
+      dot:   { type: 'boolean' },
     },
   },
 

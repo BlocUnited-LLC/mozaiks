@@ -47,6 +47,14 @@ def _get_chat_sessions_collection():
     return client["mozaiksai"]["ChatSessions"]
 
 
+def _get_app_registry_collection():
+    from mozaiksai.core.core_config import get_mongo_client
+    from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
+
+    client = get_mongo_client()
+    return client[SYSTEM_DATABASE]["AppRegistryRecords"]
+
+
 def _serialize_datetime(value: Any) -> str | None:
     if hasattr(value, "isoformat"):
         try:
@@ -54,6 +62,78 @@ def _serialize_datetime(value: Any) -> str | None:
         except Exception:
             return None
     return None
+
+
+async def _load_app_registry_maps() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    coll = _get_app_registry_collection()
+    by_app_id: dict[str, dict[str, Any]] = {}
+    by_chat_id: dict[str, dict[str, Any]] = {}
+    cursor = coll.find(
+        {},
+        {
+            "_id": 1,
+            "app_id": 1,
+            "name": 1,
+            "name_status": 1,
+            "name_source": 1,
+            "lifecycle_state": 1,
+            "active_chat_id": 1,
+        },
+    )
+    async for doc in cursor:
+        app_id = str(doc.get("app_id") or "").strip()
+        active_chat_id = str(doc.get("active_chat_id") or "").strip()
+        record = {
+            "build_registry_id": str(doc.get("_id") or ""),
+            "app_id": app_id,
+            "app_name": doc.get("name"),
+            "name_status": doc.get("name_status") or ("named" if doc.get("name") else "provisional"),
+            "name_source": doc.get("name_source") or ("manual" if doc.get("name") else "provisional"),
+            "lifecycle_state": doc.get("lifecycle_state"),
+        }
+        if app_id:
+            by_app_id[app_id] = record
+        if active_chat_id:
+            by_chat_id[active_chat_id] = record
+    return by_app_id, by_chat_id
+
+
+def _usage_app_display_name(record: dict[str, Any] | None, app_id: str | None) -> str | None:
+    if record and record.get("name_status") == "named" and record.get("app_name"):
+        return str(record["app_name"])
+    if app_id:
+        suffix = str(app_id).split("-")[-1][:6].upper()
+        return f"Draft {suffix}" if suffix else "Draft App"
+    return None
+
+
+async def _enrich_usage_with_app_registry(usage: dict[str, Any]) -> dict[str, Any]:
+    by_app_id, by_chat_id = await _load_app_registry_maps()
+
+    def enrich_row(row: dict[str, Any]) -> dict[str, Any]:
+        app_id = str(row.get("app_id") or "").strip()
+        chat_id = str(row.get("chat_id") or "").strip()
+        record = by_app_id.get(app_id) if app_id else None
+        if record is None and chat_id:
+            record = by_chat_id.get(chat_id)
+            if record and record.get("app_id"):
+                app_id = str(record["app_id"])
+                row["app_id"] = app_id
+        if record:
+            row["build_registry_id"] = record.get("build_registry_id")
+            row["app_name"] = _usage_app_display_name(record, app_id)
+            row["name_status"] = record.get("name_status")
+            row["name_source"] = record.get("name_source")
+            row["lifecycle_state"] = record.get("lifecycle_state")
+        elif app_id:
+            row["app_name"] = app_id
+        return row
+
+    for key in ("by_run", "events"):
+        rows = usage.get(key)
+        if isinstance(rows, list):
+            usage[key] = [enrich_row(dict(row)) for row in rows if isinstance(row, dict)]
+    return usage
 
 
 def _count_assistant_turns(messages: Any) -> int:
@@ -256,13 +336,46 @@ async def get_admin_usage(
 ):
     """Return neutral token usage measurements from the runtime usage ledger."""
     try:
-        from mozaiksai.core.usage import get_runtime_usage_ledger
+        from mozaiksai.core.usage import (
+            get_runtime_token_budget_alert_ledger,
+            get_runtime_usage_ledger,
+        )
 
         ledger = get_runtime_usage_ledger()
-        return await ledger.query_usage(app_id=app_id, user_id=user_id, limit=limit)
+        alert_ledger = get_runtime_token_budget_alert_ledger()
+        usage = await ledger.query_usage(app_id=app_id, user_id=user_id, limit=limit)
+        usage = await _enrich_usage_with_app_registry(usage)
+        return {
+            **usage,
+            "token_budget_alerts": await alert_ledger.query_alerts(
+                app_id=app_id,
+                user_id=user_id,
+                limit=min(limit, 100),
+            ),
+        }
     except Exception as e:
         logger.warning("[admin] usage query failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to load runtime usage") from e
+
+
+@router.delete("/usage/orphaned")
+async def purge_orphaned_usage(
+    user: UserPrincipal = Depends(_require_admin),
+):
+    """Delete usage events for apps that no longer exist in the app registry."""
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+        from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE
+        from mozaiksai.core.usage import get_runtime_usage_ledger
+
+        client = get_mongo_client()
+        app_records = await client[SYSTEM_DATABASE]["AppRegistryRecords"].distinct("app_id")
+        known_app_ids = [str(aid) for aid in app_records if aid]
+        deleted = await get_runtime_usage_ledger().purge_orphaned_usage(known_app_ids=known_app_ids)
+        return {"deleted": deleted, "known_apps": len(known_app_ids)}
+    except Exception as e:
+        logger.warning("[admin] orphaned usage purge failed: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to purge orphaned usage") from e
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from mozaiksai.core.data.persistence.namespaces import (
     BuilderCollections,
     PlatformCollections,
 )
+from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     build_app_validation_strategy_summary,
@@ -72,6 +74,16 @@ APP_LIFECYCLE_LABELS = {
 }
 
 
+def _optional_text(*values: Any) -> str | None:
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if text:
+            return text
+    return None
+
+
 def get_missing_studio_surfaces(app_root: Path) -> list[str]:
     app_prefix = "app"
     theme_rel = f"{app_prefix}/brand/theme_config.json"
@@ -118,10 +130,21 @@ def build_app_overview_summary(
             "local_only": local_only,
             "workspace_root": str(app_root),
             "route": f"/apps/{app_id}/overview",
+            "environment": os.getenv("ENVIRONMENT", "local").lower(),
         },
         "app": {
             "id": app_id,
             "name": app_config.get("appName") or app_root.name,
+            "description": _optional_text(
+                app_config.get("description"),
+                app_config.get("appDescription"),
+                app_config.get("summary"),
+            ),
+            "tagline": _optional_text(app_config.get("tagline")),
+            "value_proposition": _optional_text(
+                app_config.get("value_proposition"),
+                app_config.get("valueProposition"),
+            ),
             "preset": app_config.get("preset") or "unknown",
         },
         "ai": {
@@ -174,7 +197,7 @@ def build_app_overview_summary(
             **summary["app"],
             "id": record_app_id,
             "name": app_record.get("name") or summary["app"]["name"],
-            "description": app_record.get("description"),
+            "description": _optional_text(app_record.get("description"), summary["app"].get("description")),
             "build_registry_id": app_record.get("build_registry_id"),
             "lifecycle_state": lifecycle_state,
             "lifecycle_label": APP_LIFECYCLE_LABELS.get(lifecycle_state, lifecycle_state.title()),
@@ -448,7 +471,7 @@ async def build_integrations_summary(*, app_id: str | None = None) -> dict:
     app_connectors: list[dict[str, Any]] = []
     if app_id:
         try:
-            app_connectors = await list_connectors(app_id)
+            app_connectors = await list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id=app_id)
         except Exception:
             app_connectors = []
 

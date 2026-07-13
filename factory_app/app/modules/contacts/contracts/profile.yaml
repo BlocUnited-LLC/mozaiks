@@ -1,0 +1,8 @@
+schema_version: mozaiks.profile.v1
+
+tabs:
+  - id: contacts
+    label: Friends
+    order: 20
+    component: ContactsTab
+    action: list_contacts

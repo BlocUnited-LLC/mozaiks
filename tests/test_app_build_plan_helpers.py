@@ -269,7 +269,7 @@ class TestInferPackIdFromIntegrationPath:
 
     def test_deeply_nested_non_matching_path_returns_none(self):
         assert _infer_pack_id_from_integration_path(
-            "modules/payments/services/integrations/stripe_client.py"
+            "modules/payments/services/integrations/payment_provider_client.py"
         ) is None
 
     def test_whitespace_stripped_before_check(self):

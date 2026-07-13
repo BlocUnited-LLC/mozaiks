@@ -275,7 +275,7 @@ All items below are in `mozaiksai/core/` or `mozaiksai/hosts/routers/` and are i
 | CQ-2 | AG2 adapter layer — isolate AG2 imports to one adapter | `core/adapters/ag2_runner.py` | **Done ✓** |
 | CQ-3 | Enable mypy on `core/` incrementally | `pyproject.toml`, `mozaiksai/core/` | **Done ✓** (0 errors, 476 files) |
 | CQ-4 | Standardize logging — enforce context-aware loggers throughout | `mozaiksai/` all modules | Remaining |
-| CQ-5 | Mark stale functions for removal — annotate with `# TODO: remove — use X instead` | `mozaiksai/core/multitenant/`, outdated adapters | Remaining |
+| CQ-5 | Mark stale functions for removal with explicit replacement guidance | `mozaiksai/core/multitenant/`, outdated adapters | Remaining |
 | CQ-6 | Add architecture decision records | new `docs/architecture/decisions/` (ADR format) | Remaining |
 
 ---

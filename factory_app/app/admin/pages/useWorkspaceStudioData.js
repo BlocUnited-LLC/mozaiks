@@ -3,9 +3,11 @@ import { useEffect, useState } from 'react'
 import { API_BASE } from './studioApi.js'
 import {
   buildStudioDemoApps,
+  getStudioDemoWorkspaceUsage,
   getStudioDemoWorkspaceRuns,
   getStudioDemoWorkspaceStats,
   isStudioDemoModeEnabled,
+  isStudioUsageDemoModeEnabled,
 } from './studioDemoData.js'
 
 export function useWorkspaceStudioData(errorFallback = 'Workspace Studio data could not be loaded.') {
@@ -21,6 +23,7 @@ export function useWorkspaceStudioData(errorFallback = 'Workspace Studio data co
   useEffect(() => {
     let cancelled = false
     const demoMode = isStudioDemoModeEnabled()
+    const usageDemoMode = isStudioUsageDemoModeEnabled()
 
     async function load() {
       try {
@@ -41,7 +44,7 @@ export function useWorkspaceStudioData(errorFallback = 'Workspace Studio data co
         const runsPayload = runsRes.status === 'fulfilled' && runsRes.value.ok ? await runsRes.value.json() : null
         const usagePayload = usageRes.status === 'fulfilled' && usageRes.value.ok ? await usageRes.value.json() : null
         const liveApps = Array.isArray(appsPayload.apps) ? appsPayload.apps : []
-        const useDemoApps = demoMode && liveApps.length === 0
+        const useDemoApps = usageDemoMode || (demoMode && liveApps.length === 0)
 
         if (!cancelled) {
           setApps(useDemoApps ? buildStudioDemoApps() : liveApps)
@@ -62,7 +65,7 @@ export function useWorkspaceStudioData(errorFallback = 'Workspace Studio data co
           )
           setWorkspaceUsage(
             useDemoApps
-              ? null
+              ? getStudioDemoWorkspaceUsage()
               : usagePayload && typeof usagePayload === 'object'
                 ? usagePayload
                 : null,
@@ -72,12 +75,12 @@ export function useWorkspaceStudioData(errorFallback = 'Workspace Studio data co
         }
       } catch (err) {
         if (!cancelled) {
-          if (demoMode) {
+          if (demoMode || usageDemoMode) {
             setApps(buildStudioDemoApps())
             setMetrics({})
             setWorkspaceStats(getStudioDemoWorkspaceStats())
             setWorkspaceRuns(getStudioDemoWorkspaceRuns())
-            setWorkspaceUsage(null)
+            setWorkspaceUsage(getStudioDemoWorkspaceUsage())
             setDataMode('demo')
             setError(null)
           } else {

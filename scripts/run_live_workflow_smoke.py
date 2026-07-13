@@ -978,11 +978,12 @@ async def run_live_workflow_smoke(
             structured_output = _extract_latest_structured_output(final_doc)
             final_context = _extract_final_context(final_doc)
             try:
+                from mozaiksai.core.data.persistence.connector_store import ConnectorStore
                 from mozaiksai.core.workflow.generator_support.connector_service import (
                     list_connectors,
                 )
 
-                app_connectors = await list_connectors(app_id)
+                app_connectors = await list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id=app_id)
             except Exception:
                 app_connectors = []
         except Exception:

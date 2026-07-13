@@ -178,6 +178,41 @@ models:
         - str
         - 'null'
         description: Optional implementation note.
+  WorkspaceCatalogCheck:
+    type: model
+    fields:
+      catalog_id:
+        type: str
+        description: >
+          Workspace integration catalog ID (e.g. "mozaikspay", "twilio", "openai").
+          Must match a known entry in the integrations catalog.
+      display_name:
+        type: str
+        description: Human-readable integration name from the catalog.
+      workspace_status:
+        type: literal
+        values:
+          - configured
+          - partial
+          - missing
+          - unknown
+        description: >
+          Status returned by check_workspace_integrations.
+          configured = all required env vars present — auto-wire this integration.
+          partial = some required env vars missing — flag to the user.
+          missing = no required env vars present — pass to record_integration_need.
+          unknown = catalog_only mode — cannot verify; surface setup guidance.
+      auto_wire:
+        type: bool
+        description: >
+          True when workspace_status is "configured". The generated app should
+          reference this integration without prompting the user for credentials.
+      missing_secrets:
+        type: optional_list
+        items: str
+        description: >
+          Secret names that are missing, present when workspace_status is
+          "partial" or "missing". Empty for "configured" and "unknown".
   AppBuildIntegration:
     type: model
     fields:
@@ -675,6 +710,8 @@ models:
         - page_bundle
         - agent_backend_integration
         - control_plane_pack
+        - ai_disclosure_docs
+        - legal_docs
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
@@ -994,6 +1031,15 @@ models:
         type: optional_list
         items: AppBuildIntegration
         description: External integrations required by the product.
+      workspace_integration_status:
+        type: optional_list
+        items: WorkspaceCatalogCheck
+        description: >
+          Results from check_workspace_integrations called during planning.
+          One entry per catalog integration checked. Downstream agents use
+          this to know which integrations are already configured (auto-wire)
+          vs. missing (require IntegrationReadinessAgent to collect inline).
+          Empty when no catalog integrations were checked.
       event_flows:
         type: optional_list
         items: AppEventFlow
@@ -3791,6 +3837,12 @@ models:
         - str
         - 'null'
         description: Optional loading label.
+      message:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional message alias for label. Prefer label in new output.
 
   AppErrorStateConfig:
     type: model
@@ -3804,6 +3856,12 @@ models:
       message:
         type: str
         description: User-facing error message.
+      action:
+        type: union
+        variants:
+        - AppPageAction
+        - 'null'
+        description: One optional recovery/navigation action.
 
   AppPanelConfig:
     type: model
@@ -3864,7 +3922,19 @@ models:
         variants:
         - str
         - 'null'
-        description: "Optional tone: default, primary, success, warning, or destructive."
+        description: "Optional tone: default, muted, info, primary, success, warning, or destructive."
+      size:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: "Optional size: sm or md."
+      dot:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        description: Optional leading dot indicator. Use sparingly for live status.
 
   AppMetricConfig:
     type: model
@@ -4551,6 +4621,34 @@ models:
       app_name:
         type: str
         description: Human-readable application name.
+      description:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          One or two sentence product description for Studio and generated app
+          management surfaces. Preserve ValueEngine ConceptBlueprint.concept_overview
+          or value_manifest.concept_overview when available; do not invent vague
+          placeholder copy.
+      tagline:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Short product tagline or positioning line for app dashboard identity.
+          Prefer a concise phrase derived from ConceptBlueprint.value_proposition.
+          Null when the concept has not established a real tagline.
+      value_proposition:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          The durable user value statement for this app. Preserve
+          ConceptBlueprint.value_proposition or value_manifest.value_proposition
+          when available so Studio can show app purpose consistently.
       version:
         type: str
         description: Semantic version string (e.g. 1.0.0).

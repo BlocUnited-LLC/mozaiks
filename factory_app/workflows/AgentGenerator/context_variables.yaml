@@ -341,7 +341,7 @@ definitions:
         agent: InterviewAgent
         ui_hidden: true
         match:
-          equals: NEXT
+          regex: (?m)^\s*NEXT\s*$
   workflow_review_approved:
     type: boolean
     description: >

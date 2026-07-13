@@ -24,13 +24,13 @@ Verifies that the generated ui/lib/moduleApi.js template:
  20.  file_contracts.yaml lists ui/lib/moduleApi.js as optional page_bundle output.
  21.  file_contracts.yaml hard_constraints mention moduleAction import rule.
  22.  file_contracts.yaml hard_constraints mention err.error_code error handling.
- 23.  Template contains no proprietary product names (Stripe, MozaiksPay, etc.).
+ 23.  Template contains no proprietary product names (payment provider, MozaiksPay, etc.).
  24.  Custom route JSX fixture: catches err.error_code without parsing body text.
  25.  Custom route JSX fixture: branches on RECORD_NOT_FOUND error code.
 
 All examples use neutral, generic names:
   inventory, approval_request, onboarding, record_not_found, validation_failed.
-No Stripe, MozaiksPay, refund-specific, or hosted-product names in this file.
+No payment provider, MozaiksPay, refund-specific, or hosted-product names in this file.
 """
 from __future__ import annotations
 
@@ -53,14 +53,14 @@ _TEMPLATE_MODULE_PATH = (
 _PROPRIETARY_NAMES = [
     "MozaiksPay",
     "mozaikspay",
-    "Stripe",
-    "stripe",
+    "payment provider",
+    "payment_provider",
     "managed_billing",
     "managed_entitlements",
     "managed_usage",
     "mozaiks_checkout",
     "refund_id",
-    "stripe_refund",
+    "payment_provider_refund",
 ]
 
 

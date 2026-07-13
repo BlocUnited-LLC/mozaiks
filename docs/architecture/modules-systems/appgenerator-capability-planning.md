@@ -118,7 +118,7 @@ implementation_mode: external_integration
 External adapter:
 
 ```yaml
-capability_pack_id: stripe_billing
+capability_pack_id: payment_provider_billing
 capability_source: external_adapter
 surface_kind: external_integration
 ```

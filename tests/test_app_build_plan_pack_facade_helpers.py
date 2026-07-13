@@ -168,9 +168,9 @@ class TestContextAvailablePackMap:
         assert "billing" in result
 
     def test_id_field_accepted(self):
-        ctx = _ctx({"capability_packs": [{"id": "stripe", "label": "Stripe"}]})
+        ctx = _ctx({"capability_packs": [{"id": "payment_provider", "label": "payment provider"}]})
         result = _context_available_pack_map(ctx)
-        assert "stripe" in result
+        assert "payment_provider" in result
 
     def test_pack_id_field_accepted(self):
         ctx = _ctx({"capability_packs": [{"pack_id": "auth0"}]})
@@ -235,10 +235,10 @@ class TestContextManagedCapabilityIds:
     def test_available_managed_capabilities_key_also_searched(self):
         ctx = _ctx({
             "capability_packs": [],
-            "available_managed_capabilities": [{"pack_id": "stripe", "capability_source": "managed_capability"}],
+            "available_managed_capabilities": [{"pack_id": "payment_provider", "capability_source": "managed_capability"}],
         })
         result = _context_managed_capability_ids(ctx)
-        assert "stripe" in result
+        assert "payment_provider" in result
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ class TestPackIdFromDescriptor:
         assert _pack_id_from_descriptor({"id": "billing"}) == "billing"
 
     def test_pack_id_field_fallback(self):
-        assert _pack_id_from_descriptor({"pack_id": "stripe"}) == "stripe"
+        assert _pack_id_from_descriptor({"pack_id": "payment_provider"}) == "payment_provider"
 
     def test_all_empty_returns_empty_string(self):
         assert _pack_id_from_descriptor({}) == ""
@@ -499,16 +499,16 @@ class TestValidatePageBindings:
             assert "billing" in str(exc)
 
     def test_page_binds_to_backing_module_raises(self):
-        pages = [{"name": "Stripe", "api_endpoint": "/api/modules/stripe_backend/charge"}]
+        pages = [{"name": "payment provider", "api_endpoint": "/api/modules/payment_provider_backend/charge"}]
         try:
             _validate_page_bindings(
                 pages,
                 managed_capability_ids=frozenset({"billing"}),
-                managed_capability_backing_module_ids=frozenset({"stripe_backend"}),
+                managed_capability_backing_module_ids=frozenset({"payment_provider_backend"}),
             )
             raise AssertionError("Expected ValueError")
         except ValueError as exc:
-            assert "stripe_backend" in str(exc)
+            assert "payment_provider_backend" in str(exc)
 
     def test_nested_endpoint_binding_raises(self):
         pages = [{"name": "P", "section": {"api_endpoint": "/api/modules/billing/pay"}}]
@@ -534,10 +534,10 @@ class TestHostedBackingModuleIds:
         assert result == frozenset()
 
     def test_backing_module_field_included(self):
-        ctx = self._ctx_with_hosted("billing", {"backing_module": "stripe_internal"})
+        ctx = self._ctx_with_hosted("billing", {"backing_module": "payment_provider_internal"})
         packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
         result = _managed_capability_backing_module_ids(packs, context_variables=ctx)
-        assert "stripe_internal" in result
+        assert "payment_provider_internal" in result
 
     def test_requires_modules_included(self):
         ctx = self._ctx_with_hosted("billing", {"requires_modules": ["payment_processor"]})

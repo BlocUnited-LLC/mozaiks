@@ -192,7 +192,7 @@ models:
 
 The following invariants must be enforced by OutputAgent through explicit
 prompt instructions. They are **not** currently enforced at the schema level
-(schema-level invariant metadata is a future enhancement — see TODO below).
+(schema-level invariant metadata is a future enhancement, described below).
 
 | Field | Invariant |
 |---|---|
@@ -219,7 +219,7 @@ prompt instructions. They are **not** currently enforced at the schema level
     - No instructions to execute phases automatically.
 ```
 
-> **TODO (future enhancement):** Add schema-level invariant metadata to
+> **Future enhancement:** Add schema-level invariant metadata to
 > `structured_outputs.yaml` so the runtime can validate invariants without
 > relying solely on agent prompt text. Proposed shape:
 >

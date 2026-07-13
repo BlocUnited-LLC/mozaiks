@@ -67,7 +67,7 @@ no external IO or global state dependency:
     - unknown path → (module_id, 100, 0, relative)
 
   _pack_ids_from_integration_clients:
-    - "services/integrations/stripe_client.py" → ["stripe"]
+    - "services/integrations/payment_provider_client.py" → ["payment_provider"]
     - multiple paths → multiple pack_ids
     - non-matching path → []
     - duplicates removed
@@ -517,18 +517,18 @@ class TestModulePathSortKey:
 # ---------------------------------------------------------------------------
 
 class TestPackIdsFromIntegrationClients:
-    def test_stripe_client_extracted(self):
-        paths = ["services/integrations/stripe_client.py"]
+    def test_payment_provider_client_extracted(self):
+        paths = ["services/integrations/payment_provider_client.py"]
         result = RefinementTriggerRouteResolver._pack_ids_from_integration_clients(paths)
-        assert result == ["stripe"]
+        assert result == ["payment_provider"]
 
     def test_multiple_clients(self):
         paths = [
-            "services/integrations/stripe_client.py",
+            "services/integrations/payment_provider_client.py",
             "services/integrations/sendgrid_client.py",
         ]
         result = RefinementTriggerRouteResolver._pack_ids_from_integration_clients(paths)
-        assert "stripe" in result
+        assert "payment_provider" in result
         assert "sendgrid" in result
 
     def test_non_matching_path_ignored(self):
@@ -538,11 +538,11 @@ class TestPackIdsFromIntegrationClients:
 
     def test_duplicates_removed(self):
         paths = [
-            "services/integrations/stripe_client.py",
-            "services/integrations/stripe_client.py",
+            "services/integrations/payment_provider_client.py",
+            "services/integrations/payment_provider_client.py",
         ]
         result = RefinementTriggerRouteResolver._pack_ids_from_integration_clients(paths)
-        assert result.count("stripe") == 1
+        assert result.count("payment_provider") == 1
 
     def test_empty_list_returns_empty(self):
         assert RefinementTriggerRouteResolver._pack_ids_from_integration_clients([]) == []

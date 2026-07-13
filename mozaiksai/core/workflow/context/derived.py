@@ -7,8 +7,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from autogen.events.agent_events import TextEvent
-
 from logs.logging_config import get_workflow_logger
 
 from .schema import load_context_variables_config
@@ -64,7 +62,7 @@ def _matches_text_conditions(
         return True
     return False
 
-def _resolve_sender_name(event: TextEvent) -> str | None:
+def _resolve_sender_name(event: Any) -> str | None:
     """Extract logical agent name for matching triggers."""
 
     def _from_value(value: Any, *, allow_string: bool = True) -> str | None:
@@ -137,7 +135,7 @@ class AgentTextTrigger:
     def __post_init__(self) -> None:
         self._compiled = _compile_optional_regex(self.regex)
 
-    def matches(self, event: TextEvent) -> bool:
+    def matches(self, event: Any) -> bool:
         sender_name = _resolve_sender_name(event)
         if not sender_name or sender_name != self.agent:
             return False
@@ -174,7 +172,7 @@ class UserTextBinding:
         )
 
 
-def _extract_text(event: TextEvent) -> str:
+def _extract_text(event: Any) -> str:
     raw = getattr(event, "content", None)
 
     def _dig(value: Any) -> str | None:
@@ -230,7 +228,7 @@ class DerivedVariableSpec:
                 except Exception as err:  # pragma: no cover
                     logger.debug("Derived variable seed failed: %s", err)
 
-    def apply(self, event: TextEvent, providers: Iterable[Any]) -> bool:
+    def apply(self, event: Any, providers: Iterable[Any]) -> bool:
         for trigger in self.triggers:
             if trigger.matches(event):
                 for provider in providers:
@@ -565,7 +563,7 @@ class DerivedContextManager:
             self._listeners.append(callback)
 
     def handle_event(self, event: Any) -> None:
-        if not self.variables or not isinstance(event, TextEvent):
+        if not self.variables:
             return
         for var in self.variables:
             if var.apply(event, self.providers):

@@ -303,6 +303,11 @@ export class ApiAdapter {
     const path = `/api/general_chats/${encodeURIComponent(appId)}/${encodeURIComponent(userId)}?${params.toString()}`;
     return this.delete(path);
   }
+
+  async deleteGeneralChat(appId, userId, chatId) {
+    const path = `/api/general_chats/${encodeURIComponent(appId)}/${encodeURIComponent(userId)}/${encodeURIComponent(chatId)}`;
+    return this.delete(path);
+  }
 }
 
 // Default WebSocket API Adapter

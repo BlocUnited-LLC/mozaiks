@@ -35,19 +35,20 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-async def _run_metadata_mode(*, app_id: str, service: str, display_name: str | None) -> dict[str, Any]:
-    from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+async def _run_metadata_mode(*, scope_id: str, service: str, display_name: str | None) -> dict[str, Any]:
+    from mozaiksai.core.data.persistence.connector_store import ConnectorStore
     from mozaiksai.core.workflow.generator_support.connector_service import (
         delete_connector,
+        get_connector,
         get_connector_backend_summary,
-        get_connector_status,
-        record_connector_metadata,
+        save_connector_draft,
     )
 
-    store = AppConnectorStore()
+    store = ConnectorStore()
     backend_summary = await get_connector_backend_summary()
-    recorded = await record_connector_metadata(
-        app_id=app_id,
+    recorded = await save_connector_draft(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id=scope_id,
         user_id="smoke-user",
         service=service,
         display_name=display_name,
@@ -59,11 +60,11 @@ async def _run_metadata_mode(*, app_id: str, service: str, display_name: str | N
         status_reason="Smoke test metadata-only connector path.",
         store=store,
     )
-    status = await get_connector_status(app_id, service, store=store)
-    deleted = await delete_connector(app_id=app_id, service=service, store=store)
+    status = await get_connector(scope=ConnectorStore.SCOPE_APP, scope_id=scope_id, service=service, store=store)
+    deleted = await delete_connector(scope=ConnectorStore.SCOPE_APP, scope_id=scope_id, service=service, store=store)
     return {
         "mode": "metadata",
-        "app_id": app_id,
+        "scope_id": scope_id,
         "service": service,
         "backend_summary": backend_summary,
         "recorded": recorded,
@@ -74,25 +75,26 @@ async def _run_metadata_mode(*, app_id: str, service: str, display_name: str | N
 
 async def _run_secret_mode(
     *,
-    app_id: str,
+    scope_id: str,
     service: str,
     display_name: str | None,
     secret_value: str,
     ttl_days: int,
 ) -> dict[str, Any]:
-    from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+    from mozaiksai.core.data.persistence.connector_store import ConnectorStore
     from mozaiksai.core.workflow.generator_support.connector_service import (
         delete_connector,
+        get_connector,
         get_connector_backend_summary,
-        get_connector_status,
-        get_secret_for_e2b,
-        store_connector,
+        get_secret,
+        save_connector,
     )
 
-    store = AppConnectorStore()
+    store = ConnectorStore()
     backend_summary = await get_connector_backend_summary()
-    stored = await store_connector(
-        app_id=app_id,
+    stored = await save_connector(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id=scope_id,
         user_id="smoke-user",
         service=service,
         secret_value=secret_value,
@@ -100,12 +102,12 @@ async def _run_secret_mode(
         ttl_days=ttl_days,
         store=store,
     )
-    status = await get_connector_status(app_id, service, store=store)
-    secret_result = await get_secret_for_e2b(app_id, service)
-    deleted = await delete_connector(app_id=app_id, service=service, store=store)
+    status = await get_connector(scope=ConnectorStore.SCOPE_APP, scope_id=scope_id, service=service, store=store)
+    secret_result = await get_secret(scope_id=scope_id, service=service)
+    deleted = await delete_connector(scope=ConnectorStore.SCOPE_APP, scope_id=scope_id, service=service, store=store)
     return {
         "mode": "secret",
-        "app_id": app_id,
+        "scope_id": scope_id,
         "service": service,
         "backend_summary": backend_summary,
         "stored": stored,
@@ -126,8 +128,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a live connector/vault smoke check against the local Mozaiks runtime contracts.")
     parser.add_argument("--mode", choices=["metadata", "secret"], default="metadata")
     parser.add_argument("--app-id", default=f"smoke-app-{uuid.uuid4().hex[:8]}")
-    parser.add_argument("--service", default="stripe")
-    parser.add_argument("--display-name", default="Stripe")
+    parser.add_argument("--service", default="mozaikspay")
+    parser.add_argument("--display-name", default="MozaiksPay")
     parser.add_argument("--secret-value", default=None)
     parser.add_argument("--secret-env", default="MOZAIKS_SMOKE_CONNECTOR_SECRET")
     parser.add_argument("--ttl-days", type=int, default=30)
@@ -138,7 +140,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _print_human_summary(result: dict[str, Any]) -> None:
     mode = result.get("mode")
     print(f"[connector-smoke] mode: {mode}")
-    print(f"[connector-smoke] app_id: {result.get('app_id')}")
+    print(f"[connector-smoke] scope_id: {result.get('scope_id')}")
     print(f"[connector-smoke] service: {result.get('service')}")
 
     backend = result.get("backend_summary") or {}
@@ -160,8 +162,7 @@ def _print_human_summary(result: dict[str, Any]) -> None:
     deleted = result.get("deleted") or {}
     print(
         "[connector-smoke] secret store:"
-        f" success={stored.get('success')} provider={stored.get('provider')}"
-        f" connector_status={stored.get('connector_status')}"
+        f" success={stored.get('success')} error={stored.get('error')}"
     )
     print(
         "[connector-smoke] secret fetch:"
@@ -186,7 +187,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     if args.mode == "metadata":
         result = await _run_metadata_mode(
-            app_id=args.app_id,
+            scope_id=args.app_id,
             service=args.service,
             display_name=args.display_name,
         )
@@ -199,7 +200,7 @@ async def _run(args: argparse.Namespace) -> int:
             )
             return 2
         result = await _run_secret_mode(
-            app_id=args.app_id,
+            scope_id=args.app_id,
             service=args.service,
             display_name=args.display_name,
             secret_value=secret_value,

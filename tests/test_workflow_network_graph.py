@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from autogen.beta.network import (
+from ag2.network import (
     EV_PACKET,
     Envelope,
     TransitionGraph,

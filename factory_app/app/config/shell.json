@@ -22,8 +22,7 @@
             "when": { "surface": "workflow_session" },
             "label": "Open Studio",
             "icon": "settings.svg",
-            "pathTemplate": "/apps/{appId}",
-            "fallbackPath": "/apps",
+            "path": "/apps",
             "variant": "secondary"
           }
         ],
@@ -33,7 +32,7 @@
     ]
   },
   "shortcuts": {
-    "profile": ["profile", "signout"],
+    "profile": ["profile", "messages", "signout"],
     "mobile": ["create", "profile"],
     "footer": ["legal", "terms", "cookies"],
     "footerHideOnMobile": true
@@ -80,6 +79,10 @@
       "public": {
         "desktop": { "header": true, "footer": true, "bottomBar": false, "localNav": false },
         "mobile": { "header": true, "footer": false, "bottomBar": false, "localNav": false }
+      },
+      "social": {
+        "desktop": { "header": true, "footer": false, "bottomBar": false, "localNav": false },
+        "mobile": { "header": true, "footer": false, "bottomBar": true, "localNav": false }
       }
     }
   },

@@ -84,6 +84,9 @@ mozaiks-platform/
 .env.*
 !.env.example
 
+# Private local provider-pricing overrides
+pricing/catalogs/usage-pricing.overrides.json
+
 # Docs build
 site/
 .mkdocs-tmp/

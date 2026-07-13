@@ -12,8 +12,7 @@ Use these terms in visible product copy:
 - `Apps`
 - `App Studio`
 - `Overview`
-- `Health`
-- `Users`
+- `Access`
 - `Usage`
 - `Integrations`
 
@@ -38,7 +37,7 @@ not appear as primary customer-facing product language:
 ## Studio, Host, And CLI
 
 **Mozaiks Studio** is the browser product. It owns app creation, build
-continuation, artifact review, app workspace status, usage, health, users, and
+continuation, artifact review, app workspace status, usage, app health signals, access, and
 integrations. Creation and continuation are separate intents: the shell Create
 entrypoint always starts a fresh build journey, while continuation happens from
 Studio/App Studio build history or an explicit chat/build record.
@@ -59,23 +58,21 @@ Workspace-level routes:
 
 - `/apps` -> workspace app portfolio home
 - `/usage` -> workspace workflow token usage and cost totals
-- `/health` -> workspace cross-app health summary
+- `/integrations` -> workspace provider setup and integration catalog
 
 App-level routes:
 
 - `/apps/:appId` -> redirects to `/apps/:appId/overview`
-- `/apps/:appId/overview` -> App Studio overview
-- `/apps/:appId/health` -> app health
-- `/apps/:appId/users` -> app users
+- `/apps/:appId/overview` -> App Studio overview with operational health summary
+- `/apps/:appId/health` -> deep app health diagnostics, hidden from primary navigation
+- `/apps/:appId/users` -> app access
 - `/apps/:appId/usage` -> app usage
-- `/apps/:appId/integrations` -> app integrations
+- `/apps/:appId/integrations` -> app integration setup detail, hidden from primary navigation
 
 Primary app navigation is:
 
 - Overview
-- Health
-- Users
-- Integrations
+- Access
 - Usage
 
 The Studio route model is canonical. Do not add route aliases for
@@ -93,14 +90,14 @@ product billing routes.
 | --- | --- | --- |
 | `/apps` | Workspace Apps | Primary workspace home and app portfolio |
 | `/usage` | Workspace Usage | Cross-app workflow input/output tokens, totals, and averages |
-| `/health` | Workspace Health | Cross-app health posture and app-level risk visibility |
+| `/integrations` | Workspace Integrations | Workspace provider setup, catalog coverage, and safe credential-presence status |
 | `/create` | Workflow entrypoint | Workflow-owned fresh create path; not part of the persistent Studio nav and never an implicit resume surface |
 | `/apps/:appId` | App Studio | Redirects to app overview |
-| `/apps/:appId/overview` | App Overview | App-scoped summary and next actions |
-| `/apps/:appId/health` | App Health | Overall app health across runtime, workflows, hosting, and integrations |
-| `/apps/:appId/users` | App Users | App-scoped users and customer activity |
+| `/apps/:appId/overview` | App Overview | App-scoped summary, next actions, operational health, connected services, build state, and activity |
+| `/apps/:appId/health` | App Health Diagnostics | Deep diagnostics across runtime, workflows, hosting, and integrations; routable but hidden from primary navigation |
+| `/apps/:appId/users` | App Access | App-scoped account access, plan assignment, and access blockers |
 | `/apps/:appId/usage` | App Usage | App-scoped input/output token usage, cost signals, totals, and averages |
-| `/apps/:appId/integrations` | App Integrations | App-scoped connectors, credentials, and permissions |
+| `/apps/:appId/integrations` | App Integration Setup | App-declared integration needs with workspace provider status; routable but hidden from primary navigation |
 
 ## Lifecycle States
 
@@ -130,14 +127,12 @@ Behavior expectations:
 
 - apps
 - usage
-- health
+- integrations
 
 `App Studio` is single-app scope:
 
 - overview
-- health
-- users
-- integrations
+- access
 - usage
 
 ## Non-Canonical Terms

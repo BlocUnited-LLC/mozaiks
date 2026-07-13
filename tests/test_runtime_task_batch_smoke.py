@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from autogen.beta.network.policies import CHANNEL_STATE_DEP
+from ag2.network.policies import CHANNEL_STATE_DEP
 
 from mozaiksai.core.workflow.execution.network_graph import (
     compile_transition_rules_to_graph,

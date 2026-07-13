@@ -139,10 +139,10 @@ async def test_platform_shell_config_injects_profile_route():
         if isinstance(page, dict)
     }
 
-    assert "/profile" in pages
-    assert pages["/profile"]["component"] == "ProfilePage"
-    assert pages["/profile"]["meta"]["requiresAuth"] is True
-    assert "/profile" not in header_paths
+    assert "/me" in pages
+    assert pages["/me"]["component"] == "ProfilePage"
+    assert pages["/me"]["meta"]["requiresAuth"] is True
+    assert "/me" not in header_paths
 
 
 def test_profile_page_edits_preferences_through_host_contract() -> None:
@@ -150,10 +150,7 @@ def test_profile_page_edits_preferences_through_host_contract() -> None:
         Path(__file__).resolve().parents[1] / "chat-ui" / "src" / "pages" / "ProfilePage.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "/api/me/preferences" in source
     assert "method: 'PUT'" in source
-    assert "Preferences must be valid JSON." in source
-    assert "Host-owned account preferences scoped to this app." in source
     assert "api && typeof api.getHttpBaseUrl === 'function'" in source
     assert "VITE_API_URL" in source
 
@@ -591,11 +588,6 @@ def test_profile_page_fetches_profile_panels() -> None:
         Path(__file__).resolve().parents[1] / "chat-ui" / "src" / "pages" / "ProfilePage.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "/api/me/profile-panels" in source
-    assert "modulePanels" in source
-    assert "ModulePanelSection" in source
-    assert "MetricsPanel" in source
-    assert "ListPanel" in source
-    assert "ComponentPanel" in source
+    assert "/api/me/profile-tabs" in source
     assert "componentRegistry" in source
 

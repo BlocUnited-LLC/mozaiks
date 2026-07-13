@@ -20,7 +20,7 @@ actions:
   - id: get_subscription_status
     description: >
       Return safe current plan display fields through MozaiksPayClient.
-      Never returns hosted subscription ids, Stripe customer ids, or granted
+      Never returns hosted subscription ids, payment provider customer ids, or granted
       managed-capability capabilities.
     handler_method: get_subscription_status
     input_schema:

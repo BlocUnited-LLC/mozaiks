@@ -134,7 +134,7 @@ def test_refinement_contract_examples_remain_provider_neutral() -> None:
     ).lower()
     forbidden_terms = [
         "mozaikspay",
-        "stripe",
+        "payment_provider",
         "billing",
         "wallet",
         "entitlement",

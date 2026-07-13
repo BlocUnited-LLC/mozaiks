@@ -323,7 +323,7 @@ def _scenario_specs() -> list[SmokeScenarioSpec]:
         SmokeScenarioSpec(
             name="data_model_comment",
             request_id="req_refinement_live_worker_data_model_001",
-            request_text="Add a TODO comment in the projects schema explaining that project_phase will require a future migration.",
+            request_text="Add a short future-migration note in the projects schema explaining that project_phase will require new phases.",
             app_id=f"{APP_ID}-data-model",
             artifact_version_id="av_refinement_live_worker_data_model_001",
             source_files=dict(source_files),

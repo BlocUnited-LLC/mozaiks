@@ -56,7 +56,7 @@ Owns agent-native semantics.
 AG2 should continue to own native concepts such as:
 
 - handoffs
-- AG2 beta workflow progression
+- AG2 1.0 beta workflow progression
 - reply hooks
 - tool calling
 

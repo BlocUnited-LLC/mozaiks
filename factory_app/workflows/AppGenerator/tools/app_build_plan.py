@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from mozaiksai.core.runtime.app.paths import (
     APP_SECURITY_SECRETS_PATH,

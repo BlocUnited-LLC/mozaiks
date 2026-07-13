@@ -29,10 +29,12 @@ export function buildHealthState({
   uptimePercent = null,
   hasDeploymentFailure = false,
   missingSecrets = 0,
+  integrationIssues = missingSecrets,
 }) {
   const normalized = normalizeAppStatus(status)
   let score = STATUS_BASE_SCORE[normalized] ?? 60
   const issues = []
+  const integrationIssueCount = Number(integrationIssues || 0)
 
   if (runtimeReadiness && runtimeReadiness !== 'entry_point_configured') {
     score -= 12
@@ -57,9 +59,9 @@ export function buildHealthState({
     issues.push(`${Number(totalErrors || 0)} recent workflow errors recorded`)
   }
 
-  if (Number(missingSecrets || 0) > 0) {
-    score -= Math.min(Number(missingSecrets || 0) * 4, 12)
-    issues.push(`${Number(missingSecrets || 0)} integrations still need secrets`)
+  if (integrationIssueCount > 0) {
+    score -= Math.min(integrationIssueCount * 4, 12)
+    issues.push(`${integrationIssueCount} integration setup item${integrationIssueCount === 1 ? '' : 's'} need attention`)
   }
 
   if (typeof uptimePercent === 'number') {

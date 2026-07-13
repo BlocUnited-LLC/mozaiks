@@ -34,9 +34,13 @@ Current implemented workflow-run persistence contract:
 
 - `ChatSessions` is run metadata and UI-state projection, not canonical execution history.
 - AG2 run history is persisted separately through the AG2 stream storage adapters and is the source of truth for execution re-entry and UI replay.
+- While the backend process still owns a paused AG2 workflow channel, user
+  replies continue that live AG2 channel first. Persisted AG2 events are the
+  canonical replay and restart fallback when the live Hub/channel handle is no
+  longer available.
 - AG2 agent-turn, LLM-call, tool-call, and HITL telemetry is emitted through AG2
   beta `TelemetryMiddleware` as OpenTelemetry spans.
-- LLM token usage is emitted by Mozaiks AG2 beta usage middleware as
+- LLM token usage is emitted by Mozaiks AG2 1.0 beta usage middleware as
   `chat.usage_delta` events and stored in `RuntimeUsageEvents`. This ledger is
   measurement-only. It does not enforce entitlements, quotas, pricing, or
   hosted billing.
@@ -128,14 +132,9 @@ Framework-owned persistence uses a single system database:
 
 - database: `mozaiksai`
 
-Active code should not introduce new hardcoded framework namespaces such as:
-
-- `autogen_ai_agents`
-- `MozaiksAI`
-- `mozaiks`
-
-Those names reflect historical evolution and are not part of the clean OSS
-contract.
+Active code should not introduce hardcoded framework database names outside the
+canonical `mozaiksai` namespace. Older local database names are not part of the
+clean OSS contract.
 
 ## Builder Artifact Flow
 

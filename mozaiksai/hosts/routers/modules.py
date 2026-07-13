@@ -185,7 +185,16 @@ async def _execute_module_action(
         user_id=str(user_id) if user_id else None,
         params=params,
     )
-    granted_permissions = list(dispatch_scope.get("permissions") or [])
+    # When auth is disabled (dev/local mode), optional_user still returns an
+    # anonymous principal so downstream code has a stable user shape. Treat all
+    # such module HTTP calls as trusted local dispatch so module permission
+    # declarations don't block the Studio admin UI. In production
+    # (AUTH_ENABLED=true), non-public HTTP callers must carry a token with
+    # explicit scopes, so granted_permissions remains a concrete list.
+    if not is_auth_enabled():
+        granted_permissions = None
+    else:
+        granted_permissions = list(dispatch_scope.get("permissions") or [])
 
     module_request = ModuleRequest(
         module=module_name,
@@ -197,9 +206,11 @@ async def _execute_module_action(
         workspace_id=str(dispatch_scope.get("workspace_id") or workspace_id) if (dispatch_scope.get("workspace_id") or workspace_id) else None,
         auth_token=str(auth_token) if auth_token else None,
         correlation_id=str(correlation_id) if correlation_id else None,
-        # HTTP module dispatch is always external-facing, so it supplies a
-        # concrete permission list. Internal trusted calls can still bypass by
-        # invoking ModuleExecutor directly with granted_permissions=None.
+        # HTTP module dispatch supplies a concrete permission list when auth is
+        # enabled. When auth is disabled (dev mode, no principal) granted_permissions
+        # is None so the executor bypasses enforcement as a trusted internal call.
+        # Internal trusted calls can also bypass by invoking ModuleExecutor directly
+        # with granted_permissions=None.
         granted_permissions=granted_permissions,
     )
 

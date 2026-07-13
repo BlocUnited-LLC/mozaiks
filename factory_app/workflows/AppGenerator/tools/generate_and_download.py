@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bundle_acceptance_gate
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
@@ -779,22 +779,7 @@ async def generate_and_download(
     except Exception as exc:
         wf_logger.warning("Failed to persist pending schema migration: %s", exc)
 
-    # Update the app lifecycle record to 'review' now that files are on disk.
     resolved_bundle_path = str(app_dir.resolve())
-    await update_build_status(
-        build_registry_id=build_registry_id or "",
-        status="review",
-        bundle_path=resolved_bundle_path,
-    )
-    # Persist lifecycle_state and bundle_path into context_variables so the
-    # refinement router can read them when the user submits a revision request
-    # from the app_review transition without the bundle having been promoted yet.
-    if context_variables is not None and hasattr(context_variables, "set"):
-        try:
-            context_variables.set("lifecycle_state", "review")
-            context_variables.set("bundle_path", resolved_bundle_path)
-        except Exception:
-            pass
 
     zip_path = base_dir / f"{bundle_name}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
@@ -820,6 +805,37 @@ async def generate_and_download(
     except Exception as artifact_err:
         wf_logger.warning("Failed to register app bundle artifact version: %s", artifact_err)
 
+    artifact_version_id = artifact_version.id if artifact_version else None
+    workflow_sequence = str(_context_get(context_variables, "workflow_sequence") or "build")
+    current_build_run = {
+        "build_id": str(build_id or chat_id or build_registry_id or ""),
+        "workflow_sequence": workflow_sequence,
+        "status": "review",
+        "active_chat_id": chat_id,
+        "active_workflow_id": workflow_name,
+        "artifact_version_id": artifact_version_id,
+        "bundle_path": resolved_bundle_path,
+    }
+    await update_build_status(
+        build_registry_id=build_registry_id or "",
+        status="review",
+        bundle_path=resolved_bundle_path,
+        artifact_version_id=artifact_version_id,
+        workflow_sequence=workflow_sequence,
+        active_chat_id=chat_id,
+        active_workflow_id=workflow_name,
+        current_build_run=current_build_run,
+    )
+    # Persist lifecycle_state and bundle_path into context_variables so the
+    # refinement router can read them when the user submits a revision request
+    # from the app_review transition without the bundle having been promoted yet.
+    if context_variables is not None and hasattr(context_variables, "set"):
+        try:
+            context_variables.set("lifecycle_state", "review")
+            context_variables.set("bundle_path", resolved_bundle_path)
+        except Exception:
+            pass
+
     ui_files = [
         {
             "name": f"{bundle_name}.zip",
@@ -842,7 +858,7 @@ async def generate_and_download(
         "stage": "confirm" if confirmation_only else "files_ready",
         "artifact_kind": "app_bundle",
         "artifact_key": "app_bundle",
-        "artifact_version_id": artifact_version.id if artifact_version else None,
+        "artifact_version_id": artifact_version_id,
         # Workbench context (best-effort): allow ChatUI to render file tree + editor + preview.
         "generated_files": files_map,
     }

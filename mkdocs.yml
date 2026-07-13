@@ -103,6 +103,11 @@ nav:
           - Context Graph: guides/platform-intelligence/01-context-graph.md
           - Harness: guides/platform-intelligence/02-harness.md
           - Refinement: guides/platform-intelligence/03-refinement.md
+  - Studio:
+      - Overview: studio/index.md
+      - Workspace Pages: studio/workspace-pages.md
+      - App Dashboard: studio/app-dashboard.md
+      - UI/UX and Primitives: studio/ui-ux-primitives.md
   - Architecture:
       - Overview: architecture/index.md
       - Foundations:

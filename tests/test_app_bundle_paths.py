@@ -164,7 +164,7 @@ class TestIsCanonicalAppConfigPath:
         assert is_canonical_app_config_path("config/secrets.yaml") is False
 
     def test_integrations_subdir_json_canonical(self):
-        assert is_canonical_app_config_path("config/integrations/stripe.json") is True
+        assert is_canonical_app_config_path("config/integrations/payment_provider.json") is True
 
     def test_integrations_subdir_yaml_canonical(self):
         assert is_canonical_app_config_path("config/integrations/twilio.yaml") is True

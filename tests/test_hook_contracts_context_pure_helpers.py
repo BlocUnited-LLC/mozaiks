@@ -45,14 +45,15 @@ class TestFormatConnectorInventoryBlock:
         assert "Required by current plan: none" in result
 
     def test_ready_services_listed(self):
-        inventory = {"ready_services": ["stripe", "sendgrid"]}
+        inventory = {"ready_services": ["payment_provider", "sendgrid"]}
         result = _format_connector_inventory_block(inventory)
-        assert "Stripe" in result or "stripe" in result.lower()
+        # display_service() title-cases the key: payment_provider → "Payment Provider"
+        assert "payment provider" in result.lower()
 
     def test_required_services_listed(self):
-        inventory = {"required_services": ["stripe"]}
+        inventory = {"required_services": ["payment_provider"]}
         result = _format_connector_inventory_block(inventory)
-        assert "Stripe" in result or "stripe" in result.lower()
+        assert "payment provider" in result.lower()
 
     def test_missing_services_section_appears_when_present(self):
         inventory = {"missing_required_services": ["sendgrid"]}
@@ -74,11 +75,11 @@ class TestFormatConnectorInventoryBlock:
 
     def test_display_name_used_when_present(self):
         inventory = {
-            "ready_services": ["stripe"],
-            "display_names": {"stripe": "Stripe Payments"},
+            "ready_services": ["payment_provider"],
+            "display_names": {"payment_provider": "payment provider Payments"},
         }
         result = _format_connector_inventory_block(inventory)
-        assert "Stripe Payments" in result
+        assert "payment provider Payments" in result
 
     def test_display_name_fallback_title_case(self):
         # No display_name for "my_service" → title case "My Service"
@@ -100,11 +101,11 @@ class TestFormatConnectorInventoryBlock:
 
     def test_multiple_ready_services_all_listed(self):
         inventory = {
-            "ready_services": ["stripe", "sendgrid"],
-            "display_names": {"stripe": "Stripe", "sendgrid": "SendGrid"},
+            "ready_services": ["payment_provider", "sendgrid"],
+            "display_names": {"payment_provider": "payment provider", "sendgrid": "SendGrid"},
         }
         result = _format_connector_inventory_block(inventory)
-        assert "Stripe" in result
+        assert "payment provider" in result
         assert "SendGrid" in result
 
 

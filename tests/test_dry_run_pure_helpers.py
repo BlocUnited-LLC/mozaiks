@@ -344,10 +344,10 @@ class TestHasIntegrationImpact:
         assert _has_integration_impact(lane="integration", paths=[], scope_summary="") is True
 
     def test_integration_in_path_true(self):
-        assert _has_integration_impact(lane=None, paths=["app/integrations/stripe.py"], scope_summary="") is True
+        assert _has_integration_impact(lane=None, paths=["app/integrations/payment_provider.py"], scope_summary="") is True
 
     def test_connector_in_scope_true(self):
-        assert _has_integration_impact(lane=None, paths=[], scope_summary="Add Stripe connector") is True
+        assert _has_integration_impact(lane=None, paths=[], scope_summary="Add payment provider connector") is True
 
     def test_adapter_in_path_true(self):
         assert _has_integration_impact(lane=None, paths=["adapters/payment.py"], scope_summary="") is True

@@ -336,6 +336,28 @@ def test_save_app_schema_accepts_canonical_declarative_config(monkeypatch, tmp_p
     assert context.data["app_pages"][0]["sections"][0]["primitive"] == "Grid"
 
 
+def test_save_app_schema_writes_app_identity_metadata(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    manifest = {
+        **_base_manifest(),
+        "description": "Ops Portal coordinates customer follow-up, account review, and team handoffs.",
+        "tagline": "Customer operations in one place",
+        "value_proposition": "A focused workspace for teams to act on customer account signals faster.",
+    }
+
+    save_app_schema_module.save_app_schema(
+        manifest=manifest,
+        pages=[_canonical_page()],
+        theme_config_patch=None,
+        context_variables=_Context(),
+    )
+
+    app_json = json.loads((tmp_path / "app.json").read_text(encoding="utf-8"))
+    assert app_json["description"] == manifest["description"]
+    assert app_json["tagline"] == manifest["tagline"]
+    assert app_json["value_proposition"] == manifest["value_proposition"]
+
+
 def test_save_app_schema_writes_default_ai_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
 

@@ -1,11 +1,11 @@
-"""Compile Mozaiks workflow routing into AG2 beta Network transition graphs."""
+"""Compile Mozaiks workflow routing into AG2 1.0 beta Network transition graphs."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from autogen.beta.network import (
+from ag2.network import (
     EV_PACKET,
     AgentTarget,
     Envelope,
@@ -177,7 +177,7 @@ def resolve_next_agent(
     participant_order: Sequence[str] | None = None,
     turn_count: int = 1,
 ) -> str | None:
-    """Resolve the next workflow speaker through AG2 beta `WorkflowAdapter`.
+    """Resolve the next workflow speaker through AG2 1.0 beta `WorkflowAdapter`.
 
     Returns an agent name, `"user"` for a pause boundary, or `"terminate"`.
     Mozaiks owns transport, persistence, and UI integration; AG2's workflow

@@ -23,33 +23,6 @@ import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
 import buildWorkspacePortfolio from './workspaceStudioModel.js'
 import { useWorkspaceApps } from './useWorkspaceApps.js'
 
-
-function formatPrimaryActionLabel(action) {
-  if (!action?.label) return 'Open Studio'
-  return action.label === 'Open App Studio' ? 'Open Studio' : action.label
-}
-
-function getPrimaryActionPresentation(action) {
-  if (action?.kind === 'build') {
-    return {
-      variant: 'secondary',
-      className: 'font-semibold',
-    }
-  }
-
-  if (action?.kind === 'overview') {
-    return {
-      variant: 'outline',
-      className: 'border-primary/35 text-primary hover:bg-primary/10 hover:text-primary',
-    }
-  }
-
-  return {
-    variant: 'primary',
-    className: '',
-  }
-}
-
 const FILTER_OPTIONS = [
   { label: 'All', value: 'all' },
   { label: 'Needs input', value: 'needs-input' },
@@ -57,53 +30,17 @@ const FILTER_OPTIONS = [
   { label: 'Live', value: 'live' },
 ]
 
-const SORT_OPTIONS = [
-  { label: 'Needs input first', value: 'needs-input' },
-  { label: 'Recently updated', value: 'recent' },
-  { label: 'Name', value: 'name' },
-]
-
 function matchesFilter(row, activeFilter) {
   if (activeFilter === 'all') return true
   return row.filterBucket === activeFilter
 }
 
-function sortPortfolioRows(rows, sortValue) {
-  const sorted = [...rows]
-  if (sortValue === 'name') {
-    return sorted.sort((left, right) => left.name.localeCompare(right.name))
-  }
-  if (sortValue === 'recent') {
-    return sorted.sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
-  }
-  return sorted.sort((left, right) => (
+function sortByNeedsInput(rows) {
+  return [...rows].sort((left, right) => (
     left.sortPriority - right.sortPriority ||
     right.updatedAt - left.updatedAt ||
     left.name.localeCompare(right.name)
   ))
-}
-
-function exportAppsCsv(rows) {
-  const headers = ['app', 'status', 'state', 'updated', 'action']
-  const lines = [
-    headers.join(','),
-    ...rows.map((row) => [
-      JSON.stringify(row.name),
-      JSON.stringify(row.snapshot.lifecycleLabel),
-      JSON.stringify(row.stateLabel),
-      JSON.stringify(row.updatedLabel),
-      JSON.stringify(formatPrimaryActionLabel(row.primaryAction)),
-    ].join(',')),
-  ]
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'workspace-apps.csv'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
 }
 
 function AppCell({ row }) {
@@ -115,51 +52,86 @@ function AppCell({ row }) {
   )
 }
 
-function AppMobileItem({ row, onOpen }) {
-  const actionPresentation = getPrimaryActionPresentation(row.primaryAction)
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+    <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+  </svg>
+)
 
+const DashboardIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+  </svg>
+)
+
+function AppMobileItem({ row, onOpen, onDashboard, onDelete }) {
   return (
-    <article className="rounded-[1.15rem] border border-border/45 bg-card/34 p-4 shadow-sm shadow-black/5">
+    <article
+      className="rounded-[1.15rem] border border-border/45 bg-card/34 p-4 shadow-sm shadow-black/5 cursor-pointer hover:bg-card/50 transition-colors"
+      onClick={() => onOpen(row)}
+    >
       <div className="flex items-start justify-between gap-3">
         <AppCell row={row} />
         <StatusPill tone={row.snapshot.lifecycleTone}>{row.snapshot.lifecycleLabel}</StatusPill>
       </div>
-      <div className="mt-4 text-sm leading-6 text-muted-foreground">
+      <div className="mt-3 text-sm leading-6 text-muted-foreground">
         <div>{row.stateLabel}</div>
         <div>Updated {row.updatedLabel}</div>
       </div>
-      <div className="mt-4">
+      <div className="mt-3 flex items-center gap-2">
+        {row.primaryAction?.kind === 'build' && (
+          <ActionButton
+            onClick={(e) => { e.stopPropagation(); onOpen(row) }}
+            size="sm"
+            variant="secondary"
+            className="font-semibold"
+          >
+            Continue Build
+          </ActionButton>
+        )}
+        {row.dashboardHref && (
+          <ActionButton
+            onClick={(e) => { e.stopPropagation(); onDashboard(row) }}
+            size="sm"
+            variant="outline"
+            className="border-primary/35 text-primary hover:bg-primary/10 hover:text-primary"
+          >
+            Dashboard
+          </ActionButton>
+        )}
         <ActionButton
-          onClick={() => onOpen(row)}
+          onClick={(e) => { e.stopPropagation(); onDelete(row) }}
           size="sm"
-          variant={actionPresentation.variant}
-          className={actionPresentation.className}
+          variant="ghost"
+          className="text-destructive hover:bg-destructive/10 px-2"
+          aria-label="Delete app"
         >
-          {formatPrimaryActionLabel(row.primaryAction)}
+          <TrashIcon />
         </ActionButton>
       </div>
     </article>
   )
 }
 
-function AppsTable({ rows, onOpen }) {
+function AppsTable({ rows, onOpen, onDashboard, onDelete }) {
   const columns = [
     {
       id: 'app',
       header: 'App',
-      width: '38%',
+      width: '34%',
       render: (row) => <AppCell row={row} />,
     },
     {
       id: 'status',
       header: 'Status',
-      width: '14%',
+      width: '13%',
       render: (row) => <StatusPill tone={row.snapshot.lifecycleTone}>{row.snapshot.lifecycleLabel}</StatusPill>,
     },
     {
       id: 'state',
       header: 'State',
-      width: '22%',
+      width: '19%',
       cellClassName: 'text-muted-foreground',
       render: (row) => row.stateLabel,
     },
@@ -172,24 +144,43 @@ function AppsTable({ rows, onOpen }) {
     },
     {
       id: 'action',
-      header: 'Action',
-      width: '14%',
+      header: '',
+      width: '22%',
       headerClassName: 'text-right',
       cellClassName: 'text-right',
-      render: (row) => {
-        const actionPresentation = getPrimaryActionPresentation(row.primaryAction)
-
-        return (
+      render: (row) => (
+        <span className="inline-flex items-center gap-1.5 justify-end">
+          {row.primaryAction?.kind === 'build' && (
+            <ActionButton
+              onClick={(e) => { e.stopPropagation(); onOpen(row) }}
+              size="sm"
+              variant="secondary"
+              className="font-semibold"
+            >
+              Continue Build
+            </ActionButton>
+          )}
+          {row.dashboardHref && (
+            <ActionButton
+              onClick={(e) => { e.stopPropagation(); onDashboard(row) }}
+              size="sm"
+              variant="outline"
+              className="border-primary/35 text-primary hover:bg-primary/10 hover:text-primary"
+            >
+              Dashboard
+            </ActionButton>
+          )}
           <ActionButton
-            onClick={() => onOpen(row)}
+            onClick={(e) => { e.stopPropagation(); onDelete(row) }}
             size="sm"
-            variant={actionPresentation.variant}
-            className={actionPresentation.className}
+            variant="ghost"
+            className="text-destructive hover:bg-destructive/10 px-2"
+            aria-label="Delete app"
           >
-            {formatPrimaryActionLabel(row.primaryAction)}
+            <TrashIcon />
           </ActionButton>
-        )
-      },
+        </span>
+      ),
     },
   ]
 
@@ -198,10 +189,11 @@ function AppsTable({ rows, onOpen }) {
       items={rows}
       columns={columns}
       getItemId={(row) => row.id}
-      renderMobileItem={(row) => <AppMobileItem row={row} onOpen={onOpen} />}
+      onRowClick={onOpen}
+      renderMobileItem={(row) => <AppMobileItem row={row} onOpen={onOpen} onDashboard={onDashboard} onDelete={onDelete} />}
       empty={{
         title: 'No apps match this search',
-        description: 'Adjust the search term or export the current directory snapshot for review.',
+        description: 'Adjust the search term or clear the filter.',
       }}
     />
   )
@@ -243,10 +235,9 @@ function ImportAppOverlay({ open, onClose, onImport }) {
 
 export default function AppsPage() {
   const navigate = useNavigate()
-  const { apps, loading, error, dataMode } = useWorkspaceApps('Could not load your apps.')
+  const { apps, loading, error, deleteApp } = useWorkspaceApps('Could not load your apps.')
   const [searchValue, setSearchValue] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
-  const [sortValue, setSortValue] = useState('needs-input')
   const [importOpen, setImportOpen] = useState(false)
 
   const portfolio = useMemo(() => buildWorkspacePortfolio(apps), [apps])
@@ -256,8 +247,9 @@ export default function AppsPage() {
       const matchesSearch = !search || row.searchText.includes(search)
       return matchesSearch && matchesFilter(row, activeFilter)
     })
-    return sortPortfolioRows(filtered, sortValue)
-  }, [activeFilter, portfolio.rows, searchValue, sortValue])
+    return sortByNeedsInput(filtered)
+  }, [activeFilter, portfolio.rows, searchValue])
+
   const filterOptions = useMemo(() => (
     FILTER_OPTIONS.map((filter) => ({
       ...filter,
@@ -266,8 +258,9 @@ export default function AppsPage() {
         : portfolio.rows.filter((row) => matchesFilter(row, filter.value)).length,
     }))
   ), [portfolio.rows])
+
   const summaryItems = [
-    { id: 'tracked', label: 'Total', value: formatCompactNumber(portfolio.totalApps, '0'), detail: portfolio.latestUpdatedLabel },
+    { id: 'tracked', label: 'Total', value: formatCompactNumber(portfolio.totalApps, '0') },
     { id: 'active', label: 'Live', value: formatCompactNumber(portfolio.activeCount, '0') },
     { id: 'build', label: 'In build', value: formatCompactNumber(portfolio.buildCount, '0') },
     { id: 'blocked', label: 'Needs input', value: formatCompactNumber(portfolio.blockingAlerts, '0') },
@@ -277,9 +270,20 @@ export default function AppsPage() {
     navigate(row.primaryAction?.href || '/apps')
   }
 
+  function handleDashboard(row) {
+    navigate(row.dashboardHref)
+  }
+
+  async function handleDelete(row) {
+    const buildRegistryId = row.id
+    if (!buildRegistryId) return
+    if (!window.confirm(`Remove "${row.name}" from your workspace?`)) return
+    await deleteApp(buildRegistryId)
+  }
+
   function handleHeaderAction(actionId) {
     if (actionId === 'create') {
-      navigate('/create?new=1')
+      navigate('/chat?workflow=ValueEngine&mode=workflow&defer_start=1')
     } else if (actionId === 'import') {
       setImportOpen(true)
     }
@@ -310,17 +314,14 @@ export default function AppsPage() {
             filters={filterOptions}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
-            sortOptions={SORT_OPTIONS}
-            sortValue={sortValue}
-            onSortChange={setSortValue}
-            actions={dataMode === 'demo' ? <StatusPill tone="warning">Demo dataset</StatusPill> : null}
+            actions={null}
           />
           {visibleRows.length > 0 ? (
-            <AppsTable rows={visibleRows} onOpen={handleOpen} />
+            <AppsTable rows={visibleRows} onOpen={handleOpen} onDashboard={handleDashboard} onDelete={handleDelete} />
           ) : (
             <InlineEmptyState
               title="No apps match this search"
-              description="Adjust the search term or export the current directory snapshot for review."
+              description="Adjust the search term or clear the filter."
             />
           )}
         </section>

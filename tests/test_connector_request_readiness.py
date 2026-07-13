@@ -26,7 +26,7 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
     metadata_calls = []
     store_calls = []
 
-    async def fake_inventory(app_id: str, required_services=None, store=None):
+    async def fake_inventory(*, scope, scope_id, required_services=None, store=None):
         del store
         ready = []
         if store_calls:
@@ -42,7 +42,7 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
             "status_buckets": {"active": ready},
             "display_names": {"email_provider": "Email Provider"},
             "connectors": [],
-            "app_id": app_id,
+            "scope_id": scope_id,
         }
 
     async def fake_use_ui_tool(component, payload, *, chat_id=None, workflow_name=None):
@@ -72,22 +72,22 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
                 },
             }
 
-    async def fake_record_connector_metadata(**kwargs):
+    async def fake_save_connector_draft(**kwargs):
         metadata_calls.append(kwargs)
         return {"saved": True, "connector": {"service": kwargs["service"], "secret_available": False}}
 
-    async def fake_store_connector(**kwargs):
+    async def fake_save_connector(**kwargs):
         store_calls.append(kwargs)
         return {
             "success": True,
-            "metadata_saved": True,
-            "record": {"service": kwargs["service"], "secret_available": True},
+            "connector": {"service": kwargs["service"], "secret_available": True},
+            "error": None,
         }
 
     monkeypatch.setattr(connector_request, "get_connector_inventory", fake_inventory)
     monkeypatch.setattr(connector_request, "use_ui_tool", fake_use_ui_tool)
-    monkeypatch.setattr(connector_request, "record_connector_metadata", fake_record_connector_metadata)
-    monkeypatch.setattr(connector_request, "store_connector", fake_store_connector)
+    monkeypatch.setattr(connector_request, "save_connector_draft", fake_save_connector_draft)
+    monkeypatch.setattr(connector_request, "save_connector", fake_save_connector)
 
     context = _Context(
         {
@@ -152,8 +152,8 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_collect_missing_connector_needs_reuses_ready_connectors(monkeypatch) -> None:
-    async def fake_inventory(app_id: str, required_services=None, store=None):
-        del app_id, store
+    async def fake_inventory(*, scope, scope_id, required_services=None, store=None):
+        del scope, scope_id, store
         required = list(required_services or [])
         return {
             "required_services": required,
@@ -333,20 +333,23 @@ def test_build_integration_request_payload_is_frontend_safe() -> None:
     assert "secret-value" not in repr(request)
 
 
-def test_integrations_route_ownership_is_app_scoped() -> None:
+def test_integrations_route_ownership_is_global_management_plus_app_detail() -> None:
     admin_registry = (REPO_ROOT / "factory_app/app/admin/admin_registry.yaml").read_text(encoding="utf-8")
     route_manifest = (REPO_ROOT / "factory_app/app/ui/route_manifest.json").read_text(encoding="utf-8")
     admin_index = (REPO_ROOT / "factory_app/app/admin/index.js").read_text(encoding="utf-8")
     docs = (REPO_ROOT / "docs/architecture/app/integrations-workflow.md").read_text(encoding="utf-8")
 
-    assert "path: /integrations" not in admin_registry
+    assert "path: /integrations" in admin_registry
     assert "path: /apps/:appId/integrations" in admin_registry
+    assert "show_in_navigation: false" in admin_registry
+    assert '"/integrations"' in route_manifest
     assert '"/apps/:appId/integrations"' in route_manifest
-    assert '"/integrations"' not in route_manifest
+    assert '"component": "WorkspaceIntegrationsPage"' in route_manifest
     assert "registerComponent('AppIntegrationsPage'" in admin_index
+    assert "registerComponent('WorkspaceIntegrationsPage'" in admin_index
     assert "integration.required" in docs
     assert "/apps/{appId}/integrations" in docs
-    assert "bare workspace `/integrations` route is intentionally not a first-class" in docs
+    assert "workspace `/integrations` route is the provider-management surface" in docs
     assert "Secret fields are write-only" in docs
 
 

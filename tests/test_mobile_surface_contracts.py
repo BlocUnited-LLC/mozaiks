@@ -33,8 +33,9 @@ def test_data_table_uses_stable_empty_array_defaults() -> None:
 def test_summary_strip_compacts_on_mobile() -> None:
     source = _read("chat-ui/src/ui/primitives/SummaryStrip.jsx")
 
-    assert 'grid grid-cols-2 gap-px bg-border/40 md:grid-cols-4' in source
-    assert 'text-[1.45rem]' in source
+    assert 'grid grid-cols-2 gap-px bg-border/35 md:grid-cols-4' in source
+    assert 'min-h-[5.75rem]' in source
+    assert 'text-xl font-semibold' in source
 
 
 def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
@@ -55,8 +56,9 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert "max-h-[82dvh]" in layout_source
     assert "top-24 w-[min" not in layout_source
 
-    assert 'h-12 w-12' in widget_source
-    assert 'sm:h-20 sm:w-20' in widget_source
+    assert 'fixed right-0 bottom-6 z-50 widget-safe-bottom' in widget_source
+    assert 'rounded-l-2xl border border-r-0 border-border/50' in widget_source
+    assert 'w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px]' in widget_source
 
 
 def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
@@ -72,7 +74,7 @@ def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
     assert 'sm:left-1/2 sm:top-1/2' in transition_source
 
     assert 'items-end justify-center' in surface_source
-    assert 'rounded-t-[2rem]' in surface_source
+    assert 'rounded-t-xl' in surface_source
 
 
 def test_modal_and_form_actions_stack_for_mobile() -> None:
@@ -99,7 +101,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert (_workspace() / "web_shell" / "playwright.responsive.config.js").exists()
     assert (_workspace() / "web_shell" / "playwright" / "apps.responsive.smoke.spec.js").exists()
     assert "workspace usage route stays responsive across desktop and mobile widths" in smoke_source
-    assert "workspace health route stays responsive across desktop and mobile widths" in smoke_source
+    assert "workspace integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app Studio root redirects to overview" in smoke_source
@@ -107,6 +109,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "app health route stays responsive across desktop and mobile widths" in smoke_source
     assert "app integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "app usage route stays responsive across desktop and mobile widths" in smoke_source
+    assert "app support route stays responsive across desktop and mobile widths" in smoke_source
     assert "app billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app users route stays responsive across desktop and mobile widths" in smoke_source
     assert "app hosting route stays responsive across desktop and mobile widths" not in smoke_source
@@ -128,18 +131,24 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
     smoke_titles_by_component = {
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
-        "WorkspaceHealthPage": "workspace health route stays responsive across desktop and mobile widths",
+        "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to overview",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
         "AppUsersPage": "app users route stays responsive across desktop and mobile widths",
         "AppUsagePage": "app usage route stays responsive across desktop and mobile widths",
         "AppIntegrationsPage": "app integrations route stays responsive across desktop and mobile widths",
+        "AppSupportPage": "app support route stays responsive across desktop and mobile widths",
     }
+    # Components served from chat-ui or custom pages — not admin console pages
+    # covered by the Playwright studio smoke suite.
+    _chat_ui_components = {"ProfilePage", "MessagesPage", "MessageThreadPage"}
     route_components = {
         page["component"]
         for page in manifest["pages"]
-        if page.get("component") and page["component"] != "AdminPortal"
+        if page.get("component")
+        and page["component"] != "AdminPortal"
+        and page["component"] not in _chat_ui_components
     }
 
     assert route_components == set(smoke_titles_by_component)
@@ -155,6 +164,7 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         # Sub-components used by route-backed pages (not directly route-backed)
         "CarryForwardReportSummary",
         "CarryForwardReportPanel",
+        "PricingHealthPanel",
         # Community module pages — route-registered per-app when community module is enabled
         "AppCommunityPage",
         "AppGovernancePage",
@@ -178,10 +188,14 @@ def test_factory_app_react_files_are_classified() -> None:
         for relative in [path.relative_to(_workspace()).as_posix()]
         if not relative.startswith("factory_app/build_context/")
     }
+    # Components registered from chat-ui or custom pages/ (not factory_app/admin/pages/)
+    _non_admin_page_components = {"MessagesPage", "MessageThreadPage", "ProfilePage"}
     route_backed_files = {
         f"factory_app/app/admin/pages/{page['component']}.jsx"
         for page in manifest["pages"]
-        if page.get("component") and page["component"] != "AdminPortal"
+        if page.get("component")
+        and page["component"] != "AdminPortal"
+        and page["component"] not in _non_admin_page_components
     }
     support_files = {
         "factory_app/app/admin/pages/AppStudioChrome.jsx",
@@ -192,6 +206,7 @@ def test_factory_app_react_files_are_classified() -> None:
         # Carry-forward display sub-components (used by route-backed pages)
         "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
         "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",
+        "factory_app/app/admin/pages/PricingHealthPanel.jsx",
         "factory_app/app/ui/components/StudioShared.jsx",
         "factory_app/app/ui/components/HarnessDecisionCard.jsx",
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
@@ -209,6 +224,13 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/MyInvitationsPage.jsx",
         "factory_app/app/admin/pages/MyVotesPage.jsx",
         "factory_app/app/admin/pages/MyDelegationsPage.jsx",
+        # Messages/contacts pages — custom route-backed pages for the messages module
+        "factory_app/app/ui/pages/custom/MessagesPage.jsx",
+        "factory_app/app/ui/pages/custom/MessageThreadPage.jsx",
+        "factory_app/app/ui/components/ContactsProfilePanel.jsx",
+        "factory_app/app/ui/components/ContactsTab.jsx",
+        "factory_app/app/ui/components/MessagingProfilePanel.jsx",
+        "factory_app/app/ui/components/MessagingTab.jsx",
     }
 
     assert react_files == route_backed_files | support_files

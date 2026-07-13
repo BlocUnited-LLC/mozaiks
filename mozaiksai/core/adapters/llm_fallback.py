@@ -139,8 +139,8 @@ def build_fallback_llm_config(
 ) -> dict[str, Any]:
     """Build a complete AG2 ``llm_config`` dict with fallback config_list.
 
-    Drop-in replacement for ``AG2RunnerAdapter.build_llm_config()`` that adds
-    fallback model support via env-driven config_list construction.
+    Build an AG2 ``llm_config`` with fallback model support via env-driven
+    config_list construction.
 
     Usage in workflow tool code::
 

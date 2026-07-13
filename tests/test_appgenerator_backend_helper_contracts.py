@@ -235,11 +235,11 @@ class TestAppPlanAgentHelperGuidance:
         assert "rationale" in text.lower() or "purpose" in text.lower() or "justified" in text.lower()
 
     def test_app_plan_agent_mentions_example_provider_client(self):
-        # Neutral provider client example — stripe_client replaced with generic provider_client
+        # Neutral provider client example — payment_provider_client replaced with generic provider_client
         text = _agents_text()
         assert (
-            "stripe_client.py" in text
-            or "stripe_client" in text
+            "payment_provider_client.py" in text
+            or "payment_provider_client" in text
             or "provider_client.py" in text
             or "provider_client" in text
         )
@@ -361,22 +361,22 @@ class TestFileContractsIntegrity:
 
 
 # ---------------------------------------------------------------------------
-# 10. file_contracts.yaml — helper examples are provider-neutral (no Stripe, etc.)
+# 10. file_contracts.yaml — helper examples are provider-neutral (no payment provider, etc.)
 # ---------------------------------------------------------------------------
 
 class TestHelperExamplesProviderNeutral:
-    def test_helper_examples_no_stripe_reference(self):
+    def test_helper_examples_no_payment_provider_reference(self):
         data = _load_yaml(_FILE_CONTRACTS)
         examples = data["backend_helper_files"].get("examples", [])
         examples_str = " ".join(examples)
-        assert "stripe" not in examples_str.lower(), (
-            f"Helper file examples must be provider-neutral. Found Stripe reference in: {examples}"
+        assert "payment_provider" not in examples_str.lower(), (
+            f"Helper file examples must be provider-neutral. Found payment provider reference in: {examples}"
         )
 
     def test_helper_examples_use_generic_provider_naming(self):
         data = _load_yaml(_FILE_CONTRACTS)
         examples = data["backend_helper_files"].get("examples", [])
-        # Should have provider_client.py, not stripe_client.py
+        # Should have provider_client.py, not payment_provider_client.py
         examples_str = " ".join(examples)
         assert "provider_client.py" in examples_str or "provider_client" in examples_str, (
             "Helper examples should include a generic provider_client.py example"
@@ -386,8 +386,8 @@ class TestHelperExamplesProviderNeutral:
         data = _load_yaml(_FILE_CONTRACTS)
         allowed = data["backend_helper_files"]["helper_contract"].get("allowed_when", [])
         allowed_str = " ".join(str(x) for x in allowed)
-        # Should say "external provider client" not "Stripe SDK wrapper"
-        assert "stripe" not in allowed_str.lower(), (
+        # Should say "external provider client" not "payment provider SDK wrapper"
+        assert "payment_provider" not in allowed_str.lower(), (
             "Helper file allowed_when rules must be provider-neutral"
         )
         assert "provider" in allowed_str.lower() or "external" in allowed_str.lower(), (
@@ -398,7 +398,7 @@ class TestHelperExamplesProviderNeutral:
         data = _load_yaml(_FILE_CONTRACTS)
         examples = data["backend_helper_files"].get("examples", [])
         examples_str = " ".join(examples)
-        # Should have routes_hooks.py, not routes_webhooks.py (which is Stripe-specific)
+        # Should have routes_hooks.py, not routes_webhooks.py (which is payment provider-specific)
         assert "routes_hooks.py" in examples_str or "routes" in examples_str, (
             "Routes example should use generic naming like routes_hooks.py"
         )
@@ -421,7 +421,7 @@ class TestListSerializerContracts:
     - module_contract.hard_constraints declares the list_* serializer requirement.
     - module_contract.hard_constraints declares the explicit items.properties requirement.
     - ServiceAgent instruction 20a requires allowlist serialization for list_* actions.
-    - The example in ServiceAgent uses a neutral domain (not MozaiksPay/Stripe/wallet/billing).
+    - The example in ServiceAgent uses a neutral domain (not MozaiksPay/payment provider/wallet/billing).
     - The example helper name follows the _serialize_{entity}_row pattern.
     - module_archetypes.yaml standard archetype hard_constraints includes the serializer rule.
     - Raw repo record pass-through is explicitly prohibited.
@@ -469,8 +469,8 @@ class TestListSerializerContracts:
 
     def test_service_agent_list_serializer_example_is_domain_neutral(self):
         text = _agents_text()
-        # The example must not use MozaiksPay, Stripe, wallet, billing, or entitlements terms
-        forbidden = ["mozaikspay", "stripe", "wallet", "billing", "entitlement", "payout", "checkout"]
+        # The example must not use MozaiksPay, payment provider, wallet, billing, or entitlements terms
+        forbidden = ["mozaikspay", "payment_provider", "wallet", "billing", "entitlement", "payout", "checkout"]
         lower = text.lower()
         # Find the 20a instruction block
         idx = lower.find("20a.")
@@ -522,13 +522,13 @@ class TestListSerializerContracts:
         )
 
     def test_list_serializer_rules_use_no_proprietary_terms(self):
-        """Serializer rules must be provider-neutral — no MozaiksPay/Stripe/wallet references."""
+        """Serializer rules must be provider-neutral — no MozaiksPay/payment provider/wallet references."""
         data = _load_yaml(_FILE_CONTRACTS)
         constraints = data["task_contracts"]["module_contract"]["hard_constraints"]
         # Find the list_* constraints
         list_constraints = [c for c in constraints if "list_" in str(c).lower() or "serialize" in str(c).lower()]
         combined = " ".join(str(c) for c in list_constraints).lower()
-        forbidden = ["stripe", "mozaikspay", "wallet", "billing", "entitlement", "payout", "checkout"]
+        forbidden = ["payment_provider", "mozaikspay", "wallet", "billing", "entitlement", "payout", "checkout"]
         for term in forbidden:
             assert term not in combined, (
                 f"module_contract list_* constraint must not reference '{term}' — use neutral language"

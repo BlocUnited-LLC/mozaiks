@@ -101,7 +101,7 @@ async def create_order(order: Order):
 
 ## 4. Webhook/External Trigger
 
-External systems (Stripe, Zapier, etc.) can call the canonical host directly:
+External systems (payment provider, Zapier, etc.) can call the canonical host directly:
 
 ```http
 POST /api/workflows/CustomerSupport/trigger

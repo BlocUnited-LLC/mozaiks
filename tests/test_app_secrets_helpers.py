@@ -178,7 +178,7 @@ class TestSecretRefEnv:
         assert result == "MY_API_KEY_SECRET_NAME"
 
     def test_appends_default_suffix_no_contract(self):
-        assert _secret_ref_env("STRIPE_SECRET", None) == "STRIPE_SECRET_SECRET_NAME"
+        assert _secret_ref_env("PAYMENT_PROVIDER_SECRET", None) == "PAYMENT_PROVIDER_SECRET_SECRET_NAME"
 
     def test_custom_suffix_from_contract(self):
         contract = _contract(azure_config={"secret_name_env_suffix": "_REF"})

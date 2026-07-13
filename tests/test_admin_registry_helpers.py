@@ -13,6 +13,7 @@ Covers:
     - surfaces list with valid values → deduped list
     - surfaces with invalid value → ValidationError
     - unknown fields ignored (extra="ignore")
+    - show_in_navigation defaults to true and can be disabled
 
   AdminRegistry.enabled_pages:
     - no pages → []
@@ -92,6 +93,14 @@ class TestAdminRegistryPage:
     def test_enabled_defaults_true(self):
         page = AdminRegistryPage(**_page())
         assert page.enabled is True
+
+    def test_show_in_navigation_defaults_true(self):
+        page = AdminRegistryPage(**_page())
+        assert page.show_in_navigation is True
+
+    def test_show_in_navigation_can_be_disabled(self):
+        page = AdminRegistryPage(**_page(show_in_navigation=False))
+        assert page.show_in_navigation is False
 
     def test_order_defaults_zero(self):
         page = AdminRegistryPage(**_page())
@@ -258,6 +267,11 @@ class TestBuildAdminShellRoutes:
         registry = _make_registry(_page(id="p", surfaces=["studio"]))
         routes = build_admin_shell_routes(registry)
         assert routes[0]["surfaces"] == ["studio"]
+
+    def test_show_in_navigation_field_included(self):
+        registry = _make_registry(_page(id="p", show_in_navigation=False))
+        routes = build_admin_shell_routes(registry)
+        assert routes[0]["show_in_navigation"] is False
 
     def test_multiple_pages_ordered(self):
         registry = _make_registry(

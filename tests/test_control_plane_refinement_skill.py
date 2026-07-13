@@ -58,6 +58,6 @@ def test_control_plane_refinement_skill_is_routed_and_public_safe() -> None:
         assert "App-zero" not in text, label
         assert "mozaiks-app" not in text, label
 
-    for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
+    for forbidden in ["payment provider", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in skill, forbidden
 

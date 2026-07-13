@@ -98,14 +98,14 @@ const DEMO_RUNTIME_SUMMARY = {
 
 const DEMO_APP_CONNECTORS = {
   'member-growth-studio': [
-    { service: 'stripe', display_name: 'Stripe', secret_available: true, status: 'active' },
+    { service: 'mozaikspay', display_name: 'MozaiksPay', secret_available: true, status: 'active' },
     { service: 'slack', display_name: 'Slack', secret_available: true, status: 'active' },
   ],
   'support-ops-assistant': [
     { service: 'salesforce', display_name: 'Salesforce', secret_available: true, status: 'active' },
   ],
   'revenue-review-studio': [
-    { service: 'stripe', display_name: 'Stripe', secret_available: false, status: 'metadata_only' },
+    { service: 'mozaikspay', display_name: 'MozaiksPay', secret_available: false, status: 'metadata_only' },
   ],
   'campaign-revision-workbench': [
     { service: 'mailchimp', display_name: 'Mailchimp', secret_available: false, status: 'metadata_only' },
@@ -422,6 +422,227 @@ const DEMO_RUNS_BY_APP = {
   ],
 }
 
+const DEMO_USAGE_BASE_DATE = '2026-07-11T16:00:00Z'
+
+const DEMO_USAGE_DAY_SHAPE = [
+  0.22, 0.34, 0.28, 0.44, 0.52, 0.18, 0.16,
+  0.48, 0.58, 0.62, 0.74, 0.68, 0.24, 0.22,
+  0.72, 0.82, 0.94, 1.12, 1.0, 0.36, 0.32,
+  0.88, 1.04, 1.18, 1.42, 1.24, 0.54, 0.5,
+]
+
+const DEMO_USAGE_PROFILES = {
+  'member-growth-studio': {
+    baseChats: 8,
+    promptBase: 9200,
+    completionBase: 1800,
+    callsBase: 4,
+    workflows: ['GrowthScoringWorkflow', 'CampaignReviewWorkflow', 'RetentionSignalsWorkflow'],
+    users: ['nora@example.com', 'sean@example.com', 'ariel@example.com', 'growth-ops@example.com'],
+  },
+  'partner-delivery-studio': {
+    baseChats: 5,
+    promptBase: 7600,
+    completionBase: 1450,
+    callsBase: 3,
+    workflows: ['DeployWorkflow', 'PartnerSyncWorkflow', 'PayoutOpsWorkflow'],
+    users: ['mina@example.com', 'devin@example.com', 'partners@example.com'],
+  },
+  'revenue-review-studio': {
+    baseChats: 4,
+    promptBase: 6200,
+    completionBase: 1200,
+    callsBase: 3,
+    workflows: ['ReviewWorkflow', 'ReportsWorkflow'],
+    users: ['kelsey@example.com', 'milo@example.com', 'finance@example.com'],
+  },
+  'support-ops-assistant': {
+    baseChats: 6,
+    promptBase: 5100,
+    completionBase: 980,
+    callsBase: 2,
+    workflows: ['TicketTriageWorkflow', 'EscalationWorkflow', 'AppGenerator'],
+    users: ['tanya@example.com', 'luis@example.com', 'support@example.com'],
+  },
+  'campaign-revision-workbench': {
+    baseChats: 2,
+    promptBase: 4200,
+    completionBase: 820,
+    callsBase: 2,
+    workflows: ['RevisionWorkflow'],
+    users: ['owen@example.com', 'review@example.com'],
+  },
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
+}
+
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 1_000_000) / 1_000_000
+}
+
+function getDemoApp(appId) {
+  return DEMO_APPS.find((entry) => entry.app_id === appId) || null
+}
+
+function buildDemoUsageRows(appIdFilter = null) {
+  const baseDate = new Date(DEMO_USAGE_BASE_DATE)
+  const firstDayOffset = -1 * (DEMO_USAGE_DAY_SHAPE.length - 1)
+  const rows = []
+
+  Object.entries(DEMO_USAGE_PROFILES).forEach(([appId, profile], appIndex) => {
+    if (appIdFilter && appId !== appIdFilter) return
+
+    const app = getDemoApp(appId)
+    DEMO_USAGE_DAY_SHAPE.forEach((shape, dayIndex) => {
+      const day = addUtcDays(baseDate, firstDayOffset + dayIndex)
+      const weekday = day.getUTCDay()
+      const weekendPenalty = weekday === 0 || weekday === 6 ? -1 : 0
+      const chats = Math.max(
+        0,
+        Math.round(profile.baseChats * shape + ((dayIndex + appIndex) % 4 === 0 ? 1 : 0) + weekendPenalty),
+      )
+
+      for (let chatIndex = 0; chatIndex < chats; chatIndex += 1) {
+        const seed = (dayIndex + 3) * (chatIndex + 5) * (appIndex + 2)
+        const promptMultiplier = 0.82 + ((seed % 7) * 0.055)
+        const completionMultiplier = 0.78 + ((seed % 5) * 0.075)
+        const promptTokens = Math.round(profile.promptBase * promptMultiplier)
+        const completionTokens = Math.round(profile.completionBase * completionMultiplier)
+        const llmCalls = Math.max(1, Math.round(profile.callsBase + (seed % 3)))
+        const eventTime = new Date(day)
+        eventTime.setUTCHours(9 + ((chatIndex + appIndex) % 9), (dayIndex * 7 + chatIndex * 11) % 60, 0, 0)
+        const runtimeSec = Math.round(45 + (promptTokens + completionTokens) / 180 + (seed % 45))
+        const estimatedCost = roundMoney((promptTokens * 0.00000015) + (completionTokens * 0.0000006))
+        const workflow = profile.workflows[(dayIndex + chatIndex) % profile.workflows.length]
+
+        rows.push({
+          chat_id: `demo-chat-${appId}-${dayIndex + 1}-${chatIndex + 1}`,
+          app_id: appId,
+          app_name: app?.name || appId,
+          workflow_name: workflow,
+          user_id: profile.users[(dayIndex + chatIndex) % profile.users.length],
+          event_ts: eventTime.toISOString(),
+          started_at: eventTime.toISOString(),
+          ended_at: new Date(eventTime.getTime() + runtimeSec * 1000).toISOString(),
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+          cached_prompt_tokens: seed % 6 === 0 ? Math.round(promptTokens * 0.18) : 0,
+          estimated_cost_usd: estimatedCost,
+          cost: estimatedCost,
+          cost_source: 'catalog',
+          model_name: seed % 9 === 0 ? 'gpt-4o-mini-2024-07-18' : 'gpt-5-nano',
+          llm_calls: llmCalls,
+          agent_turns: Math.max(2, llmCalls * 2 + (seed % 4)),
+          tool_calls: Math.max(1, llmCalls + (seed % 6)),
+          errors: seed % 37 === 0 ? 1 : 0,
+          runtime_sec: runtimeSec,
+          status: 1,
+        })
+      }
+    })
+  })
+
+  return rows.sort((left, right) => new Date(right.event_ts).getTime() - new Date(left.event_ts).getTime())
+}
+
+function summarizeDemoUsageRows(rows, appId = null) {
+  const sourceRows = Array.isArray(rows) ? rows : []
+  const totals = sourceRows.reduce((acc, row) => {
+    acc.prompt_tokens += Number(row.prompt_tokens || 0)
+    acc.completion_tokens += Number(row.completion_tokens || 0)
+    acc.total_tokens += Number(row.total_tokens || 0)
+    acc.cached_prompt_tokens += Number(row.cached_prompt_tokens || 0)
+    acc.estimated_cost_usd = roundMoney(acc.estimated_cost_usd + Number(row.estimated_cost_usd || 0))
+    acc.llm_calls += Number(row.llm_calls || 0)
+    return acc
+  }, {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    cached_prompt_tokens: 0,
+    estimated_cost_usd: 0,
+    llm_calls: 0,
+  })
+
+  const workflowGroups = new Map()
+  for (const row of sourceRows) {
+    const workflow = row.workflow_name || 'Unknown workflow'
+    if (!workflowGroups.has(workflow)) {
+      workflowGroups.set(workflow, {
+        workflow_name: workflow,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        cached_prompt_tokens: 0,
+        estimated_cost_usd: 0,
+        llm_calls: 0,
+        runs: 0,
+      })
+    }
+    const current = workflowGroups.get(workflow)
+    current.prompt_tokens += Number(row.prompt_tokens || 0)
+    current.completion_tokens += Number(row.completion_tokens || 0)
+    current.total_tokens += Number(row.total_tokens || 0)
+    current.cached_prompt_tokens += Number(row.cached_prompt_tokens || 0)
+    current.estimated_cost_usd = roundMoney(current.estimated_cost_usd + Number(row.estimated_cost_usd || 0))
+    current.llm_calls += Number(row.llm_calls || 0)
+    current.runs += 1
+  }
+
+  const usedModels = Array.from(new Set(sourceRows.map((row) => row.model_name).filter(Boolean))).sort()
+
+  return {
+    app_id: appId,
+    user_id: null,
+    totals,
+    by_workflow: Array.from(workflowGroups.values()).sort((left, right) => right.total_tokens - left.total_tokens),
+    by_run: sourceRows,
+    events: sourceRows.map((row) => ({
+      ...row,
+      event_id: row.chat_id,
+      source: 'demo_usage_event',
+    })),
+    source: 'demo_usage_events',
+    cost_source: 'catalog',
+    pricing_health: {
+      status: 'ready',
+      catalogs: [
+        {
+          kind: 'catalog',
+          env_name: null,
+          path: 'pricing/catalogs/usage-pricing.generated.json',
+          exists: true,
+          status: 'ready',
+          error: null,
+          model_count: 2353,
+          source_name: 'litellm',
+          source_url: 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json',
+          source_revision: 'demo',
+          fetched_at: DEMO_USAGE_BASE_DATE,
+        },
+      ],
+      catalog_model_count: 2353,
+      catalog_updated_at: DEMO_USAGE_BASE_DATE,
+      used_model_count: usedModels.length,
+      used_models: usedModels,
+      priced_event_count: sourceRows.length,
+      unpriced_event_count: 0,
+      unpriced_model_count: 0,
+      unpriced_models: [],
+      default_table_event_count: 0,
+      default_table_models: [],
+      cost_source_counts: { catalog: sourceRows.length },
+      coverage_percent: 100,
+    },
+    token_budget_alerts: [],
+  }
+}
+
 const DEMO_SESSIONS_BY_APP = Object.fromEntries(
   Object.entries(DEMO_RUNS_BY_APP).map(([appId, runs]) => [
     appId,
@@ -467,6 +688,18 @@ export function isStudioDemoModeEnabled() {
       && import.meta.env?.DEV
       && String(import.meta.env?.VITE_MOCK_MODE || '').toLowerCase() === 'true',
   )
+}
+
+export function isStudioUsageDemoModeEnabled() {
+  return Boolean(
+    typeof import.meta !== 'undefined'
+      && import.meta.env?.DEV
+      && String(import.meta.env?.VITE_USAGE_DEMO_MODE || '').toLowerCase() === 'true',
+  )
+}
+
+export function isStudioDemoApp(appId) {
+  return DEMO_APPS.some((entry) => entry.app_id === appId)
 }
 
 export function buildStudioDemoApps() {
@@ -547,8 +780,19 @@ export function listStudioDemoAppConnectors(appId) {
 }
 
 export function getStudioDemoUsageRecord(appId) {
-  const record = DEMO_USAGE_BY_APP[appId]
-  return record ? { ...record } : null
+  const usage = getStudioDemoUsagePayload(appId)
+  const rows = usage.by_run || []
+  if (!usage || rows.length === 0) {
+    const record = DEMO_USAGE_BY_APP[appId]
+    return record ? { ...record } : null
+  }
+  return {
+    tokens_used: usage.totals.total_tokens,
+    llm_cost_usd: usage.totals.estimated_cost_usd,
+    workflow_runs: rows.length,
+    tool_calls: rows.reduce((total, row) => total + Number(row.tool_calls || 0), 0),
+    errors: rows.reduce((total, row) => total + Number(row.errors || 0), 0),
+  }
 }
 
 export function getStudioDemoBillingRecord(appId) {
@@ -582,6 +826,10 @@ export function getStudioDemoWorkflowNames(appId) {
 }
 
 export function getStudioDemoRuns(appId) {
+  const usage = getStudioDemoUsagePayload(appId)
+  if (usage.by_run.length > 0) {
+    return usage.by_run.slice(0, 12).map((run) => ({ ...run }))
+  }
   return (DEMO_RUNS_BY_APP[appId] || []).map((run) => ({ ...run }))
 }
 
@@ -600,8 +848,9 @@ export function getStudioDemoBuildHistory(appId) {
 }
 
 export function getStudioDemoAdminStats(appId) {
-  const usage = getStudioDemoUsageRecord(appId)
-  if (!usage) {
+  const usagePayload = getStudioDemoUsagePayload(appId)
+  const rows = usagePayload.by_run || []
+  if (rows.length === 0) {
     return {
       active_chats: 0,
       tracked_chats: 0,
@@ -614,30 +863,24 @@ export function getStudioDemoAdminStats(appId) {
     }
   }
   return {
-    active_chats: usage.workflow_runs > 0 ? 1 : 0,
-    tracked_chats: usage.workflow_runs,
-    total_agent_turns: Math.round((usage.workflow_runs || 0) * 1.8),
-    total_tool_calls: usage.tool_calls,
-    total_errors: usage.errors,
-    total_prompt_tokens: Math.round((usage.tokens_used || 0) * 0.72),
-    total_completion_tokens: Math.round((usage.tokens_used || 0) * 0.28),
-    total_cost: usage.llm_cost_usd,
+    active_chats: rows.filter((row) => !row.ended_at).length,
+    tracked_chats: rows.length,
+    total_agent_turns: rows.reduce((total, row) => total + Number(row.agent_turns || 0), 0),
+    total_tool_calls: rows.reduce((total, row) => total + Number(row.tool_calls || 0), 0),
+    total_errors: rows.reduce((total, row) => total + Number(row.errors || 0), 0),
+    total_prompt_tokens: usagePayload.totals.prompt_tokens,
+    total_completion_tokens: usagePayload.totals.completion_tokens,
+    total_cost: usagePayload.totals.estimated_cost_usd,
   }
 }
 
 export function getStudioDemoWorkspaceRuns() {
-  return Object.entries(DEMO_RUNS_BY_APP).flatMap(([appId, runs]) => {
-    const app = DEMO_APPS.find((entry) => entry.app_id === appId)
-    return runs.map((run) => ({
-      ...run,
-      app_id: appId,
-      app_name: app?.name || appId,
-    }))
-  })
+  return getStudioDemoWorkspaceUsage().by_run.map((run) => ({ ...run }))
 }
 
 export function getStudioDemoWorkspaceStats() {
-  const runs = getStudioDemoWorkspaceRuns()
+  const usage = getStudioDemoWorkspaceUsage()
+  const runs = usage.by_run
 
   return {
     active_chats: runs.filter((run) => !run.ended_at).length,
@@ -645,10 +888,18 @@ export function getStudioDemoWorkspaceStats() {
     total_agent_turns: runs.reduce((total, run) => total + Number(run.agent_turns || 0), 0),
     total_tool_calls: runs.reduce((total, run) => total + Number(run.tool_calls || 0), 0),
     total_errors: runs.reduce((total, run) => total + Number(run.errors || 0), 0),
-    total_prompt_tokens: runs.reduce((total, run) => total + Number(run.prompt_tokens || 0), 0),
-    total_completion_tokens: runs.reduce((total, run) => total + Number(run.completion_tokens || 0), 0),
-    total_cost: runs.reduce((total, run) => total + Number(run.cost || 0), 0),
+    total_prompt_tokens: usage.totals.prompt_tokens,
+    total_completion_tokens: usage.totals.completion_tokens,
+    total_cost: usage.totals.estimated_cost_usd,
   }
+}
+
+export function getStudioDemoUsagePayload(appId) {
+  return summarizeDemoUsageRows(buildDemoUsageRows(appId), appId)
+}
+
+export function getStudioDemoWorkspaceUsage() {
+  return summarizeDemoUsageRows(buildDemoUsageRows(), null)
 }
 
 export default buildStudioDemoApps

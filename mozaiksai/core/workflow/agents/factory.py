@@ -1,6 +1,6 @@
 # ==============================================================================
 # FILE: mozaiksai/core/workflow/agents/factory.py
-# DESCRIPTION: autogen.beta.Agent factory for workflow orchestration.
+# DESCRIPTION: AG2 Agent factory for workflow orchestration.
 # ==============================================================================
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from collections.abc import Callable, Sequence
 from functools import wraps
 from typing import Any
 
-from autogen.beta import Agent
-from autogen.beta.config import OpenAIConfig
+from ag2 import Agent
+from ag2.config import OpenAIConfig
 
 from ..context.context_utils import (
     apply_context_exposures as _apply_context_exposures,
@@ -110,7 +110,7 @@ class ContextVariablesBridge:
 # ------------------------------------------------------------------
 
 def llm_config_to_openai_config(llm_config: dict[str, Any]) -> OpenAIConfig:
-    """Convert an AG2 llm_config dict to an autogen.beta OpenAIConfig."""
+    """Convert an AG2 llm_config dict to an OpenAIConfig."""
     config_list = llm_config.get("config_list") or []
     if not config_list:
         raise ValueError("llm_config has no config_list entries")
@@ -208,7 +208,7 @@ async def create_agents(
     context_variables: Any | None = None,
     cache_seed: int | None = None,
 ) -> dict[str, Agent]:
-    """Create autogen.beta.Agent instances for a workflow."""
+    """Create AG2 Agent instances for a workflow."""
 
     logger.debug("[AGENTS] Creating beta agents for workflow: %s", workflow_name)
     from time import perf_counter
@@ -346,17 +346,17 @@ async def create_agents(
 
         raw_tool_fns: list[Callable] = [] if auto_tool_call_enabled else agent_tool_functions.get(agent_name, [])
 
-        # Inject LocalShellTool when agent declares sandbox_shell: true.
-        # LocalShellTool is an AG2 Tool subclass and does not need context wrapping.
+        # Inject SandboxShellTool when agent declares sandbox_shell: true.
+        # SandboxShellTool is an AG2 Tool subclass and does not need context wrapping.
         shell_tools: list[Any] = []
         if not auto_tool_call_enabled and agent_config.get("sandbox_shell"):
             try:
-                from autogen.beta.tools import LocalShellTool
-                shell_tools = [LocalShellTool()]
-                logger.debug("[AGENTS] LocalShellTool attached to '%s'", agent_name)
+                from ag2.tools.shell import SandboxShellTool
+                shell_tools = [SandboxShellTool()]
+                logger.debug("[AGENTS] SandboxShellTool attached to '%s'", agent_name)
             except Exception as shell_err:
                 logger.warning(
-                    "[AGENTS] sandbox_shell requested for '%s' but LocalShellTool unavailable: %s",
+                    "[AGENTS] sandbox_shell requested for '%s' but SandboxShellTool unavailable: %s",
                     agent_name,
                     shell_err,
                 )
@@ -366,7 +366,7 @@ async def create_agents(
             _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns
         ] + shell_tools
 
-        # Load workflow-local AG2 beta prompt middleware declarations.
+        # Load workflow-local AG2 1.0 beta prompt middleware declarations.
         prompt_middleware_functions: list[Callable] = []
         try:
             from ..execution.middleware import _resolve_import, load_prompt_middleware_entries
@@ -402,6 +402,7 @@ async def create_agents(
                 beta_response_schema = None
 
         middleware = []
+        observers = []
         telemetry_enabled = False
         try:
             from mozaiksai.core.observability import build_ag2_telemetry_middleware
@@ -433,6 +434,19 @@ async def create_agents(
         except Exception as usage_err:
             logger.debug("[AGENTS] AG2 usage middleware skipped for '%s': %s", agent_name, usage_err)
 
+        try:
+            from mozaiksai.core.observability import build_ag2_token_watchdog_observers
+
+            observers.extend(
+                build_ag2_token_watchdog_observers(
+                    agent_name=agent_name,
+                    workflow_name=workflow_name,
+                    context_variables=context_bridge,
+                )
+            )
+        except Exception as watchdog_err:
+            logger.debug("[AGENTS] AG2 token watchdog observers skipped for '%s': %s", agent_name, watchdog_err)
+
         if prompt_middleware_functions:
             from ..execution.middleware import build_prompt_middleware
 
@@ -453,6 +467,7 @@ async def create_agents(
             tools=tuple(wrapped_tools),
             response_schema=beta_response_schema,
             middleware=middleware,
+            observers=observers,
         )
 
         # Store Mozaiks metadata
@@ -461,6 +476,7 @@ async def create_agents(
         agent._mozaiks_base_system_message = system_message
         agent._mozaiks_prompt_middleware = prompt_middleware_functions
         agent._mozaiks_ag2_telemetry_enabled = telemetry_enabled
+        agent._mozaiks_ag2_token_watchdog_enabled = bool(observers)
         agent._mozaiks_agent_kind = "local"
         agent._mozaiks_context_bridge = context_bridge
 
@@ -483,7 +499,7 @@ async def create_agents(
 # ------------------------------------------------------------------
 
 def list_agent_middleware(agent: Any) -> dict[str, list[str]]:
-    """Return Mozaiks prompt middleware registered as AG2 beta middleware."""
+    """Return Mozaiks prompt middleware registered as AG2 1.0 beta middleware."""
     out: dict[str, list[str]] = {}
     middleware_functions = getattr(agent, "_mozaiks_prompt_middleware", [])
     if middleware_functions:

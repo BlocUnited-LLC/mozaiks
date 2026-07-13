@@ -72,7 +72,7 @@ def test_platform_shell_config_expands_shortcuts(monkeypatch, tmp_path: Path) ->
         "admin-portal",
         "signout",
     ]
-    assert [item["path"] for item in shell["mobile"]["bottomBar"]["items"]] == ["/", "/apps", "/profile"]
+    assert [item["path"] for item in shell["mobile"]["bottomBar"]["items"]] == ["/", "/apps", "/me"]
     assert shell["footer"]["links"][0] == {"label": "Legal Notice", "href": "/legal"}
     assert shell["footer"]["hideOnMobile"] is True
 
@@ -85,9 +85,9 @@ def test_shell_shortcut_catalog_uses_workspace_home_primitives_without_dashboard
     assert catalog["home"]["path"] == "/"
     assert catalog["apps"]["path"] == "/apps"
     assert catalog["workspace"]["path"] == "/apps"
-    assert catalog["profile"]["label"] == "Account"
-    assert catalog["account"]["path"] == "/profile"
-    assert catalog["account"]["label"] == "Account"
+    assert catalog["profile"]["label"] == "Profile"
+    assert catalog["account"]["path"] == "/me"
+    assert catalog["account"]["label"] == "Profile"
     assert "dashboard" not in catalog
     assert "admin_portal" not in catalog
 

@@ -137,9 +137,9 @@ class TestNormalizeCurrentPlan:
         assert "stakeholder_sign_off" in result["approvals_required"]
 
     def test_cost_implications_returned(self):
-        plan = {"cost_implications": ["Adds Stripe fee"]}
+        plan = {"cost_implications": ["Adds payment provider fee"]}
         result = _normalize_current_plan(plan)
-        assert "Adds Stripe fee" in result["cost_implications"]
+        assert "Adds payment provider fee" in result["cost_implications"]
 
     def test_runtime_implications_returned(self):
         plan = {"runtime_implications": ["New webhook endpoint"]}

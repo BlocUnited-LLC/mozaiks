@@ -11,5 +11,5 @@ no longer the canonical way to add backend logic to a Mozaiks app.
 Mozaiks. They follow the 4-layer contract (handler → service → repo → policy + schemas) and are
 auto-discovered by the platform host at startup.
 
-See: `.Codex/skills/add-module/SKILL.md`
+See: `.agents/skills/add-module/SKILL.md`
 

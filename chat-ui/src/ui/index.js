@@ -43,4 +43,5 @@ export {
   SummaryStrip,
   SurfaceCard,
   Timeline,
+  UsageTrendPanel,
 } from './primitives/index.js';

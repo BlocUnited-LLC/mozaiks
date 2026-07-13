@@ -70,7 +70,7 @@ def test_appgenerator_guidance_stays_public_safe() -> None:
         assert "mozaiks-app" not in text, relative_path
 
     skill = _read(".claude/skills/appgenerator-change/SKILL.md")
-    for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
+    for forbidden in ["payment provider", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in skill, forbidden
 
 

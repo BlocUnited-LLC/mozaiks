@@ -1,4 +1,4 @@
-"""Transition graph validation for the AG2 beta Network workflow model."""
+"""Transition graph validation for the AG2 1.0 beta Network workflow model."""
 
 from __future__ import annotations
 

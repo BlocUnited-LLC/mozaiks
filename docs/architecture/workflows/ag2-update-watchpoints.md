@@ -1,6 +1,6 @@
 # AG2 Update Watchpoints
 
-This is the living update log for Mozaiks' AG2 beta integration. Use it when
+This is the living update log for Mozaiks' AG2 1.0 beta integration. Use it when
 AG2 changes, when Mozaiks adds workflow runtime behavior, or when a control-plane
 change depends on agentic execution mechanics.
 
@@ -11,10 +11,10 @@ current replacement plan lives in
 
 ## Current Baseline
 
-Reviewed on June 11, 2026 against:
+Reviewed on July 8, 2026 against:
 
-- installed package: `autogen==0.13.2` from `.venv/Lib/site-packages/autogen`
-- declared dependency floor: `ag2[a2a,openai,lmm]>=0.13.2`
+- installed package: `ag2==1.0.0b0` from the `ag2` import package
+- declared dependency: `ag2[a2a,openai,tracing]==1.0.0b0`
 - AG2 docs:
   - <https://docs.ag2.ai/latest/docs/beta/network/overview/>
   - <https://docs.ag2.ai/latest/docs/beta/network/hub_and_identity/>
@@ -50,14 +50,15 @@ Mozaiks still owns deterministic product contracts around those primitives:
 | AG2 workflow runner boundary | `mozaiksai/core/adapters/ag2_network_runner.py`, `mozaiksai/core/adapters/ag2_orchestration.py` | Mozaiks must adapt workflow YAML, app/session IDs, structured-output registry, and Mozaiks `RunResult` semantics to AG2 Hub channels. | If AG2 adds a stable high-level workflow runner over `Hub`/`AgentClient`, shrink `AG2NetworkRunner` to request/result conversion only. |
 | Turn failure result mapping | `mozaiksai/core/adapters/ag2_network_runner.py` | AG2 reports agent turn crashes through `HubListener.on_turn_failed` while leaving the channel alive. Mozaiks maps that listener event to a failed `RunResult` so runtime callers do not wait for channel timeout. | If AG2 Workflow channels gain first-class failure policy or auto-close behavior for turn crashes, replace the local listener with the native channel result. |
 | Round-end context mutation bridge | `_install_context_update_handler` in `mozaiksai/core/adapters/ag2_network_runner.py` | Mozaiks tools mutate `ContextVariablesBridge`, while AG2 workflow routing reads packet `context_updates` before `WorkflowAdapter.fold(...)` selects the next speaker. The current bridge wraps AG2's default handler to merge those updates into `EV_PACKET`. | Replace with an AG2-supported round-end packet transform hook, default-handler middleware, or native context update helper when available. This is the most fragile divergence. |
-| Source-scoped deterministic transition conditions | `mozaiksai/core/adapters/ag2_transition_conditions.py`, `mozaiksai/core/workflow/execution/network_graph.py` | Mozaiks workflow YAML declares `source_agent` per rule, while AG2 `ContextEquals`, `ToolCalled`, and classic `ContextExpression` do not include source scope by themselves. Mozaiks registers tiny source-scoped beta `TransitionCondition` adapters over those AG2-owned evaluators. | If AG2 adds native condition composition such as `FromSpeaker AND ContextEquals`, `FromSpeaker AND ToolCalled`, or beta-native `ContextExpression`, replace the local adapters with native composition. |
+| Source-scoped deterministic transition conditions | `mozaiksai/core/adapters/ag2_transition_conditions.py`, `mozaiksai/core/workflow/execution/network_graph.py` | Mozaiks workflow YAML declares `source_agent` per rule, while AG2 `ContextEquals` and `ToolCalled` do not include source scope by themselves. AG2 1.0.0b0 does not ship an upstream expression evaluator for Mozaiks `${var}` workflow contracts, so Mozaiks keeps a small deterministic evaluator at the adapter boundary. | If AG2 adds native condition composition such as `FromSpeaker AND ContextEquals`, `FromSpeaker AND ToolCalled`, or a native expression evaluator, replace the local adapters with native composition. |
+| One-shot workflow bootstrap transition | `BootstrapInitialDispatch` in `mozaiksai/core/adapters/ag2_transition_conditions.py`, injected by `AG2NetworkRunner._compile_graph_with_initiator(...)` | Mozaiks opens workflow channels from a human initiator and injects a first-turn dispatch to the declared initial agent. This condition is intentionally bootstrap-only and cannot be configured as a general workflow-author transition. | Remove this adapter if AG2 exposes a native workflow-channel startup target that dispatches the initial message without adding a reusable human-speaker transition. |
 | Structured-output validation after AG2 packets | `mozaiksai/core/workflow/outputs/runtime_validation.py`, `mozaiksai/core/workflow/outputs/runtime_events.py`, `AG2NetworkRunner._validate_wal_structured_outputs(...)` | AG2 owns model execution; Mozaiks owns canonical app/workflow/module artifact schemas and hard validation. | If AG2 Network supports per-agent `response_schema` on workflow channels, use it for model pressure, but keep Mozaiks validation as the artifact contract authority. |
 | Task-batch scheduling and result merge | `mozaiksai/core/workflow/task_batches.py`, `mozaiksai/core/adapters/ag2_task_batch_runner.py` | AG2 `Task` is lifecycle/observation; it does not assign, dependency-sort, enforce owned paths, or merge generated artifact outputs. | If AG2 adds a deterministic task graph/scheduler with dependency and observation semantics, move worker execution and lifecycle there while keeping Mozaiks artifact ownership validation. |
 | Phased task-batch workflow execution | `mozaiksai/core/workflow/orchestration_patterns.py` | A planning phase runs through AG2, Mozaiks executes deterministic task channels, then a continuation phase resumes with merged context. This keeps the DAG deterministic but splits one logical workflow across channels. | Replace with AG2-native parent/child workflow channels or task lineage when AG2 can preserve parent workflow context, WAL lineage, cancellation, and observation in one execution surface. |
 | Approved-generation smoke coordinator uses AG2 task primitive | `scripts/smoke_agentgenerator_live_pack.py` | Live AgentGenerator pack smoke found the single-agent AG2 Network coordinator/metadata path timing out before packet emission, while direct AG2 task calls completed reliably. The smoke keeps the production-critical parallel workflow generation path on the real AG2 task batch runner and keeps this one-shot approved-boundary coordinator outside Mozaiks runtime code. | If AG2 Network single-agent channels gain deterministic packet emission/close behavior for one-shot coordinator calls, move the smoke coordinator/metadata calls back through `AG2NetworkRunner` or an AG2-recommended one-shot network primitive. |
 | Control-plane LLM checkpoints | `mozaiksai/control_plane/implementations/*`, `mozaiksai/core/adapters/ag2_agent_runner.py` | The control plane is deterministic artifact-aware policy; AG2 should only own the LLM call used for classifier/proposer/coding-plan structured output. | If AG2 Harness gains a typed one-shot agent primitive that better fits this use, adapt `AG2StructuredAgentRunner`. Do not move artifact routing, promotion, invalidation, or scoped patch policy into AG2. |
 | Studio/platform event projection | `_project_ag2_wal_to_mozaiks_transport(...)` in `mozaiksai/core/adapters/ag2_network_runner.py` | The frontend consumes Mozaiks websocket events and app-scoped chat persistence, not raw AG2 envelopes. | Prefer AG2 Hub listeners or channel event subscriptions for live projection when they support app-scoped transport and chat persistence boundaries. |
-| Cancel/resume boundary | `AG2OrchestrationAdapter.cancel(...)`, `AG2OrchestrationAdapter.resume(...)` | Current cancel/resume is transport/session managed. Resume re-enters Mozaiks orchestration with persisted context rather than hydrating and continuing an AG2 channel. | Move toward AG2 channel cancellation/resume if AG2 exposes durable channel continuation with tenant-safe store boundaries. |
+| Durable resume boundary | `AG2OrchestrationAdapter.cancel(...)`, `AG2OrchestrationAdapter.resume(...)`, process-live handles registered by `SimpleTransport` | Current in-process continuation uses the live AG2 Hub/channel when available. After backend restart or live-handle loss, resume re-enters Mozaiks orchestration from persisted AG2 stream events rather than hydrating a durable AG2 channel. | Move durable restart resume to AG2 if AG2 exposes tenant-safe channel hydration/continuation over a durable KnowledgeStore. |
 
 ## Too-Much-Ownership Flags
 
@@ -85,16 +86,16 @@ changes under `mozaiksai/core/workflow`, `mozaiksai/core/adapters`, or
 
    ```powershell
    @'
-   import autogen
-   print(getattr(autogen, "__version__", "unknown"))
-   print(autogen.__file__)
+   import ag2
+   print(getattr(ag2, "__version__", "unknown"))
+   print(ag2.__file__)
    '@ | .\.venv\Scripts\python.exe -
    ```
 
-2. Inspect AG2 beta surfaces in the installed package:
+2. Inspect AG2 1.0 beta surfaces in the installed package:
 
    ```powershell
-   rg --hidden --no-ignore "class (Hub|HubClient|AgentClient|WorkflowAdapter|TransitionGraph|TaskMirror|Task)|context_vars|EV_PACKET|EV_CHANNEL_CLOSED" .\.venv\Lib\site-packages\autogen\beta\network -n
+   rg --hidden --no-ignore "class (Hub|HubClient|AgentClient|WorkflowAdapter|TransitionGraph|TaskMirror|Task)|context_vars|EV_PACKET|EV_CHANNEL_CLOSED" .\.venv\Lib\site-packages\ag2\network -n
    ```
 
 3. Re-check official AG2 docs for Network, Tasks, Task Observation, and
@@ -117,6 +118,22 @@ changes under `mozaiksai/core/workflow`, `mozaiksai/core/adapters`, or
 
 ## Current Decision Log
 
+### July 8, 2026
+
+- **AG2 package namespace migrated**: Mozaiks now targets `ag2==1.0.0b0` and
+  imports active beta APIs from `ag2.*`.
+- **Mozaiks expression compatibility gap**: AG2 1.0.0b0 does not expose a
+  native expression helper for Mozaiks `${context_variable}` workflow
+  contracts. Mozaiks keeps a small source-scoped evaluator in
+  `ag2_transition_conditions.py` for the declarative `context_expression`
+  contract.
+- **Retired cache/logger hooks**: AG2 1.0.0b0 no longer exposes the earlier
+  cache/logger hook modules; Mozaiks preserves cache seeds for AG2 config
+  conversion and removed the file-logger monkeypatch.
+- **A2A follow-up**: importing `ag2.a2a.client` currently requires the gRPC
+  dependencies from `a2a-sdk[grpc]` in this environment. Validate the new AG2
+  A2A remote-agent API before re-enabling that optional workflow surface.
+
 ### June 12, 2026
 
 - **Live AgentGenerator pack smoke passed with real AG2/model calls**:
@@ -135,15 +152,15 @@ changes under `mozaiksai/core/workflow`, `mozaiksai/core/adapters`, or
 
 ### June 11, 2026 (update 2)
 
-- **Context expression routing uses AG2 evaluators**:
-  `network_graph.py` compiles deterministic routing into AG2 beta
+- **Context expression routing used upstream evaluators in 0.13.x**:
+  `network_graph.py` compiles deterministic routing into AG2 1.0 beta
   `TransitionCondition` objects registered from `mozaiksai.core.adapters`.
   Simple equality uses AG2 `ContextEquals`; tool routes use AG2 `ToolCalled`;
   composite context routes use the canonical `condition_type: context_expression`
-  field and AG2's `ContextExpression` parser/evaluator. The remaining
+  field and Mozaiks' local `${context_variable}` evaluator. The remaining
   divergence is source-scoping those AG2 conditions to Mozaiks' declarative
-  `source_agent` field and bridging beta `WorkflowState.context_vars` into the
-  AG2 expression evaluator.
+  `source_agent` field and bridging `WorkflowState.context_vars` into the local
+  expression evaluator.
 - **Stream projection boundary**: The active Studio/platform event projection
   surface is `_project_ag2_wal_to_mozaiks_transport(...)` in
   `ag2_network_runner.py`.

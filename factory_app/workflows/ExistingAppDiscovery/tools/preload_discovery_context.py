@@ -93,11 +93,11 @@ _CONNECTOR_SIGNALS: list[dict[str, Any]] = [
         "likely_secret_envs": ["GOOGLE_APPLICATION_CREDENTIALS", "GCP_PROJECT_ID"],
     },
     {
-        "provider_id": "stripe",
-        "packages": ["stripe"],
-        "imports": ["import stripe", "from stripe", "require('stripe')", "new Stripe("],
+        "provider_id": "payment_provider",
+        "packages": ["payment_provider"],
+        "imports": ["import payment_provider", "from payment_provider", "require('payment_provider')", "new payment provider("],
         "category": "payments",
-        "likely_secret_envs": ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"],
+        "likely_secret_envs": ["PAYMENT_PROVIDER_SECRET_KEY", "PAYMENT_PROVIDER_PUBLISHABLE_KEY", "PAYMENT_PROVIDER_WEBHOOK_SECRET"],
     },
     {
         "provider_id": "sendgrid",

@@ -2,7 +2,7 @@
 AG2 tool adapter: read_carry_forward_module_contract for AppPlanAgent.
 
 Thin wrapper that exposes the control-plane carry-forward module contract
-reader as an AG2 callable tool with autogen dependency-injection annotations.
+reader as an AG2 callable tool with Pydantic metadata annotations.
 
 AppPlanAgent may call this tool during ``conceptual_replan`` to inspect
 specific contract files (module.yaml, contracts/*.yaml, runtime_extensions.yaml)
@@ -16,7 +16,7 @@ See full implementation at:
 """
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.control_plane.tools.read_carry_forward_module_contract import (
     read_carry_forward_module_contract as _core,

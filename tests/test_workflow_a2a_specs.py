@@ -41,3 +41,31 @@ def test_load_a2a_agent_specs_filters_invalid_and_disabled_entries() -> None:
     assert spec.client.get("accepted_output_modes") == ["text/plain"]
 
 
+def test_create_a2a_remote_agent_uses_ag2_a2a_config() -> None:
+    spec = _a2a.A2AAgentSpec(
+        name="RemoteWriter",
+        url="https://example.com/agents/writer",
+        max_reconnects=5,
+        polling_interval=1.25,
+        client={
+            "streaming": False,
+            "timeout": 30,
+            "prefer": "jsonrpc",
+            "headers": {"X-Test": "yes"},
+        },
+    )
+    context = {"app_id": "app-1"}
+
+    agent = _a2a.create_a2a_remote_agent(spec, context_variables=context)
+
+    assert agent.name == "RemoteWriter"
+    assert agent.config.card_url == "https://example.com/agents/writer"
+    assert agent.config.max_reconnects == 5
+    assert agent.config.polling_interval == 1.25
+    assert agent.config.streaming is False
+    assert agent.config.timeout == 30
+    assert agent.config.prefer == "jsonrpc"
+    assert agent.config.headers == {"X-Test": "yes"}
+    assert agent.context_variables is context
+
+

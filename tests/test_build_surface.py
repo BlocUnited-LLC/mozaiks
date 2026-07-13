@@ -38,7 +38,7 @@ def test_studio_host_exposes_build_endpoint_and_console_routes() -> None:
     assert 'build_shell_config(surface="studio")' in studio_source
     assert '"path": "/apps/new"' in manifest_source
     assert '"path": "/usage"' in manifest_source
-    assert '"path": "/health"' in manifest_source
+    assert '"path": "/integrations"' in manifest_source
     assert '"path": "/billing"' not in manifest_source
     assert '"path": "/hosting"' not in manifest_source
     assert '"path": "/operations"' not in manifest_source
@@ -73,7 +73,7 @@ def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -
     assert "registerComponent('AppHostingPage'" not in source
     assert "registerComponent('WorkspaceHostingPage'" not in source
     assert "registerComponent('AppsPage'" in admin_source
-    assert "registerComponent('WorkspaceHealthPage'" in admin_source
+    assert "registerComponent('WorkspaceIntegrationsPage'" in admin_source
     assert "registerComponent('WorkspaceHostingPage'" not in admin_source
     assert "registerComponent('AppHealthPage'" in admin_source
     assert "registerComponent('AppHostingPage'" not in admin_source
@@ -111,7 +111,7 @@ def test_removed_custom_studio_pages_are_deleted_from_factory_app() -> None:
 
     # Active pages live under admin/pages/
     assert (workspace / "factory_app/app/admin/pages/AppHealthPage.jsx").exists()
-    assert (workspace / "factory_app/app/admin/pages/WorkspaceHealthPage.jsx").exists()
+    assert (workspace / "factory_app/app/admin/pages/WorkspaceIntegrationsPage.jsx").exists()
     # Hosting pages moved to mozaiks-app (hosted-only capability)
     assert not (workspace / "factory_app/app/admin/pages/AppHostingPage.jsx").exists()
     assert not (workspace / "factory_app/app/admin/pages/WorkspaceHostingPage.jsx").exists()
@@ -163,9 +163,20 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     assert "Mozaiks Studio" in layout_source
     assert "Import App" in source
     assert "/apps/new" in source
+    assert "/chat?workflow=ValueEngine&mode=workflow&defer_start=1" in source
+    assert "/chat?workflow=ValueEngine&mode=workflow&new=1" not in source
     assert "row.primaryAction?.href" in source
     assert "active_chat_id" in _read("chat-ui/src/admin/appStudioModel.js")
     assert "active_chat_id" in _read("mozaiksai/core/runtime/app/studio_summary.py")
+
+
+def test_chat_page_defers_new_app_workflow_until_first_user_message() -> None:
+    source = _read("chat-ui/src/pages/ChatPage.js")
+    assert "queryDeferStart" in source
+    assert "searchParams.get('defer_start')" in source
+    assert "if (queryDeferStart)" in source
+    assert "Deferred workflow launch" in source
+    assert "nextParams.delete('defer_start')" in source
 
 
 def test_building_app_list_entry_routes_to_active_chat() -> None:
@@ -185,7 +196,7 @@ def test_workspace_layout_links_studio_and_hosting_sections() -> None:
     assert "Browse sections" not in source
     assert "Mozaiks Studio" in source
     assert "App Studio" in source
-    assert '"label": "Users"' in manifest_source
+    assert '"label": "Access"' in manifest_source
     assert '"label": "Billing"' not in manifest_source
     assert '"label": "Health"' in manifest_source
     assert '"label": "Hosting"' not in manifest_source
@@ -260,75 +271,44 @@ def test_route_manifest_components_all_registered_in_admin_index() -> None:
     )
 
 
-def test_integrations_route_is_app_scoped_only() -> None:
+def test_integrations_routes_have_global_management_and_app_detail() -> None:
     manifest_source = _read("factory_app/app/ui/route_manifest.json")
     admin_registry = _read("factory_app/app/admin/admin_registry.yaml")
     playwright_source = _read("web_shell/playwright/apps.responsive.smoke.spec.js")
 
+    assert '"/integrations"' in manifest_source
     assert '"/apps/:appId/integrations"' in manifest_source
-    assert '"/integrations"' not in manifest_source
+    assert '"component": "WorkspaceIntegrationsPage"' in manifest_source
+    assert '"include": false' in manifest_source
+    assert "path: /integrations" in admin_registry
     assert "path: /apps/:appId/integrations" in admin_registry
-    assert "path: /integrations" not in admin_registry
+    assert "show_in_navigation: false" in admin_registry
     assert "page.goto(`/apps/${APP_ID}/integrations`)" in playwright_source
-    assert "page.goto('/integrations')" not in playwright_source
+    assert "page.goto('/integrations')" in playwright_source
 
 
-def test_integrations_page_uses_integrations_eyebrow() -> None:
+def test_app_integrations_page_is_setup_detail_not_crud_inventory() -> None:
     source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
-    assert "Integrations" in source
+    assert "Integration Setup" in source
+    assert "list_app_integration_needs" in source
+    assert "Workspace integrations" in source
+    assert "App-specific service requirements" in source
+    assert "Add Integration" not in source
+    assert "/api/studio/integrations/connectors/" not in source
+    assert "checkConnectorHealth" not in source
     assert 'eyebrow="Studio"' not in source
 
 
-def test_integrations_page_focuses_on_external_integrations() -> None:
-    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
-    assert 'External Integrations' in source
-    assert 'Add Integration' in source
-    assert 'analytics_provider' in source
-    assert 'Hosted Analytics' in source
-    assert 'stripe' not in source.lower()
-    assert 'Connector Secret Backend' not in source
-    assert 'Runtime Adapters' not in source
-    assert 'Connection State' not in source
-
-
-def test_integrations_page_displays_safe_connector_health() -> None:
-    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
-    assert "connector?.health?.status" in source
-    assert "ConnectorHealthPill" in source
-    assert "ConnectorReadinessPill" in source
-    assert "missing_fields" in source
-    assert "last_checked_at" in source
-    assert "checked_by" in source
-    assert "public_config" in source
-    assert "Missing required fields" in source
-    assert "Needs attention" in source
-    assert "Unknown" in source
-
-
-def test_integrations_page_supports_manual_connector_health_checks() -> None:
-    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
-    assert "connectorSupportsHealthCheck" in source
-    assert "health_check_supported" in source
-    assert "Check now" in source
-    assert "Checking..." in source
-    assert "checkConnectorHealth" in source
-    assert "/api/studio/integrations/connectors/" in source
-    assert "/health-check?app_id=" in source
-    assert "method: 'POST'" in source
-    assert "setData((prev)" in source
-    assert "safe_details" in source
-    assert "Health details" in source
-    assert "checkConnectorHealth(" not in source.split("useEffect", 1)[1].split("async function saveConnector", 1)[0]
-
-
-def test_integrations_page_redacts_secret_shaped_public_config() -> None:
-    source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
-    assert "function isSecretFieldName" in source
-    assert "function getSafePublicConfigEntries" in source
-    assert "api[_-]?key" in source
-    assert ".filter(([key]) => !isSecretFieldName(key))" in source
-    assert "function getSafeHealthDetailEntries" in source
-    assert "test-secret-value" not in source
+def test_app_overview_links_out_instead_of_owning_diagnostic_panels() -> None:
+    source = _read("factory_app/app/admin/pages/AppOverviewPage.jsx")
+    manifest_source = _read("factory_app/app/ui/route_manifest.json")
+    assert "BusinessSnapshotPanel" not in source
+    assert "OperationalHealthPanel" not in source
+    assert "ConnectedServicesPanel" not in source
+    assert "list_app_integration_needs" not in source
+    assert '"/apps/:appId/health"' in manifest_source
+    assert '"/apps/:appId/support"' in manifest_source
+    assert '"component": "AppSupportPage"' in manifest_source
 
 
 def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:

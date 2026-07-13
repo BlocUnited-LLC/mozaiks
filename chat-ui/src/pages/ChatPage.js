@@ -116,6 +116,9 @@ const ChatPage = () => {
   const queryFreshStart = ['1', 'true', 'yes', 'on'].includes(
     String(searchParams.get('new') || searchParams.get('fresh') || searchParams.get('force_new') || '').toLowerCase()
   );
+  const queryDeferStart = ['1', 'true', 'yes', 'on'].includes(
+    String(searchParams.get('defer_start') || '').toLowerCase()
+  );
   const queryEmbeddedView = searchParams.get('view');
   // Gate / action / refinement context — set by useWorkflowStart
   // e.g. /chat?workflow=AppGenerator&context={"app_type":"new"}&trigger_source=gate
@@ -128,6 +131,8 @@ const ChatPage = () => {
   const queryActionId = searchParams.get('action_id') || null;
   const queryChangeClass = searchParams.get('change_class') || null;
   const queryArtifactVersionId = searchParams.get('artifact_version_id') || null;
+  // Page context forwarded by the persistent widget when navigating from a non-chat route
+  const queryPageContext = searchParams.get('page_context') || null;
 
   useEffect(() => {
     if (!queryWorkflowName) {
@@ -602,6 +607,26 @@ const ChatPage = () => {
     setMessagesWithLogging(sanitizedMessages);
   }, [conversationMode, messages, sanitizeVisibleWorkflowMessages, setMessagesWithLogging, setWorkflowMessages]);
   
+  // Seed a page-context system message when navigating from the widget on a known page
+  useEffect(() => {
+    if (!queryPageContext || queryMode !== 'ask') return;
+    const seenKey = `mozaiks.page_ctx_seeded:${queryPageContext.slice(0, 40)}`;
+    try { if (sessionStorage.getItem(seenKey)) return; } catch {}
+    setMessagesWithLogging((prev) => {
+      if (prev.length > 0) return prev; // already has messages; don't prepend
+      return [{
+        id: `page-ctx-${Date.now()}`,
+        sender: 'system',
+        agentName: 'System',
+        content: `📍 **Page context:** ${queryPageContext}`,
+        isStreaming: false,
+        metadata: { hideInTranscript: false, source: 'page_context' },
+      }];
+    });
+    try { sessionStorage.setItem(seenKey, '1'); } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryPageContext, queryMode]);
+
   // Note: Artifact panel restoration is handled directly in ensureWorkflowMode with setTimeout
   const implicitDevAppId =
     process.env.NODE_ENV !== 'production' &&
@@ -1021,32 +1046,23 @@ const ChatPage = () => {
 
   // Helper function to extract agent name from nested message structure
   const extractAgentName = useCallback((data) => {
+    const asStr = (v) => (v && typeof v === 'string' && v.trim() && v !== 'Unknown') ? v.trim() : null;
     try {
-      // First try direct agent field
-      if (data.agent && data.agent !== 'Unknown') {
-        return data.agent;
-      }
-      if (data.agentName && data.agentName !== 'Unknown') {
-        return data.agentName;
-      }
-      if (data.agent_name && data.agent_name !== 'Unknown') {
-        return data.agent_name;
-      }
-      
-      // Parse content if it's a JSON string containing nested agent info
-      if (data.content && typeof data.content === 'string') {
-        const parsed = JSON.parse(data.content);
-        if (parsed?.data?.content?.sender) {
-          return parsed.data.content.sender;
-        }
-        if (parsed?.data?.agent) {
-          return parsed.data.agent;
-        }
-      }
-      
-      return 'Agent'; // fallback
+      return (
+        asStr(data.agent) ||
+        asStr(data.agentName) ||
+        asStr(data.agent_name) ||
+        (() => {
+          if (data.content && typeof data.content === 'string') {
+            const parsed = JSON.parse(data.content);
+            return asStr(parsed?.data?.content?.sender) || asStr(parsed?.data?.agent);
+          }
+          return null;
+        })() ||
+        'Agent'
+      );
     } catch {
-      return data.agent || data.agent_name || 'Agent';
+      return asStr(data.agent) || asStr(data.agent_name) || 'Agent';
     }
   }, []);
 
@@ -1178,6 +1194,7 @@ const ChatPage = () => {
     refreshWorkflowSessions,
     handleRefreshGeneralSessions,
     handleClearGeneralSessions,
+    handleDeleteGeneralSession,
     handleRefreshWorkflowSessions,
     handleClearWorkflowSessions,
   } = useChatSessionHistory({
@@ -2896,6 +2913,11 @@ useEffect(() => {
   if (!api) return;
   if (!workflowConfigLoaded) return; // wait until registry is ready
   if (currentChatId) return; // existing logic handles resume or already started
+  if (queryDeferStart) {
+    setLoading(false);
+    pendingStartRef.current = false;
+    return;
+  }
   if (pendingStartRef.current) return;
 
   pendingStartRef.current = true;
@@ -3016,7 +3038,7 @@ useEffect(() => {
     }
   })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, resolveKnownWorkflowName, consumeNavigationQueryParams]);
+}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, queryDeferStart, resolveKnownWorkflowName, consumeNavigationQueryParams]);
 
   // Ensure resumed workflow chats always keep a canonical URL session context.
   // This prevents ambiguous reconnect behavior when the page was loaded with only ?workflow=...
@@ -3839,19 +3861,60 @@ useEffect(() => {
         return;
       }
 
-      // Send directly to backend workflow via WebSocket
+      // Deferred workflow launch: create the runtime chat only when the user
+      // sends the first real message, then route that message into the run.
       try {
-      if (!currentChatId) {
-        console.error('❌ [SEND] No chat ID available for sending message');
-        return;
+      let targetChatId = currentChatId;
+      let targetWorkflowName = resolveKnownWorkflowName(currentWorkflowName)
+        || resolveKnownWorkflowName(urlWorkflowName)
+        || resolveWorkflow(currentWorkflowName)
+        || resolveWorkflow(urlWorkflowName);
+
+      if (!targetChatId) {
+        if (!targetWorkflowName) {
+          console.error('❌ [SEND] No workflow available for deferred message');
+          return;
+        }
+        const startResult = await api.startChat(
+          currentAppId,
+          targetWorkflowName,
+          currentUserId,
+          {},
+          queryContext,
+          { trigger_source: queryTriggerSource },
+          { forceNew: queryFreshStart },
+        );
+        targetChatId = startResult?.chat_id || startResult?.id || null;
+        targetWorkflowName = startResult?.workflow_name || targetWorkflowName;
+        if (!targetChatId) {
+          console.error('❌ [SEND] Could not create workflow chat for deferred message');
+          return;
+        }
+        setCurrentChatId(targetChatId);
+        setActiveChatId(targetChatId);
+        setCurrentWorkflowName(targetWorkflowName);
+        setActiveWorkflowName(targetWorkflowName);
+        setConversationMode('workflow');
+
+        const nextParams = new URLSearchParams(location.search || '');
+        nextParams.delete('context');
+        nextParams.delete('new');
+        nextParams.delete('fresh');
+        nextParams.delete('force_new');
+        nextParams.delete('defer_start');
+        nextParams.set('workflow', targetWorkflowName);
+        nextParams.set('chat_id', targetChatId);
+        nextParams.set('mode', 'workflow');
+        const nextSearch = nextParams.toString();
+        navigate(location.pathname + (nextSearch ? `?${nextSearch}` : ''), { replace: true });
       }
       
       const success = await api.sendMessageToWorkflow(
         messageContent.content, 
         currentAppId, 
         currentUserId, 
-        currentWorkflowName,
-        currentChatId, // Pass the chat ID
+        targetWorkflowName,
+        targetChatId,
         artifactContextPayload ? { artifact_context: artifactContextPayload } : null
       );
       if (success) {
@@ -4600,10 +4663,10 @@ useEffect(() => {
           <button
             type="button"
             onClick={toggleWidgetChatMinimized}
-            className="group relative w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] shadow-[0_8px_32px_rgba(15,23,42,0.6)] border-2 border-[rgba(var(--color-primary-light-rgb),0.5)] hover:shadow-[0_16px_48px_rgba(51,240,250,0.4)] hover:scale-105 transition-all duration-300 flex items-center justify-center"
+            className="group relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-secondary shadow-[0_8px_32px_rgba(15,23,42,0.6)] border-2 border-primary/50 hover:shadow-[0_16px_48px_rgba(51,240,250,0.4)] hover:scale-105 transition-all duration-300 flex items-center justify-center"
             title="Expand chat"
           >
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[rgba(var(--color-primary-light-rgb),0.2)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
             <img 
               src={brandLogoSrc} 
               alt="mozaiksai" 
@@ -4623,8 +4686,8 @@ useEffect(() => {
           className="pointer-events-auto relative group mb-[-1px] z-20"
           title="Minimize chat"
         >
-          <div className="w-32 h-8 rounded-t-2xl bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.4)] to-[rgba(var(--color-secondary-rgb),0.4)] border-t border-l border-r border-[rgba(var(--color-primary-light-rgb),0.4)] backdrop-blur-sm flex items-center justify-center group-hover:bg-gradient-to-r group-hover:from-[rgba(var(--color-primary-rgb),0.6)] group-hover:to-[rgba(var(--color-secondary-rgb),0.6)] transition-all">
-            <svg className="w-5 h-5 text-[var(--color-primary-light)] group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+          <div className="w-32 h-8 rounded-t-2xl bg-gradient-to-r from-primary/40 to-secondary/40 border-t border-l border-r border-primary/40 backdrop-blur-sm flex items-center justify-center group-hover:from-primary/60 group-hover:to-secondary/60 transition-all">
+            <svg className="w-5 h-5 text-primary group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
           </div>
@@ -4742,6 +4805,7 @@ useEffect(() => {
                 onStartEntryWorkflow={() => handleConversationModeChange('workflow')}
                 onRefresh={conversationMode === 'workflow' ? handleRefreshWorkflowSessions : handleRefreshGeneralSessions}
                 onClear={conversationMode === 'workflow' ? handleClearWorkflowSessions : handleClearGeneralSessions}
+                onDeleteSession={conversationMode === 'ask' ? handleDeleteGeneralSession : undefined}
                 onClose={() => setIsAskHistoryDrawerOpen(false)}
               />
             )}
@@ -4757,6 +4821,7 @@ useEffect(() => {
                 onStartNewChat={handleStartGeneralChat}
                 onRefresh={handleRefreshGeneralSessions}
                 onClear={handleClearGeneralSessions}
+                onDeleteSession={handleDeleteGeneralSession}
               />
             )}
             <div className="flex-1 min-h-0 -my-2 h-[calc(100%+1rem)]">

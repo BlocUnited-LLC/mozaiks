@@ -1,7 +1,7 @@
 """Connector secret backend for platform-managed app integrations.
 
 This layer owns durable secret storage for connector credentials. Metadata about
-connectors lives in MongoDB via AppConnectorStore; raw secrets belong here.
+connectors lives in MongoDB via ConnectorStore; raw secrets belong here.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ class ConnectorVaultBackend(Protocol):
     async def store_secret(
         self,
         *,
-        app_id: str,
+        scope_id: str,
         service: str,
         secret_value: str,
         display_name: str | None = None,
@@ -37,10 +37,10 @@ class ConnectorVaultBackend(Protocol):
     ) -> dict[str, Any]:
         ...
 
-    async def get_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
+    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
         ...
 
-    async def delete_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
+    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
         ...
 
 
@@ -66,12 +66,12 @@ def _slug(value: str, *, default: str) -> str:
     return candidate or default
 
 
-def _secret_name(app_id: str, service: str, *, prefix: str | None = None) -> str:
+def _secret_name(scope_id: str, service: str, *, prefix: str | None = None) -> str:
     base_prefix = _slug(prefix or _secret_prefix(), default="mozaiks-connector")
     service_slug = _slug(service, default="service")
-    app_slug = _slug(app_id, default="app")
-    digest = hashlib.sha1(str(app_id).encode("utf-8")).hexdigest()[:10]
-    name = f"{base_prefix}-{service_slug}-{app_slug[:40]}-{digest}"
+    scope_slug = _slug(scope_id, default="scope")
+    digest = hashlib.sha1(str(scope_id).encode("utf-8")).hexdigest()[:10]
+    name = f"{base_prefix}-{service_slug}-{scope_slug[:40]}-{digest}"
     return name[:127]
 
 
@@ -88,7 +88,7 @@ class NoopConnectorVaultBackend:
     async def store_secret(
         self,
         *,
-        app_id: str,
+        scope_id: str,
         service: str,
         secret_value: str,
         display_name: str | None = None,
@@ -102,7 +102,7 @@ class NoopConnectorVaultBackend:
             "error": "Connector secret backend is not configured.",
         }
 
-    async def get_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
+    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
         return {
             "success": False,
             "provider": "disabled",
@@ -111,7 +111,7 @@ class NoopConnectorVaultBackend:
             "error": "Connector secret backend is not configured.",
         }
 
-    async def delete_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
+    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
         return {
             "success": False,
             "provider": "disabled",
@@ -167,14 +167,14 @@ class AzureKeyVaultConnectorVaultBackend:
     async def store_secret(
         self,
         *,
-        app_id: str,
+        scope_id: str,
         service: str,
         secret_value: str,
         display_name: str | None = None,
         ttl_days: int = 30,
     ) -> dict[str, Any]:
         client = self._get_client()
-        secret_name = _secret_name(app_id, service)
+        secret_name = _secret_name(scope_id, service)
         if client is None:
             return {
                 "success": False,
@@ -187,7 +187,7 @@ class AzureKeyVaultConnectorVaultBackend:
         expires_at = datetime.now(UTC) + timedelta(days=max(int(ttl_days), 1))
         tags = {
             "managed_by": "mozaiks",
-            "app_id": str(app_id),
+            "scope_id": str(scope_id),
             "service": _slug(service, default="service"),
         }
         if display_name:
@@ -222,9 +222,9 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": "Secret could not be stored.",
             }
 
-    async def get_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
+    async def get_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
         client = self._get_client()
-        secret_name = _secret_name(app_id, service)
+        secret_name = _secret_name(scope_id, service)
         if client is None:
             return {
                 "success": False,
@@ -256,9 +256,9 @@ class AzureKeyVaultConnectorVaultBackend:
                 "error": "Secret could not be retrieved.",
             }
 
-    async def delete_secret(self, *, app_id: str, service: str) -> dict[str, Any]:
+    async def delete_secret(self, *, scope_id: str, service: str) -> dict[str, Any]:
         client = self._get_client()
-        secret_name = _secret_name(app_id, service)
+        secret_name = _secret_name(scope_id, service)
         if client is None:
             return {
                 "success": False,

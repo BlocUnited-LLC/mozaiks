@@ -13,7 +13,7 @@ runtime surfaces:
 
 There is no global agent mesh and no workflow-local router that owns product
 intent. Workflow-local handoffs stay inside one workflow bundle and compile to
-AG2 beta Network `TransitionGraph` objects.
+AG2 1.0 beta Network `TransitionGraph` objects.
 
 ## Current Shape
 
@@ -24,7 +24,7 @@ User / API / UI event
       -> control-plane refinement route
       -> workflow run route
   -> OrchestrationPort.run/resume/cancel
-  -> AG2 beta workflow execution
+  -> AG2 1.0 beta workflow execution
   -> runtime events + artifact persistence
 ```
 
@@ -42,7 +42,7 @@ The control plane owns builder-session interpretation:
 - coding-worker request preparation
 
 `OrchestrationPort` owns the runtime execution boundary. Everything above it is
-engine-agnostic; the AG2 adapter owns AG2 beta agent, stream, and Network
+engine-agnostic; the AG2 adapter owns AG2 1.0 beta agent, stream, and Network
 translation details.
 
 Current implementation note:
@@ -86,18 +86,18 @@ workflow-local transition can read deterministic context variables, tool results
 or typed structured-output state. Natural-language intent classification belongs
 in the control plane before the workflow run is started or resumed.
 
-For AG2 beta specifically, be careful with the word `resume`: AG2 typed events
+For AG2 1.0 beta specifically, be careful with the word `resume`: AG2 typed events
 are the runtime source of truth, while durable AG2 Network channel continuation
 is not available in the installed API. Mozaiks restores runtime-owned session
 routing state plus persistent AG2 run-stream history first and then re-enters
 the workflow through `OrchestrationPort`.
 
-## AG2 Beta Mapping
+## AG2 1.0 beta Mapping
 
-Mozaiks keeps workflow YAML as its authoring contract and compiles it to AG2 beta
+Mozaiks keeps workflow YAML as its authoring contract and compiles it to AG2 1.0 beta
 runtime objects:
 
-| Mozaiks contract | AG2 beta runtime object |
+| Mozaiks contract | AG2 1.0 beta runtime object |
 | --- | --- |
 | `agents.yaml` | `Agent` registration |
 | `transition_graph.yaml` | `TransitionGraph` |

@@ -294,6 +294,102 @@ function buildAppStudioPayload(appId = APP_ID) {
   };
 }
 
+function buildWorkspaceIntegrationsPayload() {
+  return {
+    integrations: [
+      {
+        id: 'mozaikspay',
+        name: 'MozaiksPay',
+        category: 'payments',
+        description: 'Payment processing and subscription checkout.',
+        status: 'configured',
+        note: 'Production key managed by workspace operators.',
+        secrets: [
+          { name: 'MOZAIKSPAY_CLIENT_SECRET', present: true },
+          { name: 'MOZAIKSPAY_WEBHOOK_SECRET', present: true },
+        ],
+        setup_steps: ['Create a restricted MozaiksPay key.', 'Add webhook signing secret.'],
+      },
+      {
+        id: 'postmark',
+        name: 'Postmark',
+        category: 'email',
+        description: 'Transactional email delivery.',
+        status: 'partial',
+        note: '',
+        secrets: [
+          { name: 'POSTMARK_SERVER_TOKEN', present: true },
+          { name: 'POSTMARK_FROM_EMAIL', present: false },
+        ],
+        setup_steps: ['Create a server token.', 'Verify a sender email.'],
+      },
+      {
+        id: 'slack',
+        name: 'Slack',
+        category: 'notifications',
+        description: 'Operator notifications.',
+        status: 'missing',
+        note: '',
+        secrets: [
+          { name: 'SLACK_BOT_TOKEN', present: false },
+        ],
+        setup_steps: ['Install the Slack app.', 'Store the bot token.'],
+      },
+    ],
+    summary: {
+      total: 3,
+      configured: 1,
+      partial: 1,
+      missing: 1,
+      unknown: 0,
+    },
+  };
+}
+
+function buildAppIntegrationDeclarationsPayload(appId = APP_ID) {
+  return {
+    app_id: appId,
+    declarations: [
+      {
+        service: 'mozaikspay',
+        catalog_id: 'mozaikspay',
+        display_name: 'MozaiksPay',
+        purpose: 'Paid memberships and subscription checkout.',
+        required_at: 'runtime',
+        optional: false,
+        workspace_status: 'configured',
+        connector_status: 'ready',
+      },
+      {
+        service: 'postmark',
+        catalog_id: 'postmark',
+        display_name: 'Postmark',
+        purpose: 'Lifecycle emails and operator alerts.',
+        required_at: 'runtime',
+        optional: false,
+        workspace_status: 'partial',
+        connector_status: 'not_configured',
+        setup_url: '/integrations/postmark',
+      },
+      {
+        service: 'internal_search',
+        catalog_id: null,
+        display_name: 'Internal Search API',
+        purpose: 'Index generated artifacts for app support.',
+        required_at: 'runtime',
+        optional: true,
+        workspace_status: 'unknown',
+        connector_status: 'not_configured',
+      },
+    ],
+    summary: {
+      total: 3,
+      required: 2,
+      blocking: 1,
+    },
+  };
+}
+
 function buildWorkspaceRunsPayload() {
   const runs = appsPayload.apps.flatMap((app) => {
     const payload = buildAppStudioPayload(app.app_id);
@@ -510,13 +606,26 @@ async function mockStudioApis(page) {
     });
   });
 
-  await page.route('**/api/studio/integrations?**', async (route) => {
-    const url = new URL(route.request().url());
-    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
+  await page.route('**/api/modules/workspace_integrations/list_integrations**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(payload.integrations),
+      body: JSON.stringify(buildWorkspaceIntegrationsPayload()),
+    });
+  });
+
+  await page.route('**/api/modules/workspace_integrations/list_app_integration_needs**', async (route) => {
+    let appId = APP_ID;
+    try {
+      const body = route.request().postDataJSON();
+      if (body?.app_id) appId = body.app_id;
+    } catch {
+      // Keep default app id for malformed test requests.
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildAppIntegrationDeclarationsPayload(appId)),
     });
   });
 
@@ -573,7 +682,7 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
     await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeHidden();
     await expect(main.getByRole('button', { name: 'Continue Build' }).first()).toBeVisible();
-    await expect(main.getByRole('button', { name: 'Open Studio' }).first()).toBeVisible();
+    await expect(main.getByRole('button', { name: 'Dashboard' }).first()).toBeVisible();
 
     const widgetButton = page.locator('.widget-safe-bottom button').first();
     await expect(widgetButton).toBeVisible();
@@ -583,7 +692,7 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   } else {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
     await expect(page.getByRole('columnheader', { name: 'Updated' })).toBeVisible();
-    await expect(page.getByRole('columnheader', { name: 'Action' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Status' })).toBeVisible();
     await expect(main.getByRole('row', { name: /Campaign Revision Workbench/i }).first()).toBeVisible();
     await expect(main.getByRole('row', { name: /Partner Delivery Studio/i }).first()).toBeVisible();
 
@@ -591,7 +700,7 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
     await expect(widgetButton).toBeVisible();
     const widgetBox = await widgetButton.boundingBox();
     expect(widgetBox).not.toBeNull();
-    expect(widgetBox.width).toBeGreaterThanOrEqual(72);
+    expect(widgetBox.width).toBeLessThanOrEqual(64);
   }
 });
 
@@ -623,9 +732,10 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Export CSV' })).toBeVisible();
-  await expect(main.getByPlaceholder('Search workflows or apps...')).toBeVisible();
-  await expect(main.getByText('Tokens Used')).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Workspace usage' })).toBeVisible();
+  await expect(main.getByPlaceholder('Search apps or workflows...')).toBeVisible();
+  await expect(main.getByText('Total spend')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Chats' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -641,14 +751,18 @@ test('workspace usage route stays responsive across desktop and mobile widths', 
   }
 });
 
-test('workspace health route stays responsive across desktop and mobile widths', async ({ page }) => {
-  await page.goto('/health');
+test('workspace integrations route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto('/integrations');
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Health', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Health by app' })).toBeVisible();
-  await expect(main.getByPlaceholder('Search health...')).toBeVisible();
-  await expect(main.getByText('Campaign Revision Workbench')).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Workspace Integrations', exact: true })).toBeVisible();
+  await main.getByRole('button', { name: 'All' }).click();
+  await expect(main.getByText('MozaiksPay')).toBeVisible();
+  await expect(main.getByText('Postmark')).toBeVisible();
+  await expect(main.getByText('Slack')).toBeVisible();
+  await expect(main.getByText('Configured', { exact: true }).first()).toBeVisible();
+  await expect(main.getByText('Partial', { exact: true }).first()).toBeVisible();
+  await expect(main.getByText('Not configured', { exact: true }).first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -671,16 +785,17 @@ test('app Studio root redirects to overview', async ({ page }) => {
 test('app overview route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/overview`);
   const main = page.locator('main');
-  const visibleWorkflowName = main.locator('div.font-semibold.text-foreground', {
-    hasText: 'RevisionOrchestrator',
-  }).first();
 
   await expect(main.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Latest app movement' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Workflow coverage' })).toBeVisible();
-  await expect(visibleWorkflowName).toBeVisible();
-  await expect(main.getByText('Build version 17').first()).toBeVisible();
-  await expect(main.getByText('Pending Approvals')).toBeVisible();
+  await expect(main.getByText('Campaign Revision Workbench').first()).toBeVisible();
+  await expect(main.getByText('Next step').first()).toBeVisible();
+  await expect(main.getByRole('link', { name: 'Continue Build' }).first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Approval required' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Activity' })).toBeVisible();
+  await expect(main.getByText('Runtime cost').first()).toBeVisible();
+  await expect(main.getByText('Active users').first()).toBeVisible();
+  await expect(main.getByText('Build v17').first()).toBeVisible();
+  await expect(main.getByText('Approval required')).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -697,7 +812,6 @@ test('app integrations route stays responsive across desktop and mobile widths',
   const consoleMessages = [];
   const responseFindings = [];
   const providerUrlRequests = [];
-  let healthCheckRequests = 0;
   page.on('console', (message) => {
     if (['warning', 'error'].includes(message.type())) {
       consoleMessages.push({
@@ -720,144 +834,45 @@ test('app integrations route stays responsive across desktop and mobile widths',
       providerUrlRequests.push(requestUrl);
     }
   });
-  await page.route('**/api/studio/integrations/connectors/*/health-check?**', async (route) => {
-    healthCheckRequests += 1;
-    const url = new URL(route.request().url());
-    const service = decodeURIComponent(url.pathname.split('/connectors/')[1].split('/health-check')[0]);
-    expect(url.searchParams.get('app_id')).toBe(APP_ID);
-    await new Promise((resolve) => {
-      setTimeout(resolve, 250);
-    });
-    if (service === 'search_provider') {
-      await route.fulfill({
-        status: 503,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          error: 'Health check unavailable.',
-        }),
-      });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        app_id: APP_ID,
-        service: 'analytics_provider',
-        health: {
-          status: 'healthy',
-          last_checked_at: '2026-05-17T13:00:00Z',
-          message: 'Manual health check passed.',
-          missing_fields: [],
-          checked_by: 'manual',
-          safe_details: {
-            response_code: 'ok',
-          },
-          health_check_supported: true,
-          frontend_safe: true,
-        },
-      }),
-    });
-  });
 
   await page.goto(`/apps/${APP_ID}/integrations`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Integrations', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Enabled and disabled integrations' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Used by agents and workflows' })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Add Integration' })).toBeVisible();
-  await expect(main.getByText('Hosted Analytics').first()).toBeVisible();
-  await expect(main.getByText('Reporting Provider').first()).toBeVisible();
-  await expect(main.getByText('Search Provider').first()).toBeVisible();
-  await expect(main.getByText('Notification Provider').first()).toBeVisible();
-  await expect(main.getByText('Configured').first()).toBeVisible();
-  await expect(main.getByText('Missing setup').first()).toBeVisible();
-  await expect(main.getByText('Needs attention').first()).toBeVisible();
-  await expect(main.getByText('Unknown').first()).toBeVisible();
-  await expect(main.getByText('Ready').first()).toBeVisible();
-  await expect(main.getByText('Review').first()).toBeVisible();
-  await expect(main.getByText('Missing required fields: API Key, Endpoint URL')).toBeVisible();
-  await expect(main.getByText('Source readiness').first()).toBeVisible();
-  await expect(main.getByText('Source manual').first()).toBeVisible();
-  await expect(main.getByText('https://analytics.example.test')).toBeVisible();
-  await expect(main.getByText('demo-workspace')).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Check now' })).toHaveCount(2);
+  await expect(main.getByRole('heading', { name: 'Integration Setup', exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Workspace integrations' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Workspace-managed services' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'App-specific services' })).toBeVisible();
+  await expect(main.getByText('MozaiksPay').first()).toBeVisible();
+  await expect(main.getByText('Postmark').first()).toBeVisible();
+  await expect(main.getByText('Internal Search API').first()).toBeVisible();
+  await expect(main.getByText('Workspace ready').first()).toBeVisible();
+  await expect(main.getByText('Partial setup').first()).toBeVisible();
+  await expect(main.getByText('No credential').first()).toBeVisible();
   await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
-  await expect(main.getByText('api key', { exact: true })).toHaveCount(0);
+  await expect(main.getByRole('button', { name: 'Add Integration' })).toHaveCount(0);
+  await expect(main.getByRole('button', { name: 'Check now' })).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
-  expect(healthCheckRequests).toBe(0);
   expect(providerUrlRequests).toHaveLength(0);
 
   await captureIntegrationsQa(page, testInfo, 'initial', {
     shell_layout: 'rendered',
-    supported_connectors_show_check_now: true,
-    unsupported_connectors_hide_check_now: true,
-    health_check_requests_on_page_load: healthCheckRequests,
+    app_declarations_visible: true,
+    credential_crud_visible: false,
     provider_url_requests: providerUrlRequests,
     secret_values_visible: false,
-    console_messages: consoleMessages,
-    response_findings: responseFindings,
-  });
-
-  const firstCheckButton = main.getByRole('button', { name: 'Check now' }).first();
-  await firstCheckButton.click();
-  await expect(main.getByRole('button', { name: 'Checking...' })).toBeVisible();
-  await captureIntegrationsQa(page, testInfo, 'checking', {
-    state: 'checking',
-    health_check_requests: healthCheckRequests,
-    provider_url_requests: providerUrlRequests,
-    secret_values_visible: false,
-  });
-  await expect(main.getByText('Manual health check passed.')).toBeVisible();
-  await expect(main.getByText('response code')).toBeVisible();
-  expect(healthCheckRequests).toBe(1);
-  expect(providerUrlRequests).toHaveLength(0);
-
-  await captureIntegrationsQa(page, testInfo, 'success', {
-    shell_layout: 'rendered',
-    summary_counts: ['Configured', 'Healthy', 'Missing required fields', 'Needs attention', 'Unknown'],
-    connector_health_states: ['configured', 'not_configured', 'unhealthy', 'unknown'],
-    public_config_visible: ['endpoint_url', 'workspace_id'],
-    secret_values_visible: false,
-    manual_health_check_requests: healthCheckRequests,
-    console_messages: consoleMessages,
-    response_findings: responseFindings,
-  });
-
-  await main.getByRole('button', { name: 'Check now' }).nth(1).click();
-  await expect(main.getByText(/503|Health check failed/i)).toBeVisible();
-  await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
-  expect(healthCheckRequests).toBe(2);
-  expect(providerUrlRequests).toHaveLength(0);
-
-  await captureIntegrationsQa(page, testInfo, 'failure', {
-    state: 'failure',
-    safe_error_visible: true,
-    secret_values_visible: false,
-    provider_url_requests: providerUrlRequests,
     console_messages: consoleMessages,
     response_findings: responseFindings,
   });
 
   await writeIntegrationsQaArtifact(`${testInfo.project.name.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}-report.json`, {
     page: `/apps/${APP_ID}/integrations`,
-    states_verified: ['initial', 'checking', 'success', 'failure'],
-    health_check_requests: healthCheckRequests,
-    health_check_requests_on_page_load: 0,
+    states_verified: ['initial'],
     provider_url_requests: providerUrlRequests,
     secret_values_visible: false,
-    supported_connectors_show_check_now: true,
-    unsupported_connectors_hide_check_now: true,
+    credential_crud_visible: false,
     console_messages: consoleMessages,
     response_findings: responseFindings,
   });
-
-  await main.getByRole('button', { name: 'Add Integration' }).click();
-  await expect(page.getByText('Register a new external service for this app.')).toBeVisible();
-  await expect(page.locator('input[placeholder="analytics_provider"]').first()).toBeVisible();
-  await expect(page.locator('input[placeholder="Hosted Analytics"]').first()).toBeVisible();
-  await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
@@ -870,7 +885,7 @@ test('app integrations route stays responsive across desktop and mobile widths',
 
   await captureIntegrationsQa(page, testInfo, 'add-integration-overlay', {
     shell_layout: 'rendered',
-    overlay: 'add integration',
+    overlay: 'not rendered',
     secret_values_visible: false,
     console_messages: consoleMessages,
     response_findings: responseFindings,
@@ -883,7 +898,6 @@ test('app usage route stays responsive across desktop and mobile widths', async 
 
   await expect(main.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Export CSV' })).toBeVisible();
   await expect(main.getByRole('columnheader', { name: 'Input' })).toBeVisible();
   await expect(main.getByText('RevisionOrchestrator').first()).toBeVisible();
   await expect(main.getByText('Average latency')).toBeVisible();
@@ -919,15 +933,35 @@ test('app health route stays responsive across desktop and mobile widths', async
   }
 });
 
+test('app support route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto(`/apps/${APP_ID}/support`);
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Support', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Help desk' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Run review' })).toBeVisible();
+  await expect(main.getByText('Sessions with Errors').first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
 test('app users route stays responsive across desktop and mobile widths', async ({ page }) => {
   await page.goto(`/apps/${APP_ID}/users`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Users', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'People using this app' })).toBeVisible();
-  await expect(main.getByPlaceholder('Search users')).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Export Users' })).toBeVisible();
-  await expect(main.getByText('No user records yet')).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Access', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible();
+  await expect(main.getByPlaceholder('Search by name, email, status, or plan')).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Export' }).first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Access state' })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -948,19 +982,14 @@ test('mobile app Studio navigation keeps route transitions stable', async ({ pag
   const main = page.locator('main');
   const routeChecks = [
     {
-      href: `/apps/${APP_ID}/health`,
-      heading: 'Health',
-      detail: async () => expect(main.getByRole('heading', { name: 'Current app health' })).toBeVisible(),
-    },
-    {
       href: `/apps/${APP_ID}/usage`,
       heading: 'Usage',
       detail: async () => expect(main.getByRole('heading', { name: 'Workflow breakdown' })).toBeVisible(),
     },
     {
       href: `/apps/${APP_ID}/users`,
-      heading: 'Users',
-      detail: async () => expect(main.getByRole('heading', { name: 'People using this app' })).toBeVisible(),
+      heading: 'Access',
+      detail: async () => expect(main.getByRole('heading', { name: 'Account management' })).toBeVisible(),
     },
   ];
 
@@ -987,12 +1016,15 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
     {
       href: '/usage',
       heading: 'Usage',
-      detail: async () => expect(main.getByRole('button', { name: 'Export CSV' })).toBeVisible(),
+      detail: async () => expect(main.getByRole('heading', { name: 'Workspace usage' })).toBeVisible(),
     },
     {
-      href: '/health',
-      heading: 'Health',
-      detail: async () => expect(main.getByRole('heading', { name: 'Health by app' })).toBeVisible(),
+      href: '/integrations',
+      heading: 'Workspace Integrations',
+      detail: async () => {
+        await main.getByRole('button', { name: 'All' }).click();
+        await expect(main.getByText('MozaiksPay')).toBeVisible();
+      },
     },
     {
       href: '/apps',

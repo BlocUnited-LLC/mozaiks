@@ -755,7 +755,7 @@ class TestCapabilityDirectoryProjection:
         assert "saas" in billing_pack["domains"]
         assert any("SaaS" in signal or "plans" in signal.lower() for signal in billing_pack["intent_signals"])
         alternatives = {item["id"] for item in billing_pack["alternatives"]}
-        assert {"stripe", "custom_payments_provider"} <= alternatives
+        assert alternatives == {"custom_payments_provider"}
         # OSS catalog must not reference proprietary managed capabilities
         assert "mozaikspay" not in entries
 
@@ -782,7 +782,7 @@ class TestCapabilityDirectoryProjection:
         middleware = _read_text("factory_app/workflows/AppGenerator/middleware.yaml")
         assert "agent: AppPlanAgent\n  function: mozaiksai.core.workflow.context.projection.inject_build_context_projections" in middleware
 
-    def test_capability_directory_injects_billing_pack_first_and_stripe_alternative(self):
+    def test_capability_directory_injects_billing_pack_first_and_custom_provider_alternative(self):
         class _ProjectionAgent:
             name = "AppPlanAgent"
 
@@ -804,7 +804,6 @@ class TestCapabilityDirectoryProjection:
         assert "[CAPABILITY DIRECTORY]" in injected
         assert "billing_pack" in injected
         assert "recommendation_rank: 1" in injected
-        assert "stripe" in injected
         assert "custom_payments_provider" in injected
         # OSS projection must not inject proprietary managed capability names
         assert "mozaikspay" not in injected

@@ -31,7 +31,11 @@ factory workflows.
 This repo is the canonical runtime/platform/factory repo.
 
 - `factory_app/workflows/` and `factory_app/control_plane/` are the Factory layer — the shared builder/generator workflows, agent configs, and control plane pack.
-- Factory-owned workflow catalogs live directly under `factory_app/workflows/{WorkflowName}/` or `factory_app/workflows/_shared/`. Generated app bundles do not contain them.
+- Factory-owned build-time catalogs and packs live under
+  `factory_app/build_context/{context_name}/` and are declared by that
+  context's `context.yaml` `assets[]`. Workflow-local YAML stays under
+  `factory_app/workflows/{WorkflowName}/`; generated app bundles do not contain
+  factory catalogs.
 - `factory_app/app/` is the Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host.
 - `factory_app/app/ui/pages/custom/studio/` contains the Studio management UI.
 - `factory_app/app/admin/` is the admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files.
@@ -63,9 +67,11 @@ Working modes:
 
 For nontrivial OSS changes:
 
-- choose the closest task skill from `.claude/skills/README.md` before editing
-- use `.claude/skills/oss-contribution-review` when scope spans layers or the
-  right skill is unclear
+- choose the closest active task skill before editing. Codex-facing skills live
+  under `.agents/skills/`; Claude Code-facing skills live under
+  `.claude/skills/`.
+- use `oss-contribution-review` when scope spans layers or the right skill is
+  unclear
 - include the appropriate impact section from `.claude/rules/testing.md` in the
   final report and always list tests run
 

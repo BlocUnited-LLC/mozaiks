@@ -3,8 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from autogen.beta import MemoryStream
-from autogen.beta.events import HumanInputRequest, ToolCallsEvent
+from ag2 import MemoryStream
+from ag2.events import HumanInputRequest, ToolCallsEvent
 
 from mozaiksai.core.adapters.ag2_stream_storage import MongoAG2StreamStorage, stream_id_for_run
 

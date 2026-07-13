@@ -39,9 +39,8 @@ transition_rules:
 ## Rules
 
 - `condition_type` is `context_equals` for context-state equality,
-  `context_expression` for AG2 `ContextExpression` checks over declared
-  `${context_variable}` references, or `tool_called` for AG2 routing-tool
-  packets.
+  `context_expression` for Mozaiks checks over declared `${context_variable}`
+  references, or `tool_called` for AG2 routing-tool packets.
 - `transition_type` is `after_turn` (unconditional) or `condition`
   (AG2 condition-gated).
 - Use `context_variables.yaml` to declare state keys; use `tools.yaml` to
@@ -49,5 +48,5 @@ transition_rules:
 - Keep `transition_graph.yaml`, `context_variables.yaml`, and `tools.yaml` as
   the three-file routing unit. Do not inline routing logic in agent prompts or
   tool implementations.
-- Workflow-local handoffs compile to AG2 beta Network `TransitionGraph`; they
+- Workflow-local handoffs compile to AG2 1.0 beta Network `TransitionGraph`; they
   do not run LLM classification during transition evaluation.

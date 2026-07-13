@@ -1,6 +1,7 @@
 ﻿# mozaiksai Requirements
 # Core runtime
-ag2[a2a,openai,lmm,tracing]>=0.13.2
+ag2[a2a,openai,tracing]==1.0.0b0
+a2a-sdk[grpc]>=1.1.0,<2
 fastapi>=0.100.0
 uvicorn[standard]>=0.20.0
 websockets>=11.0

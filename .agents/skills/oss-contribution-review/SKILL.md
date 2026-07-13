@@ -20,13 +20,14 @@ classify:
 Use these anchors when relevant:
 
 - `AGENTS.md`
-- `AGENTS.md`
+- `CLAUDE.md`
 - `ARCHITECTURE.md`
-- `.Codex/skills/README.md`
-- `.Codex/rules/architecture-boundaries.md`
-- `.Codex/rules/factory-build-workflows.md`
-- `.Codex/rules/control-plane-refinement.md`
-- `.Codex/rules/testing.md`
+- active task skills under `.agents/skills/` or `.claude/skills/`
+- `.claude/skills/README.md`
+- `.claude/rules/architecture-boundaries.md`
+- `.claude/rules/factory-build-workflows.md`
+- `.claude/rules/control-plane-refinement.md`
+- `.claude/rules/testing.md`
 
 Return:
 

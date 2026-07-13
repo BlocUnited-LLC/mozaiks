@@ -20,7 +20,7 @@ export default function CreateAppRedirectPage() {
         const res = await fetch(`${API_BASE}/api/studio/apps`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'New App' }),
+          body: JSON.stringify({ name_source: 'provisional' }),
         })
         const body = await res.json().catch(() => ({ detail: res.statusText }))
         if (!res.ok) throw new Error(body.detail || 'App draft could not be created.')

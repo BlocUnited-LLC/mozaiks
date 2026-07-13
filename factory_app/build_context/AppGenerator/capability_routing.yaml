@@ -282,7 +282,7 @@ layers:
           When mozaikspay or another checkout pack is available in
           capability_packs, generate only the app-specific commerce facade:
           product/order/cart state → create_checkout_session → success page.
-          Never regenerate Stripe internals or raw provider credential handling.
+          Never regenerate payment provider internals or raw provider credential handling.
 
       - revenue_model: marketplace
         capability_pack: marketplace
@@ -405,7 +405,7 @@ layers:
         6. If the operator pack is not available in context capability_packs,
            declare the billing/commerce/marketplace module as custom_owned with
            the same interface contract instead of inventing provider internals.
-      Never generate Stripe, payment provider internals, or raw payment credentials
+      Never generate payment provider, payment provider internals, or raw payment credentials
       as module business logic. Payment provider mechanics belong in operator packs
       or app/services/adapters/payments/ (hosted product only).
 

@@ -362,7 +362,7 @@ export default function RevenueDistributionReviewPage() {
                       </li>
                       <li>Does not approve or compute claims.</li>
                       <li>
-                        Does not execute settlement. No wallet, MozaiksPay, or Stripe calls.
+                        Does not execute settlement. No wallet, MozaiksPay, or payment provider calls.
                       </li>
                     </ul>
                   ) : (

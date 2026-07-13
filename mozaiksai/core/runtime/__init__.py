@@ -26,6 +26,19 @@ from .composition.extensions import (
 from .composition.module_context import ModuleContext
 from .composition.module_executor import ModuleExecutor, ModuleRequest, ModuleResult
 from .composition.platform_hooks import PlatformHookRegistry, get_platform_hooks
+from .readiness import (
+    EnvReader,
+    EnvValidator,
+    ReadinessCheck,
+    checks_from_readiness_requirements,
+    env_present,
+    evaluate_readiness_checks,
+    evaluate_readiness_requirements,
+    non_false_env,
+    readiness_score,
+    summarize_readiness_categories,
+    truthy_env,
+)
 
 __all__ = [
     "AppDefinition",
@@ -55,4 +68,15 @@ __all__ = [
     "ModuleExecutor",
     "ModuleRequest",
     "ModuleResult",
+    "EnvReader",
+    "EnvValidator",
+    "ReadinessCheck",
+    "checks_from_readiness_requirements",
+    "env_present",
+    "evaluate_readiness_checks",
+    "evaluate_readiness_requirements",
+    "non_false_env",
+    "readiness_score",
+    "summarize_readiness_categories",
+    "truthy_env",
 ]

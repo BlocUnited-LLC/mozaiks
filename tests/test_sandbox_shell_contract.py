@@ -5,7 +5,7 @@ Covers:
 - YAML declarations: AppGenerator coding agents declare sandbox_shell: true
 - AgentGenerator workflow bundle workers do not use sandbox_shell; validation is deterministic after export
 - Auto_tool_call agents are not marked sandbox_shell (they cannot receive tools)
-- Factory source: LocalShellTool injection is gated on auto_tool_call_enabled
+- Factory source: SandboxShellTool injection is gated on auto_tool_call_enabled
 """
 from __future__ import annotations
 
@@ -134,11 +134,11 @@ def test_agentgenerator_workflow_bundle_builder_agent_defaults_sandbox_shell_fal
 
 
 # ---------------------------------------------------------------------------
-# Factory source: LocalShellTool injection guard
+# Factory source: SandboxShellTool injection guard
 # ---------------------------------------------------------------------------
 
 def test_factory_shell_injection_gated_on_auto_tool_call() -> None:
-    """The factory must not inject LocalShellTool for auto_tool_call agents."""
+    """The factory must not inject SandboxShellTool for auto_tool_call agents."""
     src = (WORKSPACE / "mozaiksai" / "core" / "workflow" / "agents" / "factory.py").read_text(encoding="utf-8")
 
     # The guard must be: only inject when NOT auto_tool_call

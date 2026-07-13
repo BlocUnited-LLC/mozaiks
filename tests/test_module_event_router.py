@@ -226,8 +226,8 @@ class TestIsSecretContextKey:
     def test_credential_detected(self):
         assert _is_secret_context_key("credential_id") is True
 
-    def test_stripe_prefix_detected(self):
-        assert _is_secret_context_key("stripe_price_id") is True
+    def test_payment_provider_prefix_detected(self):
+        assert _is_secret_context_key("payment_provider_price_id") is True
 
     def test_idempotency_detected(self):
         assert _is_secret_context_key("idempotency_key") is True

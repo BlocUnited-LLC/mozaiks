@@ -103,6 +103,18 @@ export function useChatSessionHistory({
     setMessagesWithLogging,
   ]);
 
+  const handleDeleteGeneralSession = useCallback(async (chatId) => {
+    if (!api || typeof api.deleteGeneralChat !== 'function' || !currentAppId || !currentUserId || !chatId) {
+      return;
+    }
+    try {
+      await api.deleteGeneralChat(currentAppId, currentUserId, chatId);
+      setGeneralChatSessions((prev) => (Array.isArray(prev) ? prev.filter((s) => s?.chat_id !== chatId) : []));
+    } catch (err) {
+      console.error('Failed to delete general chat session:', err);
+    }
+  }, [api, currentAppId, currentUserId, setGeneralChatSessions]);
+
   const handleRefreshWorkflowSessions = useCallback(() => {
     refreshWorkflowSessions();
   }, [refreshWorkflowSessions]);
@@ -158,6 +170,7 @@ export function useChatSessionHistory({
     refreshWorkflowSessions,
     handleRefreshGeneralSessions,
     handleClearGeneralSessions,
+    handleDeleteGeneralSession,
     handleRefreshWorkflowSessions,
     handleClearWorkflowSessions,
   };

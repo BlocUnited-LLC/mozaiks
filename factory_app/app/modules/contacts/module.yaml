@@ -1,0 +1,26 @@
+schema_version: mozaiks.module.v1
+module:
+  id: contacts
+  display_name: Contacts
+  version: 1.0.0
+  description: Stub contacts module for Studio. Returns demo data for profile panel testing.
+  handler: backend.handler:ContactsHandler
+
+permissions:
+  - id: contacts.read
+    description: Read contact list.
+
+actions:
+  - id: list_contacts
+    api_surface: public_readonly
+    description: List contacts for the current user.
+    handler_method: list_contacts
+    output_schema:
+      type: object
+      required: [contacts, count]
+      properties:
+        contacts:
+          type: array
+          items: { type: object }
+        count: { type: integer }
+    permissions: []

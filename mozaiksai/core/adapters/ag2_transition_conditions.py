@@ -1,13 +1,14 @@
-"""Mozaiks transition-condition adapters for AG2 beta Network."""
+"""Mozaiks transition-condition adapters for AG2 Network."""
 
 from __future__ import annotations
 
+import ast
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from autogen.agentchat.group import ContextExpression
-from autogen.beta.network import (
+from ag2.network import (
     ContextEquals,
     Envelope,
     FromSpeaker,
@@ -15,6 +16,67 @@ from autogen.beta.network import (
     WorkflowState,
     register_condition,
 )
+
+_CONTEXT_REF_RE = re.compile(r"\$\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}")
+_ALLOWED_EXPRESSION_NODES = (
+    ast.Expression,
+    ast.BoolOp,
+    ast.UnaryOp,
+    ast.Compare,
+    ast.Call,
+    ast.Name,
+    ast.Load,
+    ast.Constant,
+    ast.List,
+    ast.Tuple,
+    ast.And,
+    ast.Or,
+    ast.Not,
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.LtE,
+    ast.Gt,
+    ast.GtE,
+    ast.Is,
+    ast.IsNot,
+    ast.In,
+    ast.NotIn,
+)
+_ALLOWED_EXPRESSION_CALLS = {"len", "__ctx"}
+
+
+class _MozaiksExpression:
+    """Evaluate Mozaiks `${var}` context expressions for workflow routing."""
+
+    def __init__(self, expression: str) -> None:
+        self.expression = _CONTEXT_REF_RE.sub(
+            lambda match: f"__ctx({match.group(1)!r})",
+            expression,
+        )
+        self._compiled = self._compile(self.expression)
+
+    def _compile(self, expression: str) -> Any:
+        tree = ast.parse(expression, mode="eval")
+        for node in ast.walk(tree):
+            if not isinstance(node, _ALLOWED_EXPRESSION_NODES):
+                raise ValueError(f"unsupported context_expression syntax: {type(node).__name__}")
+            if isinstance(node, ast.Name) and node.id not in _ALLOWED_EXPRESSION_CALLS:
+                raise ValueError(f"unsupported context_expression name: {node.id}")
+            if isinstance(node, ast.Call):
+                if not isinstance(node.func, ast.Name) or node.func.id not in _ALLOWED_EXPRESSION_CALLS:
+                    raise ValueError("unsupported context_expression function call")
+                if node.keywords:
+                    raise ValueError("context_expression function keywords are not supported")
+        return compile(tree, "<context_expression>", "eval")
+
+    def evaluate(self, context_variables: Any) -> bool:
+        def _ctx(key: str) -> Any:
+            if hasattr(context_variables, "get"):
+                return context_variables.get(key)
+            return None
+
+        return bool(eval(self._compiled, {"__builtins__": {}}, {"__ctx": _ctx, "len": len}))
 
 
 @dataclass(frozen=True)
@@ -46,14 +108,14 @@ class SourceScopedContextEquals:
 
 @dataclass
 class SourceScopedContextExpression:
-    """Source-scoped adapter over AG2's `ContextExpression` evaluator."""
+    """Source-scoped adapter over Mozaiks' deterministic context expression contract."""
 
     source_agent_id: str
     expression: str
     name: ClassVar[str] = "mozaiks_source_context_expression"
 
     def __post_init__(self) -> None:
-        self._compiled_expression = ContextExpression(self.expression)
+        self._compiled_expression = _MozaiksExpression(self.expression)
 
     def evaluate(self, state: WorkflowState, envelope: Envelope) -> bool:
         return FromSpeaker(self.source_agent_id).evaluate(state, envelope) and bool(

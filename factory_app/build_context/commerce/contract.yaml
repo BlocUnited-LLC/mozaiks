@@ -73,7 +73,7 @@ forbidden_outputs:
   - path_prefix: modules/shop/
   - path_prefix: modules/marketplace/
   - path_prefix: modules/mozaikspay/
-  - path_prefix: modules/stripe/
+  - path_prefix: modules/payment_provider/
   - path_prefix: services/payments/
   - path_prefix: services/adapters/payments/
   - path_prefix: app/capability_packs/

@@ -18,7 +18,7 @@ This package handles two event categories:
 
 AG2 runtime events (agent messages, state changes, workflow execution) are
 handled directly by the orchestration layer via event_serialization.py and
-the AG2 beta MemoryStream subscription — no separate event wrapper needed.
+the AG2 1.0 beta MemoryStream subscription — no separate event wrapper needed.
 
 Usage Examples:
 

@@ -42,6 +42,7 @@ _FORBIDDEN_SECRET_VALUE_MARKERS = (
 _SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _WORKFLOW_INPUT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+_READINESS_CHECK_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _WORKFLOW_SECRET_REF_RE = re.compile(r"\$\{\{\s*secrets\.([A-Z][A-Z0-9_]*)\s*\}\}")
 _WORKFLOW_INPUT_REF_RE = re.compile(r"\$\{\{\s*inputs\.([a-z][a-z0-9_]*)\s*\}\}")
 
@@ -52,6 +53,13 @@ def _bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes"}
     return default
+
+
+def _int_or_default(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _list_of_str(value: Any) -> list[str]:
@@ -145,6 +153,11 @@ def _default_ci_secret_requirements(*, include_workflow: bool) -> dict[str, list
                 "required": False,
                 "purpose": "Optional callback URL for hosts that collect build completion events.",
             },
+            {
+                "name": "app_url",
+                "required": False,
+                "purpose": "Live application base URL used by the deploy job for the post-deploy health check.",
+            },
         ],
     }
 
@@ -184,6 +197,174 @@ def _normalize_ci_secret_requirements(value: Any) -> dict[str, list[dict[str, An
                 }
             )
     return normalized
+
+
+def _default_readiness_requirements() -> dict[str, list[dict[str, Any]]]:
+    return {
+        "checks": [
+            {
+                "id": "runtime_environment",
+                "category": "runtime",
+                "label": "Runtime environment configured",
+                "implemented_score": 7,
+                "required_env": ["OPENAI_API_KEY", "MONGO_URI"],
+                "required_evidence": [],
+                "canonical_paths": ["env.example", "deployment.manifest.json"],
+                "notes": "Host or operator must provide required runtime variables before deploy.",
+            },
+            {
+                "id": "container_smoke",
+                "category": "deployment",
+                "label": "Container build and smoke check",
+                "implemented_score": 7,
+                "required_env": [],
+                "required_evidence": ["APP_IMAGE_SMOKE_VERIFIED_AT"],
+                "canonical_paths": ["Dockerfile", "deployment.manifest.json"],
+                "notes": "Evidence stamp should reference a CI run, artifact, or change record.",
+            },
+            {
+                "id": "healthcheck",
+                "category": "deployment",
+                "label": "Health endpoint check",
+                "implemented_score": 7,
+                "required_env": [],
+                "required_evidence": ["APP_HEALTHCHECK_VERIFIED_AT"],
+                "canonical_paths": ["deployment.manifest.json"],
+                "notes": "Evidence stamp should be set only after the configured health path succeeds.",
+            },
+        ]
+    }
+
+
+def _normalize_readiness_requirements(value: Any) -> dict[str, list[dict[str, Any]]]:
+    normalized: dict[str, list[dict[str, Any]]] = {"checks": []}
+    if not isinstance(value, dict):
+        return normalized
+    checks = value.get("checks")
+    if not isinstance(checks, list):
+        return normalized
+    for item in checks:
+        if not isinstance(item, dict):
+            continue
+        normalized["checks"].append(
+            {
+                "id": str(item.get("id") or "").strip(),
+                "category": str(item.get("category") or "").strip(),
+                "label": str(item.get("label") or "").strip(),
+                "implemented_score": _int_or_default(item.get("implemented_score"), 0),
+                "required_env": _list_of_str(item.get("required_env")),
+                "required_evidence": _list_of_str(item.get("required_evidence")),
+                "canonical_paths": _list_of_str(item.get("canonical_paths")),
+                "notes": str(item.get("notes") or "").strip() or None,
+            }
+        )
+    return normalized
+
+
+def validate_readiness_requirements(value: Any, *, path: str = "readiness_requirements") -> list[str]:
+    errors: list[str] = []
+    if value is None:
+        return errors
+    if not isinstance(value, dict):
+        return [f"{path} must be an object when present"]
+
+    unknown_root_keys = sorted(set(value) - {"checks"})
+    if unknown_root_keys:
+        errors.append(f"{path} has unsupported fields: {', '.join(unknown_root_keys)}")
+
+    checks = value.get("checks", [])
+    if checks is None:
+        checks = []
+    if not isinstance(checks, list):
+        errors.append(f"{path}.checks must be a list")
+        return errors
+
+    seen_ids: set[str] = set()
+    for idx, item in enumerate(checks):
+        item_path = f"{path}.checks[{idx}]"
+        if not isinstance(item, dict):
+            errors.append(f"{item_path} must be an object")
+            continue
+
+        allowed_item_keys = {
+            "id",
+            "category",
+            "label",
+            "implemented_score",
+            "required_env",
+            "required_evidence",
+            "canonical_paths",
+            "notes",
+        }
+        unknown_item_keys = sorted(set(item) - allowed_item_keys)
+        if unknown_item_keys:
+            errors.append(f"{item_path} has unsupported fields: {', '.join(unknown_item_keys)}")
+
+        check_id = str(item.get("id") or "").strip()
+        if not check_id:
+            errors.append(f"{item_path}.id is required")
+        elif not _READINESS_CHECK_ID_RE.fullmatch(check_id):
+            errors.append(f"{item_path}.id must be a lowercase identifier using letters, digits, or underscores")
+        elif check_id in seen_ids:
+            errors.append(f"{item_path}.id is duplicated")
+        else:
+            seen_ids.add(check_id)
+
+        category = str(item.get("category") or "").strip()
+        if not category:
+            errors.append(f"{item_path}.category is required")
+        elif not _READINESS_CHECK_ID_RE.fullmatch(category):
+            errors.append(f"{item_path}.category must be a lowercase identifier using letters, digits, or underscores")
+
+        label = item.get("label")
+        if not isinstance(label, str) or not label.strip():
+            errors.append(f"{item_path}.label is required")
+        elif _forbidden_secret_value(label):
+            errors.append(f"{item_path}.label must not contain raw secret material")
+
+        implemented_score = item.get("implemented_score")
+        if not isinstance(implemented_score, int) or not 0 <= implemented_score <= 10:
+            errors.append(f"{item_path}.implemented_score must be an integer from 0 to 10")
+
+        for bucket in ("required_env", "required_evidence"):
+            values = item.get(bucket, [])
+            if values is None:
+                values = []
+            if not isinstance(values, list):
+                errors.append(f"{item_path}.{bucket} must be a list")
+                continue
+            seen_values: set[str] = set()
+            for value_idx, raw_value in enumerate(values):
+                value_path = f"{item_path}.{bucket}[{value_idx}]"
+                name = str(raw_value or "").strip()
+                if not name:
+                    errors.append(f"{value_path} is required")
+                elif not _SECRET_NAME_RE.fullmatch(name):
+                    errors.append(f"{value_path} must be an uppercase identifier using letters, digits, or underscores")
+                elif name in seen_values:
+                    errors.append(f"{value_path} is duplicated")
+                else:
+                    seen_values.add(name)
+
+        canonical_paths = item.get("canonical_paths", [])
+        if canonical_paths is None:
+            canonical_paths = []
+        if not isinstance(canonical_paths, list):
+            errors.append(f"{item_path}.canonical_paths must be a list")
+        else:
+            for path_idx, raw_value in enumerate(canonical_paths):
+                if not isinstance(raw_value, str) or not raw_value.strip():
+                    errors.append(f"{item_path}.canonical_paths[{path_idx}] must be a non-empty string")
+                elif _forbidden_secret_value(raw_value):
+                    errors.append(f"{item_path}.canonical_paths[{path_idx}] must not contain raw secret material")
+
+        notes = item.get("notes")
+        if notes is not None and not isinstance(notes, str):
+            errors.append(f"{item_path}.notes must be a string when present")
+        elif isinstance(notes, str) and _forbidden_secret_value(notes):
+            errors.append(f"{item_path}.notes must not contain raw secret material")
+
+    return errors
 
 
 def validate_ci_secret_requirements(value: Any, *, path: str = "ci_secret_requirements") -> list[str]:
@@ -426,9 +607,14 @@ def build_deploy_target_spec(
             "metadata": {},
         },
         "deployment_profile": str(deployment_profile or DEFAULT_PROFILE),
+        "deploy_environments": {
+            "staging": "staging",
+            "production": "production",
+        },
         "ci_secret_requirements": _default_ci_secret_requirements(
             include_workflow=_bool(include_workflow, True)
         ),
+        "readiness_requirements": _default_readiness_requirements(),
     }
 
 
@@ -484,8 +670,21 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
     elif not str(provider_profile.get("name") or "").strip():
         errors.append("provider_profile.name is required")
 
+    deploy_environments = spec.get("deploy_environments")
+    if deploy_environments is not None:
+        if not isinstance(deploy_environments, dict):
+            errors.append("deploy_environments must be an object when present")
+        else:
+            for env_key in ("staging", "production"):
+                val = str(deploy_environments.get(env_key) or "").strip()
+                if val and _forbidden_secret_value(val):
+                    errors.append(f"deploy_environments.{env_key} must not contain raw secret material")
+
     errors.extend(
         validate_ci_secret_requirements(spec.get("ci_secret_requirements"), path="ci_secret_requirements")
+    )
+    errors.extend(
+        validate_readiness_requirements(spec.get("readiness_requirements"), path="readiness_requirements")
     )
 
     return errors
@@ -521,6 +720,9 @@ def build_deployment_template_manifest(
             _normalize_ci_secret_requirements(deploy_target_spec.get("ci_secret_requirements"))
             if has_ci_workflow
             else _empty_ci_secret_requirements()
+        ),
+        "readiness_requirements": _normalize_readiness_requirements(
+            deploy_target_spec.get("readiness_requirements")
         ),
         "dockerfile": "Dockerfile" if "Dockerfile" in file_paths else None,
         "compose": "docker-compose.yml" if "docker-compose.yml" in file_paths else None,
@@ -560,6 +762,9 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
     ci_secret_requirements = manifest.get("ci_secret_requirements")
     errors.extend(
         validate_ci_secret_requirements(ci_secret_requirements, path="ci_secret_requirements")
+    )
+    errors.extend(
+        validate_readiness_requirements(manifest.get("readiness_requirements"), path="readiness_requirements")
     )
 
     health = manifest.get("healthcheck") if isinstance(manifest.get("healthcheck"), dict) else {}
@@ -669,10 +874,15 @@ def _render_compose(spec: dict[str, Any]) -> str:
 def _render_workflow(spec: dict[str, Any]) -> str:
     runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
     port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
+    health_path = str(runtime.get("health_path") or DEFAULT_HEALTH_PATH).strip() or DEFAULT_HEALTH_PATH  # type: ignore[union-attr]
     ci_secret_requirements = _normalize_ci_secret_requirements(spec.get("ci_secret_requirements"))
     required_secrets = ci_secret_requirements["required"]
     optional_secrets = ci_secret_requirements["optional"]
     workflow_inputs = ci_secret_requirements["workflow_inputs"]
+
+    deploy_envs = spec.get("deploy_environments") if isinstance(spec.get("deploy_environments"), dict) else {}
+    staging_env = str(deploy_envs.get("staging") or "staging").strip() or "staging"  # type: ignore[union-attr]
+    production_env = str(deploy_envs.get("production") or "production").strip() or "production"  # type: ignore[union-attr]
 
     lines = [
         "name: deploy",
@@ -698,11 +908,13 @@ def _render_workflow(spec: dict[str, Any]) -> str:
             ]
         )
 
+    # ── build-and-smoke job (gates on staging environment) ──────────────────
     lines.extend(
         [
             "jobs:",
             "  build-and-smoke:",
             "    runs-on: ubuntu-latest",
+            f"    environment: {staging_env}",
         ]
     )
 
@@ -734,12 +946,11 @@ def _render_workflow(spec: dict[str, Any]) -> str:
                 "        shell: bash",
             ]
         )
-        if required_secrets:
-            lines.append("        env:")
-            for item in required_secrets:
-                secret_name = str(item.get("name") or "").strip()
-                if secret_name:
-                    lines.append(f"          {secret_name}: ${{{{ secrets.{secret_name} }}}}")
+        lines.append("        env:")
+        for item in required_secrets:
+            secret_name = str(item.get("name") or "").strip()
+            if secret_name:
+                lines.append(f"          {secret_name}: ${{{{ secrets.{secret_name} }}}}")
         lines.extend(["        run: |"])
         for item in required_secrets:
             secret_name = str(item.get("name") or "").strip()
@@ -773,6 +984,40 @@ def _render_workflow(spec: dict[str, Any]) -> str:
             "        run: docker build -t generated-app:ci .",
             "      - name: Smoke check",
             f"        run: docker run --rm -e PORT={port} generated-app:ci python -c \"print('smoke ok')\"",
+        ]
+    )
+
+    # ── deploy job (gates on production environment, runs after build-and-smoke) ─
+    lines.extend(
+        [
+            "",
+            "  deploy:",
+            "    runs-on: ubuntu-latest",
+            "    needs: build-and-smoke",
+            f"    environment: {production_env}",
+            "    env:",
+            "      APP_URL: ${{ inputs.app_url }}",
+            f"      HEALTH_PATH: {health_path}",
+            "    steps:",
+            "      - name: Post-deploy health check",
+            "        shell: bash",
+            "        run: |",
+            "          if [ -z \"${APP_URL}\" ]; then",
+            "            echo \"APP_URL not set — skipping live health check.\"",
+            "            exit 0",
+            "          fi",
+            "          echo \"Checking live instance at ${APP_URL}${HEALTH_PATH} ...\"",
+            "          for i in $(seq 1 10); do",
+            "            status=$(curl -s -o /dev/null -w \"%{http_code}\" \"${APP_URL}${HEALTH_PATH}\")",
+            "            if [ \"$status\" = \"200\" ]; then",
+            "              echo \"Health check passed (HTTP $status).\"",
+            "              exit 0",
+            "            fi",
+            "            echo \"Attempt $i: HTTP $status — retrying in 10s ...\"",
+            "            sleep 10",
+            "          done",
+            "          echo \"Health check failed after 10 attempts.\" >&2",
+            "          exit 1",
             "",
         ]
     )
@@ -924,5 +1169,6 @@ __all__ = [
     "validate_deploy_target_spec",
     "validate_deployment_template_manifest",
     "validate_generated_deployment_bundle",
+    "validate_readiness_requirements",
 ]
 

@@ -8,22 +8,23 @@ App Studio keeps these pages visible instead:
 
 ```text
 /apps/:appId/overview
-/apps/:appId/health
 /apps/:appId/users
 /apps/:appId/usage
-/apps/:appId/integrations
 ```
 
 Framework-owned admin composition remains internal and host-owned. Build,
-Health, Usage, and Integrations are product surfaces; they are not admin
-sections. Hosted deployments may provide billing or hosting surfaces through
+Usage, and app access are product surfaces; they are not admin
+sections. App health is summarized inside Overview. Deep diagnostic routes such
+as `/apps/:appId/health` and `/apps/:appId/integrations` may remain routable but
+hidden from primary navigation when they are needed for support or setup
+detail. Hosted deployments may provide billing or hosting surfaces through
 their own workspace routes or capability packs; the OSS factory Studio does
 not hardcode those hosted product routes.
 
 Terminology note:
 
-- use `Health` as the visible product section name for runtime posture,
-  workflow reliability, and app health in Studio
+- use `Operational health` inside Overview for runtime posture, workflow
+  reliability, validation, hosting, and integration setup signals
 - keep `operations` as an internal admin taxonomy when framework-owned admin
   panels need a bounded section for incidents, logs, or runtime state
 

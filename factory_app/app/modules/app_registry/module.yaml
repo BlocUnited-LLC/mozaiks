@@ -18,11 +18,17 @@ actions:
     handler_method: create_app_record
     input_schema:
       type: object
-      required:
-        - name
       properties:
         name:
           type: string
+          description: Optional real app name. Omit while the app is still provisional.
+        name_source:
+          type: string
+          enum:
+            - provisional
+            - value_engine_concept
+            - imported_app
+            - manual
         description:
           type: string
         status:
@@ -38,6 +44,21 @@ actions:
             - archived
         app_id:
           type: string
+        chat_app_id:
+          type: string
+          description: Factory session app id used to resume the build chat.
+        active_chat_id:
+          type: string
+          description: Current chat session that owns the active build.
+        active_workflow_id:
+          type: string
+          description: Current workflow that should be resumed while the build is active.
+        build_context_profile:
+          type: object
+          description: Compact summary of selected build contexts, packs, and catalog inputs for this app build.
+        current_build_run:
+          type: object
+          description: Active build run pointer used by Studio continue-build and control-plane re-entry.
     output_schema:
       type: object
       properties:
@@ -73,6 +94,16 @@ actions:
             - archived
         bundle_path:
           type: string
+        artifact_version_id:
+          type: string
+        workflow_sequence:
+          type: string
+        active_chat_id:
+          type: string
+        active_workflow_id:
+          type: string
+        current_build_run:
+          type: object
     output_schema:
       type: object
       properties:

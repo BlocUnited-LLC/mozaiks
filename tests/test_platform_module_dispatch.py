@@ -127,7 +127,7 @@ def test_module_dispatch_idor_guard_fires_on_mismatched_app_id(monkeypatch) -> N
     assert resp.status_code == 403
 
 
-def test_unauthenticated_module_dispatch_uses_empty_permissions_not_internal_bypass(monkeypatch) -> None:
+def test_auth_disabled_module_dispatch_bypasses_action_permissions_for_local_studio(monkeypatch) -> None:
     executor = ModuleExecutor()
     executor.register(
         "orders",
@@ -137,12 +137,13 @@ def test_unauthenticated_module_dispatch_uses_empty_permissions_not_internal_byp
     registry = ExecutorRegistry()
     registry.register(executor)
     monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
 
     client = _client(failed_module_names=[])
     resp = client.get("/api/modules/orders/list")
 
-    assert resp.status_code == 403
-    assert resp.json()["detail"]["error_code"] == "PERMISSION_DENIED"
+    assert resp.status_code == 200
+    assert resp.json() == {"permissions": None}
 
 
 def test_auth_enabled_module_dispatch_requires_token_by_default(monkeypatch) -> None:

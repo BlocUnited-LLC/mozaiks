@@ -4,7 +4,7 @@ human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
 initial_message: You are part of a collaborative effort to generate a multi-agent
-  workflow per AG2 (formerly autogen). InterviewAgent, start from the current
+  workflow per AG2. InterviewAgent, start from the current
   context, guide the user with assumptions or suggestions, and ask only the most
   important missing clarifying question.
 initial_agent: InterviewAgent

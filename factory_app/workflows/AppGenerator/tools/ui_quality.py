@@ -7,7 +7,7 @@ state so AG2 handoffs can send noisy UI back to AppSchemaAgent before assembly.
 
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.workflows._shared.generated_ui_contract import (
     audit_custom_route_bundle_integrity,

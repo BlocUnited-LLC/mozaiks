@@ -1,0 +1,29 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.workspace_support.request_created
+    version: 1
+    description: Emitted when a support request is submitted by an operator or user.
+    producer: workspace_support
+    payload_schema:
+      type: object
+      required: [request_id, app_id, severity, message]
+      properties:
+        request_id: { type: string }
+        app_id:     { type: string }
+        severity:   { type: string }
+        message:    { type: string }
+        page_url:   { type: string }
+        page_title: { type: string }
+
+  - type: domain.workspace_support.negative_feedback
+    version: 1
+    description: Emitted when a user submits a poor session rating (rating=0).
+    producer: workspace_support
+    payload_schema:
+      type: object
+      required: [feedback_id, app_id]
+      properties:
+        feedback_id:   { type: string }
+        app_id:        { type: string }
+        session_id:    { type: string }
+        workflow_name: { type: string }

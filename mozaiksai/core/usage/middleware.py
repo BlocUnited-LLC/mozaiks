@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-"""AG2 beta middleware that emits Mozaiks runtime usage events.
+"""AG2 1.0 beta middleware that emits Mozaiks runtime usage events.
 
 OpenTelemetry spans are handled by AG2's built-in TelemetryMiddleware. This
 middleware keeps a separate, queryable runtime ledger by emitting neutral
 ``chat.usage_delta`` events after each LLM call.
 """
 
+import os
 import time
 from collections.abc import Sequence
 from typing import Any
 
-from autogen.beta import Context
-from autogen.beta.events import BaseEvent, ModelResponse
-from autogen.beta.middleware import BaseMiddleware, LLMCall, Middleware
+from ag2 import Context
+from ag2.events import BaseEvent, ModelResponse
+from ag2.middleware import BaseMiddleware, LLMCall, Middleware
 
 from logs.logging_config import get_core_logger
 from mozaiksai.core.tokens.guard import TokenUsageGuard
@@ -61,8 +62,30 @@ def _text(value: Any) -> str:
     return "" if text.lower() == "none" else text
 
 
+def _positive_int(value: Any, *, default: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, parsed)
+
+
+def _required_tokens_for_call(context_variables: Any) -> int:
+    """Resolve conservative preflight spend requirement for the next LLM call."""
+
+    for key in (
+        "token_preflight_required_tokens",
+        "token_watchdog_required_tokens",
+        "token_budget_required_tokens",
+    ):
+        value = _ctx_get(context_variables, key)
+        if value is not None:
+            return _positive_int(value)
+    return _positive_int(os.getenv("MOZAIKS_TOKEN_PREFLIGHT_REQUIRED_TOKENS"), default=1)
+
+
 class MozaiksUsageMiddleware(BaseMiddleware):
-    """Emit factual usage deltas after AG2 beta LLM calls."""
+    """Emit factual usage deltas after AG2 1.0 beta LLM calls."""
 
     def __init__(
         self,
@@ -91,7 +114,7 @@ class MozaiksUsageMiddleware(BaseMiddleware):
             user_id=_text(_ctx_get(self._context_variables, "user_id", "anonymous")) or "anonymous",
             tenant_id=_text(_ctx_get(self._context_variables, "tenant_id", "")) or None,
             workspace_id=_text(_ctx_get(self._context_variables, "workspace_id", "")) or None,
-            required_tokens=1,
+            required_tokens=_required_tokens_for_call(self._context_variables),
         )
 
         started = time.perf_counter()
@@ -127,6 +150,7 @@ class MozaiksUsageMiddleware(BaseMiddleware):
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 cached=cached_tokens > 0,
+                cached_tokens=cached_tokens,
                 duration_sec=duration,
                 invocation_id=getattr(response, "id", None),
             )
@@ -142,7 +166,7 @@ def build_ag2_usage_middleware(
     context_variables: Any,
     model_name: str | None = None,
 ) -> Middleware:
-    """Build AG2 beta middleware for neutral runtime usage metering."""
+    """Build AG2 1.0 beta middleware for neutral runtime usage metering."""
 
     return Middleware(
         MozaiksUsageMiddleware,

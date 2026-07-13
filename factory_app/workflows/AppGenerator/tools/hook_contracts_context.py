@@ -5,6 +5,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from mozaiksai.core.data.persistence.connector_store import ConnectorStore
+
 logger = logging.getLogger(__name__)
 
 
@@ -119,7 +121,11 @@ def _app_connector_inventory_summary(agent: Any) -> str:
             def _runner() -> None:
                 try:
                     holder["inventory"] = asyncio.run(
-                        get_connector_inventory(str(app_id), required_services=required_services)
+                        get_connector_inventory(
+                            scope=ConnectorStore.SCOPE_APP,
+                            scope_id=str(app_id),
+                            required_services=required_services,
+                        )
                     )
                 except Exception as exc:  # pragma: no cover - defensive
                     error_holder["error"] = exc
@@ -137,7 +143,13 @@ def _app_connector_inventory_summary(agent: Any) -> str:
                 raise error_holder["error"]
             inventory = holder.get("inventory")
         else:
-            inventory = asyncio.run(get_connector_inventory(str(app_id), required_services=required_services))
+            inventory = asyncio.run(
+                get_connector_inventory(
+                    scope=ConnectorStore.SCOPE_APP,
+                    scope_id=str(app_id),
+                    required_services=required_services,
+                )
+            )
     except Exception as exc:
         logger.debug("[%s] Failed to build app connector inventory summary: %s", getattr(agent, "name", "?"), exc)
         return ""

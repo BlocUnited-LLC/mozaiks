@@ -278,14 +278,14 @@ class TestTaskSortKey:
 
 class TestInferPackIdFromIntegrationPath:
     def test_valid_integration_path(self):
-        result = _infer_pack_id_from_integration_path("services/integrations/stripe_pay_client.py")
-        assert result == "stripe_pay"
+        result = _infer_pack_id_from_integration_path("services/integrations/payment_provider_pay_client.py")
+        assert result == "payment_provider_pay"
 
     def test_wrong_prefix_returns_none(self):
-        assert _infer_pack_id_from_integration_path("services/adapters/stripe_client.py") is None
+        assert _infer_pack_id_from_integration_path("services/adapters/payment_provider_client.py") is None
 
     def test_no_client_suffix_returns_none(self):
-        assert _infer_pack_id_from_integration_path("services/integrations/stripe.py") is None
+        assert _infer_pack_id_from_integration_path("services/integrations/payment_provider.py") is None
 
     def test_backslash_normalized(self):
         result = _infer_pack_id_from_integration_path("services\\integrations\\mailchimp_client.py")
@@ -365,7 +365,7 @@ class TestJoinUniqueText:
 
 class TestPackIdFromDescriptor:
     def test_capability_pack_id_returned(self):
-        assert _pack_id_from_descriptor({"capability_pack_id": "stripe"}) == "stripe"
+        assert _pack_id_from_descriptor({"capability_pack_id": "payment_provider"}) == "payment_provider"
 
     def test_falls_back_to_id(self):
         assert _pack_id_from_descriptor({"id": "paypal"}) == "paypal"
@@ -377,11 +377,11 @@ class TestPackIdFromDescriptor:
         assert _pack_id_from_descriptor({}) == ""
 
     def test_capability_pack_id_takes_priority(self):
-        d = {"capability_pack_id": "stripe", "id": "other", "pack_id": "third"}
-        assert _pack_id_from_descriptor(d) == "stripe"
+        d = {"capability_pack_id": "payment_provider", "id": "other", "pack_id": "third"}
+        assert _pack_id_from_descriptor(d) == "payment_provider"
 
     def test_whitespace_stripped(self):
-        assert _pack_id_from_descriptor({"capability_pack_id": "  stripe  "}) == "stripe"
+        assert _pack_id_from_descriptor({"capability_pack_id": "  payment_provider  "}) == "payment_provider"
 
 
 # ---------------------------------------------------------------------------
@@ -418,14 +418,14 @@ class TestRoutePageApiEndpointToFacade:
         assert _route_page_api_endpoint_to_facade(endpoint, rules) == endpoint
 
     def test_matching_rule_replaces_module(self):
-        rules = {("stripe_module", "charge"): "payment_facade"}
-        result = _route_page_api_endpoint_to_facade("/api/modules/stripe_module/charge", rules)
+        rules = {("payment_provider_module", "charge"): "payment_facade"}
+        result = _route_page_api_endpoint_to_facade("/api/modules/payment_provider_module/charge", rules)
         assert result == "/api/modules/payment_facade/charge"
 
     def test_no_matching_rule_unchanged(self):
         rules = {("other_module", "action"): "facade"}
-        result = _route_page_api_endpoint_to_facade("/api/modules/stripe_module/charge", rules)
-        assert result == "/api/modules/stripe_module/charge"
+        result = _route_page_api_endpoint_to_facade("/api/modules/payment_provider_module/charge", rules)
+        assert result == "/api/modules/payment_provider_module/charge"
 
     def test_less_than_two_parts_unchanged(self):
         # /api/modules/only_one_segment
@@ -433,8 +433,8 @@ class TestRoutePageApiEndpointToFacade:
         assert result == "/api/modules/single"
 
     def test_extra_path_segments_preserved(self):
-        rules = {("stripe", "charge"): "pay_facade"}
-        result = _route_page_api_endpoint_to_facade("/api/modules/stripe/charge/extra", rules)
+        rules = {("payment_provider", "charge"): "pay_facade"}
+        result = _route_page_api_endpoint_to_facade("/api/modules/payment_provider/charge/extra", rules)
         assert result == "/api/modules/pay_facade/charge/extra"
 
     def test_backslash_normalized(self):

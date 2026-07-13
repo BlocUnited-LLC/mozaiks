@@ -1,0 +1,14 @@
+context_id: integrations
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: catalog.yaml
+    kind: catalog
+    projections:
+      - id: integrations_catalog_for_planning
+        records: integrations
+        recipients:
+          - AppPlanAgent
+        render: summary
+        marker: INTEGRATIONS_CATALOG_CONTEXT
+        heading: Available Workspace Integrations

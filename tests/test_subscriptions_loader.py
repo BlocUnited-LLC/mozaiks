@@ -14,6 +14,7 @@ from mozaiksai.core.runtime.app.subscriptions_loader import (
     SubscriptionAssignmentStoreDef,
     SubscriptionsConfig,
     SubscriptionsLoadError,
+    UsageChargePolicyDef,
     UsageLimitDef,
     load_subscriptions_config,
 )
@@ -167,6 +168,38 @@ def test_load_token_wallets_and_plan_allowances(tmp_path: Path) -> None:
     assert config.token_wallet_by_id("ai_tokens") is config.token_wallets[0]
 
 
+def test_load_usage_charge_policies(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        """
+        schema_version: mozaiks.subscriptions.v1
+        label: Token SaaS
+        default_plan_id: pro
+        usage_charge_policies:
+          - meter_id: ai_tokens
+            label: AI usage
+            source: runtime_llm_usage
+            basis: provider_cost_usd
+            markup_percent: 35
+            minimum_charge_usd: 0.01
+            rounding: cent
+        plans:
+          - plan_id: pro
+            label: Pro
+            capabilities: [ai.chat]
+        """,
+    )
+
+    config = load_subscriptions_config(tmp_path)
+
+    assert config is not None
+    policy = config.usage_charge_policy_by_meter_id("ai_tokens")
+    assert policy is not None
+    assert policy.basis == "provider_cost_usd"
+    assert policy.markup_percent == 35
+    assert policy.minimum_charge_usd == 0.01
+
+
 def test_load_pricing_catalog_groups(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
@@ -255,6 +288,33 @@ def test_token_allowance_requires_declared_wallet_when_wallets_declared() -> Non
                         ],
                     }
                 ],
+            }
+        )
+
+
+def test_usage_charge_policy_tokens_basis_requires_unit_price() -> None:
+    with pytest.raises(ValidationError, match="unit_price_usd_per_1k"):
+        UsageChargePolicyDef.model_validate(
+            {
+                "meter_id": "ai_tokens",
+                "basis": "tokens",
+                "markup_percent": 10,
+            }
+        )
+
+
+def test_usage_charge_policy_meter_ids_must_be_unique() -> None:
+    with pytest.raises(ValidationError, match="meter_ids must be unique"):
+        SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Token SaaS",
+                "default_plan_id": "pro",
+                "usage_charge_policies": [
+                    {"meter_id": "ai_tokens", "basis": "provider_cost_usd"},
+                    {"meter_id": "ai_tokens", "basis": "provider_cost_usd"},
+                ],
+                "plans": [{"plan_id": "pro", "label": "Pro"}],
             }
         )
 

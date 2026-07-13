@@ -3,7 +3,7 @@ Centralized LLM configuration & caching utilities.
 
 Goals
 -----
-1. Single place for building the config_list used by Autogen's OpenAIWrapper.
+1. Single place for building the config_list used by AG2 OpenAI configuration.
 2. Lightweight async cache (raw provider list + final llm_config variants) with TTL.
 3. Support structured outputs (response_format) without rebuilding base pieces.
 4. Gentle fallback when Mongo unavailable (env-only bootstrap) WITH price mapping.
@@ -26,9 +26,7 @@ import hashlib
 import json
 import logging
 import os
-import tempfile
 import time
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -38,53 +36,6 @@ from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, BuilderC
 
 logger = logging.getLogger(__name__)
 
-
-def _attach_autogen_cache(llm_config: dict[str, Any]) -> None:
-    """Attach an Autogen disk cache rooted in a writable location.
-
-    Autogen's default cache behavior uses cache_root='.cache', which can fail on
-    Docker Desktop + bind mounts. Injecting a Cache object forces Autogen to use
-    our explicit cache root instead.
-    """
-
-    seed = llm_config.get("cache_seed")
-    if seed is None:
-        return
-    try:
-        cache_seed = int(seed)
-    except Exception:
-        return
-
-    try:
-        from autogen.cache import Cache  # type: ignore
-    except Exception as err:
-        logger.debug("[LLM_CONFIG] Autogen cache unavailable; skipping cache attach: %s", err)
-        return
-
-    cache_root = (
-        os.getenv("MOZAIKS_AUTOGEN_CACHE_DIR")
-        or os.getenv("AUTOGEN_CACHE_DIR")
-        or os.path.join(tempfile.gettempdir(), "mozaiksai_autogen_cache")
-    )
-
-    try:
-        Path(cache_root).mkdir(parents=True, exist_ok=True)
-    except Exception as mk_err:
-        logger.warning("[LLM_CONFIG] Autogen cache disabled (cannot create dir %s): %s", cache_root, mk_err)
-        return
-
-    try:
-        cache_obj = Cache.disk(cache_seed, str(cache_root))
-    except Exception as cache_err:
-        logger.warning("[LLM_CONFIG] Autogen cache disabled (failed to init disk cache at %s): %s", cache_root, cache_err)
-        return
-
-    config_list = llm_config.get("config_list")
-    if not isinstance(config_list, list):
-        return
-    for entry in config_list:
-        if isinstance(entry, dict) and "cache" not in entry:
-            entry["cache"] = cache_obj
 
 # ---------------------------------------------------------------------------
 # Cache Structures
@@ -100,7 +51,7 @@ _LAST_API_KEYS: set[str] = set()
 
 _CACHE_TTL = int(os.getenv("LLM_CONFIG_CACHE_TTL", "300"))
 
-# Deterministic seed for Autogen caching layer.
+# Deterministic seed for AG2 model calls.
 # Enhancement: allow optional environment override (LLM_DEFAULT_CACHE_SEED) OR
 # randomized process seed when RANDOMIZE_DEFAULT_CACHE_SEED=1 (unless overridden per-chat).
 _env_seed = os.getenv("LLM_DEFAULT_CACHE_SEED")
@@ -323,7 +274,7 @@ async def get_llm_config(
 
     Returns a tuple (wrapper_placeholder, llm_config). The first element is
     reserved and currently always None; the second is the dict converted into
-    an AG2 beta OpenAIConfig.
+    an AG2 1.0 beta OpenAIConfig.
     """
     cache_key = _build_llm_cache_key(
         response_format=response_format, extra_config=extra_config
@@ -331,7 +282,6 @@ async def get_llm_config(
     if cache and cache_key in _LLM_CONFIG_CACHE:
         import copy
         cfg = copy.deepcopy(_LLM_CONFIG_CACHE[cache_key])
-        _attach_autogen_cache(cfg)
         return None, cfg
 
     # Ensure base provider list loaded
@@ -397,7 +347,6 @@ async def get_llm_config(
     
     # Final check - ensure we don't have any extra config modifications happening
     logger.debug("[LLM_CONFIG] About to return config with config_list length: %s", len(llm_config.get('config_list', [])))
-    _attach_autogen_cache(llm_config)
     return None, llm_config
 
 

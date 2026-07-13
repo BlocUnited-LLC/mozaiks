@@ -1,0 +1,26 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.workspace_integrations.note_updated
+    version: 1
+    producer: workspace_integrations
+    description: An operator added or updated a note on a workspace integration.
+    payload_schema:
+      type: object
+      properties:
+        integration_id:
+          type: string
+        note:
+          type: string
+        updated_by:
+          type: string
+  - type: domain.workspace_integrations.declarations_saved
+    version: 1
+    producer: workspace_integrations
+    description: Integration needs identified during an app build were saved.
+    payload_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+        count:
+          type: integer

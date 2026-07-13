@@ -8,9 +8,9 @@ from importlib import import_module
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from autogen.beta.events import UnknownEvent
-from autogen.beta.events.base import BaseEvent
-from autogen.beta.history import Storage
+from ag2.events import UnknownEvent
+from ag2.events.base import BaseEvent
+from ag2.history import Storage
 from pymongo import ReturnDocument
 
 from logs.logging_config import get_workflow_logger

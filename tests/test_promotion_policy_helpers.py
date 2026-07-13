@@ -38,7 +38,7 @@ Covers:
 
   _is_module_internal_managed_path:
     - "modules/managed_billing/module.yaml" → True (managed_ prefix)
-    - "modules/stripe_provider/handler.py" → True (provider in name)
+    - "modules/payment_provider_provider/handler.py" → True (provider in name)
     - "modules/billing/module.yaml" → False
     - path with fewer than 2 parts → False
     - non-modules prefix → False
@@ -241,7 +241,7 @@ class TestIsModuleInternalManagedPath:
         assert _is_module_internal_managed_path("modules/managed_billing/module.yaml") is True
 
     def test_provider_in_name_true(self):
-        assert _is_module_internal_managed_path("modules/stripe_provider/handler.py") is True
+        assert _is_module_internal_managed_path("modules/payment_provider_provider/handler.py") is True
 
     def test_regular_module_false(self):
         assert _is_module_internal_managed_path("modules/billing/module.yaml") is False
@@ -289,7 +289,7 @@ class TestRequiredValidationNames:
         assert "migration_plan_validation" in result
 
     def test_integration_path(self):
-        result = _required_validation_names(lane="feature", path="services/integrations/stripe_client.py")
+        result = _required_validation_names(lane="feature", path="services/integrations/payment_provider_client.py")
         assert "integration_readiness_validation" in result
 
     def test_module_generated_path(self):

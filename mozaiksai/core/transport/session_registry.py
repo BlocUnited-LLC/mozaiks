@@ -15,7 +15,7 @@ Enables users to:
 Key Concepts:
 - One WebSocket connection can host multiple workflow sessions
 - Only ONE workflow is "active" at a time; others are "paused"
-- Each workflow has its own chat_id, AG2 beta workflow run, and artifact
+- Each workflow has its own chat_id, AG2 1.0 beta workflow run, and artifact
 - Session state persists in MongoDB; registry tracks runtime state only
 
 Example Flow:
@@ -71,7 +71,7 @@ class SessionRegistry:
     
     NOT Responsible For:
     - Persisting workflow state (MongoDB handles that)
-    - Starting/stopping AG2 beta workflow runs (orchestration layer)
+    - Starting/stopping AG2 1.0 beta workflow runs (orchestration layer)
     - LLM intent detection (UI buttons drive switching)
     """
     

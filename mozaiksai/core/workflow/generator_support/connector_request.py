@@ -15,10 +15,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from logs.logging_config import get_workflow_logger
+from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.workflow.generator_support.connector_service import (
     get_connector_inventory,
-    record_connector_metadata,
-    store_connector,
+    save_connector,
+    save_connector_draft,
 )
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
@@ -585,9 +586,9 @@ async def request_connector_bundle(
 
         if configured and app_id:
             try:
-                metadata_result = await record_connector_metadata(
-                    app_id=str(app_id),
-                    user_id=str(user_id) if user_id else None,
+                metadata_result = await save_connector_draft(
+                    scope=ConnectorStore.SCOPE_APP,
+                    scope_id=str(app_id),
                     service=svc["service"],
                     provider=svc.get("provider"),
                     integration_id=svc.get("integration_id"),
@@ -599,8 +600,9 @@ async def request_connector_bundle(
                     ui_event_id=response.get("ui_event_id"),
                     public_config=public_config,
                     required_fields=svc["required_fields"],
+                    user_id=str(user_id) if user_id else None,
+                    status_reason="Credential requested inline by a generator workflow.",
                     logger=wf_logger,
-                    status_reason="Credential requested inline by a generator workflow and recorded for the app integrations surface.",
                 )
                 metadata_saved = bool(metadata_result.get("saved"))
                 connector_record = metadata_result.get("connector")
@@ -608,8 +610,9 @@ async def request_connector_bundle(
                 metadata_error = str(exc)
             if has_key:
                 try:
-                    stored = await store_connector(
-                        app_id=str(app_id),
+                    stored = await save_connector(
+                        scope=ConnectorStore.SCOPE_APP,
+                        scope_id=str(app_id),
                         user_id=str(user_id) if user_id else "unknown",
                         service=svc["service"],
                         secret_value=trimmed_key,
@@ -622,7 +625,7 @@ async def request_connector_bundle(
                         logger=wf_logger,
                     )
                     connector_stored = bool(stored.get("success"))
-                    connector_record = stored.get("record") or connector_record
+                    connector_record = stored.get("connector") or connector_record
                 except Exception as exc:
                     wf_logger.warning("Connector storage failed for %s: %s", svc["service"], exc)
 
@@ -748,7 +751,7 @@ async def collect_missing_connector_needs(
     app_id = _context_get(context_variables, "app_id")
     required_services = [need["service"] for need in blocking_needs]
     inventory = (
-        await get_connector_inventory(str(app_id), required_services=required_services)
+        await get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id=str(app_id), required_services=required_services)
         if app_id
         else {
             "required_services": required_services,
@@ -769,7 +772,7 @@ async def collect_missing_connector_needs(
             context_variables=context_variables,
         )
         inventory = (
-            await get_connector_inventory(str(app_id), required_services=required_services)
+            await get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id=str(app_id), required_services=required_services)
             if app_id
             else inventory
         )

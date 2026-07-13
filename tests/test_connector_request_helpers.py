@@ -83,16 +83,16 @@ class TestNormalizeService:
         assert normalize_service("") == ""
 
     def test_whitespace_stripped(self):
-        assert normalize_service("  stripe  ") == "stripe"
+        assert normalize_service("  payment_provider  ") == "payment_provider"
 
     def test_lowercased(self):
-        assert normalize_service("Stripe") == "stripe"
+        assert normalize_service("payment provider") == "payment_provider"
 
     def test_spaces_to_underscores(self):
         assert normalize_service("my service") == "my_service"
 
     def test_already_normalized(self):
-        assert normalize_service("stripe_billing") == "stripe_billing"
+        assert normalize_service("payment_provider_billing") == "payment_provider_billing"
 
     def test_combined(self):
         assert normalize_service("  My Service  ") == "my_service"
@@ -107,10 +107,10 @@ class TestDisplayService:
         assert display_service("my_service") == "My Service"
 
     def test_single_word(self):
-        assert display_service("stripe") == "Stripe"
+        assert display_service("payment_provider") == "Payment Provider"
 
     def test_already_normalized_becomes_title(self):
-        assert display_service("stripe_billing") == "Stripe Billing"
+        assert display_service("payment_provider_billing") == "Payment Provider Billing"
 
     def test_empty_service(self):
         assert display_service("") == ""
@@ -346,12 +346,12 @@ class TestDedupeIntegrationNeeds:
         assert dedupe_integration_needs([]) == []
 
     def test_single_need_normalized(self):
-        result = dedupe_integration_needs([self._need("stripe")])
+        result = dedupe_integration_needs([self._need("payment_provider")])
         assert len(result) == 1
-        assert result[0]["service"] == "stripe"
+        assert result[0]["service"] == "payment_provider"
 
     def test_non_dict_need_skipped(self):
-        result = dedupe_integration_needs(["bad", self._need("stripe")])
+        result = dedupe_integration_needs(["bad", self._need("payment_provider")])
         assert len(result) == 1
 
     def test_need_with_no_service_skipped(self):
@@ -359,7 +359,7 @@ class TestDedupeIntegrationNeeds:
         assert result == []
 
     def test_duplicate_service_merged(self):
-        needs = [self._need("stripe"), self._need("stripe")]
+        needs = [self._need("payment_provider"), self._need("payment_provider")]
         result = dedupe_integration_needs(needs)
         assert len(result) == 1
 
@@ -390,46 +390,46 @@ class TestDedupeIntegrationNeeds:
 
     def test_both_optional_stays_optional(self):
         needs = [
-            self._need("stripe", optional=True),
-            self._need("stripe", optional=True),
+            self._need("payment_provider", optional=True),
+            self._need("payment_provider", optional=True),
         ]
         result = dedupe_integration_needs(needs)
         assert result[0]["optional"] is True
 
     def test_one_not_optional_makes_required(self):
         needs = [
-            self._need("stripe", optional=True),
-            self._need("stripe", optional=False),
+            self._need("payment_provider", optional=True),
+            self._need("payment_provider", optional=False),
         ]
         result = dedupe_integration_needs(needs)
         assert result[0]["optional"] is False
 
     def test_build_time_takes_priority_over_runtime(self):
         needs = [
-            self._need("stripe", required_at="runtime"),
-            self._need("stripe", required_at="build_time"),
+            self._need("payment_provider", required_at="runtime"),
+            self._need("payment_provider", required_at="build_time"),
         ]
         result = dedupe_integration_needs(needs)
         assert result[0]["required_at"] == "build_time"
 
     def test_purpose_merged_if_first_empty(self):
         needs = [
-            {**self._need("stripe"), "purpose": ""},
-            {**self._need("stripe"), "purpose": "Needed for payments."},
+            {**self._need("payment_provider"), "purpose": ""},
+            {**self._need("payment_provider"), "purpose": "Needed for payments."},
         ]
         result = dedupe_integration_needs(needs)
         assert result[0]["purpose"] == "Needed for payments."
 
     def test_required_by_accumulated_as_list(self):
         needs = [
-            {**self._need("stripe"), "required_by": {"source": "a"}},
-            {**self._need("stripe"), "required_by": {"source": "b"}},
+            {**self._need("payment_provider"), "required_by": {"source": "a"}},
+            {**self._need("payment_provider"), "required_by": {"source": "b"}},
         ]
         result = dedupe_integration_needs(needs)
         assert len(result[0]["required_by"]) == 2
 
     def test_output_sorted_by_display_name(self):
-        needs = [self._need("stripe"), self._need("openai"), self._need("github")]
+        needs = [self._need("payment_provider"), self._need("openai"), self._need("github")]
         result = dedupe_integration_needs(needs)
         names = [r["service"] for r in result]
         assert names == sorted(names)

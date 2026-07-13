@@ -64,7 +64,7 @@ class UnifiedWorkflowManager:
     """Unified workflow manager focusing on config + UI tool metadata.
 
     Backend agent tools are bound directly during agent creation; prompt
-    middleware declarations are compiled into AG2 beta middleware.
+    middleware declarations are compiled into AG2 1.0 beta middleware.
     """
 
     _instance = None

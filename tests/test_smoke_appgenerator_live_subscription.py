@@ -15,13 +15,13 @@ from scripts.smoke_appgenerator_live_subscription import (
 def test_subscription_output_validator_rejects_provider_specific_drift() -> None:
     contract = sample_subscription_contract()
     output = deterministic_subscription_output()
-    output["code_files"][0]["content"] += "\nstripe_price_id: price_123\n"
+    output["code_files"][0]["content"] += "\npayment_provider_price_id: price_123\n"
     output["subscription_config_bundle"]["files"][0]["content"] = output["code_files"][0]["content"]
 
     _content, errors = validate_subscription_output(output, contract)
 
     assert errors
-    assert any("stripe" in error for error in errors)
+    assert any("payment_provider" in error for error in errors)
 
 
 def test_module_contract_validator_requires_exact_entitlement_gate() -> None:

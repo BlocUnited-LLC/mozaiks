@@ -32,7 +32,7 @@ keeps the rest of the app stable.
 
 ## How Classification Works
 
-The classifier is backed by `autogen.beta.Agent.ask()` with a `response_schema`
+The classifier is backed by `ag2.Agent.ask()` with a `response_schema`
 that enforces the `ChangeClassifierResult` shape at the provider level. It reads
 persisted builder state from the control-plane context tools before calling the
 LLM, so it can take staleness into account:

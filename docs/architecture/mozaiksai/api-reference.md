@@ -137,6 +137,14 @@ Human-in-the-loop decision points for multi-step workflows.
 | `GET` | `/api/me/tokens/ledger` | Token wallet ledger entries for the current user |
 | `GET` | `/api/me/profile-panels` | Module-declared profile panel contributions |
 
+`/api/me/usage` returns measured provider usage and subscription usage metadata.
+When `app/config/subscriptions.yaml` declares a `runtime_llm_usage` charge
+policy, usage rows also include a policy-derived `billable_amount_usd`
+estimate. The response also includes `pricing_health`, which reports provider
+catalog coverage, unpriced models, fallback-price usage, and the active catalog
+metadata. These values are display and planning estimates, not invoices or
+payment-provider charges.
+
 ---
 
 ## File Upload (platform host only)
@@ -158,7 +166,7 @@ Human-in-the-loop decision points for multi-step workflows.
 
 ## Related Architecture
 
-- [Runtime Architecture](../../architecture/foundations/runtime-overview.md)
+- [Architecture Foundations](../foundations/overview.md)
 - [Transport and Streaming](transport-and-streaming.md)
 - [Token Management](token-management.md)
 - [Module System](../../architecture/app/canonical-app-structure.md)

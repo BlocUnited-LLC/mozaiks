@@ -8,6 +8,7 @@ import RouteRenderer from '../components/RouteRenderer';
 import { initializeWorkflows } from '../@chat-workflows/index.js';
 import { registerComponent } from '../registry/componentRegistry.js';
 import ConfigValidationOverlay from '../config/ConfigValidationOverlay';
+import { SkipLink } from '../ui/primitives/SkipLink.jsx';
 
 /**
  * Inner shell — must render inside ChatUIProvider to consume its context.
@@ -77,6 +78,7 @@ export default function MozaiksApp({
         uiConfig={uiConfig}
       >
         <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <SkipLink targetId="main-content" />
           <ConfigValidationOverlay />
           <GlobalChatWidgetWrapper />
           {children || <AppShell />}

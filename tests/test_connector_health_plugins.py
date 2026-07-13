@@ -14,8 +14,8 @@ from mozaiksai.core.workflow.generator_support.connector_health import (
     run_connector_health_check,
 )
 from mozaiksai.core.workflow.generator_support.connector_request import collect_missing_connector_needs
-from mozaiksai.core.workflow.generator_support.connector_service import get_connector_inventory, list_connectors, store_connector
-from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+from mozaiksai.core.workflow.generator_support.connector_service import get_connector_inventory, list_connectors, save_connector
+from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 
 SECRET_VALUE = "test-secret-value"
 
@@ -124,25 +124,24 @@ class _FakeVaultBackend:
     def __init__(self) -> None:
         self.secrets = {}
 
-    async def store_secret(self, *, app_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
+    async def store_secret(self, *, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
         del display_name, ttl_days
-        self.secrets[(app_id, service)] = secret_value
+        self.secrets[(scope_id, service)] = secret_value
         return {
             "success": True,
             "provider": "fake_vault",
-            "secret_name": f"fake-{app_id}-{service}",
+            "secret_name": f"fake-{scope_id}-{service}",
             "expires_at": "2026-06-01T00:00:00+00:00",
         }
 
-    async def get_secret(self, *, app_id: str, service: str):
-        value = self.secrets.get((app_id, service))
+    async def get_secret(self, *, scope_id: str, service: str):
+        value = self.secrets.get((scope_id, service))
         return {
             "success": value is not None,
             "provider": "fake_vault",
             "secret_value": value,
-            "secret_name": f"fake-{app_id}-{service}",
+            "secret_name": f"fake-{scope_id}-{service}",
         }
-
 
 class _Context:
     def __init__(self, data: dict[str, Any]):
@@ -193,14 +192,15 @@ class _FailingHealthProvider:
         raise RuntimeError(f"boom {SECRET_VALUE}")
 
 
-def _store() -> AppConnectorStore:
-    return AppConnectorStore(pm=_FakePersistenceManager())
+def _store() -> ConnectorStore:
+    return ConnectorStore(pm=_FakePersistenceManager())
 
 
-def _seed_configured_connector(store: AppConnectorStore, *, service: str = "analytics_provider") -> None:
+def _seed_configured_connector(store: ConnectorStore, *, service: str = "analytics_provider") -> None:
     asyncio.run(
-        store.upsert_connector(
-            app_id="app_1",
+        store.upsert(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id="app_1",
             service=service,
             display_name="Hosted Analytics",
             user_id="user_1",
@@ -230,7 +230,7 @@ def test_no_plugin_registered_returns_configuration_health_without_persisting_pr
     _seed_configured_connector(store)
 
     result = asyncio.run(run_connector_health_check(app_id="app_1", service="analytics_provider", store=store))
-    connector = asyncio.run(store.get_connector(app_id="app_1", service="analytics_provider"))
+    connector = asyncio.run(store.get(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", service="analytics_provider"))
 
     assert result["status"] == "configured"
     assert result["health_check_supported"] is False
@@ -243,12 +243,12 @@ def test_manual_health_check_with_fake_provider_updates_safe_health(monkeypatch)
     vault = _FakeVaultBackend()
     provider = _DemoHealthProvider()
     _seed_configured_connector(store)
-    vault.secrets[("app_1", "analytics_provider")] = SECRET_VALUE
+    vault.secrets[("app_1", "analytics_provider")] = SECRET_VALUE  # scope_id="app_1"
     monkeypatch.setattr(connector_health, "get_connector_vault_backend", lambda: vault)
     register_connector_health_provider(provider)
 
     result = asyncio.run(run_connector_health_check(app_id="app_1", service="analytics_provider", store=store))
-    connector = asyncio.run(store.get_connector(app_id="app_1", service="analytics_provider"))
+    connector = asyncio.run(store.get(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", service="analytics_provider"))
 
     assert result["status"] == "healthy"
     assert result["checked_by"] == "manual"
@@ -263,7 +263,6 @@ def test_manual_health_check_with_fake_provider_updates_safe_health(monkeypatch)
     assert provider.calls[0]["secret_repr"] == "SecretHandle(value=<redacted>)"
     assert SECRET_VALUE not in repr(result)
     assert SECRET_VALUE not in repr(connector)
-
 
 def test_plugin_exception_returns_sanitized_unhealthy_result() -> None:
     store = _store()
@@ -284,7 +283,7 @@ def test_list_connectors_does_not_invoke_provider_plugin() -> None:
     _seed_configured_connector(store)
     register_connector_health_provider(provider)
 
-    connectors = asyncio.run(list_connectors("app_1", store=store))
+    connectors = asyncio.run(list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", store=store))
 
     assert connectors[0]["health"]["health_check_supported"] is True
     assert provider.calls == []
@@ -301,8 +300,9 @@ def test_connector_save_does_not_invoke_provider_plugin(monkeypatch) -> None:
     register_connector_health_provider(provider)
 
     saved = asyncio.run(
-        store_connector(
-            app_id="app_1",
+        save_connector(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id="app_1",
             user_id="user_1",
             service="analytics_provider",
             secret_value=SECRET_VALUE,
@@ -324,8 +324,9 @@ def test_readiness_ignores_unhealthy_provider_health_by_default() -> None:
     store = _store()
     _seed_configured_connector(store)
     asyncio.run(
-        store.update_connector_health(
-            app_id="app_1",
+        store.update_health(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id="app_1",
             service="analytics_provider",
             health_status="unhealthy",
             health_message="Manual review required.",
@@ -335,7 +336,7 @@ def test_readiness_ignores_unhealthy_provider_health_by_default() -> None:
     )
 
     inventory = asyncio.run(
-        get_connector_inventory("app_1", required_services=["analytics_provider"], store=store)
+        get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", required_services=["analytics_provider"], store=store)
     )
 
     assert inventory["ready_services"] == ["analytics_provider"]
@@ -346,8 +347,8 @@ def test_collect_missing_connector_needs_does_not_run_provider_health(monkeypatc
     provider = _DemoHealthProvider()
     register_connector_health_provider(provider)
 
-    async def fake_inventory(app_id: str, required_services=None, store=None):
-        del app_id, store
+    async def fake_inventory(*, scope, scope_id, required_services=None, store=None):
+        del scope, scope_id, store
         return {
             "required_services": list(required_services or []),
             "ready_services": ["analytics_provider"],

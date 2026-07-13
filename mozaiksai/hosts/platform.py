@@ -39,7 +39,7 @@ from mozaiksai.core.auth.dependencies import (
 )
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.entitlement import EntitlementPort
-from mozaiksai.core.profile.discovery import load_profile_panels
+from mozaiksai.core.profile.discovery import load_profile_panels, load_profile_tabs
 from mozaiksai.core.relationships.discovery import load_relationship_providers
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
@@ -114,6 +114,7 @@ except Exception as exc:  # pragma: no cover
     logger.debug("ADMIN_ROUTER_MOUNT_FAILED: %s", exc)
 
 # Router modules extracted from platform.py for code organization.
+from mozaiksai.hosts.routers.account import router as _account_router  # noqa: E402
 from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
 from mozaiksai.hosts.routers.modules import router as _modules_router  # noqa: E402
 from mozaiksai.hosts.routers.notifications import router as _notifications_router  # noqa: E402
@@ -122,6 +123,7 @@ from mozaiksai.hosts.routers.shell import router as _shell_router  # noqa: E402
 from mozaiksai.hosts.routers.transitions import router as _transitions_router  # noqa: E402
 from mozaiksai.hosts.routers.workflows import router as _workflows_router  # noqa: E402
 
+app.include_router(_account_router)
 app.include_router(_modules_router)
 app.include_router(_notifications_router)
 app.include_router(_shell_router)
@@ -403,11 +405,12 @@ runtime_app.register_app_lifespan(app, platform_lifespan)
 
 
 PROFILE_SHELL_ROUTE = {
-    "path": "/profile",
+    "path": "/me",
     "component": "ProfilePage",
-    "label": "Account",
+    "label": "Profile",
     "order": 998,
-    "title": "Account",
+    "title": "Profile",
+    "shellMode": "social",
 }
 
 
@@ -618,8 +621,8 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
         "home": {"id": "home", "label": "Home", "action": "navigate", "path": "/"},
         "apps": {"id": "apps", "label": "Apps", "action": "navigate", "path": "/apps"},
         "workspace": {"id": "workspace", "label": "Workspace", "action": "navigate", "path": "/apps"},
-        "profile": {"id": "profile", "label": "Account", "action": "navigate", "path": "/profile"},
-        "account": {"id": "profile", "label": "Account", "action": "navigate", "path": "/profile"},
+        "profile": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/me"},
+        "account": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/me"},
         "settings": {"id": "settings", "label": "Settings", "action": "navigate", "path": "/settings"},
         "messages": {"id": "messages", "label": "Messages", "action": "navigate", "path": "/messages"},
         "notifications": {"id": "notifications", "label": "Alerts", "action": "navigate", "path": "/notifications"},
@@ -1173,6 +1176,24 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 "requiresAuth": True,
                 "title": PROFILE_SHELL_ROUTE["title"],
                 "appShell": True,
+                "shellMode": "social",
+                "ai_context": "The user is on their Profile page — their social identity, contacts, and messages.",
+            },
+        },
+    )
+    _append_page_once(
+        pages,
+        {
+            "path": "/u/:username",
+            "component": "ProfilePage",
+            "label": "User Profile",
+            "order": 999,
+            "meta": {
+                "requiresAuth": True,
+                "title": "Profile",
+                "appShell": True,
+                "shellMode": "social",
+                "ai_context": "The user is viewing another user's public profile.",
             },
         },
     )
@@ -1298,14 +1319,25 @@ async def get_current_user_usage(
 ):
     """Return user-scoped token usage and app-declared subscription limits."""
     resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
-    from mozaiksai.core.usage import get_runtime_usage_ledger
+    from mozaiksai.core.usage import get_runtime_token_budget_alert_ledger, get_runtime_usage_ledger
 
     bounded_limit = max(1, min(int(limit or 1), 1000))
     ledger = get_runtime_usage_ledger()
+    alert_ledger = get_runtime_token_budget_alert_ledger()
     usage = await ledger.query_usage(app_id=resolved_app_id, user_id=user_id, limit=bounded_limit)
     subscriptions = getattr(app.state, "subscriptions_config", None)
+    charge_policy = _runtime_llm_usage_charge_policy(subscriptions)
+    if charge_policy is not None:
+        from mozaiksai.core.usage.charges import enrich_usage_with_charge_policy
+
+        usage = enrich_usage_with_charge_policy(usage, charge_policy)
     return {
         **usage,
+        "token_budget_alerts": await alert_ledger.query_alerts(
+            app_id=resolved_app_id,
+            user_id=user_id,
+            limit=min(bounded_limit, 100),
+        ),
         "subscription_usage": _serialize_subscription_usage_limits(subscriptions),
         "token_wallets": await _current_user_token_wallet_summary(
             subscriptions,
@@ -1562,6 +1594,57 @@ async def get_profile_panels(
     return {"panels": hydrated}
 
 
+@app.get("/api/me/profile-tabs")
+async def get_profile_tabs(
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return module-declared profile tabs, each hydrated with live action data.
+
+    Walks modules/*/contracts/profile.yaml under the active app root and, for
+    each tab that declares an ``action``, calls the module executor to fetch
+    tab data. Tabs whose action fails are still returned with ``data: null``
+    and an ``error`` string so the UI can render graceful empty states.
+    """
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    app_root = resolve_app_root()
+    raw_tabs = load_profile_tabs(app_root)
+
+    module_executor = executor_registry.module_executor
+    hydrated: list[dict[str, Any]] = []
+
+    for tab in raw_tabs:
+        action = tab.get("action")
+        tab_out: dict[str, Any] = {**tab, "data": None, "error": None}
+
+        if action and module_executor is not None:
+            module_name = tab.get("module_id", "")
+            try:
+                req = ModuleRequest(
+                    module=module_name,
+                    action=action,
+                    params={},
+                    app_id=resolved_app_id,
+                    user_id=user_id,
+                    tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+                    auth_token=None,
+                    correlation_id=None,
+                    granted_permissions=list(principal.scopes) if principal else None,
+                )
+                result = await module_executor.execute(req, context=None)
+                if result.success:
+                    tab_out["data"] = result.data
+                else:
+                    tab_out["error"] = result.error or f"Action {action!r} failed"
+            except Exception as exc:
+                logger.warning("[profile-tabs] %s.%s failed: %s", module_name, action, exc)
+                tab_out["error"] = f"Action {action!r} failed"
+
+        hydrated.append(tab_out)
+
+    return {"tabs": hydrated}
+
+
 @app.get("/api/me/relationships")
 async def get_current_user_relationships(
     app_id: str | None = None,
@@ -1676,6 +1759,8 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> dict | N
         # WorkspaceLayout and other layout-aware components can find it.
         if isinstance(nav.get("group"), str) and nav["group"].strip():
             page["meta"].setdefault("appShell", True)
+    if isinstance(meta.get("ai_context"), str) and meta["ai_context"].strip():
+        page["meta"]["ai_context"] = meta["ai_context"].strip()
     return page
 
 
@@ -1914,6 +1999,7 @@ def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
             "default_plan_id": None,
             "plans": [],
             "token_wallets": [],
+            "usage_charge_policies": [],
             "source": "none",
         }
     plans: list[dict[str, Any]] = []
@@ -1945,13 +2031,27 @@ def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
         wallet.model_dump()
         for wallet in getattr(config, "token_wallets", []) or []
     ]
+    usage_charge_policies = [
+        policy.model_dump()
+        for policy in getattr(config, "usage_charge_policies", []) or []
+    ]
     return {
         "schema_version": getattr(config, "schema_version", None),
         "default_plan_id": getattr(config, "default_plan_id", None),
         "plans": plans,
         "token_wallets": token_wallets,
+        "usage_charge_policies": usage_charge_policies,
         "source": "app_config_subscriptions",
     }
+
+
+def _runtime_llm_usage_charge_policy(config: Any) -> Any | None:
+    if config is None:
+        return None
+    for policy in getattr(config, "usage_charge_policies", []) or []:
+        if getattr(policy, "source", None) == "runtime_llm_usage":
+            return policy
+    return None
 
 
 async def _current_user_token_wallet_summary(

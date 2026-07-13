@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-import autogen
+import ag2
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -92,67 +92,8 @@ mongo_client = None
 simple_transport: SimpleTransport | None = None
 
 
-def _patch_autogen_file_logger() -> None:
-    """Patch AG2 file logging so non-serializable values cannot break runtime logs."""
-    try:
-        from autogen.logger import file_logger as _file_logger
-        from autogen.logger.logger_utils import get_current_ts as _logger_ts
-    except Exception as patch_err:  # pragma: no cover - defensive safeguard
-        wf_logger.debug("Skipped AG2 file logger patch: %s", patch_err)
-        return
-
-    file_logger_cls: Any = _file_logger.FileLogger
-    if getattr(file_logger_cls, "_mozaiks_safe_json", False):
-        return
-
-    import json as _json
-    import threading as _threading
-
-    safe_serialize = _file_logger.safe_serialize
-
-    def _patched_log_new_wrapper(self, wrapper, init_args=None):
-        try:
-            self.logger.info(
-                _json.dumps(
-                    {
-                        "wrapper_id": id(wrapper),
-                        "session_id": self.session_id,
-                        "json_state": safe_serialize(init_args or {}),
-                        "timestamp": _logger_ts(),
-                        "thread_id": _threading.get_ident(),
-                    }
-                )
-            )
-        except Exception as exc:  # pragma: no cover - logging fallback
-            self.logger.error("[file_logger] Failed to log wrapper event %s", exc)
-
-    def _patched_log_new_client(self, client, wrapper, init_args):
-        thread_id = _threading.get_ident()
-        try:
-            self.logger.info(
-                _json.dumps(
-                    {
-                        "client_id": id(client),
-                        "wrapper_id": id(wrapper),
-                        "session_id": self.session_id,
-                        "class": type(client).__name__,
-                        "json_state": safe_serialize(init_args or {}),
-                        "timestamp": _logger_ts(),
-                        "thread_id": thread_id,
-                    }
-                )
-            )
-        except Exception as exc:  # pragma: no cover - logging fallback
-            self.logger.error("[file_logger] Failed to log client event %s", exc)
-
-    file_logger_cls.log_new_wrapper = _patched_log_new_wrapper  # type: ignore[attr-defined]
-    file_logger_cls.log_new_client = _patched_log_new_client  # type: ignore[attr-defined]
-    file_logger_cls._mozaiks_safe_json = True
-
-
-_patch_autogen_file_logger()
-logging.getLogger("autogen").setLevel(logging.DEBUG)
-wf_logger.info("autogen version: %s", getattr(autogen, "__version__", "unknown"))
+logging.getLogger("ag2").setLevel(logging.DEBUG)
+wf_logger.info("ag2 version: %s", getattr(ag2, "__version__", "unknown"))
 
 app = FastAPI(
     title="Mozaiks Runtime Host",
@@ -413,6 +354,7 @@ async def _ping_mongo(client) -> None:
     await client.admin.command("ping")
 
 
+@app.get("/api/health/readiness")
 @app.get("/api/health/ready")
 async def health_readiness(request: Request):
     """Readiness probe — checks all critical dependencies before accepting traffic."""

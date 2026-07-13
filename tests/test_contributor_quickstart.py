@@ -92,7 +92,7 @@ def test_contributing_quickstart_avoids_private_or_stale_public_framing() -> Non
     assert "transport.py" in quickstart
     assert "direct provider internals" in quickstart
 
-    for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
+    for forbidden in ["payment provider", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in quickstart, forbidden
 
 

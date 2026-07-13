@@ -251,9 +251,9 @@ class TestFormatDomainExcerpt:
         assert "type_4" not in result
 
     def test_capability_packs_rendered(self):
-        data = {"capability_packs": ["stripe_pay", "sendgrid"]}
+        data = {"capability_packs": ["payment_provider_pay", "sendgrid"]}
         result = _format_domain_excerpt("ecommerce", data)
-        assert "stripe_pay" in result
+        assert "payment_provider_pay" in result
         assert "sendgrid" in result
 
     def test_modules_rendered(self):

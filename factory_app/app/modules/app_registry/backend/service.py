@@ -32,30 +32,43 @@ class AppRegistryService:
         self,
         *,
         owner_user_id: str,
-        name: str,
+        name: str | None = None,
         description: str | None = None,
         status: str = "draft",
         app_id: str | None = None,
+        chat_app_id: str | None = None,
         active_chat_id: str | None = None,
         active_workflow_id: str | None = None,
+        name_source: str | None = None,
+        build_context_profile: dict[str, Any] | None = None,
+        current_build_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = ensure_create_payload(
             name=name,
             description=description,
             status=status,
             app_id=app_id,
+            chat_app_id=chat_app_id,
             active_chat_id=active_chat_id,
             active_workflow_id=active_workflow_id,
+            name_source=name_source,
+            build_context_profile=build_context_profile,
+            current_build_run=current_build_run,
         )
-        resolved_app_id = payload["app_id"] or _create_app_id(payload["name"])
+        resolved_app_id = payload["app_id"] or _create_app_id(payload["name"] or "draft-app")
         app = await self.repo.upsert_app_record(
             owner_user_id=owner_user_id,
             name=payload["name"],
             description=payload["description"],
             lifecycle_state=payload["status"],
             app_id=resolved_app_id,
+            chat_app_id=payload["chat_app_id"],
             active_chat_id=payload["active_chat_id"],
             active_workflow_id=payload["active_workflow_id"],
+            name_source=payload["name_source"],
+            name_status=payload["name_status"],
+            build_context_profile=payload["build_context_profile"],
+            current_build_run=payload["current_build_run"],
         )
         return {"success": True, "app": app}
 
@@ -65,16 +78,31 @@ class AppRegistryService:
         build_registry_id: str,
         status: str,
         bundle_path: str | None = None,
+        artifact_version_id: str | None = None,
+        workflow_sequence: str | None = None,
+        active_chat_id: str | None = None,
+        active_workflow_id: str | None = None,
+        current_build_run: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = ensure_status_payload(
             build_registry_id=build_registry_id,
             status=status,
             bundle_path=bundle_path,
+            artifact_version_id=artifact_version_id,
+            workflow_sequence=workflow_sequence,
+            active_chat_id=active_chat_id,
+            active_workflow_id=active_workflow_id,
+            current_build_run=current_build_run,
         )
         app = await self.repo.update_lifecycle_state(
             build_registry_id=payload["build_registry_id"],
             lifecycle_state=payload["status"],
             bundle_path=payload["bundle_path"],
+            artifact_version_id=payload["artifact_version_id"],
+            workflow_sequence=payload["workflow_sequence"],
+            active_chat_id=payload["active_chat_id"],
+            active_workflow_id=payload["active_workflow_id"],
+            current_build_run=payload["current_build_run"],
         )
         return {"success": app is not None, "app": app}
 
@@ -120,6 +148,23 @@ class AppRegistryService:
             bundle_path=record.get("bundle_path"),
         )
         return {"success": app is not None, "app": app}
+
+    async def delete_app(self, *, build_registry_id: str) -> dict[str, Any]:
+        normalized_record_id = normalize_optional_text(build_registry_id)
+        if not normalized_record_id:
+            raise ValueError("build_registry_id is required")
+        # Resolve app_id before deleting so we can cascade-purge usage events
+        existing = await self.repo.get_by_build_registry_id(build_registry_id=normalized_record_id)
+        deleted = await self.repo.delete_app(build_registry_id=normalized_record_id)
+        if deleted and existing:
+            app_id = existing.get("app_id")
+            if app_id:
+                try:
+                    from mozaiksai.core.usage import get_runtime_usage_ledger
+                    await get_runtime_usage_ledger().purge_usage_for_app(app_id=app_id)
+                except Exception:
+                    pass  # usage purge is best-effort; don't fail the delete
+        return {"success": deleted}
 
     async def ensure_status_for_app(
         self,

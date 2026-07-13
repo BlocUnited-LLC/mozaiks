@@ -165,6 +165,11 @@ function buildRow(app) {
   const name = getAppDisplayName(app)
   const description = getAppDisplayDescription(app) || snapshot.guidance
 
+  const appId = app?.app_id || app?.id || null
+  // Build-state apps expose an "Access Dashboard" secondary action pointing at the
+  // overview page. The dashboard may be incomplete during build, but still navigable.
+  const dashboardHref = appId && isAppInBuild(status) ? `/apps/${encodeURIComponent(appId)}/overview` : null
+
   return {
     app,
     id: app?.build_registry_id || app?.app_id || app?.name || `${status}-pending`,
@@ -178,6 +183,7 @@ function buildRow(app) {
     usageState: getUsageState(status),
     operationsState,
     primaryAction: getAppPrimaryAction(app),
+    dashboardHref,
     sortPriority: getPortfolioSortPriority(status, operationsState),
     filterBucket: getFilterBucket(status, operationsState),
     searchText: [name, description, snapshot.lifecycleLabel, stateLabel].join(' ').toLowerCase(),

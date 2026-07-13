@@ -8,7 +8,7 @@ Verifies that the mozaikspay OSS build pack:
   - the app-side client (mozaikspay_client.py) is provider-neutral
   - the billing_portal facade module is app-owned
   - generated pages call billing_portal actions only, not managed modules directly
-  - no raw Stripe secrets or provider internals bleed into generated output
+  - no raw payment provider secrets or provider internals bleed into generated output
   - runtime boundary rules are documented in contract.yaml
 """
 from __future__ import annotations
@@ -181,21 +181,21 @@ class TestRequiredOutputsExist:
 class TestForbiddenOutputsAbsent:
     """Templates must not generate content that violates the forbidden_output rules."""
 
-    def test_templates_do_not_import_stripe_directly(self):
+    def test_templates_do_not_import_payment_provider_directly(self):
         violations = []
         for f in _all_template_files():
             content = _template_content(f)
-            if "import stripe" in content:
+            if "import payment_provider" in content:
                 violations.append(str(f.relative_to(_PACK_ROOT)))
-        assert violations == [], f"Templates directly import stripe: {violations}"
+        assert violations == [], f"Templates directly import payment_provider: {violations}"
 
-    def test_templates_do_not_contain_stripe_secret_key(self):
+    def test_templates_do_not_contain_payment_provider_secret_key(self):
         violations = []
         for f in _all_template_files():
             content = _template_content(f)
-            if "STRIPE_SECRET_KEY" in content:
+            if "PAYMENT_PROVIDER_SECRET_KEY" in content:
                 violations.append(str(f.relative_to(_PACK_ROOT)))
-        assert violations == [], f"Templates reference STRIPE_SECRET_KEY: {violations}"
+        assert violations == [], f"Templates reference PAYMENT_PROVIDER_SECRET_KEY: {violations}"
 
     def test_templates_do_not_include_managed_entitlements_mutations(self):
         violations = []
@@ -228,7 +228,7 @@ class TestMozaiksPayClientTemplate:
 
     def test_client_uses_connector_or_env_vars_not_hardcoded_url(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
-        assert "AppConnectorStore" in content
+        assert "ConnectorStore" in content
         assert "get_connector_vault_backend" in content
         assert "MOZAIKSPAY_API_BASE" in content
         assert "MOZAIKSPAY_CLIENT_ID" in content
@@ -236,16 +236,16 @@ class TestMozaiksPayClientTemplate:
         # Must not hardcode any production or staging URL
         assert "https://api.mozaiks" not in content
 
-    def test_client_does_not_import_stripe(self):
+    def test_client_does_not_import_payment_provider(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
-        assert "import stripe" not in content
+        assert "import payment_provider" not in content
 
     def test_client_does_not_store_raw_secrets(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
         # Should not persist or store a secret value
-        assert "STRIPE_SECRET_KEY" not in content
-        assert "sk_live_" not in content
-        assert "sk_test_" not in content
+        assert "PAYMENT_PROVIDER_SECRET_KEY" not in content
+        assert "provider_live_" not in content
+        assert "provider_test_" not in content
 
     def test_client_calls_provider_api_path(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
@@ -254,7 +254,7 @@ class TestMozaiksPayClientTemplate:
         assert "/subscription/status" in content
         assert "/billing-portal/session" in content
         assert "X-MozaiksPay-Client-Id" in content
-        assert "get_connector(" in content
+        assert "ConnectorStore().get(" in content
         assert "get_connector_vault_backend" in content
         assert "/api/modules/managed_billing" not in content
 
@@ -269,7 +269,7 @@ class TestMozaiksPayClientTemplate:
         assert "MozaiksPayError" in content
         assert "MozaiksPayConfigurationError" in content
 
-    def test_client_uses_http_not_stripe_sdk(self):
+    def test_client_uses_http_not_payment_provider_sdk(self):
         content = _CLIENT_TEMPLATE.read_text(encoding="utf-8")
         assert "httpx" in content
 
@@ -301,7 +301,7 @@ class TestBillingPortalModuleYaml:
 
     def test_no_raw_provider_credentials_in_output_schema(self):
         content = _MODULE_YAML.read_text(encoding="utf-8")
-        for forbidden in ("stripe_customer_id", "stripe_subscription_id", "STRIPE_"):
+        for forbidden in ("payment_provider_customer_id", "payment_provider_subscription_id", "PAYMENT_PROVIDER_"):
             assert forbidden not in content, (
                 f"module.yaml must not expose provider-owned field: {forbidden}"
             )

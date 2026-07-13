@@ -27,12 +27,12 @@ async def test_studio_shell_config_injects_studio_routes():
     assert "/apps/:appId/build" not in page_paths
     assert "/apps/:appId/deploy" not in page_paths
     assert "/apps/:appId/admin" not in page_paths
-    assert "/profile" in page_paths
+    assert "/me" in page_paths
     # admin_registry.yaml declares operations and settings as app-scope admin pages.
     assert "/apps/:appId/operations" in page_paths
     assert "/apps/:appId/settings" in page_paths
     assert "/apps" not in header_paths
-    assert "/profile" not in header_paths
+    assert "/me" not in header_paths
 
     studio_pages = {page.get("path"): page for page in shell_config.get("pages", [])}
     assert studio_pages["/apps"]["meta"]["requiresRole"] == "admin"

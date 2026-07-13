@@ -104,8 +104,8 @@ def test_prompt_middleware_updates_current_turn_prompt() -> None:
         context_bridge={},
     )
 
-    from autogen.beta import Context, MemoryStream
-    from autogen.beta.events import ModelRequest, ModelResponse
+    from ag2 import Context, MemoryStream
+    from ag2.events import ModelRequest, ModelResponse
 
     context = Context(MemoryStream(), prompt=["Base prompt"], variables={})
     middleware = middleware_factory(ModelRequest("go"), context)

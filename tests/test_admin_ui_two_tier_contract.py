@@ -25,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _PRODUCT_TERMS = (
     "MozaiksPay",
     "mozaikspay",
-    "Stripe",
+    "payment provider",
     "wallet",
     "investor",
     "entitlement",

@@ -516,15 +516,19 @@ export function SectionRenderer({
       primitiveProps = {
         id: componentId,
         label: config.label,
+        message: config.message,
       };
       break;
-    case 'ErrorState':
+    case 'ErrorState': {
+      const action = buildEmptyAction(config, executeAction, section.id);
       primitiveProps = {
         id: componentId,
         title: config.title,
         message: config.message,
+        action,
       };
       break;
+    }
     case 'Panel':
     case 'SurfaceCard':
       primitiveProps = {
@@ -541,6 +545,8 @@ export function SectionRenderer({
         id: componentId,
         label: config.label,
         tone: config.tone ?? 'default',
+        size: config.size,
+        dot: config.dot,
       };
       break;
     case 'Metric':

@@ -90,7 +90,7 @@ plans:
         cadence: monthly
 """,
         "services/integrations/mozaikspay_client.py": """
-from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 from mozaiksai.core.secrets import get_connector_vault_backend
 
 _CONNECTOR_SERVICE = "mozaikspay"
@@ -277,27 +277,27 @@ def test_scan_generated_bundle_rejects_data_contract_module_id_mismatch() -> Non
 def test_scan_generated_bundle_rejects_raw_provider_secret_literals() -> None:
     errors = scan_generated_bundle(
         {
-            "services/integrations/payments_client.py": "import stripe\nstripe.api_key = 'sk_test_1234567890'\n",
+            "services/integrations/payments_client.py": "import payment_provider\npayment_provider.api_key = 'provider_test_1234567890'\n",
         }
     )
 
     assert any("raw provider secret key literal" in error for error in errors)
-    assert any("imports the Stripe SDK directly" in error for error in errors)
-    assert any("assigns stripe.api_key directly" in error for error in errors)
+    assert any("imports the payment provider SDK directly" in error for error in errors)
+    assert any("assigns payment_provider.api_key directly" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_direct_provider_refund_calls() -> None:
     errors = scan_generated_bundle(
         {
             "modules/payments/backend/service.py": (
-                "result = stripe.Refund.create(payment_intent=payment_intent_id)\n"
+                "result = payment_provider.Refund.create(payment_intent=payment_intent_id)\n"
             ),
-            "services/integrations/payments_client.py": 'url = "/v1/refunds"\n',
+            "services/integrations/payments_client.py": 'url = "/refunds"\n',
         }
     )
 
     assert any("refunds APIs directly" in error for error in errors)
-    assert any("/v1/refunds" in error for error in errors)
+    assert any("/refunds" in error for error in errors)
 
 
 def test_scan_generated_bundle_allows_managed_refund_adapter_call() -> None:

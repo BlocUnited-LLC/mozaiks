@@ -22,6 +22,7 @@ def _event(
     workflow_name: str = "AppGenerator",
     prompt_tokens: int = 10,
     completion_tokens: int = 5,
+    cached_prompt_tokens: int = 0,
     total_tokens: int | None = None,
     estimated_cost_usd: float = 0.0,
 ) -> dict:
@@ -32,6 +33,7 @@ def _event(
         "workflow_name": workflow_name,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
+        "cached_prompt_tokens": cached_prompt_tokens,
         "total_tokens": total_tokens if total_tokens is not None else prompt_tokens + completion_tokens,
         "estimated_cost_usd": estimated_cost_usd,
         "event_ts": datetime(2026, 6, 1, tzinfo=UTC),
@@ -49,6 +51,7 @@ class TestSummarizeUsageEventsTotals:
         assert result["totals"]["prompt_tokens"] == 0
         assert result["totals"]["completion_tokens"] == 0
         assert result["totals"]["total_tokens"] == 0
+        assert result["totals"]["cached_prompt_tokens"] == 0
         assert result["totals"]["estimated_cost_usd"] == 0.0
         assert result["totals"]["llm_calls"] == 0
         assert result["by_workflow"] == []
@@ -61,6 +64,7 @@ class TestSummarizeUsageEventsTotals:
         assert result["totals"]["prompt_tokens"] == 10
         assert result["totals"]["completion_tokens"] == 5
         assert result["totals"]["total_tokens"] == 15
+        assert result["totals"]["cached_prompt_tokens"] == 0
         assert result["totals"]["llm_calls"] == 1
 
     def test_multiple_events_sum_totals(self):
@@ -73,7 +77,19 @@ class TestSummarizeUsageEventsTotals:
         assert result["totals"]["prompt_tokens"] == 30
         assert result["totals"]["completion_tokens"] == 15
         assert result["totals"]["total_tokens"] == 45
+        assert result["totals"]["cached_prompt_tokens"] == 0
         assert result["totals"]["llm_calls"] == 2
+
+    def test_cached_prompt_tokens_sum_totals(self):
+        from mozaiksai.core.usage.ledger import summarize_usage_events
+        docs = [
+            _event(prompt_tokens=10, completion_tokens=5, cached_prompt_tokens=4),
+            _event(prompt_tokens=20, completion_tokens=10, cached_prompt_tokens=6),
+        ]
+        result = summarize_usage_events(docs, app_id="app-1")
+        assert result["totals"]["cached_prompt_tokens"] == 10
+        assert result["by_workflow"][0]["cached_prompt_tokens"] == 10
+        assert result["by_run"][0]["cached_prompt_tokens"] == 10
 
     def test_cost_accumulation(self):
         from mozaiksai.core.usage.ledger import summarize_usage_events

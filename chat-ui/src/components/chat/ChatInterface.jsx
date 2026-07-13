@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import ChatMessage from "./ChatMessage";
 import { useNavigate, useParams } from "react-router-dom";
 import UIToolRenderer from "../../core/ui/UIToolRenderer";
@@ -197,6 +197,7 @@ const ModernChatInterface = ({
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
   const [buttonText, setButtonText] = useState('SEND');
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const navigate = useNavigate();
@@ -214,6 +215,11 @@ const ModernChatInterface = ({
   const baseShellTitle = String(appDisplayName || chatTheme?.branding?.name || 'MozaiksAI').trim() || 'MozaiksAI';
   const shellTitle = conversationMode === 'ask' ? `Ask ${baseShellTitle}` : baseShellTitle;
   const brandLogoSrc = getBrandLogoSrc(chatTheme);
+  const hasPendingHarnessDecision = Boolean(
+    pendingHarnessDecision
+    && typeof pendingHarnessDecision === 'object'
+    && pendingHarnessDecision.decision_id
+  );
   // const renderCountRef = useRef(0); // For debugging renders if needed
 
   // Optional debug: enable to trace renders
@@ -222,6 +228,48 @@ const ModernChatInterface = ({
   // useEffect(() => {
   //   console.debug('ModernChatInterface received messages:', messages?.length || 0);
   // }, [messages]);
+
+  // ---------------------------------------------------------------------------
+  // Composer focus helpers
+  // ---------------------------------------------------------------------------
+
+  const isComposerDisabled = buttonText === 'NEXT' || hasPendingHarnessDecision;
+
+  const focusComposer = useCallback(() => {
+    if (!isComposerDisabled) {
+      textareaRef.current?.focus();
+    }
+  }, [isComposerDisabled]);
+
+  // Auto-focus when it's the user's turn to reply (awaiting_reply / tool input)
+  useEffect(() => {
+    if ((pendingComposerReply || pendingComposerInputToolCall) && !isComposerDisabled) {
+      const id = setTimeout(focusComposer, 60);
+      return () => clearTimeout(id);
+    }
+  }, [pendingComposerReply, pendingComposerInputToolCall, isComposerDisabled, focusComposer]);
+
+  // "Type anywhere" — keypresses anywhere on the page land in the composer
+  // unless the user is already typing in another input (e.g. an artifact form).
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return; // leave shortcuts alone
+      if (e.key.length !== 1) return;                  // skip non-printable keys
+      if (isComposerDisabled) return;
+      const active = document.activeElement;
+      if (
+        active &&
+        (active.tagName === 'INPUT' ||
+         active.tagName === 'TEXTAREA' ||
+         active.isContentEditable ||
+         active === textareaRef.current)
+      ) return;
+      textareaRef.current?.focus();
+      // Don't preventDefault — the character propagates into the now-focused textarea
+    };
+    document.addEventListener('keydown', handleGlobalKeyDown);
+    return () => document.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isComposerDisabled]);
 
   // Chat flow UI tool event handling
   // This keeps the main chat interface clean and avoids hook violations.
@@ -254,11 +302,6 @@ const ModernChatInterface = ({
     || pendingComposerInputToolCall?.payload?.agent_name
     || pendingComposerReply?.agent
     || 'Agent'
-  );
-  const hasPendingHarnessDecision = Boolean(
-    pendingHarnessDecision
-    && typeof pendingHarnessDecision === 'object'
-    && pendingHarnessDecision.decision_id
   );
   const pendingHarnessTitle = PENDING_HARNESS_DECISION_TITLES[pendingHarnessDecision?.decision_type] || 'Harness Decision';
   const pendingHarnessActions = Array.isArray(pendingHarnessDecision?.actions)
@@ -311,6 +354,7 @@ const ModernChatInterface = ({
     const newMessage = { "sender": "user", "content": message, "artifactContext": artifactContext || null };
     onSendMessage(newMessage);
     setMessage('');
+    setTimeout(focusComposer, 60);
   };
 
   const onUploadClick = () => {
@@ -339,7 +383,7 @@ const ModernChatInterface = ({
     }
   };
 
-  const handleKeyPress = (event) => {
+  const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       onSubmitClick(event);
@@ -787,6 +831,7 @@ const ModernChatInterface = ({
 
           <div className="flex-1 relative min-w-0 flex items-center">
             <textarea
+              ref={textareaRef}
               value={message}
               onChange={(e) => {
                 setMessage(e.target.value);
@@ -795,10 +840,10 @@ const ModernChatInterface = ({
                 e.target.style.height = 'auto';
                 e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
               }}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyDown}
               onFocus={() => setHasUserInteracted(true)}
               placeholder={composerPlaceholder}
-              disabled={buttonText === 'NEXT' || hasPendingHarnessDecision}
+              disabled={isComposerDisabled}
               rows={1}
               className={`w-full bg-white/10 border-2 rounded-lg sm:rounded-xl px-2.5 sm:px-3 py-1.5 sm:py-2 mt-0.5 text-[var(--color-text-primary)] text-slate-100 text-sm sm:text-base placeholder:text-[var(--color-text-secondary)] placeholder:text-slate-400 placeholder:text-xs sm:placeholder:text-sm focus:outline-none resize-none transition-all duration-300 transmission-typing-font min-h-[36px] sm:min-h-[40px] max-h-[120px] my-scroll1 backdrop-blur-sm ${
                 hasUserInteracted

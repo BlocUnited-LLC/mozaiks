@@ -94,24 +94,24 @@ class TestSlug:
 
 class TestSecretName:
     def test_result_is_string(self):
-        assert isinstance(_secret_name("app-1", "stripe"), str)
+        assert isinstance(_secret_name("app-1", "payment_provider"), str)
 
     def test_starts_with_prefix(self):
-        result = _secret_name("app-1", "stripe", prefix="myprefix")
+        result = _secret_name("app-1", "payment_provider", prefix="myprefix")
         assert result.startswith("myprefix-")
 
     def test_contains_service_slug(self):
-        result = _secret_name("app-1", "stripe")
-        assert "stripe" in result
+        result = _secret_name("app-1", "payment_provider")
+        assert "payment-provider" in result
 
     def test_contains_app_id_slug(self):
-        result = _secret_name("myapp", "stripe")
+        result = _secret_name("myapp", "payment_provider")
         assert "myapp" in result
 
     def test_contains_sha1_digest(self):
         app_id = "myapp"
         digest = hashlib.sha1(app_id.encode("utf-8")).hexdigest()[:10]
-        result = _secret_name(app_id, "stripe")
+        result = _secret_name(app_id, "payment_provider")
         assert digest in result
 
     def test_total_length_capped_at_127(self):
@@ -121,7 +121,7 @@ class TestSecretName:
         assert len(result) <= 127
 
     def test_prefix_override_applied(self):
-        result = _secret_name("app-1", "stripe", prefix="custom-prefix")
+        result = _secret_name("app-1", "payment_provider", prefix="custom-prefix")
         assert result.startswith("custom-prefix-")
 
     def test_special_chars_in_service_slugified(self):
@@ -130,16 +130,16 @@ class TestSecretName:
         assert "@" not in result
 
     def test_consistent_for_same_inputs(self):
-        r1 = _secret_name("app-1", "stripe")
-        r2 = _secret_name("app-1", "stripe")
+        r1 = _secret_name("app-1", "payment_provider")
+        r2 = _secret_name("app-1", "payment_provider")
         assert r1 == r2
 
     def test_different_app_ids_produce_different_names(self):
-        r1 = _secret_name("app-1", "stripe")
-        r2 = _secret_name("app-2", "stripe")
+        r1 = _secret_name("app-1", "payment_provider")
+        r2 = _secret_name("app-2", "payment_provider")
         assert r1 != r2
 
     def test_different_services_produce_different_names(self):
-        r1 = _secret_name("app-1", "stripe")
+        r1 = _secret_name("app-1", "payment_provider")
         r2 = _secret_name("app-1", "openai")
         assert r1 != r2

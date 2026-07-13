@@ -36,13 +36,6 @@ capabilities:
       - Use app/config/subscriptions.yaml when a generated SaaS app needs plan quotas, usage limits, token_wallets, or token_allowances.
       - Pages must bind through app-owned facade modules, not directly to any external billing endpoint.
     alternatives:
-      - id: stripe
-        capability_kind: external_adapter
-        use_when: User explicitly asks for Stripe or already has Stripe as the required processor.
-        generator_notes:
-          - Generate provider-neutral app-owned billing/subscription modules.
-          - Put Stripe mechanics behind services/adapters/payments/stripe.py or services/integrations/stripe_client.py.
-          - Never embed raw Stripe secrets in generated files.
       - id: custom_payments_provider
         capability_kind: external_adapter
         use_when: User brings a custom payment processor, wallet rail, or billing service.

@@ -14,6 +14,7 @@ import { getAppStudioSnapshot, sumBy } from './appStudioDataHelpers.js'
 import { buildHealthState, formatPercentValue } from './studioHealthModel.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
+
 export default function AppHealthPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppStudioData(appId)
@@ -26,7 +27,7 @@ export default function AppHealthPage() {
   const averageLatency = snapshot.runs.length > 0
     ? Math.round(sumBy(snapshot.runs, (run) => run.runtime_sec || 0) / snapshot.runs.length)
     : null
-  const missingSecrets = snapshot.appConnectors.filter((connector) => !connector.secret_available).length
+  const integrationIssues = snapshot.appConnectors.filter((connector) => !connector.secret_available).length
   const health = buildHealthState({
     status: snapshot.lifecycleState,
     totalErrors: Number(snapshot.stats.total_errors || 0),
@@ -34,7 +35,7 @@ export default function AppHealthPage() {
     latestValidationStatus: latestArtifact?.validation_status,
     uptimePercent: snapshot.deploymentRecord?.uptime_percent ?? null,
     hasDeploymentFailure: Boolean(snapshot.deploymentRecord?.failed),
-    missingSecrets,
+    integrationIssues,
   })
   const errorRate = snapshot.runs.length > 0
     ? Math.round((Number(snapshot.stats.total_errors || 0) / snapshot.runs.length) * 100)
@@ -44,7 +45,7 @@ export default function AppHealthPage() {
     { id: 'uptime', label: 'Uptime', value: health.uptimeLabel, detail: 'Observed hosting uptime' },
     { id: 'errors', label: 'Error Rate', value: snapshot.runs.length > 0 ? `${errorRate}%` : '0%', detail: 'Runs with recent friction' },
     { id: 'latency', label: 'Avg Latency', value: averageLatency != null ? `${averageLatency}s` : 'Pending', detail: 'Observed across recent runs' },
-    { id: 'integrations', label: 'Missing Secrets', value: formatCompactNumber(missingSecrets, '0'), detail: 'Integrations still incomplete' },
+    { id: 'integrations', label: 'Integration Gaps', value: formatCompactNumber(integrationIssues, '0'), detail: 'Setup items still incomplete' },
   ]
 
   return (
@@ -144,6 +145,7 @@ export default function AppHealthPage() {
             )}
           </Panel>
         </div>
+
       </div>
     </WorkspaceLayout>
   )

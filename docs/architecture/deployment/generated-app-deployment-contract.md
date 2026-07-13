@@ -62,6 +62,8 @@ Required shape:
   - `health`
 - `provider_profile`
   - generic metadata only in OSS
+- `readiness_requirements`
+  - provider-neutral checks that name required runtime env and evidence stamps
 
 Optional shape:
 
@@ -86,11 +88,52 @@ Required shape:
 - `healthcheck`
 - `ci_workflow`
 - `ci_secret_requirements` (optional)
+- `readiness_requirements`
 - `dockerfile`
 - `compose`
 - `validation_status`
 - `deploy_target_spec`
 - `build_output_contract` (optional)
+
+### Readiness Requirements
+
+Generated deployment manifests carry a names-only readiness section under
+`readiness_requirements`. This is the OSS first-class contract for production
+evidence without coupling generated apps to a hosted product, cloud provider, or
+payment provider.
+
+Suggested shape:
+
+- `checks`
+  - `id`
+  - `category`
+  - `label`
+  - `implemented_score`
+  - `required_env`
+  - `required_evidence`
+  - `canonical_paths`
+  - `notes` (optional)
+
+Default generated checks are provider-neutral:
+
+- `runtime_environment`
+  - requires `OPENAI_API_KEY` and `MONGO_URI`
+- `container_smoke`
+  - requires evidence stamp `APP_IMAGE_SMOKE_VERIFIED_AT`
+- `healthcheck`
+  - requires evidence stamp `APP_HEALTHCHECK_VERIFIED_AT`
+
+Rules:
+
+1. Readiness requirements carry names only, never values.
+2. `required_env` and `required_evidence` use uppercase env-style names.
+3. Evidence stamps should contain an ISO timestamp, run id, ticket URL, or
+   change record only after the named check has passed.
+4. Readiness checks are provider-neutral; they must not mention Azure, AWS,
+   payment provider, MozaiksPay, Cloudflare, registrar adapters, or hosted-product policy.
+5. Hosted products may add product-specific checks outside generated app
+   bundles, then evaluate both layers with the OSS
+   `mozaiksai.core.runtime.readiness` primitive.
 
 ### CI Workflow Secret Requirements
 
@@ -198,6 +241,7 @@ OSS AppGenerator emits and validates:
 - artifact validation rules
 - provider-neutral build output handoff contract
 - names-only CI workflow secret requirements contract
+- provider-neutral readiness requirements contract
 
 Adapter layers outside AppGenerator handle:
 
@@ -261,6 +305,8 @@ This contract supports self-hosting through the same generic artifact outputs:
 - generic container platform deployment
 
 Self-host users consume generated artifacts and provide their own infrastructure and secret stores.
+They can evaluate the manifest readiness section with
+`mozaiksai.core.runtime.readiness.evaluate_readiness_requirements`.
 
 ## Hosted Product Handoff
 

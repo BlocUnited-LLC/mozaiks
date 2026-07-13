@@ -282,7 +282,7 @@ It should not own the runtime engines.
 The harness is not:
 
 - a workflow
-- an AG2 beta workflow run
+- an AG2 1.0 beta workflow run
 - a module handler under `app/modules/*`
 - a global prompt wrapped around every message
 - a replacement for `extension_registry.json`
@@ -630,7 +630,7 @@ The current first-party tools live under:
 
 ## AG2 Implementation Model
 
-LLM-backed checkpoints use `autogen.beta.Agent.ask()` to enforce structured
+LLM-backed checkpoints use `ag2.Agent.ask()` to enforce structured
 outputs without custom JSON-parsing fallbacks.
 
 ### Structured Output Pattern

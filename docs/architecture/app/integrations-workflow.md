@@ -142,11 +142,10 @@ safe_details: {}
 error_code: string | null
 ```
 
-Checks run only by explicit server-side request, such as an operator clicking
-"Check now" on `/apps/{appId}/integrations`. The frontend calls the Studio
-health-check endpoint and never calls provider APIs directly. Provider checks
-must not run from `list_connectors`, page load, connector save, or the default
-IntegrationReadinessAgent checkpoint.
+Checks run only by explicit server-side request from a registered management
+surface. The frontend must call a Studio/backend endpoint and never call
+provider APIs directly. Provider checks must not run from page load, connector
+save, or the default IntegrationReadinessAgent checkpoint.
 
 Secret access is server-only. A plugin receives a `ConnectorSecretReader`, not a
 secret value in its constructor or public inputs. The reader can resolve the
@@ -173,18 +172,28 @@ policy is intentionally not part of the current contract.
 
 ## Route Ownership
 
-Integrations are app-scoped in the canonical first version. The registered
-Studio route is:
+Integrations use a two-tier Studio model. The workspace route manages provider
+availability once for the whole workspace:
+
+```text
+/integrations
+```
+
+The workspace `/integrations` route is the provider-management surface. It owns
+the integration catalog, credential-presence status, setup guidance, and
+operator notes. Apps do not duplicate global provider setup.
+
+Each app may also expose a deep detail route for the services its latest build
+declared:
 
 ```text
 /apps/{appId}/integrations
 ```
 
-That route owns connector inventory, credential setup, readiness, and health for
-one app. Connector readiness is evaluated against an app build/workflow context,
-so a bare workspace `/integrations` route is intentionally not a first-class
-route unless a future workspace-level integration product is explicitly
-designed and registered in `route_manifest.json`.
+That route is for app-specific requirements and setup gaps. It is linked from
+the app Overview "Connected services" panel and hidden from the primary app
+sidebar. Connector readiness is evaluated against an app build/workflow context,
+but shared provider status is overlaid from the workspace catalog.
 
 `admin/admin_registry.yaml` may include app-level navigation metadata for the
 integrations page, but it is not a custom route registry. Full-page React route
@@ -193,10 +202,14 @@ component registration.
 
 ## Operator UI
 
-The `/apps/{appId}/integrations` surface renders connector health for operators
-without revealing secrets. Each connector should show its display name,
-readiness, health status, missing required fields, last checked timestamp when
-present, safe public configuration, and credential presence as a boolean state.
+The `/integrations` surface renders the workspace integration catalog for
+operators without revealing secrets. Each provider should show its display name,
+category, setup status, required secret names, setup guidance, and operator
+note. Secret presence is returned as booleans only.
+
+The app Overview renders a compact "Connected services" summary for the
+services that specific app declared. `/apps/{appId}/integrations` renders the
+same declarations in detail, cross-referenced with live workspace status.
 
 When a connector health payload includes `health_check_supported: true`, the UI
 may show a manual "Check now" button. Clicking it calls:

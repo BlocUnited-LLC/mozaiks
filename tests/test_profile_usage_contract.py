@@ -48,6 +48,16 @@ def test_profile_usage_serializes_subscription_usage_limits():
                     "auto_debit_usage": True,
                 }
             ],
+            "usage_charge_policies": [
+                {
+                    "meter_id": "ai_tokens",
+                    "label": "AI usage",
+                    "source": "runtime_llm_usage",
+                    "basis": "provider_cost_usd",
+                    "markup_percent": 35,
+                    "rounding": "cent",
+                }
+            ],
         }
     )
 
@@ -88,6 +98,18 @@ def test_profile_usage_serializes_subscription_usage_limits():
                 "scope": "user",
                 "auto_debit_usage": True,
                 "allow_negative_balance": False,
+            }
+        ],
+        "usage_charge_policies": [
+            {
+                "meter_id": "ai_tokens",
+                "label": "AI usage",
+                "source": "runtime_llm_usage",
+                "basis": "provider_cost_usd",
+                "markup_percent": 35.0,
+                "unit_price_usd_per_1k": None,
+                "minimum_charge_usd": 0.0,
+                "rounding": "cent",
             }
         ],
         "source": "app_config_subscriptions",

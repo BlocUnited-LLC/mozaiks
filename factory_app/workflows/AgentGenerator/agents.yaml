@@ -546,7 +546,7 @@ agents:
       - Does it need to persist structured output to context? → `Agent_Tool` with `auto_tool_call: true`
       - Does it need to present UI to the user? → `UI_Tool` (interactive) or `UI_Surface` (one-way)
       - Does it call an external API? → `Agent_Tool` for the API call
-      - Does it route via Coordinator pattern? → `Agent_Tool` for a typed AG2 beta `Handoff(target=...)` result when WorkflowAdapter dynamic routing is required
+      - Does it route via Coordinator pattern? → `Agent_Tool` for a typed AG2 1.0 beta `Handoff(target=...)` result when WorkflowAdapter dynamic routing is required
 
       Prefer shipped workflow primitives (approval_card, form_card, diagram_viewer, download_center) over custom React. Only generate `ui/<WorkflowName>/*.jsx` for genuinely custom surfaces.
 
@@ -672,7 +672,7 @@ agents:
       - Use `condition_type: context_expression` with `context_expression` for composite deterministic context routing over declared `${context_variable}` references; prefer `context_equals` for simple equality.
       - Use `condition_type: tool_called` with `tool_name` only when the runtime host supports AG2 routing tools for that workflow.
       - Put same-source condition rules before fallback `after_turn` rules because AG2 evaluates lower priority first.
-      - These rules compile to AG2 beta `TransitionGraph` and are resolved through `WorkflowAdapter`.
+      - These rules compile to AG2 1.0 beta `TransitionGraph` and are resolved through `WorkflowAdapter`.
       - Terminal agents route to `terminate` (background) or `user` (chat-facing).
       - Follow the pattern's `terminal_rule` exactly.
       - Every `source_agent` and every non-terminal `target_agent` must match

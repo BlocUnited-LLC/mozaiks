@@ -10,6 +10,7 @@
         "requiresRole": "admin",
         "title": "Create App",
         "appShell": true,
+        "ai_context": "The user is on the Create App page, where they can generate a new AI-powered app using the Studio builder.",
         "navigation": {
           "group": "workspace-studio",
           "include": false
@@ -26,6 +27,7 @@
         "requiresRole": "admin",
         "title": "Apps",
         "appShell": true,
+        "ai_context": "The user is on the Apps page, showing all apps in this workspace. Each app can be clicked to open App Studio for configuration, usage, and health details.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
@@ -43,6 +45,7 @@
         "requiresRole": "admin",
         "title": "Usage",
         "appShell": true,
+        "ai_context": "The user is on the Workspace Usage page. It shows LLM token consumption, cost estimates, and chat activity across all apps in this workspace.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
@@ -51,19 +54,20 @@
       }
     },
     {
-      "path": "/health",
-      "component": "WorkspaceHealthPage",
-      "label": "Health",
+      "path": "/integrations",
+      "component": "WorkspaceIntegrationsPage",
+      "label": "Integrations",
       "order": 6,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Health",
+        "title": "Integrations",
         "appShell": true,
+        "ai_context": "The user is on the Workspace Integrations page. It shows all third-party services available to apps in this workspace. Each integration shows its configuration status and which environment variables or credentials it needs.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
-          "icon": "pulse"
+          "icon": "plug"
         }
       }
     },
@@ -77,6 +81,7 @@
         "requiresRole": "admin",
         "title": "App Studio",
         "appShell": true,
+        "ai_context": "The user is in App Studio, the management interface for a specific app. They can review build status, configure workflows, and manage the app lifecycle.",
         "navigation": {
           "group": "app-studio",
           "include": false
@@ -93,6 +98,7 @@
         "requiresRole": "admin",
         "title": "App Overview",
         "appShell": true,
+        "ai_context": "The user is on the App Overview page in App Studio. It shows the app's identity, top-level KPIs, build state, and recent activity.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -110,6 +116,7 @@
         "requiresRole": "admin",
         "title": "App Health",
         "appShell": true,
+        "ai_context": "The user is on the App Health page. It shows runtime signals, connector status, and any warnings or errors for this app.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -120,13 +127,14 @@
     {
       "path": "/apps/:appId/users",
       "component": "AppUsersPage",
-      "label": "Users",
+      "label": "Access",
       "order": 22,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Users",
+        "title": "App Access",
         "appShell": true,
+        "ai_context": "The user is on the App Access page. It shows users and roles who have access to this app.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -137,15 +145,17 @@
     {
       "path": "/apps/:appId/integrations",
       "component": "AppIntegrationsPage",
-      "label": "Integrations",
+      "label": "Integration Setup",
       "order": 23,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Integrations",
+        "title": "Integration Setup",
         "appShell": true,
+        "ai_context": "The user is on the App Integration Setup page. It shows which third-party services this app uses and their configuration status.",
         "navigation": {
           "group": "app-studio",
+          "include": false,
           "scope": "local",
           "icon": "plug"
         }
@@ -161,11 +171,94 @@
         "requiresRole": "admin",
         "title": "Usage",
         "appShell": true,
+        "ai_context": "The user is on the App Usage page. It shows LLM token consumption, cost estimates, and per-workflow chat breakdowns for this specific app.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
           "icon": "chart"
         }
+      }
+    },
+    {
+      "path": "/apps/:appId/support",
+      "component": "AppSupportPage",
+      "label": "Support",
+      "order": 25,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "App Support",
+        "appShell": true,
+        "ai_context": "The user is on the App Support page. It shows help desk notes, stalled runs, escalations, and support-facing diagnostics for this app.",
+        "navigation": {
+          "group": "app-studio",
+          "scope": "local",
+          "icon": "support"
+        }
+      }
+    },
+    {
+      "id": "messages",
+      "label": "Messages",
+      "path": "/messages",
+      "component": "MessagesPage",
+      "order": 30,
+      "navigation": {
+        "include": false
+      },
+      "meta": {
+        "title": "Messages",
+        "requiresAuth": true,
+        "appShell": true,
+        "shellMode": "workspace"
+      }
+    },
+    {
+      "id": "message-thread",
+      "label": "Conversation",
+      "path": "/messages/:threadId",
+      "component": "MessageThreadPage",
+      "order": 31,
+      "navigation": {
+        "include": false
+      },
+      "meta": {
+        "title": "Conversation",
+        "requiresAuth": true,
+        "appShell": true,
+        "shellMode": "conversation"
+      }
+    },
+    {
+      "id": "profile-me",
+      "label": "My Profile",
+      "path": "/me",
+      "component": "ProfilePage",
+      "order": 32,
+      "navigation": {
+        "include": false
+      },
+      "meta": {
+        "title": "My Profile",
+        "requiresAuth": true,
+        "appShell": true,
+        "shellMode": "social"
+      }
+    },
+    {
+      "id": "profile-user",
+      "label": "Profile",
+      "path": "/u/:username",
+      "component": "ProfilePage",
+      "order": 33,
+      "navigation": {
+        "include": false
+      },
+      "meta": {
+        "title": "Profile",
+        "requiresAuth": true,
+        "appShell": true,
+        "shellMode": "social"
       }
     }
   ]

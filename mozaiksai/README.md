@@ -21,12 +21,12 @@ compose app-local hosts on top of Studio instead of adding product hosts here.
 
 ## What This Layer Owns
 
-- Executes AI workflow runs with AG2 beta Agents and Network transition graphs
+- Executes AI workflow runs with AG2 1.0 beta Agents and Network transition graphs
 - Streams events to frontend via WebSocket
 - Persists chat sessions to MongoDB
 - Handles tool calls from agents
 - Manages workflow state (in-progress, completed)
-- AG2 beta telemetry and neutral runtime usage measurement
+- AG2 1.0 beta telemetry and neutral runtime usage measurement
 
 It must not own:
 
@@ -104,7 +104,7 @@ run_workflow_orchestration(workflow_name, chat_id, ...)
     ↓
 Load workflow config from factory_app/workflows/{name}/
     ↓
-Create AG2 beta agents and compile transition_graph.yaml to a TransitionGraph
+Create AG2 1.0 beta agents and compile transition_graph.yaml to a TransitionGraph
     ↓
 Run agent turns through the AG2 orchestration adapter
     ↓

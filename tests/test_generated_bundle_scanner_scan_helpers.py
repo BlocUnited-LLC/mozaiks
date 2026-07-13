@@ -93,7 +93,7 @@ class TestScanSecuritySecretContract:
         assert _scan_security_secret_contract({"security/secrets.yaml": ""}) == []
 
     def test_valid_names_only_returns_empty(self):
-        content = "secrets:\n  - name: STRIPE_KEY\n    backend: env\n"
+        content = "secrets:\n  - name: PAYMENT_PROVIDER_KEY\n    backend: env\n"
         assert _scan_security_secret_contract({"security/secrets.yaml": content}) == []
 
     def test_invalid_yaml_returns_error(self):
@@ -103,7 +103,7 @@ class TestScanSecuritySecretContract:
         assert "valid YAML" in errors[0]
 
     def test_raw_api_key_with_value_returns_error(self):
-        content = "api_key: sk_live_abc123\n"
+        content = "api_key: provider_live_abc123\n"
         errors = _scan_security_secret_contract({"security/secrets.yaml": content})
         assert len(errors) == 1
         assert "raw credential" in errors[0] or "names-only" in errors[0]
@@ -126,7 +126,7 @@ class TestScanSecuritySecretContract:
 
     def test_secrets_yaml_path_case_insensitive(self):
         # Files map uses normalized paths; security/secrets.yaml is canonical
-        content = "name: STRIPE_KEY\n"
+        content = "name: PAYMENT_PROVIDER_KEY\n"
         result = _scan_security_secret_contract({"security/secrets.yaml": content})
         assert result == []
 

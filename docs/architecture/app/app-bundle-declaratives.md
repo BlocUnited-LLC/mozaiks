@@ -41,7 +41,7 @@ falling back to broader tenant, workspace, user, or app-level records.
 Plans may also declare `usage_limits` for meters such as `ai_tokens`. These
 limits are deterministic app intent used by admin, billing, and MozaiksPay
 facade surfaces. Token measurements themselves come from runtime
-AG2 beta usage middleware and `/api/me/usage` or `/api/admin/usage`; generated
+AG2 1.0 beta usage middleware and `/api/me/usage` or `/api/admin/usage`; generated
 modules must not create a second usage ledger.
 
 Plans may also declare provider-neutral `token_allowances`, and apps may declare

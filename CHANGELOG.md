@@ -12,7 +12,16 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Changed
+
+- Hardened usage pricing catalog sync with upstream content hashing, normalized row-count drift checks, generated catalog change summaries, docs-based override guidance, and private override-file packaging protection.
+
+## 0.1.8 - 2026-07-12
+
 ### Added
+
+- **Workspace integrations catalog** (`factory_app/app/modules/workspace_integrations/`):
+  New Studio module that tracks third-party service configuration status at the workspace level. Status (`configured`, `partial`, `missing`, `unknown`) is derived server-side from environment secrets — no secret values are ever returned. Includes operator notes storage per integration, `MOZAIKS_INTEGRATIONS_REGISTRY_MODE=catalog_only` for hosted multi-tenant deployments, and 14 catalog entries across 9 categories (payments, email, sms, ai, storage, source_control, notifications, database, cache, auth, analytics). Studio workspace page at `/integrations` shows the full catalog grouped by category with per-secret presence rows. AppGenerator gains `check_workspace_integrations` tool (registered to `AppPlanAgent`) so the agent can detect available integrations early in planning and avoid prompting for credentials that are already configured.
 
 - **Immutable audit trail** (`mozaiksai/core/audit/`):
   Every module action and workflow start is logged to a dedicated append-only MongoDB `audit_log` collection with actor, app_id, resource, action, and inputs hash. Failures degrade to structured log so records are never silently lost. Wired into `ModuleExecutor.execute()` via fire-and-forget `asyncio.create_task`.
@@ -415,10 +424,10 @@ This project follows a practical pre-1.0 changelog format:
 
 - **Open-redirect guard on billing portal return_url** (`mozaiks-app/app/modules/hosted_billing/backend/service.py`):
   `create_billing_portal_session` now validates that `return_url` uses the `https://`
-  scheme and contains a non-empty host before passing the URL to the Stripe Customer
+  scheme and contains a non-empty host before passing the URL to the payment provider Customer
   Portal API. `http://` and `javascript:` URLs are rejected with `INVALID_INPUT`
-  without contacting Stripe. 3 new tests cover http rejection, javascript: rejection,
-  and empty URL. Stripe itself also validates portal return URLs in the dashboard
+  without contacting payment provider. 3 new tests cover http rejection, javascript: rejection,
+  and empty URL. payment provider itself also validates portal return URLs in the dashboard
   allowlist, so this is defense-in-depth on the Mozaiks side.
 
 - **Public-status filter bypass closed** (`mozaiks-app/app/modules/investor_marketplace/backend/service.py`, `policy.py`):
@@ -824,7 +833,7 @@ This project follows a practical pre-1.0 changelog format:
   production readiness gate requires. Covers context.yaml and contract.yaml
   contract shapes, all `required_outputs` having matching template files, the
   `forbidden_outputs` drift guard, `mozaikspay_client.py` provider-neutrality
-  (no `import stripe`, no raw secrets, env-var–only URL resolution), the
+  (no `import payment_provider`, no raw secrets, env-var–only URL resolution), the
   `billing_portal` facade module being app-owned (`owner: app`), page schemas
   routing through the facade rather than provider-owned modules directly, and a
   pack-wide drift guard (41 tests).
@@ -837,9 +846,9 @@ This project follows a practical pre-1.0 changelog format:
   export-blocking `app_runtime_load` check.
 
 - **`test_wallet_module.py`** (mozaiks-app) — comprehensive wallet service
-  tests covering balance calculation, payout request guards (no Stripe account,
+  tests covering balance calculation, payout request guards (no payment provider account,
   amount exceeds available, zero amount, default-to-full-available), credit
-  reactions (`credit_app_earnings`, `credit_investment_return`), Stripe webhook
+  reactions (`credit_app_earnings`, `credit_investment_return`), payment provider webhook
   processing idempotency (`payout.paid`, `payout.failed`, already-terminal,
   transaction-not-found, unhandled event), managed wallet provisioning validation,
   wallet provisioning status with secret stripping, and repo
@@ -1654,7 +1663,7 @@ This project follows a practical pre-1.0 changelog format:
 ### Changed
 
 - Generated `requirements.txt` now includes commented examples for
-  app-specific dependencies (e.g. Stripe, Twilio) to clarify that `mozaiks`
+  app-specific dependencies (e.g. payment provider, Twilio) to clarify that `mozaiks`
   itself is not listed there — it is a platform-level install, not an
   app-level dependency.
 - Getting Started doc clarified that `.\my-workspace` is the name of the
@@ -1742,7 +1751,7 @@ This project follows a practical pre-1.0 changelog format:
   `domain.app_registry.app_promoted`.
 - Added provider-neutral deployment artifact generation (`deployment_contract.py`):
   produces Dockerfile, CI workflow, and compose scaffold from the app bundle.
-- Added `generated_bundle_scanner.py`: detects Stripe SDK usage, refund API
+- Added `generated_bundle_scanner.py`: detects payment provider SDK usage, refund API
   calls, and secret key literals in generated bundles before promotion.
 - Added canonical `ui/lib/moduleApi.js` template (`module_api_template.py`)
   with structured error fields for generated frontend module clients.

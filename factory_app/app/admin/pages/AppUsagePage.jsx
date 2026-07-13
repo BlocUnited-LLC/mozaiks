@@ -1,15 +1,23 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 
+import { Alert, UsageTrendPanel } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   StudioErrorState,
   StudioInlineEmptyState,
   StudioLoadingState,
   Panel,
+  SegmentedControl,
 } from '../../ui/components/StudioShared.jsx'
 import { AppStudioHero, formatCompactNumber, formatCurrencyValue } from './AppStudioChrome.jsx'
 import { getAppStudioSnapshot, sumBy } from './appStudioDataHelpers.js'
+import PricingHealthPanel from './PricingHealthPanel.jsx'
+import {
+  USAGE_TREND_METRICS,
+  buildUsageTrendSeries,
+  getUsageRows,
+} from './usagePresentation.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
 const COL_HEADER = 'px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground'
@@ -96,33 +104,6 @@ function buildWorkflowGroups(usage, demoRuns = []) {
   }).sort((a, b) => b.totalTokens - a.totalTokens)
 }
 
-function exportBreakdownCsv(appId, groups) {
-  const headers = ['workflow', 'runs', 'llm_calls', 'input_tokens', 'output_tokens', 'total_tokens', 'avg_tokens', 'estimated_cost', 'avg_cost']
-  const lines = [
-    headers.join(','),
-    ...groups.map((g) => [
-      JSON.stringify(g.workflow),
-      g.count,
-      g.llmCalls,
-      g.inputTokens,
-      g.outputTokens,
-      g.totalTokens,
-      Math.round(g.avgTokens),
-      g.cost.toFixed(4),
-      g.avgCost.toFixed(4),
-    ].join(',')),
-  ]
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${appId}-usage.csv`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
-
 function WorkflowGroupRow({ group, expanded, onToggle }) {
   return (
     <>
@@ -131,7 +112,7 @@ function WorkflowGroupRow({ group, expanded, onToggle }) {
           <div className="flex items-center gap-2">
             <span className={`text-[10px] text-muted-foreground transition-transform duration-150 select-none ${expanded ? 'rotate-90' : ''}`}>▶</span>
             <span className="font-semibold text-foreground text-sm">{group.workflow}</span>
-            <span className="text-xs text-muted-foreground ml-1">{group.count} run{group.count !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-muted-foreground ml-1">{group.count} chat{group.count !== 1 ? 's' : ''}</span>
           </div>
         </td>
         <td className={COL_CELL}>{formatCompactNumber(group.inputTokens, '0')}</td>
@@ -167,6 +148,7 @@ export default function AppUsagePage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppStudioData(appId)
   const [expandedWorkflows, setExpandedWorkflows] = useState(new Set())
+  const [chartMetric, setChartMetric] = useState('cost')
 
   const toggleExpand = (workflowName) => {
     setExpandedWorkflows((prev) => {
@@ -188,19 +170,62 @@ export default function AppUsagePage() {
   const totalCost = Number(usageTotals.estimated_cost_usd || 0)
   const totalRuns = Number(snapshot.stats.tracked_chats || 0)
   const totalLlmCalls = Number(usageTotals.llm_calls || 0)
-  const costDrivers = workflowGroups.flatMap((group) => group.sessions)
-    .sort((left, right) => Number(right.cost || 0) - Number(left.cost || 0))
-    .slice(0, 3)
+  const usageRows = getUsageRows(snapshot.usage, dataMode === 'demo' ? snapshot.runs : [])
+  const trendData = buildUsageTrendSeries(usageRows, chartMetric).map((point) => ({
+    ...point,
+    extras: [
+      { label: 'Date', value: point.detail || point.label },
+      { label: 'Cost', value: formatCurrencyValue(point.cost, '$0.0000') },
+      { label: 'Tokens', value: formatCompactNumber(point.tokens, '0') },
+      { label: 'Chats', value: String(point.runs) },
+    ],
+  }))
   const averageLatency = snapshot.runs.length > 0
     ? Math.round(sumBy(snapshot.runs, (run) => run.runtime_sec || 0) / snapshot.runs.length)
     : null
 
-  const handleExportCsv = () => exportBreakdownCsv(appId, workflowGroups)
-  const summaryItems = [
-    { id: 'total', label: 'Tokens Used', value: formatCompactNumber(totalTokens, 'Pending'), detail: 'Input + output' },
-    { id: 'cost', label: 'LLM Cost', value: formatCurrencyValue(totalCost), detail: 'Estimated or provider supplied' },
-    { id: 'runs', label: 'Workflow Runs', value: formatCompactNumber(totalRuns, '0'), detail: 'Tracked executions' },
-    { id: 'llmCalls', label: 'LLM Calls', value: formatCompactNumber(totalLlmCalls, '0'), detail: 'Metered calls' },
+  const costSource = snapshot.usage?.cost_source
+  const pricingHealth = snapshot.usage?.pricing_health
+  const costDetail = pricingHealth?.status === 'ready'
+    ? 'Catalog priced'
+    : pricingHealth?.status === 'unpriced_models'
+      ? 'Unpriced models'
+      : costSource === 'default_table'
+        ? 'Fallback list prices'
+        : costSource === 'override'
+          ? 'Override rates'
+          : 'Estimated or provider supplied'
+  const appDisplayName = snapshot.app?.name || snapshot.summary?.app?.name || appId
+  const chartConfig = {
+    cost: {
+      label: 'Total spend',
+      value: formatCurrencyValue(totalCost),
+      detail: costDetail,
+      formatPointValue: (value) => formatCurrencyValue(value, '$0.00'),
+    },
+    tokens: {
+      label: 'Total tokens',
+      value: formatCompactNumber(totalTokens, 'Pending'),
+      detail: 'Input + output',
+      formatPointValue: (value) => formatCompactNumber(value, '0'),
+    },
+    runs: {
+      label: 'Chats',
+      value: formatCompactNumber(totalRuns, '0'),
+      detail: 'Tracked chats',
+      formatPointValue: (value) => formatCompactNumber(value, '0'),
+    },
+  }[chartMetric]
+  const sideItems = [
+    { id: 'input', label: 'Input tokens', value: formatCompactNumber(totalInputTokens, '0') },
+    { id: 'output', label: 'Output tokens', value: formatCompactNumber(totalOutputTokens, '0') },
+    { id: 'calls', label: 'LLM calls', value: formatCompactNumber(totalLlmCalls, '0') },
+    {
+      id: 'workflows',
+      label: 'Tracked workflows',
+      value: formatCompactNumber(snapshot.workflowNames.length, '0'),
+      detail: averageLatency != null ? `${averageLatency}s average runtime` : 'Runtime appears after completed chats.',
+    },
   ]
 
   return (
@@ -213,12 +238,46 @@ export default function AppUsagePage() {
           title="Usage"
           currentSection="Usage"
           subtitle="Review measured runtime token usage and cost estimates."
-          actions={[{ id: 'export-csv', label: 'Export CSV' }]}
-          onAction={(actionId) => { if (actionId === 'export-csv') handleExportCsv() }}
-          summaryItems={summaryItems}
+          actions={null}
+          onAction={null}
         />
 
-        <Panel title="Workflow breakdown" subtitle="Expand a workflow to see metered runs.">
+        <UsageTrendPanel
+          title={`${appDisplayName} usage`}
+          subtitle="Spend, token volume, and chat activity for this app."
+          metricLabel={chartConfig.label}
+          metricValue={chartConfig.value}
+          metricDetail={chartConfig.detail}
+          data={trendData}
+          sideItems={sideItems}
+          formatPointValue={chartConfig.formatPointValue}
+          action={(
+            <SegmentedControl
+              options={USAGE_TREND_METRICS}
+              value={chartMetric}
+              onChange={setChartMetric}
+              className="border-b-0"
+            />
+          )}
+        />
+
+        {costSource === 'not_configured' && totalCost === 0 && (
+          <Alert
+            variant="warning"
+            message="Cost estimates show $0.00 because one or more models are not priced. Refresh the provider catalog or set a pricing override."
+          />
+        )}
+
+        {costSource === 'default_table' && (
+          <Alert
+            variant="info"
+            message="Some costs are estimated from the local fallback table. Refresh the generated provider catalog or add override rates before relying on these numbers."
+          />
+        )}
+
+        <PricingHealthPanel usage={snapshot.usage} />
+
+        <Panel title="Workflow breakdown" subtitle="Expand a workflow to see metered chats.">
           {workflowGroups.length > 0 ? (
             <div className="overflow-hidden rounded-2xl border border-border/42">
               <table className="min-w-full text-sm">
@@ -228,7 +287,7 @@ export default function AppUsagePage() {
                     <th className={COL_HEADER}>Input</th>
                     <th className={COL_HEADER}>Output</th>
                     <th className={COL_HEADER}>Total</th>
-                    <th className={COL_HEADER}>Avg / run</th>
+                    <th className={COL_HEADER}>Avg / chat</th>
                     <th className={COL_HEADER}>Cost</th>
                     <th className={COL_HEADER}>Avg cost</th>
                     <th className={COL_HEADER}>LLM calls</th>
@@ -249,48 +308,23 @@ export default function AppUsagePage() {
           ) : (
             <StudioInlineEmptyState
               title="No usage breakdown available yet"
-              description="This view becomes informative once AG2 beta workflow agents produce metered LLM calls."
+              description="This view becomes informative once AG2 1.0 beta workflow agents produce metered LLM calls."
             />
           )}
         </Panel>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-          <Panel title="Highest-cost activity" subtitle="Metered runs currently driving estimated spend.">
-            {costDrivers.length > 0 ? (
-              <div className="space-y-3">
-                {costDrivers.map((run) => (
-                  <div key={run.chat_id} className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-semibold text-foreground">{run.workflow_name}</div>
-                      <div className="text-sm text-muted-foreground">{formatCurrencyValue(run.cost, '$0.00')}</div>
-                    </div>
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      {formatCompactNumber(run.totalTokens, '0')} tokens · {formatCompactNumber(run.llmCalls, '0')} LLM calls
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <StudioInlineEmptyState
-                title="Cost drivers appear after runtime usage begins"
-                description="Once the app is actively serving LLM traffic, this panel highlights the metered runs behind the largest cost footprint."
-              />
-            )}
-          </Panel>
-
-          <Panel title="Runtime posture" subtitle="Lifecycle and usage signals stay separated.">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
-                <div className="text-[12px] font-medium text-muted-foreground/82">Average latency</div>
-                <div className="mt-2 text-2xl font-semibold text-foreground">{averageLatency != null ? `${averageLatency}s` : 'Pending'}</div>
-              </div>
-              <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
-                <div className="text-[12px] font-medium text-muted-foreground/82">Tracked workflows</div>
-                <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.workflowNames.length, '0')}</div>
-              </div>
+        <Panel title="Runtime posture" subtitle="Lifecycle and usage signals stay separated.">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
+              <div className="text-[12px] font-medium text-muted-foreground/82">Average latency</div>
+              <div className="mt-2 text-2xl font-semibold text-foreground">{averageLatency != null ? `${averageLatency}s` : 'Pending'}</div>
             </div>
-          </Panel>
-        </div>
+            <div className="rounded-2xl border border-border/42 bg-card/30 px-4 py-3">
+              <div className="text-[12px] font-medium text-muted-foreground/82">Tracked workflows</div>
+              <div className="mt-2 text-2xl font-semibold text-foreground">{formatCompactNumber(snapshot.workflowNames.length, '0')}</div>
+            </div>
+          </div>
+        </Panel>
       </div>
     </WorkspaceLayout>
   )

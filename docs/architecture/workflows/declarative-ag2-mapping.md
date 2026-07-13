@@ -24,10 +24,10 @@ Those are Mozaiks layers that exist before a workflow starts.
 | --- | --- | --- |
 | `orchestrator.yaml` | pattern, turns, startup behavior | mostly AG2-native |
 | `agents.yaml` | agent roster and prompts | AG2-native with Mozaiks composition helpers |
-| `transition_graph.yaml` | routing rules inside the workflow | AG2 beta WorkflowAdapter / TransitionGraph |
+| `transition_graph.yaml` | routing rules inside the workflow | AG2 1.0 beta WorkflowAdapter / TransitionGraph |
 | `context_variables.yaml` | workflow state bindings | AG2-native container plus Mozaiks adapters |
 | `tools.yaml` | tool declarations | AG2 tool calling plus Mozaiks wrappers |
-| `middleware.yaml` | prompt injection declarations | Mozaiks declarations compiled to AG2 beta middleware |
+| `middleware.yaml` | prompt injection declarations | Mozaiks declarations compiled to AG2 1.0 beta middleware |
 | `structured_outputs.yaml` | typed runtime validation | Mozaiks layer |
 | `ui_config.yaml` | frontend exposure metadata | frontend-only |
 | `extended_orchestration/task_batches.yaml` | workflow-local deterministic task DAG contract | Mozaiks contract layer executed through AG2 where possible |
@@ -58,9 +58,9 @@ tool binding.
 
 ### `transition_graph.yaml`
 
-Maps to AG2 beta Network transition conditions and targets. Mozaiks compiles
+Maps to AG2 1.0 beta Network transition conditions and targets. Mozaiks compiles
 the rules into a `TransitionGraph`; turn-to-turn routing is resolved through
-AG2 beta `WorkflowAdapter`.
+AG2 1.0 beta `WorkflowAdapter`.
 
 Runtime compilation rules:
 
@@ -68,8 +68,8 @@ Runtime compilation rules:
 - `condition_type: context_equals` rules compile to a source-scoped adapter over
   AG2 `ContextEquals`
 - `condition_type: context_expression` rules compile to a source-scoped custom
-  AG2 beta `TransitionCondition` that evaluates AG2's `ContextExpression`
-  syntax against workflow context state
+  AG2 1.0 beta `TransitionCondition` that evaluates Mozaiks
+  `${context_variable}` syntax against workflow context state
 - `condition_type: tool_called` rules compile to a source-scoped adapter over
   AG2 `ToolCalled`
 - `target_agent: user` pauses the run for user input
@@ -90,7 +90,7 @@ Termination is declarative. A workflow bundle ends through
 
 The runtime does not inspect message text for completion and does not use a
 separate Python termination handler. During execution, Mozaiks resolves the next
-speaker through AG2 beta `WorkflowAdapter`; when that resolution returns AG2
+speaker through AG2 1.0 beta `WorkflowAdapter`; when that resolution returns AG2
 `TerminateTarget`, the turn loop reports `run_completed=true` and the runtime
 marks the app-scoped `ChatSessions` run as completed. `max_turns` remains a
 safety cap, not the primary happy-path completion mechanism.
@@ -139,8 +139,8 @@ lifecycle_tools: []
 
 ### `middleware.yaml`
 
-Maps to Mozaiks prompt-injection declarations. Runtime registration is AG2 beta
-agent middleware, not the old AG2 hook registration style. Lifecycle behavior belongs
+Maps to Mozaiks prompt-injection declarations. Runtime registration is AG2 1.0 beta
+agent middleware, not prior hook registration style. Lifecycle behavior belongs
 in `tools.yaml` `lifecycle_tools`.
 
 Canonical shape:

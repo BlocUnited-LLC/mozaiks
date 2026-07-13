@@ -67,7 +67,7 @@ class TestRedactPublicConfig:
 
     def test_nested_dict_inner_secrets_redacted(self):
         config = {
-            "provider": "stripe",
+            "provider": "payment_provider",
             "credentials": {
                 "api_key": "sk-secret",
                 "publishable_key": "pk-public",
@@ -81,7 +81,7 @@ class TestRedactPublicConfig:
         config = {
             "integrations": [
                 {"service": "openai", "api_key": "sk-abc"},
-                {"service": "stripe", "token": "tok-xyz"},
+                {"service": "payment_provider", "token": "tok-xyz"},
             ]
         }
         result = _redact_public_config(config)

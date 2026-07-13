@@ -42,6 +42,7 @@ export function ActionButton({
   variant = 'primary',
   size = 'default',
   className = '',
+  ...buttonProps
 }) {
   const mappedVariant = variant === 'destructive' ? 'danger' : variant;
   const mappedSize = size === 'md' ? 'default' : size;
@@ -53,6 +54,7 @@ export function ActionButton({
       disabled={disabled}
       onClick={onClick}
       className={className}
+      {...buttonProps}
     >
       {children}
     </Button>

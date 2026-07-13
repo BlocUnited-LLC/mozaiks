@@ -173,7 +173,7 @@ class TestNoncanonicalServicePaths:
         assert "services/admin_config.py" not in result
 
     def test_integrations_prefix_allowed(self):
-        result = _noncanonical_service_paths(["services/integrations/stripe_client.py"])
+        result = _noncanonical_service_paths(["services/integrations/payment_provider_client.py"])
         assert result == []
 
     def test_adapters_prefix_allowed(self):
@@ -217,7 +217,7 @@ class TestInvalidServiceFoundationPaths:
         assert result == []
 
     def test_integrations_prefix_allowed(self):
-        result = _invalid_service_foundation_paths(["services/integrations/stripe_client.py"])
+        result = _invalid_service_foundation_paths(["services/integrations/payment_provider_client.py"])
         assert result == []
 
     def test_adapters_prefix_allowed(self):

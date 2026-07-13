@@ -4,6 +4,8 @@ Studio is the browser-based interface for building, reviewing, and managing your
 Studio opens automatically when you run `python -m mozaiks quickstart` or
 `python -m mozaiks studio`.
 
+For the product-level page contracts, see the [Studio docs](../../studio/index.md).
+
 ## Creating Your First App
 
 1. Click **Create App** in the top navigation or in the empty workspace.
@@ -18,8 +20,11 @@ In-progress builds stay in **Apps** so you can return any time.
 | Section | Purpose |
 |---------|---------|
 | **Apps** | All your app workspaces and their build state |
-| **Builds** | Run history and artifact review for each app |
-| **Settings** | Workspace config, keys, and integration setup |
+| **Usage** | Workspace-level model usage, token volume, and cost estimates |
+| **Integrations** | Shared provider setup and safe credential-presence status |
+| **App Overview** | Single-app state, next action, health, build context, and connected services |
+| **Access** | Single-app account access, plan assignment, and access blockers |
+| **App Usage** | Single-app chats, workflows, tokens, and cost detail |
 
 ## Coming Back to a Build
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.workflows.AppGenerator.tools.audit_module_contracts import (
     audit_admin_panel_page_refs,

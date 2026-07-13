@@ -167,8 +167,8 @@ class TestManagedInternalsNotCopied:
         """Generated façade must not contain managed-capability secrets or credentials."""
         # Simulate a module source check
         prohibited_terms = [
-            "STRIPE_SECRET_KEY",
-            "STRIPE_WEBHOOK_SECRET",
+            "PAYMENT_PROVIDER_SECRET_KEY",
+            "PAYMENT_PROVIDER_WEBHOOK_SECRET",
             "MANAGED_WALLET_URL",
             "MANAGED_ENTITLEMENTS_TOKEN",
         ]
@@ -204,7 +204,7 @@ class TestNeutralFixtureNames:
         pack_id = "managed_analytics"
         assert "wallet" not in pack_id.lower()
         assert "billing" not in pack_id.lower()
-        assert "stripe" not in pack_id.lower()
+        assert "payment_provider" not in pack_id.lower()
 
     def test_fixture_external_reporting_is_neutral(self):
         """external_reporting is neutral and not MozaiksPay-specific."""

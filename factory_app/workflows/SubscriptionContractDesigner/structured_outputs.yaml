@@ -97,6 +97,39 @@ models:
         variants: [str, 'null']
         description: Human-readable allowance label.
 
+  UsageChargePolicy:
+    type: model
+    fields:
+      meter_id:
+        type: str
+        description: Usage meter id this charge policy applies to, such as ai_tokens.
+      label:
+        type: union
+        variants: [str, 'null']
+        description: Human-readable customer charge label.
+      source:
+        type: literal
+        values: [runtime_llm_usage]
+        description: Runtime usage source used for customer-facing charge estimates.
+      basis:
+        type: literal
+        values: [provider_cost_usd, tokens]
+        description: Charge basis; provider_cost_usd applies markup to runtime provider-cost estimates, tokens uses unit_price_usd_per_1k.
+      markup_percent:
+        type: float
+        description: Non-negative app-level markup percentage applied to the selected basis.
+      unit_price_usd_per_1k:
+        type: union
+        variants: [float, 'null']
+        description: Customer token price per 1K tokens; required only when basis is tokens.
+      minimum_charge_usd:
+        type: float
+        description: Optional minimum customer charge for non-zero usage.
+      rounding:
+        type: literal
+        values: [none, cent, micro_usd]
+        description: Rounding strategy for billable usage estimates.
+
   UsageLimit:
     type: model
     fields:
@@ -209,6 +242,10 @@ models:
         type: list
         items: TokenWallet
         description: Provider-neutral token wallets.
+      usage_charge_policies:
+        type: list
+        items: UsageChargePolicy
+        description: Provider-neutral customer usage charge estimate policies.
       pricing_catalog:
         type: union
         variants: [PricingCatalog, 'null']

@@ -368,7 +368,7 @@ mozaiks=={_current_mozaiks_version()}
 
 # App-specific dependencies — add packages your modules and integrations need.
 # Examples:
-#   stripe>=8.0.0
+#   payment_provider>=8.0.0
 #   boto3>=1.34.0
 #   azure-identity>=1.16.0
 #   azure-keyvault-secrets>=4.8.0

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChatUI } from '../../context/ChatUIContext';
 import ChatInterface from './ChatInterface';
@@ -40,7 +40,8 @@ import {
 const PersistentChatWidget = ({
   chatId,
   workflowName,
-  conversationMode: conversationModeProp
+  conversationMode: conversationModeProp,
+  pageContext = null,
 }) => {
   const {
     setConversationMode,
@@ -64,6 +65,47 @@ const PersistentChatWidget = ({
   const navigate = useNavigate();
 
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showRatingBanner, setShowRatingBanner] = useState(false);
+  const prevWorkflowStatusRef = useRef(null);
+
+  // Detect when a workflow session ends and prompt for a rating
+  useEffect(() => {
+    const prev = prevWorkflowStatusRef.current;
+    const current = workflowStatus || 'idle';
+    const wasActive = prev !== null && prev !== 'idle';
+    const isNowIdle = current === 'idle';
+
+    if (wasActive && isNowIdle && Array.isArray(workflowMessages) && workflowMessages.length > 1) {
+      const sessionId = activeChatId || chatId || null;
+      const ratedKey = `mozaiks.session_rated:${sessionId || 'unknown'}`;
+      try {
+        if (!sessionStorage.getItem(ratedKey)) {
+          setShowRatingBanner(true);
+        }
+      } catch {}
+    }
+
+    prevWorkflowStatusRef.current = current;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflowStatus]);
+
+  const handleRating = useCallback((rating) => {
+    const sessionId = activeChatId || chatId || null;
+    fetch('/api/modules/workspace_support/submit_session_feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        workflow_name: activeWorkflowName || workflowName || null,
+        rating,
+      }),
+    }).catch(() => {});
+    try {
+      sessionStorage.setItem(`mozaiks.session_rated:${sessionId || 'unknown'}`, String(rating));
+    } catch {}
+    setShowRatingBanner(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChatId, chatId, activeWorkflowName, workflowName]);
 
   // Track message array lengths to increment unread badge when new messages arrive
   // while the widget is collapsed. Only counts messages added after mount.
@@ -109,6 +151,30 @@ const PersistentChatWidget = ({
 
   const messages = showingWorkflowContext ? workflowMessages : askMessages;
   const hasBackend = !!api;
+
+  const handleGetHelp = () => {
+    // Fire-and-forget support request to the module so the /support page can track it
+    const body = {
+      message: `Support requested from ${pageContext || 'widget'}.`,
+      page_url: typeof window !== 'undefined' ? window.location.pathname : null,
+      page_title: pageContext || null,
+      severity: 'low',
+    };
+    fetch('/api/modules/workspace_support/create_support_request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch(() => {});
+
+    // Navigate to full chat with support context
+    const params = new URLSearchParams({ mode: 'ask' });
+    params.set('page_context', pageContext
+      ? `Support request — ${pageContext}`
+      : 'Support request from chat widget');
+    setConversationMode('ask');
+    setIsExpanded(false);
+    navigate(`/chat?${params.toString()}`);
+  };
 
   const handleSendMessage = (message) => {
     if (showingWorkflowContext) {
@@ -167,7 +233,9 @@ const PersistentChatWidget = ({
     } else {
       setConversationMode('ask');
       setIsExpanded(false);
-      navigate('/chat?mode=ask');
+      const params = new URLSearchParams({ mode: 'ask' });
+      if (pageContext) params.set('page_context', pageContext);
+      navigate(`/chat?${params.toString()}`);
     }
   };
 
@@ -212,26 +280,30 @@ const PersistentChatWidget = ({
     setActiveGeneralChatId(newGeneralId);
   };
 
-  // ─── Minimized state ────────────────────────────────────────────────────────
+  // ─── Minimized state — slim right-edge tab ──────────────────────────────────
   if (!isExpanded) {
     return (
-      <div className="fixed right-4 bottom-4 z-50 widget-safe-bottom">
+      <div className="fixed right-0 bottom-6 z-50 widget-safe-bottom">
         <button
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
-          className="group relative flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[rgba(var(--color-primary-light-rgb),0.5)] bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] shadow-[0_8px_32px_rgba(15,23,42,0.6)] transition-all duration-300 hover:scale-105 hover:shadow-[0_16px_48px_rgba(51,240,250,0.4)] sm:h-20 sm:w-20"
+          className="group relative flex flex-col items-center gap-1.5 rounded-l-2xl border border-r-0 border-border/50 bg-card/90 px-2 py-4 shadow-md backdrop-blur-sm transition-all duration-200 hover:border-primary/40 hover:bg-card hover:px-3"
           title={workflowName ? `Continue: ${workflowName}` : 'Open chat'}
         >
-          <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[rgba(var(--color-primary-light-rgb),0.2)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           <img
             src={brandLogoSrc}
-            alt="mozaiksai"
-            className="relative z-10 h-7 w-7 transition-transform group-hover:scale-110 sm:h-11 sm:w-11"
+            alt="Chat"
+            className="h-4 w-4 opacity-60 transition-opacity group-hover:opacity-100"
             onError={applyBrandImageFallback}
           />
-          {/* Unread presence dot */}
+          <svg
+            className="h-3.5 w-3.5 text-muted-foreground transition-colors group-hover:text-foreground"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
           {unreadChatCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-[var(--color-primary-light)] border-2 border-black z-20" />
+            <span className="absolute -top-1 -left-1 h-2.5 w-2.5 rounded-full bg-primary" />
           )}
         </button>
       </div>
@@ -303,18 +375,64 @@ const PersistentChatWidget = ({
         {/* Sub-header: context label or compose affordance */}
         <div className="flex-shrink-0 px-3 pt-2 pb-1.5 border-b border-[rgba(var(--color-primary-light-rgb),0.06)]">
           {showingWorkflowContext ? (
-            <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-              {activeWorkflowName || workflowName || 'Active workflow'}
-            </span>
+            <div>
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider">
+                {activeWorkflowName || workflowName || 'Active workflow'}
+              </span>
+              {showRatingBanner && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span className="text-[10px] text-gray-400">How was your experience?</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRating(0)}
+                    className="text-base leading-none hover:scale-110 transition-transform"
+                    title="Poor"
+                  >👎</button>
+                  <button
+                    type="button"
+                    onClick={() => handleRating(1)}
+                    className="text-base leading-none hover:scale-110 transition-transform"
+                    title="Great"
+                  >👍</button>
+                  <button
+                    type="button"
+                    onClick={() => setShowRatingBanner(false)}
+                    className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors ml-1"
+                    title="Dismiss"
+                  >✕</button>
+                </div>
+              )}
+            </div>
           ) : (
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-60 hover:opacity-100 flex items-center gap-1"
-            >
-              <span>+</span>
-              <span>New conversation</span>
-            </button>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleNewConversation}
+                  className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-60 hover:opacity-100 flex items-center gap-1"
+                >
+                  <span>+</span>
+                  <span>New conversation</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGetHelp}
+                  className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-50 hover:opacity-100 flex items-center gap-1"
+                  title="Contact administrator"
+                >
+                  <span>⛑</span>
+                  <span>Get help</span>
+                </button>
+              </div>
+              {pageContext && (
+                <span
+                  className="text-[10px] text-gray-500 truncate max-w-[8rem]"
+                  title={pageContext}
+                >
+                  📍 Page active
+                </span>
+              )}
+            </div>
           )}
         </div>
 

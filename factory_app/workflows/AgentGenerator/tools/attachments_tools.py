@@ -12,7 +12,7 @@ in the agent prompt or UI if desired).
 import logging
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 

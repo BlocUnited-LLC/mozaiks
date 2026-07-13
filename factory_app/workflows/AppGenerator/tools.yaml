@@ -54,6 +54,19 @@ tools:
   auto_tool_call: true
   bind_to_agent: false
 - agent: AppPlanAgent
+  file: check_workspace_integrations.py
+  function: check_workspace_integrations
+  description: >
+    Read-only workspace integration catalog check. Called by AppPlanAgent early
+    in planning to discover which integrations are already configured via
+    environment secrets. Returns structured availability buckets (available,
+    partial, missing, unknown) so the agent can wire configured integrations
+    automatically and pass missing required ones to record_integration_need for
+    the downstream IntegrationReadinessAgent to collect inline. Never returns
+    secret values — only presence booleans.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+- agent: AppPlanAgent
   file: read_carry_forward_module_contract.py
   function: read_carry_forward_module_contract
   description: >
@@ -144,6 +157,16 @@ tools:
         type: object
         properties: {}
         additionalProperties: true
+- agent: IntegrationReadinessAgent
+  file: save_integration_manifest.py
+  function: save_integration_manifest
+  description: >
+    Persist the resolved integration manifest for this app to the workspace
+    declarations store after check_integration_readiness completes. Best-effort:
+    never blocks the build pipeline if the write fails.
+  tool_type: Agent_Tool
+  auto_tool_call: false
+  bind_to_agent: false
 - agent: ControllerAgent
   file: integration_readiness.py
   function: record_integration_need

@@ -80,6 +80,18 @@ def _sample_contract() -> dict:
                     "allow_negative_balance": False,
                 }
             ],
+            "usage_charge_policies": [
+                {
+                    "meter_id": "ai_tokens",
+                    "label": "AI usage",
+                    "source": "runtime_llm_usage",
+                    "basis": "provider_cost_usd",
+                    "markup_percent": 35,
+                    "unit_price_usd_per_1k": None,
+                    "minimum_charge_usd": 0,
+                    "rounding": "cent",
+                }
+            ],
             "pricing_catalog": {
                 "default_group_id": "platform",
                 "groups": [
@@ -220,9 +232,11 @@ def test_subscription_contract_designer_schema_supports_semantic_pricing_catalog
     assert "PricingCatalog" in models
     assert "PricingCatalogGroup" in models
     assert "PlanDesignRationale" in models
+    assert "UsageChargePolicy" in models
 
     subscription_fields = models["SubscriptionConfigFile"]["fields"]
     assert subscription_fields["pricing_catalog"]["variants"] == ["PricingCatalog", "null"]
+    assert subscription_fields["usage_charge_policies"]["items"] == "UsageChargePolicy"
 
     output_fields = models["SubscriptionContractOutput"]["fields"]
     assert output_fields["plan_design_rationale"]["items"] == "PlanDesignRationale"
@@ -238,6 +252,9 @@ def test_subscription_contract_designer_prompt_maps_plans_to_upstream_context() 
     assert "builder_options" in agents_text
     assert "pricing_catalog.groups are display metadata" in agents_text
     assert "Do not create pricing.yaml" in agents_text
+    assert "usage_charge_policies" in agents_text
+    assert "markup_percent" in agents_text
+    assert "provider-cost estimates" in agents_text
     assert "plan_design_rationale" in agents_text
 
 
@@ -272,6 +289,7 @@ def test_subscription_context_injection_preserves_plan_design_reasoning() -> Non
     assert "plan_design_rationale" in trimmed
     assert trimmed["plan_design_rationale"][0]["source_context"] == "concept_blueprint"
     assert trimmed["subscription_config_file"]["pricing_catalog"]["groups"][0]["group_id"] == "platform"
+    assert trimmed["subscription_config_file"]["usage_charge_policies"][0]["markup_percent"] == 35
 
 
 def test_appgenerator_declares_subscription_config_task_contract() -> None:
@@ -291,6 +309,7 @@ def test_appgenerator_declares_subscription_config_task_contract() -> None:
     assert "task_type: subscription_config" in agents_text
     assert 'owned_paths: ["config/subscriptions.yaml"]' in agents_text
     assert "current_build_task_type == \"subscription_config\"" in agents_text
+    assert "usage_charge_policies" in agents_text
     assert "module_contract_updates" in agents_text
     assert "set that action's `entitlement_gate` to the exact" in agents_text
     assert "Treat the action list in `current_build_task.initial_message` as a closed contract" in agents_text
@@ -414,6 +433,7 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     assert config.pricing_catalog is not None
     assert config.pricing_catalog.default_group_id == "platform"
     assert config.pricing_catalog.groups[1].group_id == "ai_usage"
+    assert config.usage_charge_policies[0].markup_percent == 35
     assert config.plans[1].token_allowances[0].amount == 250000
     assert context["subscription_contract"]["plan_design_rationale"][0]["source_context"] == "concept_blueprint"
 

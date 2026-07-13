@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from autogen.beta import Agent, MemoryStream
-from autogen.beta.config import OpenAIConfig
-from autogen.beta.middleware import RetryMiddleware
-from autogen.beta.observers import TokenMonitor
+from ag2 import Agent, MemoryStream
+from ag2.config import OpenAIConfig
+from ag2.middleware.builtin import RetryMiddleware
+from ag2.observers import TokenMonitor
 from pydantic import BaseModel
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)

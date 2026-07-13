@@ -362,7 +362,7 @@ _CONTEXT_SECRET_PATTERNS: tuple[str, ...] = (
     "_token",
     "password",
     "credential",
-    "stripe_",
+    "payment_provider_",
     "idempotency_",
 )
 

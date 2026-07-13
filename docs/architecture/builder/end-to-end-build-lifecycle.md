@@ -266,6 +266,12 @@ Responsibilities:
 - surface build output summary, validation strategy used, and integration check results
 - show sandbox preview URL when E2B or local npm validation ran
 - present Promote and Revise paths to the user
+- persist the active `current_build_run` on the app registry record, including
+  the workflow sequence, active chat/workflow, staged bundle path, and app-bundle
+  `artifact_version_id` when one was registered
+- preserve a compact `build_context_profile` on the app registry record so
+  Continue Build and refinement re-entry can reason about the selected build
+  contexts/packs without copying raw prompt catalogs or provider secrets
 - on Promote: call Studio artifact promotion for `artifact_version_id`, restore
   the reviewed bundle into the active app root, and transition
   `lifecycle_state` from `review` to `active`
@@ -274,7 +280,9 @@ Responsibilities:
 
 How the pause works:
 
-- `AppGenerator` terminates its AG2 session after writing the bundle and calling `update_build_status(status="review")`
+- `AppGenerator` terminates its AG2 session after writing the bundle, registering
+  the app-bundle artifact version, and calling `update_build_status(status="review")`
+  with the staged bundle path and artifact version
 - `AppGenerator` sets `lifecycle_state=review`, `bundle_path`, and
   `artifact_version_id` in AG2 context_variables before terminating
 - the build sequence advances to the `app_review` chat-session transition,

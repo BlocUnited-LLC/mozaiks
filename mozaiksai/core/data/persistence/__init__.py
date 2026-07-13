@@ -5,7 +5,7 @@ Handles MongoDB operations and session management.
 """
 
 from .artifact_store import BuilderArtifactStore
-from .connector_store import AppConnectorStore
+from .connector_store import ConnectorStore
 from .db_manager import get_db_manager
 from .namespaces import SYSTEM_DATABASE, BuilderCollections, PlatformCollections, RuntimeCollections
 from .persistence_manager import AG2PersistenceManager, PersistenceManager
@@ -15,7 +15,7 @@ __all__ = [
     'AG2PersistenceManager',
     'get_db_manager',
     'BuilderArtifactStore',
-    'AppConnectorStore',
+    'ConnectorStore',
     'SYSTEM_DATABASE',
     'RuntimeCollections',
     'BuilderCollections',

@@ -3,9 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-from autogen.beta.events import ModelResponse
-from autogen.beta.events.input_events import TextInput
-from autogen.beta.events.types import ModelMessage
+from ag2.events import ModelResponse
+from ag2.events.input_events import TextInput
+from ag2.events.types import ModelMessage
 
 from tests.import_utils import import_module_directly
 

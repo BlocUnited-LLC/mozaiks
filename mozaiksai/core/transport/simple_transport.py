@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 # AG2 imports for event type checking
-from autogen.events import BaseEvent
+from ag2.events import BaseEvent
 from fastapi import WebSocket
 from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -98,7 +98,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
     Lean transport system focused solely on real-time UI communication.
 
     Features:
-    - Message filtering (removes AutoGen noise)
+    - Message filtering (removes non-user-facing AG2 event payload noise)
     - WebSocket connection management
     - Event forwarding to the UI
     - Thread-safe singleton pattern
@@ -208,6 +208,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             dispatcher = get_event_dispatcher()
             dispatcher.register_handler("chat.usage_delta", self._handle_usage_delta_event)
             dispatcher.register_handler("chat.usage_summary", self._handle_usage_summary_event)
+            dispatcher.register_handler("chat.token_budget_alert", self._handle_token_budget_alert_event)
         except Exception:
             logger.debug("Usage event handler registration skipped", exc_info=True)
 
@@ -254,6 +255,15 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             await self.send_event_to_ui({"kind": "usage_summary", **payload}, str(chat_id))
         except Exception:
             logger.debug("Failed to forward usage_summary to UI", exc_info=True)
+
+    async def _handle_token_budget_alert_event(self, payload: dict[str, Any]) -> None:
+        chat_id = payload.get("chat_id")
+        if not chat_id:
+            return
+        try:
+            await self.send_event_to_ui({"kind": "token_budget_alert", **payload}, str(chat_id))
+        except Exception:
+            logger.debug("Failed to forward token_budget_alert to UI", exc_info=True)
 
     # ==================================================================================
     # CONNECTION HELPERS
@@ -973,17 +983,17 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         if _seen is None:
             _seen = set()
         try:
-            # Lazy import so absence of autogen doesn't break app start.
+            # Lazy import so absence of optional AG2 event classes doesn't break app start.
             try:
-                from autogen.events.agent_events import InputRequestEvent  # type: ignore
-            except Exception:  # pragma: no cover - autogen optional
+                from ag2.events import HumanInputRequest as InputRequestEvent  # type: ignore
+            except Exception:  # pragma: no cover - AG2 optional class
                 InputRequestEvent = tuple()  # type: ignore
 
             # Optional tool events (some versions place them elsewhere)
             ToolResponseEvent = None  # default
             for mod_path in [
-                "autogen.events.tool_events",
-                "autogen.events.agent_events",  # fallback if class relocated
+                "ag2.events.tool_events",
+                "ag2.events",  # fallback if class relocated
             ]:
                 if ToolResponseEvent:
                     break
@@ -1256,7 +1266,7 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         })
 
     async def _handle_resume_request(self, chat_id: str, last_client_index: int, websocket) -> None:
-        """Resume protocol for persisted AG2 beta workflow runs.
+        """Resume protocol for persisted AG2 1.0 beta workflow runs.
 
         We DO NOT compute sequence diffs via a bespoke diff endpoint anymore.
         Instead we:

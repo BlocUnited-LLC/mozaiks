@@ -1,0 +1,335 @@
+schema_version: mozaiks.module.v1
+module:
+  id: workspace_integrations
+  display_name: Workspace Integrations
+  version: 1.0.0
+  description: Catalog of third-party integrations available to apps in this workspace, with live configuration status derived from environment secrets.
+  owner: app
+  visibility: private
+  handler: backend.handler:WorkspaceIntegrationsModule
+permissions:
+  - id: workspace_integrations.read
+    description: View integration catalog and configuration status.
+  - id: workspace_integrations.manage
+    description: Update integration notes and activation records.
+actions:
+  - id: list_integrations
+    description: Return the full integration catalog with configured/partial/missing status for each entry.
+    handler_method: list_integrations
+    input_schema:
+      type: object
+      properties:
+        category:
+          type: string
+          description: Filter by category (payments, email, sms, storage, etc.). Omit to return all.
+    output_schema:
+      type: object
+      properties:
+        integrations:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              category:
+                type: string
+              description:
+                type: string
+              status:
+                type: string
+                enum: [configured, partial, missing, unknown]
+              secrets:
+                type: array
+                description: Per-secret presence. Values are never included.
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    present:
+                      type: boolean
+              setup_url:
+                type: string
+                description: Setup path, present only when status is missing.
+              setup_steps:
+                type: array
+                items:
+                  type: string
+              note:
+                type: string
+        summary:
+          type: object
+          properties:
+            configured:
+              type: integer
+            partial:
+              type: integer
+            missing:
+              type: integer
+            total:
+              type: integer
+    permissions:
+      - workspace_integrations.read
+
+  - id: get_integration
+    description: Return a single integration entry with full setup steps and secret-level status.
+    handler_method: get_integration
+    input_schema:
+      type: object
+      required:
+        - integration_id
+      properties:
+        integration_id:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        integration:
+          type: object
+    permissions:
+      - workspace_integrations.read
+
+  - id: set_integration_note
+    description: Store an operator note against an integration (e.g. key rotation date, environment scope).
+    handler_method: set_integration_note
+    input_schema:
+      type: object
+      required:
+        - integration_id
+        - note
+      properties:
+        integration_id:
+          type: string
+        note:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        success:
+          type: boolean
+        integration_id:
+          type: string
+    permissions:
+      - workspace_integrations.manage
+    emits:
+      - domain.workspace_integrations.note_updated
+
+  - id: declare_app_integration_needs
+    description: >
+      Persist the set of integration needs identified during an app build.
+      Called by the factory after IntegrationReadinessAgent resolves what the app
+      requires. Upserts declarations keyed by (app_id, service) so re-builds overwrite
+      cleanly. Stores workspace catalog status and connector vault status at build time.
+    handler_method: declare_app_integration_needs
+    input_schema:
+      type: object
+      required:
+        - app_id
+        - needs
+      properties:
+        app_id:
+          type: string
+        declared_at:
+          type: string
+          description: ISO timestamp of the build that produced these declarations. Defaults to now.
+        needs:
+          type: array
+          items:
+            type: object
+            properties:
+              service:
+                type: string
+              catalog_id:
+                type: string
+              display_name:
+                type: string
+              kind:
+                type: string
+              purpose:
+                type: string
+              required_at:
+                type: string
+              optional:
+                type: boolean
+              workspace_status:
+                type: string
+                enum: [configured, partial, missing, unknown]
+              connector_status:
+                type: string
+    output_schema:
+      type: object
+      properties:
+        saved:
+          type: integer
+        app_id:
+          type: string
+    permissions:
+      - workspace_integrations.manage
+    emits:
+      - domain.workspace_integrations.declarations_saved
+
+  - id: list_app_integration_needs
+    description: >
+      Return all integration declarations for an app with live workspace catalog status
+      overlaid. Used by the per-app integrations tab to show what the build declared
+      the app needs, cross-referenced against the current workspace configuration.
+    handler_method: list_app_integration_needs
+    input_schema:
+      type: object
+      required:
+        - app_id
+      properties:
+        app_id:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+        declarations:
+          type: array
+          items:
+            type: object
+            properties:
+              service:
+                type: string
+              catalog_id:
+                type: string
+              display_name:
+                type: string
+              kind:
+                type: string
+              purpose:
+                type: string
+              required_at:
+                type: string
+              optional:
+                type: boolean
+              workspace_status:
+                type: string
+                enum: [configured, partial, missing, unknown]
+              connector_status:
+                type: string
+              setup_url:
+                type: string
+              declared_at:
+                type: string
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            required:
+              type: integer
+            blocking:
+              type: integer
+    permissions:
+      - workspace_integrations.read
+
+  - id: save_workspace_connector
+    description: >
+      Store a credential at workspace scope. The credential is available to all
+      apps in the workspace unless the app has an app-scoped override.
+    handler_method: save_workspace_connector
+    input_schema:
+      type: object
+      required: [workspace_id, service, secret_value]
+      properties:
+        workspace_id:
+          type: string
+        service:
+          type: string
+        secret_value:
+          type: string
+        display_name:
+          type: string
+        public_config:
+          type: object
+        required_fields:
+          type: array
+          items:
+            type: object
+        ttl_days:
+          type: integer
+    output_schema:
+      type: object
+      properties:
+        success:
+          type: boolean
+        connector:
+          type: object
+        error:
+          type: string
+    permissions:
+      - workspace_integrations.manage
+
+  - id: list_workspace_connectors
+    description: List all workspace-scoped connectors with health status.
+    handler_method: list_workspace_connectors
+    input_schema:
+      type: object
+      required: [workspace_id]
+      properties:
+        workspace_id:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        connectors:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+    permissions:
+      - workspace_integrations.read
+
+  - id: delete_workspace_connector
+    description: Remove a workspace-scoped connector and its vault secret.
+    handler_method: delete_workspace_connector
+    input_schema:
+      type: object
+      required: [workspace_id, service]
+      properties:
+        workspace_id:
+          type: string
+        service:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+        service:
+          type: string
+        secret_deleted:
+          type: boolean
+    permissions:
+      - workspace_integrations.manage
+
+capabilities:
+  - capability_id: workspace_integrations.list
+    kind: action
+    target: list_integrations
+    title: List Workspace Integrations
+    permissions:
+      - workspace_integrations.read
+    input_schema:
+      type: object
+
+  - capability_id: workspace_integrations.get
+    kind: action
+    target: get_integration
+    title: Get Integration Detail
+    permissions:
+      - workspace_integrations.read
+    input_schema:
+      type: object
+      required:
+        - integration_id
+      properties:
+        integration_id:
+          type: string

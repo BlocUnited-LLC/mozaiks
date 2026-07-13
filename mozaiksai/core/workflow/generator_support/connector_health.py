@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from mozaiksai.core.data.persistence import AppConnectorStore
+from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.secrets import get_connector_vault_backend
 
 HEALTH_STATUSES = {"healthy", "unhealthy", "unknown"}
@@ -143,11 +143,11 @@ class ConnectorSecretReader:
     """Server-side secret reader passed to health providers."""
 
     def __init__(self, *, app_id: str, service: str) -> None:
-        self.app_id = str(app_id)
+        self.scope_id = str(app_id)
         self.service = _normalize_id(service)
 
     async def get_secret(self) -> SecretHandle:
-        result = await get_connector_vault_backend().get_secret(app_id=self.app_id, service=self.service)
+        result = await get_connector_vault_backend().get_secret(scope_id=self.scope_id, service=self.service)
         return SecretHandle(
             result.get("secret_value"),
             available=bool(result.get("success")),
@@ -155,7 +155,7 @@ class ConnectorSecretReader:
         )
 
     def __repr__(self) -> str:  # pragma: no cover - defensive secret guard
-        return f"ConnectorSecretReader(app_id={self.app_id!r}, service={self.service!r})"
+        return f"ConnectorSecretReader(scope_id={self.scope_id!r}, service={self.service!r})"
 
 
 class ConnectorHealthProvider(Protocol):
@@ -207,13 +207,17 @@ async def run_connector_health_check(
     service: str,
     checked_by: str = "manual",
     safe_context: dict[str, Any] | None = None,
-    store: AppConnectorStore | None = None,
+    store: ConnectorStore | None = None,
 ) -> dict[str, Any]:
     """Run an explicitly requested server-side provider health check."""
 
-    connector_store = store or AppConnectorStore()
+    connector_store = store or ConnectorStore()
     normalized_service = _normalize_id(service)
-    record = await connector_store.get_connector(app_id=str(app_id), service=normalized_service)
+    record = await connector_store.get(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id=str(app_id),
+        service=normalized_service,
+    )
     if not isinstance(record, dict):
         return {
             "status": "not_configured",
@@ -260,8 +264,9 @@ async def run_connector_health_check(
             error_code="provider_check_failed",
         ).to_safe_dict()
 
-    updated = await connector_store.update_connector_health(
-        app_id=str(app_id),
+    updated = await connector_store.update_health(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id=str(app_id),
         service=normalized_service,
         health_status=safe_result["status"],
         health_message=safe_result.get("message"),

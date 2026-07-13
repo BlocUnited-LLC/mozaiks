@@ -20,7 +20,7 @@ router = APIRouter(tags=["notifications"])
 logger = get_workflow_logger("platform_app")
 
 # Fields excluded from notification list responses.
-# source_event may contain provider IDs (e.g. stripe_payment_intent_id).
+# source_event may contain provider IDs (e.g. payment_provider_payment_intent_id).
 _NOTIFICATION_SAFE_PROJECTION: dict[str, int] = {
     "_id": 0,
     "source_event": 0,

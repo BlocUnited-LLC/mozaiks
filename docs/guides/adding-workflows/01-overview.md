@@ -56,7 +56,7 @@ included only when the workflow needs them.
 3. Define `structured_outputs.yaml`: strict output models for generator agents.
 4. Define `agents.yaml`: conversational agents gather context; generator agents emit typed output.
 5. Define `tools.yaml`: bind dumb tools and optional UI emission.
-6. Define `transition_graph.yaml`: deterministic routing between agents and the user through AG2 beta WorkflowAdapter.
+6. Define `transition_graph.yaml`: deterministic routing between agents and the user through AG2 1.0 beta WorkflowAdapter.
 7. Define `ui_config.yaml`: list visual agents that should stream to the UI.
 
 ## Contract Snippets
@@ -181,7 +181,7 @@ them as contract references, not as full workflow examples.
     ```
 
     Handoffs should describe deterministic routing. The runtime compiles these
-    rules to a `TransitionGraph` and resolves each turn through AG2 beta
+    rules to a `TransitionGraph` and resolves each turn through AG2 1.0 beta
     `WorkflowAdapter`. Use `context_equals`, `context_expression`, or
     `tool_called` conditions and put same-source condition routes before
     fallback `after_turn` routes.

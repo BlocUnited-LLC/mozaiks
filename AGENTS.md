@@ -147,8 +147,9 @@ Canonical ownership:
 | `mozaiksai.hosts.bootstrap` | Repo-local path defaults (CWD-relative; no-ops when not in repo checkout) |
 | `mozaiks_cli/` | CLI / developer interface — parallel to Studio, not a subset of it |
 | `factory_app/workflows/` | Factory layer — shared builder/generator workflows (AppGenerator, AgentGenerator, DesignDocs, ValueEngine) |
-| `factory_app/workflows/{WorkflowName}/*.yaml` | Factory layer — workflow-owned prompt/catalog context consumed by that workflow |
+| `factory_app/workflows/{WorkflowName}/*.yaml` | Factory layer — workflow-owned runtime YAML, prompts, agents, transitions, structured outputs, tool bindings, and middleware |
 | `factory_app/workflows/_shared/` | Factory layer — shared prompt/catalog helpers consumed by multiple factory workflows |
+| `factory_app/build_context/{context_name}/context.yaml` | Factory layer — named build-context registries for static catalogs, contracts, reusable packs, and templates |
 | `factory_app/control_plane/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
 | `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
@@ -231,9 +232,11 @@ Examples:
 
 For nontrivial OSS changes:
 
-- choose the closest task skill from `.claude/skills/README.md` before editing
-- use `.claude/skills/oss-contribution-review` when scope spans layers or the
-  right skill is unclear
+- choose the closest active task skill before editing. Codex-facing skills live
+  under `.agents/skills/`; Claude Code-facing skills live under
+  `.claude/skills/`.
+- use `oss-contribution-review` when scope spans layers or the right skill is
+  unclear
 - include the appropriate impact section from `.claude/rules/testing.md` in the
   final report and always list tests run
 

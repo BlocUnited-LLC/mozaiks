@@ -40,6 +40,7 @@ export { PricingCatalog }  from './PricingCatalog.jsx';
 export { ResourceList }    from './ResourceList.jsx';
 export { ResourceTable }   from './ResourceTable.jsx';
 export { SummaryStrip }    from './SummaryStrip.jsx';
+export { UsageTrendPanel } from './UsageTrendPanel.jsx';
 export {
   ErrorState,
   IconButton,
@@ -54,6 +55,11 @@ export {
   StatusPill,
   SurfaceCard,
 } from './Surface.jsx';
+
+// Accessibility primitives
+export { VisuallyHidden } from './VisuallyHidden.jsx';
+export { SkipLink }       from './SkipLink.jsx';
+export { FocusTrap }      from './FocusTrap.jsx';
 
 // Event bus — exported so App.jsx / providers can wire the WebSocket bridge
 export { mountAppEventBridge, useAppEvent, emitAppEvent } from '../hooks/useAppEventBus.js';

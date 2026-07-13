@@ -29,7 +29,7 @@ except AttributeError:
 
 # Packages installed by the mozaiks framework itself — no need to re-declare.
 _FRAMEWORK_ROOTS: frozenset[str] = frozenset({
-    "mozaiksai", "autogen", "ag2", "factory_app", "workflows",
+    "mozaiksai", "ag2", "factory_app", "workflows",
 })
 
 # Import name → PyPI package name when they differ.
@@ -44,7 +44,6 @@ _IMPORT_TO_PYPI: dict[str, str] = {
     "dateutil":     "python-dateutil",
     "attr":         "attrs",
     "pkg_resources": "setuptools",
-    "stripe":       "stripe",
     "boto3":        "boto3",
     "botocore":     "botocore",
     "pymongo":      "pymongo",
@@ -95,7 +94,7 @@ def scan_requirements(files_map: dict[str, str]) -> str:
 
     Excludes:
     - stdlib modules
-    - framework packages (mozaiksai, autogen, ag2, …)
+    - framework packages (mozaiksai, ag2, ...)
     - relative/internal imports
     - names starting with _ (private / test artifacts)
 

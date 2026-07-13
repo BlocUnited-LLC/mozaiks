@@ -8,8 +8,11 @@ import {
   getStudioDemoBuildHistory,
   getStudioDemoRuns,
   getStudioDemoSessions,
+  getStudioDemoUsagePayload,
   getStudioDemoWorkflowNames,
+  isStudioDemoApp,
   isStudioDemoModeEnabled,
+  isStudioUsageDemoModeEnabled,
 } from './studioDemoData.js'
 
 function buildDemoBuildState(appId, summary) {
@@ -80,6 +83,7 @@ function buildDemoPayload(appId) {
     stats: getStudioDemoAdminStats(appId),
     runs: { runs: getStudioDemoRuns(appId), total: getStudioDemoRuns(appId).length },
     sessions: { sessions: getStudioDemoSessions(appId), total: getStudioDemoSessions(appId).length },
+    usage: getStudioDemoUsagePayload(appId),
     buildState: { build: buildDemoBuildState(appId, summary) },
     buildHistory: getStudioDemoBuildHistory(appId),
     integrations: null,
@@ -92,13 +96,24 @@ export function useAppStudioData(appId) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [dataMode, setDataMode] = useState('live')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     const demoMode = isStudioDemoModeEnabled()
+    const usageDemoMode = isStudioUsageDemoModeEnabled()
 
     async function load() {
       try {
+        if (usageDemoMode && isStudioDemoApp(appId)) {
+          if (!cancelled) {
+            setData(buildDemoPayload(appId))
+            setDataMode('demo')
+            setError(null)
+          }
+          return
+        }
+
         const [
           overviewRes,
           statsRes,
@@ -167,13 +182,14 @@ export function useAppStudioData(appId) {
     return () => {
       cancelled = true
     }
-  }, [appId])
+  }, [appId, refreshKey])
 
   return {
     data,
     loading,
     error,
     dataMode,
+    refresh: () => setRefreshKey((k) => k + 1),
   }
 }
 

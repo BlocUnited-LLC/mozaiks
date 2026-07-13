@@ -45,6 +45,13 @@ Example::
         usage_meter_id: ai_tokens
         scope: user
         auto_debit_usage: true
+    usage_charge_policies:
+      - meter_id: ai_tokens
+        label: AI usage
+        source: runtime_llm_usage
+        basis: provider_cost_usd
+        markup_percent: 35
+        rounding: cent
     pricing_catalog:
       default_group_id: platform
       groups:
@@ -207,6 +214,56 @@ class TokenAllowanceDef(BaseModel):
             return None
         value = value.strip()
         return value or None
+
+
+class UsageChargePolicyDef(BaseModel):
+    """Provider-neutral customer usage charge policy.
+
+    This describes how an app estimates customer-facing usage charges from
+    measured runtime usage. It does not create payment provider prices,
+    invoices, checkout sessions, or authoritative settlement records.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    meter_id: str = "ai_tokens"
+    label: str | None = None
+    source: Literal["runtime_llm_usage"] = "runtime_llm_usage"
+    basis: Literal["provider_cost_usd", "tokens"] = "provider_cost_usd"
+    markup_percent: float = Field(default=0.0, ge=0)
+    unit_price_usd_per_1k: float | None = Field(default=None, ge=0)
+    minimum_charge_usd: float = Field(default=0.0, ge=0)
+    rounding: Literal["none", "cent", "micro_usd"] = "cent"
+
+    @field_validator("meter_id")
+    @classmethod
+    def _validate_meter_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _METER_ID_RE.match(value):
+            raise ValueError(
+                f"meter_id must match [a-z0-9_.-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def _validate_charge_basis(self) -> UsageChargePolicyDef:
+        if self.basis == "tokens" and self.unit_price_usd_per_1k is None:
+            raise ValueError(
+                "usage_charge_policies with basis='tokens' must set unit_price_usd_per_1k"
+            )
+        if self.basis == "provider_cost_usd" and self.unit_price_usd_per_1k is not None:
+            raise ValueError(
+                "unit_price_usd_per_1k is only valid when basis='tokens'"
+            )
+        return self
 
 
 class PlanDef(BaseModel):
@@ -489,6 +546,7 @@ class SubscriptionsConfig(BaseModel):
     default_plan_id: str
     assignment_store: SubscriptionAssignmentStoreDef | None = None
     token_wallets: list[TokenWalletDef] = Field(default_factory=list)
+    usage_charge_policies: list[UsageChargePolicyDef] = Field(default_factory=list)
     pricing_catalog: PricingCatalogDef | None = None
     plans: list[PlanDef]
 
@@ -515,6 +573,9 @@ class SubscriptionsConfig(BaseModel):
         wallet_ids = [wallet.wallet_id for wallet in self.token_wallets]
         if len(wallet_ids) != len(set(wallet_ids)):
             raise ValueError("token_wallet wallet_ids must be unique")
+        usage_charge_meter_ids = [policy.meter_id for policy in self.usage_charge_policies]
+        if len(usage_charge_meter_ids) != len(set(usage_charge_meter_ids)):
+            raise ValueError("usage_charge_policies meter_ids must be unique")
         declared_wallet_ids = set(wallet_ids)
         for plan in self.plans:
             for allowance in plan.token_allowances:
@@ -572,6 +633,13 @@ class SubscriptionsConfig(BaseModel):
                 return wallet
         return None
 
+    def usage_charge_policy_by_meter_id(self, meter_id: str) -> UsageChargePolicyDef | None:
+        meter_key = str(meter_id or "").strip()
+        for policy in self.usage_charge_policies:
+            if policy.meter_id == meter_key:
+                return policy
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Loader
@@ -622,6 +690,7 @@ __all__ = [
     "SubscriptionsLoadError",
     "TokenAllowanceDef",
     "TokenWalletDef",
+    "UsageChargePolicyDef",
     "UsageLimitDef",
     "load_subscriptions_config",
 ]

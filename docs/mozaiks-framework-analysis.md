@@ -80,7 +80,7 @@ The architecture follows clean separation: **ports define contracts, adapters im
 
 The AI development tooling market has fractured into four clusters:
 
-1. **Agent frameworks** (LangGraph, CrewAI, Autogen/AG2, LlamaIndex Workflows) — focused on the orchestration of AI agents
+1. **Agent frameworks** (LangGraph, CrewAI, AG2, LlamaIndex Workflows) — focused on the orchestration of AI agents
 2. **LLM app builders** (Dify, Flowise, Botpress) — drag-and-drop tools to build chat-based experiences
 3. **Workflow automation** (n8n, Zapier, Temporal, Prefect) — general-purpose automation with AI nodes bolted on
 4. **Copilot / code generation** (GitHub Copilot, Cursor, Devin) — AI-assisted code writing, not code generation at a system level
@@ -105,7 +105,7 @@ Mozaiks does not fit cleanly in any of these clusters. It competes with elements
 | **Community / ecosystem** | Pre-release | Large | Large | Large | Massive | Large |
 | **Maturity** | Pre-production | Production | Production | Production | Production | Production |
 
-### AG2 / AutoGen (the engine underneath)
+### AG2 (the engine underneath)
 
 Mozaiks uses AG2 as its multi-agent execution backbone. This is not a weakness — AG2 is the most powerful open-source multi-agent framework and has Microsoft's backing. The relationship is correct: AG2 owns agent primitives, Mozaiks owns the structured contracts, persistence, multi-tenancy, and app lifecycle that AG2 does not provide. The AG2 adapter isolates that boundary cleanly.
 

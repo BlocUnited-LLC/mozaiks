@@ -106,7 +106,8 @@ export function isGenericAppName(name) {
 export function getAppDisplayName(app) {
   const status = normalizeAppStatus(app?.status || app?.lifecycle_state)
   const rawName = app?.name || app?.app_id || 'Untitled app'
-  if (status === 'draft' && isGenericAppName(rawName)) {
+  const provisional = app?.name_status === 'provisional' || isGenericAppName(app?.name)
+  if ((status === 'draft' || isAppInBuild(status)) && provisional) {
     return `Draft ${formatAppShortId(app?.app_id || app?.id)}`
   }
   return rawName
@@ -164,7 +165,10 @@ export function getAppStudioDestination(app) {
   if (isAppInBuild(app?.status || app?.lifecycle_state) && app?.active_chat_id) {
     const workflowId = encodeURIComponent(app?.active_workflow_id || 'ValueEngine')
     const chatId = encodeURIComponent(app.active_chat_id)
-    return `/chat?workflow=${workflowId}&mode=workflow&chat_id=${chatId}`
+    // chat_app_id is the factory session app_id used when the chat was created.
+    // It must match what the backend stored, so chat_exists lookup succeeds on resume.
+    const sessionAppId = encodeURIComponent(app?.chat_app_id || app?.app_id || app?.id || '')
+    return `/chat?workflow=${workflowId}&mode=workflow&chat_id=${chatId}${sessionAppId ? `&app_id=${sessionAppId}` : ''}`
   }
   const appId = encodeURIComponent(app?.app_id || app?.id || '')
   if (!appId) return '/apps'

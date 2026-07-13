@@ -27,6 +27,9 @@ agents:
             when the app has multiple service lines on one pricing surface
           - provider-neutral token_wallets and token_allowances when the app sells
             token budgets or AI usage quotas
+          - provider-neutral usage_charge_policies when the app charges users
+            for measured AI usage, including markup over provider cost or a
+            fixed customer token unit price
           - module action entitlement gates for plan-gated features
           - workflow metering declarations for AI or paid-resource workflows
           - usage/billing page requirements for AppSchemaAgent
@@ -106,6 +109,13 @@ agents:
              - Use usage_limits and token_allowances only for AI, request, credit,
                or resource budgets that are visible in upstream workflow/module
                context or explicitly requested by builder_options.
+             - Use usage_charge_policies only when the app charges users for
+               measured AI usage. If upstream context does not specify a rate,
+               prefer basis: provider_cost_usd with a modest markup_percent and
+               record the assumption in plan_design_rationale and validation_notes.
+             - Do not put provider model prices in usage_charge_policies. Runtime
+               provider-cost estimates come from the usage-pricing catalog; this
+               field describes what this app charges its users.
 
           4. Pricing catalog groups:
              - Keep one canonical subscription_config_file. Do not create pricing.yaml.
@@ -154,18 +164,24 @@ agents:
              token_wallet at config root and token_allowances on paid plans.
           8. token_allowances.wallet_id must reference a declared token_wallet.
           9. token wallets are provider-neutral. They are not payment providers.
-          10. Workflow metering declarations tell AgentGenerator/AppGenerator which
+          10. usage_charge_policies are provider-neutral customer charge estimate
+              policies. Use source: runtime_llm_usage. Use basis: provider_cost_usd
+              with markup_percent when the app charges cost-plus. Use basis: tokens
+              only when the app explicitly charges a fixed token price and then
+              include unit_price_usd_per_1k. Never put provider model prices,
+              provider price ids, invoices, taxes, or settlement in this field.
+          11. Workflow metering declarations tell AgentGenerator/AppGenerator which
               generated workflow actions should reserve/commit tokens once the OSS
               metering service is available. Do not implement the meter in the workflow.
-          11. pricing_catalog is optional display metadata inside
+          12. pricing_catalog is optional display metadata inside
               subscription_config_file. pricing_catalog.groups[].plan_ids must
               reference declared plans. pricing_catalog must not replace
               plans[].capabilities, usage_limits, token_allowances, or
               assignment_store.
-          12. The contract must not reference concrete hosted products, operator
+          13. The contract must not reference concrete hosted products, operator
               billing admin actions, payment-provider product ids, price ids,
               API keys, secrets, invoices, or settlement.
-          13. When contract_required is true, include an app_generator_instruction
+          14. When contract_required is true, include an app_generator_instruction
               targeting AppPlanAgent that says: the billing module must expose a
               public_readonly get_plans action (no permissions, no entitlement_gate)
               that reads config/subscriptions.yaml using load_subscriptions_config

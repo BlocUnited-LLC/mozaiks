@@ -22,22 +22,14 @@ Covers (a2a.py):
     - None → default
     - invalid string → default
 
-  _sanitize_string_list:
-    - non-list → []
-    - empty list → []
-    - whitespace-only strings excluded
-    - non-string items excluded
-    - strips whitespace from items
-
   _build_client_config_kwargs:
     - "streaming" key → bool coerced
-    - "polling" key → bool coerced
-    - "use_client_preference" key → bool coerced
-    - "accepted_output_modes" key → sanitized list
-    - "extensions" key → sanitized list
-    - "supported_transports" key → sanitized list
-    - "push_notification_configs" list key → passed through
-    - "push_notification_configs" non-list → not included
+    - "timeout" key → float coerced
+    - "input_required_timeout" key → float coerced or None
+    - "history_length" key → int coerced or None
+    - "tenant" key → stripped string or None
+    - "prefer" key → valid transport preference only
+    - "headers" mapping → stringified headers
     - keys not in allowlist not included
     - empty mapping → {}
 
@@ -111,7 +103,6 @@ from mozaiksai.core.workflow.agents.a2a import (
     _as_float,
     _as_int,
     _build_client_config_kwargs,
-    _sanitize_string_list,
 )
 from mozaiksai.core.workflow.context.projection import (
     _asset_projections,
@@ -212,46 +203,7 @@ class TestAsInt:
 
 
 # ---------------------------------------------------------------------------
-# 4. _sanitize_string_list
-# ---------------------------------------------------------------------------
-
-class TestSanitizeStringList:
-    def test_non_list_returns_empty(self):
-        assert _sanitize_string_list("not a list") == []
-
-    def test_none_returns_empty(self):
-        assert _sanitize_string_list(None) == []
-
-    def test_empty_list_returns_empty(self):
-        assert _sanitize_string_list([]) == []
-
-    def test_valid_strings_returned(self):
-        result = _sanitize_string_list(["a", "b", "c"])
-        assert result == ["a", "b", "c"]
-
-    def test_whitespace_only_excluded(self):
-        result = _sanitize_string_list(["  ", "valid"])
-        assert "  " not in result
-        assert "valid" in result
-
-    def test_non_string_items_excluded(self):
-        result = _sanitize_string_list([42, "valid", None])
-        assert 42 not in result
-        assert "valid" in result
-
-    def test_strips_whitespace_from_items(self):
-        result = _sanitize_string_list(["  hello  ", "world"])
-        assert "hello" in result
-        assert "world" in result
-        assert "  hello  " not in result
-
-    def test_preserves_order(self):
-        result = _sanitize_string_list(["b", "a", "c"])
-        assert result == ["b", "a", "c"]
-
-
-# ---------------------------------------------------------------------------
-# 5. _build_client_config_kwargs
+# 4. _build_client_config_kwargs
 # ---------------------------------------------------------------------------
 
 class TestBuildClientConfigKwargs:
@@ -262,46 +214,57 @@ class TestBuildClientConfigKwargs:
         result = _build_client_config_kwargs({"streaming": True})
         assert result["streaming"] is True
 
-    def test_polling_coerced_to_bool(self):
-        result = _build_client_config_kwargs({"polling": False})
-        assert result["polling"] is False
+    def test_timeout_coerced_to_float(self):
+        result = _build_client_config_kwargs({"timeout": "12.5"})
+        assert result["timeout"] == 12.5
 
-    def test_use_client_preference_coerced(self):
-        result = _build_client_config_kwargs({"use_client_preference": True})
-        assert result["use_client_preference"] is True
+    def test_input_required_timeout_none_passthrough(self):
+        result = _build_client_config_kwargs({"input_required_timeout": None})
+        assert result["input_required_timeout"] is None
 
-    def test_accepted_output_modes_sanitized(self):
-        result = _build_client_config_kwargs({"accepted_output_modes": ["text", "json"]})
-        assert result["accepted_output_modes"] == ["text", "json"]
+    def test_input_required_timeout_coerced_to_float(self):
+        result = _build_client_config_kwargs({"input_required_timeout": "30"})
+        assert result["input_required_timeout"] == 30.0
 
-    def test_extensions_sanitized(self):
-        result = _build_client_config_kwargs({"extensions": ["ext1", "  ", "ext2"]})
-        assert result["extensions"] == ["ext1", "ext2"]
+    def test_history_length_zero_becomes_none(self):
+        result = _build_client_config_kwargs({"history_length": "0"})
+        assert result["history_length"] is None
 
-    def test_supported_transports_sanitized(self):
-        result = _build_client_config_kwargs({"supported_transports": ["http"]})
-        assert result["supported_transports"] == ["http"]
+    def test_history_length_positive_coerced(self):
+        result = _build_client_config_kwargs({"history_length": "5"})
+        assert result["history_length"] == 5
 
-    def test_push_notification_configs_list_passthrough(self):
-        configs = [{"url": "https://example.com"}]
-        result = _build_client_config_kwargs({"push_notification_configs": configs})
-        assert result["push_notification_configs"] == configs
+    def test_tenant_stripped(self):
+        result = _build_client_config_kwargs({"tenant": "  acme  "})
+        assert result["tenant"] == "acme"
 
-    def test_push_notification_configs_non_list_excluded(self):
-        result = _build_client_config_kwargs({"push_notification_configs": "not-a-list"})
-        assert "push_notification_configs" not in result
+    def test_empty_tenant_becomes_none(self):
+        result = _build_client_config_kwargs({"tenant": "   "})
+        assert result["tenant"] is None
+
+    def test_valid_prefer_is_lowercased(self):
+        result = _build_client_config_kwargs({"prefer": "GRPC"})
+        assert result["prefer"] == "grpc"
+
+    def test_invalid_prefer_not_included(self):
+        result = _build_client_config_kwargs({"prefer": "websocket"})
+        assert "prefer" not in result
+
+    def test_headers_mapping_stringified(self):
+        result = _build_client_config_kwargs({"headers": {"X-Test": 123}})
+        assert result["headers"] == {"X-Test": "123"}
 
     def test_unknown_key_not_included(self):
         result = _build_client_config_kwargs({"unknown_key": "value"})
         assert "unknown_key" not in result
 
     def test_streaming_missing_not_added(self):
-        result = _build_client_config_kwargs({"polling": False})
+        result = _build_client_config_kwargs({"timeout": 5})
         assert "streaming" not in result
 
 
 # ---------------------------------------------------------------------------
-# 6. _required_text (schema.py)
+# 5. _required_text (schema.py)
 # ---------------------------------------------------------------------------
 
 class TestRequiredText:
@@ -330,7 +293,7 @@ class TestRequiredText:
 
 
 # ---------------------------------------------------------------------------
-# 7. _optional_text (schema.py)
+# 6. _optional_text (schema.py)
 # ---------------------------------------------------------------------------
 
 class TestOptionalText:
@@ -354,7 +317,7 @@ class TestOptionalText:
 
 
 # ---------------------------------------------------------------------------
-# 8. _normalize_string_list (schema.py)
+# 7. _normalize_string_list (schema.py)
 # ---------------------------------------------------------------------------
 
 class TestNormalizeStringListSchema:

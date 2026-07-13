@@ -64,9 +64,8 @@ my-app/
 ├── workflows/
 └── build_context/
     └── {context_name}/
-        ├── manifest.yaml
-        ├── catalogs/
-        └── packs/
+        ├── context.yaml
+        └── {declared assets}
 ```
 
 - The first-party factory layer lives under `factory_app/`
@@ -76,8 +75,9 @@ my-app/
 - `app/services/` is the canonical app-owned service implementation lane
 - `build_context/`, when present, is workspace-level declarative build-time
   prompt/context input. Each named context declares the workflows it applies to
-  in `manifest.yaml` and may provide `catalogs/` and `packs/`; it is not
-  generated app runtime output.
+  in `context.yaml`; every catalog, contract, template, or pack asset must be
+  explicitly declared in that registry. Build context is not generated app
+  runtime output.
 
 ## What Mozaiks Is
 
@@ -202,8 +202,9 @@ See [docs/architecture/modules-systems/framework-capability-classification.md](d
 
 **Owns:**
 - Shared builder/generator workflows: `AppGenerator`, `AgentGenerator`, `DesignDocs`, `ValueEngine`
-- Factory-owned workflow catalogs under `factory_app/workflows/{WorkflowName}/`
-  or `factory_app/workflows/_shared/`
+- Factory-owned build-time catalogs and packs under
+  `factory_app/build_context/{context_name}/`, declared through `context.yaml`
+  `assets[]`
 - Control plane declarative pack: checkpoints, classifier prompts, routing policies, context-loading tools
 - Workflow prompts, agent rosters, structured output models, and tool bindings for generation
 - Artifact assembly: module contract generation, page schema generation, workflow bundle generation
@@ -230,8 +231,12 @@ Quality gates:
 
 **Key files:**
 - `factory_app/workflows/` — shared builder/generator workflow root
-- `factory_app/workflows/{WorkflowName}/*.yaml` — workflow-owned prompt/catalog context
+- `factory_app/workflows/{WorkflowName}/*.yaml` — workflow-owned runtime YAML,
+  prompts, agent rosters, transitions, structured outputs, tool bindings, and
+  middleware
 - `factory_app/workflows/_shared/` — shared factory prompt/catalog helpers
+- `factory_app/build_context/{context_name}/context.yaml` — named build-context
+  registries for static catalogs, contracts, reusable packs, and templates
 - `factory_app/control_plane/` — declarative builder harness pack
 - `mozaiksai/control_plane/` — harness runtime implementation (mounted by Studio host)
 
@@ -520,10 +525,10 @@ App workspaces and generated app output must not bundle their own copies of Reac
 
 ### mozaiksai/ — AI Workflow Runtime
 
-**What it does:** Executes multi-agent AI workflows using AG2 (AutoGen).
+**What it does:** Executes multi-agent AI workflows using AG2.
 
 **Key responsibilities:**
-- Run AI workflow executions with AG2 beta agents and transition graphs
+- Run AI workflow executions with AG2 1.0 beta agents and transition graphs
 - Stream events to frontend via WebSocket
 - Persist chat sessions to MongoDB
 - Handle tool calls from agents

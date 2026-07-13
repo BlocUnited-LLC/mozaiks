@@ -170,7 +170,7 @@ agents:
       - Promote a hint to `surface_kind: control_plane` only when the app needs at least two of: semantic intake across multiple execution paths, checkpointed revision/session continuity, policy/approval/escalation gates, scoped coding or contract-surface planning, or request-meaning-based artifact routing.
       - If the need is a single known workflow, fixed `workflow_sequence`, or ordinary module action routing, resolve it as `workflow` or `module`, not `control_plane`.
       - Keep workflow execution lanes as `workflow` surfaces even when a separate control plane may route into them.
-      - Use `external_integration` when the main boundary is Stripe Connect, ads APIs, hosting providers, CRM APIs, etc.
+      - Use `external_integration` when the main boundary is payment provider onboarding, ads APIs, hosting providers, CRM APIs, etc.
       - If a surface depends on third-party credentials, describe that dependency in `integrations`, but keep the credential lifecycle in the platform connector/admin surface rather than in module-owned persistence.
       - Use `ui_only` only for purely presentational/reporting surfaces that own no durable business state.
       - Every persistent page should map to one primary owning surface.

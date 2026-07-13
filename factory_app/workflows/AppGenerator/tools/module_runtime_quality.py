@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 

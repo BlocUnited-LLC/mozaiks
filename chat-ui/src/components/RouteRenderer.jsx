@@ -309,7 +309,7 @@ function ShellChromeLayout({ children, route }) {
         </div>
       )}
       <div className={frameClassName}>
-        <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+        <main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">{children}</main>
         {(showFooterDesktop || showFooterMobile) && (
           <div className={footerClassName}>
             <Footer />

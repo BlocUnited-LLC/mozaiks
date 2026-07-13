@@ -125,6 +125,16 @@ class TestDefaultCiSecretRequirements:
         )
         assert callback["required"] is False
 
+    def test_include_workflow_true_has_app_url_input(self):
+        result = _default_ci_secret_requirements(include_workflow=True)
+        input_names = [item["name"] for item in result["workflow_inputs"]]
+        assert "app_url" in input_names
+
+    def test_include_workflow_true_app_url_not_required(self):
+        result = _default_ci_secret_requirements(include_workflow=True)
+        app_url = next(item for item in result["workflow_inputs"] if item["name"] == "app_url")
+        assert app_url["required"] is False
+
 
 # ---------------------------------------------------------------------------
 # 3. _normalize_ci_secret_requirements

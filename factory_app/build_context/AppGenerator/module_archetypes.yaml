@@ -70,6 +70,7 @@ archetypes:
       - Use public/public_readonly api_surface only for anonymous-safe read actions. Tenant, workspace, user, mutation, and admin actions require authenticated HTTP dispatch by default.
       - Build resource scope filters from ctx.app_id, ctx.tenant_id, ctx.workspace_id, ctx.user_id, and ctx.permissions in backend/policy.py rather than trusting request payload scope fields.
       - list_* service methods must serialize repo records through an allowlist helper defined in backend/schemas.py before returning. Never pass raw repo documents to callers. The allowlist returns only the fields declared in module.yaml output_schema items.properties; unknown or future DB fields are excluded by default.
+      - If the module stores records that include user_id (i.e. it owns user-scoped data), set module.user_data_scope=true in module.yaml and generate backend/account_data_handler.py implementing the AccountDataHandler protocol (delete_user_data + export_user_data). The OSS loader auto-registers the handler at startup. Do not declare user_data_scope=true for modules that only reference user_id as a foreign key without owning the user's primary records (e.g. audit logs that reference but do not belong to the user).
 
   messaging:
     summary: Deterministic module for real-time or threaded communication.
@@ -99,6 +100,7 @@ archetypes:
       - The repo layer provides read-state update helpers.
       - Event payloads include delivery metadata needed for real-time routing.
       - Do not emit channels.yaml; messaging metadata belongs in canonical contracts and backend policy helpers.
+      - Messaging modules always own user-scoped data (message content, thread membership, read state). Set module.user_data_scope=true and generate backend/account_data_handler.py. delete_user_data must remove or anonymise the user's message content, DMs, and thread participation records. export_user_data must return all sent messages and thread membership.
 
   workflow:
     summary: Deterministic module that manages a named state machine.
@@ -127,6 +129,7 @@ archetypes:
       - The policy layer exposes a validate_transition helper.
       - The service layer enforces transition validation before mutation.
       - Transition events include from_state and to_state when declared.
+      - If the workflow module's managed documents are owned by a specific user (e.g. user-submitted requests, approvals initiated by a user), set module.user_data_scope=true and generate backend/account_data_handler.py. delete_user_data must delete or anonymise records where user_id matches the deleted user. export_user_data must return all user-initiated workflow records. Omit user_data_scope if the module owns only app-scoped or tenant-scoped state with no direct user_id ownership.
 
   event_pipeline:
     summary: >
@@ -204,6 +207,7 @@ archetypes:
       - The repo layer provides append_entry style writes instead of update_balance shortcuts.
       - Multi-document writes use atomic operations.
       - The schemas layer separates balance projections from ledger entries.
+      - If ledger entries carry user_id (e.g. a per-user token wallet or user balance ledger), set module.user_data_scope=true and generate backend/account_data_handler.py. export_user_data must return the user's ledger entries and current balance projection. delete_user_data should anonymise the user_id field on ledger entries rather than deleting them (preserving financial audit integrity) — document this choice in the handler's docstring. Omit user_data_scope for purely app-scoped or tenant-scoped ledgers with no user_id ownership.
 
   billing:
     summary: >
@@ -255,3 +259,14 @@ archetypes:
       - Checkout sessions are append-only records; never mutate a completed session.
       - Refund and cancellation flows must emit events that downstream entitlement
         and wallet modules can react to independently.
+      - >
+        Any module that writes time-bounded pending records (checkout sessions,
+        reservations, invitations, etc.) must include a background expiry watcher
+        declared as a startup_service in runtime_extensions.yaml. The watcher runs
+        on a fixed interval (recommended: hourly), calls a service-layer
+        expire_stale_<records> method, and emits a <record>.expired domain event
+        per expired record. The service method must be exposed as an internal
+        module action (api_surface: internal) so operators can trigger it manually
+        and tests can exercise it without spawning the startup service. The watcher
+        uses a direct Motor connection (AsyncIOMotorClient via MONGO_URI /
+        MONGO_DB_NAME) because it runs outside any module request context.

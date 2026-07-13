@@ -5,7 +5,7 @@ Verifies that base OSS generator prompts are host-agnostic:
 
 1. hook_universal_prompts.py has no proprietary product names (MozaiksPay, etc.).
 2. AppGenerator agents.yaml does not use MANAGED_WALLET_URL as the primary generic example.
-3. Generic managed capability adapter acceptance criteria do not say "Stripe" in non-wallet-scoped templates.
+3. Generic managed capability adapter acceptance criteria do not say "payment provider" in non-wallet-scoped templates.
 4. OSS mode: hook_managed_capabilities_context is a no-op when no managed context is supplied.
 5. When typed operator contracts are supplied, the hook renders them.
 6. MozaiksPay does not appear anywhere in OSS default prompts or hooks.
@@ -150,21 +150,21 @@ class TestAppGeneratorAgentsYamlHostAgnostic:
             "'MANAGED_{PACK_ID}_URL' as the generic env var example."
         )
 
-    def test_generic_managed_adapter_acceptance_criteria_no_stripe(self) -> None:
+    def test_generic_managed_adapter_acceptance_criteria_no_payment_provider(self) -> None:
         """
         The generic managed capability adapter example's acceptance_criteria must not say
-        'Does not call Stripe directly'. That is a wallet-specific constraint.
+        'Does not call payment provider directly'. That is a wallet-specific constraint.
         """
         source = self._read_source()
         # Find the acceptance_criteria block in the generic managed capability adapter output example.
         # The wallet-specific example scoped around task_wallet_adapter is acceptable.
-        # The generic ControllerAgent prompt template must not have Stripe-specific criteria.
+        # The generic ControllerAgent prompt template must not have payment provider-specific criteria.
 
         # Check the full source does not have the old wording in any non-wallet context.
         # We check the exact old text is gone.
-        assert '"Does not call Stripe directly"' not in source, (
+        assert '"Does not call payment provider directly"' not in source, (
             'Generic acceptance criteria in agents.yaml still contain '
-            '"Does not call Stripe directly". Replace with a generic constraint.'
+            '"Does not call payment provider directly". Replace with a generic constraint.'
         )
 
     def test_generic_acceptance_criteria_uses_provider_agnostic_wording(self) -> None:
@@ -441,13 +441,13 @@ class TestProviderNeutralHelperExamples:
         with file_contracts_path.open(encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
 
-    def test_helper_examples_no_stripe_reference(self) -> None:
-        """Helper file examples must not reference Stripe."""
+    def test_helper_examples_no_payment_provider_reference(self) -> None:
+        """Helper file examples must not reference payment provider."""
         contracts = self._read_file_contracts()
         examples = contracts.get("backend_helper_files", {}).get("examples", [])
         examples_str = " ".join(str(e) for e in examples)
-        assert "stripe" not in examples_str.lower(), (
-            "Helper file examples must be provider-neutral. Found Stripe reference."
+        assert "payment_provider" not in examples_str.lower(), (
+            "Helper file examples must be provider-neutral. Found payment provider reference."
         )
 
     def test_helper_examples_use_generic_provider_client(self) -> None:
@@ -468,9 +468,9 @@ class TestProviderNeutralHelperExamples:
         assert "routes_" in examples_str, (
             "Helper examples should include a routes_* pattern."
         )
-        # Should not be Stripe-specific
-        assert "stripe_webhook" not in examples_str.lower(), (
-            "Routes example must be provider-neutral, not Stripe-specific."
+        # Should not be payment provider-specific
+        assert "payment_provider_webhook" not in examples_str.lower(), (
+            "Routes example must be provider-neutral, not payment provider-specific."
         )
 
     def test_worker_example_uses_generic_naming(self) -> None:

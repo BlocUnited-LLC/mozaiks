@@ -40,40 +40,29 @@ def _as_int(value: Any, *, default: int) -> int:
         return default
 
 
-def _sanitize_string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    out: list[str] = []
-    for item in value:
-        if isinstance(item, str):
-            text = item.strip()
-            if text:
-                out.append(text)
-    return out
-
-
 def _build_client_config_kwargs(client_cfg: Mapping[str, Any]) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
 
     # Keep this list narrow and explicit so declarative config stays predictable.
     if "streaming" in client_cfg:
         kwargs["streaming"] = _as_bool(client_cfg.get("streaming"), default=True)
-    if "polling" in client_cfg:
-        kwargs["polling"] = _as_bool(client_cfg.get("polling"), default=False)
-    if "use_client_preference" in client_cfg:
-        kwargs["use_client_preference"] = _as_bool(client_cfg.get("use_client_preference"), default=False)
+    if "timeout" in client_cfg:
+        kwargs["timeout"] = _as_float(client_cfg.get("timeout"), default=60.0)
+    if "input_required_timeout" in client_cfg:
+        raw_timeout = client_cfg.get("input_required_timeout")
+        kwargs["input_required_timeout"] = None if raw_timeout is None else _as_float(raw_timeout, default=60.0)
+    if "history_length" in client_cfg:
+        kwargs["history_length"] = _as_int(client_cfg.get("history_length"), default=0) or None
+    if "tenant" in client_cfg and isinstance(client_cfg.get("tenant"), str):
+        kwargs["tenant"] = str(client_cfg["tenant"]).strip() or None
+    if "prefer" in client_cfg and isinstance(client_cfg.get("prefer"), str):
+        prefer = str(client_cfg["prefer"]).strip().lower()
+        if prefer in {"jsonrpc", "rest", "grpc"}:
+            kwargs["prefer"] = prefer
 
-    if "accepted_output_modes" in client_cfg:
-        kwargs["accepted_output_modes"] = _sanitize_string_list(client_cfg.get("accepted_output_modes"))
-    if "extensions" in client_cfg:
-        kwargs["extensions"] = _sanitize_string_list(client_cfg.get("extensions"))
-    if "supported_transports" in client_cfg:
-        kwargs["supported_transports"] = _sanitize_string_list(client_cfg.get("supported_transports"))
-
-    # Pass through raw push notification configs if they are already list-shaped.
-    push_cfg = client_cfg.get("push_notification_configs")
-    if isinstance(push_cfg, list):
-        kwargs["push_notification_configs"] = push_cfg
+    headers = client_cfg.get("headers")
+    if isinstance(headers, Mapping):
+        kwargs["headers"] = {str(k): str(v) for k, v in headers.items()}
 
     return kwargs
 
@@ -129,28 +118,29 @@ def create_a2a_remote_agent(spec: A2AAgentSpec, *, context_variables: Any = None
     """Instantiate an AG2 A2A remote agent from declarative spec."""
 
     try:
-        from autogen.a2a import A2aRemoteAgent
-        from autogen.a2a.client import ClientConfig
+        from ag2 import Agent
+        from ag2.a2a import A2AConfig
     except Exception as err:  # pragma: no cover - depends on optional extras
         raise RuntimeError(
-            "A2A support is unavailable. Install AG2 with A2A extras (e.g. `ag2[a2a,openai,lmm]`)."
+            "A2A support is unavailable. Install AG2 with A2A extras (e.g. `ag2[a2a,openai]`)."
         ) from err
 
     client_kwargs = _build_client_config_kwargs(spec.client)
-    client_config = ClientConfig(**client_kwargs)
-
-    agent = A2aRemoteAgent(
-        url=spec.url,
-        name=spec.name,
-        silent=spec.silent,
-        client_config=client_config,
+    a2a_config = A2AConfig(
+        card_url=spec.url,
         max_reconnects=spec.max_reconnects,
         polling_interval=spec.polling_interval,
+        **client_kwargs,
+    )
+    agent = Agent(
+        name=spec.name,
+        prompt=f"Remote A2A agent: {spec.name}",
+        config=a2a_config,
     )
 
     # Share the runtime context object so A2A and local agents observe the same state.
     if context_variables is not None:
-        agent.context_variables = context_variables
+        agent.context_variables = context_variables  # type: ignore[attr-defined]
 
     agent._mozaiks_a2a_url = spec.url  # type: ignore[attr-defined]
     return agent

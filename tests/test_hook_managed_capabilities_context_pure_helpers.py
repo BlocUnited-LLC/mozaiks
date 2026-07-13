@@ -131,16 +131,16 @@ class TestFormatManagedCapabilities:
         assert "Managed capabilities available" in result
 
     def test_pack_id_rendered(self):
-        result = _format_managed_capabilities([{"id": "stripe_pay"}])
-        assert "stripe_pay" in result
+        result = _format_managed_capabilities([{"id": "payment_provider_pay"}])
+        assert "payment_provider_pay" in result
 
     def test_display_name_rendered(self):
-        result = _format_managed_capabilities([{"id": "stripe_pay", "display_name": "Stripe Payments"}])
-        assert "Stripe Payments" in result
+        result = _format_managed_capabilities([{"id": "payment_provider_pay", "display_name": "payment provider Payments"}])
+        assert "payment provider Payments" in result
 
     def test_display_name_fallback_to_id(self):
-        result = _format_managed_capabilities([{"id": "stripe_pay"}])
-        assert "stripe_pay" in result
+        result = _format_managed_capabilities([{"id": "payment_provider_pay"}])
+        assert "payment_provider_pay" in result
 
     def test_description_first_line_rendered(self):
         result = _format_managed_capabilities([{"id": "pay", "description": "Payment integration\nExtra line"}])
@@ -266,15 +266,15 @@ class TestFormatPackBranding:
         assert _format_pack_branding([{"id": "pay"}]) is None
 
     def test_pack_with_branding_returns_string(self):
-        pack = {"id": "pay", "branding": {"attribution": "Powered by Stripe"}}
+        pack = {"id": "pay", "branding": {"attribution": "Powered by payment provider"}}
         result = _format_pack_branding([pack])
         assert result is not None
         assert "Pack branding:" in result
 
     def test_attribution_rendered(self):
-        pack = {"id": "pay", "branding": {"attribution": "Powered by Stripe"}}
+        pack = {"id": "pay", "branding": {"attribution": "Powered by payment provider"}}
         result = _format_pack_branding([pack])
-        assert "Powered by Stripe" in result
+        assert "Powered by payment provider" in result
 
     def test_app_branded_surfaces_rendered(self):
         pack = {"id": "pay", "branding": {"app_branded_surfaces": ["checkout"]}}
@@ -364,8 +364,8 @@ class TestFormatFacadeContracts:
         assert any("pay_facade" in line for line in result)
 
     def test_provider_module_rendered(self):
-        result = _format_facade_contracts([{"module_id": "pay_facade", "provider_module": "stripe_module"}])
-        assert any("stripe_module" in line for line in result)
+        result = _format_facade_contracts([{"module_id": "pay_facade", "provider_module": "payment_provider_module"}])
+        assert any("payment_provider_module" in line for line in result)
 
     def test_facade_id_fallback(self):
         result = _format_facade_contracts([{"facade_id": "billing_facade"}])

@@ -5,7 +5,7 @@ DAGs inside one workflow. They replace persisted session-based decomposition
 for normal builder work such as generating modules, pages, services,
 contracts, and review items.
 
-They are intentionally different from AG2 beta `Task` and sub-agent delegation:
+They are intentionally different from AG2 1.0 beta `Task` and sub-agent delegation:
 
 - AG2 `Task` is a lifecycle and observability wrapper around a unit of work.
   It does not assign, schedule, dependency-sort, or merge artifact work.

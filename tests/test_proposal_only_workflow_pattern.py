@@ -14,7 +14,7 @@ Test requirements:
 7.  blocked/deferred phase pattern is documented.
 8.  AppGenerator guidance routes high-stakes planning workflows to proposal_only.
 9.  No proprietary workflow names appear in the OSS guidance.
-10. No MozaiksPay/Stripe/billing/investor/domain-registry examples in the generic pattern.
+10. No MozaiksPay/payment provider/billing/investor/domain-registry examples in the generic pattern.
 """
 
 from __future__ import annotations
@@ -67,8 +67,8 @@ PROPRIETARY_WORKFLOW_NAMES = [
 PROPRIETARY_EXAMPLES = [
     "MozaiksPay",
     "mozaikspay",
-    "Stripe",
-    "stripe",
+    "payment provider",
+    "payment_provider",
     "GoDaddy",
     "godaddy",
     "OpenSRS",
@@ -219,10 +219,10 @@ class TestProposalOnlyHumanReviewRequired:
             "pattern doc must have an output invariants section"
         )
 
-    def test_todo_notes_future_schema_level_invariants(self):
+    def test_future_note_mentions_schema_level_invariants(self):
         """Pattern doc must acknowledge that schema-level invariants are a future enhancement."""
         doc = _read(PATTERN_DOC)
-        assert re.search(r"TODO.*schema.level|schema.level.*invariant.*future", doc, re.DOTALL | re.IGNORECASE), (
+        assert re.search(r"schema.level.*invariant.*future", doc, re.DOTALL | re.IGNORECASE), (
             "pattern doc must note that schema-level invariant enforcement is a future enhancement"
         )
 

@@ -4,6 +4,9 @@ from importlib import import_module
 
 CANONICAL_STUDIO_ROUTES = {
     ("GET", "/api/health"),
+    ("GET", "/api/health/live"),
+    ("GET", "/api/health/ready"),
+    ("GET", "/api/health/readiness"),
     ("GET", "/api/events/metrics"),
     ("GET", "/health/active-runs"),
     ("GET", "/api/shell-config"),

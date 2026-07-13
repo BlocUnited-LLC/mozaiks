@@ -11,7 +11,9 @@
     "test:ui-primitives": "node ../scripts/validate-ui-primitive-usage.js",
     "test:responsive-smoke": "playwright test -c playwright.responsive.config.js",
     "test:generated-ui": "playwright test -c playwright.generated-ui.config.js",
-    "test:generated-ui:app": "playwright test -c playwright.generated-ui.config.js playwright/generated-ui/generated-app.generic.acceptance.spec.js"
+    "test:generated-ui:app": "playwright test -c playwright.generated-ui.config.js playwright/generated-ui/generated-app.generic.acceptance.spec.js",
+    "test:visual": "playwright test -c playwright.visual.config.js",
+    "test:visual:update": "playwright test -c playwright.visual.config.js --update-snapshots"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

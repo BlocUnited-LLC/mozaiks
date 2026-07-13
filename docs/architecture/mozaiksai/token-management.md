@@ -4,11 +4,13 @@ How Mozaiks measures, records, and surfaces LLM token usage across workflow runs
 
 ## Design Stance
 
-Token tracking in Mozaiks has two runtime layers:
+Token tracking in Mozaiks has three runtime layers:
 
 - `RuntimeUsageLedger` records factual LLM measurements.
 - `TokenWalletLedger` records provider-neutral token allocations, credits,
   debits, refunds, and balance projections.
+- `RuntimeTokenBudgetAlertLedger` records AG2 observer alerts for live run
+  budget warnings and critical thresholds.
 
 Neither layer owns payment providers, checkout, invoices, or hosted-product
 pricing. Subscription intent is declared in `app/config/subscriptions.yaml`;
@@ -50,6 +52,36 @@ The middleware captures:
   context variables when present
 - estimated cost via `mozaiksai/core/usage/pricing.py`
 
+Before each LLM call, the middleware runs `TokenUsageGuard`. The default
+preflight requirement is one token so a depleted wallet is blocked. Hosts or
+workflows can tighten this by setting one of these context variables:
+
+- `token_preflight_required_tokens`
+- `token_watchdog_required_tokens`
+- `token_budget_required_tokens`
+
+The process-wide fallback is `MOZAIKS_TOKEN_PREFLIGHT_REQUIRED_TOKENS`.
+
+### AG2 Token Watchdog
+
+`mozaiksai/core/usage/watchdog.py` attaches AG2's built-in `TokenMonitor` to
+runtime-created agents and adds a Mozaiks alert bridge observer. AG2 owns the
+observer mechanics and emits `ObserverAlert` events. Mozaiks records those
+alerts as `chat.token_budget_alert` events with app/run/user scope.
+
+Thresholds resolve in this order:
+
+1. Run context: `token_watchdog_warn_tokens`, `token_watchdog_alert_tokens`
+2. Run context aliases: `token_budget_warn_tokens`, `token_budget_alert_tokens`
+3. Run context maximum: `token_budget_max_tokens` for the alert threshold
+4. Environment defaults:
+   - `MOZAIKS_TOKEN_WATCHDOG_WARN_TOKENS`
+   - `MOZAIKS_TOKEN_WATCHDOG_ALERT_TOKENS`
+
+Set `MOZAIKS_TOKEN_WATCHDOG_ENABLED=false` to disable observer attachment.
+Watchdog alerts are live observability signals. They do not create invoices,
+grant plans, or replace token-wallet debits.
+
 ### RuntimeUsageLedger
 
 `mozaiksai/core/usage/ledger.py` owns the persistence layer.
@@ -68,6 +100,9 @@ Usage events are persisted to MongoDB under:
 
 Indexes: `event_id` (unique), `(app_id, event_ts)`, `(app_id, user_id, event_ts)`,
 `(app_id, chat_id)`.
+
+Budget alerts are persisted separately under `RuntimeTokenBudgetAlerts` with
+the same app/user/chat indexing pattern.
 
 ### TokenWalletLedger
 
@@ -145,6 +180,14 @@ from `app/config/subscriptions.yaml` and token wallet summaries:
     "plan_id": "pro",
     "limits": {...}
   },
+  "token_budget_alerts": [
+    {
+      "severity": "warning",
+      "workflow_name": "AppGenerator",
+      "agent_name": "PlannerAgent",
+      "total_tokens": 50000
+    }
+  ],
   "token_wallets": {
     "wallets": [
       {
@@ -173,7 +216,179 @@ Additional token endpoints:
 `mozaiksai/core/usage/pricing.py` provides `estimate_token_cost(model, tokens)`.
 Estimates are informational only — not authoritative billing data.
 
+Production deployments should keep an operator-maintained JSON or YAML catalog.
+When `pricing/catalogs/usage-pricing.generated.json` exists, the runtime uses it
+automatically unless `MOZAIKS_USAGE_PRICING_CATALOG_PATH` points somewhere else.
+Installed wheels also include the same generated catalog under the runtime
+package so source checkouts and package installs get the same default coverage.
+Mozaiks can generate that catalog from LiteLLM's maintained model-price
+reference:
+
+```powershell
+python scripts\update_usage_pricing_catalog.py `
+  --output pricing\catalogs\usage-pricing.generated.json
+```
+
+The GitHub workflow `.github/workflows/update-usage-pricing-catalog.yml` runs
+the same refresh weekly and opens a normal PR when provider reference prices
+change. AG2 intentionally does not maintain model prices; Mozaiks treats
+provider pricing as a runtime catalog concern so model launches and provider
+price changes do not require framework code changes.
+
+The updater is intentionally CI/PR based instead of runtime-live fetching. This
+keeps cost estimates reproducible, avoids startup dependency on GitHub, and
+lets upstream schema changes fail in automation before they affect operators.
+Each generated catalog records the upstream revision plus a content SHA-256, and
+the updater fails if normalization produces an unexpectedly small catalog or a
+large row-count drop from the existing generated catalog.
+
+Example:
+
+```yaml
+schema_version: mozaiks.usage_pricing.v1
+models:
+  gpt-5-nano:
+    input_per_1m_usd: 0.05
+    cached_input_per_1m_usd: 0.005
+    output_per_1m_usd: 0.40
+  claude-sonnet-4.6:
+    input_per_1k_usd: 0.003
+    cached_input_per_1k_usd: 0.0003
+    output_per_1k_usd: 0.015
+  default:
+    input_per_1k_usd: 0.001
+    cached_input_per_1k_usd: 0.0001
+    output_per_1k_usd: 0.004
+```
+
+Precedence:
+
+1. Provider/runtime-supplied explicit cost, if present in the usage event
+2. Model-specific env vars, such as
+   `MOZAIKS_USAGE_GPT_5_NANO_INPUT_PER_1K_USD`
+3. Global env vars, `MOZAIKS_USAGE_INPUT_PER_1K_USD` and
+   `MOZAIKS_USAGE_OUTPUT_PER_1K_USD`
+4. `MOZAIKS_USAGE_PRICING_OVERRIDE_PATH` for negotiated/custom provider rates
+5. `MOZAIKS_USAGE_PRICING_CATALOG_PATH`, usually the generated LiteLLM catalog
+   or the repo default `pricing/catalogs/usage-pricing.generated.json`
+6. Built-in non-authoritative fallback table for known historical models
+
+Operators that need negotiated rates, internal models, or temporary upstream
+patches should create a real override file and point
+`MOZAIKS_USAGE_PRICING_OVERRIDE_PATH` at it. The repo-local
+`pricing/catalogs/usage-pricing.overrides.json` path is ignored by Git and
+excluded from package manifests so private rates do not get committed or
+published accidentally.
+
+Override file shape:
+
+```json
+{
+  "schema_version": "mozaiks.usage_pricing.v1",
+  "models": {
+    "custom-provider/private-model": {
+      "input_per_1m_usd": 0.5,
+      "cached_input_per_1m_usd": 0.05,
+      "output_per_1m_usd": 1.5
+    }
+  }
+}
+```
+
+The usage ledger stores both `estimated_cost_usd` and `cost_source` on each
+event. Dashboards should show costs from `catalog`, `estimated`, or `provided`
+as configured estimates and treat `default_table` as local/dev fallback data.
+Set `MOZAIKS_USAGE_PRICING_DISABLE_DEFAULT_CATALOG=true` only for tests or
+diagnostics that need to prove behavior without the generated default catalog.
+
+### Pricing Health
+
+`/api/me/usage` includes a `pricing_health` object derived from the event
+`cost_source` values and the active pricing catalogs:
+
+```json
+{
+  "status": "ready",
+  "catalog_model_count": 2486,
+  "catalog_updated_at": "2026-07-11T05:41:51.909060+00:00",
+  "used_model_count": 2,
+  "unpriced_model_count": 0,
+  "priced_event_count": 18,
+  "unpriced_event_count": 0,
+  "coverage_percent": 100.0,
+  "cost_source_counts": {
+    "catalog": 18
+  }
+}
+```
+
+Statuses:
+
+- `ready` — active catalog/override pricing covered the measured events.
+- `unpriced_models` — one or more events had `cost_source: not_configured`.
+- `fallback_prices` — at least one event used the built-in fallback table.
+- `catalog_unavailable` — a configured catalog path was missing or invalid.
+- `not_configured` — no catalog, override, env rate, or measured usage exists.
+
+Studio `/usage` and app-specific usage pages surface this health instead of
+showing silent `$0.00` averages for unpriced model traffic.
+
 ---
+
+## Customer Markups and Billable Estimates
+
+Provider prices and customer prices are different facts:
+
+- Provider prices answer: "What did OpenAI, Anthropic, or another provider
+  charge the operator?"
+- Customer markups answer: "What does this app charge its users for that
+  measured usage?"
+
+Provider prices belong in the runtime usage-pricing catalog. Customer markups
+belong in the app's `app/config/subscriptions.yaml` because two apps can use
+the same model and charge users differently.
+
+Example app-level policy:
+
+```yaml
+schema_version: mozaiks.subscriptions.v1
+label: Example SaaS
+default_plan_id: pro
+
+usage_charge_policies:
+  - meter_id: ai_tokens
+    label: AI usage
+    source: runtime_llm_usage
+    basis: provider_cost_usd
+    markup_percent: 35
+    minimum_charge_usd: 0
+    rounding: cent
+
+plans:
+  - plan_id: pro
+    label: Pro
+    capabilities: [ai.chat]
+```
+
+`basis: provider_cost_usd` estimates customer charge from the runtime's provider
+cost estimate plus markup. `basis: tokens` uses a declared
+`unit_price_usd_per_1k` instead:
+
+```yaml
+usage_charge_policies:
+  - meter_id: ai_tokens
+    label: AI usage
+    source: runtime_llm_usage
+    basis: tokens
+    unit_price_usd_per_1k: 0.01
+    markup_percent: 20
+    rounding: micro_usd
+```
+
+`/api/me/usage` enriches the current user's usage with
+`billable_amount_usd` when a `runtime_llm_usage` charge policy is configured.
+This is still an estimate. Payment provider prices, checkout sessions, invoices,
+refunds, tax, and settlement remain app-owned or hosted-product behavior.
 
 ## Subscription Limits and Allowances
 
@@ -194,6 +409,13 @@ token_wallets:
     usage_meter_id: ai_tokens
     scope: user
     auto_debit_usage: true
+
+usage_charge_policies:
+  - meter_id: ai_tokens
+    label: AI usage
+    source: runtime_llm_usage
+    basis: provider_cost_usd
+    markup_percent: 35
 
 plans:
   - plan_id: pro
@@ -263,6 +485,7 @@ token wallet records before exit.
   `TokenWalletLedger`.
 - Do not emit usage events from workflow tools directly — use the middleware.
 - Do not hardcode model pricing — use `pricing.py` as the single source.
+- Do not put customer markups in the provider pricing catalog.
 - Do not query the usage collection directly from module handlers — use
   `get_runtime_usage_ledger()` or the `/api/me/usage` endpoint.
 - Do not create app-local token balance ledgers when the OSS token wallet ledger

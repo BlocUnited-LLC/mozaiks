@@ -22,19 +22,20 @@ export const AskHistorySidebar = ({
   onStartNewChat,
   onRefresh,
   onClear,
+  onDeleteSession,
 }) => {
   const hasSessions = Array.isArray(sessions) && sessions.length > 0;
   return (
-    <aside className="hidden lg:flex flex-col w-64 xl:w-72 2xl:w-80 shrink-0 self-stretch min-h-0 h-full rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(2,6,23,0.72)] backdrop-blur-xl shadow-[0_20px_60px_rgba(2,6,23,0.6)] px-4 py-4 text-sm text-slate-100">
+    <aside className="hidden lg:flex flex-col w-64 xl:w-72 2xl:w-80 shrink-0 self-stretch min-h-0 h-full rounded-2xl border border-primary/25 bg-card/[0.72] backdrop-blur-xl shadow-[0_20px_60px_rgba(2,6,23,0.6)] px-4 py-4 text-sm text-foreground">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-[11px] tracking-[0.2em] uppercase text-[rgba(148,163,184,0.9)]">Ask</p>
+          <p className="text-[11px] tracking-[0.2em] uppercase text-muted-foreground">Ask</p>
           <h2 className="text-lg font-semibold">Recent Conversations</h2>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="px-2 py-1 rounded-lg border border-[rgba(248,113,113,0.45)] text-[11px] tracking-wide text-[rgba(254,202,202,0.92)] hover:text-white hover:border-[rgba(248,113,113,0.8)] transition disabled:opacity-60"
+            className="px-2 py-1 rounded-lg border border-destructive/45 text-[11px] tracking-wide text-destructive/90 hover:text-destructive hover:border-destructive/80 transition disabled:opacity-60"
             onClick={onClear}
             disabled={loading}
           >
@@ -42,7 +43,7 @@ export const AskHistorySidebar = ({
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.4)] text-[11px] tracking-wide text-[rgba(148,163,184,0.9)] hover:text-white hover:border-[rgba(var(--color-primary-light-rgb),0.8)] transition"
+            className="px-2 py-1 rounded-lg border border-primary/40 text-[11px] tracking-wide text-muted-foreground hover:text-foreground hover:border-primary/80 transition"
             onClick={onRefresh}
             disabled={loading}
           >
@@ -54,12 +55,12 @@ export const AskHistorySidebar = ({
         <button
           type="button"
           onClick={onStartNewChat}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[rgba(var(--color-secondary-rgb),0.35)] bg-[rgba(var(--color-secondary-rgb),0.12)] py-2 text-sm font-semibold text-white hover:border-[rgba(var(--color-secondary-rgb),0.55)] hover:bg-[rgba(var(--color-secondary-rgb),0.18)] transition"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-secondary/35 bg-secondary/12 py-2 text-sm font-semibold text-foreground hover:border-secondary/55 hover:bg-secondary/18 transition"
         >
           <span className="text-base" aria-hidden="true">＋</span>
           New Chat
         </button>
-        <p className="text-[12px] text-[rgba(148,163,184,0.9)]">{hasSessions ? `${sessions.length} saved session${sessions.length === 1 ? '' : 's'}` : 'No saved conversations yet.'}</p>
+        <p className="text-[12px] text-muted-foreground">{hasSessions ? `${sessions.length} saved session${sessions.length === 1 ? '' : 's'}` : 'No saved conversations yet.'}</p>
       </div>
       <div className="mt-3 flex-1 overflow-y-auto my-scroll1 pr-1 space-y-2">
         {hasSessions ? (
@@ -71,24 +72,35 @@ export const AskHistorySidebar = ({
             const summary = session?.summary || session?.last_message_preview || 'Tap to resume conversation.';
             const timestamp = formatHistoryTimestamp(session?.last_updated_at || session?.updated_at);
             return (
-              <button
-                key={chatId}
-                type="button"
-                onClick={() => onSelectChat(chatId)}
-                className={`w-full text-left rounded-2xl border px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)] ${isActive
-                  ? 'border-[rgba(var(--color-primary-light-rgb),0.7)] bg-[rgba(var(--color-primary-rgb),0.15)] shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
-                  : 'border-[rgba(148,163,184,0.2)] bg-[rgba(15,23,42,0.65)] hover:border-[rgba(148,163,184,0.4)] hover:bg-[rgba(15,23,42,0.8)]'}`}
-              >
-                <div className="flex items-center justify-between text-[11px] text-[rgba(148,163,184,0.95)]">
-                  <span className="font-semibold text-[rgba(226,232,240,0.9)] text-sm">{label}</span>
-                  <span>{timestamp}</span>
-                </div>
-                <p className="mt-1 text-[13px] leading-relaxed text-[rgba(226,232,240,0.8)] max-h-[3.6rem] overflow-hidden">{summary}</p>
-              </button>
+              <div key={chatId} className="group relative">
+                <button
+                  type="button"
+                  onClick={() => onSelectChat(chatId)}
+                  className={`w-full text-left rounded-2xl border px-3 py-2 pr-8 transition focus:outline-none focus:ring-2 focus:ring-primary/60 ${isActive
+                    ? 'border-primary/70 bg-primary/15 shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
+                    : 'border-border/20 bg-card/65 hover:border-border/40 hover:bg-card/80'}`}
+                >
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span className="font-semibold text-foreground/90 text-sm">{label}</span>
+                    <span>{timestamp}</span>
+                  </div>
+                  <p className="mt-1 text-[13px] leading-relaxed text-foreground/80 max-h-[3.6rem] overflow-hidden">{summary}</p>
+                </button>
+                {onDeleteSession && (
+                  <button
+                    type="button"
+                    aria-label="Delete conversation"
+                    onClick={(e) => { e.stopPropagation(); onDeleteSession(chatId); }}
+                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1 rounded-lg text-destructive/70 hover:text-destructive hover:bg-destructive/12 transition"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                  </button>
+                )}
+              </div>
             );
           })
         ) : (
-          <div className="rounded-2xl border border-dashed border-[rgba(148,163,184,0.4)] px-3 py-6 text-center text-[13px] text-[rgba(148,163,184,0.9)]">
+          <div className="rounded-2xl border border-dashed border-border/40 px-3 py-6 text-center text-[13px] text-muted-foreground">
             Start a conversation to see it appear here.
           </div>
         )}
@@ -109,6 +121,7 @@ export const MobileAskHistoryDrawer = ({
   onStartEntryWorkflow,
   onRefresh,
   onClear,
+  onDeleteSession,
   onClose,
 }) => {
   if (!open) {
@@ -136,27 +149,27 @@ export const MobileAskHistoryDrawer = ({
         onClick={onClose}
       ></button>
       <div className="absolute inset-x-0 bottom-0 pointer-events-auto px-2 sm:px-3 pb-[calc(env(safe-area-inset-bottom,0px)+0.35rem)]">
-        <div className="mx-auto w-full max-w-3xl rounded-t-3xl border border-[rgba(var(--color-primary-light-rgb),0.35)] bg-[rgba(5,10,24,0.96)] backdrop-blur-2xl shadow-[0_20px_60px_rgba(2,6,23,0.85)] flex flex-col overflow-hidden max-h-[min(78dvh,720px)]">
+        <div className="mx-auto w-full max-w-3xl rounded-t-3xl border border-primary/35 bg-background/[0.96] backdrop-blur-2xl shadow-[0_20px_60px_rgba(2,6,23,0.85)] flex flex-col overflow-hidden max-h-[min(78dvh,720px)]">
           <div className="flex justify-center pt-2 pb-1">
-            <div className="h-1 w-10 rounded-full bg-[rgba(148,163,184,0.45)]" />
+            <div className="h-1 w-10 rounded-full bg-muted-foreground/45" />
           </div>
 
-          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[rgba(var(--color-primary-light-rgb),0.25)]">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-primary/25">
             <div>
-              <p className="text-[10px] tracking-[0.3em] uppercase text-[rgba(148,163,184,0.8)]">{modeLabel}</p>
-              <h2 className="text-base font-semibold text-white">{title}</h2>
+              <p className="text-[10px] tracking-[0.3em] uppercase text-muted-foreground">{modeLabel}</p>
+              <h2 className="text-base font-semibold text-foreground">{title}</h2>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.35)] text-[11px] tracking-[0.15em] uppercase text-[rgba(226,232,240,0.95)] hover:border-[rgba(var(--color-primary-light-rgb),0.75)] hover:text-white transition"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/35 text-[11px] tracking-[0.15em] uppercase text-foreground/95 hover:border-primary/75 hover:text-foreground transition"
             >
               <span aria-hidden="true">←</span>
               Back To Chat
             </button>
           </div>
 
-          <div className="px-4 py-3 border-b border-[rgba(148,163,184,0.35)]">
+          <div className="px-4 py-3 border-b border-border/35">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -168,7 +181,7 @@ export const MobileAskHistoryDrawer = ({
                   }
                   onClose?.();
                 }}
-                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-[rgba(var(--color-secondary-rgb),0.35)] bg-[rgba(var(--color-secondary-rgb),0.15)] py-2 text-sm font-semibold text-white"
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-secondary/35 bg-secondary/15 py-2 text-sm font-semibold text-foreground"
               >
                 <span className="text-lg" aria-hidden="true">＋</span>
                 {launchButtonLabel}
@@ -177,7 +190,7 @@ export const MobileAskHistoryDrawer = ({
                 type="button"
                 onClick={onRefresh}
                 disabled={loading}
-                className="px-3 py-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.35)] text-xs text-[rgba(148,163,184,0.95)] hover:border-[rgba(var(--color-primary-light-rgb),0.7)] hover:text-white transition disabled:opacity-60"
+                className="px-3 py-2 rounded-xl border border-primary/35 text-xs text-muted-foreground hover:border-primary/70 hover:text-foreground transition disabled:opacity-60"
               >
                 {loading ? '…' : 'Refresh'}
               </button>
@@ -185,12 +198,12 @@ export const MobileAskHistoryDrawer = ({
                 type="button"
                 onClick={onClear}
                 disabled={loading}
-                className="px-3 py-2 rounded-xl border border-[rgba(248,113,113,0.45)] text-xs text-[rgba(254,202,202,0.95)] hover:border-[rgba(248,113,113,0.8)] hover:text-white transition disabled:opacity-60"
+                className="px-3 py-2 rounded-xl border border-destructive/45 text-xs text-destructive/95 hover:border-destructive/80 hover:text-destructive transition disabled:opacity-60"
               >
                 Clear
               </button>
             </div>
-            <p className="mt-2 text-[12px] text-[rgba(148,163,184,0.9)]">
+            <p className="mt-2 text-[12px] text-muted-foreground">
               {countText}
             </p>
           </div>
@@ -211,31 +224,42 @@ export const MobileAskHistoryDrawer = ({
                   : (session?.summary || session?.last_message_preview || 'Tap to resume conversation.');
                 const timestamp = formatHistoryTimestamp(session?.last_updated_at || session?.updated_at);
                 return (
-                  <button
-                    key={chatId}
-                    type="button"
-                    onClick={() => {
-                      if (isWorkflowMode) {
-                        onSelectWorkflow?.(chatId, session?.workflow_name || null);
-                      } else {
-                        onSelectChat?.(chatId);
-                      }
-                      onClose?.();
-                    }}
-                    className={`w-full text-left rounded-2xl border px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)] ${isActive
-                      ? 'border-[rgba(var(--color-primary-light-rgb),0.7)] bg-[rgba(var(--color-primary-rgb),0.15)] shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
-                      : 'border-[rgba(148,163,184,0.2)] bg-[rgba(15,23,42,0.65)] hover:border-[rgba(148,163,184,0.4)] hover:bg-[rgba(15,23,42,0.8)]'}`}
-                  >
-                    <div className="flex items-center justify-between text-[11px] text-[rgba(148,163,184,0.95)]">
-                      <span className="font-semibold text-[rgba(226,232,240,0.95)] text-sm">{label}</span>
-                      <span>{timestamp}</span>
-                    </div>
-                    <p className="mt-1 text-[13px] leading-relaxed text-[rgba(226,232,240,0.85)] max-h-[3.6rem] overflow-hidden">{summary}</p>
-                  </button>
+                  <div key={chatId} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isWorkflowMode) {
+                          onSelectWorkflow?.(chatId, session?.workflow_name || null);
+                        } else {
+                          onSelectChat?.(chatId);
+                        }
+                        onClose?.();
+                      }}
+                      className={`w-full text-left rounded-2xl border px-3 py-2 pr-10 transition focus:outline-none focus:ring-2 focus:ring-primary/60 ${isActive
+                        ? 'border-primary/70 bg-primary/15 shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
+                        : 'border-border/20 bg-card/65 hover:border-border/40 hover:bg-card/80'}`}
+                    >
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span className="font-semibold text-foreground/95 text-sm">{label}</span>
+                        <span>{timestamp}</span>
+                      </div>
+                      <p className="mt-1 text-[13px] leading-relaxed text-foreground/85 max-h-[3.6rem] overflow-hidden">{summary}</p>
+                    </button>
+                    {!isWorkflowMode && onDeleteSession && (
+                      <button
+                        type="button"
+                        aria-label="Delete conversation"
+                        onClick={(e) => { e.stopPropagation(); onDeleteSession(chatId); }}
+                        className="absolute top-2 right-2 p-1.5 rounded-lg text-destructive/70 hover:text-destructive hover:bg-destructive/12 transition"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                      </button>
+                    )}
+                  </div>
                 );
               })
             ) : (
-              <div className="rounded-2xl border border-dashed border-[rgba(148,163,184,0.4)] px-3 py-6 text-center text-[13px] text-[rgba(148,163,184,0.9)]">
+              <div className="rounded-2xl border border-dashed border-border/40 px-3 py-6 text-center text-[13px] text-muted-foreground">
                 {emptyText}
               </div>
             )}
@@ -257,16 +281,16 @@ export const WorkflowHistorySidebar = ({
 }) => {
   const hasSessions = Array.isArray(sessions) && sessions.length > 0;
   return (
-    <aside className="hidden lg:flex flex-col w-64 xl:w-72 2xl:w-80 shrink-0 self-stretch min-h-0 h-full rounded-2xl border border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(2,6,23,0.72)] backdrop-blur-xl shadow-[0_20px_60px_rgba(2,6,23,0.6)] px-4 py-4 text-sm text-slate-100">
+    <aside className="hidden lg:flex flex-col w-64 xl:w-72 2xl:w-80 shrink-0 self-stretch min-h-0 h-full rounded-2xl border border-primary/25 bg-card/[0.72] backdrop-blur-xl shadow-[0_20px_60px_rgba(2,6,23,0.6)] px-4 py-4 text-sm text-foreground">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-[11px] tracking-[0.2em] uppercase text-[rgba(148,163,184,0.9)]">Workflow</p>
+          <p className="text-[11px] tracking-[0.2em] uppercase text-muted-foreground">Workflow</p>
           <h2 className="text-lg font-semibold">Recent Workflows</h2>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="px-2 py-1 rounded-lg border border-[rgba(248,113,113,0.45)] text-[11px] tracking-wide text-[rgba(254,202,202,0.92)] hover:text-white hover:border-[rgba(248,113,113,0.8)] transition disabled:opacity-60"
+            className="px-2 py-1 rounded-lg border border-destructive/45 text-[11px] tracking-wide text-destructive/90 hover:text-destructive hover:border-destructive/80 transition disabled:opacity-60"
             onClick={onClear}
             disabled={loading}
           >
@@ -274,7 +298,7 @@ export const WorkflowHistorySidebar = ({
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded-lg border border-[rgba(var(--color-primary-light-rgb),0.4)] text-[11px] tracking-wide text-[rgba(148,163,184,0.9)] hover:text-white hover:border-[rgba(var(--color-primary-light-rgb),0.8)] transition"
+            className="px-2 py-1 rounded-lg border border-primary/40 text-[11px] tracking-wide text-muted-foreground hover:text-foreground hover:border-primary/80 transition"
             onClick={onRefresh}
             disabled={loading}
           >
@@ -286,12 +310,12 @@ export const WorkflowHistorySidebar = ({
         <button
           type="button"
           onClick={onStartEntryWorkflow}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-[rgba(var(--color-secondary-rgb),0.35)] bg-[rgba(var(--color-secondary-rgb),0.12)] py-2 text-sm font-semibold text-white hover:border-[rgba(var(--color-secondary-rgb),0.55)] hover:bg-[rgba(var(--color-secondary-rgb),0.18)] transition"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-secondary/35 bg-secondary/12 py-2 text-sm font-semibold text-foreground hover:border-secondary/55 hover:bg-secondary/18 transition"
         >
           <span className="text-base" aria-hidden="true">▶</span>
           Open Workflow
         </button>
-        <p className="text-[12px] text-[rgba(148,163,184,0.9)]">{hasSessions ? `${sessions.length} active run${sessions.length === 1 ? '' : 's'}` : 'No active workflows yet.'}</p>
+        <p className="text-[12px] text-muted-foreground">{hasSessions ? `${sessions.length} active run${sessions.length === 1 ? '' : 's'}` : 'No active workflows yet.'}</p>
       </div>
       <div className="mt-3 flex-1 overflow-y-auto my-scroll1 pr-1 space-y-2">
         {hasSessions ? (
@@ -309,20 +333,20 @@ export const WorkflowHistorySidebar = ({
                 key={chatId}
                 type="button"
                 onClick={() => onSelectSession(chatId, workflowName)}
-                className={`w-full text-left rounded-2xl border px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-primary-light-rgb),0.6)] ${isActive
-                  ? 'border-[rgba(var(--color-primary-light-rgb),0.7)] bg-[rgba(var(--color-primary-rgb),0.15)] shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
-                  : 'border-[rgba(148,163,184,0.2)] bg-[rgba(15,23,42,0.65)] hover:border-[rgba(148,163,184,0.4)] hover:bg-[rgba(15,23,42,0.8)]'}`}
+                className={`w-full text-left rounded-2xl border px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-primary/60 ${isActive
+                  ? 'border-primary/70 bg-primary/15 shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
+                  : 'border-border/20 bg-card/65 hover:border-border/40 hover:bg-card/80'}`}
               >
-                <div className="flex items-center justify-between text-[11px] text-[rgba(148,163,184,0.95)]">
-                  <span className="font-semibold text-[rgba(226,232,240,0.9)] text-sm">{workflowName}</span>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span className="font-semibold text-foreground/90 text-sm">{workflowName}</span>
                   <span>{timestamp}</span>
                 </div>
-                <p className="mt-1 text-[13px] leading-relaxed text-[rgba(226,232,240,0.8)] max-h-[3.6rem] overflow-hidden">{summary}</p>
+                <p className="mt-1 text-[13px] leading-relaxed text-foreground/80 max-h-[3.6rem] overflow-hidden">{summary}</p>
               </button>
             );
           })
         ) : (
-          <div className="rounded-2xl border border-dashed border-[rgba(148,163,184,0.4)] px-3 py-6 text-center text-[13px] text-[rgba(148,163,184,0.9)]">
+          <div className="rounded-2xl border border-dashed border-border/40 px-3 py-6 text-center text-[13px] text-muted-foreground">
             Start a workflow run to see it appear here.
           </div>
         )}

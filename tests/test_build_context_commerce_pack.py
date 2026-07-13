@@ -78,7 +78,7 @@ def test_commerce_contract_required_outputs_exist_under_templates() -> None:
         "modules/shop/",
         "modules/marketplace/",
         "modules/mozaikspay/",
-        "modules/stripe/",
+        "modules/payment_provider/",
         "services/adapters/payments/",
     } <= forbidden
 
@@ -174,7 +174,7 @@ def test_commerce_backend_templates_compile_and_use_runtime_persistence() -> Non
     assert "app.commerce.checkout.requested" in service_text
     assert "record_checkout_result" in service_text
     assert "/api/modules/mozaikspay" not in service_text
-    assert "stripe" not in service_text.lower()
+    assert "services.integrations.mozaikspay_client" not in service_text
 
 
 def test_commerce_contracts_declare_events_admin_settings_and_reactions() -> None:
@@ -262,6 +262,6 @@ def test_commerce_pack_does_not_generate_payment_provider_or_marketplace_modules
     }
 
     assert not any(path.startswith("modules/mozaikspay/") for path in generated_paths)
-    assert not any(path.startswith("modules/stripe/") for path in generated_paths)
+    assert not any(path.startswith("modules/payment_provider/") for path in generated_paths)
     assert not any(path.startswith("modules/marketplace/") for path in generated_paths)
     assert not any(path.startswith("services/adapters/payments/") for path in generated_paths)

@@ -469,16 +469,16 @@ class TestSecretResponseKeysCoverage:
 
     def test_connector_redacts_extended_secret_keys(self):
         record = {
-            "service": "stripe",
+            "service": "payment_provider",
             "client_secret_hash": "csh",
             "secret_salt": "ss",
             "private_key": "pk",
             "refresh_token": "rt",
         }
         result = self._connector_redact(record)
-        assert result == {"service": "stripe"}
+        assert result == {"service": "payment_provider"}
 
     def test_safe_fields_pass_through(self):
-        record = {"service": "stripe", "status": "active", "created_at": "2025-01-01"}
+        record = {"service": "payment_provider", "status": "active", "created_at": "2025-01-01"}
         result = self._studio_redact(record)
         assert result == record

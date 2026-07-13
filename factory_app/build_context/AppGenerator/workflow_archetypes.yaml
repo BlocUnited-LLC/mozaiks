@@ -253,7 +253,8 @@ archetypes:
         OutputAgent must enforce these invariants in the final structured output.
         They are enforced through explicit OutputAgent prompt instructions, not through
         schema-level constraints. A future enhancement may add schema-level invariant
-        metadata to structured_outputs.yaml (TODO — schema-level invariants).
+        metadata to structured_outputs.yaml when schema-level invariants are
+        introduced.
       invariants:
         - field: human_review_required
           enforced_value: true

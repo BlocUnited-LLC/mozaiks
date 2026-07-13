@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from mozaiksai.core.workflow.generator_support import connector_request, connector_service
-from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SECRET_VALUE = "secret-analytics-provider-api-key"
@@ -129,29 +129,29 @@ class _FakeVaultBackend:
     def __init__(self) -> None:
         self.secrets = {}
 
-    async def store_secret(self, *, app_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
+    async def store_secret(self, *, scope_id: str, service: str, secret_value: str, display_name=None, ttl_days: int = 30):
         del display_name, ttl_days
-        self.secrets[(app_id, service)] = secret_value
+        self.secrets[(scope_id, service)] = secret_value
         return {
             "success": True,
             "provider": "fake_vault",
-            "secret_name": f"fake-{app_id}-{service}",
+            "secret_name": f"fake-{scope_id}-{service}",
             "expires_at": "2026-06-01T00:00:00+00:00",
         }
 
-    async def get_secret(self, *, app_id: str, service: str):
-        value = self.secrets.get((app_id, service))
+    async def get_secret(self, *, scope_id: str, service: str):
+        value = self.secrets.get((scope_id, service))
         return {
             "success": value is not None,
             "provider": "fake_vault",
-            "secret_name": f"fake-{app_id}-{service}",
+            "secret_name": f"fake-{scope_id}-{service}",
             "secret_value": value,
             "expires_at": "2026-06-01T00:00:00+00:00" if value is not None else None,
         }
 
-    async def delete_secret(self, *, app_id: str, service: str):
-        existed = (app_id, service) in self.secrets
-        self.secrets.pop((app_id, service), None)
+    async def delete_secret(self, *, scope_id: str, service: str):
+        existed = (scope_id, service) in self.secrets
+        self.secrets.pop((scope_id, service), None)
         return {"success": existed, "provider": "fake_vault"}
 
 
@@ -232,28 +232,29 @@ def test_plan_fixture_declares_neutral_analytics_integration() -> None:
 
 @pytest.mark.asyncio
 async def test_appgenerator_integration_readiness_blocks_requests_saves_and_passes(monkeypatch) -> None:
-    connector_store = AppConnectorStore(pm=_FakePersistenceManager())
+    connector_store = ConnectorStore(pm=_FakePersistenceManager())
     vault = _FakeVaultBackend()
     ui_calls: list[dict[str, Any]] = []
 
     monkeypatch.setattr(connector_service, "get_connector_vault_backend", lambda: vault)
 
-    async def inventory(app_id: str, required_services=None, store=None):
+    async def inventory(*, scope, scope_id, required_services=None, store=None):
         del store
         return await connector_service.get_connector_inventory(
-            app_id,
+            scope=scope,
+            scope_id=scope_id,
             required_services=required_services,
             store=connector_store,
         )
 
     async def record_metadata(**kwargs):
-        return await connector_service.record_connector_metadata(
+        return await connector_service.save_connector_draft(
             **kwargs,
             store=connector_store,
         )
 
     async def save_connector(**kwargs):
-        return await connector_service.store_connector(
+        return await connector_service.save_connector(
             **kwargs,
             store=connector_store,
         )
@@ -286,8 +287,8 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
         }
 
     monkeypatch.setattr(connector_request, "get_connector_inventory", inventory)
-    monkeypatch.setattr(connector_request, "record_connector_metadata", record_metadata)
-    monkeypatch.setattr(connector_request, "store_connector", save_connector)
+    monkeypatch.setattr(connector_request, "save_connector_draft", record_metadata)
+    monkeypatch.setattr(connector_request, "save_connector", save_connector)
     monkeypatch.setattr(connector_request, "use_ui_tool", fake_use_ui_tool)
 
     context = _Context(
@@ -333,7 +334,7 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
     assert integration_request["resume"]["run_id"] == "run-analytics-smoke"
     assert integration_request["resume"]["step_id"] == "task_analytics_adapter"
 
-    connector = await connector_store.get_connector(app_id="app-analytics-smoke", service="analytics_provider")
+    connector = await connector_store.get(scope=ConnectorStore.SCOPE_APP, scope_id="app-analytics-smoke", service="analytics_provider")
     assert connector is not None
     assert connector["secret_available"] is True
     assert connector["public_config"] == {
@@ -375,11 +376,11 @@ def test_generated_output_references_connector_id_without_raw_secret() -> None:
 async def test_studio_connector_read_response_redacts_secret_shaped_fields(monkeypatch) -> None:
     from mozaiksai.hosts import studio
 
-    async def fake_list_connectors(app_id: str):
-        assert app_id == "app-analytics-smoke"
+    async def fake_list_connectors(*, scope, scope_id, store=None):
+        assert scope_id == "app-analytics-smoke"
         return [
             {
-                "app_id": app_id,
+                "scope_id": scope_id,
                 "service": "analytics_provider",
                 "secret_available": True,
                 "secret_value": SECRET_VALUE,
@@ -406,7 +407,7 @@ async def test_studio_connector_read_response_redacts_secret_shaped_fields(monke
 
 
 def test_connector_metadata_redacts_misclassified_public_config_secret() -> None:
-    store = AppConnectorStore(pm=_FakePersistenceManager())
+    store = ConnectorStore(pm=_FakePersistenceManager())
 
     connector = asyncio.run(_upsert_misclassified_connector(store))
 
@@ -417,9 +418,10 @@ def test_connector_metadata_redacts_misclassified_public_config_secret() -> None
     assert SECRET_VALUE not in repr(connector)
 
 
-async def _upsert_misclassified_connector(store: AppConnectorStore) -> dict[str, Any]:
-    return await store.upsert_connector(
-        app_id="app-analytics-smoke",
+async def _upsert_misclassified_connector(store: ConnectorStore) -> dict[str, Any]:
+    return await store.upsert(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id="app-analytics-smoke",
         service="analytics_provider",
         display_name="Hosted Analytics",
         user_id="user-operator",

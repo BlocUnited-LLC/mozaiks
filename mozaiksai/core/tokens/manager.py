@@ -43,6 +43,7 @@ class TokenManager:
         completion_tokens: int = 0,
         total_tokens: int | None = None,
         cached: bool = False,
+        cached_tokens: int = 0,
         duration_sec: float = 0.0,
         invocation_id: str | None = None,
         event_ts: datetime | None = None,
@@ -66,6 +67,7 @@ class TokenManager:
         prompt = max(0, int(prompt_tokens or 0))
         completion = max(0, int(completion_tokens or 0))
         total = max(0, int(total_tokens if total_tokens is not None else (prompt + completion)))
+        cached_prompt = min(max(0, int(cached_tokens or 0)), prompt)
 
         payload: dict[str, Any] = {
             "event_id": uuid.uuid4().hex[:12],
@@ -81,7 +83,8 @@ class TokenManager:
             "prompt_tokens": prompt,
             "completion_tokens": completion,
             "total_tokens": total,
-            "cached": bool(cached),
+            "cached": bool(cached or cached_prompt > 0),
+            "cached_prompt_tokens": cached_prompt,
             "duration_sec": float(duration_sec or 0.0),
             "invocation_id": invocation_id or None,
         }

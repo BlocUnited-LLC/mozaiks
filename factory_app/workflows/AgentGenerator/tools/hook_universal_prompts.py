@@ -111,7 +111,7 @@ The MozaiksCore platform provides these capabilities automatically. NEVER design
 
 **What Workflows SHOULD Define**:
 1. Agent Roles & Prompts - What each agent does and how it thinks
-2. Tools & Integrations - External APIs and business logic (Stripe, SendGrid, OpenAI, etc.)
+2. Tools & Integrations - External APIs and business logic (payment provider, SendGrid, OpenAI, etc.)
 3. Orchestration Flow - How agents coordinate and hand off
 4. Context Variables - Domain-specific state the workflow tracks
 5. Human Interaction Points - Where users provide input or approval

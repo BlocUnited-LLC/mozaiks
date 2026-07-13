@@ -12,23 +12,24 @@ export function SummaryStrip({ items = [], className }) {
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-[calc(var(--core-primitive-radius,1rem)+0.35rem)] border border-border/32 bg-card/[0.16] shadow-[0_1px_0_rgba(255,255,255,0.025)]',
+        'overflow-hidden rounded-lg border border-border/45 bg-card/[0.18] shadow-[0_1px_0_rgba(255,255,255,0.025)]',
         className,
       )}
+      aria-label="Summary metrics"
     >
-      <div className="grid grid-cols-2 gap-px bg-border/40 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px bg-border/35 md:grid-cols-4">
         {normalizedItems.map((item, index) => (
           <div
             key={item.id || item.label}
             className={cn(
-              'min-w-0 bg-card/30 px-4 py-3.5 sm:px-5 sm:py-4',
+              'min-h-[5.75rem] min-w-0 bg-card/34 px-4 py-3.5 sm:px-5',
               index === 0 && 'md:rounded-l-[inherit]',
               index === normalizedItems.length - 1 && 'md:rounded-r-[inherit]',
             )}
           >
-            <div className="text-[12px] font-medium text-muted-foreground/84">{item.label}</div>
-            <div className="mt-1 flex flex-wrap items-end gap-x-2 gap-y-1">
-              <div className="text-[1.45rem] font-semibold leading-none text-foreground sm:text-[1.62rem]">
+            <div className="truncate text-[12px] font-medium text-muted-foreground/84">{item.label}</div>
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-end gap-x-2 gap-y-1">
+              <div className="min-w-0 break-words text-xl font-semibold leading-none text-foreground">
                 {item.value}
               </div>
               {item.detail ? (

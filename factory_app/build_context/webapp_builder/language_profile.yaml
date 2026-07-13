@@ -161,7 +161,7 @@ integration_catalog:
       common_providers: [openai, anthropic, google, mistral]
     - id: payment_processor
       label: Payment Processor
-      common_providers: [stripe, braintree, adyen, square]
+      common_providers: [mozaikspay, custom_payment_processor, braintree, adyen, square]
     - id: sms_provider
       label: SMS Provider
       common_providers: [twilio, vonage, aws_sns]

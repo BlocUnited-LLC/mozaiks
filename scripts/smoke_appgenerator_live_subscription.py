@@ -35,7 +35,7 @@ MODULE_PATH = "modules/reports/module.yaml"
 
 _PY_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _FORBIDDEN_PROVIDER_TERMS = (
-    "stripe",
+    "mozaikspay",
     "price_id",
     "payment_intent",
     "checkout",
@@ -178,7 +178,7 @@ def sample_subscription_contract() -> dict[str, Any]:
             "Usage pages read platform-owned /api/me/usage and /api/me/tokens endpoints.",
         ],
         "validation_notes": [
-            "No payment provider resources, checkout routes, invoices, or custom token ledgers belong in the generated app bundle.",
+            "No MozaiksPay resources, checkout routes, invoices, or custom token ledgers belong in the generated app bundle.",
         ],
     }
 
@@ -196,7 +196,7 @@ def _subscription_task() -> dict[str, Any]:
         "initial_message": (
             "Serialize only subscription_contract.subscription_config_file to "
             "config/subscriptions.yaml. Emit no module files, backend Python, "
-            "payment provider resources, checkout behavior, invoice logic, or token ledger code."
+            "MozaiksPay resources, checkout behavior, invoice logic, or token ledger code."
         ),
         "owned_paths": [SUBSCRIPTION_PATH],
         "depends_on": [],
@@ -1010,7 +1010,7 @@ async def _run_config_task(
     prompt: str,
     timeout_seconds: float,
 ) -> dict[str, Any]:
-    from autogen.beta import Agent, MemoryStream
+    from ag2 import Agent, MemoryStream
 
     from mozaiksai.core.workflow.agents import create_agents
     from mozaiksai.core.workflow.agents.factory import (

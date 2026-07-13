@@ -64,14 +64,14 @@ _AVAILABLE_MANAGED_CAPABILITIES = [
         "capabilities": [
             {"capability_id": "wallet.view"},
             {"capability_id": "wallet.payout"},
-            {"capability_id": "wallet.connect_stripe"},
+            {"capability_id": "wallet.connect_provider"},
         ],
     }
 ]
 
 _USER_REQUEST = (
     "Build a creator dashboard app where creators can view their wallet balance, "
-    "connect Stripe, request payouts, and see recent payout activity. "
+    "connect MozaiksPay, request payouts, and see recent payout activity. "
     "Use the managed wallet capability if available."
 )
 

@@ -46,7 +46,12 @@ async def test_ag2_usage_middleware_emits_usage_delta(monkeypatch):
         return SimpleNamespace(
             id="response-1",
             model="gpt-test",
-            usage=SimpleNamespace(prompt_tokens=12, completion_tokens=8, total_tokens=20),
+            usage=SimpleNamespace(
+                prompt_tokens=12,
+                completion_tokens=8,
+                total_tokens=20,
+                cached_tokens=5,
+            ),
         )
 
     response = await middleware.on_llm_call(call_next, [], SimpleNamespace())
@@ -63,6 +68,8 @@ async def test_ag2_usage_middleware_emits_usage_delta(monkeypatch):
     assert emitted["prompt_tokens"] == 12
     assert emitted["completion_tokens"] == 8
     assert emitted["total_tokens"] == 20
+    assert emitted["cached"] is True
+    assert emitted["cached_tokens"] == 5
 
 
 def test_build_ag2_usage_middleware_returns_ag2_middleware():
@@ -114,3 +121,37 @@ async def test_ag2_usage_middleware_checks_token_balance_before_llm_call(monkeyp
         await middleware.on_llm_call(call_next, [], SimpleNamespace())
 
     assert called is False
+
+
+@pytest.mark.asyncio
+async def test_ag2_usage_middleware_uses_context_preflight_required_tokens(monkeypatch):
+    seen = {}
+
+    class _AllowingGuard:
+        async def check_or_raise(self, **kwargs):  # noqa: ANN003
+            seen.update(kwargs)
+            return TokenUsageDecision(allowed=True, reason="sufficient_balance")
+
+    class _BudgetContext(_ContextBridge):
+        data = {
+            **_ContextBridge.data,
+            "token_preflight_required_tokens": 2500,
+        }
+
+    monkeypatch.setattr(usage_mod, "TokenUsageGuard", lambda: _AllowingGuard())
+
+    middleware = usage_mod.MozaiksUsageMiddleware(
+        event=SimpleNamespace(),
+        context=SimpleNamespace(),
+        agent_name="PlannerAgent",
+        workflow_name="AppGenerator",
+        context_variables=_BudgetContext(),
+        model_name="gpt-test",
+    )
+
+    async def call_next(events, context):
+        return SimpleNamespace(id="response-1", usage=None)
+
+    await middleware.on_llm_call(call_next, [], SimpleNamespace())
+
+    assert seen["required_tokens"] == 2500

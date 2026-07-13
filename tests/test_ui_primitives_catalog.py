@@ -44,12 +44,16 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
                 "CollectionToolbar",
                 "AnalyticsSummaryStrip",
                 "ContentRail",
+                "FocusTrap",
                 "IconButton",
                 "LinkButton",
                 "PerformanceTileGrid",
                 "ResourceList",
                 "SegmentedControl",
                 "SlideOver",
+                "SkipLink",
+                "UsageTrendPanel",
+                "VisuallyHidden",
             }
         )
     )
@@ -139,4 +143,49 @@ def test_collection_toolbar_keeps_search_and_mobile_filter_contrast() -> None:
     assert "flex-nowrap" in source
     assert "overflow-x-auto" in source
     assert "sm:flex-wrap" in source
+
+
+def test_surface_primitives_keep_sleek_accessible_defaults() -> None:
+    source = (
+        REPO_ROOT / "chat-ui" / "src" / "ui" / "primitives" / "Surface.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "const STATUS_TONES" in source
+    assert "muted:" in source
+    assert "info:" in source
+    assert "rounded-lg border p-4" in source
+    assert "rounded-[1.35rem]" not in source
+    assert "rounded-2xl" not in source
+    assert "rounded-3xl" not in source
+    assert "tracking-[-" not in source
+    assert 'role="status"' in source
+    assert 'aria-live="polite"' in source
+    assert 'role="alert"' in source
+    assert 'aria-live="assertive"' in source
+    assert "const displayLabel = label ?? message ?? 'Loading...';" in source
+    assert "function PrimitiveAction" in source
+    assert "focus-visible:ring-2" in source
+
+
+def test_page_renderer_passes_state_and_status_primitive_props() -> None:
+    source = (
+        REPO_ROOT / "chat-ui" / "src" / "ui" / "page-renderer" / "SectionRenderer.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert "message: config.message" in source
+    assert "const action = buildEmptyAction(config, executeAction, section.id);" in source
+    assert "action," in source
+    assert "size: config.size" in source
+    assert "dot: config.dot" in source
+
+
+def test_page_primitive_schema_documents_state_action_and_status_props() -> None:
+    schemas = ui_primitives.load_primitive_schemas()
+    assert schemas is not None
+
+    assert schemas["LoadingState"]["properties"]["message"] == "string — alias for label"
+    assert schemas["ErrorState"]["properties"]["action"] == "action object"
+    assert "muted" in schemas["StatusPill"]["properties"]["tone"]
+    assert schemas["StatusPill"]["properties"]["size"] == "string: sm|md"
+    assert schemas["StatusPill"]["properties"]["dot"] == "boolean"
 

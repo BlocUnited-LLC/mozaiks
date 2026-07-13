@@ -4,7 +4,7 @@ This file is copied to:
     services/integrations/mozaikspay_client.py
 
 It is consumer-side adapter code. It must not import provider-owned modules,
-call Stripe directly, store secrets, or create a token usage ledger.
+call payment provider directly, store secrets, or create a token usage ledger.
 """
 
 from __future__ import annotations
@@ -92,16 +92,16 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
     if not app_id:
         return None
     try:
-        from mozaiksai.core.data.persistence.connector_store import AppConnectorStore
+        from mozaiksai.core.data.persistence.connector_store import ConnectorStore
         from mozaiksai.core.secrets import get_connector_vault_backend
 
-        record = await AppConnectorStore().get_connector(app_id=str(app_id), service=_CONNECTOR_SERVICE)
+        record = await ConnectorStore().get(scope=ConnectorStore.SCOPE_APP, scope_id=str(app_id), service=_CONNECTOR_SERVICE)
         if not isinstance(record, dict):
             return None
         raw_public_config = record.get("public_config")
         public_config: dict[str, Any] = raw_public_config if isinstance(raw_public_config, dict) else {}
         secret_result = await get_connector_vault_backend().get_secret(
-            app_id=str(app_id),
+            scope_id=str(app_id),
             service=_CONNECTOR_SERVICE,
         )
         client_secret = _clean(secret_result.get("secret_value")) if isinstance(secret_result, dict) else ""

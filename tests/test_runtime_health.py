@@ -7,6 +7,17 @@ from starlette.requests import Request
 from mozaiksai.hosts import runtime
 
 
+def test_readiness_route_aliases_are_registered() -> None:
+    routes = {
+        (method, route.path)
+        for route in runtime.app.routes
+        for method in getattr(route, "methods", set())
+    }
+
+    assert ("GET", "/api/health/ready") in routes
+    assert ("GET", "/api/health/readiness") in routes
+
+
 class _FakeAdmin:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error

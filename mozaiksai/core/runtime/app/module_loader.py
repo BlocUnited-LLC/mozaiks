@@ -112,6 +112,10 @@ class ModuleIdentity(ModuleContractModel):
     owner: str | None = None
     visibility: str | None = None
     handler: str
+    # When true the module owns user-scoped data and must provide a
+    # backend/account_data_handler.py that implements AccountDataHandler.
+    # The loader auto-registers the handler with account_data_registry at startup.
+    user_data_scope: bool = False
 
     @field_validator("id", "handler", mode="before")
     @classmethod
@@ -580,15 +584,45 @@ class ModuleProfilePanel(ModuleContractModel):
         return self
 
 
+class ModuleProfileTab(ModuleContractModel):
+    """A module-declared tab contribution to the social profile page."""
+
+    id: str
+    label: str
+    order: int = 100
+    action: str | None = None       # module action called to hydrate tab data
+    component: str | None = None    # registered React component for tab body
+
+    @field_validator("id", "label", mode="before")
+    @classmethod
+    def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
+        return _required_text(value, field_name=f"profile tab {info.field_name}")
+
+    @field_validator("action", "component", mode="before")
+    @classmethod
+    def _optional(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+    @model_validator(mode="after")
+    def _validate_tab_contract(self) -> "ModuleProfileTab":
+        if not self.component and not self.action:
+            raise ValueError("profile tabs must declare at least a 'component' or an 'action'")
+        return self
+
+
 class ModuleProfileManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.profile.v1"] = "mozaiks.profile.v1"
     panels: list[ModuleProfilePanel] = Field(default_factory=list)
+    tabs: list[ModuleProfileTab] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _unique_panel_ids(self) -> ModuleProfileManifest:
-        panel_ids = [panel.id for panel in self.panels]
+    def _unique_ids(self) -> "ModuleProfileManifest":
+        panel_ids = [p.id for p in self.panels]
         if len(panel_ids) != len(set(panel_ids)):
             raise ValueError("profile.yaml panels must have unique id values")
+        tab_ids = [t.id for t in self.tabs]
+        if len(tab_ids) != len(set(tab_ids)):
+            raise ValueError("profile.yaml tabs must have unique id values")
         return self
 
 
@@ -845,15 +879,93 @@ class ModuleLoader:
 
         handler = self._import_handler(name, module_dir, handler_path, class_name, definition)
 
+        if definition.module.user_data_scope:
+            self._register_account_data_handler(name, module_dir)
+
         logger.info(
-            "MODULE_LOADED: %s v%s handler=%s actions=%s",
-            name, definition.version, type(handler).__name__, [a.id for a in definition.actions])
+            "MODULE_LOADED: %s v%s handler=%s actions=%s user_data_scope=%s",
+            name, definition.version, type(handler).__name__,
+            [a.id for a in definition.actions], definition.module.user_data_scope)
         return LoadedModule(
             definition=definition,
             handler=handler,
             path=module_dir,
             manifests=manifests,
         )
+
+    def _register_account_data_handler(self, module_id: str, module_dir: Path) -> None:
+        """Import and register backend/account_data_handler.py with account_data_registry.
+
+        Called automatically when module.yaml declares ``user_data_scope: true``.
+        The handler file must export a class named ``AccountDataHandler`` (or any
+        name — the loader looks for a class implementing the AccountDataHandler
+        Protocol).  It is registered under ``module_id`` with the process-global
+        ``account_data_registry``.
+
+        Failure to load the handler logs a warning (not a hard error) so a
+        missing handler file does not prevent the rest of the module from loading.
+        Generated modules must declare the file; the warning makes the gap visible.
+        """
+        handler_file = module_dir / "backend" / "account_data_handler.py"
+        if not handler_file.exists():
+            logger.warning(
+                "ACCOUNT_HANDLER_MISSING: module %r declares user_data_scope=true "
+                "but backend/account_data_handler.py was not found. "
+                "Account deletion and data export will NOT cover this module's data.",
+                module_id,
+            )
+            return
+
+        try:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location(
+                f"app.modules.{module_id}.backend.account_data_handler",
+                handler_file,
+            )
+            if spec is None or spec.loader is None:
+                raise ImportError("spec_from_file_location returned None")
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+
+            # Find the handler class — prefer one explicitly named AccountDataHandler,
+            # fall back to any class that satisfies the Protocol.
+            from mozaiksai.core.account import AccountDataHandler as _Protocol
+            handler_cls = getattr(mod, "AccountDataHandler", None)
+            if handler_cls is None:
+                # Search for any class that implements the protocol
+                import inspect as _inspect
+                candidates = [
+                    obj for _, obj in _inspect.getmembers(mod, _inspect.isclass)
+                    if obj.__module__ == mod.__name__ and isinstance(obj, type)
+                ]
+                for candidate in candidates:
+                    try:
+                        if isinstance(candidate(db=None), _Protocol):  # type: ignore[call-arg]
+                            handler_cls = candidate
+                            break
+                    except Exception:
+                        pass
+
+            if handler_cls is None:
+                logger.warning(
+                    "ACCOUNT_HANDLER_NO_CLASS: module %r backend/account_data_handler.py "
+                    "found but no AccountDataHandler class discovered. "
+                    "Export a class named AccountDataHandler.",
+                    module_id,
+                )
+                return
+
+            from mozaiksai.core.account import account_data_registry
+            account_data_registry.register(module_id, handler_cls)
+            logger.info("ACCOUNT_HANDLER_REGISTERED: module=%s class=%s", module_id, handler_cls.__name__)
+
+        except Exception as exc:
+            logger.warning(
+                "ACCOUNT_HANDLER_LOAD_ERROR: module %r backend/account_data_handler.py "
+                "could not be loaded: %s",
+                module_id,
+                exc,
+            )
 
     def _load_companion_manifests(
         self,

@@ -3,7 +3,7 @@ from pathlib import PurePosixPath
 from typing import Annotated, Any
 
 import yaml
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from mozaiksai.core.workflow.generator_support.page_plan_utils import (
     _page_from_plan,

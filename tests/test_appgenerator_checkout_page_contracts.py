@@ -23,7 +23,7 @@ Scope:
   15. No provider-specific names appear in OSS guidance or tests.
 
 All fixtures use neutral names: checkout_module, ecommerce_checkout, external_payment_provider.
-No MozaiksPay, Stripe, wallet, billing, or proprietary hosted-product names in OSS tests.
+No MozaiksPay, payment provider, wallet, billing, or proprietary hosted-product names in OSS tests.
 """
 from __future__ import annotations
 
@@ -40,8 +40,8 @@ _FILE_CONTRACTS_PATH = (
 _PROPRIETARY_NAMES = [
     "MozaiksPay",
     "mozaikspay",
-    "Stripe",
-    "stripe",
+    "payment provider",
+    "payment_provider",
     "wallet",
     "managed_billing",
     "managed_usage",

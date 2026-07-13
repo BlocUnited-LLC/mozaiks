@@ -227,7 +227,7 @@ Source file analyzed:
 | Variable | Type | Source | How it is obtained at runtime |
 |---|---|---|---|
 | `context_aware` | `boolean` | `config` | `os.getenv("CONTEXT_AWARE")`, fallback `true`, boolean coercion |
-| `concept_overview` | `string` | `data_reference` | Mongo lookup in `autogen_ai_agents.Concepts` with query `{app_id: {{runtime.app_id}}}`, field `ConceptOverview` |
+| `concept_overview` | `string` | `data_reference` | Mongo lookup in `mozaiksai.BuilderConcepts` with query `{app_id: {{runtime.app_id}}}`, field `ConceptOverview` |
 | `concept_api_endpoints` | `array` | `data_reference` | Same query path as above, field `ApiEndpoints`, fallback `[]` when no doc/value |
 | `concept_blueprint` | `object` | `data_reference` | Same query path as above, field `Blueprint`, fallback `null` |
 | `monetization_enabled` | `boolean` | `config` | `os.getenv("MONETIZATION_ENABLED")`, fallback `false`, boolean coercion |
@@ -242,7 +242,7 @@ Source file analyzed:
 | `strategy_ready` | `boolean` | `state` | Initialized to `false`; later flipped by strategy tool flow |
 | `download_complete` | `boolean` | `state` | Initialized to `false`; updated by UI trigger from `generate_and_download` at `response_key=download_accepted` |
 | `attachments_allow_bundling` | `boolean` | `config` | `os.getenv("AGENTGEN_ATTACHMENTS_ALLOW_BUNDLING")`, fallback `false`, boolean coercion |
-| `chat_attachments` | `array` | `data_reference` | Mongo lookup in `MozaiksAI.ChatSessions` with query `{app_id: {{runtime.app_id}}, _id: {{runtime.chat_id}}}`, field `attachments` |
+| `chat_attachments` | `array` | `data_reference` | Mongo lookup in `mozaiksai.ChatSessions` with query `{app_id: {{runtime.app_id}}, _id: {{runtime.chat_id}}}`, field `attachments` |
 | `is_multi_workflow` | `boolean` | `computed` | Starts `false`; populated by pattern-selection logic |
 | `pack_name` | `string` | `computed` | Starts `null`; populated by pattern-selection logic |
 | `current_workflow_index` | `integer` | `state` | Initialized to `0`; updated by pack iteration/runtime loop |

@@ -1,4 +1,4 @@
-"""Shared AG2 beta Network patternbook loader for factory workflows."""
+"""Shared AG2 1.0 beta Network patternbook loader for factory workflows."""
 
 from __future__ import annotations
 
@@ -134,7 +134,7 @@ def render_pattern_guidance(pattern_id: int | str | None) -> str:
         lines.append(f"- {avoid}")
 
     lines.append("")
-    lines.append("AG2 beta primitives:")
+    lines.append("AG2 1.0 beta primitives:")
     for primitive in pattern.get("beta_primitives") or []:
         lines.append(f"- {primitive}")
 

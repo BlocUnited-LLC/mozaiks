@@ -1,43 +1,30 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { API_BASE } from './studioApi.js'
-import { buildStudioDemoApps, isStudioDemoModeEnabled } from './studioDemoData.js'
 
 export function useWorkspaceApps(errorFallback = 'Workspace apps could not be loaded.') {
   const [apps, setApps] = useState([])
   const [metrics, setMetrics] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [dataMode, setDataMode] = useState('live')
+  const [dataMode] = useState('live')
 
   useEffect(() => {
     let cancelled = false
-    const demoMode = isStudioDemoModeEnabled()
 
     async function load() {
       try {
         const res = await fetch(`${API_BASE}/api/studio/apps`)
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
         const payload = await res.json()
-        const liveApps = Array.isArray(payload.apps) ? payload.apps : []
-
         if (!cancelled) {
-          const useDemoApps = demoMode && liveApps.length === 0
-          setApps(useDemoApps ? buildStudioDemoApps() : liveApps)
+          setApps(Array.isArray(payload.apps) ? payload.apps : [])
           setMetrics(payload.metrics && typeof payload.metrics === 'object' ? payload.metrics : {})
-          setDataMode(useDemoApps ? 'demo' : 'live')
           setError(null)
         }
       } catch (err) {
         if (!cancelled) {
-          if (demoMode) {
-            setApps(buildStudioDemoApps())
-            setMetrics({})
-            setDataMode('demo')
-            setError(null)
-          } else {
-            setError(err instanceof Error ? err.message : errorFallback)
-          }
+          setError(err instanceof Error ? err.message : errorFallback)
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -50,12 +37,27 @@ export function useWorkspaceApps(errorFallback = 'Workspace apps could not be lo
     }
   }, [errorFallback])
 
+  const deleteApp = useCallback(async (buildRegistryId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/studio/apps/${encodeURIComponent(buildRegistryId)}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+      setApps((prev) => prev.filter((a) => a.build_registry_id !== buildRegistryId))
+      return true
+    } catch (err) {
+      console.error('[useWorkspaceApps] deleteApp failed:', err)
+      return false
+    }
+  }, [])
+
   return {
     apps,
     metrics,
     loading,
     error,
     dataMode,
+    deleteApp,
   }
 }
 

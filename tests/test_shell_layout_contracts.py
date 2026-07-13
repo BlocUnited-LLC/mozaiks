@@ -22,7 +22,9 @@ def test_header_has_single_nav_source_of_truth() -> None:
 
 def test_shell_chrome_main_column_preserves_footer() -> None:
     source = _read("chat-ui/src/components/RouteRenderer.jsx")
-    assert '<main className="flex min-h-0 flex-1 flex-col">{children}</main>' in source
+    assert '<main id="main-content" tabIndex={-1}' in source
+    assert 'className="flex min-h-0 flex-1 flex-col outline-none"' in source
+    assert "{children}</main>" in source
 
 
 def test_transition_screens_use_shell_safe_height() -> None:

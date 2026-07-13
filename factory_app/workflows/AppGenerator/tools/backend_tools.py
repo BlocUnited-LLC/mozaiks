@@ -6,7 +6,7 @@ Wraps AppGeneratorBackendClient methods as callable tools for agents.
 
 from typing import Annotated, Any
 
-from autogen.tools.dependency_injection import Field
+from pydantic import Field
 
 from factory_app.workflows.AppGenerator.tools.backend_client import app_gen_backend_client
 from logs.logging_config import get_workflow_logger

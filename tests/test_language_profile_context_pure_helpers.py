@@ -277,10 +277,10 @@ class TestBuildServicesBlock:
         assert _build_services_block({}) == ""
 
     def test_string_values_rendered(self):
-        services = {"stripe": "stripe-python>=5"}
+        services = {"payment_provider": "payment_provider-python>=5"}
         result = _build_services_block(services)
-        assert "stripe" in result
-        assert "stripe-python>=5" in result
+        assert "payment_provider" in result
+        assert "payment_provider-python>=5" in result
 
     def test_non_string_values_skipped(self):
         services = {"config": {"key": "value"}, "name": "my_service"}
@@ -290,13 +290,13 @@ class TestBuildServicesBlock:
         assert '{"key": "value"}' not in result
 
     def test_multiple_string_values_all_rendered(self):
-        services = {"stripe": "stripe-python", "sendgrid": "sendgrid"}
+        services = {"payment_provider": "payment_provider-python", "sendgrid": "sendgrid"}
         result = _build_services_block(services)
-        assert "stripe" in result
+        assert "payment_provider" in result
         assert "sendgrid" in result
 
     def test_result_starts_with_services_header(self):
-        services = {"stripe": "stripe-python"}
+        services = {"payment_provider": "payment_provider-python"}
         result = _build_services_block(services)
         assert result.startswith("Services:")
 

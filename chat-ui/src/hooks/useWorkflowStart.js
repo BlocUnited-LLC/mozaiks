@@ -89,7 +89,7 @@ export function useWorkflowStart() {
       if (trigger_source === CHAT_TRIGGER_SOURCE) {
         const url = buildWorkflowChatUrl(workflowId, null, contextVariables);
         navigate(url + '&new=1');
-        return { execution_mode: 'chat_navigation', workflow_id };
+        return { execution_mode: 'chat_navigation', workflow_id: workflowId };
       }
 
       // All other trigger sources — use the unified backend endpoint

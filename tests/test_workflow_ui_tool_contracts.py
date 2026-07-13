@@ -458,6 +458,17 @@ def test_agent_generator_review_handoff_uses_user_text_state_triggers() -> None:
     assert "regex" in revision_trigger["match"]
 
 
+def test_agent_generator_interview_next_trigger_accepts_standalone_next_line() -> None:
+    context_config = _read_yaml("factory_app/workflows/AgentGenerator/context_variables.yaml")
+    interview = context_config["definitions"]["interview_complete"]
+    trigger = interview["source"]["triggers"][0]
+
+    assert trigger["type"] == "agent_text"
+    assert trigger["agent"] == "InterviewAgent"
+    assert trigger["match"]["regex"] == r"(?m)^\s*NEXT\s*$"
+    assert "equals" not in trigger["match"]
+
+
 def test_ui_manifest_components_are_exported_by_resolvable_workflow_barrels() -> None:
     shipped_components = set(get_workflow_shipped_component_names())
 

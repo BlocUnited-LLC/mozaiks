@@ -1,0 +1,44 @@
+name: Update usage pricing catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-usage-pricing-catalog
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Refresh generated catalog
+        run: python scripts/update_usage_pricing_catalog.py
+
+      - name: Validate generated catalog
+        run: python scripts/update_usage_pricing_catalog.py --check
+
+      - name: Open pricing catalog PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: automation/update-usage-pricing-catalog
+          commit-message: "Update generated usage pricing catalog"
+          title: "Update generated usage pricing catalog"
+          body: |
+            Refreshes `pricing/catalogs/usage-pricing.generated.json` from LiteLLM's model price reference.
+
+            This catalog is provider cost-basis data only. App/customer markups remain in `app/config/subscriptions.yaml`.
+          labels: dependencies

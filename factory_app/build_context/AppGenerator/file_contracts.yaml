@@ -60,10 +60,11 @@ task_contracts:
       - Schema version must be mozaiks.subscriptions.v1.
       - Do not emit modules/{pack_name}/contracts/subscriptions.yaml or any module-local subscriptions.yaml.
       - Do not emit hosted billing admin actions, payment-provider products, price ids, invoices, checkout internals, or settlement logic in this file.
-      - token_wallets live at the config root and are provider-neutral.
-      - token_allowances live under plans[] and every wallet_id must reference a declared token_wallet.
-      - assignment_store declares where active app-owned subscription assignments are read by ConfiguredEntitlementAdapter.
-      - Optional pricing_catalog groups are display metadata for public pricing tabs/service selectors only. They may group declared plan_ids and app/provider-owned add_on_ids, but they must not grant capabilities or carry payment-provider price IDs.
+        - token_wallets live at the config root and are provider-neutral.
+        - token_allowances live under plans[] and every wallet_id must reference a declared token_wallet.
+        - assignment_store declares where active app-owned subscription assignments are read by ConfiguredEntitlementAdapter.
+        - Optional usage_charge_policies live at the config root and describe app-level customer charge estimates only; they may use runtime_llm_usage, provider_cost_usd markup, or a fixed token unit price.
+        - Optional pricing_catalog groups are display metadata for public pricing tabs/service selectors only. They may group declared plan_ids and app/provider-owned add_on_ids, but they must not grant capabilities or carry payment-provider price IDs.
       - Use pricing_catalog when an app sells multiple service lines on one pricing surface, such as platform access, token packs, hosting, domains, marketing, or support.
       - Generated module actions that require paid access must declare actions[].entitlement_gate with a capability_id granted by at least one plan.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
@@ -250,6 +251,86 @@ task_contracts:
       - Persistent pages launch workflows declaratively; live workflow UI stays workflow-owned.
       - Do not convert agent integrations into app-owned module collections by default.
 
+  ai_disclosure_docs:
+    owner_agent: AppPlanAgent
+    summary: >
+      AI subprocessor and data-use disclosure scaffold. Emitted automatically
+      when the generated app includes AI-powered features (workflows, agent
+      backends, LLM-driven actions). Gives the app developer a ready-to-fill
+      template so every AI-enabled Mozaiks app ships with the legal disclosure
+      surface it needs to comply with GDPR, CCPA, and standard SaaS AI-use
+      disclosure obligations.
+    trigger:
+      emit_when:
+        - The app plan includes one or more AI workflows, AgentGenerator
+          backends, or LLM-backed module actions.
+        - Any capability in the plan is marked ai_powered: true.
+    required_outputs:
+      - docs/ai-subprocessors.md
+    optional_outputs: []
+    hard_constraints:
+      - Emit docs/ai-subprocessors.md as a stub template the developer fills in,
+        not as real policy text. The generated file must carry clear TODO markers
+        so the developer knows exactly what to complete before publishing.
+      - The stub must declare placeholders for all required sections below.
+        Do not omit any section, even if it appears to be "not applicable" for
+        the generated app — the developer must make that determination.
+      - Do not invent or fill in the app developer's actual legal obligations,
+        AI provider names, data retention policies, or contact addresses.
+        Provide placeholder tokens in ALL_CAPS or [bracketed] form only.
+      - The generated stub must include sections for (1) which AI providers and
+        subprocessors are used and what data they receive, (2) whether input
+        data is used for model training by the subprocessor, (3) data retention
+        window at the subprocessor, (4) user rights (access / deletion request
+        path), (5) how users consent or are notified before AI features process
+        their data, and (6) a contact / DPO address for GDPR purposes.
+      - Keep generated stub text generic enough to be adapted by any generated
+        app. Do not hard-code Mozaiks-internal provider names or hosted-product
+        specifics into the template.
+      - Link to this file from the generated README or docs/index.md when those
+        documents are also generated in the same plan.
+
+  legal_docs:
+    owner_agent: AppPlanAgent
+    summary: >
+      Privacy policy and terms of service scaffold. Emitted automatically for
+      every generated SaaS app so the developer ships with the legal surface
+      required for public deployment. Provides ready-to-fill stub documents;
+      the developer must complete them before making the app publicly accessible.
+    trigger:
+      emit_always: true
+    required_outputs:
+      - docs/privacy-policy.md
+      - docs/terms-of-service.md
+    optional_outputs:
+      - docs/cookie-policy.md
+    hard_constraints:
+      - Emit docs/privacy-policy.md and docs/terms-of-service.md as stub templates
+        the developer fills in, not as real policy text. Every section must carry
+        clear [PLACEHOLDER] or TODO markers so the developer knows exactly what to
+        complete before publishing.
+      - Do not invent or fill in the app developer's actual legal obligations,
+        jurisdiction, data retention policies, governing law, or contact addresses.
+        Provide placeholder tokens in ALL_CAPS or [bracketed] form only.
+      - The privacy policy stub must include sections for (1) what data is collected
+        and why, (2) how data is stored and for how long, (3) third-party sharing
+        and subprocessors, (4) user rights (access, correction, deletion, portability),
+        (5) cookies and tracking, (6) contact and data-controller identity, and
+        (7) policy update notification process.
+      - The terms of service stub must include sections for (1) acceptance of terms,
+        (2) description of the service, (3) user account responsibilities, (4)
+        prohibited conduct, (5) intellectual property, (6) disclaimer of warranties,
+        (7) limitation of liability, (8) governing law and dispute resolution, and
+        (9) changes to terms.
+      - Keep generated stub text generic enough to be adapted by any generated app.
+        Do not hard-code Mozaiks-internal provider names, hosted-product specifics,
+        or any concrete legal jurisdiction into the template.
+      - Link to both documents from the generated app's main navigation footer using
+        the legal and terms shell shortcut ids in config/shell.json when that file is
+        also generated in the same plan.
+      - Do not emit cookie-policy.md unless the app plan explicitly uses browser
+        cookies or fingerprinting beyond what the platform session requires.
+
 backend_helper_files:
   description: >
     Rules for backend/{helper_name}.py files generated under app/modules/{module_id}/backend/.
@@ -354,6 +435,29 @@ backend_helper_files:
       to extract the bare hostname before use in DNS records. Never write a URL
       as a CNAME target. Use urllib.parse.urlparse(url).hostname.
 
+  account_data_handler:
+    canonical_location: backend/account_data_handler.py
+    kind: helper
+    generated_by: ServiceAgent
+    required: true_when_user_data_scope_is_set
+    trigger: module.yaml declares module.user_data_scope=true
+    implements_protocol: AccountDataHandler
+    auto_registered_by: ModuleLoader at startup — no manual registration required
+    required_methods:
+      - "async delete_user_data(*, app_id: str, user_id: str) -> dict  # returns {deleted_count: int, ...}"
+      - "async export_user_data(*, app_id: str, user_id: str) -> dict  # returns module-namespaced records"
+    constructor_signature: "__init__(self, db: Any) -> None  # receives motor db from loader"
+    hard_constraints:
+      - Must be named AccountDataHandler (the loader discovers it by this name first).
+      - Both methods must scope ALL queries through app_id AND user_id. Never delete or export records across tenants.
+      - delete_user_data must be idempotent — calling it twice must not raise an error.
+      - export_user_data must return an empty dict (not None or raise) when the user has no records.
+      - For financial/ledger modules (transactional archetype), anonymise rather than delete user_id on ledger entries to preserve audit integrity. Document this in the method docstring.
+      - "Return key names in export_user_data must be namespaced with the module_id to avoid collisions when the platform merges all module exports (e.g. {\"messages_threads\": [...], \"messages_dms\": [...]})."
+      - Do not call service.py or handler.py from the handler — access the db directly for simplicity and to avoid ctx dependencies.
+      - Do not import from other modules. The handler must be self-contained within its module's backend.
+      - The ModuleLoader auto-registers this class; do not call account_data_registry.register() manually in the handler file.
+
   examples:
     - backend/provider_client.py   # external provider client wrapper
     - backend/routes_hooks.py       # api_router entrypoint — custom inbound route mounting
@@ -362,4 +466,5 @@ backend_helper_files:
     - backend/audit_subscriber.py    # startup_service entrypoint for audit event handling
     - backend/verification_poller.py # startup_service — background DNS/state poller (event_pipeline)
     - backend/ssl_status_poller.py   # startup_service — background certificate poller (event_pipeline)
+    - backend/account_data_handler.py # AccountDataHandler — GDPR delete + export for user-scoped modules
 

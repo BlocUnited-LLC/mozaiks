@@ -292,8 +292,8 @@ class TestIsSecretContextKey:
         from mozaiksai.core.runtime.composition.module_event_router import _is_secret_context_key
         return _is_secret_context_key(key)
 
-    def test_stripe_prefix_is_secret(self):
-        assert self._check("stripe_payment_intent_id") is True
+    def test_payment_provider_prefix_is_secret(self):
+        assert self._check("payment_provider_payment_intent_id") is True
 
     def test_idempotency_prefix_is_secret(self):
         assert self._check("idempotency_key") is True
@@ -422,20 +422,20 @@ class TestContextFieldsBehaviour:
         rule = {
             "id": "approval.created.notify",
             "event_type": "approval.created",
-            "context_fields": ["approval_id", "stripe_payment_intent_id", "api_key"],
+            "context_fields": ["approval_id", "payment_provider_payment_intent_id", "api_key"],
             "template": {"title": "Approval", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
         asyncio.run(
             router.handle_event("approval.created", self._envelope({
                 "approval_id": "appr_xyz",
-                "stripe_payment_intent_id": "pi_secret_123",
-                "api_key": "sk_live_abc",
+                "payment_provider_payment_intent_id": "pi_secret_123",
+                "api_key": "provider_live_abc",
             }))
         )
         ctx = stored[0].get("context", {})
         assert ctx.get("approval_id") == "appr_xyz"
-        assert "stripe_payment_intent_id" not in ctx
+        assert "payment_provider_payment_intent_id" not in ctx
         assert "api_key" not in ctx
 
     def test_no_context_fields_means_no_context_key(self):
@@ -467,12 +467,12 @@ class TestContextFieldsBehaviour:
         rule = {
             "id": "sensitive.notify",
             "event_type": "sensitive.event",
-            "context_fields": ["stripe_id", "api_key"],
+            "context_fields": ["payment_provider_id", "api_key"],
             "template": {"title": "Sensitive", "body": ""},
         }
         router, stored, asyncio = self._make_router_and_store(rule)
         asyncio.run(
-            router.handle_event("sensitive.event", self._envelope({"stripe_id": "x", "api_key": "y"}))
+            router.handle_event("sensitive.event", self._envelope({"payment_provider_id": "x", "api_key": "y"}))
         )
         assert not stored[0].get("context")
 

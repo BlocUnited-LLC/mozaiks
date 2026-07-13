@@ -33,6 +33,7 @@ class AdminRegistryPage(BaseModel):
     icon: str | None = None
     order: int = 0
     enabled: bool = True
+    show_in_navigation: bool = True
     scope: Literal["workspace", "app"] = "app"
     surfaces: list[Literal["platform", "studio"]] | None = None
 
@@ -120,6 +121,7 @@ def build_admin_shell_routes(registry: AdminRegistry) -> list[dict[str, Any]]:
                 "admin_page": page.id,
                 "scope": page.scope,
                 "surfaces": page.surfaces,
+                "show_in_navigation": page.show_in_navigation,
             }
         )
     return routes

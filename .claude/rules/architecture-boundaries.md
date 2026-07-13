@@ -19,8 +19,9 @@ contributor guidance.
   `mozaiksai/control_plane/` runtime machinery.
 - Framework capability: `mozaiksai.hosts.platform`,
   `mozaiksai.hosts.studio`, app/module/page/shell/admin contracts, `chat-ui/`,
-  CLI developer tooling, `factory_app/workflows/`, `factory_app/control_plane/`,
-  and `factory_app/app/` as the first-party builder/reference app workspace.
+  CLI developer tooling, `factory_app/workflows/`, `factory_app/build_context/`,
+  `factory_app/control_plane/`, and `factory_app/app/` as the first-party
+  builder/reference app workspace.
 - Hosted product capability: app-local hosted product hosts outside this OSS
   repo, hosted-only collaboration/billing/marketplace/deployment surfaces, and
   proprietary hosted product engines or provider-owned managed capabilities
@@ -42,6 +43,9 @@ contributor guidance.
 - Put generic runtime mechanics in `mozaiksai/`.
 - Put cross-workflow builder journey composition in
   `factory_app/workflows/extended_orchestration/extension_registry.json`.
+- Put static factory build-time catalogs, contracts, reusable pack descriptors,
+  and deterministic templates in named `factory_app/build_context/{context_name}/`
+  directories declared by `context.yaml` `assets[]`.
 - Put builder-session harness policy in `factory_app/control_plane/`, not in
   workflow-local handoffs or module handlers.
 - Put app/module/page/shell behavior in platform or app workspace contracts,

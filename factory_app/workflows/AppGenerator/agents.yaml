@@ -228,6 +228,15 @@ agents:
       8. Capture any visual/style preference the user stated during the interview (e.g. "dark", "minimal", "techy") as `theme_preferences` — raw text, no translation needed. Set to null if no preference was stated.
       9. Preserve upstream `concept_blueprint.brand_intent` as `brand_intent` whenever it exists. Only change it if the user explicitly refined the brand or experience direction.
       9a. Select `shell_preset_hint` from `[SHELL PRESET CONTEXT]` only when a preset clearly matches the app's navigation/chrome model. Set it to null when platform defaults are sufficient. This is prompt-time guidance only; do not plan a generated runtime file for the preset.
+      9b. **Workspace integration check** — before finalizing `external_integrations`, call `check_workspace_integrations` with the catalog IDs of every third-party service the plan requires:
+         - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `postgres`, `redis`, `openai`, `anthropic`, `google_oauth`, `segment`.
+         - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
+         - Use the result to populate `workspace_integration_status[]` in the plan:
+           - `configured` (auto_wire: true) — integration is ready; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
+           - `partial` or `missing` (auto_wire: false) — call `record_integration_need` for each so `IntegrationReadinessAgent` can collect the credential inline. Include the catalog `setup_url` in the message.
+           - `unknown` — catalog-only mode (hosted deployment). Record status as `unknown`; do not call `record_integration_need`; surface the setup link in the build summary instead.
+         - If no planned integrations match catalog IDs, skip the tool call and leave `workspace_integration_status` empty.
+         - This check is read-only and non-blocking. If the tool fails, continue planning with all integrations treated as unchecked.
       10. If agent-backend context exists (`agent_api_url` or `agent_websocket_url` is non-null), set `agent_backend_required` to true and include the required integration surfaces in `frontend_scope`, `service_scope`, `external_integrations`, and `capability_packs`.
          - Use `generated_workflow_capability_id` (not the raw workflow name) in every `workflow_capability_ids` field in event flows and module contract task `initial_message`s. If `generated_workflow_capability_id` is null but `generated_workflow_name` is set, derive it as lowercase hyphen-separated (e.g. `CustomerSupport` → `customer-support`).
          - Use `generated_workflow_name` (not the capability id) when defining persistent page workflow launch affordances such as `workflow_touchpoints` and page actions with `action_type: workflow`.
@@ -999,10 +1008,11 @@ agents:
           f. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
           g. Set `extensions` only when a specific UI zone cannot be expressed with primitives (see extension slot rules above). Null for most pages.
       4. Build the `manifest`:
-          a. `pages` — list every declared `app_build_plan.pages[].name`.
-          b. `custom_routes` — null/empty unless you emit custom_route_bundle; otherwise list every custom route id in order.
-          c. `auth_strategy` and `roles` from `app_build_plan`.
-          d. `default_route` — the most logical landing page route and it must match a generated declarative page route or custom route path.
+          a. `app_name`, `description`, `tagline`, and `value_proposition` — preserve the approved concept identity from `value_manifest` / `concept_blueprint` when present. `description` should be the durable "what this app is" summary shown in Studio; `tagline` should be a short positioning line; `value_proposition` should carry the core user value.
+          b. `pages` — list every declared `app_build_plan.pages[].name`.
+          c. `custom_routes` — null/empty unless you emit custom_route_bundle; otherwise list every custom route id in order.
+          d. `auth_strategy` and `roles` from `app_build_plan`.
+          e. `default_route` — the most logical landing page route and it must match a generated declarative page route or custom route path.
       5. Set `theme_config_patch` to null when upstream context does not establish a clear non-default direction, or when the approved direction already matches the platform default.
       6. Set `shell_config` to null when the default platform shell or selected `shell_preset_hint` is appropriate without runtime overrides. Only emit it when the app needs a custom logo/header action, canonical shortcut chrome, a non-default `navigation.policy`, non-page-owned `navigation.items`, or a non-default `chrome` mode policy.
       7. If `captured_theme_config` is present, preserve its token structure where possible and only narrow it to the app-specific deltas you actually need.
@@ -1027,6 +1037,9 @@ agents:
         "agent_message": "Generated manifest and 3 page schemas using PageHeader, ResourceTable, and Form primitives.",
         "manifest": {
           "app_name": "My App",
+          "description": "My App helps operators monitor account activity, route follow-up work, and keep customer records current from one workspace.",
+          "tagline": "Operational clarity for customer teams",
+          "value_proposition": "A focused workspace for customer operations teams to manage accounts, tasks, and follow-up decisions faster.",
           "version": "1.0.0",
           "auth_strategy": "role-based",
           "roles": ["admin", "user"],
@@ -1255,6 +1268,9 @@ agents:
          only when unresolved services are optional or not required before validation/runtime.
       4. If the tool returns `status = "blocked"`, set `ready = false` and list
          `unresolved_required_services`.
+      5. Call `save_integration_manifest` (best-effort, non-blocking). This persists
+         what the build declared the app needs so the Studio integrations tab can
+         surface it after the session ends. Do not block on failure.
 
       **CRITICAL**: Output ONLY raw JSON matching IntegrationReadinessOutput. No markdown, no commentary.
   - id: output_format
@@ -1267,8 +1283,8 @@ agents:
         "integration_readiness": {
           "status": "ready",
           "ready": true,
-          "checked_services": ["stripe"],
-          "ready_services": ["stripe"],
+          "checked_services": ["mozaikspay"],
+          "ready_services": ["mozaikspay"],
           "unresolved_required_services": [],
           "agent_message": "Integration readiness checked."
         }
@@ -1486,7 +1502,8 @@ agents:
       - Emit exactly one typed subscription_config_bundle and serialized
         `config/subscriptions.yaml` file.
       - The file declares app plans, capabilities, assignment_store,
-        token_wallets, usage_limits, and token_allowances only.
+        token_wallets, usage_limits, token_allowances, usage_charge_policies,
+        and pricing_catalog display metadata only.
 
       **Mode R (workflow_integration_repair)**:
       - Read `workflow_integration_repair_request` and `workflow_integration_repair_failed_tests`.

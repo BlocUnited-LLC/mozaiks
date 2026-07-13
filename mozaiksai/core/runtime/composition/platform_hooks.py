@@ -62,6 +62,23 @@ Bundle keys (all optional):
     workflow_name_resolver (requested_workflow_name: str, workflow_names: List[str])
         -> Optional[str]
         Resolve stale or case-insensitive workflow names to a loaded workflow.
+
+    on_account_delete_complete
+                          async (*, app_id: str, user_id: str,
+                                  deletion_results: Dict[str, Any]) -> None
+        Called after all ``AccountDataHandler.delete_user_data`` handlers have
+        run.  Use this to revoke auth provider sessions, remove OIDC accounts,
+        emit a hosted audit event, cancel platform subscriptions, etc.
+        Raised exceptions are logged as warnings and do not surface to the
+        caller.
+
+    on_account_export_ready
+                          async (*, app_id: str, user_id: str,
+                                  export_payload: Dict[str, Any]) -> Dict[str, Any]
+        Called after all ``AccountDataHandler.export_user_data`` handlers have
+        run.  Use this to inject platform-level records (auth identity, billing
+        history, subscription snapshot) into the export payload before it is
+        returned to the caller.  Must return the (possibly augmented) payload.
 """
 
 import importlib

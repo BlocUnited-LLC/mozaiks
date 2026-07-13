@@ -7,7 +7,7 @@
 [![Release](https://img.shields.io/github/v/release/BlocUnited-LLC/mozaiks)](https://github.com/BlocUnited-LLC/mozaiks/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/BlocUnited-LLC/mozaiks/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://www.python.org/)
-[![AG2](https://img.shields.io/badge/AG2-Autogen-green)](https://github.com/ag2ai/ag2)
+[![AG2](https://img.shields.io/badge/AG2-1.0_beta-green)](https://github.com/ag2ai/ag2)
 
 </div>
 
@@ -80,6 +80,14 @@ separate from builder workflows.
     Extend an app with a custom AI workflow.
 
     [:octicons-arrow-right-24: Add Workflows](guides/adding-workflows/01-overview.md)
+
+-   :material-view-dashboard: **Use Studio**
+
+    ---
+
+    Learn the workspace and app-dashboard surfaces.
+
+    [:octicons-arrow-right-24: Studio](studio/index.md)
 
 -   :material-puzzle-outline: **Add a Module**
 

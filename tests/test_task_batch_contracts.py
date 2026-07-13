@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from autogen.beta.network.policies import CHANNEL_STATE_DEP
+from ag2.network.policies import CHANNEL_STATE_DEP
 
 from mozaiksai.core.workflow.task_batches import (
     execute_task_batches_for_trigger,

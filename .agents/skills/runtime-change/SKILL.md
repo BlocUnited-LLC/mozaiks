@@ -14,6 +14,7 @@ Typical triggers:
 - `mozaiksai/core/runtime/composition/module_executor.py`
 - `mozaiksai/core/runtime/composition/module_event_router.py`
 - `mozaiksai/core/runtime/composition/module_context.py`
+- `mozaiksai/core/runtime/composition/platform_hooks.py`
 - `mozaiksai/core/runtime/composition/extensions.py`
 - `mozaiksai/core/auth/**`
 - `mozaiksai/core/transport/**`
@@ -23,10 +24,10 @@ Inspect first:
 
 - `ARCHITECTURE.md`
 - `AGENTS.md`
-- `AGENTS.md`
-- `.Codex/rules/runtime.md`
-- `.Codex/rules/architecture-boundaries.md`
-- `.Codex/rules/testing.md`
+- `CLAUDE.md`
+- `.claude/rules/runtime.md`
+- `.claude/rules/architecture-boundaries.md`
+- `.claude/rules/testing.md`
 - `docs/architecture/app/platform-authoring.md` when app loading, shell, route ownership, or module dispatch changes
 - `docs/architecture/modules-systems/module-system.md` when module contracts or module runtime composition change
 - `docs/architecture/foundations/events-and-data/persistence-and-artifact-storage.md` when `ctx.persistence`, data contract, indexes, or migrations change
@@ -37,6 +38,7 @@ Inspect first:
   - `mozaiksai/core/runtime/app/module_loader.py` + `tests/test_module_loader_contracts.py`
   - `mozaiksai/core/runtime/composition/extensions.py` + `tests/test_module_runtime_extensions.py`
   - `mozaiksai/core/runtime/composition/module_executor.py` / `mozaiksai/core/runtime/composition/module_context.py` + `tests/test_runtime_persistence_module_injection.py`
+  - `mozaiksai/core/runtime/composition/platform_hooks.py` + `tests/test_platform_hook_registry.py`
   - `mozaiksai/core/runtime/composition/module_event_router.py` + `tests/test_module_loader_contracts.py`
   - generated-app dependency checks + `tests/test_appgenerator_canonical_generation.py` or `tests/test_appgenerator_persistence_alignment.py` when AppGenerator assumptions are touched
 
@@ -86,6 +88,9 @@ Common runtime areas:
 - Runtime extensions:
   - Inspect `mozaiksai/core/runtime/composition/extensions.py`, `mozaiksai/core/runtime/app/module_loader.py`, and `tests/test_module_runtime_extensions.py`.
   - Keep entrypoints module-local under `backend.*` and contract-bound.
+- Platform hooks:
+  - Inspect `mozaiksai/core/runtime/composition/platform_hooks.py` and `tests/test_platform_hook_registry.py`.
+  - Hooks are provider-neutral extension points for deployers. They must not encode hosted-only product rules in OSS.
 - Persistence, data contract, indexes, and migrations:
   - Inspect `mozaiksai/core/runtime/persistence/**`, `tests/test_runtime_persistence_module_injection.py`, and the relevant `tests/test_runtime_persistence_*.py` slice.
   - If generated module behavior changes, also inspect `factory_app/build_context/AppGenerator/file_contracts.yaml` and `tests/test_appgenerator_persistence_alignment.py`.
@@ -106,6 +111,7 @@ Focused testing guidance:
   - persistence injection: `python -m pytest tests/test_runtime_persistence_module_injection.py -q`
   - WebSocket or runtime host behavior: `python -m pytest tests/test_runtime_websocket_contract.py -q`
   - auth discovery or auth config: `python -m pytest tests/test_auth_oidc_discovery.py -q`
+  - platform hooks: `python -m pytest tests/test_platform_hook_registry.py -q`
   - platform app loading and shell behavior: `python -m pytest tests/test_platform_ai_config_resolution.py tests/test_platform_layout.py tests/test_platform_shell_p0_fixes.py -q`
   - AppGenerator or runtime contract coupling: `python -m pytest tests/test_appgenerator_canonical_generation.py tests/test_appgenerator_persistence_alignment.py -q`
 - Do not substitute a broad repo-wide run when a narrower slice can falsify the change.

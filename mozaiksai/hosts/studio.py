@@ -65,6 +65,7 @@ from mozaiksai.core.artifacts import (
 )
 from mozaiksai.core.auth import UserPrincipal, require_user_scope
 from mozaiksai.core.auth.dependencies import validate_path_id
+from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.runtime.app.studio_summary import (
     build_app_overview_summary,
     build_apps_summary,
@@ -88,8 +89,8 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
     compute_connector_health,
     delete_connector,
     list_connectors,
-    store_connector,
-    update_connector_metadata,
+    patch_connector,
+    save_connector,
 )
 from mozaiksai.core.workflow.paths import candidate_app_workflows_roots
 from mozaiksai.hosts import platform as platform_app
@@ -608,17 +609,26 @@ async def get_workspace_apps(
 
 
 class CreateWorkspaceAppRequest(BaseModel):
-    name: str = Field(default="New App", min_length=1, max_length=120)
+    name: str | None = Field(default=None, max_length=120)
     description: str | None = Field(default=None, max_length=1000)
     app_id: str | None = Field(default=None, max_length=160)
+    chat_app_id: str | None = Field(default=None, max_length=160)
     status: str = Field(default="draft", max_length=40)
     active_chat_id: str | None = Field(default=None, max_length=160)
     active_workflow_id: str | None = Field(default=None, max_length=160)
+    name_source: str | None = Field(default=None, max_length=80)
+    build_context_profile: dict[str, Any] | None = None
+    current_build_run: dict[str, Any] | None = None
 
 
 class UpdateWorkspaceAppStatusRequest(BaseModel):
     status: str = Field(min_length=1, max_length=40)
     bundle_path: str | None = Field(default=None, max_length=1000)
+    artifact_version_id: str | None = Field(default=None, max_length=160)
+    workflow_sequence: str | None = Field(default=None, max_length=160)
+    active_chat_id: str | None = Field(default=None, max_length=160)
+    active_workflow_id: str | None = Field(default=None, max_length=160)
+    current_build_run: dict[str, Any] | None = None
 
 
 @app.post("/api/studio/apps")
@@ -634,8 +644,12 @@ async def create_workspace_app(
             description=body.description,
             status=body.status,
             app_id=body.app_id,
+            chat_app_id=body.chat_app_id,
             active_chat_id=body.active_chat_id,
             active_workflow_id=body.active_workflow_id,
+            name_source=body.name_source,
+            build_context_profile=body.build_context_profile,
+            current_build_run=body.current_build_run,
         )
     except ValueError as exc:
         logger.warning("create_app_record validation error: %s", exc)
@@ -657,6 +671,11 @@ async def update_workspace_app_status(
             build_registry_id=build_registry_id,
             status=body.status,
             bundle_path=body.bundle_path,
+            artifact_version_id=body.artifact_version_id,
+            workflow_sequence=body.workflow_sequence,
+            active_chat_id=body.active_chat_id,
+            active_workflow_id=body.active_workflow_id,
+            current_build_run=body.current_build_run,
         )
     except ValueError as exc:
         logger.warning("update_app_status validation error: %s", exc)
@@ -664,6 +683,22 @@ async def update_workspace_app_status(
     except Exception as exc:
         logger.exception("Failed to update app status")
         raise HTTPException(status_code=500, detail="Failed to update app status") from exc
+
+
+@app.delete("/api/studio/apps/{build_registry_id}")
+async def delete_workspace_app(
+    build_registry_id: str,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    _, _user_id = _resolve_studio_scope(principal)
+    try:
+        return await _get_app_registry_service().delete_app(build_registry_id=build_registry_id)
+    except ValueError as exc:
+        logger.warning("delete_app validation error: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to delete app record")
+        raise HTTPException(status_code=500, detail="Failed to delete app record") from exc
 
 
 @app.get("/api/studio/integrations")
@@ -681,7 +716,7 @@ async def get_integration_connectors(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
-    connectors = await list_connectors(app_id)
+    connectors = await list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id=app_id)
     return {
         "app_id": app_id,
         "connectors": [_redact_connector_record(connector) for connector in connectors],
@@ -1058,8 +1093,9 @@ async def create_or_update_integration_connector(
     record = None
     secret_result: dict[str, Any] | None = None
     if body.secret_value:
-        secret_result = await store_connector(
-            app_id=app_id,
+        secret_result = await save_connector(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id=app_id,
             user_id=user_id,
             service=body.service,
             secret_value=body.secret_value,
@@ -1068,7 +1104,7 @@ async def create_or_update_integration_connector(
             public_config=body.public_config,
             required_fields=body.required_fields,
         )
-        record = secret_result.get("record")
+        record = secret_result.get("connector")
     if (
         body.display_name is not None
         or body.notes is not None
@@ -1076,23 +1112,23 @@ async def create_or_update_integration_connector(
         or body.expires_at is not None
         or body.public_config is not None
     ):
-        record = await update_connector_metadata(
-            app_id=app_id,
+        record = await patch_connector(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id=app_id,
             service=body.service,
             user_id=user_id,
             display_name=body.display_name,
             notes=body.notes,
-            status=body.status or (secret_result or {}).get("connector_status") or "metadata_only",
+            status=body.status or ("active" if (secret_result or {}).get("success") else "metadata_only"),
             expires_at=body.expires_at,
             public_config=body.public_config,
             required_fields=body.required_fields,
         )
     if not record:
-        from mozaiksai.core.data.persistence import AppConnectorStore
-
-        store = AppConnectorStore()
-        record = await store.upsert_connector(
-            app_id=app_id,
+        store = ConnectorStore()
+        record = await store.upsert(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id=app_id,
             service=body.service,
             display_name=body.display_name,
             user_id=user_id,
@@ -1120,18 +1156,17 @@ async def patch_integration_connector(
     principal: UserPrincipal = Depends(require_user_scope),
 ):
     validate_path_id(service, "service")
-    from mozaiksai.core.data.persistence import AppConnectorStore
-
     app_id, user_id = _resolve_studio_scope(principal, app_id=app_id)
-    store = AppConnectorStore()
-    existing = await store.get_connector(app_id=app_id, service=service)
+    store = ConnectorStore()
+    existing = await store.get(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
 
     secret_result: dict[str, Any] | None = None
     if body.secret_value:
-        secret_result = await store_connector(
-            app_id=app_id,
+        secret_result = await save_connector(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id=app_id,
             user_id=user_id,
             service=service,
             secret_value=body.secret_value,
@@ -1140,8 +1175,9 @@ async def patch_integration_connector(
             public_config=body.public_config,
             required_fields=body.required_fields,
         )
-    record = await update_connector_metadata(
-        app_id=app_id,
+    record = await patch_connector(
+        scope=ConnectorStore.SCOPE_APP,
+        scope_id=app_id,
         service=service,
         user_id=user_id,
         display_name=body.display_name,
@@ -1194,7 +1230,7 @@ async def remove_integration_connector(
 ):
     validate_path_id(service, "service")
     app_id, _ = _resolve_studio_scope(principal, app_id=app_id)
-    result = await delete_connector(app_id=app_id, service=service)
+    result = await delete_connector(scope=ConnectorStore.SCOPE_APP, scope_id=app_id, service=service)
     if not result.get("deleted"):
         raise HTTPException(status_code=404, detail=f"Connector not found: {service}")
     return {

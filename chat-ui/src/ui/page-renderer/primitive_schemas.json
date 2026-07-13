@@ -285,7 +285,8 @@
     "avoid": "Do not use decorative skeletons when a plain loading state is enough.",
     "required": [],
     "properties": {
-      "label": "string"
+      "label": "string",
+      "message": "string — alias for label"
     }
   },
   "ErrorState": {
@@ -297,7 +298,8 @@
     ],
     "properties": {
       "title": "string",
-      "message": "string — REQUIRED"
+      "message": "string — REQUIRED",
+      "action": "action object"
     }
   },
   "Panel": {
@@ -332,7 +334,9 @@
     ],
     "properties": {
       "label": "string — REQUIRED",
-      "tone": "string: default|primary|success|warning|destructive"
+      "tone": "string: default|muted|info|primary|success|warning|destructive",
+      "size": "string: sm|md",
+      "dot": "boolean"
     }
   },
   "Metric": {

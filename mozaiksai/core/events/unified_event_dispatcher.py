@@ -191,6 +191,10 @@ class UnifiedEventDispatcher:
 
         self._token_wallet_usage_ingest = get_token_wallet_usage_ingest_client()
         self.register_handler("chat.usage_delta", self._token_wallet_usage_ingest.handle_usage_delta)
+        from mozaiksai.core.usage import get_runtime_token_budget_alert_ledger
+
+        self._token_budget_alert_ledger = get_runtime_token_budget_alert_ledger()
+        self.register_handler("chat.token_budget_alert", self._token_budget_alert_ledger.record_budget_alert)
 
     def _setup_default_handlers(self):
         self.register_handler(BusinessLogHandler())
@@ -541,6 +545,7 @@ class UnifiedEventDispatcher:
             'print': 'chat.print', 'text': 'chat.text', 'input_ack': 'chat.input_ack',
             'input_timeout': 'chat.input_timeout', 'select_speaker': 'chat.select_speaker', 'resume_boundary': 'chat.resume_boundary',
             'usage_delta': 'chat.usage_delta', 'usage_summary': 'chat.usage_summary', 'run_complete': 'chat.run_complete', 'error': 'chat.error', 'tool_call': 'chat.tool_call', 'tool_response': 'chat.tool_response',
+            'token_budget_alert': 'chat.token_budget_alert',
             'agent_output_validated': 'chat.agent_output_validated', 'run_start': 'chat.run_start', 'tool_call_dismiss': 'chat.tool_call_dismiss',
             'awaiting_reply': 'chat.awaiting_reply', 'activity': 'chat.activity',
             'attachment_uploaded': 'chat.attachment_uploaded',

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from time import perf_counter
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from autogen.beta import Agent
-from autogen.beta.knowledge import MemoryKnowledgeStore
-from autogen.beta.network import (
+from ag2 import Agent
+from ag2.knowledge import MemoryKnowledgeStore
+from ag2.network import (
     EV_CHANNEL_CLOSED,
     EV_CONTEXT_SET,
     EV_PACKET,
@@ -23,7 +24,7 @@ from autogen.beta.network import (
     Transition,
     TransitionGraph,
 )
-from autogen.beta.network.policies import CHANNEL_STATE_DEP
+from ag2.network.policies import CHANNEL_STATE_DEP
 from pydantic import BaseModel
 
 import mozaiksai.core.transport.simple_transport as simple_transport_module
@@ -731,6 +732,149 @@ async def test_run_workflow_orchestration_uses_ag2_network_runner(
 
 
 @pytest.mark.anyio
+async def test_run_workflow_orchestration_resolves_user_reentry_to_next_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Persistence:
+        def __init__(self) -> None:
+            self.completed: list[tuple[str, str]] = []
+            self.persisted_context: dict[str, Any] | None = None
+
+        async def load_run_events(self, *, chat_id: str, app_id: str) -> list[Any]:
+            return [{"event_type": "text"}]
+
+        def project_run_events_to_messages(self, events: list[Any]) -> list[dict[str, Any]]:
+            return [{"role": "user", "name": "user", "content": "Approved, proceed."}]
+
+        async def create_chat_session(self, **kwargs: Any) -> None:
+            return None
+
+        async def get_or_assign_cache_seed(self, chat_id: str, app_id: str) -> int:
+            return 7
+
+        async def fetch_chat_session_extra_context(self, *, chat_id: str, app_id: str) -> dict[str, Any]:
+            return {
+                "interview_complete": True,
+                "workflow_review_approved": True,
+                "workflow_review_revision_requested": False,
+            }
+
+        async def persist_context_variables(
+            self,
+            *,
+            chat_id: str,
+            app_id: str,
+            variables: dict[str, Any],
+        ) -> None:
+            self.persisted_context = dict(variables)
+
+        async def append_run_assistant_message(self, **kwargs: Any) -> None:
+            return None
+
+        async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
+            self.completed.append((chat_id, app_id))
+            return True
+
+    class _Transport:
+        def __init__(self) -> None:
+            self.connections: dict[str, dict[str, Any]] = {}
+            self.events: list[tuple[str, dict[str, Any]]] = []
+
+        async def send_event_to_ui(self, event: dict[str, Any], chat_id: str) -> None:
+            self.events.append((chat_id, dict(event)))
+
+        def unregister_derived_context_manager(self, chat_id: str) -> None:
+            return None
+
+    persistence = _Persistence()
+    transport = _Transport()
+    captured: dict[str, Any] = {}
+
+    async def _get_transport() -> _Transport:
+        return transport
+
+    async def _agents_factory(workflow_name: str, context: Any, cache_seed: int) -> dict[str, Agent]:
+        return {
+            "InterviewAgent": _DeterministicAgent("InterviewAgent", "{}"),
+            "PatternAgent": _DeterministicAgent("PatternAgent", "{}"),
+            "PackBuildCoordinator": _DeterministicAgent("PackBuildCoordinator", "{}"),
+        }
+
+    async def _network_phase(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(
+            status=RunStatus.COMPLETED,
+            error=None,
+            context_variables=kwargs["context_variables"],
+            structured_outputs=[],
+            wal=[],
+            agent_name_by_id={},
+            channel_id="channel-reentry",
+            close_reason="workflow_complete",
+        )
+
+    monkeypatch.setattr(orchestration_patterns_module, "AG2PersistenceManager", lambda: persistence)
+    monkeypatch.setattr(simple_transport_module.SimpleTransport, "get_instance", staticmethod(_get_transport))
+    monkeypatch.setattr(orchestration_patterns_module, "_run_ag2_network_phase", _network_phase)
+    monkeypatch.setattr(
+        orchestration_patterns_module,
+        "_load_workflow_config",
+        lambda workflow_name: {
+            "config": {
+                "max_turns": 4,
+                "workflow_startup_mode": "AgentDriven",
+                "initial_agent": "InterviewAgent",
+                "transition_graph": {
+                    "transition_rules": [
+                        {
+                            "source_agent": "user",
+                            "target_agent": "InterviewAgent",
+                            "transition_type": "condition",
+                            "condition_type": "context_equals",
+                            "condition_key": "interview_complete",
+                            "condition_value": False,
+                        },
+                        {
+                            "source_agent": "user",
+                            "target_agent": "PackBuildCoordinator",
+                            "transition_type": "condition",
+                            "condition_type": "context_equals",
+                            "condition_key": "workflow_review_approved",
+                            "condition_value": True,
+                        },
+                    ]
+                },
+            },
+            "max_turns": 4,
+            "workflow_startup_mode": "AgentDriven",
+            "initial_agent_name": "InterviewAgent",
+        },
+    )
+    monkeypatch.setattr(task_batches_module, "load_task_batches_config", lambda workflow_name: None)
+    monkeypatch.setattr(structured_outputs_module, "load_workflow_structured_outputs", lambda workflow_name: ({}, {}))
+
+    result = await run_workflow_orchestration(
+        workflow_name="AgentGenerator",
+        app_id="app-1",
+        chat_id="chat-reentry",
+        user_id="user-1",
+        initial_agent_name_override="user",
+        agents_factory=_agents_factory,
+        context_factory=lambda: {
+            "interview_complete": False,
+            "workflow_review_approved": False,
+            "workflow_review_revision_requested": False,
+        },
+    )
+
+    assert result is not None
+    assert result["run_completed"] is True
+    assert captured["initial_agent_name"] == "PackBuildCoordinator"
+    assert captured["initial_message"] == "user (user): Approved, proceed."
+    assert persistence.completed == [("chat-reentry", "app-1")]
+
+
+@pytest.mark.anyio
 async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -908,3 +1052,169 @@ async def test_run_workflow_orchestration_executes_task_batches_between_ag2_phas
         "SynthesisAgent",
     ]
     assert persistence.completed == [("chat-1", "app-1")]
+
+
+@pytest.mark.anyio
+async def test_task_batch_preface_handoff_to_user_pauses_without_second_ag2_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Persistence:
+        def __init__(self) -> None:
+            self.assistant_messages: list[dict[str, Any]] = []
+
+        async def load_run_events(self, *, chat_id: str, app_id: str) -> list[Any]:
+            return []
+
+        def project_run_events_to_messages(self, events: list[Any]) -> list[dict[str, Any]]:
+            return []
+
+        async def create_chat_session(self, **kwargs: Any) -> None:
+            return None
+
+        async def get_or_assign_cache_seed(self, chat_id: str, app_id: str) -> int:
+            return 7
+
+        async def fetch_chat_session_extra_context(self, *, chat_id: str, app_id: str) -> dict[str, Any]:
+            return {}
+
+        async def persist_context_variables(
+            self,
+            *,
+            chat_id: str,
+            app_id: str,
+            variables: dict[str, Any],
+        ) -> None:
+            return None
+
+        async def append_run_assistant_message(self, **kwargs: Any) -> None:
+            self.assistant_messages.append(dict(kwargs))
+
+        async def mark_chat_completed(self, chat_id: str, app_id: str) -> bool:
+            raise AssertionError("paused workflow must not be marked completed")
+
+    class _Transport:
+        def __init__(self) -> None:
+            self.connections: dict[str, dict[str, Any]] = {}
+            self.events: list[tuple[str, dict[str, Any]]] = []
+
+        async def send_event_to_ui(self, event: dict[str, Any], chat_id: str) -> None:
+            self.events.append((chat_id, dict(event)))
+
+        def unregister_derived_context_manager(self, chat_id: str) -> None:
+            return None
+
+    persistence = _Persistence()
+    transport = _Transport()
+    network_calls: list[dict[str, Any]] = []
+
+    async def _get_transport() -> _Transport:
+        return transport
+
+    async def _agents_factory(workflow_name: str, context: Any, cache_seed: int) -> dict[str, Agent]:
+        return {
+            "InterviewAgent": _DeterministicAgent("InterviewAgent", "{}"),
+            "PackBuildCoordinator": _DeterministicAgent("PackBuildCoordinator", "{}"),
+        }
+
+    async def _network_phase(**kwargs: Any) -> SimpleNamespace:
+        network_calls.append(dict(kwargs))
+        return SimpleNamespace(
+            status=RunStatus.COMPLETED,
+            error=None,
+            context_variables=kwargs["context_variables"],
+            structured_outputs=[],
+            wal=[],
+            agent_name_by_id={},
+            channel_id="channel-preface",
+            close_reason="workflow_complete",
+            live_run=None,
+        )
+
+    async def _noop_task_batches(**kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(orchestration_patterns_module, "AG2PersistenceManager", lambda: persistence)
+    monkeypatch.setattr(simple_transport_module.SimpleTransport, "get_instance", staticmethod(_get_transport))
+    monkeypatch.setattr(orchestration_patterns_module, "_run_ag2_network_phase", _network_phase)
+    monkeypatch.setattr(task_batches_module, "execute_task_batches_for_trigger", _noop_task_batches)
+    monkeypatch.setattr(
+        orchestration_patterns_module,
+        "_load_workflow_config",
+        lambda workflow_name: {
+            "config": {
+                "max_turns": 4,
+                "workflow_startup_mode": "AgentDriven",
+                "initial_agent": "InterviewAgent",
+                "transition_graph": {
+                    "transition_rules": [
+                        {
+                            "source_agent": "InterviewAgent",
+                            "target_agent": "user",
+                            "transition_type": "after_turn",
+                        },
+                        {
+                            "source_agent": "user",
+                            "target_agent": "PackBuildCoordinator",
+                            "transition_type": "condition",
+                            "condition_type": "context_equals",
+                            "condition_key": "workflow_review_approved",
+                            "condition_value": True,
+                        },
+                    ]
+                },
+            },
+            "max_turns": 4,
+            "workflow_startup_mode": "AgentDriven",
+            "initial_agent_name": "InterviewAgent",
+        },
+    )
+    monkeypatch.setattr(
+        task_batches_module,
+        "load_task_batches_config",
+        lambda workflow_name: parse_task_batches_config(
+            {
+                "version": 1,
+                "batches": [
+                    {
+                        "id": "workflow_generation_tasks",
+                        "trigger_agent": "PackBuildCoordinator",
+                        "source": {
+                            "kind": "context_variable",
+                            "path": "workflows_spec",
+                            "task_model": "WorkflowInPack",
+                        },
+                        "worker": {
+                            "mode": "ag2_agent",
+                            "agent_field": "initial_agent",
+                            "prompt_field": "initial_message",
+                        },
+                        "execution": {"concurrency": 1},
+                        "result": {
+                            "context_key": "workflow_bundle_results",
+                            "status_key": "workflow_bundle_status",
+                            "merge_strategy": "collect_task_outputs",
+                        },
+                    }
+                ],
+            }
+        ),
+    )
+    monkeypatch.setattr(structured_outputs_module, "load_workflow_structured_outputs", lambda workflow_name: ({}, {}))
+
+    result = await run_workflow_orchestration(
+        workflow_name="AgentGenerator",
+        app_id="app-1",
+        chat_id="chat-preface",
+        user_id="user-1",
+        initial_message="Build a workflow.",
+        agents_factory=_agents_factory,
+        context_factory=lambda: {},
+    )
+
+    assert result is not None
+    assert result["awaiting_user_input"] is True
+    assert result["run_completed"] is False
+    assert len(network_calls) == 1
+    assert network_calls[0]["initial_agent_name"] == "InterviewAgent"
+    assert transport.events[-2][1]["kind"] == "awaiting_reply"
+    assert transport.events[-2][1]["source_agent"] == "InterviewAgent"

@@ -22,6 +22,7 @@ Use these anchors when relevant:
 - `AGENTS.md`
 - `CLAUDE.md`
 - `ARCHITECTURE.md`
+- active task skills under `.agents/skills/` or `.claude/skills/`
 - `.claude/skills/README.md`
 - `.claude/rules/architecture-boundaries.md`
 - `.claude/rules/factory-build-workflows.md`

@@ -107,13 +107,8 @@ That namespace should own:
 - builder artifact collections
 - refinement/migration metadata
 
-The current mixed names:
-
-- `autogen_ai_agents`
-- `MozaiksAI`
-- `mozaiks`
-
-should be treated as drift to remove over time.
+Hardcoded framework database names outside `mozaiksai` should be treated as
+drift and removed when encountered.
 
 ## Build Sequence Contract
 
@@ -662,8 +657,8 @@ These are known inconsistencies in the current system:
 
 1. `ValueEngine` writes `ValueManifests`, while downstream contexts still read
    from `Concepts`.
-2. Builder metadata is split across `autogen_ai_agents`, `MozaiksAI`, and
-   `mozaiks`.
+2. Builder metadata must be consolidated under the canonical `mozaiksai`
+   database namespace.
 3. prompts and tests must not fall back to old `ctx.db`,
    `backend/database/*`, or `backend/models/*` artifacts.
 4. generated repo guidance must stay aligned with `ctx.persistence` as the

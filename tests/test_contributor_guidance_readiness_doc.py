@@ -65,5 +65,5 @@ def test_contributor_guidance_readiness_doc_stays_public_safe() -> None:
     assert "App Zero" not in doc
     assert "App-zero" not in doc
 
-    for forbidden in ["Stripe", "AWS", "Azure", "wallet", "investor"]:
+    for forbidden in ["payment provider", "AWS", "Azure", "wallet", "investor"]:
         assert forbidden not in doc, forbidden

@@ -10,7 +10,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from autogen.beta.network.policies import CHANNEL_STATE_DEP
+from ag2.network.policies import CHANNEL_STATE_DEP
 
 from mozaiksai.core.ports.orchestration import RunStatus
 from mozaiksai.core.workflow.outputs.runtime_validation import (

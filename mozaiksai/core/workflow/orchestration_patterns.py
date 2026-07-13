@@ -2,7 +2,7 @@
 # FILE: mozaiksai/core/workflow/orchestration_patterns.py
 # DESCRIPTION: Workflow orchestration entry point.
 #
-# Wires together the AG2 beta agent factory, run bootstrap, AG2 Network
+# Wires together the AG2 1.0 beta agent factory, run bootstrap, AG2 Network
 # execution, persistence, transport, lifecycle, and observability into a single
 # async function that callers use to start or re-enter a workflow run.
 #
@@ -26,6 +26,11 @@ from logs.runtime_artifacts import get_agent_outputs_dir
 from mozaiksai.core.adapters.ag2_network_runner import AG2NetworkRunner, AG2NetworkRunnerRequest
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.workflow.execution.network_graph import (
+    WorkflowGraphCompileError,
+    compile_transition_rules_to_graph,
+    resolve_next_agent,
+)
 
 from .context import DerivedContextManager
 from .execution.run_bootstrap import bootstrap_run_messages, merge_persisted_extra_context
@@ -45,6 +50,8 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # AG2 Network orchestration helpers
 # ---------------------------------------------------------------------------
+
+_SPECIAL_USER_AGENT_NAMES = frozenset({"user", "user_proxy", "userproxy", "userproxyagent"})
 
 def _messages_to_network_prompt(messages: list[dict[str, Any]]) -> str:
     """Render persisted Mozaiks messages into one AG2 workflow-channel prompt."""
@@ -100,6 +107,137 @@ def _next_agent_after_trigger(
         if target and target != "terminate":
             return target
     return None
+
+
+def _resolve_executable_initial_agent(
+    *,
+    initial_agent_name: str,
+    configured_initial_agent_name: str,
+    agents: dict[str, Any],
+    transition_rules: list[dict[str, Any]],
+    context_variables: dict[str, Any],
+    wf_logger: Any,
+    workflow_name_upper: str,
+) -> str:
+    """Resolve symbolic user re-entry to the next executable workflow agent."""
+
+    normalized_initial = str(initial_agent_name or "").strip()
+    if normalized_initial.lower() not in _SPECIAL_USER_AGENT_NAMES:
+        return normalized_initial
+
+    agent_id_by_name = {str(name): str(name) for name in agents}
+    agent_id_by_name["user"] = "user"
+    agent_name_by_id = {agent_id: name for name, agent_id in agent_id_by_name.items()}
+    try:
+        graph = compile_transition_rules_to_graph(
+            transition_rules,
+            initial_agent_name="user",
+            agent_id_by_name=agent_id_by_name,
+        )
+        next_agent = resolve_next_agent(
+            graph,
+            current_agent_name="user",
+            context_variables=context_variables,
+            agent_name_by_id=agent_name_by_id,
+            participant_order=["user", *agents.keys()],
+        )
+    except WorkflowGraphCompileError as err:
+        wf_logger.warning(
+            "[%s] USER_REENTRY_RESOLUTION_FAILED configured_initial=%s: %s",
+            workflow_name_upper,
+            configured_initial_agent_name,
+            err,
+        )
+        return normalized_initial
+
+    if next_agent and next_agent.lower() not in _SPECIAL_USER_AGENT_NAMES and next_agent != "terminate":
+        wf_logger.debug(
+            "[%s] Resolved user re-entry to executable initial agent %s",
+            workflow_name_upper,
+            next_agent,
+        )
+        return next_agent
+
+    wf_logger.warning(
+        "[%s] User re-entry did not resolve to an executable agent; next_agent=%s configured_initial=%s",
+        workflow_name_upper,
+        next_agent,
+        configured_initial_agent_name,
+    )
+    return normalized_initial
+
+
+def _resolve_continuation_agent_after_trigger(
+    *,
+    transition_rules: list[dict[str, Any]],
+    trigger_agent: str,
+    agents: dict[str, Any],
+    context_variables: dict[str, Any],
+    wf_logger: Any,
+    workflow_name_upper: str,
+) -> str | None:
+    agent_id_by_name = {str(name): str(name) for name in agents}
+    agent_id_by_name["user"] = "user"
+    agent_name_by_id = {agent_id: name for name, agent_id in agent_id_by_name.items()}
+    try:
+        graph = compile_transition_rules_to_graph(
+            transition_rules,
+            initial_agent_name=trigger_agent,
+            agent_id_by_name=agent_id_by_name,
+        )
+        return resolve_next_agent(
+            graph,
+            current_agent_name=trigger_agent,
+            context_variables=context_variables,
+            agent_name_by_id=agent_name_by_id,
+            participant_order=["user", *agents.keys()],
+        )
+    except WorkflowGraphCompileError as err:
+        wf_logger.warning(
+            "[%s] CONTINUATION_RESOLUTION_FAILED trigger_agent=%s: %s",
+            workflow_name_upper,
+            trigger_agent,
+            err,
+        )
+        return _next_agent_after_trigger(
+            transition_rules=transition_rules,
+            trigger_agent=trigger_agent,
+        )
+
+
+def _apply_derived_agent_text_from_runner_result(
+    *,
+    runner_result: Any,
+    derived_context_manager: Any | None,
+    context_variables: dict[str, Any],
+) -> dict[str, Any]:
+    if derived_context_manager is None or not hasattr(derived_context_manager, "apply_agent_text"):
+        return {}
+
+    updated: dict[str, Any] = {}
+    for envelope in runner_result.wal or []:
+        if not isinstance(envelope, dict) or envelope.get("event_type") != "ag2.packet":
+            continue
+        agent_name = runner_result.agent_name_by_id.get(str(envelope.get("sender_id") or ""))
+        if not agent_name:
+            continue
+        event_data = envelope.get("event_data")
+        if not isinstance(event_data, dict):
+            continue
+        body = event_data.get("body")
+        if isinstance(body, (dict, list)):
+            text = json.dumps(body, ensure_ascii=False, default=str)
+        else:
+            text = str(body or "")
+        if not text.strip():
+            continue
+        agent_updates = derived_context_manager.apply_agent_text(str(agent_name), text)
+        if isinstance(agent_updates, dict) and agent_updates:
+            updated.update(agent_updates)
+
+    if updated:
+        context_variables.update(updated)
+    return updated
 
 
 def _last_agent_name_from_runner_result(runner_result: Any) -> str | None:
@@ -237,7 +375,8 @@ async def run_workflow_orchestration(
         config = cfg["config"]
         max_turns = cfg["max_turns"]
         workflow_startup_mode = cfg["workflow_startup_mode"]
-        initial_agent_name: str = cfg["initial_agent_name"]
+        configured_initial_agent_name: str = cfg["initial_agent_name"]
+        initial_agent_name: str = configured_initial_agent_name
         transition_rules: list[dict[str, Any]] = (
             (config.get("transition_graph") or {}).get("transition_rules") or []
         )
@@ -391,6 +530,16 @@ async def run_workflow_orchestration(
             from .agents.factory import ContextVariablesBridge
             context_bridge = ContextVariablesBridge(ctx_dict)
 
+        initial_agent_name = _resolve_executable_initial_agent(
+            initial_agent_name=initial_agent_name,
+            configured_initial_agent_name=configured_initial_agent_name,
+            agents=agents,
+            transition_rules=transition_rules,
+            context_variables=ctx_dict,
+            wf_logger=wf_logger,
+            workflow_name_upper=workflow_name_upper,
+        )
+
         try:
             if transport and hasattr(transport, "connections") and chat_id in transport.connections:
                 transport.connections[chat_id]["agents"] = agents
@@ -506,6 +655,11 @@ async def run_workflow_orchestration(
                     agent_name_by_id=first_phase_result.agent_name_by_id,
                     initial_sequence=projected_sequence,
                 )
+                _apply_derived_agent_text_from_runner_result(
+                    runner_result=first_phase_result,
+                    derived_context_manager=derived_context_manager,
+                    context_variables=ctx_dict,
+                )
                 structured_payload = _first_agent_payload_from_runner_result(
                     first_phase_result,
                     trigger_agent_name,
@@ -527,11 +681,20 @@ async def run_workflow_orchestration(
                     fresh_agents_per_task=True,
                     agents_factory=agents_factory,
                 )
-                continuation_agent = _next_agent_after_trigger(
+                continuation_agent = _resolve_continuation_agent_after_trigger(
                     transition_rules=transition_rules,
                     trigger_agent=trigger_agent_name,
+                    agents=agents,
+                    context_variables=ctx_dict,
+                    wf_logger=wf_logger,
+                    workflow_name_upper=workflow_name_upper,
                 )
-                if continuation_agent:
+                if continuation_agent and continuation_agent.lower() in _SPECIAL_USER_AGENT_NAMES:
+                    first_phase_result.status = RunStatus.PAUSED
+                    first_phase_result.close_reason = "awaiting_user_input"
+                    runner_result = first_phase_result
+                    project_final_runner_result = False
+                elif continuation_agent:
                     runner_result = await _run_ag2_network_phase(
                         workflow_name=workflow_name,
                         chat_id=chat_id,
@@ -570,6 +733,11 @@ async def run_workflow_orchestration(
                 app_id=app_id,
                 agent_name_by_id=runner_result.agent_name_by_id,
                 initial_sequence=projected_sequence,
+            )
+            _apply_derived_agent_text_from_runner_result(
+                runner_result=runner_result,
+                derived_context_manager=derived_context_manager,
+                context_variables=ctx_dict,
             )
         else:
             sequence_counter = projected_sequence

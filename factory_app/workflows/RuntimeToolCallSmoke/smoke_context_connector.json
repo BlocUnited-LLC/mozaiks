@@ -2,9 +2,9 @@
   "app_build_plan": {
     "external_integrations": [
       {
-        "name": "Stripe",
-        "service": "stripe",
-        "display_name": "Stripe",
+        "name": "MozaiksPay",
+        "service": "mozaikspay",
+        "display_name": "MozaiksPay",
         "kind": "api_key",
         "purpose": "Runtime connector smoke credential collection.",
         "required_at": "validation_time",

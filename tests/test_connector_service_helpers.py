@@ -56,7 +56,7 @@ class TestNormalizeService:
         assert _normalize_service("") == ""
 
     def test_whitespace_stripped(self):
-        assert _normalize_service("  stripe  ") == "stripe"
+        assert _normalize_service("  payment_provider  ") == "payment_provider"
 
     def test_lowercased(self):
         assert _normalize_service("OpenAI") == "openai"
@@ -71,7 +71,7 @@ class TestNormalizeService:
 
 class TestDisplayService:
     def test_underscore_to_title(self):
-        assert _display_service("stripe_billing") == "Stripe Billing"
+        assert _display_service("payment_provider_billing") == "Payment Provider Billing"
 
     def test_single_word(self):
         assert _display_service("github") == "Github"
@@ -202,6 +202,6 @@ class TestClassifyConnectorStatus:
         assert result["exists"] is True
 
     def test_connector_field_set_to_record(self):
-        record = {"secret_available": True, "service": "stripe"}
+        record = {"secret_available": True, "service": "payment_provider"}
         result = _classify_connector_status(record)
         assert result["connector"] is record

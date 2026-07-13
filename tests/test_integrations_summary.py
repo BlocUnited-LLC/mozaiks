@@ -50,8 +50,9 @@ def test_integrations_summary_includes_connector_health_counts(monkeypatch) -> N
             "error": None,
         }
 
-    async def fake_list_connectors(app_id: str):
-        assert app_id == "app_1"
+    async def fake_list_connectors(*, scope: str, scope_id: str):
+        assert scope == "app"
+        assert scope_id == "app_1"
         return [
             {
                 "service": "analytics_provider",

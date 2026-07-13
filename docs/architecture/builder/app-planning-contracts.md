@@ -196,7 +196,7 @@ active runtime-loaded app root.
 
 `BuildTask` is the precise meaning of `task` in the Mozaiks NL app generator.
 
-It is not a vague TODO. It is a bounded authoring unit with:
+It is not a vague future-work note. It is a bounded authoring unit with:
 
 - `task_id`
 - `title`
@@ -214,7 +214,7 @@ Important rule:
 - tasks that plan do not write bundle paths
 - tasks that write bundle paths must declare which declarative family they own
 
-This is what lets AG2 beta workflow runs operate as constrained implementation workers
+This is what lets AG2 1.0 beta workflow runs operate as constrained implementation workers
 instead of becoming the architecture themselves.
 
 ## `BuildGraph`
