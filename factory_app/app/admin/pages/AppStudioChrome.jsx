@@ -248,10 +248,8 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
       <div className="px-5 pb-5 sm:px-6 sm:pb-6">
 
         {/* Logo row — negative margin pulls it up over the banner edge */}
-        <div className="-mt-12 mb-4 flex items-end justify-between">
-
-          {/* Logo with inline camera button */}
-          <div className="relative shrink-0">
+        <div className="-mt-12 mb-4">
+          <div className="relative shrink-0 inline-block">
             <AppIdentityMark
               summary={summary}
               appId={appId}
@@ -273,9 +271,14 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
               />
             </label>
           </div>
+        </div>
 
-          {/* Status pills — right side of logo row */}
-          <div className="flex items-center gap-2 pb-0.5">
+        {/* App name + tagline + description */}
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-2xl font-bold leading-tight tracking-tight text-foreground">
+              {appName}
+            </h2>
             {lifecycleLabel ? (
               <StatusPill tone="default">
                 {String(lifecycleLabel).replace(/_/g, ' ')}
@@ -285,13 +288,6 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
               <StatusPill tone="warning">Demo data</StatusPill>
             ) : null}
           </div>
-        </div>
-
-        {/* App name + tagline + description */}
-        <div className="space-y-1">
-          <h2 className="text-2xl font-bold leading-tight tracking-tight text-foreground">
-            {appName}
-          </h2>
           {tagline ? (
             <p className="text-sm font-medium text-foreground/65">{tagline}</p>
           ) : null}
