@@ -445,3 +445,25 @@ def test_appgenerator_prompt_time_contract_artifacts_align_with_structured_outpu
 
     assert set(module_archetypes["archetypes"].keys()) == set(module_type_values)
 
+
+def test_module_identity_declares_user_data_scope_field() -> None:
+    """ModuleIdentity must expose user_data_scope so generators can flag GDPR-relevant modules."""
+    config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+    fields = config["models"]["ModuleIdentity"]["fields"]
+    assert "user_data_scope" in fields, "ModuleIdentity is missing user_data_scope field"
+    uds = fields["user_data_scope"]
+    assert uds["type"] == "bool"
+    assert "account_data" in uds["description"].lower() or "user_data_scope" in uds["description"].lower()
+
+
+def test_module_python_stub_includes_account_data_handler_kind() -> None:
+    """ModulePythonStub must declare account_data_handler kind so GDPR handlers can be scaffolded."""
+    config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+    kind_values = config["models"]["ModulePythonStub"]["fields"]["kind"]["values"]
+    assert "account_data_handler" in kind_values, (
+        "ModulePythonStub.kind is missing account_data_handler — "
+        "generators cannot scaffold GDPR delete/export handlers"
+    )
+    description = config["models"]["ModulePythonStub"]["fields"]["kind"]["description"]
+    assert "user_data_scope" in description
+

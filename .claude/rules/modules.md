@@ -47,6 +47,11 @@ Persistent modules use `backend/repo.py`, `backend/policy.py`, and
   (`ctx.persistence.collection(module_id, entity_name)`), not `ctx.db`
 - `repo.py` owns persistence operations only; `service.py` owns business logic
   and event emission; `handler.py` remains thin dispatch
+- modules that store user-PII or user-owned records (contacts, messages, profiles,
+  interests, memberships, transactions) must set `user_data_scope: true` in
+  `module.yaml` and ship `backend/account_data_handler.py` exporting
+  `AccountDataHandler` with async `delete_user_data(*, app_id, user_id)` and
+  `export_user_data(*, app_id, user_id)` methods
 
 Do not ship module runtime actions that return:
 

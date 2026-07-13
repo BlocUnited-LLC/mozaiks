@@ -1891,6 +1891,11 @@ models:
       handler:
         type: str
         description: "Canonical Python entrypoint in module-local form backend.handler:ModuleClass."
+      user_data_scope:
+        type: bool
+        optional: true
+        description: >
+          Set to true when the module stores user-personally-identifiable or user-owned records (contacts, messages, profiles, interests, memberships, transactions). When true the runtime auto-registers the module with the account_data_registry and requires backend/account_data_handler.py to exist. Omit or set false for admin-only, system, or platform-owned records.
 
   ModulePermission:
     type: model
@@ -2453,8 +2458,10 @@ models:
         - settings_hook
         - notifications_hook
         - admin_hook
+        - account_data_handler
         - helper
-        description: Stub family. Keep this finite and contract-driven. Layered module backends should declare handler, service, repo, policy, and schemas when a durable module is generated.
+        description: >
+          Stub family. Keep this finite and contract-driven. Layered module backends should declare handler, service, repo, policy, and schemas when a durable module is generated. Declare account_data_handler when module.yaml sets user_data_scope: true — the file must export AccountDataHandler with async delete_user_data(*, app_id, user_id) and async export_user_data(*, app_id, user_id) methods.
       purpose:
         type: str
         description: Why this stub exists and what contract surface it implements. For kind=repo, generated content must use ctx.persistence.collection(module_id, entity_name), must not use ctx.db, and must not import get_mongo_client.
@@ -4487,7 +4494,7 @@ models:
         type: literal
         values:
         - overview
-        - users
+        - access
         - billing
         - usage
         - operations
