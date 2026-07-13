@@ -32,7 +32,7 @@
     ]
   },
   "shortcuts": {
-    "profile": ["profile", "messages", "signout"],
+    "profile": ["profile", "signout"],
     "mobile": ["create", "profile"],
     "footer": ["legal", "terms", "cookies"],
     "footerHideOnMobile": true

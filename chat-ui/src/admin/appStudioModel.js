@@ -162,9 +162,12 @@ export function isAppDeployReady(status) {
 }
 
 export function getAppStudioDestination(app) {
-  if (isAppInBuild(app?.status || app?.lifecycle_state) && app?.active_chat_id) {
-    const workflowId = encodeURIComponent(app?.active_workflow_id || 'ValueEngine')
-    const chatId = encodeURIComponent(app.active_chat_id)
+  const currentBuildRun = app?.current_build_run || {}
+  const activeChatId = currentBuildRun.active_chat_id || app?.active_chat_id
+  const activeWorkflowId = currentBuildRun.active_workflow_id || app?.active_workflow_id || 'ValueEngine'
+  if (isAppInBuild(app?.status || app?.lifecycle_state) && activeChatId) {
+    const workflowId = encodeURIComponent(activeWorkflowId)
+    const chatId = encodeURIComponent(activeChatId)
     // chat_app_id is the factory session app_id used when the chat was created.
     // It must match what the backend stored, so chat_exists lookup succeeds on resume.
     const sessionAppId = encodeURIComponent(app?.chat_app_id || app?.app_id || app?.id || '')

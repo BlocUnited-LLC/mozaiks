@@ -14,7 +14,7 @@
  * See: docs/architecture/foundations/profile-panel-contract.md
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
 import componentRegistry from '../registry/componentRegistry';
@@ -80,12 +80,12 @@ function ErrorState({ message }) {
   );
 }
 
-function AvatarBubble({ name, email }) {
-  const text = initials(name, email);
+function CameraIcon({ className = 'h-4 w-4' }) {
   return (
-    <div className="h-24 w-24 rounded-full bg-primary/15 border-4 border-card flex items-center justify-center flex-shrink-0 shadow-lg">
-      <span className="text-3xl font-bold text-primary">{text}</span>
-    </div>
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
   );
 }
 
@@ -93,10 +93,33 @@ function AvatarBubble({ name, email }) {
 // Hero
 // ---------------------------------------------------------------------------
 
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function heroStorageKey(username, field) {
+  return `mozaiks_profile_${field}_${username || 'me'}`;
+}
+
 function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
+  const coverInputRef = useRef(null);
+  const avatarInputRef = useRef(null);
+  const storageId = profile.username || 'me';
+
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(profile.display_name || profile.username || '');
   const [bio, setBio] = useState(profile.bio || '');
+  const [coverPreview, setCoverPreview] = useState(
+    profile.cover_url || localStorage.getItem(heroStorageKey(storageId, 'cover')) || null
+  );
+  const [avatarPreview, setAvatarPreview] = useState(
+    profile.avatar_url || localStorage.getItem(heroStorageKey(storageId, 'avatar')) || null
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
@@ -104,14 +127,36 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   const handle = profile.username ? `@${profile.username}` : null;
   const joined = formatJoined(profile.created_at);
   const roles = profile.roles || [];
+  const avatarText = initials(name, profile.email);
+
+  function handleCoverChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    fileToDataUrl(file).then((dataUrl) => {
+      setCoverPreview(dataUrl);
+      try { localStorage.setItem(heroStorageKey(storageId, 'cover'), dataUrl); } catch (_) {}
+    });
+    e.target.value = '';
+  }
+
+  function handleAvatarChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    fileToDataUrl(file).then((dataUrl) => {
+      setAvatarPreview(dataUrl);
+      try { localStorage.setItem(heroStorageKey(storageId, 'avatar'), dataUrl); } catch (_) {}
+    });
+    e.target.value = '';
+  }
 
   async function handleSave() {
     setSaving(true);
     setSaveError(null);
     try {
+      const body = { display_name: displayName, bio };
       const res = await fetchWithAuth(`${backendUrl}/api/me`, {
         method: 'PUT',
-        body: JSON.stringify({ display_name: displayName, bio }),
+        body: JSON.stringify(body),
       }, auth);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       setEditing(false);
@@ -125,13 +170,65 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
 
   return (
     <div>
-      {/* Cover gradient */}
-      <div className="h-32 sm:h-44 w-full bg-gradient-to-br from-primary/30 via-primary/10 to-secondary/20" />
+      {/* Cover */}
+      <div className="relative h-36 sm:h-48 w-full overflow-hidden bg-gradient-to-br from-primary/30 via-primary/10 to-secondary/20">
+        {coverPreview && (
+          <img src={coverPreview} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        )}
+        {isOwner && (
+          <>
+            <button
+              type="button"
+              onClick={() => coverInputRef.current?.click()}
+              className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl border border-white/20 bg-black/45 backdrop-blur-sm px-3 py-1.5 text-xs font-medium text-white hover:bg-black/65 transition-colors"
+            >
+              <CameraIcon className="h-3.5 w-3.5" />
+              Change cover
+            </button>
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={handleCoverChange}
+            />
+          </>
+        )}
+      </div>
 
       <div className="px-5 sm:px-8">
         {/* Avatar + actions row */}
         <div className="flex items-end justify-between gap-4 -mt-12">
-          <AvatarBubble name={name} email={profile.email} />
+          {/* Avatar */}
+          <div className="relative group">
+            <div className="h-24 w-24 rounded-full border-4 border-card overflow-hidden flex items-center justify-center bg-primary/15 shadow-lg flex-shrink-0">
+              {avatarPreview ? (
+                <img src={avatarPreview} alt={name} className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-3xl font-bold text-primary">{avatarText}</span>
+              )}
+            </div>
+            {isOwner && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Change photo"
+                >
+                  <CameraIcon className="h-6 w-6 text-white" />
+                </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handleAvatarChange}
+                />
+              </>
+            )}
+          </div>
+
           <div className="pb-2 flex gap-2">
             {isOwner && !editing && (
               <button
@@ -187,7 +284,11 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
                   {saving ? 'Saving…' : 'Save'}
                 </button>
                 <button
-                  onClick={() => { setEditing(false); setDisplayName(profile.display_name || profile.username || ''); setBio(profile.bio || ''); }}
+                  onClick={() => {
+                    setEditing(false);
+                    setDisplayName(profile.display_name || profile.username || '');
+                    setBio(profile.bio || '');
+                  }}
                   className="rounded-xl border border-border px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted/50 transition-colors"
                 >
                   Cancel

@@ -1,17 +1,12 @@
 /**
- * StudioPage — internal router for first-party Studio paths.
+ * StudioPage — redirect helper for first-party Studio paths.
  *
- * Mirrors the admin portal pattern: one registered component can handle the
- * first-party app management subtree, with sub-routing done via location.pathname.
+ * Concrete Studio pages are declared in app/ui/route_manifest.json. This
+ * component only preserves the app-root redirect from /apps/:appId to the
+ * canonical overview route.
  */
 
 import { Navigate, useLocation } from 'react-router-dom'
-
-import AppsPage from './AppsPage.jsx'
-import AppOverviewPage from './AppOverviewPage.jsx'
-import AppBuildHistoryPage from './AppBuildHistoryPage.jsx'
-import AppIntegrationsPage from './AppIntegrationsPage.jsx'
-import CreateAppRedirectPage from './CreateAppRedirectPage.jsx'
 
 
 export default function StudioPage() {
@@ -21,19 +16,5 @@ export default function StudioPage() {
     return <Navigate replace to={`${location.pathname}/overview`} />
   }
 
-  let Section = AppOverviewPage
-
-  if (location.pathname === '/apps') {
-    Section = AppsPage
-  } else if (location.pathname === '/apps/new') {
-    Section = CreateAppRedirectPage
-  } else if (/^\/apps\/[^/]+\/activity$/.test(location.pathname)) {
-    Section = AppBuildHistoryPage
-  } else if (/^\/apps\/[^/]+\/integrations$/.test(location.pathname)) {
-    Section = AppIntegrationsPage
-  } else if (/^\/apps\/[^/]+\/overview$/.test(location.pathname)) {
-    Section = AppOverviewPage
-  }
-
-  return <Section />
+  return <Navigate replace to="/apps" />
 }

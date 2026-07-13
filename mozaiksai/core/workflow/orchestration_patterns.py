@@ -345,7 +345,6 @@ async def run_workflow_orchestration(
     initial_agent_name_override: str | None = None,
     agents_factory: Callable | None = None,
     context_factory: Callable | None = None,
-    transition_graph_factory: Callable | None = None,
     **kwargs: Any,
 ) -> dict[str, Any] | None:
     start_time = perf_counter()

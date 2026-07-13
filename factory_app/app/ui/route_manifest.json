@@ -2,7 +2,7 @@
   "pages": [
     {
       "path": "/apps/new",
-      "component": "StudioPage",
+      "component": "CreateAppRedirectPage",
       "label": "Create App",
       "order": 3,
       "meta": {
@@ -119,14 +119,15 @@
         "ai_context": "The user is on the App Health page. It shows runtime signals, connector status, and any warnings or errors for this app.",
         "navigation": {
           "group": "app-studio",
+          "include": false,
           "scope": "local",
           "icon": "pulse"
         }
       }
     },
     {
-      "path": "/apps/:appId/users",
-      "component": "AppUsersPage",
+      "path": "/apps/:appId/access",
+      "component": "AppAccessPage",
       "label": "Access",
       "order": 22,
       "meta": {
@@ -134,7 +135,7 @@
         "requiresRole": "admin",
         "title": "App Access",
         "appShell": true,
-        "ai_context": "The user is on the App Access page. It shows users and roles who have access to this app.",
+        "ai_context": "The user is on the App Access page. It shows users, roles, permission posture, plan assignment context, and support-access handoff for this app.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",
@@ -198,35 +199,22 @@
       }
     },
     {
-      "id": "messages",
-      "label": "Messages",
-      "path": "/messages",
-      "component": "MessagesPage",
-      "order": 30,
-      "navigation": {
-        "include": false
-      },
+      "path": "/apps/:appId/activity",
+      "component": "AppBuildHistoryPage",
+      "label": "Build History",
+      "order": 26,
       "meta": {
-        "title": "Messages",
-        "requiresAuth": true,
+        "surfaces": ["studio"],
+        "requiresRole": "admin",
+        "title": "Build History",
         "appShell": true,
-        "shellMode": "workspace"
-      }
-    },
-    {
-      "id": "message-thread",
-      "label": "Conversation",
-      "path": "/messages/:threadId",
-      "component": "MessageThreadPage",
-      "order": 31,
-      "navigation": {
-        "include": false
-      },
-      "meta": {
-        "title": "Conversation",
-        "requiresAuth": true,
-        "appShell": true,
-        "shellMode": "conversation"
+        "ai_context": "The user is on the App Build History page. It shows artifact versions, validation state, carry-forward preservation, and recent build activity for this app.",
+        "navigation": {
+          "group": "app-studio",
+          "include": false,
+          "scope": "local",
+          "icon": "history"
+        }
       }
     },
     {

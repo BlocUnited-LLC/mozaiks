@@ -58,7 +58,6 @@ def _base_result(*, strategy: str, status: str) -> dict[str, Any]:
         "test_results": None,
         "parsed_errors": [],
     }
-    return None
 
 
 def _safe_relpath(raw: str) -> str | None:

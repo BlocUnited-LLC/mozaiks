@@ -5,7 +5,6 @@ import { Alert } from '@mozaiks/chat-ui/ui'
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   LinkButton,
-  Metric,
   Panel,
   StatusPill,
   StudioErrorState,
@@ -143,6 +142,94 @@ function buildDashboardMetrics(snapshot, totalCost, totalRuns) {
 }
 
 
+// ─── KPI Icons ────────────────────────────────────────────────────────────────
+
+function IconRevenue({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <line x1="12" y1="1" x2="12" y2="23" />
+      <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
+    </svg>
+  )
+}
+
+function IconCost({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  )
+}
+
+function IconMargin({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+      <polyline points="16 7 22 7 22 13" />
+    </svg>
+  )
+}
+
+function IconUsers({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87" />
+      <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  )
+}
+
+function IconChats({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+  )
+}
+
+const KPI_ICONS = {
+  revenue: IconRevenue,
+  cost: IconCost,
+  margin: IconMargin,
+  users: IconUsers,
+  chats: IconChats,
+}
+
+
+// ─── KPI Cards ────────────────────────────────────────────────────────────────
+
+function KpiCard({ id, label, value, detail }) {
+  const Icon = KPI_ICONS[id]
+  return (
+    <div className="flex flex-col gap-2 overflow-hidden rounded-xl border border-border/50 bg-card/70 px-5 py-4 shadow-sm shadow-black/4">
+      <div className="flex items-center gap-1.5 text-muted-foreground/65">
+        {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
+        <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
+      </div>
+      <div className="text-2xl font-bold leading-none tracking-tight text-foreground">{value}</div>
+      {detail ? (
+        <div className="text-xs text-muted-foreground/60">{detail}</div>
+      ) : (
+        <div className="h-4" />
+      )}
+    </div>
+  )
+}
+
+function KpiGrid({ items }) {
+  if (!items.length) return null
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {items.map((item) => (
+        <KpiCard key={item.id} {...item} />
+      ))}
+    </div>
+  )
+}
+
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function BuildStatusPanel({ build, latestArtifact, isApprovalPending, appId }) {
@@ -206,46 +293,54 @@ function BuildStatusPanel({ build, latestArtifact, isApprovalPending, appId }) {
           </div>
         </>
       )}
-
     </Panel>
   )
 }
 
 function ActivityPanel({ snapshot, latestRun, totalRuns, appId }) {
-  const hasRuns = totalRuns > 0
   const latestWorkflow = latestRun?.workflow_name || null
 
   return (
     <Panel title="Activity" subtitle="Runtime usage and recent runs.">
       <div className="grid grid-cols-2 gap-3">
-        <Metric
-          label="Chats"
-          value={formatCompactNumber(totalRuns, '0')}
-          detail={latestRun ? formatRelativeTime(latestRun.started_at) : 'No runs yet'}
-        />
-        <Metric
-          label="Latest workflow"
-          value={latestWorkflow || '—'}
-          detail={latestRun ? formatRelativeTime(latestRun.started_at) : 'No runs yet'}
-        />
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Chats</span>
+          <span className="text-2xl font-bold tracking-tight text-foreground">
+            {formatCompactNumber(totalRuns, '0')}
+          </span>
+          <span className="text-xs text-muted-foreground/60">
+            {latestRun ? formatRelativeTime(latestRun.started_at) : 'No runs yet'}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Last workflow</span>
+          <span className="truncate text-base font-semibold text-foreground">{latestWorkflow || '—'}</span>
+          <span className="text-xs text-muted-foreground/60">
+            {latestRun ? formatRelativeTime(latestRun.started_at) : 'No runs yet'}
+          </span>
+        </div>
       </div>
 
       <div className="my-4 border-t border-border/30" />
 
       {latestRun ? (
         <>
-          <Metric
-            label="Latest run"
-            value={latestRun.workflow_name || 'Workflow run'}
-            detail={`${latestRun.user_id || 'Operator'} · ${formatRelativeTime(latestRun.started_at)}`}
-          />
-          {latestRun.status != null && (
-            <div className="mt-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/65">Latest run</div>
+              <div className="mt-0.5 truncate text-sm font-medium text-foreground">
+                {latestRun.workflow_name || 'Workflow run'}
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground/60">
+                {latestRun.user_id || 'Operator'} · {formatRelativeTime(latestRun.started_at)}
+              </div>
+            </div>
+            {latestRun.status != null && (
               <StatusPill tone={runStatusTone(latestRun.status)}>
                 {runStatusLabel(latestRun.status)}
               </StatusPill>
-            </div>
-          )}
+            )}
+          </div>
         </>
       ) : (
         <StudioInlineEmptyState
@@ -299,7 +394,7 @@ export default function AppOverviewPage() {
   const nextStep = getLifecycleGuidance(lifecycle)
   const dashboardMetrics = buildDashboardMetrics(snapshot, totalCost, totalRuns)
 
-  const summaryItems = [
+  const kpiItems = [
     {
       id: 'revenue',
       label: 'Revenue',
@@ -334,7 +429,7 @@ export default function AppOverviewPage() {
 
   return (
     <WorkspaceLayout>
-      <div className="space-y-6">
+      <div className="space-y-5">
 
         <AppStudioHero
           appId={appId}
@@ -346,10 +441,12 @@ export default function AppOverviewPage() {
           title="Overview"
           subtitle="Top-level app performance, cost, access, usage, and build state."
           currentSection="overview"
-          summaryItems={summaryItems}
+          summaryItems={[]}
           actions={[{ id: 'refresh', label: 'Refresh', variant: 'outline' }]}
           onAction={(id) => id === 'refresh' && refresh()}
         />
+
+        <KpiGrid items={kpiItems} />
 
         {isApprovalPending && (
           <Alert variant="warning">
@@ -368,7 +465,7 @@ export default function AppOverviewPage() {
             description="Capture the first app brief to begin tracking this app through the build lifecycle. Artifact history, approval state, and runtime metrics will appear here once a build starts."
           />
         ) : (
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-5 xl:grid-cols-2">
             <BuildStatusPanel
               build={build}
               latestArtifact={latestArtifact}

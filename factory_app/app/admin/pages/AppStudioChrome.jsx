@@ -13,7 +13,6 @@ export function formatCurrencyValue(value, fallback = 'Pending') {
   if (value == null || Number.isNaN(Number(value))) return fallback
   const num = Number(value)
   const abs = Math.abs(num)
-  // Use 4 decimal places for very small amounts (fractions of a cent), 2 otherwise
   const fractionDigits = abs > 0 && abs < 0.01 ? 4 : 2
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
@@ -139,20 +138,27 @@ function getAppInitials(name, appId) {
   return compact.slice(0, 2).toUpperCase()
 }
 
-function AppIdentityMark({ summary, appId, className = '', imageClassName = '', initialsClassName = '' }) {
+// size: 'sm' | 'md' | 'lg'
+function AppIdentityMark({ summary, appId, size = 'md', className = '', imageClassName = '', initialsClassName = '' }) {
+  const sizeClasses = {
+    sm: 'h-8 w-8 text-xs rounded-lg',
+    md: 'h-11 w-11 text-sm rounded-xl',
+    lg: 'h-20 w-20 text-2xl rounded-2xl',
+  }
+  const sz = sizeClasses[size] || sizeClasses.md
   const appName = getAppName(summary, appId)
   const logoSrc = getAppLogoSrc(summary)
 
   if (logoSrc) {
     return (
-      <span className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/50 bg-card/45 ${className}`}>
+      <span className={`flex shrink-0 items-center justify-center overflow-hidden border border-border/50 bg-card/45 ${sz} ${className}`}>
         <img src={logoSrc} alt={`${appName} logo`} className={`h-full w-full object-cover ${imageClassName}`} />
       </span>
     )
   }
 
   return (
-    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/28 bg-primary/10 text-sm font-semibold text-primary ${className} ${initialsClassName}`}>
+    <span className={`flex shrink-0 items-center justify-center border border-primary/28 bg-primary/10 font-semibold text-primary ${sz} ${className} ${initialsClassName}`}>
       {getAppInitials(appName, appId)}
     </span>
   )
@@ -169,7 +175,7 @@ function AppIdentity({ appId, summary, dataMode }) {
   return (
     <div className="flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
-        <AppIdentityMark summary={summary} appId={appId} />
+        <AppIdentityMark summary={summary} appId={appId} size="md" />
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-foreground">{appName}</div>
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{shortId || 'App workspace'}</div>
@@ -180,7 +186,6 @@ function AppIdentity({ appId, summary, dataMode }) {
           </StatusPill>
         ) : null}
       </div>
-
       {dataMode === 'demo' ? (
         <StatusPill tone="warning" className="w-fit shrink-0">Demo data</StatusPill>
       ) : null}
@@ -192,17 +197,24 @@ function AppNextStep({ nextStep = null, action = null }) {
   if (!nextStep && !action) return null
 
   return (
-    <div className="flex min-w-0 flex-col gap-3 border-t border-border/35 pt-4 sm:min-w-[17rem] sm:max-w-xs sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
-      <div>
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">Next step</div>
-        {nextStep ? (
-          <p className="mt-1 text-sm leading-6 text-foreground">{nextStep}</p>
-        ) : (
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">No operator action is needed right now.</p>
-        )}
+    <div className="shrink-0 rounded-xl border border-border/30 bg-background/65 p-4 backdrop-blur-md sm:min-w-[15rem] sm:max-w-xs">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+        Next step
       </div>
+      {nextStep ? (
+        <p className="mt-1.5 text-sm leading-relaxed text-foreground">{nextStep}</p>
+      ) : (
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+          No operator action is needed right now.
+        </p>
+      )}
       {action?.href && action?.label ? (
-        <LinkButton to={action.href} variant="secondary" size="sm" className="w-fit font-semibold">
+        <LinkButton
+          to={action.href}
+          variant="secondary"
+          size="sm"
+          className="mt-3 w-full justify-center font-semibold"
+        >
           {action.label}
         </LinkButton>
       ) : null}
@@ -217,47 +229,75 @@ function AppDashboardBanner({ appId, summary, dataMode, nextStep = null, nextSte
   const tagline = getAppTagline(summary)
   const bannerSrc = getAppBannerSrc(summary)
   const lifecycleLabel = app.lifecycle_label || app.lifecycle_state || app.status || null
-  const identityPending = !description
 
   return (
-    <section className="relative min-h-[11rem] overflow-hidden rounded-lg border border-border/45 bg-card/32 shadow-sm shadow-black/5">
+    <section className="relative min-h-[17rem] overflow-hidden rounded-2xl border border-border/40 bg-card/50 shadow-md shadow-black/8">
+      {/* Banner image — full bleed */}
       {bannerSrc ? (
         <img
           src={bannerSrc}
-          alt={`${appName} banner`}
+          alt=""
+          aria-hidden="true"
           className="absolute inset-0 h-full w-full object-cover"
         />
-      ) : null}
-      {bannerSrc ? <div className="absolute inset-0 bg-background/62" aria-hidden="true" /> : null}
+      ) : (
+        /* Subtle ambient gradient when no image */
+        <div
+          className="absolute inset-0 bg-gradient-to-br from-primary/8 via-transparent to-secondary/8"
+          aria-hidden="true"
+        />
+      )}
 
-      <div className="relative flex min-h-[11rem] flex-col justify-end gap-4 p-5 sm:p-6">
+      {/* Gradient scrim — strong at bottom, fades to transparent at top */}
+      <div
+        className="absolute inset-0 bg-gradient-to-t from-background/96 via-background/55 to-background/8"
+        aria-hidden="true"
+      />
+
+      {/* Status pills — top-right overlay */}
+      <div className="absolute right-4 top-4 flex items-center gap-2">
+        {lifecycleLabel ? (
+          <StatusPill tone="default" className="bg-background/65 backdrop-blur-sm">
+            {String(lifecycleLabel).replace(/_/g, ' ')}
+          </StatusPill>
+        ) : null}
+        {dataMode === 'demo' ? (
+          <StatusPill tone="warning" className="backdrop-blur-sm">Demo data</StatusPill>
+        ) : null}
+      </div>
+
+      {/* Content — pinned to bottom */}
+      <div className="relative flex min-h-[17rem] flex-col justify-end gap-5 p-6 sm:p-8">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex min-w-0 items-end gap-4">
+
+          {/* Identity block */}
+          <div className="flex min-w-0 items-end gap-5">
             <AppIdentityMark
               summary={summary}
               appId={appId}
-              className="h-16 w-16 rounded-2xl border-border/60 bg-background/72 text-xl shadow-sm shadow-black/10"
+              size="lg"
+              className="border-border/50 bg-background/80 shadow-lg shadow-black/15 backdrop-blur-sm"
             />
-            <div className="min-w-0 pb-0.5">
-              <div className="truncate text-2xl font-semibold leading-none text-foreground sm:text-3xl">
+            <div className="min-w-0 pb-1">
+              <h2 className="truncate text-3xl font-bold leading-tight tracking-tight text-foreground sm:text-4xl">
                 {appName}
-              </div>
+              </h2>
               {tagline ? (
-                <div className="mt-1.5 text-sm font-medium leading-6 text-foreground/86">{tagline}</div>
+                <p className="mt-1 text-sm font-medium text-foreground/75">{tagline}</p>
               ) : null}
-              <p className={`mt-1 max-w-2xl text-sm leading-6 ${identityPending ? 'text-muted-foreground/72' : 'text-muted-foreground/90'}`}>
-                {description || 'App description will appear after the concept brief is captured.'}
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {lifecycleLabel ? (
-                  <StatusPill tone="default" className="bg-background/70">
-                    {String(lifecycleLabel).replace(/_/g, ' ')}
-                  </StatusPill>
-                ) : null}
-                {dataMode === 'demo' ? <StatusPill tone="warning">Demo data</StatusPill> : null}
-              </div>
+              {description ? (
+                <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground/85">
+                  {description}
+                </p>
+              ) : (
+                <p className="mt-1.5 text-sm text-muted-foreground/50">
+                  App description will appear after the concept brief is captured.
+                </p>
+              )}
             </div>
           </div>
+
+          {/* Next step frosted card */}
           <AppNextStep nextStep={nextStep} action={nextStepAction} />
         </div>
       </div>
@@ -289,9 +329,7 @@ export function AppStudioHero({
           nextStep={nextStep}
           nextStepAction={nextStepAction}
         />
-      ) : (
-        <AppIdentity appId={appId} summary={summary} dataMode={dataMode} />
-      )}
+      ) : null}
       <PageHeader title={title} subtitle={subtitle} actions={actions} onAction={onAction} className="px-1" />
 
       {summaryItems.length > 0 ? <SummaryStrip items={summaryItems} /> : null}

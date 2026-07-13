@@ -38,8 +38,6 @@ def _merge_code_files(feature_outputs: list[dict[str, Any]]) -> list[dict[str, s
 async def assemble_features(
     app_id: str,
     feature_outputs: list[dict[str, Any]],
-    app_name: str | None = None,
-    primary_color: str | None = None,
 ) -> dict[str, Any]:
     """
     Merge feature outputs into a single workflow bundle.
@@ -47,8 +45,6 @@ async def assemble_features(
     Args:
         app_id: The parent application ID
         feature_outputs: List of outputs from AppGenerator(feature scope)
-        app_name: Optional display name (unused here, reserved)
-        primary_color: Optional branding color (unused here, reserved)
 
     Returns:
         {

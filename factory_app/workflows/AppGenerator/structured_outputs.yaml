@@ -2598,6 +2598,46 @@ models:
           - 'null'
         description: Optional display order. Lower numbers appear first. Defaults to 100.
 
+  ModuleProfileTab:
+    type: model
+    fields:
+      id:
+        type: str
+        description: >
+          Stable tab id. Must be unique within this module's profile manifest.
+          Used as the React tab key and the URL anchor.
+      label:
+        type: str
+        description: Human-readable tab label displayed in the horizontal tab bar.
+      order:
+        type: union
+        variants:
+          - int
+          - 'null'
+        description: >
+          Display order. Lower numbers appear first. Defaults to 100.
+          Use low values (10, 20) for core social tabs (messages, contacts).
+      action:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: >
+          Module action id called to hydrate the tab body at
+          /api/me/profile-tabs request time. Must reference an action declared
+          in module.yaml. Omit if the tab is purely component-driven with no
+          server data.
+      component:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: >
+          React component registry key that renders the tab body. Required.
+          Must be mirrored in js_stubs so the shell can resolve it at runtime.
+          The component receives { tab, data } props where data is the hydrated
+          action result.
+
   ModuleProfileManifest:
     type: model
     fields:
@@ -2607,12 +2647,24 @@ models:
           - mozaiks.profile.v1
         description: Must be mozaiks.profile.v1.
       panels:
-        type: list
+        type: optional_list
         items: ModuleProfilePanel
         description: >
-          Profile panels declared by this module. Panel ids must be unique.
-          Emit only panels the module can meaningfully populate from its own
-          declared actions. Do not expose admin-only actions or secrets.
+          Stacked-card panels (panel mode). Prefer tabs for new modules. Panel ids
+          must be unique. Emit only panels the module can meaningfully populate
+          from its own declared actions. Do not expose admin-only actions or
+          secrets.
+      tabs:
+        type: optional_list
+        items: ModuleProfileTab
+        description: >
+          Tab contributions to the social profile page (/me, /u/:username).
+          Tab ids must be unique within this module. Emit tabs when the module
+          has user-scoped data worth a dedicated profile section — for example
+          a wallet summary, contacts roster, or message inbox. Do not add tabs
+          for every module; only emit when the tab content is meaningfully
+          user-facing. Each tab must declare a component and may declare an
+          action to hydrate it with server data.
 
   ModuleRelationshipProvider:
     type: model

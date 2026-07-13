@@ -69,7 +69,7 @@ async function copyToClipboard(value) {
   return true
 }
 
-export default function AppUsersPage() {
+export default function AppAccessPage() {
   const { appId = 'workspace-app' } = useParams()
   const { data, loading, error, dataMode } = useAppStudioData(appId)
   const [searchValue, setSearchValue] = useState('')

@@ -105,20 +105,28 @@ class AppRegistryRepo:
                 incoming=build_context_profile,
                 now=now,
             )
-        build_run = self._merge_build_run(
-            build_registry_id=build_registry_id,
-            existing_run=(existing or {}).get("current_build_run"),
-            incoming=current_build_run,
-            lifecycle_state=lifecycle_state,
-            active_chat_id=active_chat_id,
-            active_workflow_id=active_workflow_id,
-            now=now,
+        should_track_build_run = bool(
+            current_build_run
+            or (existing or {}).get("current_build_run")
+            or active_chat_id
+            or active_workflow_id
+            or lifecycle_state in BUILD_CONTINUE_STATES
         )
-        set_fields["current_build_run"] = build_run
-        set_fields["build_runs"] = self._upsert_build_run(
-            (existing or {}).get("build_runs"),
-            build_run,
-        )
+        if should_track_build_run:
+            build_run = self._merge_build_run(
+                build_registry_id=build_registry_id,
+                existing_run=(existing or {}).get("current_build_run"),
+                incoming=current_build_run,
+                lifecycle_state=lifecycle_state,
+                active_chat_id=active_chat_id,
+                active_workflow_id=active_workflow_id,
+                now=now,
+            )
+            set_fields["current_build_run"] = build_run
+            set_fields["build_runs"] = self._upsert_build_run(
+                (existing or {}).get("build_runs"),
+                build_run,
+            )
         set_on_insert: dict[str, Any] = {
             "created_at": now,
             "bundle_path": None,
@@ -168,20 +176,31 @@ class AppRegistryRepo:
             update_fields["active_chat_id"] = active_chat_id
         if active_workflow_id:
             update_fields["active_workflow_id"] = active_workflow_id
-        build_run = self._merge_build_run(
-            build_registry_id=build_registry_id,
-            existing_run=existing.get("current_build_run"),
-            incoming=current_build_run,
-            lifecycle_state=lifecycle_state,
-            workflow_sequence=workflow_sequence,
-            active_chat_id=active_chat_id,
-            active_workflow_id=active_workflow_id,
-            artifact_version_id=artifact_version_id,
-            bundle_path=bundle_path,
-            now=now,
+        should_track_build_run = bool(
+            current_build_run
+            or existing.get("current_build_run")
+            or workflow_sequence
+            or active_chat_id
+            or active_workflow_id
+            or artifact_version_id
+            or bundle_path
+            or lifecycle_state in BUILD_CONTINUE_STATES
         )
-        update_fields["current_build_run"] = build_run
-        update_fields["build_runs"] = self._upsert_build_run(existing.get("build_runs"), build_run)
+        if should_track_build_run:
+            build_run = self._merge_build_run(
+                build_registry_id=build_registry_id,
+                existing_run=existing.get("current_build_run"),
+                incoming=current_build_run,
+                lifecycle_state=lifecycle_state,
+                workflow_sequence=workflow_sequence,
+                active_chat_id=active_chat_id,
+                active_workflow_id=active_workflow_id,
+                artifact_version_id=artifact_version_id,
+                bundle_path=bundle_path,
+                now=now,
+            )
+            update_fields["current_build_run"] = build_run
+            update_fields["build_runs"] = self._upsert_build_run(existing.get("build_runs"), build_run)
         await coll.update_one({"_id": build_registry_id}, {"$set": update_fields}, upsert=False)
         return await self.get_by_build_registry_id(build_registry_id=build_registry_id)
 

@@ -624,7 +624,6 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
         "profile": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/me"},
         "account": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/me"},
         "settings": {"id": "settings", "label": "Settings", "action": "navigate", "path": "/settings"},
-        "messages": {"id": "messages", "label": "Messages", "action": "navigate", "path": "/messages"},
         "notifications": {"id": "notifications", "label": "Alerts", "action": "navigate", "path": "/notifications"},
         "marketplace": {"id": "marketplace", "label": "Marketplace", "action": "navigate", "path": "/marketplace"},
         "wallet": {"id": "wallet", "label": "Wallet", "action": "navigate", "path": "/wallet"},
@@ -1177,7 +1176,7 @@ async def build_shell_config(*, surface: str = "platform") -> dict:
                 "title": PROFILE_SHELL_ROUTE["title"],
                 "appShell": True,
                 "shellMode": "social",
-                "ai_context": "The user is on their Profile page — their social identity, contacts, and messages.",
+                "ai_context": "The user is on their Profile page — their account identity, preferences, and module-contributed profile panels.",
             },
         },
     )
@@ -1287,6 +1286,9 @@ async def update_current_user_profile(
     if "display_name" in payload:
         value = payload.get("display_name")
         updates["display_name"] = value.strip() if isinstance(value, str) and value.strip() else None
+    if "bio" in payload:
+        value = payload.get("bio")
+        updates["bio"] = value.strip() if isinstance(value, str) and value.strip() else None
     if "avatar_url" in payload:
         value = payload.get("avatar_url")
         updates["avatar_url"] = value.strip() if isinstance(value, str) and value.strip() else None
@@ -2162,7 +2164,8 @@ async def _load_account_preferences(*, app_id: str, user_id: str) -> dict[str, A
 
 class ProfileUpdateRequest(BaseModel):
     display_name: str | None = Field(default=None, max_length=120, description="Preferred user-facing display name")
-    avatar_url: str | None = Field(default=None, max_length=2048, description="Optional avatar image URL")
+    bio: str | None = Field(default=None, max_length=500, description="Short user bio")
+    avatar_url: str | None = Field(default=None, max_length=2048, description="Optional avatar image URL — must be a URL, not a data URI")
 
 
 class ProfilePreferencesUpdateRequest(BaseModel):

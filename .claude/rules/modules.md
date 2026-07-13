@@ -98,20 +98,49 @@ Do not create helper files for:
 - workflow orchestration
 - random file splitting
 
-## Profile Panels
+## Profile Surface
 
 `contracts/profile.yaml` is optional. Use it when a module has user-scoped data
-worth surfacing on the user profile page (account summary, notification prefs,
-usage stats). Do not add profile.yaml to every module.
+worth surfacing on the social profile page (`/me`, `/u/:username`). Do not add
+`profile.yaml` to every module — only when the tab content is meaningfully
+user-facing (messages inbox, contacts roster, wallet summary, usage stats).
 
-- `schema_version` must be `mozaiks.profile.v1`
-- panels bind to module actions via `action:` — the platform calls the action at
-  `/api/me/profile-panels` request time and attaches the result as `data`
-- valid `kind` values: `metrics`, `list`, `component` — `form` is reserved and rejected at load time
-- `kind: component` requires a `component:` field and no `fields:` list
+`schema_version` must be `mozaiks.profile.v1`.
+
+### Tabs (preferred)
+
+Tabs appear in the horizontal tab bar on the profile hero. The platform hydrates
+each tab by calling the declared `action` and passing the result as `data` to the
+React component.
+
+```yaml
+schema_version: mozaiks.profile.v1
+tabs:
+  - id: messages
+    label: Messages
+    order: 10
+    action: list_threads        # module action id — must be declared in module.yaml
+    component: MessagingTab     # React component registry key — must be in js_stubs
+```
+
+- `id` and `label` are required and must be unique within the manifest
+- `component` is required — the registered React component receives `{ tab, data }` props
+- `action` is optional — hydrates `data` at `/api/me/profile-tabs` request time
+- `order` defaults to 100; use low values (10, 20) for core social tabs
+- tabs must not expose admin-only actions or secrets
+- the component must be declared in `js_stubs` so the generator knows to register it
+
+### Panels (panel mode)
+
+Stacked-card panels are the older format. Prefer tabs for new modules.
+
+- panels bind to module actions via `action:` at `/api/me/profile-panels` request time
+- valid `kind` values: `metrics`, `list`, `component` — `form` is reserved and rejected
+- `kind: component` requires `component:` and no `fields:`
 - `kind: metrics` and `kind: list` require a non-empty `fields:` list
-- profile panels must not expose admin-only actions or secrets
-- profile panels do not replace or override `/api/me` identity
+- panels must not expose admin-only actions or secrets
+
+Profile tabs and panels do not replace or override `/api/me` identity.
 
 ## Entitlement Gating
 

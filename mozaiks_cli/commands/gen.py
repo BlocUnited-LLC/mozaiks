@@ -282,7 +282,7 @@ def _adapt_python_tool(content: str) -> str:
         re.MULTILINE
     )
 
-    def add_type_if_missing(match, pattern_num):
+    def add_type_if_missing(match):
         nonlocal needs_any_import
         kwargs_part = match.group(1)  # e.g., "**runtime"
         suffix = match.group(2)       # e.g., "\n) ->" or ")" or ","
@@ -297,7 +297,7 @@ def _adapt_python_tool(content: str) -> str:
         return kwargs_part + ': Any' + suffix
 
     # Apply pattern1 first (multi-line case)
-    content = pattern1.sub(lambda m: add_type_if_missing(m, 1), content)
+    content = pattern1.sub(add_type_if_missing, content)
 
     # Now check if pattern2 needs to be applied
     # But be careful: we only want to modify function definitions, not calls

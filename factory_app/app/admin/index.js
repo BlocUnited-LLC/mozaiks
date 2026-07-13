@@ -2,10 +2,10 @@
  * factory_app/app/admin — admin portal UI registration.
  *
  * All Studio and admin portal pages are co-located here, separate from
- * user-facing app pages in app/ui/. The admin portal is platform-owned
- * (rendered through AdminPortal / AdminWorkspaceLayout) and declared via
- * admin/admin_registry.yaml. This barrel registers the custom page
- * components that back those routes.
+ * user-facing app pages in app/ui/. First-party Studio routes are declared
+ * in app/ui/route_manifest.json. admin/admin_registry.yaml is reserved for
+ * AdminPortal extension pages. This barrel registers the custom page
+ * components that back both surfaces.
  *
  * Generated apps: admin pages for a generated app belong in admin/pages/
  * of that app's workspace, registered through its own admin/index.js.
@@ -20,25 +20,12 @@ const WorkspaceUsagePage         = lazy(() => import('./pages/WorkspaceUsagePage
 const WorkspaceIntegrationsPage  = lazy(() => import('./pages/WorkspaceIntegrationsPage.jsx'))
 const AppOverviewPage    = lazy(() => import('./pages/AppOverviewPage.jsx'))
 const AppHealthPage      = lazy(() => import('./pages/AppHealthPage.jsx'))
-const AppUsersPage       = lazy(() => import('./pages/AppUsersPage.jsx'))
+const AppAccessPage      = lazy(() => import('./pages/AppAccessPage.jsx'))
 const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
 const AppBuildHistoryPage = lazy(() => import('./pages/AppBuildHistoryPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
 const AppSupportPage      = lazy(() => import('./pages/AppSupportPage.jsx'))
-const AppCommunityPage    = lazy(() => import('./pages/AppCommunityPage.jsx'))
-const AppGovernancePage   = lazy(() => import('./pages/AppGovernancePage.jsx'))
-const AppGovernanceProposalPage = lazy(() => import('./pages/AppGovernanceProposalPage.jsx'))
-const AppCollaboratorsPage = lazy(() => import('./pages/AppCollaboratorsPage.jsx'))
-const AppRevenueParticipationPage = lazy(() => import('./pages/AppRevenueParticipationPage.jsx'))
-const RevenueParticipationPlanReviewPage = lazy(() => import('./pages/RevenueParticipationPlanReviewPage.jsx'))
-const RevenueDistributionReviewPage = lazy(() => import('./pages/RevenueDistributionReviewPage.jsx'))
-const MyCommunitiesPage   = lazy(() => import('./pages/MyCommunitiesPage.jsx'))
-const MyInvitationsPage   = lazy(() => import('./pages/MyInvitationsPage.jsx'))
-const MyVotesPage         = lazy(() => import('./pages/MyVotesPage.jsx'))
-const MyDelegationsPage   = lazy(() => import('./pages/MyDelegationsPage.jsx'))
 const ProfilePage         = lazy(() => import('@mozaiks/chat-ui/pages/ProfilePage.jsx'))
-const MessagesPage        = lazy(() => import('../ui/pages/custom/MessagesPage.jsx'))
-const MessageThreadPage   = lazy(() => import('../ui/pages/custom/MessageThreadPage.jsx'))
 
 export function registerAdminComponents(registerComponent) {
   if (typeof registerComponent !== 'function') return
@@ -73,8 +60,8 @@ export function registerAdminComponents(registerComponent) {
     override: true,
   })
 
-  registerComponent('AppUsersPage', AppUsersPage, {
-    description: 'App users surface — user access, operators, and app-scoped participation controls.',
+  registerComponent('AppAccessPage', AppAccessPage, {
+    description: 'App access surface — account access, roles, permissions, plan assignment context, and support-access posture.',
   })
 
   registerComponent('AppUsagePage', AppUsagePage, {
@@ -93,59 +80,7 @@ export function registerAdminComponents(registerComponent) {
     description: 'Build history surface — artifact versions with carry-forward preservation audit per revision.',
   })
 
-  registerComponent('AppCommunityPage', AppCommunityPage, {
-    description: 'App community surface — app-scoped community overview, member roster, and create-first-community flow.',
-  })
-
-  registerComponent('AppGovernancePage', AppGovernancePage, {
-    description: 'App governance surface — proposal list, create/open/close/outcome actions for app-scoped community governance.',
-  })
-
-  registerComponent('AppGovernanceProposalPage', AppGovernanceProposalPage, {
-    description: 'Governance proposal detail — vote casting, delegation management, and immutable snapshot review for a single proposal.',
-  })
-
-  registerComponent('AppCollaboratorsPage', AppCollaboratorsPage, {
-    description: 'App collaborators surface — invite collaborators, update roles, and manage member roster for app-scoped communities.',
-  })
-
-  registerComponent('AppRevenueParticipationPage', AppRevenueParticipationPage, {
-    description: 'Revenue participation surface — lists workflow-generated plan proposals and distribution reviews for human operator review.',
-  })
-
-  registerComponent('RevenueParticipationPlanReviewPage', RevenueParticipationPlanReviewPage, {
-    description: 'Revenue plan proposal review — operator reviews a RevenueParticipationDesignerWorkflow artifact and confirms draft plan creation.',
-  })
-
-  registerComponent('RevenueDistributionReviewPage', RevenueDistributionReviewPage, {
-    description: 'Revenue distribution review — operator reviews a RevenueDistributionReviewWorkflow artifact and confirms settlement period actions.',
-  })
-
-  registerComponent('MyCommunitiesPage', MyCommunitiesPage, {
-    description: 'My communities surface — shows all community memberships for the current user across all apps.',
-  })
-
-  registerComponent('MyInvitationsPage', MyInvitationsPage, {
-    description: 'My invitations surface — pending and historical community invitations, with token-based accept/decline flow.',
-  })
-
-  registerComponent('MyVotesPage', MyVotesPage, {
-    description: 'My votes surface — open governance proposals across the user\'s communities, with navigation to vote on each.',
-  })
-
-  registerComponent('MyDelegationsPage', MyDelegationsPage, {
-    description: 'My delegations surface — outgoing and incoming voting delegations, with revoke action for active outgoing delegations.',
-  })
-
   registerComponent('ProfilePage', ProfilePage, {
-    description: 'User profile surface — public profile view with avatar, bio, community memberships, and social links.',
-  })
-
-  registerComponent('MessagesPage', MessagesPage, {
-    description: 'Messages surface — DM threads and announcements for the current user.',
-  })
-
-  registerComponent('MessageThreadPage', MessageThreadPage, {
-    description: 'Message thread surface — conversation view for a single DM or announcement thread.',
+    description: 'User profile surface — account identity, avatar, bio, and profile preferences.',
   })
 }
