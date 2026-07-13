@@ -56,6 +56,9 @@ export {
   SurfaceCard,
 } from './Surface.jsx';
 
+// Chat / thread primitives
+export { ChatThread, ChatMessageBubble, ChatInput } from './ChatThread.jsx';
+
 // Accessibility primitives
 export { VisuallyHidden } from './VisuallyHidden.jsx';
 export { SkipLink }       from './SkipLink.jsx';

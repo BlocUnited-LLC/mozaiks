@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
+import { ChatThread } from '@mozaiks/chat-ui/ui'
 import {
   Panel,
   StatusPill,
@@ -198,63 +199,12 @@ function SessionListCard({ run, active, onClick }) {
   )
 }
 
-// ─── Message bubble ───────────────────────────────────────────────────────────
-
-function MessageBubble({ message }) {
-  const isUser = message.role === 'user'
-  const isOperator = message.role === 'operator'
-  const isSystem = message.role === 'system'
-
-  if (isSystem) {
-    return (
-      <div className="mx-auto max-w-sm rounded-xl border border-destructive/25 bg-destructive/8 px-3 py-2 text-center text-[11px] text-destructive/80">
-        {message.content}
-      </div>
-    )
-  }
-
-  const alignRight = isUser || isOperator
-
-  return (
-    <div className={`flex gap-2.5 ${alignRight ? 'flex-row-reverse' : 'flex-row'}`}>
-      {!alignRight && (
-        <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
-          AI
-        </span>
-      )}
-      <div className="flex flex-col gap-0.5">
-        {isOperator && (
-          <span className="pr-1 text-right text-[10px] font-medium text-muted-foreground/50">Operator</span>
-        )}
-        <div
-          className={[
-            'max-w-[72%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
-            isUser
-              ? 'rounded-tr-sm bg-primary text-primary-foreground'
-              : isOperator
-                ? 'rounded-tr-sm bg-secondary/30 text-foreground border border-secondary/30'
-                : 'rounded-tl-sm border border-border/30 bg-card/80 text-foreground',
-          ].join(' ')}
-        >
-          {message.content}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ─── Thread detail panel ──────────────────────────────────────────────────────
 
 function ThreadPanel({ run, assignments, onAssign, operators }) {
-  const [threadMessages, setThreadMessages] = useState(null)
-  const [input, setInput] = useState('')
-  const bottomRef = useRef(null)
+  const [extraMessages, setExtraMessages] = useState([])
 
-  // Reset thread messages when session changes
-  useEffect(() => {
-    setThreadMessages(null)
-    setInput('')
-  }, [run?.chat_id])
+  useEffect(() => { setExtraMessages([]) }, [run?.chat_id])
 
   if (!run) {
     return (
@@ -265,25 +215,12 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
     )
   }
 
-  const baseMessages = run.messages || []
-  const messages = threadMessages ?? baseMessages
+  const messages = [...(run.messages || []), ...extraMessages]
   const assignedTo = assignments[run.chat_id] || 'Unassigned'
   const tone = sessionStatusTone(run)
 
-  function handleSend() {
-    const text = input.trim()
-    if (!text) return
-    const operatorMsg = { role: 'operator', content: text }
-    setThreadMessages([...messages, operatorMsg])
-    setInput('')
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-  }
-
-  function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
+  function handleSend(text) {
+    setExtraMessages((prev) => [...prev, { role: 'operator', content: text }])
   }
 
   return (
@@ -298,7 +235,7 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
             <div className="text-[11px] text-muted-foreground/60">{run.workflow_name} · {relativeTime(run.started_at)}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <StatusPill tone={tone}>{sessionStatusLabel(run)}</StatusPill>
           <select
             value={assignedTo}
@@ -310,61 +247,26 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.length > 0 ? (
-          <>
-            {messages.map((msg, i) => <MessageBubble key={i} message={msg} />)}
-            <div ref={bottomRef} />
-          </>
-        ) : (
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <p className="text-sm text-muted-foreground/50">
-              Transcript will appear here once the session completes.
-            </p>
-          </div>
-        )}
-      </div>
+      {/* ChatThread primitive handles messages + input */}
+      <ChatThread
+        messages={messages}
+        onSend={handleSend}
+        inputPlaceholder="Reply to this session…"
+        emptyText="Transcript will appear here once the session completes."
+        className="flex-1 min-h-0"
+      />
 
       {/* Stats bar */}
       <div className="flex items-center gap-3 border-t border-border/10 px-4 py-1.5 text-[11px] text-muted-foreground/45">
         <span>{formatCompactNumber(run.agent_turns, '0')} turns</span>
         <span className="text-border/30">·</span>
         <span>{formatCompactNumber(run.tool_calls, '0')} tools</span>
-        {Number(run.errors || 0) > 0 ? (
+        {Number(run.errors || 0) > 0 && (
           <>
             <span className="text-border/30">·</span>
             <span className="text-destructive/60">{run.errors} errors</span>
           </>
-        ) : null}
-      </div>
-
-      {/* Chat input */}
-      <div className="border-t border-border/20 px-3 pb-3 pt-2">
-        <div className="flex items-end gap-2 rounded-xl border border-border/30 bg-background/60 px-3 py-2 focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20 transition-all">
-          <textarea
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Reply to this session…"
-            className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none"
-            style={{ maxHeight: '96px', overflowY: 'auto' }}
-          />
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={!input.trim()}
-            className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity disabled:opacity-30 hover:opacity-90"
-            aria-label="Send"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
-        </div>
-        <p className="mt-1 px-1 text-[10px] text-muted-foreground/35">Enter to send · Shift+Enter for new line</p>
+        )}
       </div>
     </div>
   )
