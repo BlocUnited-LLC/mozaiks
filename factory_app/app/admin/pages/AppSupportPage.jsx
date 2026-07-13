@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
@@ -202,6 +202,7 @@ function SessionListCard({ run, active, onClick }) {
 
 function MessageBubble({ message }) {
   const isUser = message.role === 'user'
+  const isOperator = message.role === 'operator'
   const isSystem = message.role === 'system'
 
   if (isSystem) {
@@ -212,22 +213,31 @@ function MessageBubble({ message }) {
     )
   }
 
+  const alignRight = isUser || isOperator
+
   return (
-    <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-      {!isUser && (
+    <div className={`flex gap-2.5 ${alignRight ? 'flex-row-reverse' : 'flex-row'}`}>
+      {!alignRight && (
         <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
           AI
         </span>
       )}
-      <div
-        className={[
-          'max-w-[72%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
-          isUser
-            ? 'rounded-tr-sm bg-primary text-primary-foreground'
-            : 'rounded-tl-sm border border-border/30 bg-card/80 text-foreground',
-        ].join(' ')}
-      >
-        {message.content}
+      <div className="flex flex-col gap-0.5">
+        {isOperator && (
+          <span className="pr-1 text-right text-[10px] font-medium text-muted-foreground/50">Operator</span>
+        )}
+        <div
+          className={[
+            'max-w-[72%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
+            isUser
+              ? 'rounded-tr-sm bg-primary text-primary-foreground'
+              : isOperator
+                ? 'rounded-tr-sm bg-secondary/30 text-foreground border border-secondary/30'
+                : 'rounded-tl-sm border border-border/30 bg-card/80 text-foreground',
+          ].join(' ')}
+        >
+          {message.content}
+        </div>
       </div>
     </div>
   )
@@ -236,6 +246,16 @@ function MessageBubble({ message }) {
 // ─── Thread detail panel ──────────────────────────────────────────────────────
 
 function ThreadPanel({ run, assignments, onAssign, operators }) {
+  const [threadMessages, setThreadMessages] = useState(null)
+  const [input, setInput] = useState('')
+  const bottomRef = useRef(null)
+
+  // Reset thread messages when session changes
+  useEffect(() => {
+    setThreadMessages(null)
+    setInput('')
+  }, [run?.chat_id])
+
   if (!run) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/30 bg-card/40 px-6 py-12 text-center">
@@ -245,15 +265,32 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
     )
   }
 
-  const messages = run.messages || []
+  const baseMessages = run.messages || []
+  const messages = threadMessages ?? baseMessages
   const assignedTo = assignments[run.chat_id] || 'Unassigned'
   const tone = sessionStatusTone(run)
+
+  function handleSend() {
+    const text = input.trim()
+    if (!text) return
+    const operatorMsg = { role: 'operator', content: text }
+    setThreadMessages([...messages, operatorMsg])
+    setInput('')
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
 
   return (
     <div className="flex flex-1 min-w-0 flex-col overflow-hidden rounded-2xl border border-border/20 bg-card/50">
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 border-b border-border/20 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b border-border/20 px-4 py-3">
         <div className="flex items-center gap-2 min-w-0">
           <UserAvatar userId={run.user_id} size="sm" />
           <div className="min-w-0">
@@ -261,13 +298,25 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
             <div className="text-[11px] text-muted-foreground/60">{run.workflow_name} · {relativeTime(run.started_at)}</div>
           </div>
         </div>
-        <StatusPill tone={tone}>{sessionStatusLabel(run)}</StatusPill>
+        <div className="flex items-center gap-2">
+          <StatusPill tone={tone}>{sessionStatusLabel(run)}</StatusPill>
+          <select
+            value={assignedTo}
+            onChange={(e) => onAssign(run.chat_id, e.target.value)}
+            className="rounded-lg border border-border/30 bg-background/60 px-2 py-1 text-[11px] text-foreground/65 transition-colors hover:border-border/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
+          >
+            {operators.map((op) => <option key={op} value={op}>{op}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.length > 0 ? (
-          messages.map((msg, i) => <MessageBubble key={i} message={msg} />)
+          <>
+            {messages.map((msg, i) => <MessageBubble key={i} message={msg} />)}
+            <div ref={bottomRef} />
+          </>
         ) : (
           <div className="flex flex-col items-center gap-3 py-10 text-center">
             <p className="text-sm text-muted-foreground/50">
@@ -277,26 +326,45 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
         )}
       </div>
 
-      {/* Footer: stats + assignment */}
-      <div className="flex items-center justify-between gap-3 border-t border-border/20 px-4 py-2.5">
-        <div className="flex items-center gap-3 text-[11px] text-muted-foreground/55">
-          <span>{formatCompactNumber(run.agent_turns, '0')} turns</span>
-          <span className="text-border/40">·</span>
-          <span>{formatCompactNumber(run.tool_calls, '0')} tools</span>
-          {Number(run.errors || 0) > 0 ? (
-            <>
-              <span className="text-border/40">·</span>
-              <span className="text-destructive/70">{run.errors} errors</span>
-            </>
-          ) : null}
+      {/* Stats bar */}
+      <div className="flex items-center gap-3 border-t border-border/10 px-4 py-1.5 text-[11px] text-muted-foreground/45">
+        <span>{formatCompactNumber(run.agent_turns, '0')} turns</span>
+        <span className="text-border/30">·</span>
+        <span>{formatCompactNumber(run.tool_calls, '0')} tools</span>
+        {Number(run.errors || 0) > 0 ? (
+          <>
+            <span className="text-border/30">·</span>
+            <span className="text-destructive/60">{run.errors} errors</span>
+          </>
+        ) : null}
+      </div>
+
+      {/* Chat input */}
+      <div className="border-t border-border/20 px-3 pb-3 pt-2">
+        <div className="flex items-end gap-2 rounded-xl border border-border/30 bg-background/60 px-3 py-2 focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20 transition-all">
+          <textarea
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Reply to this session…"
+            className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none"
+            style={{ maxHeight: '96px', overflowY: 'auto' }}
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!input.trim()}
+            className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity disabled:opacity-30 hover:opacity-90"
+            aria-label="Send"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
         </div>
-        <select
-          value={assignedTo}
-          onChange={(e) => onAssign(run.chat_id, e.target.value)}
-          className="rounded-lg border border-border/30 bg-background/60 px-2 py-1 text-[11px] text-foreground/65 transition-colors hover:border-border/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
-        >
-          {operators.map((op) => <option key={op} value={op}>{op}</option>)}
-        </select>
+        <p className="mt-1 px-1 text-[10px] text-muted-foreground/35">Enter to send · Shift+Enter for new line</p>
       </div>
     </div>
   )
