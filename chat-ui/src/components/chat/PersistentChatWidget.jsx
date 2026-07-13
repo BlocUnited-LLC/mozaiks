@@ -66,6 +66,9 @@ const PersistentChatWidget = ({
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [showRatingBanner, setShowRatingBanner] = useState(false);
+  const [supportMessage, setSupportMessage] = useState('');
+  const [supportSent, setSupportSent] = useState(false);
+  const [supportLoading, setSupportLoading] = useState(false);
   const prevWorkflowStatusRef = useRef(null);
 
   // Detect when a workflow session ends and prompt for a rating
@@ -145,35 +148,37 @@ const PersistentChatWidget = ({
     (Array.isArray(workflowMessages) && workflowMessages.length > 0) ||
     !!(activeChatId || chatId);
 
-  // widgetContext: 'auto' = follow active context; 'ask' = user forced to ask inline
+  // widgetContext: 'auto' | 'ask' | 'support'
   const [widgetContext, setWidgetContext] = useState('auto');
   const showingWorkflowContext = hasActiveWorkflow && widgetContext !== 'ask';
 
   const messages = showingWorkflowContext ? workflowMessages : askMessages;
   const hasBackend = !!api;
 
-  const handleGetHelp = () => {
-    // Fire-and-forget support request to the module so the /support page can track it
-    const body = {
-      message: `Support requested from ${pageContext || 'widget'}.`,
-      page_url: typeof window !== 'undefined' ? window.location.pathname : null,
-      page_title: pageContext || null,
-      severity: 'low',
-    };
-    fetch('/api/modules/workspace_support/create_support_request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).catch(() => {});
+  const handleOpenSupport = () => {
+    setSupportSent(false);
+    setSupportMessage('');
+    setWidgetContext('support');
+  };
 
-    // Navigate to full chat with support context
-    const params = new URLSearchParams({ mode: 'ask' });
-    params.set('page_context', pageContext
-      ? `Support request — ${pageContext}`
-      : 'Support request from chat widget');
-    setConversationMode('ask');
-    setIsExpanded(false);
-    navigate(`/chat?${params.toString()}`);
+  const handleSubmitSupport = async () => {
+    const text = supportMessage.trim();
+    if (!text || supportLoading) return;
+    setSupportLoading(true);
+    try {
+      await fetch('/api/modules/workspace_support/create_support_request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          page_url: typeof window !== 'undefined' ? window.location.pathname : null,
+          page_title: pageContext || null,
+          severity: 'low',
+        }),
+      });
+    } catch (_) {}
+    setSupportLoading(false);
+    setSupportSent(true);
   };
 
   const handleSendMessage = (message) => {
@@ -224,19 +229,6 @@ const PersistentChatWidget = ({
         timestamp: new Date().toISOString(),
       }]);
     }, 500);
-  };
-
-  // Left button: switch to ask context inline (if workflow showing) or go to full Ask page
-  const handleLeftButton = () => {
-    if (showingWorkflowContext) {
-      setWidgetContext('ask');
-    } else {
-      setConversationMode('ask');
-      setIsExpanded(false);
-      const params = new URLSearchParams({ mode: 'ask' });
-      if (pageContext) params.set('page_context', pageContext);
-      navigate(`/chat?${params.toString()}`);
-    }
   };
 
   // Right button: "Back to workspace" — navigate to workflow split view
@@ -311,9 +303,26 @@ const PersistentChatWidget = ({
   }
 
   // ─── Expanded state ─────────────────────────────────────────────────────────
-  const leftLabel = showingWorkflowContext ? 'Ask Mode' : 'mozaiksai';
-  const leftSubLabel = showingWorkflowContext ? 'Switch to ask' : 'Chat Station';
-  const leftTitle = showingWorkflowContext ? 'Switch to ask mode' : 'Open Chat Station';
+  const inSupportMode = widgetContext === 'support';
+  const leftLabel = inSupportMode ? 'Help & Support' : showingWorkflowContext ? 'Ask Mode' : 'mozaiksai';
+  const leftSubLabel = inSupportMode ? 'Talk to an operator' : showingWorkflowContext ? 'Switch to ask' : 'Chat Station';
+  const leftTitle = inSupportMode ? 'Back to chat' : showingWorkflowContext ? 'Switch to ask mode' : 'Open Chat Station';
+
+  const handleLeftButton = () => {
+    if (inSupportMode) {
+      setWidgetContext('auto');
+      setSupportSent(false);
+      setSupportMessage('');
+    } else if (showingWorkflowContext) {
+      setWidgetContext('ask');
+    } else {
+      setConversationMode('ask');
+      setIsExpanded(false);
+      const params = new URLSearchParams({ mode: 'ask' });
+      if (pageContext) params.set('page_context', pageContext);
+      navigate(`/chat?${params.toString()}`);
+    }
+  };
 
   return (
     <div className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
@@ -334,18 +343,21 @@ const PersistentChatWidget = ({
       {/* Chat panel */}
       <div className="pointer-events-auto w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px] bg-gradient-to-br from-gray-900/95 via-slate-900/95 to-black/95 backdrop-blur-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] rounded-2xl rounded-tr-none shadow-2xl overflow-hidden flex flex-col">
 
-        {/* Header: max 2 buttons */}
+        {/* Header */}
         <div className="flex-shrink-0 bg-[rgba(0,0,0,0.6)] border-b border-[rgba(var(--color-primary-light-rgb),0.2)] backdrop-blur-xl">
-          <div className="flex flex-row items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3">
-            {/* Left: 🧠 — context-adaptive */}
+          <div className="flex flex-row items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 gap-2">
+
+            {/* Left: context-adaptive label button */}
             <button
               type="button"
               onClick={handleLeftButton}
               className="flex items-center gap-2 sm:gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-light)]/60 rounded-xl min-w-0 flex-1"
               title={leftTitle}
             >
-              <span className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 bg-gradient-to-br from-[var(--color-secondary)] to-[var(--color-primary)]">
-                <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">🧠</span>
+              <span className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 ${inSupportMode ? 'bg-gradient-to-br from-warning/60 to-warning/30' : 'bg-gradient-to-br from-[var(--color-secondary)] to-[var(--color-primary)]'}`}>
+                <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">
+                  {inSupportMode ? '?' : '🧠'}
+                </span>
               </span>
               <span className="text-left min-w-0 flex-1">
                 <span className="block text-sm sm:text-lg font-bold text-white tracking-tight truncate">{leftLabel}</span>
@@ -353,59 +365,60 @@ const PersistentChatWidget = ({
               </span>
             </button>
 
-            {/* Right: Back to workspace — only when workflow is active */}
-            {hasActiveWorkflow && (
+            {/* Right actions */}
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {/* Help (?) button — always visible, highlighted when active */}
               <button
-                onClick={handleBackToWorkspace}
-                className="group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm flex-shrink-0"
-                title="Back to workspace"
+                type="button"
+                onClick={handleOpenSupport}
+                title="Get help from an operator"
+                className={`flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-bold transition-all duration-200 ${
+                  inSupportMode
+                    ? 'border-warning/60 bg-warning/20 text-warning'
+                    : 'border-[rgba(var(--color-primary-light-rgb),0.25)] bg-[rgba(var(--color-primary-rgb),0.08)] text-gray-300 hover:border-[rgba(var(--color-primary-light-rgb),0.5)] hover:text-white'
+                }`}
               >
-                <img
-                  src={brandLogoSrc}
-                  className="w-8 h-8 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
-                  alt="Back to workspace"
-                  onError={applyBrandImageFallback}
-                />
-                <div className="absolute inset-0 bg-[rgba(var(--color-primary-light-rgb),0.1)] rounded-lg blur opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10" />
+                ?
               </button>
-            )}
+
+              {/* Back to workspace — only when workflow is active and not in support mode */}
+              {hasActiveWorkflow && !inSupportMode && (
+                <button
+                  onClick={handleBackToWorkspace}
+                  className="group relative p-2 rounded-lg bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.1)] to-[rgba(var(--color-secondary-rgb),0.1)] border border-[rgba(var(--color-primary-light-rgb),0.3)] hover:border-[rgba(var(--color-primary-light-rgb),0.6)] transition-all duration-300 backdrop-blur-sm"
+                  title="Back to workspace"
+                >
+                  <img
+                    src={brandLogoSrc}
+                    className="w-8 h-8 opacity-70 group-hover:opacity-100 transition-all duration-300 group-hover:scale-105"
+                    alt="Back to workspace"
+                    onError={applyBrandImageFallback}
+                  />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Sub-header: context label or compose affordance */}
-        <div className="flex-shrink-0 px-3 pt-2 pb-1.5 border-b border-[rgba(var(--color-primary-light-rgb),0.06)]">
-          {showingWorkflowContext ? (
-            <div>
-              <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                {activeWorkflowName || workflowName || 'Active workflow'}
-              </span>
-              {showRatingBanner && (
-                <div className="mt-1.5 flex items-center gap-2">
-                  <span className="text-[10px] text-gray-400">How was your experience?</span>
-                  <button
-                    type="button"
-                    onClick={() => handleRating(0)}
-                    className="text-base leading-none hover:scale-110 transition-transform"
-                    title="Poor"
-                  >👎</button>
-                  <button
-                    type="button"
-                    onClick={() => handleRating(1)}
-                    className="text-base leading-none hover:scale-110 transition-transform"
-                    title="Great"
-                  >👍</button>
-                  <button
-                    type="button"
-                    onClick={() => setShowRatingBanner(false)}
-                    className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors ml-1"
-                    title="Dismiss"
-                  >✕</button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-3">
+        {/* Sub-header: context label / compose / workflow name */}
+        {!inSupportMode && (
+          <div className="flex-shrink-0 px-3 pt-2 pb-1.5 border-b border-[rgba(var(--color-primary-light-rgb),0.06)]">
+            {showingWorkflowContext ? (
+              <div>
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">
+                  {activeWorkflowName || workflowName || 'Active workflow'}
+                </span>
+                {showRatingBanner && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="text-[10px] text-gray-400">How was your experience?</span>
+                    <button type="button" onClick={() => handleRating(0)} className="text-base leading-none hover:scale-110 transition-transform" title="Poor">👎</button>
+                    <button type="button" onClick={() => handleRating(1)} className="text-base leading-none hover:scale-110 transition-transform" title="Great">👍</button>
+                    <button type="button" onClick={() => setShowRatingBanner(false)} className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors ml-1" title="Dismiss">✕</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={handleNewConversation}
@@ -414,44 +427,76 @@ const PersistentChatWidget = ({
                   <span>+</span>
                   <span>New conversation</span>
                 </button>
+                {pageContext && (
+                  <span className="text-[10px] text-gray-500 truncate max-w-[8rem]" title={pageContext}>
+                    📍 Page active
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Body: support panel OR chat */}
+        {inSupportMode ? (
+          <div className="flex flex-1 flex-col overflow-hidden">
+            {supportSent ? (
+              /* Confirmation */
+              <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-8 text-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-success/20 text-3xl">✓</span>
+                <p className="text-sm leading-relaxed text-gray-300">
+                  Got it — your request has been received. An operator will review it and follow up with you shortly.
+                </p>
                 <button
                   type="button"
-                  onClick={handleGetHelp}
-                  className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-50 hover:opacity-100 flex items-center gap-1"
-                  title="Contact administrator"
+                  onClick={() => { setWidgetContext('auto'); setSupportSent(false); setSupportMessage(''); }}
+                  className="mt-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] px-4 py-2 text-sm text-gray-300 transition-colors hover:border-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-white"
                 >
-                  <span>⛑</span>
-                  <span>Get help</span>
+                  Back to chat
                 </button>
               </div>
-              {pageContext && (
-                <span
-                  className="text-[10px] text-gray-500 truncate max-w-[8rem]"
-                  title={pageContext}
+            ) : (
+              /* Support form */
+              <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
+                <p className="text-[11px] text-gray-400">
+                  Describe what you need help with and an operator will follow up shortly.
+                </p>
+                <textarea
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  placeholder="What do you need help with?"
+                  rows={5}
+                  className="flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-gray-500 focus:border-[rgba(var(--color-primary-light-rgb),0.4)] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSubmitSupport}
+                  disabled={!supportMessage.trim() || supportLoading}
+                  className="rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-40 hover:opacity-90"
                 >
-                  📍 Page active
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Chat content */}
-        <div className="flex-1 overflow-hidden">
-          <ChatInterface
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            loading={false}
-            connectionStatus="disconnected"
-            conversationMode={showingWorkflowContext ? 'workflow' : 'ask'}
-            onConversationModeChange={(mode) => setConversationMode(mode)}
-            isOnChatPage={false}
-            hideHeader={true}
-            disableMobileShellChrome={true}
-            plainContainer={true}
-            chatTheme={chatTheme}
-          />
-        </div>
+                  {supportLoading ? 'Sending…' : 'Send request'}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Normal chat */
+          <div className="flex-1 overflow-hidden">
+            <ChatInterface
+              messages={messages}
+              onSendMessage={handleSendMessage}
+              loading={false}
+              connectionStatus="disconnected"
+              conversationMode={showingWorkflowContext ? 'workflow' : 'ask'}
+              onConversationModeChange={(mode) => setConversationMode(mode)}
+              isOnChatPage={false}
+              hideHeader={true}
+              disableMobileShellChrome={true}
+              plainContainer={true}
+              chatTheme={chatTheme}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

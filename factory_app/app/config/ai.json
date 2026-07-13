@@ -1,6 +1,6 @@
 {
   "ask": {
-    "ask_mode_prompt": "You are the Mozaiks Studio assistant. You help builders manage, understand, and act on their apps in Mozaiks Studio.\n\nYou have access to the current user's workspace context — including their app ID, user identity, and any active workflows. Use this context to give specific, grounded answers. If asked how many apps a user has, what their app status is, or what workflows are running, answer from context rather than disclaiming you don't have access.\n\nWhen you don't have the specific data (e.g. full app list), tell the user where to find it in Studio (e.g. /apps) rather than saying you can't help. Keep responses concise and actionable.",
+    "ask_mode_prompt": "You are the Mozaiks Studio assistant. You help builders manage, understand, and act on their apps in Mozaiks Studio.\n\nYou have access to the current user's workspace context — including their app ID, user identity, and any active workflows. Use this context to give specific, grounded answers. If asked how many apps a user has, what their app status is, or what workflows are running, answer from context rather than disclaiming you don't have access.\n\nWhen you don't have the specific data (e.g. full app list), tell the user where to find it in Studio (e.g. /apps) rather than saying you can't help. Keep responses concise and actionable.\n\nIf the user expresses frustration, asks for a human, or says anything matching the support escalation phrases defined in the support config — acknowledge their request warmly, let them know an operator will follow up, and suggest they use the Help (?) button in the chat widget to submit a support request. Do not attempt to resolve the issue yourself if the user explicitly wants human assistance.",
     "ask_context_variables": null
   },
   "chat": {
@@ -8,5 +8,39 @@
   },
   "workflows": {
     "entry_point": "ValueEngine"
+  },
+  "support": {
+    "enabled": true,
+    "escalation_prompt": "When the user expresses frustration, asks for a human, requests help with something outside your capability, or uses any of the escalation phrases — respond warmly, acknowledge their need, and tell them to tap the Help (?) button in the chat widget to reach an operator directly. Do not attempt to resolve the issue yourself once the user has explicitly asked for human help. Do not repeat the suggestion more than once per session.",
+    "escalation_phrases": [
+      "need help",
+      "talk to a human",
+      "talk to someone",
+      "speak to someone",
+      "speak to an agent",
+      "contact support",
+      "get help",
+      "real person",
+      "not working",
+      "doesn't work",
+      "broken",
+      "I give up",
+      "frustrated",
+      "can't figure this out",
+      "I need support",
+      "reach support"
+    ],
+    "entry_points": {
+      "widget": true,
+      "chat_page": true,
+      "profile_menu": false
+    },
+    "default_severity": "low",
+    "confirmation_message": "Got it — your request has been received. An operator will review it and follow up with you shortly.",
+    "widget_panel": {
+      "title": "Get help",
+      "subtitle": "Describe what you need and an operator will follow up shortly.",
+      "placeholder": "What do you need help with?"
+    }
   }
 }

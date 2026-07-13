@@ -17,6 +17,23 @@ import { useAppStudioData } from './useAppStudioData.js'
 
 const DEMO_SESSIONS = [
   {
+    chat_id: 'demo-session-0',
+    workflow_name: 'AppGenerator',
+    user_id: 'alex@example.com',
+    agent_turns: 3,
+    tool_calls: 4,
+    errors: 0,
+    started_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    ended_at: null,
+    status: 1,
+    awaiting_operator: true,
+    messages: [
+      { role: 'user', content: "I've been trying to get this working for an hour and I'm completely stuck. I need to talk to a real person." },
+      { role: 'assistant', content: "I completely understand — that's frustrating and I'm sorry you've hit a wall. An operator will follow up with you shortly. In the meantime, is there anything specific I can note for them about what you were trying to do?" },
+      { role: 'user', content: "Just tell them I need help with the invoicing module, it keeps erroring out on save." },
+    ],
+  },
+  {
     chat_id: 'demo-session-1',
     workflow_name: 'AppGenerator',
     user_id: 'sarah@example.com',
@@ -94,6 +111,7 @@ const DEMO_OPERATORS = ['Unassigned', 'Sarah K.', 'James M.', 'Priya R.', 'Mike 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function sessionStatusTone(run) {
+  if (run.awaiting_operator) return 'warning'
   if (Number(run.errors || 0) > 0 || run.status === 0) return 'destructive'
   if (!run.ended_at && Number(run.agent_turns || 0) > 30) return 'warning'
   if (run.status === 2) return 'success'
@@ -102,6 +120,7 @@ function sessionStatusTone(run) {
 }
 
 function sessionStatusLabel(run) {
+  if (run.awaiting_operator) return 'Awaiting operator'
   if (Number(run.errors || 0) > 0 || run.status === 0) return 'Error'
   if (!run.ended_at && Number(run.agent_turns || 0) > 30) return 'Stalled'
   if (run.status === 2) return 'Completed'
