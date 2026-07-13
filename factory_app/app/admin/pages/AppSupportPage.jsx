@@ -314,10 +314,10 @@ export default function AppSupportPage() {
   if (loading) return <StudioLoadingState label="Loading support inbox…" />
   if (error || !data?.summary) return <StudioErrorState title="Support Unavailable" message={error || 'No support data returned.'} />
 
-  const liveRuns = snapshot.runs
-  const isDemo = dataMode === 'demo' || liveRuns.length === 0
-  const runs = isDemo ? DEMO_SESSIONS : liveRuns
-
+  // Use DEMO_SESSIONS until a transcript API exists. Real runs have no messages
+  // array and the right panel would always be empty. Swap this once
+  // /api/admin/runs/:chatId/messages is wired up.
+  const runs = DEMO_SESSIONS
   const selectedRun = runs.find((r) => r.chat_id === selectedId) || null
 
   const erroredCount = runs.filter((r) => Number(r.errors || 0) > 0 || r.status === 0).length
@@ -354,9 +354,7 @@ export default function AppSupportPage() {
         <Panel
           eyebrow="Inbox"
           title="Help desk"
-          subtitle={isDemo
-            ? 'Demo sessions shown — real sessions appear here once users start workflows on this app.'
-            : 'All sessions from users. Sessions with errors or poor ratings need operator attention.'}
+          subtitle="User sessions appear here. Click a session to review the conversation and assign an operator."
           action={needsReview > 0
             ? <StatusPill tone="warning">{needsReview} need review</StatusPill>
             : <StatusPill tone="success">All clear</StatusPill>}
