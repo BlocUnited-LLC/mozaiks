@@ -1893,9 +1893,8 @@ models:
         description: "Canonical Python entrypoint in module-local form backend.handler:ModuleClass."
       user_data_scope:
         type: bool
-        optional: true
         description: >
-          Set to true when the module stores user-personally-identifiable or user-owned records (contacts, messages, profiles, interests, memberships, transactions). When true the runtime auto-registers the module with the account_data_registry and requires backend/account_data_handler.py to exist. Omit or set false for admin-only, system, or platform-owned records.
+          Set to true when the module stores user-personally-identifiable or user-owned records (contacts, messages, profiles, interests, memberships, transactions). When true the runtime auto-registers the module with the account_data_registry and requires backend/account_data_handler.py to exist. Set false for admin-only, system, or platform-owned records.
 
   ModulePermission:
     type: model

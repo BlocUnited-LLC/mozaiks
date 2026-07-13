@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from mozaiksai.core.workflow.declarative.contracts import parse_structured_outputs_config
+
 
 def _workspace() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -15,6 +17,15 @@ def _read(relative_path: str) -> str:
 
 def _read_yaml(relative_path: str):
     return yaml.safe_load(_read(relative_path))
+
+
+def test_appgenerator_structured_outputs_parse_with_runtime_contract_validator() -> None:
+    """AppGenerator structured outputs must stay loadable by WorkflowManager."""
+    config = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+
+    parsed = parse_structured_outputs_config(config)
+
+    assert parsed["models"]["ModuleIdentity"]["fields"]["user_data_scope"]["type"] == "bool"
 
 
 def test_appgenerator_structured_outputs_include_canonical_module_contract_models() -> None:
@@ -453,6 +464,7 @@ def test_module_identity_declares_user_data_scope_field() -> None:
     assert "user_data_scope" in fields, "ModuleIdentity is missing user_data_scope field"
     uds = fields["user_data_scope"]
     assert uds["type"] == "bool"
+    assert "optional" not in uds
     assert "account_data" in uds["description"].lower() or "user_data_scope" in uds["description"].lower()
 
 
