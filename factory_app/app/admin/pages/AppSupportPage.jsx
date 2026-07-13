@@ -3,8 +3,6 @@ import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
-  LinkButton,
-  Metric,
   Panel,
   StatusPill,
   StudioErrorState,
@@ -14,7 +12,7 @@ import AppStudioHero, { formatCompactNumber, formatDateTimeLabel } from './AppSt
 import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
 import { useAppStudioData } from './useAppStudioData.js'
 
-// ─── Demo fallback sessions ───────────────────────────────────────────────────
+// ─── Demo sessions with placeholder transcripts ───────────────────────────────
 
 const DEMO_SESSIONS = [
   {
@@ -27,6 +25,14 @@ const DEMO_SESSIONS = [
     started_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
     ended_at: null,
     status: 1,
+    messages: [
+      { role: 'user', content: 'Hi, I want to build an app that helps freelancers track their invoices and clients.' },
+      { role: 'assistant', content: "That's a great idea! I'll help you scope this out. Let me start by asking a few questions about your core workflows. How do freelancers typically create invoices today — manually or with existing tools?" },
+      { role: 'user', content: "Most of them do it manually with Word or Google Docs. It's a mess." },
+      { role: 'assistant', content: "Understood — so the core pain point is friction around invoice creation and tracking payment status. I'll design the app around three core workflows: Invoice Creation, Client Management, and Payment Tracking. Let me generate a concept brief for you now." },
+      { role: 'user', content: 'Yes exactly. Can you also add expense tracking?' },
+      { role: 'assistant', content: "Absolutely — expense tracking maps naturally into the data model alongside invoices. I'll add an Expenses module with receipt capture and categorization. Generating your full app plan now…" },
+    ],
   },
   {
     chat_id: 'demo-session-2',
@@ -38,6 +44,13 @@ const DEMO_SESSIONS = [
     started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
     ended_at: new Date(Date.now() - 2.8 * 60 * 60 * 1000).toISOString(),
     status: 0,
+    messages: [
+      { role: 'user', content: 'I need to update the dashboard to show monthly revenue trends instead of daily.' },
+      { role: 'assistant', content: "Got it. I'll update the dashboard page schema to group revenue by month and add a trend line chart primitive. This will also require a small change to the data aggregation query in the analytics module. Applying now…" },
+      { role: 'user', content: 'And can you also add a filter for date range?' },
+      { role: 'assistant', content: "Yes — I'll add a DateRangePicker control to the toolbar. One moment while I apply the revision…" },
+      { role: 'system', content: 'Error: structured output validation failed — chart primitive config missing required field `y_axis_label`.' },
+    ],
   },
   {
     chat_id: 'demo-session-3',
@@ -49,6 +62,13 @@ const DEMO_SESSIONS = [
     started_at: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(),
     ended_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
     status: 2,
+    messages: [
+      { role: 'user', content: 'I want to create a community platform for indie game developers to share projects and get feedback.' },
+      { role: 'assistant', content: "Perfect — a community platform for indie devs is a great fit for Mozaiks. I'll structure this around Project Showcase, Feedback Threads, and Member Profiles as the core modules. Let me build your concept brief…" },
+      { role: 'user', content: 'Can we also have a voting/rating system for projects?' },
+      { role: 'assistant', content: "Yes — I'll add a Reactions module with upvotes, ratings, and a trending feed algorithm. This is built in. Generating your full app plan now…" },
+      { role: 'assistant', content: "Your app is ready! I've generated all modules, pages, and workflows. You can review the build output in the Build History tab and deploy when ready." },
+    ],
   },
   {
     chat_id: 'demo-session-4',
@@ -60,6 +80,11 @@ const DEMO_SESSIONS = [
     started_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     ended_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 8 * 60 * 1000).toISOString(),
     status: 2,
+    messages: [
+      { role: 'user', content: 'Can you review the data model for the Orders module and suggest improvements?' },
+      { role: 'assistant', content: "Looking at the Orders schema now. I see a few things: the `order_items` array should be normalized into a separate collection for scale, and the `status` field would benefit from an explicit enum. Let me draft the updated design doc…" },
+      { role: 'assistant', content: "Design documentation updated. The revised schema includes normalized order items, explicit status transitions, and indexed lookups on `user_id` and `created_at`. Ready for review." },
+    ],
   },
 ]
 
@@ -83,18 +108,6 @@ function sessionStatusLabel(run) {
   return 'Ended'
 }
 
-function feedbackTone(rating) {
-  if (rating === 0) return 'destructive'
-  if (rating === 1) return 'success'
-  return 'default'
-}
-
-function feedbackLabel(rating) {
-  if (rating === 0) return 'Poor'
-  if (rating === 1) return 'Good'
-  return 'Rated'
-}
-
 function relativeTime(iso) {
   if (!iso) return null
   const diff = Date.now() - new Date(iso).getTime()
@@ -107,7 +120,6 @@ function relativeTime(iso) {
   return `${days}d ago`
 }
 
-// Deterministic hue from a string — used for user avatar color
 function stringHue(str) {
   let hash = 0
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash)
@@ -127,27 +139,22 @@ function assignmentsKey(appId) {
 }
 
 function loadAssignments(appId) {
-  try {
-    return JSON.parse(localStorage.getItem(assignmentsKey(appId)) || '{}')
-  } catch {
-    return {}
-  }
+  try { return JSON.parse(localStorage.getItem(assignmentsKey(appId)) || '{}') } catch { return {} }
 }
 
 function saveAssignments(appId, assignments) {
-  try {
-    localStorage.setItem(assignmentsKey(appId), JSON.stringify(assignments))
-  } catch (_) {}
+  try { localStorage.setItem(assignmentsKey(appId), JSON.stringify(assignments)) } catch (_) {}
 }
 
-// ─── User avatar ──────────────────────────────────────────────────────────────
+// ─── Avatar ───────────────────────────────────────────────────────────────────
 
-function UserAvatar({ userId }) {
+function UserAvatar({ userId, size = 'md' }) {
   const initials = userInitials(userId)
   const hue = stringHue(userId || '')
+  const sz = size === 'sm' ? 'h-7 w-7 text-[10px]' : 'h-9 w-9 text-xs'
   return (
     <span
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm"
+      className={`flex shrink-0 items-center justify-center rounded-full font-bold text-white shadow-sm ${sz}`}
       style={{ backgroundColor: `hsl(${hue} 55% 42%)` }}
       aria-hidden="true"
     >
@@ -156,81 +163,140 @@ function UserAvatar({ userId }) {
   )
 }
 
-// ─── Session card (inbox style) ───────────────────────────────────────────────
+// ─── Session list card ────────────────────────────────────────────────────────
 
-function SessionCard({ run, appId, assignments, onAssign, operators, active = false }) {
+function SessionListCard({ run, active, onClick }) {
   const tone = sessionStatusTone(run)
-  const label = sessionStatusLabel(run)
-  const openUrl = run.chat_id
-    ? `/chat?mode=workflow&chat_id=${encodeURIComponent(run.chat_id)}`
-    : null
-  const timeLabel = relativeTime(run.started_at)
-  const assignedTo = assignments[run.chat_id] || 'Unassigned'
   const needsAttention = tone === 'destructive' || tone === 'warning'
-
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
       className={[
-        'group relative overflow-hidden rounded-2xl border px-4 py-4 transition-all duration-200',
+        'w-full text-left rounded-2xl border px-3 py-3 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-primary/50',
         active
           ? 'border-primary/70 bg-primary/15 shadow-[0_10px_35px_rgba(6,182,212,0.15)]'
           : needsAttention
-            ? 'border-destructive/30 bg-card/70 hover:border-destructive/50 hover:bg-card/85'
+            ? 'border-destructive/25 bg-card/65 hover:border-destructive/45 hover:bg-card/80'
             : 'border-border/20 bg-card/65 hover:border-border/40 hover:bg-card/80',
       ].join(' ')}
     >
-      {/* Top row: avatar + title + time + status */}
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2.5">
         <UserAvatar userId={run.user_id} />
-
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-foreground">
-                {run.workflow_name || 'Chat session'}
-              </div>
-              <div className="mt-0.5 truncate text-xs text-muted-foreground/70">
-                {run.user_id || 'Unknown user'}
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-1.5">
-              <span className="text-[10px] text-muted-foreground/50">{timeLabel}</span>
-              <StatusPill tone={tone}>{label}</StatusPill>
-            </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="truncate text-xs font-semibold text-foreground/90">{run.workflow_name || 'Chat session'}</span>
+            <span className="shrink-0 text-[10px] text-muted-foreground/50">{relativeTime(run.started_at)}</span>
           </div>
-
-          {/* Stats row */}
-          <div className="mt-2.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground/60">
-            <span>{formatCompactNumber(run.agent_turns, '0')} turns</span>
-            <span className="text-border/50">·</span>
-            <span>{formatCompactNumber(run.tool_calls, '0')} tools</span>
-            {Number(run.errors || 0) > 0 ? (
-              <>
-                <span className="text-border/50">·</span>
-                <span className="font-medium text-destructive/80">{run.errors} {run.errors === 1 ? 'error' : 'errors'}</span>
-              </>
-            ) : null}
-          </div>
-
-          {/* Footer: assign + open */}
-          <div className="mt-3 flex items-center justify-between gap-3">
-            <select
-              value={assignedTo}
-              onChange={(e) => onAssign(run.chat_id, e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              className="rounded-lg border border-border/30 bg-background/60 px-2 py-1 text-xs text-foreground/70 transition-colors hover:border-border/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
-            >
-              {operators.map((op) => (
-                <option key={op} value={op}>{op}</option>
-              ))}
-            </select>
-            {openUrl ? (
-              <LinkButton to={openUrl} variant="outline" size="sm" className="shrink-0">
-                Open chat
-              </LinkButton>
-            ) : null}
+          <div className="mt-0.5 truncate text-[11px] text-muted-foreground/65">{run.user_id || 'Unknown user'}</div>
+          <div className="mt-1.5">
+            <StatusPill tone={tone}>{sessionStatusLabel(run)}</StatusPill>
           </div>
         </div>
+      </div>
+    </button>
+  )
+}
+
+// ─── Message bubble ───────────────────────────────────────────────────────────
+
+function MessageBubble({ message }) {
+  const isUser = message.role === 'user'
+  const isSystem = message.role === 'system'
+
+  if (isSystem) {
+    return (
+      <div className="mx-auto max-w-sm rounded-xl border border-destructive/25 bg-destructive/8 px-3 py-2 text-center text-[11px] text-destructive/80">
+        {message.content}
+      </div>
+    )
+  }
+
+  return (
+    <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+      {!isUser && (
+        <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+          AI
+        </span>
+      )}
+      <div
+        className={[
+          'max-w-[72%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
+          isUser
+            ? 'rounded-tr-sm bg-primary text-primary-foreground'
+            : 'rounded-tl-sm border border-border/30 bg-card/80 text-foreground',
+        ].join(' ')}
+      >
+        {message.content}
+      </div>
+    </div>
+  )
+}
+
+// ─── Thread detail panel ──────────────────────────────────────────────────────
+
+function ThreadPanel({ run, assignments, onAssign, operators }) {
+  if (!run) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/30 bg-card/40 px-6 py-12 text-center">
+        <span className="text-3xl opacity-20">💬</span>
+        <p className="text-sm text-muted-foreground/60">Select a session to review the conversation</p>
+      </div>
+    )
+  }
+
+  const messages = run.messages || []
+  const assignedTo = assignments[run.chat_id] || 'Unassigned'
+  const tone = sessionStatusTone(run)
+
+  return (
+    <div className="flex flex-1 min-w-0 flex-col overflow-hidden rounded-2xl border border-border/20 bg-card/50">
+
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 border-b border-border/20 px-4 py-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <UserAvatar userId={run.user_id} size="sm" />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-foreground">{run.user_id || 'Unknown user'}</div>
+            <div className="text-[11px] text-muted-foreground/60">{run.workflow_name} · {relativeTime(run.started_at)}</div>
+          </div>
+        </div>
+        <StatusPill tone={tone}>{sessionStatusLabel(run)}</StatusPill>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {messages.length > 0 ? (
+          messages.map((msg, i) => <MessageBubble key={i} message={msg} />)
+        ) : (
+          <div className="flex flex-col items-center gap-3 py-10 text-center">
+            <p className="text-sm text-muted-foreground/50">
+              Transcript will appear here once the session completes.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Footer: stats + assignment */}
+      <div className="flex items-center justify-between gap-3 border-t border-border/20 px-4 py-2.5">
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground/55">
+          <span>{formatCompactNumber(run.agent_turns, '0')} turns</span>
+          <span className="text-border/40">·</span>
+          <span>{formatCompactNumber(run.tool_calls, '0')} tools</span>
+          {Number(run.errors || 0) > 0 ? (
+            <>
+              <span className="text-border/40">·</span>
+              <span className="text-destructive/70">{run.errors} errors</span>
+            </>
+          ) : null}
+        </div>
+        <select
+          value={assignedTo}
+          onChange={(e) => onAssign(run.chat_id, e.target.value)}
+          className="rounded-lg border border-border/30 bg-background/60 px-2 py-1 text-[11px] text-foreground/65 transition-colors hover:border-border/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
+        >
+          {operators.map((op) => <option key={op} value={op}>{op}</option>)}
+        </select>
       </div>
     </div>
   )
@@ -243,20 +309,22 @@ export default function AppSupportPage() {
   const { data, loading, error, dataMode } = useAppStudioData(appId)
   const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
   const [assignments, setAssignments] = useState(() => loadAssignments(appId))
+  const [selectedId, setSelectedId] = useState(null)
 
   if (loading) return <StudioLoadingState label="Loading support inbox…" />
   if (error || !data?.summary) return <StudioErrorState title="Support Unavailable" message={error || 'No support data returned.'} />
 
   const liveRuns = snapshot.runs
-  const runs = liveRuns.length > 0 ? liveRuns : DEMO_SESSIONS
-  const isDemo = liveRuns.length === 0
+  const isDemo = dataMode === 'demo' || liveRuns.length === 0
+  const runs = isDemo ? DEMO_SESSIONS : liveRuns
+
+  const selectedRun = runs.find((r) => r.chat_id === selectedId) || null
 
   const erroredCount = runs.filter((r) => Number(r.errors || 0) > 0 || r.status === 0).length
   const stalledCount = runs.filter((r) => !r.ended_at && Number(r.agent_turns || 0) > 30).length
   const feedbackItems = Array.isArray(snapshot.summary?.support?.feedback) ? snapshot.summary.support.feedback : []
   const poorFeedbackCount = feedbackItems.filter((f) => f.rating === 0).length
-
-  const operators = DEMO_OPERATORS
+  const needsReview = erroredCount + stalledCount
 
   function handleAssign(chatId, operator) {
     const next = { ...assignments, [chatId]: operator }
@@ -271,8 +339,6 @@ export default function AppSupportPage() {
     { id: 'feedback', label: 'Poor Ratings', value: formatCompactNumber(poorFeedbackCount, '0'), detail: 'From session feedback' },
   ]
 
-  const needsReview = erroredCount + stalledCount
-
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
@@ -281,7 +347,7 @@ export default function AppSupportPage() {
           summary={snapshot.summary}
           dataMode={dataMode}
           title="Support"
-          subtitle="Chat sessions from users. Open a session to review the conversation or follow up."
+          subtitle="Review user sessions, assign operators, and follow up on issues."
           summaryItems={summaryItems}
         />
 
@@ -289,26 +355,34 @@ export default function AppSupportPage() {
           eyebrow="Inbox"
           title="Help desk"
           subtitle={isDemo
-            ? 'Demo sessions shown — real sessions will appear here once users start workflows on this app.'
+            ? 'Demo sessions shown — real sessions appear here once users start workflows on this app.'
             : 'All sessions from users. Sessions with errors or poor ratings need operator attention.'}
           action={needsReview > 0
             ? <StatusPill tone="warning">{needsReview} need review</StatusPill>
             : <StatusPill tone="success">All clear</StatusPill>}
         >
-          <div className="space-y-2">
-            {runs.map((run) => {
-              const runKey = run.chat_id || `${run.workflow_name || 'run'}-${run.started_at}`
-              return (
-                <SessionCard
-                  key={runKey}
+          {/* Two-pane inbox */}
+          <div className="flex gap-3" style={{ minHeight: '480px' }}>
+
+            {/* Left: session list */}
+            <div className="flex w-64 shrink-0 flex-col gap-1.5 overflow-y-auto xl:w-72">
+              {runs.map((run) => (
+                <SessionListCard
+                  key={run.chat_id}
                   run={run}
-                  appId={appId}
-                  assignments={assignments}
-                  onAssign={handleAssign}
-                  operators={operators}
+                  active={run.chat_id === selectedId}
+                  onClick={() => setSelectedId(run.chat_id === selectedId ? null : run.chat_id)}
                 />
-              )
-            })}
+              ))}
+            </div>
+
+            {/* Right: thread detail */}
+            <ThreadPanel
+              run={selectedRun}
+              assignments={assignments}
+              onAssign={handleAssign}
+              operators={DEMO_OPERATORS}
+            />
           </div>
         </Panel>
 
@@ -321,11 +395,6 @@ export default function AppSupportPage() {
               ? <StatusPill tone="warning">{poorFeedbackCount} poor</StatusPill>
               : <StatusPill tone="success">All positive</StatusPill>}
           >
-            <div className="mb-4 grid grid-cols-3 gap-3">
-              <Metric label="Total ratings" value={formatCompactNumber(feedbackItems.length, '0')} />
-              <Metric label="Poor" value={formatCompactNumber(poorFeedbackCount, '0')} detail="👎" />
-              <Metric label="Good" value={formatCompactNumber(feedbackItems.length - poorFeedbackCount, '0')} detail="👍" />
-            </div>
             <div className="space-y-2">
               {feedbackItems.slice(0, 10).map((item, i) => (
                 <div key={item.session_id || i} className="flex items-center justify-between rounded-2xl border border-border/20 bg-card/65 px-4 py-3">
@@ -333,7 +402,9 @@ export default function AppSupportPage() {
                     <div className="text-sm font-semibold text-foreground">{item.workflow_name || 'Session'}</div>
                     <div className="mt-1 text-xs text-muted-foreground/75">{formatDateTimeLabel(item.created_at)}</div>
                   </div>
-                  <StatusPill tone={feedbackTone(item.rating)}>{feedbackLabel(item.rating)}</StatusPill>
+                  <StatusPill tone={item.rating === 0 ? 'destructive' : 'success'}>
+                    {item.rating === 0 ? 'Poor' : 'Good'}
+                  </StatusPill>
                 </div>
               ))}
             </div>
