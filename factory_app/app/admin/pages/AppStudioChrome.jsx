@@ -213,7 +213,7 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
     <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-md shadow-black/8">
 
       {/* ── Banner strip ──────────────────────────────────────────────────── */}
-      <div className="relative h-32 sm:h-40">
+      <div className="relative h-36 sm:h-48">
 
         {bannerSrc ? (
           <img
