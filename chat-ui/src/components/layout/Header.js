@@ -293,6 +293,14 @@ const Header = ({
       .catch(() => {});
   });
 
+  const handleClearAllNotifications = async () => {
+    try {
+      await fetch('/api/notifications', { method: 'DELETE', headers: { Accept: 'application/json' } });
+      setNotificationCount(0);
+      setIsNotificationsOpen(false);
+    } catch (_) {}
+  };
+
   const executeAction = async (action) => {
     if (!action) return;
     const resolvedAction = resolveShellAction(action, shellActionContext);
@@ -532,18 +540,29 @@ const Header = ({
                   <div className="p-4 text-sm text-[rgba(226,232,240,0.82)] transmission-typing-font">
                     {notificationCount > 0 ? "Unread alerts are available." : notificationsConfig.emptyText || "No notifications"}
                   </div>
-                  {notificationsPath && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleNavigationItem({ path: notificationsPath });
-                        setIsNotificationsOpen(false);
-                      }}
-                      className="mx-3 mb-3 flex w-[calc(100%-1.5rem)] items-center justify-center rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.35)] px-3 py-2 text-xs font-semibold text-[var(--color-primary-light)] transition hover:bg-[rgba(var(--color-primary-rgb),0.12)] heading-font"
-                    >
-                      View all notifications
-                    </button>
-                  )}
+                  <div className="mx-3 mb-3 flex flex-col gap-2">
+                    {notificationsPath && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleNavigationItem({ path: notificationsPath });
+                          setIsNotificationsOpen(false);
+                        }}
+                        className="flex w-full items-center justify-center rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.35)] px-3 py-2 text-xs font-semibold text-[var(--color-primary-light)] transition hover:bg-[rgba(var(--color-primary-rgb),0.12)] heading-font"
+                      >
+                        View all notifications
+                      </button>
+                    )}
+                    {notificationCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllNotifications}
+                        className="flex w-full items-center justify-center rounded-xl border border-[rgba(var(--color-error-rgb,220,38,38),0.35)] px-3 py-2 text-xs font-semibold text-[var(--color-error,#ef4444)] transition hover:bg-[rgba(var(--color-error-rgb,220,38,38),0.12)] heading-font"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
