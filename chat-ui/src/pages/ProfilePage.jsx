@@ -107,6 +107,98 @@ function heroStorageKey(username, field) {
   return `mozaiks_profile_${field}_${username || 'me'}`;
 }
 
+function useFriendshipStatus(backendUrl, auth, username) {
+  const [status, setStatus] = useState(null); // null | 'none' | 'request_sent' | 'request_received' | 'friends'
+  const [requestId, setRequestId] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!username || !backendUrl) { setStatus('none'); return; }
+    fetchWithAuth(`${backendUrl}/api/modules/friends/get_friendship_status`, {
+      method: 'POST',
+      body: JSON.stringify({ other_user_id: username }),
+    }, auth)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d) {
+          setStatus(d.status || 'none');
+          setRequestId(d.request?.request_id || null);
+        }
+      })
+      .catch(() => setStatus('none'));
+  }, [username, backendUrl, auth]);
+
+  const sendRequest = async () => {
+    if (!username) return;
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth(`${backendUrl}/api/modules/friends/send_friend_request`, {
+        method: 'POST',
+        body: JSON.stringify({ recipient_id: username }),
+      }, auth);
+      const data = res.ok ? await res.json() : null;
+      if (data?.success) {
+        setStatus('request_sent');
+        setRequestId(data.request?.request_id || null);
+      }
+    } catch (_) {}
+    setLoading(false);
+  };
+
+  const acceptRequest = async () => {
+    if (!requestId) return;
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth(`${backendUrl}/api/modules/friends/accept_friend_request`, {
+        method: 'POST',
+        body: JSON.stringify({ request_id: requestId }),
+      }, auth);
+      if (res.ok) setStatus('friends');
+    } catch (_) {}
+    setLoading(false);
+  };
+
+  return { status, loading, sendRequest, acceptRequest };
+}
+
+function FriendButton({ status, loading, onSend, onAccept }) {
+  if (status === 'friends') {
+    return (
+      <span className="rounded-2xl border border-border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground">
+        Friends ✓
+      </span>
+    );
+  }
+  if (status === 'request_sent') {
+    return (
+      <span className="rounded-2xl border border-border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground">
+        Request sent
+      </span>
+    );
+  }
+  if (status === 'request_received') {
+    return (
+      <button
+        onClick={onAccept}
+        disabled={loading}
+        className="rounded-2xl bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+      >
+        {loading ? 'Accepting…' : 'Accept request'}
+      </button>
+    );
+  }
+  // 'none' or null
+  return (
+    <button
+      onClick={onSend}
+      disabled={loading || status === null}
+      className="rounded-2xl border border-primary/40 bg-primary/8 px-4 py-1.5 text-sm font-semibold text-primary hover:bg-primary/15 disabled:opacity-40 transition-colors"
+    >
+      {loading ? 'Sending…' : '+ Add friend'}
+    </button>
+  );
+}
+
 function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   const coverInputRef = useRef(null);
   const avatarInputRef = useRef(null);
@@ -123,6 +215,9 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+
+  const { status: friendStatus, loading: friendLoading, sendRequest: sendFriendRequest, acceptRequest: acceptFriendRequest } =
+    useFriendshipStatus(isOwner ? null : backendUrl, auth, isOwner ? null : profile.username);
 
   const name = profile.display_name || profile.username || 'Unknown';
   const handle = profile.username ? `@${profile.username}` : null;
@@ -244,9 +339,12 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
                 <button className="rounded-2xl bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
                   Message
                 </button>
-                <button className="rounded-2xl border border-border bg-card px-4 py-1.5 text-sm font-semibold text-foreground hover:border-primary/40 hover:text-primary transition-colors">
-                  Add contact
-                </button>
+                <FriendButton
+                  status={friendStatus}
+                  loading={friendLoading}
+                  onSend={sendFriendRequest}
+                  onAccept={acceptFriendRequest}
+                />
               </>
             )}
           </div>
@@ -351,20 +449,22 @@ function TabBar({ tabs, activeId, onSelect }) {
 function TabContent({ tab }) {
   if (!tab) return null;
 
-  if (tab.error) {
-    return (
-      <div className="px-5 sm:px-8 py-8">
-        <p className="text-sm text-muted-foreground italic">Could not load {tab.label}.</p>
-      </div>
-    );
-  }
-
   const Component = tab.component ? componentRegistry.getComponent(tab.component) : null;
 
+  // Component tabs: always render — component handles empty/error state itself.
   if (Component) {
     return (
       <div className="px-5 sm:px-8 py-6">
         <Component tab={tab} data={tab.data} />
+      </div>
+    );
+  }
+
+  // Non-component tab with a hard error.
+  if (tab.error) {
+    return (
+      <div className="px-5 sm:px-8 py-8">
+        <p className="text-sm text-muted-foreground italic">Could not load {tab.label}.</p>
       </div>
     );
   }

@@ -3,5 +3,5 @@ tabs:
   - id: friends
     label: Friends
     order: 10
-    action: list_friends_of
+    action: list_friends
     component: FriendListTab
