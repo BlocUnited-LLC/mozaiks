@@ -1,0 +1,216 @@
+schema_version: mozaiks.module.v1
+module:
+  id: friends
+  display_name: Friends
+  version: 1.0.0
+  description: >
+    Bidirectional friend connections with friend request lifecycle.
+    Users send, accept, decline, and withdraw requests; accepted requests
+    create symmetric friendship records queryable by either party.
+  user_data_scope: true
+  handler: backend.handler:FriendsHandler
+
+permissions:
+  - id: friends.read
+    description: Read your own friend list and request inbox.
+  - id: friends.manage
+    description: Send, accept, decline, and remove friend connections.
+  - id: friends.admin
+    description: Administer all friendship records.
+
+actions:
+  - id: send_friend_request
+    api_surface: public
+    description: Send a friend request to another user.
+    handler_method: send_friend_request
+    input_schema:
+      type: object
+      required: [recipient_id]
+      properties:
+        recipient_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        request: { type: object }
+        error: { type: string }
+    permissions: [friends.manage]
+    emits: [domain.social.friend_request.sent]
+
+  - id: accept_friend_request
+    api_surface: public
+    description: Accept a pending friend request addressed to the current user.
+    handler_method: accept_friend_request
+    input_schema:
+      type: object
+      required: [request_id]
+      properties:
+        request_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        friendship: { type: object }
+        error: { type: string }
+    permissions: [friends.manage]
+    emits: [domain.social.friendship.created]
+
+  - id: decline_friend_request
+    api_surface: public
+    description: Decline a pending friend request addressed to the current user.
+    handler_method: decline_friend_request
+    input_schema:
+      type: object
+      required: [request_id]
+      properties:
+        request_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        error: { type: string }
+    permissions: [friends.manage]
+    emits: [domain.social.friend_request.declined]
+
+  - id: withdraw_friend_request
+    api_surface: public
+    description: Withdraw a pending friend request sent by the current user.
+    handler_method: withdraw_friend_request
+    input_schema:
+      type: object
+      required: [request_id]
+      properties:
+        request_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        error: { type: string }
+    permissions: [friends.manage]
+    emits: [domain.social.friend_request.withdrawn]
+
+  - id: remove_friend
+    api_surface: public
+    description: Remove an existing friend connection (symmetric — removes both sides).
+    handler_method: remove_friend
+    input_schema:
+      type: object
+      required: [friend_user_id]
+      properties:
+        friend_user_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        error: { type: string }
+    permissions: [friends.manage]
+    emits: [domain.social.friendship.removed]
+
+  - id: list_friends
+    api_surface: public_readonly
+    description: List friends of the current user with cursor pagination.
+    handler_method: list_friends
+    input_schema:
+      type: object
+      properties:
+        before: { type: string }
+        limit: { type: integer }
+    output_schema:
+      type: object
+      required: [friends, count]
+      properties:
+        friends: { type: array }
+        count: { type: integer }
+        next_cursor: { type: string }
+    permissions: [friends.read]
+
+  - id: list_friends_of
+    api_surface: public_readonly
+    description: List friends of a specific user (public profile surface).
+    handler_method: list_friends_of
+    input_schema:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string }
+        before: { type: string }
+        limit: { type: integer }
+    output_schema:
+      type: object
+      required: [friends, count]
+      properties:
+        friends: { type: array }
+        count: { type: integer }
+        next_cursor: { type: string }
+    permissions: [friends.read]
+
+  - id: list_friend_requests
+    api_surface: public_readonly
+    description: List incoming and/or outgoing friend requests for the current user.
+    handler_method: list_friend_requests
+    input_schema:
+      type: object
+      properties:
+        direction: { type: string, enum: [incoming, outgoing, all] }
+        status: { type: string, enum: [pending, accepted, declined, withdrawn, all] }
+        limit: { type: integer }
+        before: { type: string }
+    output_schema:
+      type: object
+      required: [requests, count]
+      properties:
+        requests: { type: array }
+        count: { type: integer }
+        next_cursor: { type: string }
+    permissions: [friends.read]
+
+  - id: get_friendship_status
+    api_surface: public_readonly
+    description: >
+      Return the friendship status between the current user and another user.
+      Status values: none | friends | request_sent | request_received.
+    handler_method: get_friendship_status
+    input_schema:
+      type: object
+      required: [other_user_id]
+      properties:
+        other_user_id: { type: string }
+    output_schema:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+        friendship: { type: object }
+        request: { type: object }
+    permissions: [friends.read]
+
+  - id: get_friends_count
+    api_surface: public_readonly
+    description: Return the total friend count for the current user.
+    handler_method: get_friends_count
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+      required: [count]
+      properties:
+        count: { type: integer }
+    permissions: [friends.read]
+
+capabilities:
+  - capability_id: social.friends.list
+    kind: action
+    target: list_friends
+    title: List Friends
+    permissions: [friends.read]
+  - capability_id: social.friends.connect
+    kind: action
+    target: send_friend_request
+    title: Send Friend Request
+    permissions: [friends.manage]

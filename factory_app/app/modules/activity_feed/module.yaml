@@ -1,0 +1,92 @@
+schema_version: mozaiks.module.v1
+module:
+  id: activity_feed
+  display_name: Activity Feed
+  version: 1.0.0
+  description: >
+    Social activity stream. Records domain events from friends and user_posts
+    as structured activity records and surfaces them as personalized feeds
+    or per-user activity timelines on the profile page.
+  handler: backend.handler:ActivityFeedHandler
+
+permissions:
+  - id: activity_feed.read
+    description: Read the activity feed and profile activity timelines.
+  - id: activity_feed.admin
+    description: Administer all activity event records.
+
+actions:
+  - id: get_feed
+    api_surface: public_readonly
+    description: >
+      Return a personalized activity feed for the current user — events
+      from their friends' activity, sorted newest-first.
+    handler_method: get_feed
+    input_schema:
+      type: object
+      properties:
+        limit: { type: integer }
+        before: { type: string }
+    output_schema:
+      type: object
+      required: [events, count]
+      properties:
+        events: { type: array }
+        count: { type: integer }
+        next_cursor: { type: string }
+    permissions: [activity_feed.read]
+
+  - id: get_profile_activity
+    api_surface: public_readonly
+    description: >
+      Return the public activity timeline for a specific user.
+      Used to hydrate the Activity tab on /me and /u/:username.
+    handler_method: get_profile_activity
+    input_schema:
+      type: object
+      properties:
+        user_id: { type: string }
+        limit: { type: integer }
+        before: { type: string }
+    output_schema:
+      type: object
+      required: [events, count]
+      properties:
+        events: { type: array }
+        count: { type: integer }
+        next_cursor: { type: string }
+    permissions: [activity_feed.read]
+
+  - id: record_activity
+    api_surface: internal
+    description: >
+      Internal action called by reactions to domain events. Records a
+      structured activity event into the feed. Do not call this from
+      user-facing action handlers — route it through reactions.yaml.
+    handler_method: record_activity
+    input_schema:
+      type: object
+      required: [activity_type, actor_id]
+      properties:
+        activity_type: { type: string }
+        actor_id: { type: string }
+        about_user_id: { type: string }
+        subject_id: { type: string }
+        subject_type: { type: string }
+        subject_label: { type: string }
+        feed_user_ids: { type: array, items: { type: string } }
+        metadata: { type: object }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        event_id: { type: string }
+    permissions: [activity_feed.admin]
+
+capabilities:
+  - capability_id: social.feed.read
+    kind: action
+    target: get_feed
+    title: Get Activity Feed
+    permissions: [activity_feed.read]

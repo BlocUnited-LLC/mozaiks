@@ -1,0 +1,7 @@
+schema_version: mozaiks.profile.v1
+tabs:
+  - id: friends
+    label: Friends
+    order: 10
+    action: list_friends_of
+    component: FriendListTab

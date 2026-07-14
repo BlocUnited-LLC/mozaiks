@@ -1,0 +1,46 @@
+schema_version: mozaiks.events.v1
+events:
+  - id: domain.social.post.published
+    description: A user published a new post.
+    payload:
+      post_id: string
+      author_id: string
+      body_preview: string
+      visibility: string
+      created_at: string
+
+  - id: domain.social.post.deleted
+    description: A post was soft-deleted.
+    payload:
+      post_id: string
+      author_id: string
+      deleted_by: string
+      deleted_at: string
+
+  - id: domain.social.post.reacted
+    description: A user added or removed a reaction on a post.
+    payload:
+      post_id: string
+      post_author_id: string
+      user_id: string
+      reaction_type: string
+      action: string           # added | removed
+      reacted_at: string
+
+  - id: domain.social.post.commented
+    description: A user added a comment to a post.
+    payload:
+      post_id: string
+      post_author_id: string
+      comment_id: string
+      author_id: string
+      body_preview: string
+      created_at: string
+
+  - id: domain.social.post.comment_deleted
+    description: A comment was deleted.
+    payload:
+      post_id: string
+      comment_id: string
+      deleted_by: string
+      deleted_at: string
