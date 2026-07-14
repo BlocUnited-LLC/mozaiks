@@ -1,0 +1,34 @@
+page_id: posts
+title: Posts
+route: /posts
+shell_mode: standard
+api_endpoint: /api/modules/user_posts/list_posts
+sections:
+  - id: posts_header
+    primitive: PageHeader
+    props:
+      title: "Posts"
+      subtitle: "What people are sharing"
+    actions:
+      - id: create_post
+        label: "New post"
+        variant: primary
+        action: user_posts/create_post
+
+  - id: posts_list
+    primitive: DataList
+    data_key: posts
+    empty_message: "No posts yet. Be the first to share something."
+    item_template:
+      fields:
+        - key: author_id
+          label: Author
+        - key: body_preview
+          label: Post
+        - key: reaction_count
+          label: Reactions
+        - key: comment_count
+          label: Comments
+        - key: created_at
+          label: Posted
+          format: relative_time

@@ -1,0 +1,43 @@
+schema_version: mozaiks.events.v1
+events:
+  - id: domain.social.friend_request.sent
+    description: A user sent a friend request to another user.
+    payload:
+      request_id: string
+      requester_id: string
+      requester_name: string
+      recipient_id: string
+      created_at: string
+
+  - id: domain.social.friend_request.declined
+    description: A recipient declined a pending friend request.
+    payload:
+      request_id: string
+      requester_id: string
+      recipient_id: string
+      declined_at: string
+
+  - id: domain.social.friend_request.withdrawn
+    description: A requester withdrew their pending friend request.
+    payload:
+      request_id: string
+      requester_id: string
+      recipient_id: string
+      withdrawn_at: string
+
+  - id: domain.social.friendship.created
+    description: Two users became friends (friend request accepted).
+    payload:
+      friendship_id: string
+      user_a_id: string
+      user_b_id: string
+      requester_id: string
+      request_id: string
+      created_at: string
+
+  - id: domain.social.friendship.removed
+    description: A user removed a friend connection.
+    payload:
+      user_id: string
+      friend_user_id: string
+      removed_at: string

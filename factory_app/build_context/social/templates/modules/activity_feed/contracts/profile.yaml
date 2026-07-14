@@ -1,0 +1,7 @@
+schema_version: mozaiks.profile.v1
+tabs:
+  - id: activity
+    label: Activity
+    order: 30
+    action: get_profile_activity
+    component: ActivityFeedTab

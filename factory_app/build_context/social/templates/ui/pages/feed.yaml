@@ -1,0 +1,27 @@
+page_id: feed
+title: Feed
+route: /feed
+shell_mode: standard
+api_endpoint: /api/modules/activity_feed/get_feed
+sections:
+  - id: feed_header
+    primitive: PageHeader
+    props:
+      title: "Your Feed"
+      subtitle: "Recent activity from your network"
+
+  - id: activity_list
+    primitive: DataList
+    data_key: events
+    empty_message: "Nothing in your feed yet. Connect with others to see their activity here."
+    item_template:
+      fields:
+        - key: activity_type
+          label: Activity
+        - key: actor_id
+          label: From
+        - key: subject_label
+          label: About
+        - key: created_at
+          label: When
+          format: relative_time

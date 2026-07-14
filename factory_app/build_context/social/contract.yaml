@@ -1,0 +1,160 @@
+contract_id: social
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_social_apps
+    when:
+      intent_any:
+        - friends
+        - friend requests
+        - social network
+        - social platform
+        - activity feed
+        - news feed
+        - follow
+        - connections
+        - user posts
+        - social graph
+    action: select_pack
+  - id: confirm_for_community_apps
+    when:
+      intent_any:
+        - community
+        - forum
+        - groups
+        - members
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - social
+  - community
+  - network
+  - creator platform
+  - marketplace with social layer
+  - collaboration
+
+required_outputs:
+  - path: data/migrations/001_social_collections.json
+    owner: templates
+  # friends module
+  - path: modules/friends/module.yaml
+    owner: templates
+  - path: modules/friends/backend/__init__.py
+    owner: templates
+  - path: modules/friends/backend/handler.py
+    owner: templates
+  - path: modules/friends/backend/service.py
+    owner: templates
+  - path: modules/friends/backend/repo.py
+    owner: templates
+  - path: modules/friends/backend/policy.py
+    owner: templates
+  - path: modules/friends/backend/schemas.py
+    owner: templates
+  - path: modules/friends/backend/account_data_handler.py
+    owner: templates
+  - path: modules/friends/contracts/events.yaml
+    owner: templates
+  - path: modules/friends/contracts/notifications.yaml
+    owner: templates
+  - path: modules/friends/contracts/reactions.yaml
+    owner: templates
+  - path: modules/friends/contracts/profile.yaml
+    owner: templates
+  # activity_feed module
+  - path: modules/activity_feed/module.yaml
+    owner: templates
+  - path: modules/activity_feed/backend/__init__.py
+    owner: templates
+  - path: modules/activity_feed/backend/handler.py
+    owner: templates
+  - path: modules/activity_feed/backend/service.py
+    owner: templates
+  - path: modules/activity_feed/backend/repo.py
+    owner: templates
+  - path: modules/activity_feed/backend/policy.py
+    owner: templates
+  - path: modules/activity_feed/backend/schemas.py
+    owner: templates
+  - path: modules/activity_feed/contracts/events.yaml
+    owner: templates
+  - path: modules/activity_feed/contracts/reactions.yaml
+    owner: templates
+  - path: modules/activity_feed/contracts/profile.yaml
+    owner: templates
+  # user_posts module
+  - path: modules/user_posts/module.yaml
+    owner: templates
+  - path: modules/user_posts/backend/__init__.py
+    owner: templates
+  - path: modules/user_posts/backend/handler.py
+    owner: templates
+  - path: modules/user_posts/backend/service.py
+    owner: templates
+  - path: modules/user_posts/backend/repo.py
+    owner: templates
+  - path: modules/user_posts/backend/policy.py
+    owner: templates
+  - path: modules/user_posts/backend/schemas.py
+    owner: templates
+  - path: modules/user_posts/backend/account_data_handler.py
+    owner: templates
+  - path: modules/user_posts/contracts/events.yaml
+    owner: templates
+  - path: modules/user_posts/contracts/notifications.yaml
+    owner: templates
+  - path: modules/user_posts/contracts/reactions.yaml
+    owner: templates
+  - path: modules/user_posts/contracts/profile.yaml
+    owner: templates
+  # UI
+  - path: ui/pages/feed.yaml
+    owner: templates
+  - path: ui/pages/friends.yaml
+    owner: templates
+  - path: ui/pages/posts.yaml
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/social/
+  - path_prefix: modules/network/
+  - path_prefix: services/social/
+  - path_prefix: services/friends/
+
+runtime_boundaries:
+  - id: persistence_layer
+    rule: All repo files must use app_data_from_context and collection aliases. No direct Motor clients.
+  - id: event_emission
+    rule: Events emitted via ctx.emit() in service.py only. Handler and repo never emit.
+  - id: bidirectional_friendship
+    rule: >
+      Friendship records are always written in pairs (user_a→user_b and user_b→user_a)
+      so either side can query their own friends list without a $or query.
+  - id: activity_feed_population
+    rule: >
+      ActivityFeedService.record_activity() is called exclusively via reactions to domain events
+      (declared in activity_feed/contracts/reactions.yaml). Do not call it directly from friends
+      or user_posts service code.
+  - id: soft_delete_posts
+    rule: >
+      Posts are soft-deleted (status=deleted) to preserve comment threads and reaction counts.
+      Hard delete is GDPR-only via account_data_handler.
+  - id: user_data_scope
+    rule: >
+      friends and user_posts declare user_data_scope: true and ship account_data_handler.py.
+      activity_feed events are derived records — purge them in account_data_handler when actor_id
+      or about_user_id matches the deleted user.
+
+facades: []
+
+cross_pack_integrations:
+  - pack_id: messaging
+    description: >
+      The friends pack integrates with messaging when both packs are selected.
+      A friendship.created event may trigger an initial DM thread; the AppGenerator
+      should declare a reaction in messages/contracts/reactions.yaml when both packs
+      are present.
+  - pack_id: commerce
+    description: >
+      User posts can reference commerce products (product_id context field). When both
+      packs are present the AppGenerator may add a product_id field to create_post input.

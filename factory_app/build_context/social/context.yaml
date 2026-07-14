@@ -1,0 +1,31 @@
+context_id: social
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: social
+  status: active
+  capability_source: generated_module
+capabilities:
+  - capability_id: social.friends.list
+    facade_recommended: friends
+  - capability_id: social.friends.connect
+    facade_recommended: friends
+  - capability_id: social.feed.read
+    facade_recommended: activity_feed
+  - capability_id: social.posts.create
+    facade_recommended: user_posts
+  - capability_id: social.posts.list
+    facade_recommended: user_posts
+  - capability_id: social.posts.react
+    facade_recommended: user_posts
+  - capability_id: social.posts.comment
+    facade_recommended: user_posts
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

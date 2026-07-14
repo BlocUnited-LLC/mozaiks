@@ -1,0 +1,33 @@
+page_id: friends
+title: Friends
+route: /friends
+shell_mode: standard
+api_endpoint: /api/modules/friends/list_friends
+sections:
+  - id: friends_header
+    primitive: PageHeader
+    props:
+      title: "Friends"
+      subtitle: "People you are connected with"
+    actions:
+      - id: view_requests
+        label: "Friend requests"
+        variant: secondary
+        route: /friends/requests
+
+  - id: friends_summary
+    primitive: SummaryStrip
+    items:
+      - key: count
+        label: Friends
+
+  - id: friends_list
+    primitive: ResourceList
+    data_key: friends
+    empty_message: "No friends yet. Find people to connect with."
+    columns:
+      - key: friend_user_id
+        label: User
+      - key: since
+        label: Friends since
+        format: date

@@ -1,0 +1,5 @@
+schema_version: mozaiks.reactions.v1
+reactions: []
+# user_posts emits domain events; it does not subscribe to other modules.
+# The activity_feed module subscribes to domain.social.post.published and
+# domain.social.post.commented via its own reactions.yaml.

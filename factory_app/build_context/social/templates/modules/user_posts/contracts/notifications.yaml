@@ -1,0 +1,35 @@
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: post_reaction_received
+    description: Notify a post author when someone reacts to their post.
+    "on": domain.social.post.reacted
+    condition:
+      field: action
+      equals: added
+    template:
+      title: "Someone reacted to your post"
+      body: "Your post received a new reaction."
+    channels:
+      - in_app
+    audience:
+      user_id_field: post_author_id
+    context_fields:
+      - post_id
+      - reaction_type
+      - user_id
+
+  - id: post_comment_received
+    description: Notify a post author when someone comments on their post.
+    "on": domain.social.post.commented
+    template:
+      title: "Someone commented on your post"
+      body: "{{body_preview}}"
+    channels:
+      - in_app
+    audience:
+      user_id_field: post_author_id
+    context_fields:
+      - post_id
+      - comment_id
+      - author_id
+      - body_preview
