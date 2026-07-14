@@ -1,0 +1,18 @@
+schema_version: mozaiks.notifications.v1
+
+notifications:
+  - id: operator_reply
+    description: Notify the user when an operator replies to their support request.
+    "on": domain.workspace_support.message_added
+    condition:
+      field: sender_role
+      equals: operator
+    template:
+      title: "Operator replied to your support request"
+      body: "{{message_preview}}"
+    channels:
+      - in_app
+    audience: {}
+    context_fields:
+      - request_id
+      - message_preview
