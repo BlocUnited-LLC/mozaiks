@@ -1,10 +1,11 @@
 """Notifications router — platform_notifications collection CRUD.
 
 Routes:
-    GET  /api/notifications/count
-    GET  /api/notifications
-    POST /api/notifications/{notification_id}/read
-    POST /api/notifications/mark-all-read
+    GET    /api/notifications/count
+    GET    /api/notifications
+    POST   /api/notifications/{notification_id}/read
+    POST   /api/notifications/mark-all-read
+    DELETE /api/notifications
 """
 from __future__ import annotations
 
@@ -40,7 +41,10 @@ def _notification_query_for_principal(principal: UserPrincipal) -> dict[str, Any
 
 def _notification_visibility_filter(principal: UserPrincipal) -> list[dict[str, Any]]:
     """Return the $or visibility filter for platform_notifications queries."""
-    visibility: list[dict[str, Any]] = [{"actor.id": principal.user_id}]
+    visibility: list[dict[str, Any]] = [
+        {"actor.id": principal.user_id},
+        {"audience.user_ids": principal.user_id},
+    ]
     roles = [role for role in principal.roles if role]
     if roles:
         visibility.append({"audience.roles": {"$in": roles}})
@@ -157,3 +161,25 @@ async def mark_all_notifications_read(
     except Exception as exc:
         logger.debug("NOTIFICATION_MARK_ALL_READ_SKIPPED: %s", exc)
         return {"success": False, "marked_count": 0}
+
+
+@router.delete("/api/notifications")
+async def clear_all_notifications(
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_user_scope),
+):
+    """Hard-delete all notifications visible to the authenticated principal."""
+    try:
+        from mozaiksai.core.core_config import get_mongo_client
+
+        collection = get_mongo_client()["mozaiks"]["platform_notifications"]
+        query: dict[str, Any] = {}
+        effective_app_id = app_id or (principal.app_id if principal.app_id else None)
+        if effective_app_id:
+            query["app_id"] = effective_app_id
+        query["$or"] = _notification_visibility_filter(principal)
+        result = await collection.delete_many(query)
+        return {"success": True, "cleared_count": result.deleted_count}
+    except Exception as exc:
+        logger.debug("NOTIFICATION_CLEAR_SKIPPED: %s", exc)
+        return {"success": False, "cleared_count": 0}
