@@ -1,9 +1,14 @@
 schema_version: mozaiks.events.v1
 events:
-  - id: domain.social.activity.recorded
+  - type: domain.social.activity.recorded
+    version: 1
+    producer: activity_feed
     description: An activity event was recorded in the social feed.
-    payload:
-      event_id: string
-      activity_type: string
-      actor_id: string
-      created_at: string
+    payload_schema:
+      type: object
+      required: [event_id, activity_type, actor_id]
+      properties:
+        event_id:      { type: string }
+        activity_type: { type: string }
+        actor_id:      { type: string }
+        created_at:    { type: string }

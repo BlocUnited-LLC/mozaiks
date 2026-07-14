@@ -1,18 +1,22 @@
 schema_version: mozaiks.reactions.v1
 reactions:
-  # Friends events → record connection activity
-  - event_type: domain.social.friendship.created
+  - id: activity_feed_on_friendship_created
+    event_type: domain.social.friendship.created
     target:
-      kind: module
+      kind: handler
       handler_method: on_friendship_created
+    description: Record connection activity when two users become friends.
 
-  # Posts events → record post activity
-  - event_type: domain.social.post.published
+  - id: activity_feed_on_post_published
+    event_type: domain.social.post.published
     target:
-      kind: module
+      kind: handler
       handler_method: on_post_published
+    description: Record post activity when a user publishes a post.
 
-  - event_type: domain.social.post.commented
+  - id: activity_feed_on_post_commented
+    event_type: domain.social.post.commented
     target:
-      kind: module
+      kind: handler
       handler_method: on_post_commented
+    description: Record comment activity when a user comments on a post.

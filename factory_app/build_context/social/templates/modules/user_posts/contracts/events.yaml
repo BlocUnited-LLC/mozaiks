@@ -1,46 +1,71 @@
 schema_version: mozaiks.events.v1
 events:
-  - id: domain.social.post.published
+  - type: domain.social.post.published
+    version: 1
+    producer: user_posts
     description: A user published a new post.
-    payload:
-      post_id: string
-      author_id: string
-      body_preview: string
-      visibility: string
-      created_at: string
+    payload_schema:
+      type: object
+      required: [post_id, author_id]
+      properties:
+        post_id:      { type: string }
+        author_id:    { type: string }
+        body_preview: { type: string }
+        visibility:   { type: string }
+        created_at:   { type: string }
 
-  - id: domain.social.post.deleted
+  - type: domain.social.post.deleted
+    version: 1
+    producer: user_posts
     description: A post was soft-deleted.
-    payload:
-      post_id: string
-      author_id: string
-      deleted_by: string
-      deleted_at: string
+    payload_schema:
+      type: object
+      required: [post_id, author_id]
+      properties:
+        post_id:    { type: string }
+        author_id:  { type: string }
+        deleted_by: { type: string }
+        deleted_at: { type: string }
 
-  - id: domain.social.post.reacted
+  - type: domain.social.post.reacted
+    version: 1
+    producer: user_posts
     description: A user added or removed a reaction on a post.
-    payload:
-      post_id: string
-      post_author_id: string
-      user_id: string
-      reaction_type: string
-      action: string           # added | removed
-      reacted_at: string
+    payload_schema:
+      type: object
+      required: [post_id, post_author_id, user_id, reaction_type, action]
+      properties:
+        post_id:        { type: string }
+        post_author_id: { type: string }
+        user_id:        { type: string }
+        reaction_type:  { type: string }
+        action:         { type: string }
+        reacted_at:     { type: string }
 
-  - id: domain.social.post.commented
+  - type: domain.social.post.commented
+    version: 1
+    producer: user_posts
     description: A user added a comment to a post.
-    payload:
-      post_id: string
-      post_author_id: string
-      comment_id: string
-      author_id: string
-      body_preview: string
-      created_at: string
+    payload_schema:
+      type: object
+      required: [post_id, post_author_id, comment_id, author_id]
+      properties:
+        post_id:        { type: string }
+        post_author_id: { type: string }
+        comment_id:     { type: string }
+        author_id:      { type: string }
+        body_preview:   { type: string }
+        created_at:     { type: string }
 
-  - id: domain.social.post.comment_deleted
+  - type: domain.social.post.comment_deleted
+    version: 1
+    producer: user_posts
     description: A comment was deleted.
-    payload:
-      post_id: string
-      comment_id: string
-      deleted_by: string
-      deleted_at: string
+    payload_schema:
+      type: object
+      required: [post_id, comment_id, deleted_by]
+      properties:
+        post_id:    { type: string }
+        comment_id: { type: string }
+        deleted_by: { type: string }
+        deleted_at: { type: string }

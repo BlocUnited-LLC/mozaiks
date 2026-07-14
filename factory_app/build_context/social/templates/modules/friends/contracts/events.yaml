@@ -1,43 +1,68 @@
 schema_version: mozaiks.events.v1
 events:
-  - id: domain.social.friend_request.sent
+  - type: domain.social.friend_request.sent
+    version: 1
+    producer: friends
     description: A user sent a friend request to another user.
-    payload:
-      request_id: string
-      requester_id: string
-      requester_name: string
-      recipient_id: string
-      created_at: string
+    payload_schema:
+      type: object
+      required: [request_id, requester_id, recipient_id]
+      properties:
+        request_id:     { type: string }
+        requester_id:   { type: string }
+        requester_name: { type: string }
+        recipient_id:   { type: string }
+        created_at:     { type: string }
 
-  - id: domain.social.friend_request.declined
+  - type: domain.social.friend_request.declined
+    version: 1
+    producer: friends
     description: A recipient declined a pending friend request.
-    payload:
-      request_id: string
-      requester_id: string
-      recipient_id: string
-      declined_at: string
+    payload_schema:
+      type: object
+      required: [request_id, requester_id, recipient_id]
+      properties:
+        request_id:   { type: string }
+        requester_id: { type: string }
+        recipient_id: { type: string }
+        declined_at:  { type: string }
 
-  - id: domain.social.friend_request.withdrawn
+  - type: domain.social.friend_request.withdrawn
+    version: 1
+    producer: friends
     description: A requester withdrew their pending friend request.
-    payload:
-      request_id: string
-      requester_id: string
-      recipient_id: string
-      withdrawn_at: string
+    payload_schema:
+      type: object
+      required: [request_id, requester_id, recipient_id]
+      properties:
+        request_id:   { type: string }
+        requester_id: { type: string }
+        recipient_id: { type: string }
+        withdrawn_at: { type: string }
 
-  - id: domain.social.friendship.created
+  - type: domain.social.friendship.created
+    version: 1
+    producer: friends
     description: Two users became friends (friend request accepted).
-    payload:
-      friendship_id: string
-      user_a_id: string
-      user_b_id: string
-      requester_id: string
-      request_id: string
-      created_at: string
+    payload_schema:
+      type: object
+      required: [friendship_id, user_a_id, user_b_id, requester_id, request_id]
+      properties:
+        friendship_id: { type: string }
+        user_a_id:     { type: string }
+        user_b_id:     { type: string }
+        requester_id:  { type: string }
+        request_id:    { type: string }
+        created_at:    { type: string }
 
-  - id: domain.social.friendship.removed
+  - type: domain.social.friendship.removed
+    version: 1
+    producer: friends
     description: A user removed a friend connection.
-    payload:
-      user_id: string
-      friend_user_id: string
-      removed_at: string
+    payload_schema:
+      type: object
+      required: [user_id, friend_user_id]
+      properties:
+        user_id:        { type: string }
+        friend_user_id: { type: string }
+        removed_at:     { type: string }
