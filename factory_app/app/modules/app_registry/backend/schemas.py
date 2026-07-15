@@ -92,10 +92,10 @@ def _sanitize_jsonish(value: Any, *, depth: int = 0) -> Any:
                 output[key[:160]] = sanitized
         return output
     if isinstance(value, (list, tuple)):
-        output = []
+        list_output: list[Any] = []
         for item in list(value)[:100]:
             sanitized = _sanitize_jsonish(item, depth=depth + 1)
             if sanitized is not None:
-                output.append(sanitized)
-        return output
+                list_output.append(sanitized)
+        return list_output
     return str(value)[:2000]

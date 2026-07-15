@@ -241,8 +241,9 @@ async def _execute_module_action(
     result = await module_executor.execute(module_request, context=None)
     if result.success:
         if module_name in _OBSERVED_MODULES:
-            data = result.data if isinstance(result.data, dict) else {}
-            thread = data.get("thread") if isinstance(data.get("thread"), dict) else {}
+            data: dict[str, Any] = result.data if isinstance(result.data, dict) else {}
+            thread_data = data.get("thread")
+            thread: dict[str, Any] = thread_data if isinstance(thread_data, dict) else {}
             thread_id = data.get("thread_id") or thread.get("thread_id")
             logger.info(
                 "module_dispatch.success module=%s action=%s correlation_id=%s data_keys=%s request_id=%s thread_id=%s message_thread_id=%s",

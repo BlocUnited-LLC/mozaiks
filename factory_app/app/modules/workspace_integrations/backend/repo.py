@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -14,13 +15,24 @@ _ENTITY = "integration_notes"
 _DECLARATIONS_COLLECTION = "AppIntegrationDeclarations"
 
 
+def _collection(ctx: ModuleContext, entity: str):
+    persistence = getattr(ctx, "persistence", None)
+    if persistence is None:
+        raise RuntimeError("Persistence is not available for this app context.")
+    return persistence.collection(_MODULE_ID, entity)
+
+
+def _document(value: Any) -> dict[str, Any] | None:
+    return dict(value) if isinstance(value, Mapping) else None
+
+
 class WorkspaceIntegrationsRepo:
     async def get_note(self, ctx: ModuleContext, integration_id: str) -> dict[str, Any] | None:
-        collection = ctx.persistence.collection(_MODULE_ID, _ENTITY)
-        return await collection.find_one({"integration_id": integration_id})
+        collection = _collection(ctx, _ENTITY)
+        return _document(await collection.find_one({"integration_id": integration_id}))
 
     async def get_all_notes(self, ctx: ModuleContext) -> list[dict[str, Any]]:
-        collection = ctx.persistence.collection(_MODULE_ID, _ENTITY)
+        collection = _collection(ctx, _ENTITY)
         rows = await collection.find_many({}, limit=100, sort=[("integration_id", 1)])
         return [dict(row) for row in rows]
 
@@ -32,7 +44,7 @@ class WorkspaceIntegrationsRepo:
         note: str,
         updated_by: str,
     ) -> dict[str, Any]:
-        collection = ctx.persistence.collection(_MODULE_ID, _ENTITY)
+        collection = _collection(ctx, _ENTITY)
         document = {
             "integration_id": integration_id,
             "note": note,

@@ -15,6 +15,7 @@ from .namespaces import SYSTEM_DATABASE, PlatformCollections
 from .persistence_manager import AG2PersistenceManager
 
 IndexSpec = tuple[Sequence[tuple[str, int]], dict[str, Any]]
+ConnectorDocumentList = list[dict[str, Any]]
 SECRET_METADATA_KEYS = {
     "secret_value",
     "secret",
@@ -130,7 +131,7 @@ class ConnectorStore:
         expires_at: str | None = None,
         notes: str | None = None,
         public_config: dict[str, Any] | None = None,
-        required_fields: list[dict[str, Any]] | None = None,
+        required_fields: Sequence[dict[str, Any]] | None = None,
         source: dict[str, Any] | None = None,
         status_reason: str | None = None,
         extra: dict[str, Any] | None = None,
@@ -195,7 +196,7 @@ class ConnectorStore:
         doc = await coll.find_one({"scope": str(scope), "scope_id": str(scope_id), "service": normalized_service})
         return self._normalize_doc(doc)
 
-    async def list(self, *, scope: str, scope_id: str) -> list[dict[str, Any]]:
+    async def list(self, *, scope: str, scope_id: str) -> ConnectorDocumentList:
         await self._ensure_indexes()
         coll = await self._collection()
         cursor = coll.find({"scope": str(scope), "scope_id": str(scope_id)}).sort("updated_at", -1).limit(200)
@@ -214,7 +215,7 @@ class ConnectorStore:
         status: str | None = None,
         expires_at: str | None = None,
         public_config: dict[str, Any] | None = None,
-        required_fields: list[dict[str, Any]] | None = None,
+        required_fields: Sequence[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         await self._ensure_indexes()
         coll = await self._collection()

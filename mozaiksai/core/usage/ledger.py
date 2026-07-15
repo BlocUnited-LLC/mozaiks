@@ -160,7 +160,7 @@ class RuntimeUsageLedger:
             return 0
         coll = await self._coll()
         result = await coll.delete_many(build_app_scope_filter(str(resolved)))
-        deleted = result.deleted_count
+        deleted = int(getattr(result, "deleted_count", 0) or 0)
         if deleted:
             logger.info("[usage_ledger] purged %d events for app_id=%s", deleted, resolved)
         return deleted
@@ -172,7 +172,7 @@ class RuntimeUsageLedger:
         normalized = [str(aid) for aid in known_app_ids if aid]
         coll = await self._coll()
         result = await coll.delete_many({"app_id": {"$nin": normalized}})
-        deleted = result.deleted_count
+        deleted = int(getattr(result, "deleted_count", 0) or 0)
         if deleted:
             logger.info("[usage_ledger] purged %d orphaned events (not in %d known apps)", deleted, len(normalized))
         return deleted

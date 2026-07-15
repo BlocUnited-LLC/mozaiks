@@ -177,14 +177,15 @@ class RuntimeTokenBudgetAlertLedger:
         bounded_limit = max(1, min(int(limit or 1), 500))
         coll = await self._coll()
         docs = await coll.find(query, {"_id": 0}).sort("event_ts", -1).limit(bounded_limit).to_list(length=bounded_limit)
-        for doc in docs:
+        normalized_docs = [dict(doc) for doc in docs if isinstance(doc, dict)]
+        for doc in normalized_docs:
             ts = doc.get("event_ts")
             if isinstance(ts, datetime):
                 doc["event_ts"] = ts.isoformat()
             created = doc.get("created_at")
             if isinstance(created, datetime):
                 doc["created_at"] = created.isoformat()
-        return docs
+        return normalized_docs
 
 
 _global_alert_ledger: RuntimeTokenBudgetAlertLedger | None = None

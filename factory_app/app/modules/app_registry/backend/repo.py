@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
@@ -226,7 +226,7 @@ class AppRegistryRepo:
     async def delete_app(self, *, build_registry_id: str) -> bool:
         coll = await self._collection()
         result = await coll.delete_one({"_id": build_registry_id})
-        return result.deleted_count > 0
+        return int(getattr(result, "deleted_count", 0) or 0) > 0
 
     async def _with_active_chat_fallback(
         self,
@@ -299,7 +299,7 @@ class AppRegistryRepo:
     def _normalize_doc(doc: dict[str, Any] | None) -> dict[str, Any] | None:
         if not isinstance(doc, dict):
             return None
-        normalized = AppRegistryRepo._serialize_value(dict(doc))
+        normalized = cast(dict[str, Any], AppRegistryRepo._serialize_value(dict(doc)))
         normalized["build_registry_id"] = str(normalized.pop("_id"))
         return normalized
 

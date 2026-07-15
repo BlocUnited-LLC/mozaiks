@@ -27,7 +27,7 @@ import inspect
 import sys
 from pathlib import Path, PurePosixPath
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -35,6 +35,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("module_loader")
+
+
+def _default_notification_channels() -> list[Literal["in_app", "email", "push", "sms"]]:
+    return ["in_app"]
 
 
 class ModuleContractModel(BaseModel):
@@ -446,7 +450,7 @@ class ModuleNotification(ModuleContractModel):
     on: str | None = None
     description: str | None = None
     condition: dict[str, Any] | None = None
-    channels: list[Literal["in_app", "email", "push", "sms"]] = Field(default_factory=lambda: ["in_app"])
+    channels: list[Literal["in_app", "email", "push", "sms"]] = Field(default_factory=_default_notification_channels)
     audience: ModuleNotificationAudience = Field(default_factory=ModuleNotificationAudience)
     template: ModuleNotificationTemplate | None = None
     # AppGenerator's structured output also supports top-level title/body.
@@ -1085,8 +1089,8 @@ class ModuleLoader:
                 )
                 return
 
-            from mozaiksai.core.account import account_data_registry
-            account_data_registry.register(module_id, handler_cls)
+            from mozaiksai.core.account import AccountDataHandler, account_data_registry
+            account_data_registry.register(module_id, cast(type[AccountDataHandler], handler_cls))
             logger.info("ACCOUNT_HANDLER_REGISTERED: module=%s class=%s", module_id, handler_cls.__name__)
 
         except Exception as exc:

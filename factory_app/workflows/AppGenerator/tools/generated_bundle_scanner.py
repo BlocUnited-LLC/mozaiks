@@ -548,7 +548,7 @@ def _scan_mozaikspay_saas_contract(
 
 def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
     normalized_files = _normalized_files_map(files_map)
-    deployment_artifacts = {
+    deployment_artifacts: dict[str, str] = {
         path: normalized_files[path]
         for path in (
             "Dockerfile",

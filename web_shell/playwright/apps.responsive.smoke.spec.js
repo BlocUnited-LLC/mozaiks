@@ -677,6 +677,16 @@ async function mockStudioApis(page) {
     });
   });
 
+  await page.route('**/api/studio/integrations?**', async (route) => {
+    const url = new URL(route.request().url());
+    const payload = buildAppStudioPayload(url.searchParams.get('app_id') || APP_ID);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(payload.integrations),
+    });
+  });
+
   await page.route('**/api/modules/workspace_integrations/list_integrations**', async (route) => {
     await route.fulfill({
       status: 200,

@@ -226,10 +226,7 @@ jobs:
     #   npx playwright test --config playwright.visual.config.js --update-snapshots
     # Then commit the updated web_shell/playwright/snapshots/ directory.
     #
-    # This job is advisory (continue-on-error: true) until baselines are committed.
-    # Once playwright/snapshots/ is populated, set continue-on-error: false to gate PRs.
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs: frontend
     defaults:
       run:

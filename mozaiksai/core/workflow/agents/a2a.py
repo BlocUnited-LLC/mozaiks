@@ -126,7 +126,7 @@ def create_a2a_remote_agent(spec: A2AAgentSpec, *, context_variables: Any = None
         ) from err
 
     client_kwargs = _build_client_config_kwargs(spec.client)
-    a2a_config = A2AConfig(
+    a2a_config = A2AConfig(  # type: ignore[abstract]
         card_url=spec.url,
         max_reconnects=spec.max_reconnects,
         polling_interval=spec.polling_interval,

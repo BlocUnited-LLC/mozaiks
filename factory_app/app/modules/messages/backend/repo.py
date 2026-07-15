@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 Document = dict[str, Any]
@@ -51,7 +51,7 @@ class ThreadRepo:
         thread_id: str,
         updated_at: str,
         preview: Mapping[str, Any],
-        participant_ids: list[str] | None = None,
+        participant_ids: Sequence[str] | None = None,
     ) -> int:
         updates: dict[str, Any] = {
             "updated_at": updated_at,
@@ -59,7 +59,7 @@ class ThreadRepo:
             "last_message": dict(preview),
         }
         if participant_ids is not None:
-            updates["participant_ids"] = participant_ids
+            updates["participant_ids"] = list(participant_ids)
         return await self.update(ctx, thread_id=thread_id, updates=updates)
 
 

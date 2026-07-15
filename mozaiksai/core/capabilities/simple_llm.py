@@ -58,7 +58,7 @@ class SimpleLLMCapabilityService:
         if user_id:
             context_parts.append(f"User: {user_id}")
         if workflows:
-            active = [w.get("workflow_name") for w in workflows if w.get("workflow_name")]
+            active = [str(w.get("workflow_name")) for w in workflows if w.get("workflow_name")]
             if active:
                 context_parts.append(f"Active workflows: {', '.join(active)}")
 

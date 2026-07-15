@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from mozaiksai.core.data.persistence import ConnectorStore
 from mozaiksai.core.secrets import describe_connector_vault_backend, get_connector_vault_backend
@@ -34,21 +34,24 @@ async def _vault_store_secret(
     display_name: str | None = None,
     ttl_days: int = 30,
 ) -> dict[str, Any]:
-    return await backend.store_secret(
-        scope_id=scope_id,
-        service=service,
-        secret_value=secret_value,
-        display_name=display_name,
-        ttl_days=ttl_days,
+    return cast(
+        dict[str, Any],
+        await backend.store_secret(
+            scope_id=scope_id,
+            service=service,
+            secret_value=secret_value,
+            display_name=display_name,
+            ttl_days=ttl_days,
+        ),
     )
 
 
 async def _vault_get_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
-    return await backend.get_secret(scope_id=scope_id, service=service)
+    return cast(dict[str, Any], await backend.get_secret(scope_id=scope_id, service=service))
 
 
 async def _vault_delete_secret(backend: Any, *, scope_id: str, service: str) -> dict[str, Any]:
-    return await backend.delete_secret(scope_id=scope_id, service=service)
+    return cast(dict[str, Any], await backend.delete_secret(scope_id=scope_id, service=service))
 
 
 def _normalize_service(service: str) -> str:

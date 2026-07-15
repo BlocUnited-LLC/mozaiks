@@ -63,7 +63,7 @@ async def delete_account(
     The response intentionally omits personal data — it contains only counts
     and success/error status per module.
     """
-    app_id = principal.app_id
+    app_id = str(principal.app_id or "default")
     user_id = principal.user_id
 
     logger.info("ACCOUNT_DELETE_STARTED: app_id=%s user_id=%s", app_id, user_id)
@@ -125,7 +125,7 @@ async def export_account_data(
     exports are collected — the host can inject platform-owned records
     (billing history, subscription snapshots, auth identity) at that point.
     """
-    app_id = principal.app_id
+    app_id = str(principal.app_id or "default")
     user_id = principal.user_id
 
     logger.info("ACCOUNT_EXPORT_STARTED: app_id=%s user_id=%s", app_id, user_id)
