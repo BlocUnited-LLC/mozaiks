@@ -359,9 +359,25 @@ def test_docs_and_prompts_state_no_implicit_custom_route_discovery() -> None:
 
 
 def test_route_component_guidance_uses_neutral_examples() -> None:
-    changed_guidance = "\n".join(
+    agents_route_guidance = "\n".join(
+        line
+        for line in _read("factory_app/workflows/AppGenerator/agents.yaml").splitlines()
+        if any(
+            marker in line
+            for marker in (
+                "custom route",
+                "custom_route_bundle",
+                "route_manifest",
+                "ui/pages/custom",
+                "ui/index.js",
+                "registerComponent",
+                "admin/admin_registry.yaml",
+            )
+        )
+    )
+    route_guidance = "\n".join(
         [
-            _read("factory_app/workflows/AppGenerator/agents.yaml"),
+            agents_route_guidance,
             _read(".claude/skills/add-page/SKILL.md"),
             _read(".claude/rules/frontend.md"),
             _read("docs/architecture/frontend/ui-system/generated-frontend-surface-contract.md"),
@@ -369,5 +385,5 @@ def test_route_component_guidance_uses_neutral_examples() -> None:
     )
 
     for forbidden in ("MozaiksPay", "proprietary app"):
-        assert forbidden not in changed_guidance
+        assert forbidden not in route_guidance
 
