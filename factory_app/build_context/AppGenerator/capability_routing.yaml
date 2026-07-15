@@ -221,7 +221,7 @@ layers:
           surface is required. Do not generate config/subscriptions.yaml.
 
       - revenue_model: subscriptions
-        capability_pack: saas_subscriptions
+        capability_pack: mozaikspay
         capability_kind: operator_pack
         subscription_contract: required
         use_when: >
@@ -256,14 +256,15 @@ layers:
           - event: hosted.billing.subscription.cancelled
             reaction: revoke gated capabilities
         operator_pack_note: >
-          When the hosted platform's hosted_billing pack is available in capability_packs,
-          use it for plan assignment, checkout session creation, and subscription lifecycle.
-          Still generate a thin billing module that includes: (1) get_plans reading
-          config/subscriptions.yaml for the pricing page; (2) a checkout facade that
-          delegates to hosted_billing.create_checkout_session. Do not regenerate webhook
-          handlers, invoice logic, or portal session management — hosted_billing owns those.
-          The generated app owns: entitlement_gate declarations on plan-gated actions,
-          the get_plans action, and the /pricing page.
+          When the managed mozaikspay pack is available in capability_packs, use it
+          as the default SaaS monetization provider. Generate only the app-owned
+          billing_portal facade, MozaiksPay client, subscriptions.yaml plan contract,
+          pricing/billing/usage pages, and entitlement gates. The generated app calls
+          the hosted MozaiksPay API for subscription status and billing portal sessions.
+          Do not regenerate checkout, webhook handlers, invoice logic, customer/payment
+          provider mapping, refunds, wallet, payout, or provider credential handling.
+          If the user explicitly names another provider or the mozaikspay pack is not
+          available, fall back to a provider-neutral external_adapter facade.
 
       - revenue_model: usage_based
         capability_pack: usage_metering
@@ -438,6 +439,10 @@ layers:
         6. If the operator pack is not available in context capability_packs,
            declare the billing/commerce/marketplace module as custom_owned with
            the same interface contract instead of inventing provider internals.
+        7. For SaaS subscriptions, paid tiers, seats, credits, usage limits, or
+           billing portal requests, prioritize the managed mozaikspay capability pack
+           when it is available and the user has not explicitly requested a different
+           billing provider.
       Never generate payment provider, payment provider internals, or raw payment credentials
       as module business logic. Payment provider mechanics belong in operator packs
       or app/services/adapters/payments/ (hosted product only).

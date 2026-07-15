@@ -657,8 +657,9 @@ class TestAgentsYamlManagedCapabilityRules:
         assert "[CAPABILITY DIRECTORY]" in self._text
         assert "{{CAPABILITY_DIRECTORY_CONTEXT}}" in self._text
 
-    def test_appplanagent_saas_recommends_billing_pack_with_provider_alternatives(self):
-        assert "billing_pack" in self._text
+    def test_appplanagent_saas_prioritizes_mozaikspay_with_provider_alternatives(self):
+        assert "mozaikspay" in self._text
+        assert "hosted MozaiksPay API" in self._text
         assert "external_adapter" in self._text
 
 
@@ -739,7 +740,7 @@ class TestHookManagedCapabilityContextInjection:
 
 
 class TestCapabilityDirectoryProjection:
-    def test_capability_directory_catalog_declares_billing_pack_first_for_saas(self):
+    def test_capability_directory_catalog_declares_mozaikspay_first_for_saas(self):
         catalog = _read_yaml(
             "factory_app/build_context/AppGenerator/capability_directory.yaml"
         )
@@ -749,15 +750,14 @@ class TestCapabilityDirectoryProjection:
             if isinstance(entry, dict)
         }
 
-        billing_pack = entries["billing_pack"]
-        assert billing_pack["recommendation_rank"] == 1
-        assert billing_pack["capability_kind"] == "framework_pack"
-        assert "saas" in billing_pack["domains"]
-        assert any("SaaS" in signal or "plans" in signal.lower() for signal in billing_pack["intent_signals"])
-        alternatives = {item["id"] for item in billing_pack["alternatives"]}
+        mozaikspay = entries["mozaikspay"]
+        assert mozaikspay["recommendation_rank"] == 1
+        assert mozaikspay["capability_kind"] == "operator_pack"
+        assert "saas" in mozaikspay["domains"]
+        assert any("SaaS" in signal or "plans" in signal.lower() for signal in mozaikspay["intent_signals"])
+        alternatives = {item["id"] for item in mozaikspay["alternatives"]}
         assert alternatives == {"custom_payments_provider"}
-        # OSS catalog must not reference proprietary managed capabilities
-        assert "mozaikspay" not in entries
+        assert "billing_pack" not in entries
 
     def test_appgenerator_manifest_projects_capability_directory_to_appplanagent(self):
         manifest = _read_yaml("factory_app/build_context/AppGenerator/context.yaml")
@@ -782,7 +782,7 @@ class TestCapabilityDirectoryProjection:
         middleware = _read_text("factory_app/workflows/AppGenerator/middleware.yaml")
         assert "agent: AppPlanAgent\n  function: mozaiksai.core.workflow.context.projection.inject_build_context_projections" in middleware
 
-    def test_capability_directory_injects_billing_pack_first_and_custom_provider_alternative(self):
+    def test_capability_directory_injects_mozaikspay_first_and_custom_provider_alternative(self):
         class _ProjectionAgent:
             name = "AppPlanAgent"
 
@@ -802,11 +802,10 @@ class TestCapabilityDirectoryProjection:
 
         injected = agent._mozaiks_prompt_sections[0]["content"]
         assert "[CAPABILITY DIRECTORY]" in injected
-        assert "billing_pack" in injected
+        assert "mozaikspay" in injected
         assert "recommendation_rank: 1" in injected
         assert "custom_payments_provider" in injected
-        # OSS projection must not inject proprietary managed capability names
-        assert "mozaikspay" not in injected
+        assert "billing_portal facade" in injected
 
 
 # ---------------------------------------------------------------------------

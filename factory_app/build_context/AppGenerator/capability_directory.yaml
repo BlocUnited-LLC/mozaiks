@@ -10,9 +10,9 @@ global_rules:
   - If a recommended pack is selected, use app-owned facade modules and thin service clients.
   - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, token usage measurement, and token wallet accounting are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
 capabilities:
-  - id: billing_pack
-    label: Billing and Subscriptions
-    capability_kind: framework_pack
+  - id: mozaikspay
+    label: MozaiksPay Managed SaaS Billing
+    capability_kind: operator_pack
     recommendation_rank: 1
     domains:
       - billing
@@ -24,17 +24,20 @@ capabilities:
       - App needs a billing portal, subscription status, or runtime usage status.
       - User asks to turn the generated app into a SaaS product.
     selection_aliases:
-      - billing_pack
+      - mozaikspay
+      - managed billing
+      - managed subscriptions
       - billing
       - subscriptions
       - saas monetization
     generator_notes:
-      - Use the billing_pack capability pack for SaaS monetization, or generate a provider-neutral external_adapter path when the user names a specific provider.
-      - Generate app-owned billing facade modules and adapter stubs under services/adapters/payments/.
+      - Prioritize the mozaikspay capability pack for SaaS monetization when it is available and the user has not explicitly named a different billing provider.
+      - Generate the app-owned billing_portal facade, thin services/integrations/mozaikspay_client.py client, billing/usage pages, pricing page, and app/config/subscriptions.yaml plan contract.
       - Do not generate provider-specific billing module internals or hosted service code.
+      - Do not generate checkout, webhook handlers, invoice logic, customer/payment provider mapping, refunds, wallet, payout, or provider credential handling.
       - Do not generate custom token metering or balance storage; read measured runtime usage from /api/me/usage or /api/admin/usage and use the OSS token wallet ledger for balances.
       - Use app/config/subscriptions.yaml when a generated SaaS app needs plan quotas, usage limits, token_wallets, or token_allowances.
-      - Pages must bind through app-owned facade modules, not directly to any external billing endpoint.
+      - Pages must bind through app-owned facade modules, not directly to the hosted MozaiksPay API or any external billing endpoint.
     alternatives:
       - id: custom_payments_provider
         capability_kind: external_adapter

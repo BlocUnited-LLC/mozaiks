@@ -46,6 +46,36 @@ def test_capability_directory_separates_conversation_support_and_social_capabili
     assert "requires messaging_pack" in support_notes
 
 
+def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> None:
+    directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
+    by_id = {capability["id"]: capability for capability in directory["capabilities"]}
+
+    mozaikspay = by_id["mozaikspay"]
+    notes = " ".join(mozaikspay.get("generator_notes", []))
+
+    assert mozaikspay["recommendation_rank"] == 1
+    assert mozaikspay["capability_kind"] == "operator_pack"
+    assert {"billing", "subscriptions", "usage", "saas"} <= set(mozaikspay["domains"])
+    assert "Prioritize the mozaikspay capability pack" in notes
+    assert "billing_portal facade" in notes
+    assert "mozaikspay_client.py" in notes
+    assert "Do not generate checkout, webhook handlers" in notes
+
+
+def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
+    routing = _read_yaml("factory_app/build_context/AppGenerator/capability_routing.yaml")
+    entries = routing["layers"]["monetization"]["entries"]
+    subscriptions = next(entry for entry in entries if entry["revenue_model"] == "subscriptions")
+    rule = routing["layers"]["monetization"]["rule"]
+
+    assert subscriptions["capability_pack"] == "mozaikspay"
+    assert subscriptions["subscription_contract"] == "required"
+    assert "managed mozaikspay pack" in subscriptions["operator_pack_note"]
+    assert "hosted MozaiksPay API" in subscriptions["operator_pack_note"]
+    assert "prioritize the managed mozaikspay capability pack" in rule
+    assert "billing provider" in rule
+
+
 @pytest.mark.parametrize("pack_id", ["messaging", "support", "social"])
 def test_pack_contexts_are_registered_for_appgenerator(pack_id: str) -> None:
     context = _read_yaml(f"factory_app/build_context/{pack_id}/context.yaml")

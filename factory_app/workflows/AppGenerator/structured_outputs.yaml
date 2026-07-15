@@ -584,6 +584,7 @@ models:
         - commerce_pack
         - marketplace_pack
         - campaigns_pack
+        - mozaikspay
         - billing_pack
         - notifications_pack
         - analytics_pack
@@ -869,7 +870,7 @@ models:
       required_capability_routes:
         type: optional_list
         items: str
-        description: Capability routes required by the taxonomy, such as saas_subscriptions, usage_metering, commerce, marketplace, sponsored_placements, donations, or investor_marketplace.
+        description: Capability routes required by the taxonomy, such as mozaikspay, usage_metering, commerce, marketplace, sponsored_placements, donations, or investor_marketplace.
       rationale:
         type: str
         description: >

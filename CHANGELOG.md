@@ -32,6 +32,7 @@ This project follows a practical pre-1.0 changelog format:
 ### Changed
 
 - The generated `messaging` build pack is now a thread/message substrate only. Contacts, friends, follows, invitations, posts, and feeds belong to the `social` pack or to an app-specific relationship provider.
+- AppGenerator now prioritizes the managed `mozaikspay` operator pack for SaaS subscriptions, billing portals, seats, credits, and usage limits when no alternate billing provider is explicitly requested.
 - Hardened usage pricing catalog sync with upstream content hashing, normalized row-count drift checks, generated catalog change summaries, docs-based override guidance, and private override-file packaging protection.
 - Clarified the deployment boundary between repo-local `infra/`, the first-party `factory_app/` workspace, and provider-neutral generated app deployment artifacts; added a canonical architecture doc and rewrote the stale `infra/DEPLOYMENT.md` guide to match current OSS behavior.
 

@@ -100,8 +100,8 @@ domains:
     - internal tool
     - vertical SaaS
     capability_packs:
-      - saas_subscriptions
-      - payments
+      - mozaikspay
+      - commerce
     modules:
       plans:
         description: Plan catalog, tiers, seats, and feature grants for the generated app's own users.
@@ -253,8 +253,8 @@ domains:
     - tip and support
     - course and content
     capability_packs:
-      - saas_subscriptions
-      - payments
+      - mozaikspay
+      - commerce
     modules:
       creator_profiles:
         description: Creator identity, bio, payout setup, and analytics overview.

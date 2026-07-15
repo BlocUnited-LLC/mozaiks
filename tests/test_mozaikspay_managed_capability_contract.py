@@ -158,6 +158,17 @@ class TestContractYaml:
         assert mozaikspay is not None
         assert _required_integration_fields(mozaikspay) == {"api_base", "client_id", "client_secret"}
 
+    def test_provider_api_contract_forbids_provider_neutral_internal_ids(self):
+        c = _read_yaml(_CONTRACT_YAML)
+        fields = set(c["provider_api_response_contract"]["globally_forbidden_response_fields"])
+
+        assert "provider_customer_id" in fields
+        assert "provider_subscription_id" in fields
+        assert "payment_provider_customer_id" in fields
+        assert "payment_provider_subscription_id" in fields
+        assert "stripe_customer_id" not in fields
+        assert "stripe_subscription_id" not in fields
+
 
 # ---------------------------------------------------------------------------
 # 3. Required output templates exist on disk
