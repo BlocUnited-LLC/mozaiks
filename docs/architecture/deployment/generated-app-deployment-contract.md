@@ -4,6 +4,10 @@
 
 This document defines the provider-neutral deployment artifact contract for generated apps.
 
+For the separate repo-local OSS `infra/` boundary and the first-party
+`factory_app/` deployment story, see
+`docs/architecture/deployment/oss-infra-and-generated-app-deployment.md`.
+
 The OSS `mozaiks` repo owns this contract.
 Hosted-product policy, approvals, provider adapters, and secret orchestration remain outside this repo.
 

@@ -1,0 +1,132 @@
+schema_version: mozaiks.module.v1
+module:
+  id: support
+  display_name: Support
+  version: 1.0.0
+  description: App support request metadata. Conversation bodies are stored in the messages module.
+  owner: app
+  visibility: private
+  handler: backend.handler:SupportModule
+
+permissions:
+  - id: support.read
+    description: Read support requests.
+  - id: support.manage
+    description: Manage support queues, link threads, and update request status.
+
+actions:
+  - id: create_support_request
+    description: Create a support request. The UI should create/link a messages support thread for conversation history.
+    handler_method: create_support_request
+    input_schema:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        subject: { type: string }
+        page_url: { type: string }
+        page_title: { type: string }
+        severity:
+          type: string
+          enum: [low, medium, high]
+          default: low
+        app_id:
+          type: string
+          description: The app this ticket is about. Stored as subject_app_id.
+        message_thread_id:
+          type: string
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        request: { type: object }
+        error: { type: string }
+    permissions: [access_as_user]
+    emits: [domain.support.request_created]
+
+  - id: list_support_requests
+    description: List support requests by user, app, or workspace-level index.
+    handler_method: list_support_requests
+    input_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [open, waiting, resolved, archived, all]
+          default: open
+        scope:
+          type: string
+          enum: [user, app, workspace]
+          default: user
+        app_id:
+          type: string
+          description: Optional subject app id filter.
+        limit:
+          type: integer
+          default: 50
+    output_schema:
+      type: object
+      required: [requests, total]
+      properties:
+        requests: { type: array }
+        total: { type: integer }
+    permissions: [access_as_user]
+
+  - id: link_message_thread
+    description: Attach a messages.thread_id to a support request.
+    handler_method: link_message_thread
+    input_schema:
+      type: object
+      required: [request_id, message_thread_id]
+      properties:
+        request_id: { type: string }
+        message_thread_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        request_id: { type: string }
+        message_thread_id: { type: string }
+        error: { type: string }
+    permissions: [support.manage]
+
+  - id: update_support_status
+    description: Update support status or assignee.
+    handler_method: update_support_status
+    input_schema:
+      type: object
+      required: [request_id, status]
+      properties:
+        request_id: { type: string }
+        status:
+          type: string
+          enum: [open, waiting, resolved, archived]
+        assignee_id: { type: string }
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: { type: boolean }
+        request_id: { type: string }
+        status: { type: string }
+    permissions: [support.manage]
+    emits: [domain.support.status_changed]
+
+capabilities:
+  - capability_id: support.requests.create
+    kind: action
+    target: create_support_request
+    title: Create support request
+    permissions: [access_as_user]
+  - capability_id: support.requests.list
+    kind: action
+    target: list_support_requests
+    title: List support requests
+    permissions: [access_as_user]
+  - capability_id: support.requests.update_status
+    kind: action
+    target: update_support_status
+    title: Update support status
+    permissions: [support.manage]

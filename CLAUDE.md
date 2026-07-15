@@ -166,6 +166,11 @@ cd infra/compose
 docker compose up             # full stack on :8000 (app), :8080 (keycloak), :27017 (mongo)
 ```
 
+`infra/` is repo-local operational scaffolding for running Mozaiks OSS itself
+(Studio/builder stack). Generated apps receive their own provider-neutral
+deployment artifacts at the app bundle root — they do not inherit `infra/`.
+See [docs/architecture/deployment/oss-infra-and-generated-app-deployment.md](docs/architecture/deployment/oss-infra-and-generated-app-deployment.md).
+
 ### Lint
 
 ```bash

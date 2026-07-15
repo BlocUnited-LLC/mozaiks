@@ -166,6 +166,68 @@ def test_module_loader_loads_canonical_contract(tmp_path: Path) -> None:
     assert type(loaded.handler).__name__ == "TasksModule"
 
 
+def test_module_loader_normalizes_notification_contract(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "notifications.yaml").write_text(
+        """
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: task_created
+    on: domain.tasks.task_created
+    title: "Task {{title}}"
+    body: "A task was created."
+    channels: [in_app, email]
+    audience:
+      roles: [operator, operator]
+    context_fields: [task_id, title]
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    loaded = ModuleLoader(str(tmp_path)).load("tasks")
+
+    notification = loaded.manifests.notifications.notifications[0]
+    assert notification.event_type == "domain.tasks.task_created"
+    assert notification.channels == ["in_app", "email"]
+    assert notification.audience.roles == ["operator"]
+    assert notification.template is not None
+    assert notification.template.title == "Task {{title}}"
+    assert notification.as_rule()["template"]["body"] == "A task was created."
+
+
+def test_module_loader_rejects_notification_without_event_type(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "notifications.yaml").write_text(
+        """
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: task_created
+    channels: [in_app]
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+def test_module_loader_rejects_unsupported_notification_channel(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path)
+    module_dir.joinpath("contracts", "notifications.yaml").write_text(
+        """
+schema_version: mozaiks.notifications.v1
+notifications:
+  - id: task_created
+    event_type: domain.tasks.task_created
+    channels: [fax]
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModuleLoadError):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
 @pytest.mark.parametrize("module_type", ["standard", "messaging", "workflow", "event_pipeline", "transactional"])
 def test_module_loader_accepts_canonical_module_type(tmp_path: Path, module_type: str) -> None:
     module_dir = _write_canonical_module(tmp_path)
@@ -505,6 +567,22 @@ def test_module_loader_rejects_non_module_owned_event_namespace(tmp_path: Path) 
     _write_canonical_module(tmp_path, emitted_event="workflow.tasks.completed")
 
     with pytest.raises(ModuleLoadError, match="module-published events"):
+        ModuleLoader(str(tmp_path)).load("tasks")
+
+
+def test_module_loader_rejects_app_local_event_namespace(tmp_path: Path) -> None:
+    module_dir = _write_canonical_module(tmp_path, emitted_event="app.tasks.task_created")
+    for relative in ("contracts/reactions.yaml", "contracts/notifications.yaml"):
+        path = module_dir / relative
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "domain.tasks.task_created",
+                "app.tasks.task_created",
+            ),
+            encoding="utf-8",
+        )
+
+    with pytest.raises(ModuleLoadError, match="domain"):
         ModuleLoader(str(tmp_path)).load("tasks")
 
 

@@ -35,11 +35,11 @@ Every Studio page should answer a concrete operator question:
 | --- | --- |
 | Apps | What apps exist, what state are they in, and which one needs action? |
 | Usage | Where are tokens and cost coming from across the workspace? |
-| Integrations | Which shared providers are configured, missing, or partially ready? |
+| Integrations | Which shared services are connected, which app-used services need setup, and what is available later? |
 | Overview | What is happening with this app, and what should I do next? |
 | Access | Who can use this app, what can they do, and who is blocked? |
 | App Usage | Which chats and workflows are driving this app's tokens and cost? |
-| Support | Which user-facing issues, escalations, or stalled runs need operator follow-up? |
+| Support | Which support chats need a reply, which are being handled, and which are resolved? |
 
 If information does not help answer that page's question, it should move to a
 drill-down, hover/detail state, or a different page.

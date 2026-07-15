@@ -84,7 +84,7 @@ runtime_boundaries:
   - id: payment_provider_boundary
     rule: Commerce owns catalog, cart, orders, checkout requests, and fulfillment state. Payment provider mechanics stay in a selected payment capability pack or app-owned services/adapters/payments when the user explicitly brings a provider.
   - id: checkout_event_boundary
-    rule: start_checkout emits app.commerce.checkout.requested and returns an app-owned checkout request. Payment completion is recorded through the internal record_checkout_result action.
+    rule: start_checkout emits domain.commerce.checkout.requested and returns an app-owned checkout request. Payment completion is recorded through the internal record_checkout_result action.
   - id: inventory_authority
     rule: Inventory is decremented only after successful checkout completion or an explicit inventory adjustment. Do not trust client-side totals.
   - id: tenant_user_scope
@@ -102,12 +102,12 @@ cross_pack_integrations:
   - pack: mozaikspay
     description: >
       When both commerce and mozaikspay are selected, the generated app can route
-      app.commerce.checkout.requested to an app-owned MozaiksPay checkout facade.
+      domain.commerce.checkout.requested to an app-owned MozaiksPay checkout facade.
       Commerce never calls hosted payment internals directly.
     optional: true
     integration_surface:
       - commerce_action: start_checkout
-        emitted_event: app.commerce.checkout.requested
+        emitted_event: domain.commerce.checkout.requested
         note: >
           The payment facade creates the hosted checkout session from the order
           snapshot and calls record_checkout_result after provider confirmation.
@@ -115,4 +115,4 @@ cross_pack_integrations:
         trigger: checkout.session.completed
         note: >
           Internal app action that marks the order paid, records provider
-          metadata, decrements inventory, and emits app.commerce.order.paid.
+          metadata, decrements inventory, and emits domain.commerce.order.paid.

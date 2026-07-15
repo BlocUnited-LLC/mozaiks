@@ -280,6 +280,34 @@ class TestVisibilityFilterHelper:
             "_notification_visibility_filter must filter by audience.roles"
         )
 
+    def test_visibility_filter_checks_user_ids_permissions_and_unscoped_global(self):
+        from mozaiksai.core.auth.dependencies import UserPrincipal
+        from mozaiksai.hosts.routers.notifications import _notification_visibility_filter
+
+        principal = UserPrincipal(
+            user_id="user_1",
+            email=None,
+            name=None,
+            roles=["operator"],
+            scopes=["support.read"],
+            raw_claims={},
+        )
+
+        visibility = _notification_visibility_filter(principal)
+
+        assert {"actor.id": "user_1"} not in visibility
+        assert {"audience.user_ids": "user_1"} in visibility
+        assert {"audience.roles": {"$in": ["operator"]}} in visibility
+        assert {"audience.permissions": {"$in": ["support.read"]}} in visibility
+        assert {"audience.roles": {"$exists": False}} not in visibility
+        assert {
+            "$and": [
+                {"$or": [{"audience.user_ids": {"$exists": False}}, {"audience.user_ids": []}]},
+                {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
+                {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
+            ]
+        } in visibility
+
 
 # ---------------------------------------------------------------------------
 # context_fields — _is_secret_context_key

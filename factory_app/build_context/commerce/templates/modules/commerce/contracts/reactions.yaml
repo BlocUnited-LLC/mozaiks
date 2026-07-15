@@ -1,7 +1,7 @@
 schema_version: mozaiks.reactions.v1
 reactions:
   - id: commerce_checkout_requested_payment_facade
-    event_type: app.commerce.checkout.requested
+    event_type: domain.commerce.checkout.requested
     target:
       kind: capability
       capability_id: mozaikspay.checkout.create_session
@@ -11,14 +11,14 @@ reactions:
       and call commerce.record_checkout_result after completion.
 
   - id: commerce_paid_order_receipt
-    event_type: app.commerce.order.paid
+    event_type: domain.commerce.order.paid
     target:
       kind: notification
       notification_id: commerce_order_receipt
     description: Notify the buyer and operators after payment succeeds.
 
   - id: commerce_checkout_failed_notification
-    event_type: app.commerce.checkout.failed
+    event_type: domain.commerce.checkout.failed
     target:
       kind: notification
       notification_id: commerce_checkout_failed

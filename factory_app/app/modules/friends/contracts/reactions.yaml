@@ -1,5 +1,0 @@
-schema_version: mozaiks.reactions.v1
-reactions: []
-# No inbound reactions in the friends module.
-# The activity_feed module subscribes to domain.social.friendship.created
-# and domain.social.friend_request.sent via its own reactions.yaml.

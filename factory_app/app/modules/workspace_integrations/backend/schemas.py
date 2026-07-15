@@ -10,6 +10,46 @@ from typing import Any
 
 INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
     {
+        "id": "openai",
+        "name": "OpenAI",
+        "category": "ai",
+        "description": "GPT models, embeddings, and assistants API.",
+        "required_secrets": ["OPENAI_API_KEY"],
+        "optional_secrets": ["OPENAI_ORG_ID"],
+        "setup_steps": [
+            "Sign in to platform.openai.com → API Keys",
+            "Create a new secret key and copy it immediately (shown once)",
+        ],
+    },
+    {
+        "id": "anthropic",
+        "name": "Anthropic",
+        "category": "ai",
+        "description": "Claude models for reasoning, analysis, and generation.",
+        "required_secrets": ["ANTHROPIC_API_KEY"],
+        "optional_secrets": [],
+        "setup_steps": [
+            "Sign in to console.anthropic.com → API Keys",
+            "Create a new key and copy it immediately (shown once)",
+        ],
+    },
+    {
+        "id": "mozaikspay",
+        "name": "Mozaiks Pay",
+        "category": "payments",
+        "description": "Managed monetization, subscription billing, billing portal, and usage display for Mozaiks apps.",
+        "required_secrets": ["MOZAIKSPAY_API_BASE", "MOZAIKSPAY_CLIENT_ID", "MOZAIKSPAY_CLIENT_SECRET"],
+        "optional_secrets": ["MOZAIKSPAY_API_KEY", "MOZAIKS_APP_URL"],
+        "default_for": ["monetized_app"],
+        "removable_default": True,
+        "capabilities": ["subscriptions", "usage_billing", "billing_portal"],
+        "setup_steps": [
+            "Open the workspace Integrations page and select Mozaiks Pay",
+            "Enter the Mozaiks Pay API base URL, client ID, and client secret",
+            "Save the connector before launching paid plans or billing portal pages",
+        ],
+    },
+    {
         "id": "resend",
         "name": "Resend",
         "category": "email",
@@ -99,30 +139,6 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
         ],
     },
     {
-        "id": "openai",
-        "name": "OpenAI",
-        "category": "ai",
-        "description": "GPT models, embeddings, and assistants API.",
-        "required_secrets": ["OPENAI_API_KEY"],
-        "optional_secrets": ["OPENAI_ORG_ID"],
-        "setup_steps": [
-            "Sign in to platform.openai.com → API Keys",
-            "Create a new secret key and copy it immediately (shown once)",
-        ],
-    },
-    {
-        "id": "anthropic",
-        "name": "Anthropic",
-        "category": "ai",
-        "description": "Claude models for reasoning, analysis, and generation.",
-        "required_secrets": ["ANTHROPIC_API_KEY"],
-        "optional_secrets": [],
-        "setup_steps": [
-            "Sign in to console.anthropic.com → API Keys",
-            "Create a new key and copy it immediately (shown once)",
-        ],
-    },
-    {
         "id": "google_oauth",
         "name": "Google OAuth",
         "category": "auth",
@@ -177,6 +193,9 @@ def build_integration_response(
         "setup_steps": spec.get("setup_steps", []),
         "note": note,
     }
+    for metadata_key in ("default_for", "removable_default", "capabilities"):
+        if metadata_key in spec:
+            response[metadata_key] = spec[metadata_key]
     if status == "missing":
         response["setup_url"] = f"/integrations/{spec['id']}"
     return response
@@ -215,6 +234,11 @@ def build_declaration_document(
     optional: bool = False,
     workspace_status: str | None = None,
     connector_status: str = "not_configured",
+    defaulted: bool = False,
+    removable: bool = False,
+    source: str = "build",
+    required_fields: list[dict[str, Any]] | None = None,
+    removed: bool = False,
     declared_at: str,
 ) -> dict[str, Any]:
     """Build a declaration document for a single integration need from a build.
@@ -234,6 +258,11 @@ def build_declaration_document(
         "optional": optional,
         "workspace_status": workspace_status,
         "connector_status": connector_status,
+        "defaulted": defaulted,
+        "removable": removable,
+        "source": source,
+        "required_fields": list(required_fields or []),
+        "removed": removed,
         "declared_at": declared_at,
     }
 
@@ -251,6 +280,10 @@ def build_declaration_response(doc: dict[str, Any]) -> dict[str, Any]:
         "optional": bool(doc.get("optional")),
         "workspace_status": doc.get("workspace_status"),
         "connector_status": doc.get("connector_status"),
+        "defaulted": bool(doc.get("defaulted")),
+        "removable": bool(doc.get("removable")),
+        "source": doc.get("source"),
+        "required_fields": doc.get("required_fields") if isinstance(doc.get("required_fields"), list) else [],
         "declared_at": doc.get("declared_at"),
         "setup_url": f"/integrations/{doc['catalog_id']}" if doc.get("catalog_id") and doc.get("workspace_status") == "missing" else None,
     }

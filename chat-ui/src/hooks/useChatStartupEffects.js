@@ -4,6 +4,7 @@ import {
   clearStoredArtifactState,
   clearStoredChatCacheSeed,
   getStoredActiveChatId,
+  getStoredActiveGeneralChatId,
   setStoredActiveChatId,
 } from '../session/chatSessionStorage';
 
@@ -15,6 +16,7 @@ export function useChatStartupEffects({
   refreshWorkflowSessions,
   conversationBootstrapRef,
   queryMode,
+  queryGeneralChatId = null,
   navigationLoading,
   configuredStartupMode,
   setConversationMode,
@@ -38,6 +40,7 @@ export function useChatStartupEffects({
   isSidePanelOpen,
   layoutMode,
   activeGeneralChatId,
+  setActiveGeneralChatId,
   generalHydrationPendingRef,
   hydrateGeneralTranscript,
   workflowMessagesCacheRef,
@@ -88,8 +91,14 @@ export function useChatStartupEffects({
 
     if (queryMode === 'ask') {
       setConversationMode('ask');
-      consumeNavigationQueryParams(['mode', 'resume', 'chat_id']);
-      if (askMessages && askMessages.length > 0) {
+      consumeNavigationQueryParams(['mode', 'resume', 'chat_id', 'force_ask', 'general_chat_id', 'generalChatId']);
+      if (queryGeneralChatId) {
+        setActiveGeneralChatId?.(queryGeneralChatId);
+        generalHydrationPendingRef.current = true;
+        Promise.resolve(hydrateGeneralTranscript(queryGeneralChatId)).finally(() => {
+          generalHydrationPendingRef.current = false;
+        });
+      } else if (askMessages && askMessages.length > 0) {
         setMessagesWithLogging(askMessages);
       } else if (generalMessagesCacheRef.current && generalMessagesCacheRef.current.length > 0) {
         setMessagesWithLogging(generalMessagesCacheRef.current);
@@ -168,7 +177,12 @@ export function useChatStartupEffects({
     const activeWs = wsRef.current;
     if (!activeWs || typeof activeWs.send !== 'function') return;
 
-    const sent = activeWs.send({ type: 'chat.enter_general_mode', chat_id: currentChatId });
+    const preferredGeneralChatId = getStoredActiveGeneralChatId();
+    const sent = activeWs.send({
+      type: 'chat.enter_general_mode',
+      chat_id: currentChatId,
+      ...(preferredGeneralChatId ? { general_chat_id: preferredGeneralChatId } : {}),
+    });
     if (sent) {
       askModeSyncedChatRef.current = currentChatId;
     }

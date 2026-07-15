@@ -82,8 +82,7 @@ configure integrations, or open usage.
   summarize their strongest signal, not duplicate their full tables.
 - Health diagnostics belong at `/apps/:appId/health`, not as a large Overview
   panel.
-- Help desk, stalled runs, escalations, and support-facing diagnostics belong
-  at `/apps/:appId/support`.
+- Support chats and operator follow-up belong at `/apps/:appId/support`.
 - Integration setup belongs at `/apps/:appId/integrations` and should only be
   linked from Overview when it is the lifecycle next step.
 - Avoid duplicating the same cost metric in multiple panels.
@@ -120,27 +119,39 @@ when a health issue needs follow-up.
 
 **Route:** `/apps/:appId/support`
 
-**User question:** Which user-facing issues, escalations, or stalled runs need
-operator follow-up?
+**User question:** Which support chats need a reply, which are being handled,
+and which are resolved?
 
-**Primary action:** Open Health diagnostics or the relevant activity detail.
+**Primary action:** Open a support chat and reply or assign an operator.
 
 **Content contract:**
 
 | Area | Content |
 | --- | --- |
-| Hero | Open support items, stalled runs, runtime errors, latest run. |
-| Help desk | Support notes, escalations, user-facing follow-up items. |
-| Run review | Stalled runs, errored runs, and run facts useful for triage. |
+| Hero | Support chat count by simple status: Needs reply, In progress, Resolved. |
+| Support chats | Per-user support conversations for this app. |
+| Feedback | Optional satisfaction notes when users rate a support or app-building chat. |
+
+**Data contract:**
+
+| Field | Source |
+| --- | --- |
+| Ticket metadata | `workspace_support.requests` filtered by `subject_app_id` |
+| Thread id | `workspace_support.requests.message_thread_id` |
+| Conversation messages | `messages.messages` through the linked thread |
+| User notification | `domain.messages.message_sent` notification rule |
 
 **UX rules:**
 
-- Support is the app help desk view. It should be phrased around follow-up,
-  escalation, and triage rather than raw infrastructure health.
+- Support is the app conversation follow-up view. It should use support-action
+  language, not workflow-run language.
+- The user-facing taxonomy is `Needs reply`, `In progress`, and `Resolved`.
 - Do not place support queues on Overview. Overview can point here when support
   work is the current next step.
 - Keep Support actionable and compact; deep trace inspection belongs in
   Activity or Health.
+- Reply delivery must be backed by the `messages` module. Do not store a second
+  support-only transcript for new tickets.
 
 ## Access
 

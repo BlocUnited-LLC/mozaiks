@@ -67,7 +67,7 @@ export function useConversationModeController({
   urlWorkflowName,
   restoreViewSnapshot,
   clearViewArtifacts,
-  queryMode,
+  queryGeneralChatId = null,
   setConnectionInitialized,
   connectionInProgressRef,
 }) {
@@ -355,8 +355,15 @@ export function useConversationModeController({
     try {
       if (mode === 'ask') {
         queryResumeHandledRef.current = null;
-        consumeNavigationQueryParams(['mode', 'resume', 'chat_id']);
-        ensureGeneralMode();
+        consumeNavigationQueryParams(['mode', 'resume', 'chat_id', 'force_ask', 'general_chat_id', 'generalChatId']);
+        ensureGeneralMode(queryGeneralChatId);
+        if (queryGeneralChatId) {
+          setActiveGeneralChatId(queryGeneralChatId);
+          generalHydrationPendingRef.current = true;
+          Promise.resolve(hydrateGeneralTranscript(queryGeneralChatId)).finally(() => {
+            generalHydrationPendingRef.current = false;
+          });
+        }
         if (setLayoutMode) setLayoutMode('full');
         if (isMobileView) setMobileDrawerState('peek');
       } else {
@@ -426,7 +433,6 @@ export function useConversationModeController({
           }
 
           try {
-            const askCarrierMode = queryMode === 'ask' || conversationMode === 'ask';
             const result = await api.startChat(
               currentAppId,
               entryWorkflow,
@@ -434,7 +440,7 @@ export function useConversationModeController({
               {},
               null,
               null,
-              askCarrierMode ? { transportPurpose: 'ask_carrier' } : null,
+              null,
             );
             if (result && (result.chat_id || result.id)) {
               const newChatId = result.chat_id || result.id;
@@ -495,7 +501,6 @@ export function useConversationModeController({
     messagesRef,
     modeChangeInProgressRef,
     navigate,
-    queryMode,
     queryResumeHandledRef,
     refreshWorkflowSessions,
     resolveKnownWorkflowName,

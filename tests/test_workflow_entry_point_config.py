@@ -28,7 +28,7 @@ def test_factory_app_ai_config_keeps_runtime_startup_sections() -> None:
     ai_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "ai.json"
     data = json.loads(ai_path.read_text(encoding="utf-8"))
 
-    assert sorted(data.keys()) == ["ask", "chat", "workflows"]
+    assert sorted(data.keys()) == ["ask", "chat", "support", "workflows"]
 
 
 def test_factory_app_control_plane_defaults_are_declared() -> None:

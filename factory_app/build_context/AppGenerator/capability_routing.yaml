@@ -18,7 +18,7 @@ layers:
       - WebSocket transport and connection lifecycle
       - Unified event bus and domain event dispatch
       - Admin shell, panel registration, /admin routing
-      - Platform notification storage and delivery pipeline
+      - Platform in-app notification storage, unread count API, notification center API, and badge invalidation signal
       - Module action routing via /api/modules/{module_id}/{action_id}
       - AG2 workflow orchestration engine and session management
       - User account and identity (/api/me contract)
@@ -57,10 +57,24 @@ layers:
       app-specific wiring, page composition, and event flow bindings — not pack internals.
     packs:
       - id: messaging
-        covers: DM threads, group channels, real-time delivery, read/unread state
+        covers: app-scoped and workspace-scoped conversation threads, support conversations, and read state
         capability_kind: operator_pack
-        use_when: App needs user-to-user or group messaging, threaded conversations, or real-time chat
+        use_when: App needs user-to-user messaging, group conversations, threaded conversations, or support conversation storage
         avoid_when: You only need one-way system alerts or push notifications — use the notifications pack instead
+
+      - id: support
+        covers: support request metadata, app-scoped support inboxes, support status, and operator follow-up pages
+        capability_kind: operator_pack
+        requires:
+          - messaging
+        use_when: App needs a help desk, user support requests, customer support inbox, operator replies, or per-app support follow-up
+        avoid_when: App only needs user-to-user DMs, friends, groups, or social chat — use messaging/social instead
+
+      - id: social
+        covers: friends, follows, invitations, user posts, reactions, comments, and activity feeds
+        capability_kind: operator_pack
+        use_when: App is a social network, creator/community product, member graph, friends list, invite flow, or feed-based app
+        avoid_when: App only needs support tickets, support chats, or basic account profiles
 
       - id: commerce
         covers: product catalog, storefront browse, inventory, cart, checkout request, orders, and fulfillment state
@@ -75,15 +89,34 @@ layers:
         avoid_when: You only need to store structured data records — a custom module is simpler
 
       - id: notifications
-        covers: multi-channel notification delivery (in-app, email, push, SMS)
+        covers: external notification delivery adapters (email, push, SMS) beyond the runtime in-app notification record
         capability_kind: operator_pack
-        use_when: App needs to alert users across channels (email, push, SMS, in-app) when domain events occur
-        avoid_when: You only need in-app state changes with no user-facing delivery outside the app
+        use_when: App needs to deliver domain-event alerts outside the app through provider-backed channels such as email, push, or SMS
+        avoid_when: You only need in-app alerts, unread badge counts, and a notification center — declare contracts/notifications.yaml on the event-producing module instead
 
     rule: >
       For these domains declare capability_kind as operator_pack.
       Generate the app-specific wiring (pages, façade module actions, event flows)
       but never regenerate pack internals.
+
+      Messaging, support, and social are intentionally separate. The messaging
+      pack owns conversation threads and messages. The support pack owns
+      app-scoped support request metadata and uses messaging for conversation
+      bodies. The social pack owns friends/follows/invitations/posts/feed and
+      may use messaging for DMs only when both packs are selected. Governance
+      features such as proposals, voting, quorum, moderation, and treasury or
+      decision policy are app-specific or a future dedicated governance pack;
+      do not make them default first-class OSS output.
+
+    notification_contract_note: >
+      In-app notifications are a runtime-provided deterministic capability, not
+      a generated business module. When a module action emits a durable domain.*
+      event that should alert a user or role, generate
+      modules/{module_id}/contracts/notifications.yaml in that same module with
+      one rule per event. Do not create a standalone notifications module, custom
+      notification repo, or websocket worker for ordinary in-app alerts. Select
+      the notifications operator pack only for external provider delivery beyond
+      the in_app channel.
 
     operator_pack_note: >
       Capability packs are operator_pack entries available only when workspace

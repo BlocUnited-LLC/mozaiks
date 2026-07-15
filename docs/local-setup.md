@@ -161,6 +161,10 @@ These scripts use the repo-local `factory_app/app`, `factory_app/workflows`, and
 Mongo and Keycloak. Use them when you are changing Mozaiks itself or debugging
 the Studio stack.
 
+For the boundary between repo-local `infra/`, the first-party `factory_app/`
+workspace, and generated app deployment artifacts, see
+`docs/architecture/deployment/oss-infra-and-generated-app-deployment.md`.
+
 ## Runtime-Only Path
 
 If you only want the app runtime and not the Studio setup flow:

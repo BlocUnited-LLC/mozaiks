@@ -26,26 +26,53 @@ actions:
           description: The support request message.
         page_url:
           type: string
+          nullable: true
           description: URL of the page where the request was submitted.
         page_title:
           type: string
+          nullable: true
           description: Title of the page where the request was submitted.
         severity:
           type: string
           enum: [low, medium, high]
           default: low
           description: Severity level of the support request.
+        app_id:
+          type: string
+          nullable: true
+          description: App this support request is about. Stored as subject_app_id so it cannot override runtime persistence scope.
+        conversation_transcript:
+          type: array
+          description: Recent chat messages to seed the support thread with context.
+          items:
+            type: object
+            required:
+              - role
+              - content
+            properties:
+              role:
+                type: string
+                enum: [user, assistant, operator, system]
+              content:
+                type: string
     output_schema:
       type: object
       properties:
         request_id:
           type: string
+        app_id:
+          type: string
+        subject_app_id:
+          type: string
         status:
           type: string
         created_at:
           type: string
+        message_thread_id:
+          type: string
+          nullable: true
     permissions:
-      - workspace_support.manage
+      - access_as_user
     emits:
       - domain.workspace_support.request_created
 
@@ -64,6 +91,15 @@ actions:
           type: integer
           default: 50
           description: Maximum number of requests to return.
+        scope:
+          type: string
+          enum: [user, app, workspace]
+          default: user
+          description: User scope lists the current user's requests; app scope lists requests for the current app; workspace scope lists requests across apps for the workspace support overview.
+        app_id:
+          type: string
+          nullable: true
+          description: Optional subject app id filter when support requests should be limited to one app dashboard. This does not override runtime persistence scope.
     output_schema:
       type: object
       properties:
@@ -74,7 +110,112 @@ actions:
         total:
           type: integer
     permissions:
-      - workspace_support.read
+      - access_as_user
+
+  - id: add_support_message
+    description: Add a message to an existing support request thread.
+    handler_method: add_support_message
+    input_schema:
+      type: object
+      required:
+        - request_id
+        - message
+      properties:
+        request_id:
+          type: string
+          description: The support request ID to add a message to.
+        message:
+          type: string
+          description: The message text.
+        sender_role:
+          type: string
+          enum: [user, operator]
+          default: user
+          description: Who is sending the message.
+    output_schema:
+      type: object
+      properties:
+        message_id:
+          type: string
+        message_thread_id:
+          type: string
+        created_at:
+          type: string
+        success:
+          type: boolean
+    permissions:
+      - access_as_user
+    emits:
+      - domain.workspace_support.message_added
+
+  - id: delete_support_request
+    description: Delete a support request and its linked message thread.
+    handler_method: delete_support_request
+    input_schema:
+      type: object
+      required:
+        - request_id
+      properties:
+        request_id:
+          type: string
+          description: The support request ID to delete.
+    output_schema:
+      type: object
+      properties:
+        success:
+          type: boolean
+        request_id:
+          type: string
+        message_thread_id:
+          type: string
+          nullable: true
+        deleted_requests:
+          type: integer
+        deleted_threads:
+          type: integer
+        deleted_messages:
+          type: integer
+        deleted_reads:
+          type: integer
+    permissions:
+      - access_as_user
+    emits:
+      - domain.workspace_support.request_deleted
+
+  - id: update_support_request_status
+    description: Resolve or reopen a support request and its linked message thread.
+    handler_method: update_support_request_status
+    input_schema:
+      type: object
+      required:
+        - request_id
+        - status
+      properties:
+        request_id:
+          type: string
+          description: The support request ID to update.
+        status:
+          type: string
+          enum: [open, resolved]
+          description: New support request status.
+    output_schema:
+      type: object
+      properties:
+        success:
+          type: boolean
+        request_id:
+          type: string
+        status:
+          type: string
+        updated_at:
+          type: string
+        message_thread_id:
+          type: string
+          nullable: true
+    permissions:
+      - access_as_user
+    emits:
+      - domain.workspace_support.request_status_changed
 
   - id: submit_session_feedback
     description: Submit a post-session satisfaction rating from the user.
@@ -84,15 +225,21 @@ actions:
       properties:
         session_id:
           type: string
+          nullable: true
           description: The chat session or run ID being rated.
         workflow_name:
           type: string
+          nullable: true
           description: Name of the workflow that was running.
         rating:
           type: integer
           enum: [0, 1]
           default: 1
           description: "0 = poor experience, 1 = good experience."
+        app_id:
+          type: string
+          nullable: true
+          description: App this feedback is about. Stored as subject_app_id.
     output_schema:
       type: object
       properties:
@@ -103,6 +250,6 @@ actions:
         created_at:
           type: string
     permissions:
-      - workspace_support.manage
+      - access_as_user
     emits:
       - domain.workspace_support.negative_feedback

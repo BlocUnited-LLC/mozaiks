@@ -12,9 +12,32 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.1.9 - 2026-07-15
+
+### Fixed
+
+- Ask-mode human-support escalation now short-circuits the LLM turn after rendering the support handoff UI, so users do not receive an extra assistant answer after requesting an operator.
+- **`infra/docker/Dockerfile` no longer references removed root files** (`run_server.py`, `shared_app.py`, `workflows/`, `config/`): it now installs the real `mozaiks` package from `pyproject.toml` (fixing missing runtime dependencies such as `jsonschema` and `limits` that the old `requirements.txt`-based build silently dropped) and serves the first-party `factory_app/` workspace via `mozaiks serve . --host studio`. Verified with a local `docker build` + container smoke test against MongoDB.
+- **Helm chart liveness probe pointed at a 404** (`infra/helm/mozaiks/values.yaml`): `livenessProbe.httpGet.path` was `/api/health/liveness`, which does not exist; the real route is `/api/health/live` (`mozaiksai/hosts/runtime.py`). Verified by rendering the chart and confirming both probe paths resolve.
+- **`infra/compose/docker-compose.yml` dev `app` service used a broken `watchmedo`/`run_server.py` command** with no `watchdog` dependency installed: replaced with `mozaiks serve . --host studio --reload`, plus a `PYTHONPATH=/app` override so the bind-mounted repo shadows the image's installed first-party packages for live-reload dev. Verified end to end against a real container.
+
+### Added
+
+- First-party Studio messaging and workspace support modules now persist support conversations through linked message threads, including profile support transcripts, app/workspace support queues, operator replies, status updates, and delete flows.
+- Added the reusable `support` build-context pack for generated help-desk apps. The pack requires `messaging`, stores ticket metadata separately, and keeps support conversations in the generated `messages` module.
+- **`.dockerignore`** at the repo root: none previously existed, so every `docker build` sent the full working tree (including `node_modules`, `.git`, and local caches) to the daemon; this also meant the old Dockerfile's `web_shell`/`chat-ui` copy would have unintentionally bundled `node_modules` files matched by `MANIFEST.in` glob patterns.
+- **`infra-build` CI job** (`.github/workflows/ci.yml`): builds `infra/docker/Dockerfile`, smoke-runs the resulting image against a real MongoDB service until `/api/health` reports healthy, then lints and renders the `infra/helm/mozaiks` chart with a regression check for the corrected health probe paths.
+- **Source hygiene scan wired into CI** (`.github/workflows/ci.yml` `lint` job): the existing `scripts/production_readiness_gate.py` terminology scan previously only ran through the standalone script; it now runs on every PR/push.
+
 ### Changed
 
+- The generated `messaging` build pack is now a thread/message substrate only. Contacts, friends, follows, invitations, posts, and feeds belong to the `social` pack or to an app-specific relationship provider.
 - Hardened usage pricing catalog sync with upstream content hashing, normalized row-count drift checks, generated catalog change summaries, docs-based override guidance, and private override-file packaging protection.
+- Clarified the deployment boundary between repo-local `infra/`, the first-party `factory_app/` workspace, and provider-neutral generated app deployment artifacts; added a canonical architecture doc and rewrote the stale `infra/DEPLOYMENT.md` guide to match current OSS behavior.
+
+### Removed
+
+- Removed obsolete first-party demo social modules from the Studio app bundle and removed contacts templates from the messaging pack. Social behavior remains available through the explicit `social` build-context pack.
 
 ## 0.1.8 - 2026-07-12
 

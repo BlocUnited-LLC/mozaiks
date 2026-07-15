@@ -89,6 +89,7 @@ nav:
   - Guides:
       - Overview: guides/index.md
       - Use Studio: guides/studio/01-overview.md
+      - Integrations: guides/integrations/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
@@ -137,6 +138,7 @@ nav:
           - Overview: architecture/modules-systems/index.md
           - Module System: architecture/modules-systems/module-system.md
           - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
+          - Internal Messaging: architecture/modules-systems/internal-messaging.md
           - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
           - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
       - Workflows:
@@ -191,6 +193,9 @@ nav:
           - AppGenerator Output Assembly: architecture/builder/appgenerator-output-assembly-contract.md
           - AgentGenerator Output Assembly: architecture/builder/agentgenerator-output-assembly-contract.md
           - App-Backend Admin Contract: architecture/builder/app-backend-admin-contract.md
+      - Deployment:
+          - OSS Infra and Generated App Deployment: architecture/deployment/oss-infra-and-generated-app-deployment.md
+          - Generated App Deployment Contract: architecture/deployment/generated-app-deployment-contract.md
       - Frontend UI:
           - Overview: architecture/frontend/index.md
           - Chat UI Runtime:

@@ -105,10 +105,10 @@ def test_commerce_module_declares_expected_actions_and_internal_checkout_callbac
         "get_order",
         "update_order_status",
     }
-    assert actions["start_checkout"]["emits"] == ["app.commerce.checkout.requested"]
+    assert actions["start_checkout"]["emits"] == ["domain.commerce.checkout.requested"]
     assert actions["record_checkout_result"]["api_surface"] == "internal"
     assert actions["record_checkout_result"]["permissions"] == []
-    assert "app.commerce.order.paid" in actions["record_checkout_result"]["emits"]
+    assert "domain.commerce.order.paid" in actions["record_checkout_result"]["emits"]
 
     for action_id in ("list_products", "list_orders"):
         output = actions[action_id]["output_schema"]["properties"]
@@ -171,7 +171,7 @@ def test_commerce_backend_templates_compile_and_use_runtime_persistence() -> Non
     assert "ctx.db" not in repo_text
 
     service_text = _read_text(backend_root / "service.py")
-    assert "app.commerce.checkout.requested" in service_text
+    assert "domain.commerce.checkout.requested" in service_text
     assert "record_checkout_result" in service_text
     assert "/api/modules/mozaikspay" not in service_text
     assert "services.integrations.mozaikspay_client" not in service_text
@@ -183,11 +183,11 @@ def test_commerce_contracts_declare_events_admin_settings_and_reactions() -> Non
     events = _read_yaml(contracts_root / "events.yaml")
     event_types = {event["type"] for event in events["events"]}
     assert {
-        "app.commerce.product.created",
-        "app.commerce.cart.updated",
-        "app.commerce.checkout.requested",
-        "app.commerce.order.paid",
-        "app.commerce.checkout.failed",
+        "domain.commerce.product.created",
+        "domain.commerce.cart.updated",
+        "domain.commerce.checkout.requested",
+        "domain.commerce.order.paid",
+        "domain.commerce.checkout.failed",
     } <= event_types
 
     admin = _read_yaml(contracts_root / "admin.yaml")
@@ -202,7 +202,7 @@ def test_commerce_contracts_declare_events_admin_settings_and_reactions() -> Non
 
     reactions = _read_yaml(contracts_root / "reactions.yaml")
     bridge = reactions["reactions"][0]
-    assert bridge["event_type"] == "app.commerce.checkout.requested"
+    assert bridge["event_type"] == "domain.commerce.checkout.requested"
     assert bridge["target"]["capability_id"] == "mozaikspay.checkout.create_session"
 
 

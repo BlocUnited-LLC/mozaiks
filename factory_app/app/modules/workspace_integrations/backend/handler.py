@@ -4,6 +4,18 @@ from mozaiksai.core.runtime.composition.module_context import ModuleContext
 
 from .service import WorkspaceIntegrationsService
 
+_DEFAULT_WORKSPACE_ID = "demo-workspace"
+
+
+def _workspace_id_from_context(ctx: ModuleContext, workspace_id: str | None = None) -> str:
+    """Resolve workspace scope for workspace-level connector actions."""
+    return str(
+        workspace_id
+        or ctx.workspace_id
+        or ctx.tenant_id
+        or _DEFAULT_WORKSPACE_ID
+    )
+
 
 class WorkspaceIntegrationsModule:
     def __init__(self, service: WorkspaceIntegrationsService | None = None) -> None:
@@ -78,13 +90,58 @@ class WorkspaceIntegrationsModule:
         ctx: ModuleContext,
         **_: object,
     ) -> dict:
-        return await self.service.list_app_integration_needs(app_id=ctx.app_id)
+        return await self.service.list_app_integration_needs(
+            app_id=ctx.app_id,
+            workspace_id=_workspace_id_from_context(ctx),
+        )
+
+    async def upsert_app_integration_need(
+        self,
+        ctx: ModuleContext,
+        *,
+        app_id: str,
+        need: dict,
+        declared_at: str | None = None,
+        **_: object,
+    ) -> dict:
+        from datetime import UTC, datetime
+        result = await self.service.upsert_app_integration_need(
+            app_id=app_id,
+            need=need,
+            declared_at=declared_at or datetime.now(UTC).isoformat(),
+        )
+        if result.get("saved", 0) > 0:
+            await ctx.emit(
+                "domain.workspace_integrations.declarations_saved",
+                {"app_id": app_id, "count": result["saved"]},
+            )
+        return result
+
+    async def delete_app_integration_need(
+        self,
+        ctx: ModuleContext,
+        *,
+        app_id: str,
+        service: str,
+        **_: object,
+    ) -> dict:
+        result = await self.service.delete_app_integration_need(
+            app_id=app_id,
+            service=service,
+            user_id=ctx.user_id or "system",
+        )
+        if result.get("deleted"):
+            await ctx.emit(
+                "domain.workspace_integrations.declaration_removed",
+                {"app_id": app_id, "service": service, "removed_by": ctx.user_id or "system"},
+            )
+        return result
 
     async def save_workspace_connector(
         self,
         ctx: ModuleContext,
         *,
-        workspace_id: str,
+        workspace_id: str | None = None,
         service: str,
         secret_value: str,
         display_name: str | None = None,
@@ -94,7 +151,7 @@ class WorkspaceIntegrationsModule:
         **_: object,
     ) -> dict:
         return await self.service.save_workspace_connector(
-            workspace_id=workspace_id,
+            workspace_id=_workspace_id_from_context(ctx, workspace_id),
             service=service,
             secret_value=secret_value,
             display_name=display_name,
@@ -108,17 +165,22 @@ class WorkspaceIntegrationsModule:
         self,
         ctx: ModuleContext,
         *,
-        workspace_id: str,
+        workspace_id: str | None = None,
         **_: object,
     ) -> dict:
-        return await self.service.list_workspace_connectors(workspace_id=workspace_id)
+        return await self.service.list_workspace_connectors(
+            workspace_id=_workspace_id_from_context(ctx, workspace_id),
+        )
 
     async def delete_workspace_connector(
         self,
         ctx: ModuleContext,
         *,
-        workspace_id: str,
+        workspace_id: str | None = None,
         service: str,
         **_: object,
     ) -> dict:
-        return await self.service.delete_workspace_connector(workspace_id=workspace_id, service=service)
+        return await self.service.delete_workspace_connector(
+            workspace_id=_workspace_id_from_context(ctx, workspace_id),
+            service=service,
+        )

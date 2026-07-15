@@ -19,6 +19,14 @@
               "keys": [{"field": "participant_ids", "order": 1}, {"field": "updated_at", "order": -1}]
             },
             {
+              "name": "threads_by_subject_app_updated",
+              "keys": [{"field": "subject_app_id", "order": 1}, {"field": "updated_at", "order": -1}]
+            },
+            {
+              "name": "threads_by_scope_updated",
+              "keys": [{"field": "scope_type", "order": 1}, {"field": "scope_id", "order": 1}, {"field": "updated_at", "order": -1}]
+            },
+            {
               "name": "threads_by_participant_type_status",
               "keys": [
                 {"field": "participant_ids", "order": 1},
@@ -66,25 +74,6 @@
             {
               "name": "reads_by_user",
               "keys": [{"field": "user_id", "order": 1}]
-            }
-          ]
-        },
-        {
-          "mongo_collection": "messages_notifications",
-          "data_alias": "messages.notifications",
-          "indexes": [
-            {
-              "name": "notifications_by_user_created",
-              "keys": [{"field": "user_id", "order": 1}, {"field": "created_at", "order": -1}]
-            },
-            {
-              "name": "notifications_unread_by_user",
-              "keys": [{"field": "user_id", "order": 1}, {"field": "read", "order": 1}]
-            },
-            {
-              "name": "notifications_by_id",
-              "keys": [{"field": "notification_id", "order": 1}],
-              "unique": true
             }
           ]
         }

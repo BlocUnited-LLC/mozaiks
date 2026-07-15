@@ -31,6 +31,10 @@ EXPECTED_INTEGRATIONS_CATALOGS = {
     "catalog.yaml",
 }
 
+EXPECTED_MOZAIKSPAY_CONTRACTS = {
+    "provider_api_contract.yaml",
+}
+
 LEGACY_WORKFLOW_ROOT_CATALOGS = [
     *(f"factory_app/workflows/AppGenerator/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
     *(f"factory_app/workflows/AppGenerator/tools/{name}" for name in EXPECTED_APPGENERATOR_CATALOGS),
@@ -75,6 +79,8 @@ def test_factory_build_context_uses_named_context_roots() -> None:
             allowed |= EXPECTED_WEBAPP_BUILDER_CATALOGS
         if context_root.name == "integrations":
             allowed |= EXPECTED_INTEGRATIONS_CATALOGS
+        if context_root.name == "mozaikspay":
+            allowed |= EXPECTED_MOZAIKSPAY_CONTRACTS
         actual = {item.name for item in context_root.iterdir()}
         assert actual <= allowed, f"{context_root} has non-canonical build-context entries: {sorted(actual - allowed)}"
 
@@ -117,6 +123,33 @@ def test_context_yaml_uses_explicit_assets_not_implicit_lanes() -> None:
             )
             asset_path = (context_path.parent / asset["path"]).resolve()
             assert asset_path.exists(), f"{context_path} asset path does not exist: {asset_path}"
+
+
+def test_appgenerator_treats_in_app_notifications_as_runtime_contracts() -> None:
+    capability_routing = (FACTORY_BUILD_CONTEXT / "AppGenerator" / "capability_routing.yaml").read_text(
+        encoding="utf-8"
+    )
+    file_contracts = (FACTORY_BUILD_CONTEXT / "AppGenerator" / "file_contracts.yaml").read_text(
+        encoding="utf-8"
+    )
+    agents = (FACTORY_WORKFLOWS / "AppGenerator" / "agents.yaml").read_text(encoding="utf-8")
+
+    assert "Platform in-app notification storage" in capability_routing
+    assert "declare contracts/notifications.yaml" in capability_routing
+    assert "Do not create a standalone notifications module" in capability_routing
+    assert "Notification rules are deterministic event-to-intent mappings" in file_contracts
+    assert "ordinary in-app notifications as runtime-provided and deterministic" in agents
+
+
+def test_messaging_pack_keeps_contacts_and_hosted_features_out_of_substrate() -> None:
+    data = yaml.safe_load((FACTORY_BUILD_CONTEXT / "messaging" / "contract.yaml").read_text(encoding="utf-8")) or {}
+
+    forbidden_prefixes = {item.get("path_prefix") for item in data.get("forbidden_outputs") or []}
+    boundary_ids = {item.get("id") for item in data.get("runtime_boundaries") or []}
+
+    assert "modules/contacts/" in forbidden_prefixes
+    assert "no_messaging_contacts_facade" in boundary_ids
+    assert "hosted_extension_boundary" in boundary_ids
 
 
 def test_build_pack_contracts_are_typed_rule_contracts() -> None:

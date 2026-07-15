@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
@@ -9,124 +9,51 @@ import {
   StudioErrorState,
   StudioLoadingState,
 } from '../../ui/components/StudioShared.jsx'
-import AppStudioHero, { formatCompactNumber, formatDateTimeLabel } from './AppStudioChrome.jsx'
-import { getAppStudioSnapshot } from './appStudioDataHelpers.js'
-import { useAppStudioData } from './useAppStudioData.js'
-
-// ─── Demo sessions with placeholder transcripts ───────────────────────────────
-
-const DEMO_SESSIONS = [
-  {
-    chat_id: 'demo-session-0',
-    workflow_name: 'AppGenerator',
-    user_id: 'alex@example.com',
-    agent_turns: 3,
-    tool_calls: 4,
-    errors: 0,
-    started_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    ended_at: null,
-    status: 1,
-    awaiting_operator: true,
-    messages: [
-      { role: 'user', content: "I've been trying to get this working for an hour and I'm completely stuck. I need to talk to a real person." },
-      { role: 'assistant', content: "I completely understand — that's frustrating and I'm sorry you've hit a wall. An operator will follow up with you shortly. In the meantime, is there anything specific I can note for them about what you were trying to do?" },
-      { role: 'user', content: "Just tell them I need help with the invoicing module, it keeps erroring out on save." },
-    ],
-  },
-  {
-    chat_id: 'demo-session-1',
-    workflow_name: 'AppGenerator',
-    user_id: 'sarah@example.com',
-    agent_turns: 14,
-    tool_calls: 52,
-    errors: 0,
-    started_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-    ended_at: null,
-    status: 1,
-    messages: [
-      { role: 'user', content: 'Hi, I want to build an app that helps freelancers track their invoices and clients.' },
-      { role: 'assistant', content: "That's a great idea! I'll help you scope this out. Let me start by asking a few questions about your core workflows. How do freelancers typically create invoices today — manually or with existing tools?" },
-      { role: 'user', content: "Most of them do it manually with Word or Google Docs. It's a mess." },
-      { role: 'assistant', content: "Understood — so the core pain point is friction around invoice creation and tracking payment status. I'll design the app around three core workflows: Invoice Creation, Client Management, and Payment Tracking. Let me generate a concept brief for you now." },
-      { role: 'user', content: 'Yes exactly. Can you also add expense tracking?' },
-      { role: 'assistant', content: "Absolutely — expense tracking maps naturally into the data model alongside invoices. I'll add an Expenses module with receipt capture and categorization. Generating your full app plan now…" },
-    ],
-  },
-  {
-    chat_id: 'demo-session-2',
-    workflow_name: 'RevisionWorkflow',
-    user_id: 'james@example.com',
-    agent_turns: 8,
-    tool_calls: 23,
-    errors: 1,
-    started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-    ended_at: new Date(Date.now() - 2.8 * 60 * 60 * 1000).toISOString(),
-    status: 0,
-    messages: [
-      { role: 'user', content: 'I need to update the dashboard to show monthly revenue trends instead of daily.' },
-      { role: 'assistant', content: "Got it. I'll update the dashboard page schema to group revenue by month and add a trend line chart primitive. This will also require a small change to the data aggregation query in the analytics module. Applying now…" },
-      { role: 'user', content: 'And can you also add a filter for date range?' },
-      { role: 'assistant', content: "Yes — I'll add a DateRangePicker control to the toolbar. One moment while I apply the revision…" },
-      { role: 'system', content: 'Error: structured output validation failed — chart primitive config missing required field `y_axis_label`.' },
-    ],
-  },
-  {
-    chat_id: 'demo-session-3',
-    workflow_name: 'AppGenerator',
-    user_id: 'priya@example.com',
-    agent_turns: 32,
-    tool_calls: 118,
-    errors: 0,
-    started_at: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(),
-    ended_at: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
-    status: 2,
-    messages: [
-      { role: 'user', content: 'I want to create a community platform for indie game developers to share projects and get feedback.' },
-      { role: 'assistant', content: "Perfect — a community platform for indie devs is a great fit for Mozaiks. I'll structure this around Project Showcase, Feedback Threads, and Member Profiles as the core modules. Let me build your concept brief…" },
-      { role: 'user', content: 'Can we also have a voting/rating system for projects?' },
-      { role: 'assistant', content: "Yes — I'll add a Reactions module with upvotes, ratings, and a trending feed algorithm. This is built in. Generating your full app plan now…" },
-      { role: 'assistant', content: "Your app is ready! I've generated all modules, pages, and workflows. You can review the build output in the Build History tab and deploy when ready." },
-    ],
-  },
-  {
-    chat_id: 'demo-session-4',
-    workflow_name: 'DesignDocs',
-    user_id: 'mike@example.com',
-    agent_turns: 6,
-    tool_calls: 18,
-    errors: 0,
-    started_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    ended_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 8 * 60 * 1000).toISOString(),
-    status: 2,
-    messages: [
-      { role: 'user', content: 'Can you review the data model for the Orders module and suggest improvements?' },
-      { role: 'assistant', content: "Looking at the Orders schema now. I see a few things: the `order_items` array should be normalized into a separate collection for scale, and the `status` field would benefit from an explicit enum. Let me draft the updated design doc…" },
-      { role: 'assistant', content: "Design documentation updated. The revised schema includes normalized order items, explicit status transitions, and indexed lookups on `user_id` and `created_at`. Ready for review." },
-    ],
-  },
-]
-
-const DEMO_OPERATORS = ['Unassigned', 'Sarah K.', 'James M.', 'Priya R.', 'Mike T.']
+import { WorkspaceStudioHero, formatCompactNumber } from './AppStudioChrome.jsx'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function sessionStatusTone(run) {
-  if (run.awaiting_operator) return 'warning'
-  if (Number(run.errors || 0) > 0 || run.status === 0) return 'destructive'
-  if (!run.ended_at && Number(run.agent_turns || 0) > 30) return 'warning'
-  if (run.status === 2) return 'success'
-  if (run.status === 1) return 'primary'
-  return 'default'
+async function fetchCurrentProfileAppId() {
+  try {
+    const response = await fetch('/api/me')
+    if (!response.ok) return null
+    const profile = await response.json()
+    return profile?.app_id || profile?.appId || null
+  } catch (_) {
+    return null
+  }
 }
 
-function sessionStatusLabel(run) {
-  if (run.awaiting_operator) return 'Awaiting operator'
-  if (Number(run.errors || 0) > 0 || run.status === 0) return 'Error'
-  if (!run.ended_at && Number(run.agent_turns || 0) > 30) return 'Stalled'
-  if (run.status === 2) return 'Completed'
-  if (run.status === 1) return 'Running'
-  return 'Ended'
+function supportStatusForRun(run) {
+  if (run.support_status === 'resolved' || run.status === 'resolved' || run.status === 2) {
+    return { label: 'Resolved', tone: 'success', bucket: 'resolved' }
+  }
+  if (run.last_message_by_role === 'operator' || run.support_status === 'responded') {
+    return { label: 'Responded', tone: 'primary', bucket: 'responded' }
+  }
+  if (
+    run.support_status === 'needs-reply' ||
+    run.last_message_by_role === 'user' ||
+    run.last_message_by_role === 'assistant' ||
+    run.awaiting_operator ||
+    Number(run.errors || 0) > 0 ||
+    run.status === 0 ||
+    (!run.ended_at && Number(run.agent_turns || 0) > 30)
+  ) {
+    return { label: 'Needs reply', tone: 'warning', bucket: 'needs-reply' }
+  }
+  if (run.ended_at) {
+    return { label: 'Resolved', tone: 'success', bucket: 'resolved' }
+  }
+  return { label: 'In progress', tone: 'primary', bucket: 'in-progress' }
 }
+
+const SUPPORT_FILTERS = [
+  { id: 'needs-reply', label: 'Needs reply' },
+  { id: 'responded', label: 'Responded' },
+  { id: 'resolved', label: 'Resolved' },
+  { id: 'all', label: 'All' },
+]
 
 function relativeTime(iso) {
   if (!iso) return null
@@ -140,12 +67,6 @@ function relativeTime(iso) {
   return `${days}d ago`
 }
 
-function stringHue(str) {
-  let hash = 0
-  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash)
-  return Math.abs(hash) % 360
-}
-
 function userInitials(userId) {
   if (!userId) return '?'
   const clean = userId.replace(/@.*$/, '').replace(/[._-]+/g, ' ').trim()
@@ -154,28 +75,14 @@ function userInitials(userId) {
   return (words[0] || '?').slice(0, 2).toUpperCase()
 }
 
-function assignmentsKey(appId) {
-  return `mozaiks_support_assignments_${appId}`
-}
-
-function loadAssignments(appId) {
-  try { return JSON.parse(localStorage.getItem(assignmentsKey(appId)) || '{}') } catch { return {} }
-}
-
-function saveAssignments(appId, assignments) {
-  try { localStorage.setItem(assignmentsKey(appId), JSON.stringify(assignments)) } catch (_) {}
-}
-
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 
 function UserAvatar({ userId, size = 'md' }) {
   const initials = userInitials(userId)
-  const hue = stringHue(userId || '')
   const sz = size === 'sm' ? 'h-7 w-7 text-[10px]' : 'h-9 w-9 text-xs'
   return (
     <span
-      className={`flex shrink-0 items-center justify-center rounded-full font-bold text-white shadow-sm ${sz}`}
-      style={{ backgroundColor: `hsl(${hue} 55% 42%)` }}
+      className={`flex shrink-0 items-center justify-center rounded-full bg-primary/80 font-bold text-primary-foreground shadow-sm ring-1 ring-primary/25 ${sz}`}
       aria-hidden="true"
     >
       {initials}
@@ -186,8 +93,8 @@ function UserAvatar({ userId, size = 'md' }) {
 // ─── Session list card ────────────────────────────────────────────────────────
 
 function SessionListCard({ run, active, onClick }) {
-  const tone = sessionStatusTone(run)
-  const needsAttention = tone === 'destructive' || tone === 'warning'
+  const supportStatus = supportStatusForRun(run)
+  const needsAttention = supportStatus.bucket === 'needs-reply'
   return (
     <button
       type="button"
@@ -205,12 +112,14 @@ function SessionListCard({ run, active, onClick }) {
         <UserAvatar userId={run.user_id} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-1">
-            <span className="truncate text-xs font-semibold text-foreground/90">{run.workflow_name || 'Chat session'}</span>
+            <span className="truncate text-xs font-semibold text-foreground/90">{run.subject || run.workflow_name || 'Support request'}</span>
             <span className="shrink-0 text-[10px] text-muted-foreground/50">{relativeTime(run.started_at)}</span>
           </div>
-          <div className="mt-0.5 truncate text-[11px] text-muted-foreground/65">{run.user_id || 'Unknown user'}</div>
+          <div className="mt-0.5 truncate text-[11px] text-muted-foreground/65">
+            {run.user_id || 'Unknown user'} · {run.app_id || 'workspace'}
+          </div>
           <div className="mt-1.5">
-            <StatusPill tone={tone}>{sessionStatusLabel(run)}</StatusPill>
+            <StatusPill tone={supportStatus.tone}>{supportStatus.label}</StatusPill>
           </div>
         </div>
       </div>
@@ -220,26 +129,91 @@ function SessionListCard({ run, active, onClick }) {
 
 // ─── Thread detail panel ──────────────────────────────────────────────────────
 
-function ThreadPanel({ run, assignments, onAssign, operators }) {
+function ThreadPanel({ run, appId, onMessageSent, onDeleted, onStatusUpdated }) {
   const [extraMessages, setExtraMessages] = useState([])
+  const [sendError, setSendError] = useState(null)
+  const [deleteError, setDeleteError] = useState(null)
+  const [statusError, setStatusError] = useState(null)
+  const [statusUpdating, setStatusUpdating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => { setExtraMessages([]) }, [run?.chat_id])
 
   if (!run) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border/30 bg-card/40 px-6 py-12 text-center">
-        <span className="text-3xl opacity-20">💬</span>
-        <p className="text-sm text-muted-foreground/60">Select a session to review the conversation</p>
+        <p className="text-sm font-medium text-foreground">No support chat selected</p>
+        <p className="text-xs text-muted-foreground/60">Select a request to review its conversation.</p>
       </div>
     )
   }
 
   const messages = [...(run.messages || []), ...extraMessages]
-  const assignedTo = assignments[run.chat_id] || 'Unassigned'
-  const tone = sessionStatusTone(run)
+  const supportStatus = supportStatusForRun(run)
 
-  function handleSend(text) {
-    setExtraMessages((prev) => [...prev, { role: 'operator', content: text }])
+  async function handleSend(text) {
+    setSendError(null)
+    if (run.request_id) {
+      try {
+        const response = await fetch('/api/modules/workspace_support/add_support_message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request_id: run.request_id, message: text, sender_role: 'operator', app_id: appId }),
+        })
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+        const body = await response.json()
+        if (!body?.success) throw new Error(body?.error || 'Reply could not be sent.')
+        await onMessageSent?.()
+      } catch (err) {
+        setSendError(err?.message || 'Reply could not be sent.')
+      }
+    } else {
+      setExtraMessages((prev) => [...prev, { role: 'operator', content: text, senderLabel: 'Support' }])
+    }
+  }
+
+  async function handleStatusChange(nextStatus) {
+    if (!run?.request_id || statusUpdating) return
+    setStatusUpdating(true)
+    setStatusError(null)
+    try {
+      const response = await fetch('/api/modules/workspace_support/update_support_request_status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: run.request_id, status: nextStatus, app_id: appId }),
+      })
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+      const body = await response.json()
+      if (!body?.success) throw new Error(body?.error || 'Status was not updated.')
+      await onStatusUpdated?.()
+    } catch (err) {
+      setStatusError(err?.message || 'Support request status could not be updated.')
+    } finally {
+      setStatusUpdating(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!run?.request_id || deleting) return
+    const confirmed = window.confirm(`Delete support request "${run.subject || run.request_id}"? This removes the linked thread and messages.`)
+    if (!confirmed) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const response = await fetch('/api/modules/workspace_support/delete_support_request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: run.request_id, app_id: appId }),
+      })
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+      const body = await response.json()
+      if (!body?.success) throw new Error(body?.error || 'Request was not deleted.')
+      await onDeleted?.(run.request_id)
+    } catch (err) {
+      setDeleteError(err?.message || 'Support request could not be deleted.')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -251,29 +225,58 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
           <UserAvatar userId={run.user_id} size="sm" />
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-foreground">{run.user_id || 'Unknown user'}</div>
-            <div className="text-[11px] text-muted-foreground/60">{run.workflow_name} · {relativeTime(run.started_at)}</div>
+            <div className="text-[11px] text-muted-foreground/60">{run.subject || run.workflow_name} · {relativeTime(run.started_at)}</div>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <StatusPill tone={tone}>{sessionStatusLabel(run)}</StatusPill>
-          <select
-            value={assignedTo}
-            onChange={(e) => onAssign(run.chat_id, e.target.value)}
-            className="rounded-lg border border-border/30 bg-background/60 px-2 py-1 text-[11px] text-foreground/65 transition-colors hover:border-border/60 focus:outline-none focus:ring-1 focus:ring-primary/40"
-          >
-            {operators.map((op) => <option key={op} value={op}>{op}</option>)}
-          </select>
+          <StatusPill tone={supportStatus.tone}>{supportStatus.label}</StatusPill>
+          {run.request_id && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleStatusChange(run.status === 'resolved' ? 'open' : 'resolved')}
+                disabled={statusUpdating}
+                className="rounded-lg border border-border/40 bg-card/70 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
+              >
+                {statusUpdating ? 'Saving…' : run.status === 'resolved' ? 'Reopen' : 'Resolve'}
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold text-destructive transition-colors hover:border-destructive/60 hover:bg-destructive/15 disabled:opacity-50"
+                title="Delete support request"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {/* ChatThread primitive handles messages + input */}
       <ChatThread
         messages={messages}
-        onSend={handleSend}
-        inputPlaceholder="Reply to this session…"
-        emptyText="Transcript will appear here once the session completes."
+        onSend={run.status === 'resolved' ? undefined : handleSend}
+        inputPlaceholder="Reply to this ticket…"
+        emptyText="No messages yet."
         className="flex-1 min-h-0"
       />
+      {sendError && (
+        <div className="border-t border-destructive/20 px-4 py-2 text-xs text-destructive">
+          {sendError}
+        </div>
+      )}
+      {deleteError && (
+        <div className="border-t border-destructive/20 px-4 py-2 text-xs text-destructive">
+          {deleteError}
+        </div>
+      )}
+      {statusError && (
+        <div className="border-t border-destructive/20 px-4 py-2 text-xs text-destructive">
+          {statusError}
+        </div>
+      )}
 
     </div>
   )
@@ -281,110 +284,197 @@ function ThreadPanel({ run, assignments, onAssign, operators }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+// Convert a workspace_support request record to the session shape AppSupportPage expects.
+function supportRequestToRun(req) {
+  const rid = req.request_id || req.id
+  const subject = req.subject || req.page_title || String(req.message || 'Support request').slice(0, 80)
+  const appId = req.subject_app_id || req.app_id || 'workspace'
+  const messages = Array.isArray(req.messages) && req.messages.length > 0
+    ? req.messages
+    : req.message
+      ? [{ role: 'user', content: req.message }]
+      : []
+  const lastMessageByRole = req.last_message_by_role || messages[messages.length - 1]?.role || 'user'
+  const isResolved = req.status === 'resolved'
+  return {
+    chat_id: rid || String(Math.random()),
+    request_id: rid || null,   // kept for add_support_message POSTs
+    workflow_name: subject,
+    subject,
+    app_id: appId,
+    user_id: req.user_id || req.submitted_by || 'user',
+    agent_turns: 0,
+    tool_calls: 0,
+    errors: 0,
+    started_at: req.created_at || new Date().toISOString(),
+    ended_at: isResolved ? req.resolved_at || req.updated_at || req.created_at : null,
+    status: req.status || 'open',
+    support_status: isResolved ? 'resolved' : lastMessageByRole === 'operator' ? 'responded' : 'needs-reply',
+    awaiting_operator: !isResolved && lastMessageByRole !== 'operator',
+    last_message_by_role: lastMessageByRole,
+    messages,
+  }
+}
+
 export default function AppSupportPage() {
   const { appId = 'workspace-app' } = useParams()
-  const { data, loading, error, dataMode } = useAppStudioData(appId)
-  const snapshot = useMemo(() => getAppStudioSnapshot(appId, data, dataMode), [appId, data, dataMode])
-  const [assignments, setAssignments] = useState(() => loadAssignments(appId))
+  const [effectiveAppId, setEffectiveAppId] = useState(appId)
   const [selectedId, setSelectedId] = useState(null)
+  const [activeFilter, setActiveFilter] = useState('needs-reply')
+  const [supportRequests, setSupportRequests] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  if (loading) return <StudioLoadingState label="Loading support inbox…" />
-  if (error || !data?.summary) return <StudioErrorState title="Support Unavailable" message={error || 'No support data returned.'} />
+  const loadSupportRequests = useCallback(async (options = {}) => {
+    const silent = Boolean(options?.silent)
+    if (!silent) setLoading(true)
+    setError(null)
+    try {
+      let targetAppId = appId
+      if (!targetAppId || targetAppId === 'default' || targetAppId === 'workspace-app') {
+        targetAppId = await fetchCurrentProfileAppId() || targetAppId
+      }
+      setEffectiveAppId(targetAppId)
+      const res = await fetch('/api/modules/workspace_support/list_support_requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'all', limit: 50, scope: 'app', app_id: targetAppId }),
+      })
+      if (!res.ok) {
+        throw new Error(`${res.status} ${res.statusText}`)
+      }
+      const body = await res.json()
+      const nextRuns = (body?.requests || []).map(supportRequestToRun)
+      setSupportRequests(nextRuns)
+      setSelectedId((current) => (
+        current && nextRuns.some((run) => run.chat_id === current)
+          ? current
+          : nextRuns[0]?.chat_id || null
+      ))
+    } catch (err) {
+      setSupportRequests([])
+      setError(err?.message || 'Support chats could not be loaded.')
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [appId])
 
-  // Use DEMO_SESSIONS until a transcript API exists. Real runs have no messages
-  // array and the right panel would always be empty. Swap this once
-  // /api/admin/runs/:chatId/messages is wired up.
-  const runs = DEMO_SESSIONS
+  useEffect(() => { loadSupportRequests() }, [loadSupportRequests])
+
+  useEffect(() => {
+    const refresh = () => loadSupportRequests({ silent: true })
+    const intervalId = window.setInterval(refresh, 5000)
+    const handleFocus = () => refresh()
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [loadSupportRequests])
+
+  if (loading) return <StudioLoadingState label="Loading support chats…" />
+  if (error) return <StudioErrorState title="Support Unavailable" message={error} />
+
+  const allRuns = supportRequests
+  const runs = allRuns.filter((run) => {
+    if (activeFilter === 'all') return true
+    return supportStatusForRun(run).bucket === activeFilter
+  })
   const selectedRun = runs.find((r) => r.chat_id === selectedId) || null
 
-  const erroredCount = runs.filter((r) => Number(r.errors || 0) > 0 || r.status === 0).length
-  const stalledCount = runs.filter((r) => !r.ended_at && Number(r.agent_turns || 0) > 30).length
-  const feedbackItems = Array.isArray(snapshot.summary?.support?.feedback) ? snapshot.summary.support.feedback : []
-  const poorFeedbackCount = feedbackItems.filter((f) => f.rating === 0).length
-  const needsReview = erroredCount + stalledCount
-
-  function handleAssign(chatId, operator) {
-    const next = { ...assignments, [chatId]: operator }
-    setAssignments(next)
-    saveAssignments(appId, next)
-  }
+  const statusBuckets = allRuns.reduce((counts, run) => {
+    const bucket = supportStatusForRun(run).bucket
+    counts[bucket] = (counts[bucket] || 0) + 1
+    return counts
+  }, {})
+  const needsReplyCount = statusBuckets['needs-reply'] || 0
+  const respondedCount = statusBuckets.responded || 0
+  const resolvedCount = statusBuckets.resolved || 0
 
   const summaryItems = [
-    { id: 'sessions', label: 'Total Sessions', value: formatCompactNumber(runs.length, '0'), detail: 'All chat sessions' },
-    { id: 'errors', label: 'Sessions with Errors', value: formatCompactNumber(erroredCount, '0'), detail: 'Need triage' },
-    { id: 'stalled', label: 'Stalled Sessions', value: formatCompactNumber(stalledCount, '0'), detail: 'No completion yet' },
-    { id: 'feedback', label: 'Poor Ratings', value: formatCompactNumber(poorFeedbackCount, '0'), detail: 'From session feedback' },
+    { id: 'chats', label: 'Support chats', value: formatCompactNumber(allRuns.length, '0'), detail: 'For this app' },
+    { id: 'needs-reply', label: 'Needs reply', value: formatCompactNumber(needsReplyCount, '0'), detail: 'Waiting on support' },
+    { id: 'responded', label: 'Responded', value: formatCompactNumber(respondedCount, '0'), detail: 'Waiting on user' },
+    { id: 'resolved', label: 'Resolved', value: formatCompactNumber(resolvedCount, '0'), detail: 'Closed chats' },
   ]
 
   return (
     <WorkspaceLayout>
       <div className="space-y-6">
-        <AppStudioHero
-          appId={appId}
-          summary={snapshot.summary}
-          dataMode={dataMode}
+        <WorkspaceStudioHero
           title="Support"
-          subtitle="Review user sessions, assign operators, and follow up on issues."
+          subtitle={`Review support chats for ${effectiveAppId}, respond, resolve, or remove requests.`}
           summaryItems={summaryItems}
         />
 
         <Panel
           eyebrow="Inbox"
-          title="Help desk"
-          subtitle="User sessions appear here. Click a session to review the conversation and assign an operator."
-          action={needsReview > 0
-            ? <StatusPill tone="warning">{needsReview} need review</StatusPill>
-            : <StatusPill tone="success">All clear</StatusPill>}
+          title="Support chats"
+          subtitle="Click a chat to review the conversation, reply, resolve, or remove it."
+          action={needsReplyCount > 0
+            ? <StatusPill tone="warning">{needsReplyCount} need reply</StatusPill>
+            : <StatusPill tone="success">No open replies</StatusPill>}
         >
+          <div className="mb-4 flex flex-wrap gap-2">
+            {SUPPORT_FILTERS.map((filter) => {
+              const count = filter.id === 'all' ? allRuns.length : statusBuckets[filter.id] || 0
+              const active = activeFilter === filter.id
+              return (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setActiveFilter(filter.id)}
+                  className={[
+                    'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
+                    active
+                      ? 'border-primary/60 bg-primary/15 text-foreground'
+                      : 'border-border/30 bg-card/50 text-muted-foreground hover:border-border/60 hover:text-foreground',
+                  ].join(' ')}
+                >
+                  {filter.label} <span className="ml-1 text-muted-foreground/70">{count}</span>
+                </button>
+              )
+            })}
+          </div>
+
           {/* Two-pane inbox */}
           <div className="flex gap-3" style={{ minHeight: '480px' }}>
 
             {/* Left: session list */}
             <div className="flex w-64 shrink-0 flex-col gap-1.5 overflow-y-auto xl:w-72">
-              {runs.map((run) => (
+              {runs.length > 0 ? runs.map((run) => (
                 <SessionListCard
                   key={run.chat_id}
                   run={run}
                   active={run.chat_id === selectedId}
                   onClick={() => setSelectedId(run.chat_id === selectedId ? null : run.chat_id)}
                 />
-              ))}
+              )) : (
+                <div className="rounded-2xl border border-dashed border-border/30 bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground/70">
+                  No support chats yet.
+                </div>
+              )}
             </div>
 
             {/* Right: thread detail */}
             <ThreadPanel
               run={selectedRun}
-              assignments={assignments}
-              onAssign={handleAssign}
-              operators={DEMO_OPERATORS}
+              appId={effectiveAppId}
+              onMessageSent={loadSupportRequests}
+              onStatusUpdated={loadSupportRequests}
+              onDeleted={async () => {
+                setSelectedId(null)
+                await loadSupportRequests()
+              }}
             />
           </div>
         </Panel>
 
-        {feedbackItems.length > 0 && (
-          <Panel
-            eyebrow="Feedback"
-            title="Session ratings"
-            subtitle="Ratings submitted by users at the end of their chat sessions."
-            action={poorFeedbackCount > 0
-              ? <StatusPill tone="warning">{poorFeedbackCount} poor</StatusPill>
-              : <StatusPill tone="success">All positive</StatusPill>}
-          >
-            <div className="space-y-2">
-              {feedbackItems.slice(0, 10).map((item, i) => (
-                <div key={item.session_id || i} className="flex items-center justify-between rounded-2xl border border-border/20 bg-card/65 px-4 py-3">
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">{item.workflow_name || 'Session'}</div>
-                    <div className="mt-1 text-xs text-muted-foreground/75">{formatDateTimeLabel(item.created_at)}</div>
-                  </div>
-                  <StatusPill tone={item.rating === 0 ? 'destructive' : 'success'}>
-                    {item.rating === 0 ? 'Poor' : 'Good'}
-                  </StatusPill>
-                </div>
-              ))}
-            </div>
-          </Panel>
-        )}
       </div>
     </WorkspaceLayout>
   )

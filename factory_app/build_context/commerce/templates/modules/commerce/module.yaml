@@ -103,7 +103,7 @@ actions:
       type: object
       required: [success, product]
     permissions: [commerce.catalog.manage]
-    emits: [app.commerce.product.created]
+    emits: [domain.commerce.product.created]
 
   - id: update_product
     api_surface: public
@@ -129,7 +129,7 @@ actions:
       type: object
       required: [success, product]
     permissions: [commerce.catalog.manage]
-    emits: [app.commerce.product.updated]
+    emits: [domain.commerce.product.updated]
 
   - id: archive_product
     api_surface: public
@@ -144,7 +144,7 @@ actions:
       type: object
       required: [success]
     permissions: [commerce.catalog.manage]
-    emits: [app.commerce.product.archived]
+    emits: [domain.commerce.product.archived]
 
   - id: adjust_inventory
     api_surface: public
@@ -161,7 +161,7 @@ actions:
       type: object
       required: [success, product]
     permissions: [commerce.inventory.manage]
-    emits: [app.commerce.inventory.adjusted]
+    emits: [domain.commerce.inventory.adjusted]
 
   - id: get_cart
     api_surface: public_readonly
@@ -189,7 +189,7 @@ actions:
       type: object
       required: [success, cart]
     permissions: [commerce.cart.manage]
-    emits: [app.commerce.cart.updated]
+    emits: [domain.commerce.cart.updated]
 
   - id: update_cart_item
     api_surface: public
@@ -205,7 +205,7 @@ actions:
       type: object
       required: [success, cart]
     permissions: [commerce.cart.manage]
-    emits: [app.commerce.cart.updated]
+    emits: [domain.commerce.cart.updated]
 
   - id: remove_cart_item
     api_surface: public
@@ -220,7 +220,7 @@ actions:
       type: object
       required: [success, cart]
     permissions: [commerce.cart.manage]
-    emits: [app.commerce.cart.updated]
+    emits: [domain.commerce.cart.updated]
 
   - id: clear_cart
     api_surface: public
@@ -233,7 +233,7 @@ actions:
       type: object
       required: [success, cart]
     permissions: [commerce.cart.manage]
-    emits: [app.commerce.cart.updated]
+    emits: [domain.commerce.cart.updated]
 
   - id: start_checkout
     api_surface: public
@@ -255,7 +255,7 @@ actions:
         checkout_request: { type: object }
         error: { type: string }
     permissions: [commerce.checkout.start]
-    emits: [app.commerce.checkout.requested]
+    emits: [domain.commerce.checkout.requested]
 
   - id: record_checkout_result
     api_surface: internal
@@ -274,7 +274,7 @@ actions:
       type: object
       required: [success, order]
     permissions: []
-    emits: [app.commerce.order.paid, app.commerce.checkout.failed]
+    emits: [domain.commerce.order.paid, domain.commerce.checkout.failed]
 
   - id: list_orders
     api_surface: public_readonly
@@ -341,7 +341,7 @@ actions:
       type: object
       required: [success, order]
     permissions: [commerce.orders.manage]
-    emits: [app.commerce.order.updated]
+    emits: [domain.commerce.order.updated]
 
 capabilities:
   - capability_id: commerce.products.browse

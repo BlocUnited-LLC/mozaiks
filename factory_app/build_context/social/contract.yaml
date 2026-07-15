@@ -108,6 +108,10 @@ required_outputs:
   - path: modules/user_posts/contracts/profile.yaml
     owner: templates
   # UI
+  - path: ui/index.js
+    owner: templates
+  - path: ui/components/SocialProfileTabs.jsx
+    owner: templates
   - path: ui/pages/feed.yaml
     owner: templates
   - path: ui/pages/friends.yaml
@@ -123,7 +127,7 @@ forbidden_outputs:
 
 runtime_boundaries:
   - id: persistence_layer
-    rule: All repo files must use app_data_from_context and collection aliases. No direct Motor clients.
+    rule: All repo files must use ctx.persistence.collection(module_id, entity_name). No direct Motor clients and no app_data_from_context aliases.
   - id: event_emission
     rule: Events emitted via ctx.emit() in service.py only. Handler and repo never emit.
   - id: bidirectional_friendship

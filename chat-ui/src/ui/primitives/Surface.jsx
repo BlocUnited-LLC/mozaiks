@@ -238,10 +238,13 @@ function readShellChromeInsets() {
 
   const shellHeader = document.querySelector('header');
   const shellFooter = document.querySelector('.shell-footer');
+  const shellMobileBottomBar = document.querySelector('.shell-mobile-bottom-bar');
+  const footerHeight = Math.ceil(shellFooter?.getBoundingClientRect().height || 0);
+  const mobileBottomBarHeight = Math.ceil(shellMobileBottomBar?.getBoundingClientRect().height || 0);
 
   return {
     top: Math.max(0, Math.ceil(shellHeader?.getBoundingClientRect().height || 0)),
-    bottom: Math.max(0, Math.ceil(shellFooter?.getBoundingClientRect().height || 0)),
+    bottom: Math.max(0, footerHeight, mobileBottomBarHeight),
   };
 }
 
@@ -263,8 +266,10 @@ function useShellChromeInsets(active) {
       observer = new ResizeObserver(updateInsets);
       const shellHeader = document.querySelector('header');
       const shellFooter = document.querySelector('.shell-footer');
+      const shellMobileBottomBar = document.querySelector('.shell-mobile-bottom-bar');
       if (shellHeader) observer.observe(shellHeader);
       if (shellFooter) observer.observe(shellFooter);
+      if (shellMobileBottomBar) observer.observe(shellMobileBottomBar);
     }
 
     return () => {
@@ -286,8 +291,10 @@ export function SlideOver({
   children,
   footer = null,
   maxWidthClass = 'max-w-xl',
+  backdrop = 'blur',
 }) {
   const { top, bottom } = useShellChromeInsets(open);
+  const useBlurBackdrop = backdrop !== 'dim';
 
   useEffect(() => {
     if (!open) return undefined;
@@ -354,9 +361,9 @@ export function SlideOver({
           aria-label="Close panel"
           onClick={onClose}
           style={{
-            backgroundColor: 'rgba(2, 6, 23, 0.62)',
-            WebkitBackdropFilter: 'blur(12px)',
-            backdropFilter: 'blur(12px)',
+            backgroundColor: useBlurBackdrop ? 'rgba(2, 6, 23, 0.62)' : 'rgba(2, 6, 23, 0.5)',
+            WebkitBackdropFilter: useBlurBackdrop ? 'blur(12px)' : undefined,
+            backdropFilter: useBlurBackdrop ? 'blur(12px)' : undefined,
           }}
         />
         <section

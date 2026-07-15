@@ -42,13 +42,23 @@ def _notification_query_for_principal(principal: UserPrincipal) -> dict[str, Any
 def _notification_visibility_filter(principal: UserPrincipal) -> list[dict[str, Any]]:
     """Return the $or visibility filter for platform_notifications queries."""
     visibility: list[dict[str, Any]] = [
-        {"actor.id": principal.user_id},
         {"audience.user_ids": principal.user_id},
     ]
     roles = [role for role in principal.roles if role]
     if roles:
         visibility.append({"audience.roles": {"$in": roles}})
-    visibility.append({"audience.roles": {"$exists": False}})
+    permissions = [scope for scope in principal.scopes if scope]
+    if permissions:
+        visibility.append({"audience.permissions": {"$in": permissions}})
+    visibility.append(
+        {
+            "$and": [
+                {"$or": [{"audience.user_ids": {"$exists": False}}, {"audience.user_ids": []}]},
+                {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
+                {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
+            ]
+        }
+    )
     return visibility
 
 

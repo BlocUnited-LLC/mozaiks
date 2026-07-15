@@ -81,11 +81,12 @@ services:
     image: mozaiksai-app:latest
     pull_policy: never
     container_name: mozaiksai-app
-    command: >
-      watchmedo auto-restart 
-      --patterns="*.py" 
-      --recursive -- 
-      python run_server.py
+    # Dev override: run the mozaiks CLI directly against the bind-mounted repo
+    # root so uvicorn's own --reload picks up live edits. See PYTHONPATH below —
+    # it shadows the image's frozen site-packages copies of the first-party
+    # packages (mozaiksai, mozaiks_cli, factory_app, logs) with the live
+    # bind-mounted source.
+    command: ["mozaiks", "serve", ".", "--host", "studio", "--reload"]
     env_file:
       - ../../.env
     ports:
@@ -99,6 +100,9 @@ services:
       AG2_RUNTIME_LOGGING: "sqlite"
       LOGS_BASE_DIR: /app/logs/logs
       DOCKERIZED: "true"
+      # Prefer the bind-mounted repo source over the image's installed copy
+      # for the first-party packages, enabling live-reload dev.
+      PYTHONPATH: /app
       # In docker mode, use the compose-network mongo service.
       # Override by setting MONGO_URI in the repo-root .env (or your shell env).
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/mozaiksai}
@@ -110,10 +114,9 @@ services:
         condition: service_healthy
     volumes:
       - ../../:/app
-      - ../../logs/logs:/app/logs/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8000)); print('ok')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 10s
       timeout: 3s
       retries: 10

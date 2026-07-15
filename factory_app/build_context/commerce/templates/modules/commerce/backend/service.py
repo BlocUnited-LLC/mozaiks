@@ -169,7 +169,7 @@ class CommerceService:
         }
         await self.products.insert(ctx, doc=product)
         await ctx.emit(
-            "app.commerce.product.created",
+            "domain.commerce.product.created",
             {"product_id": product["product_id"], "status": product["status"], "created_by": actor},
         )
         return {"success": True, "product": serialize_product(product)}
@@ -217,7 +217,7 @@ class CommerceService:
         updates["updated_at"] = timestamp_now()
         updated = await self.products.update(ctx, product_id=product_id, updates=updates)
         await ctx.emit(
-            "app.commerce.product.updated",
+            "domain.commerce.product.updated",
             {"product_id": product_id, "changes": sorted(updates.keys()), "updated_by": actor_id(ctx)},
         )
         return {"success": True, "product": serialize_product(updated or product)}
@@ -231,7 +231,7 @@ class CommerceService:
         if not updated:
             return {"success": False, "error": "product not found"}
         await ctx.emit(
-            "app.commerce.product.archived",
+            "domain.commerce.product.archived",
             {"product_id": product_id, "archived_by": actor_id(ctx)},
         )
         return {"success": True, "product": serialize_product(updated)}
@@ -256,7 +256,7 @@ class CommerceService:
             if not product:
                 return {"success": False, "error": "product not found"}
         await ctx.emit(
-            "app.commerce.inventory.adjusted",
+            "domain.commerce.inventory.adjusted",
             {
                 "product_id": product_id,
                 "delta": int(delta),
@@ -416,7 +416,7 @@ class CommerceService:
         await self.checkout_requests.insert(ctx, doc=checkout_request)
         await self.carts.mark_converted(ctx, cart_id=cart["cart_id"], now=now)
         await ctx.emit(
-            "app.commerce.checkout.requested",
+            "domain.commerce.checkout.requested",
             {
                 "checkout_id": checkout_id,
                 "order_id": order_id,
@@ -502,7 +502,7 @@ class CommerceService:
             order_id=order_id,
             updates={"status": result_status, "updated_at": now},
         )
-        event_type = "app.commerce.order.paid" if result_status == "paid" else "app.commerce.checkout.failed"
+        event_type = "domain.commerce.order.paid" if result_status == "paid" else "domain.commerce.checkout.failed"
         await ctx.emit(
             event_type,
             {
@@ -581,7 +581,7 @@ class CommerceService:
             updates={"status": clean_status, "fulfillment": fulfillment, "updated_at": now},
         )
         await ctx.emit(
-            "app.commerce.order.updated",
+            "domain.commerce.order.updated",
             {"order_id": order_id, "status": clean_status, "updated_by": actor_id(ctx)},
         )
         return {"success": True, "order": serialize_order(updated or order)}
@@ -681,7 +681,7 @@ class CommerceService:
 
     async def _emit_cart_updated(self, ctx, cart: dict[str, Any]) -> None:
         await ctx.emit(
-            "app.commerce.cart.updated",
+            "domain.commerce.cart.updated",
             {
                 "cart_id": cart["cart_id"],
                 "actor_id": cart["actor_id"],

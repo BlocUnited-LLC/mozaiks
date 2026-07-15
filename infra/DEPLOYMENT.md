@@ -1,203 +1,94 @@
-# mozaiksai Runtime - Deployment Guide
+# Repo-Local Infra Guide
 
-## Quick Start (Local Development)
+## Purpose
+
+This directory contains **repo-local operational scaffolding for the Mozaiks OSS
+repository**.
+
+Use it when you are operating or debugging the first-party Studio/builder stack
+that lives inside this repo.
+
+Do **not** treat this directory as the canonical generated-app deployment output.
+
+For the architecture boundary, see:
+
+- `docs/architecture/deployment/oss-infra-and-generated-app-deployment.md`
+- `docs/architecture/deployment/generated-app-deployment-contract.md`
+
+## What `infra/` Covers Today
+
+Current repo-local infra includes:
+
+- Docker Compose for local and repo-hosted stack startup
+- repo Docker image definition
+- Helm chart for the repo host
+- Keycloak realm export/import support
+- Grafana dashboard templates
+
+Current implementation is oriented around the first-party `factory_app/`
+workspace and shared builder workflows.
+
+## When An OSS User Should Use This Directory
+
+Use `infra/` when you are:
+
+- changing Mozaiks OSS itself
+- running the first-party Studio stack in this repo
+- debugging repo-local auth, MongoDB, Keycloak, or observability wiring
+- validating repo-host packaging
+
+If you are creating or deploying a generated app workspace, the app's own
+workspace root and deployment contract are the source of truth instead.
+
+## Current Local Dev Path
+
+The preferred OSS contributor path is the local setup flow documented in
+`docs/local-setup.md`.
+
+That path uses the repo-local `factory_app/app`, `factory_app/workflows`, and
+`web_shell/` sources, with local Docker Compose infra for MongoDB and Keycloak
+when needed.
+
+## Repo-Local Compose Shortcuts
+
+From the repo root:
 
 ```bash
-# From repo root
 cd infra/compose
 docker compose up -d
 ```
 
-This starts:
-- **MongoDB** on `localhost:27017`
-- **mozaiksai Runtime** on `localhost:8000`
+Current compose stack is for the repo-local Studio/builder environment, not a
+generic generated app deployment.
 
-## Quick Start (Production)
+Production-flavored repo compose:
 
 ```bash
 cd infra/compose
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-## Building the Image
+## Current Caveat
 
-```bash
-# From repo root
-docker build -t mozaiks/runtime:latest -f infra/docker/Dockerfile .
+This repo is not in production yet.
 
-# Or with version tag
-docker build -t mozaiks/runtime:1.0.0 -f infra/docker/Dockerfile .
-```
+The Docker image, dev/prod Compose stacks, and Helm chart are now built and
+smoke-tested as part of CI (`infra-build` job in `.github/workflows/ci.yml`).
+Operational hardening beyond that — TLS/ingress policy, session affinity,
+secrets rotation drills, and a documented backup/restore rehearsal against the
+current Helm chart — is still outstanding. Do not describe this directory as
+the canonical deployment path for generated customer apps.
 
-## Environment Variables
+## Generated Apps Are Separate
 
-Create a `.env` file in the repo root (or pass via `-e` flags):
+Generated apps may receive provider-neutral app-root deployment artifacts such
+as:
 
-```env
-# Required
-OPENAI_API_KEY=sk-...
+- `Dockerfile`
+- `docker-compose.yml`
+- `env.example`
+- `deployment.manifest.json`
+- `.github/workflows/deploy.yml`
 
-# MongoDB (default works for compose)
-MONGO_URI=mongodb://mongo:27017/mozaiksai
-
-# Optional - Azure Key Vault (if using Azure for secrets)
-# AZURE_KEYVAULT_NAME=your-keyvault
-# AZURE_CLIENT_ID=...
-# AZURE_CLIENT_SECRET=...
-# AZURE_TENANT_ID=...
-
-# Multi-tenant settings
-DEFAULT_APP_ID=default
-```
-
-## Runtime API Endpoints
-
-Once running, the runtime exposes:
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/health` | GET | Health check |
-| `/api/sessions` | POST | Create new chat session |
-| `/api/sessions/{chat_id}` | GET | Get session state |
-| `/api/sessions?app_id=X&user_id=Y` | GET | List user sessions |
-| `/ws/{workflow}/{app_id}/{chat_id}/{user_id}` | WS | WebSocket connection |
-
-## Deployment Options
-
-### Option 1: Docker Compose (Simple)
-
-Best for: single-server deployments, small scale
-
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
-### Option 2: Kubernetes (Scalable)
-
-Best for: production, auto-scaling, high availability
-
-```yaml
-# Example Kubernetes deployment (create your own based on this)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: mozaiksai-runtime
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: mozaiksai-runtime
-  template:
-    metadata:
-      labels:
-        app: mozaiksai-runtime
-    spec:
-      containers:
-      - name: runtime
-        image: mozaiks/runtime:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: MONGO_URI
-          valueFrom:
-            secretKeyRef:
-              name: mozaiksai-secrets
-              key: mongo-uri
-        - name: OPENAI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: mozaiksai-secrets
-              key: openai-api-key
-        livenessProbe:
-          httpGet:
-            path: /api/health
-            port: 8000
-          initialDelaySeconds: 15
-          periodSeconds: 30
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "250m"
-          limits:
-            memory: "2Gi"
-            cpu: "1000m"
-```
-
-### Option 3: Cloud Run / App Service (Managed)
-
-Best for: serverless, pay-per-use
-
-**Google Cloud Run:**
-```bash
-gcloud run deploy mozaiksai-runtime \
-  --image gcr.io/your-project/mozaiks-runtime:latest \
-  --platform managed \
-  --allow-unauthenticated \
-  --set-env-vars "MONGO_URI=mongodb+srv://..." \
-  --set-secrets "OPENAI_API_KEY=openai-key:latest"
-```
-
-**Azure Container Apps:**
-```bash
-az containerapp create \
-  --name mozaiksai-runtime \
-  --resource-group your-rg \
-  --image mozaiks/runtime:latest \
-  --target-port 8000 \
-  --ingress external \
-  --env-vars "MONGO_URI=mongodb+srv://..."
-```
-
-## Self-Host Checklist
-
-For customers who want to run their own runtime:
-
-- [ ] MongoDB instance (Atlas, self-hosted, or managed)
-- [ ] OpenAI API key (or compatible LLM endpoint)
-- [ ] Docker runtime or Kubernetes cluster
-- [ ] Network access from their frontend to runtime (CORS configured)
-- [ ] (Optional) Reverse proxy with TLS (nginx, Traefik, etc.)
-
-## Connecting ChatUI to the Runtime
-
-In your React app:
-
-```jsx
-<ChatUIProvider
-  config={{
-    api: { baseUrl: 'https://your-runtime-url.com' },
-    ws: { baseUrl: 'wss://your-runtime-url.com' },
-    chat: { defaultAppId: 'your-app-id' }
-  }}
->
-  {/* Your app */}
-</ChatUIProvider>
-```
-
-## Monitoring & Observability
-
-The runtime logs to stdout (Docker captures these). For production:
-
-1. **Logs**: Use Docker logging drivers or ship to your log aggregator
-2. **Metrics**: Runtime exposes `/api/health` for uptime monitoring
-3. **Traces**: Token usage is logged per `(app_id, user_id, chat_id)`
-
-## Troubleshooting
-
-**Container won't start:**
-```bash
-docker logs mozaiksai-runtime
-```
-
-**MongoDB connection issues:**
-```bash
-# Check if mongo is healthy
-docker compose ps
-# Test connection from runtime container
-docker exec mozaiksai-runtime python -c "from pymongo import MongoClient; print(MongoClient('mongodb://mongo:27017').admin.command('ping'))"
-```
-
-**WebSocket connection fails:**
-- Check CORS settings in your reverse proxy
-- Ensure WebSocket upgrade is allowed through load balancer
-- Verify `ws://` vs `wss://` matches your TLS setup
+Those come from AppGenerator's deployment contract renderer, not from this
+repo-local `infra/` directory.

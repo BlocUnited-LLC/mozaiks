@@ -92,6 +92,8 @@ class ModuleEventRouter:
                     event_type=event_type,
                 )
                 if rule is not None:
+                    if not _notification_rule_matches(rule, envelope):
+                        continue
                     key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
                     await self._create_notification(rule, event_type, envelope)
                     emitted_notifications.add(key)
@@ -102,7 +104,7 @@ class ModuleEventRouter:
 
         for rule in self._notifications_by_event.get(event_type, []):
             key = (str(rule.get("module_id") or ""), str(rule.get("id") or ""))
-            if key not in emitted_notifications:
+            if key not in emitted_notifications and _notification_rule_matches(rule, envelope):
                 await self._create_notification(rule, event_type, envelope)
 
     def _index_modules(self, modules: Iterable[LoadedModule]) -> None:
@@ -120,6 +122,10 @@ class ModuleEventRouter:
 
             if module.manifests.notifications is not None:
                 for raw_rule in module.manifests.notifications.notifications:
+                    if hasattr(raw_rule, "as_rule") and callable(raw_rule.as_rule):
+                        raw_rule = raw_rule.as_rule()
+                    elif hasattr(raw_rule, "model_dump") and callable(raw_rule.model_dump):
+                        raw_rule = raw_rule.model_dump(mode="python", exclude_none=True)
                     if not isinstance(raw_rule, dict):
                         continue
                     event_type = str(raw_rule.get("event_type") or "").strip()
@@ -282,6 +288,11 @@ class ModuleEventRouter:
             }
 
         template = rule.get("template") if isinstance(rule.get("template"), dict) else {}
+        if not template and (rule.get("title") or rule.get("body")):
+            template = {
+                "title": rule.get("title"),
+                "body": rule.get("body"),
+            }
 
         # Build structured context from context_fields declared by the rule.
         # Only keys explicitly listed in context_fields are copied; secret-shaped
@@ -296,6 +307,21 @@ class ModuleEventRouter:
         else:
             context = None
 
+        audience = dict(rule.get("audience") if isinstance(rule.get("audience"), dict) else {})
+        user_id_field = str(audience.get("user_id_field") or "").strip()
+        if user_id_field and payload.get(user_id_field):
+            raw_user_ids = payload.get(user_id_field)
+            if isinstance(raw_user_ids, list):
+                target_user_ids = [str(user_id).strip() for user_id in raw_user_ids if str(user_id).strip()]
+            else:
+                target_user_id = str(raw_user_ids).strip()
+                target_user_ids = [target_user_id] if target_user_id else []
+            if target_user_ids:
+                existing_user_ids = audience.get("user_ids")
+                if not isinstance(existing_user_ids, list):
+                    existing_user_ids = []
+                audience["user_ids"] = list(dict.fromkeys([*existing_user_ids, *target_user_ids]))
+
         record = {
             "notification_id": f"ntf_{uuid4().hex}",
             "rule_id": rule.get("id"),
@@ -305,7 +331,7 @@ class ModuleEventRouter:
             "app_id": tenant.get("app_id"),
             "tenant_id": tenant.get("tenant_id"),
             "actor": envelope.get("actor") if isinstance(envelope.get("actor"), dict) else None,
-            "audience": rule.get("audience") if isinstance(rule.get("audience"), dict) else {},
+            "audience": audience,
             "channels": rule.get("channels") if isinstance(rule.get("channels"), list) else ["in_app"],
             "title": _render_template(str(template.get("title") or rule.get("id") or "Notification"), payload),
             "body": _render_template(str(template.get("body") or ""), payload),
@@ -334,6 +360,24 @@ class ModuleEventRouter:
                 "visibility": "internal",
             }
             await self._maybe_await(self._event_emitter("notification.created", notification_event))
+            count_changed_event = {
+                "id": f"evt_{uuid4().hex}",
+                "type": "notification.count_changed",
+                "version": 1,
+                "occurred_at": _utc_now(),
+                "source": {
+                    "layer": "platform",
+                    "module_id": rule.get("module_id"),
+                },
+                "tenant": tenant,
+                "correlation": envelope.get("correlation") if isinstance(envelope.get("correlation"), dict) else {},
+                "payload": {
+                    "app_id": tenant.get("app_id"),
+                    "module_id": rule.get("module_id"),
+                },
+                "visibility": "internal",
+            }
+            await self._maybe_await(self._event_emitter("notification.count_changed", count_changed_event))
 
     async def _store_notification(self, record: dict[str, Any]) -> None:
         try:
@@ -371,6 +415,25 @@ def _is_secret_context_key(key: str) -> bool:
     """Return True if *key* looks like a secret and must not be copied into context."""
     k = key.lower()
     return any(pat in k for pat in _CONTEXT_SECRET_PATTERNS)
+
+
+def _notification_rule_matches(rule: dict[str, Any], envelope: dict[str, Any]) -> bool:
+    """Evaluate the small deterministic condition shape supported by notifications.yaml."""
+    condition = rule.get("condition")
+    if not isinstance(condition, dict) or not condition:
+        return True
+    field = str(condition.get("field") or "").strip()
+    if not field:
+        return True
+    payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else envelope
+    value = payload.get(field) if isinstance(payload, dict) else None
+    if "equals" in condition:
+        return value == condition.get("equals")
+    if "not_equals" in condition:
+        return value != condition.get("not_equals")
+    if "in" in condition and isinstance(condition.get("in"), list):
+        return value in condition["in"]
+    return True
 
 
 def _render_template(template: str, payload: dict[str, Any]) -> str:

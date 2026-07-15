@@ -78,9 +78,12 @@ podDisruptionBudget:
 # ──────────────────────────────────────────────────────────────────────────────
 # Health probes
 # ──────────────────────────────────────────────────────────────────────────────
+# Paths match the routes registered in mozaiksai/hosts/runtime.py:
+#   GET /api/health/live       (liveness)
+#   GET /api/health/readiness  (readiness, alias: /api/health/ready)
 livenessProbe:
   httpGet:
-    path: /api/health/liveness
+    path: /api/health/live
     port: http
   initialDelaySeconds: 20
   periodSeconds: 15

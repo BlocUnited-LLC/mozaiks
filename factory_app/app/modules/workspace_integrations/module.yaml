@@ -3,7 +3,7 @@ module:
   id: workspace_integrations
   display_name: Workspace Integrations
   version: 1.0.0
-  description: Catalog of third-party integrations available to apps in this workspace, with live configuration status derived from environment secrets.
+  description: Catalog of third-party integrations available to apps in this workspace, with live configuration status derived from environment secrets and workspace connectors.
   owner: app
   visibility: private
   handler: backend.handler:WorkspaceIntegrationsModule
@@ -14,7 +14,7 @@ permissions:
     description: Update integration notes and activation records.
 actions:
   - id: list_integrations
-    description: Return the full integration catalog with configured/partial/missing status for each entry.
+    description: Return the full integration catalog with configured/partial/missing status and app usage counts for each entry.
     handler_method: list_integrations
     input_schema:
       type: object
@@ -60,6 +60,9 @@ actions:
                   type: string
               note:
                 type: string
+              app_usage_count:
+                type: integer
+                description: Number of distinct apps that currently declare this catalog integration.
         summary:
           type: object
           properties:
@@ -68,6 +71,8 @@ actions:
             partial:
               type: integer
             missing:
+              type: integer
+            used:
               type: integer
             total:
               type: integer
@@ -174,8 +179,9 @@ actions:
   - id: list_app_integration_needs
     description: >
       Return all integration declarations for an app with live workspace catalog status
-      overlaid. Used by the per-app integrations tab to show what the build declared
-      the app needs, cross-referenced against the current workspace configuration.
+      and workspace connector status overlaid. Used by the per-app integrations tab
+      to show what the build declared the app needs, cross-referenced against the
+      current workspace configuration.
     handler_method: list_app_integration_needs
     input_schema:
       type: object
@@ -213,6 +219,8 @@ actions:
                 enum: [configured, partial, missing, unknown]
               connector_status:
                 type: string
+              workspace_connector_status:
+                type: string
               setup_url:
                 type: string
               declared_at:
@@ -229,6 +237,88 @@ actions:
     permissions:
       - workspace_integrations.read
 
+  - id: upsert_app_integration_need
+    description: Create or update one app integration declaration.
+    handler_method: upsert_app_integration_need
+    input_schema:
+      type: object
+      required:
+        - app_id
+        - need
+      properties:
+        app_id:
+          type: string
+        declared_at:
+          type: string
+          description: ISO timestamp of the operator update. Defaults to now.
+        need:
+          type: object
+          required:
+            - service
+          properties:
+            service:
+              type: string
+            catalog_id:
+              type: string
+            display_name:
+              type: string
+            kind:
+              type: string
+            purpose:
+              type: string
+            required_at:
+              type: string
+            optional:
+              type: boolean
+            defaulted:
+              type: boolean
+            removable:
+              type: boolean
+            required_fields:
+              type: array
+              items:
+                type: object
+    output_schema:
+      type: object
+      properties:
+        saved:
+          type: integer
+        app_id:
+          type: string
+        declaration:
+          type: object
+    permissions:
+      - workspace_integrations.manage
+    emits:
+      - domain.workspace_integrations.declarations_saved
+
+  - id: delete_app_integration_need
+    description: Remove one app integration declaration. Defaulted declarations are soft-deleted so user removals survive later builds.
+    handler_method: delete_app_integration_need
+    input_schema:
+      type: object
+      required:
+        - app_id
+        - service
+      properties:
+        app_id:
+          type: string
+        service:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+        app_id:
+          type: string
+        service:
+          type: string
+    permissions:
+      - workspace_integrations.manage
+    emits:
+      - domain.workspace_integrations.declaration_removed
+
   - id: save_workspace_connector
     description: >
       Store a credential at workspace scope. The credential is available to all
@@ -236,9 +326,10 @@ actions:
     handler_method: save_workspace_connector
     input_schema:
       type: object
-      required: [workspace_id, service, secret_value]
+      required: [service, secret_value]
       properties:
         workspace_id:
+          description: Optional workspace scope override. Defaults to the current request workspace.
           type: string
         service:
           type: string
@@ -271,9 +362,9 @@ actions:
     handler_method: list_workspace_connectors
     input_schema:
       type: object
-      required: [workspace_id]
       properties:
         workspace_id:
+          description: Optional workspace scope override. Defaults to the current request workspace.
           type: string
     output_schema:
       type: object
@@ -292,9 +383,10 @@ actions:
     handler_method: delete_workspace_connector
     input_schema:
       type: object
-      required: [workspace_id, service]
+      required: [service]
       properties:
         workspace_id:
+          description: Optional workspace scope override. Defaults to the current request workspace.
           type: string
         service:
           type: string

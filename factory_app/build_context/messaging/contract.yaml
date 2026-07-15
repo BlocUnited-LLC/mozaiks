@@ -12,6 +12,9 @@ selection_rules:
         - conversations
         - inbox
         - threads
+        - support chat
+        - support messages
+        - conversation threads
     action: select_pack
   - id: confirm_for_light_social
     when:
@@ -33,8 +36,6 @@ required_outputs:
     owner: templates
   - path: modules/messages/module.yaml
     owner: templates
-  - path: modules/messages/runtime_extensions.yaml
-    owner: templates
   - path: modules/messages/backend/__init__.py
     owner: templates
   - path: modules/messages/backend/handler.py
@@ -47,8 +48,6 @@ required_outputs:
     owner: templates
   - path: modules/messages/backend/schemas.py
     owner: templates
-  - path: modules/messages/backend/event_subscriber.py
-    owner: templates
   - path: modules/messages/contracts/events.yaml
     owner: templates
   - path: modules/messages/contracts/notifications.yaml
@@ -57,47 +56,47 @@ required_outputs:
     owner: templates
   - path: ui/pages/custom/Messages.jsx
     owner: templates
-  - path: modules/contacts/module.yaml
-    owner: templates
-  - path: modules/contacts/backend/__init__.py
-    owner: templates
-  - path: modules/contacts/backend/handler.py
-    owner: templates
-  - path: modules/contacts/backend/service.py
-    owner: templates
-  - path: modules/contacts/backend/repo.py
-    owner: templates
-  - path: modules/contacts/backend/policy.py
-    owner: templates
-  - path: modules/contacts/backend/schemas.py
-    owner: templates
-  - path: modules/contacts/contracts/events.yaml
-    owner: templates
-  - path: modules/contacts/contracts/profile.yaml
-    owner: templates
-  - path: ui/pages/contacts.yaml
-    owner: templates
   - path: ui/route_manifest.json
     owner: templates
 
 forbidden_outputs:
   - path_prefix: modules/messaging/
   - path_prefix: modules/chat/
+  - path_prefix: modules/contacts/
   - path_prefix: services/messaging/
   - path_prefix: services/chat/
 
 runtime_boundaries:
   - id: persistence_layer
-    rule: Generated repo.py must use app_data_from_context and collection aliases. No direct Motor clients.
+    rule: Generated repo.py must use ctx.persistence.collection("messages", entity_name). No direct Motor clients and no app_data_from_context aliases.
   - id: event_emission
     rule: Events must be emitted via ctx.emit(), not direct dispatcher calls from service/handler.
-  - id: websocket_delivery
-    rule: Real-time delivery is handled by MessageDeliveryWorker via the OSS event dispatcher. Do not build a second delivery path.
-  - id: auth_gate
-    rule: WebSocket endpoints must use authenticate_websocket_with_path_user from mozaiksai.core.auth.
+  - id: notification_delivery
+    rule: Message recipient notifications are declared in messages/contracts/notifications.yaml from domain.messages.message_sent. Do not create a notification repo or delivery worker inside the app module.
   - id: no_announcement_leakage
     rule: The create_announcement action is hosted-platform only. Do not add it to generated app templates.
+  - id: contacts_belong_to_social
+    rule: Friends, follows, contacts, invitations, and social graph state belong to the social pack or an app-specific module, not the messaging substrate.
+  - id: no_messaging_contacts_facade
+    rule: Do not emit messaging.contacts.* capabilities or a contacts module as a DM roster. Select the social pack for friend/relationship rosters, or use an app-specific relationship provider with non-messaging capability ids when the product truly needs a private address book.
+  - id: hosted_extension_boundary
+    rule: Hosted products may add announcements, operator routing, realtime fan-out, or product-specific moderation, but they must keep core thread/message persistence on the messages module and preserve domain.messages.* lifecycle events for create_thread, send_message, and mark_thread_read.
 
 facades: []
 
-cross_pack_integrations: []
+cross_pack_integrations:
+  - pack_id: support
+    description: >
+      Support modules use messages for persisted conversations. The support
+      module stores ticket metadata and references messages.thread_id through
+      message_thread_id.
+  - pack_id: social
+    description: >
+      Social apps may use messages for DMs after the social pack creates
+      friends, follows, or invitations. Social graph ownership remains in the
+      social pack.
+  - pack_id: governance
+    description: >
+      Governance apps may use messages for deliberation threads, but proposals,
+      votes, quorum, moderation, and role policy are app-specific or a separate
+      governance pack.

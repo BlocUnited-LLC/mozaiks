@@ -1,0 +1,129 @@
+schema_version: mozaiks.provider_api_contract.v1
+contract_id: mozaikspay_provider_api
+description: >
+  Machine-readable interface spec for the MozaiksPay provider API.
+  Consumed by generated SaaS apps via mozaikspay_client.py.
+  Served by the MozaiksPay hosted platform (proprietary, separate repo).
+
+  This file defines ONLY the public interface — request shape, response shape,
+  auth scheme, and which fields are forbidden from responses. No payment provider
+  logic, fee calculations, or subscription business rules belong here.
+
+auth:
+  scheme: client_credentials
+  headers:
+    - name: X-MozaiksPay-Client-Id
+      description: App-scoped client ID issued by the hosted platform (mpc_ prefix).
+      required: true
+      secret: false
+    - name: Authorization
+      format: "Bearer {client_secret}"
+      description: App-scoped client secret issued by the hosted platform (mps_ prefix).
+      required: true
+      secret: true
+  credential_prefixes:
+    client_id: "mpc_"
+    client_secret: "mps_"
+
+endpoints:
+  - id: subscription_status
+    method: GET
+    path: /api/mozaikspay/v1/subscription/status
+    description: >
+      Return the current subscription plan for the calling app scope.
+      Safe for display in generated app billing pages.
+    scope_params:
+      - name: user_id
+        in: query
+        required: false
+      - name: tenant_id
+        in: query
+        required: false
+      - name: workspace_id
+        in: query
+        required: false
+    response:
+      success_shape:
+        success: { type: boolean, value: true }
+        found: { type: boolean }
+        plan_id: { type: string, nullable: true }
+        plan_name: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        starts_at: { type: string, format: iso8601, nullable: true }
+        expires_at: { type: string, format: iso8601, nullable: true }
+        on_free_plan: { type: boolean }
+      not_found_shape:
+        success: { type: boolean, value: true }
+        found: { type: boolean, value: false }
+        plan_id: { type: "null" }
+        plan_name: { type: "null" }
+        status: { type: "null" }
+        starts_at: { type: "null" }
+        expires_at: { type: "null" }
+        on_free_plan: { type: boolean, value: true }
+      error_shape:
+        success: { type: boolean, value: false }
+        error: { type: string }
+        error_code: { type: string }
+      forbidden_fields:
+        - provider_customer_id
+        - provider_subscription_id
+        - payment_provider_customer_id
+        - payment_provider_subscription_id
+        - granted_capabilities
+        - metadata
+        - client_secret
+        - secret_salt
+        - client_secret_hash
+
+  - id: billing_portal_session
+    method: POST
+    path: /api/mozaikspay/v1/billing-portal/session
+    description: >
+      Create a hosted billing portal redirect session. The caller redirects
+      their end-user to portal_url. No subscription state is mutated by this call.
+    request_body:
+      return_url: { type: string, format: https_url, required: true }
+      user_id: { type: string, required: false }
+      tenant_id: { type: string, required: false }
+      workspace_id: { type: string, required: false }
+    response:
+      success_shape:
+        success: { type: boolean, value: true }
+        portal_url: { type: string, format: https_url }
+        return_url: { type: string, format: https_url }
+        expires_at: { type: string, format: iso8601, nullable: true }
+      error_shape:
+        success: { type: boolean, value: false }
+        error_code: { type: string }
+      forbidden_fields:
+        - provider_customer_id
+        - provider_subscription_id
+        - payment_provider_customer_id
+        - payment_provider_subscription_id
+        - session_id
+        - client_secret
+        - secret_salt
+
+error_handling:
+  http_errors:
+    401: "Missing or invalid client credentials."
+    403: "Client credential scope does not allow the requested user/tenant/workspace scope."
+    400: "Invalid request body (missing return_url, unsafe URL, etc.)."
+    404: "No subscription found for this scope (subscription_status only — not an HTTP 404)."
+  application_errors:
+    SUBSCRIPTION_NOT_FOUND: "No subscription record for the given scope."
+    BILLING_CUSTOMER_NOT_FOUND: "Subscription exists but billing provider customer not yet linked."
+    MOZAIKSPAY_BILLING_NOT_CONFIGURED: "Hosted platform billing provider is not configured."
+    MOZAIKSPAY_BILLING_API_ERROR: "Billing provider returned an error."
+    INVALID_INPUT: "Required field missing or unsafe URL."
+
+drift_guard:
+  description: >
+    Changes to this file must be reflected in:
+    - The hosted platform server implementation (proprietary repo, provider_api.py)
+    - The generated client template (templates/services/integrations/mozaikspay_client.py)
+    - The generated billing_portal schemas (templates/modules/billing_portal/backend/schemas.py)
+    If any of these diverge, generated SaaS apps will break silently at runtime.
+  owned_by: mozaikspay-platform
+  consumer: generated-saas-apps

@@ -1,0 +1,41 @@
+{
+  "migration_id": "support_001_collections",
+  "description": "Declare support request indexes.",
+  "surfaces": [
+    {
+      "surface_id": "support",
+      "collections": [
+        {
+          "mongo_collection": "support_requests",
+          "data_alias": "support.requests",
+          "indexes": [
+            {
+              "name": "support_requests_by_id",
+              "keys": [{"field": "request_id", "order": 1}],
+              "unique": true
+            },
+            {
+              "name": "support_requests_by_subject_app_status_updated",
+              "keys": [
+                {"field": "subject_app_id", "order": 1},
+                {"field": "status", "order": 1},
+                {"field": "updated_at", "order": -1}
+              ]
+            },
+            {
+              "name": "support_requests_by_requester_updated",
+              "keys": [
+                {"field": "requester_id", "order": 1},
+                {"field": "updated_at", "order": -1}
+              ]
+            },
+            {
+              "name": "support_requests_by_message_thread",
+              "keys": [{"field": "message_thread_id", "order": 1}]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

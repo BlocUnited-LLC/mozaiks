@@ -24,3 +24,16 @@ events:
           type: string
         count:
           type: integer
+  - type: domain.workspace_integrations.declaration_removed
+    version: 1
+    producer: workspace_integrations
+    description: An app integration declaration was removed by an operator.
+    payload_schema:
+      type: object
+      properties:
+        app_id:
+          type: string
+        service:
+          type: string
+        removed_by:
+          type: string

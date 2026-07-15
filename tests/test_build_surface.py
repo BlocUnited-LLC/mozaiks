@@ -296,10 +296,13 @@ def test_integrations_routes_have_global_management_and_app_detail() -> None:
 
 def test_app_integrations_page_is_setup_detail_not_crud_inventory() -> None:
     source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
-    assert "Integration Setup" in source
+    assert "App Integrations" in source
     assert "list_app_integration_needs" in source
     assert "Workspace integrations" in source
-    assert "App-specific service requirements" in source
+    assert "Services this app needs" in source
+    assert "Required" in source
+    assert "Optional" in source
+    assert "App-specific" in source
     assert "Add Integration" not in source
     assert "/api/studio/integrations/connectors/" not in source
     assert "checkConnectorHealth" not in source
@@ -321,8 +324,9 @@ def test_app_overview_links_out_instead_of_owning_diagnostic_panels() -> None:
 def test_integrations_page_uses_shared_primitives_for_health_ui() -> None:
     source = _read("factory_app/app/admin/pages/AppIntegrationsPage.jsx")
     assert "StatusPill" in source
-    assert "SurfaceCard" in source
+    assert "SummaryStrip" in source
     assert "Panel" in source
+    assert "ActionButton" in source
     assert "StudioInlineEmptyState" in source
     assert "StudioLoadingState" in source
     assert "StudioErrorState" in source

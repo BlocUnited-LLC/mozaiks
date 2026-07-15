@@ -12,6 +12,7 @@ import FormCard from './FormCard';
 import DiagramViewer from './DiagramViewer';
 import DownloadCenter from './DownloadCenter';
 import ArtifactWorkbench from './ArtifactWorkbench';
+import EscalationCard from './EscalationCard';
 
 // L1 agent-UI primitives (ui.render event system)
 import {
@@ -41,6 +42,7 @@ const CoreComponents = {
   ChoicePicker,
   ConfirmationSummary,
   FormCard,
+  EscalationCard,
   DiagramViewer,
   DownloadCenter,
   ArtifactWorkbench,
@@ -64,6 +66,7 @@ export {
   ChoicePicker,
   ConfirmationSummary,
   FormCard,
+  EscalationCard,
   DiagramViewer,
   DownloadCenter,
   ArtifactWorkbench,

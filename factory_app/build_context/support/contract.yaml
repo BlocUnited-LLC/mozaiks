@@ -1,0 +1,105 @@
+contract_id: support
+contract_type: build_pack_instructions
+
+selection_rules:
+  - id: select_for_helpdesk_apps
+    when:
+      intent_any:
+        - support desk
+        - help desk
+        - helpdesk
+        - customer support
+        - support tickets
+        - operator replies
+        - user support
+    action: select_pack
+  - id: do_not_select_for_social_chat_only
+    when:
+      intent_any:
+        - friends
+        - direct messages
+        - group chat
+    action: require_explicit_user_confirmation
+
+recommended_domains:
+  - support
+  - helpdesk
+  - customer operations
+  - app operations
+
+required_packs:
+  - messaging
+
+required_outputs:
+  - path: data/migrations/001_support_collections.json
+    owner: templates
+  - path: modules/support/module.yaml
+    owner: templates
+  - path: modules/support/backend/__init__.py
+    owner: templates
+  - path: modules/support/backend/handler.py
+    owner: templates
+  - path: modules/support/backend/service.py
+    owner: templates
+  - path: modules/support/backend/repo.py
+    owner: templates
+  - path: modules/support/backend/policy.py
+    owner: templates
+  - path: modules/support/backend/schemas.py
+    owner: templates
+  - path: modules/support/contracts/events.yaml
+    owner: templates
+  - path: modules/support/contracts/reactions.yaml
+    owner: templates
+  - path: modules/support/contracts/notifications.yaml
+    owner: templates
+  - path: ui/pages/custom/Support.jsx
+    owner: templates
+  - path: ui/route_manifest.json
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/helpdesk/
+  - path_prefix: modules/support_messages/
+  - path_prefix: modules/support_chat/
+  - path_prefix: services/support/
+
+runtime_boundaries:
+  - id: ticket_metadata_only
+    rule: >
+      The support module owns request metadata, status, severity, page context,
+      assignee, and message_thread_id. It must not store message transcripts.
+  - id: use_messages_for_conversations
+    rule: >
+      Support conversations are persisted through the messages pack. The support
+      UI creates a support request, creates a messages thread, links
+      message_thread_id, and sends replies through messages/send_message.
+  - id: app_scoped_support
+    rule: >
+      Support requests must include subject_app_id. In generated apps this is
+      normally ctx.app_id. In Studio/hosted product views, this is the app the
+      ticket is about and must not be confused with persistence scope.
+  - id: no_dummy_messages
+    rule: >
+      Support pages may render empty states and fixture social/friend examples
+      in demo mode, but support messages must come from persisted message
+      threads. Do not hardcode support transcripts.
+  - id: notification_contract
+    rule: >
+      Support modules must declare contracts/notifications.yaml for user-facing
+      support events. Do not create a separate notifications module or local
+      notification persistence worker.
+  - id: persistence_layer
+    rule: Generated repo.py must use ctx.persistence.collection("support", entity_name). No direct Motor clients and no app_data_from_context aliases.
+
+facades: []
+
+cross_pack_integrations:
+  - pack_id: messaging
+    description: >
+      Required. Support stores message_thread_id and delegates all conversation
+      reads/writes to messages module actions.
+  - pack_id: social
+    description: >
+      Optional. Social apps can show support entry points on profiles or feeds,
+      but friends, follows, DMs, and invites remain owned by social/messaging.

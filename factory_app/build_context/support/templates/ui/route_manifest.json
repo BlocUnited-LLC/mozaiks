@@ -1,0 +1,21 @@
+{
+  "pages": [
+    {
+      "id": "support",
+      "label": "Support",
+      "path": "/support",
+      "component": "Support",
+      "order": 60,
+      "navigation": {
+        "scope": "global",
+        "icon": "HelpCircle",
+        "order": 60
+      },
+      "meta": {
+        "title": "Support",
+        "requiresAuth": true,
+        "shellMode": "workspace"
+      }
+    }
+  ]
+}

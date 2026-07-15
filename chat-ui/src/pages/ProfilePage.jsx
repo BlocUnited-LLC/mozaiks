@@ -1,5 +1,5 @@
 /**
- * ProfilePage — Social identity surface.
+ * ProfilePage — user identity surface.
  *
  * Two views from one component:
  *   /me              — your own profile, editable
@@ -18,7 +18,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
 import componentRegistry from '../registry/componentRegistry';
-import { ChatThread } from '../ui/primitives/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,6 +56,18 @@ function formatJoined(iso) {
   if (!iso) return null;
   try { return new Date(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }); }
   catch { return null; }
+}
+
+function profileTrace(event, details = {}) {
+  try {
+    console.info('[mozaiks-profile]', event, details);
+  } catch (_) {}
+}
+
+function profileWarn(event, details = {}) {
+  try {
+    console.warn('[mozaiks-profile]', event, details);
+  } catch (_) {}
 }
 
 // ---------------------------------------------------------------------------
@@ -107,98 +118,6 @@ function heroStorageKey(username, field) {
   return `mozaiks_profile_${field}_${username || 'me'}`;
 }
 
-function useFriendshipStatus(backendUrl, auth, username) {
-  const [status, setStatus] = useState(null); // null | 'none' | 'request_sent' | 'request_received' | 'friends'
-  const [requestId, setRequestId] = useState(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!username || !backendUrl) { setStatus('none'); return; }
-    fetchWithAuth(`${backendUrl}/api/modules/friends/get_friendship_status`, {
-      method: 'POST',
-      body: JSON.stringify({ other_user_id: username }),
-    }, auth)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d) {
-          setStatus(d.status || 'none');
-          setRequestId(d.request?.request_id || null);
-        }
-      })
-      .catch(() => setStatus('none'));
-  }, [username, backendUrl, auth]);
-
-  const sendRequest = async () => {
-    if (!username) return;
-    setLoading(true);
-    try {
-      const res = await fetchWithAuth(`${backendUrl}/api/modules/friends/send_friend_request`, {
-        method: 'POST',
-        body: JSON.stringify({ recipient_id: username }),
-      }, auth);
-      const data = res.ok ? await res.json() : null;
-      if (data?.success) {
-        setStatus('request_sent');
-        setRequestId(data.request?.request_id || null);
-      }
-    } catch (_) {}
-    setLoading(false);
-  };
-
-  const acceptRequest = async () => {
-    if (!requestId) return;
-    setLoading(true);
-    try {
-      const res = await fetchWithAuth(`${backendUrl}/api/modules/friends/accept_friend_request`, {
-        method: 'POST',
-        body: JSON.stringify({ request_id: requestId }),
-      }, auth);
-      if (res.ok) setStatus('friends');
-    } catch (_) {}
-    setLoading(false);
-  };
-
-  return { status, loading, sendRequest, acceptRequest };
-}
-
-function FriendButton({ status, loading, onSend, onAccept }) {
-  if (status === 'friends') {
-    return (
-      <span className="rounded-2xl border border-border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground">
-        Friends ✓
-      </span>
-    );
-  }
-  if (status === 'request_sent') {
-    return (
-      <span className="rounded-2xl border border-border bg-card px-4 py-1.5 text-sm font-semibold text-muted-foreground">
-        Request sent
-      </span>
-    );
-  }
-  if (status === 'request_received') {
-    return (
-      <button
-        onClick={onAccept}
-        disabled={loading}
-        className="rounded-2xl bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-      >
-        {loading ? 'Accepting…' : 'Accept request'}
-      </button>
-    );
-  }
-  // 'none' or null
-  return (
-    <button
-      onClick={onSend}
-      disabled={loading || status === null}
-      className="rounded-2xl border border-primary/40 bg-primary/8 px-4 py-1.5 text-sm font-semibold text-primary hover:bg-primary/15 disabled:opacity-40 transition-colors"
-    >
-      {loading ? 'Sending…' : '+ Add friend'}
-    </button>
-  );
-}
-
 function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   const coverInputRef = useRef(null);
   const avatarInputRef = useRef(null);
@@ -215,9 +134,6 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
   );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
-
-  const { status: friendStatus, loading: friendLoading, sendRequest: sendFriendRequest, acceptRequest: acceptFriendRequest } =
-    useFriendshipStatus(isOwner ? null : backendUrl, auth, isOwner ? null : profile.username);
 
   const name = profile.display_name || profile.username || 'Unknown';
   const handle = profile.username ? `@${profile.username}` : null;
@@ -333,19 +249,6 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
               >
                 Edit profile
               </button>
-            )}
-            {!isOwner && (
-              <>
-                <button className="rounded-2xl bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
-                  Message
-                </button>
-                <FriendButton
-                  status={friendStatus}
-                  loading={friendLoading}
-                  onSend={sendFriendRequest}
-                  onAccept={acceptFriendRequest}
-                />
-              </>
             )}
           </div>
         </div>
@@ -496,118 +399,6 @@ function TabContent({ tab }) {
 }
 
 // ---------------------------------------------------------------------------
-// User Messages / Support Inbox tab
-// ---------------------------------------------------------------------------
-// DM demo data — placeholder until a messaging module is wired.
-// Support tickets are owned by workspace_support/contracts/profile.yaml
-// and rendered by UserSupportPanel via the profile-panels API.
-// ---------------------------------------------------------------------------
-
-const DEMO_DMS = [
-  {
-    id: 'dm-alex',
-    name: 'Alex Rivera',
-    initials: 'AR',
-    meta: 'Last seen 10 min ago',
-    preview: 'Did you check out the new workflow I shared?',
-    updatedAt: '10m',
-    messages: [
-      { role: 'peer', content: 'Hey! Did you check out the new workflow I pushed to the sandbox?', senderLabel: 'Alex', avatarText: 'AR' },
-      { role: 'user', content: "Not yet, just wrapped up a build. What's it do?" },
-      { role: 'peer', content: "It automates the whole content pipeline — from brief to published post. Cut our turnaround from 2 days to 45 min.", senderLabel: 'Alex', avatarText: 'AR' },
-      { role: 'user', content: 'Seriously? I need to see this. Can you share the config?' },
-      { role: 'peer', content: "Just dropped it in the shared workspace under /workflows/content-autopilot. Let me know what you think.", senderLabel: 'Alex', avatarText: 'AR' },
-      { role: 'user', content: 'On it now. This is going to save us so much time.' },
-    ],
-  },
-  {
-    id: 'dm-sam',
-    name: 'Sam Chen',
-    initials: 'SC',
-    meta: 'Last seen yesterday',
-    preview: "Let me know when you're free to review",
-    updatedAt: '1d',
-    messages: [
-      { role: 'user', content: 'Sam — are you around to do a quick code review on the new module?' },
-      { role: 'peer', content: 'Sure, I have 30 min at 3pm. Send me the PR link.', senderLabel: 'Sam', avatarText: 'SC' },
-      { role: 'user', content: "It's #247 on the main repo. It's pretty small." },
-      { role: 'peer', content: "Left some comments — handler looks clean. Just had a question on the scoping in policy.py.", senderLabel: 'Sam', avatarText: 'SC' },
-      { role: 'user', content: 'Good catch, updating it now.' },
-      { role: 'peer', content: "Let me know when you're free to review the updated version.", senderLabel: 'Sam', avatarText: 'SC' },
-    ],
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Direct messages tab — DM list + thread view
-// ---------------------------------------------------------------------------
-
-function UserMessagesTab() {
-  const [selectedId, setSelectedId] = useState(DEMO_DMS[0].id);
-  const selected = DEMO_DMS.find(d => d.id === selectedId) || DEMO_DMS[0];
-
-  return (
-    <div className="flex overflow-hidden rounded-2xl border border-border/30 bg-card/20" style={{ minHeight: 480 }}>
-
-      {/* Left: DM list */}
-      <div className="w-56 shrink-0 border-r border-border/20 flex flex-col bg-card/30">
-        <div className="px-4 py-3 border-b border-border/15">
-          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Direct Messages</span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto divide-y divide-border/10">
-          {DEMO_DMS.map(dm => {
-            const active = dm.id === selectedId;
-            return (
-              <button
-                key={dm.id}
-                type="button"
-                onClick={() => setSelectedId(dm.id)}
-                className={`w-full text-left flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/20 ${active ? 'bg-muted/40' : ''}`}
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/60 text-foreground ring-1 ring-border/20 text-[11px] font-bold">
-                  {dm.initials}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-xs font-semibold text-foreground truncate">{dm.name}</span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground/50">{dm.updatedAt}</span>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground truncate block">{dm.preview}</span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Right: thread */}
-      {selected && (
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border/20 bg-card/20">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/60 text-foreground ring-1 ring-border/20 text-[11px] font-bold">
-              {selected.initials}
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-foreground leading-none">{selected.name}</p>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">{selected.meta}</p>
-            </div>
-          </div>
-          <ChatThread
-            messages={selected.messages}
-            variant="dm"
-            emptyText="No messages yet."
-            className="flex-1 min-h-0"
-            inputPlaceholder={`Message ${selected.name}…`}
-            onSend={() => {}}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Root
 // ---------------------------------------------------------------------------
 
@@ -620,12 +411,6 @@ const DEMO_PROFILE = {
   created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 180).toISOString(),
 };
 
-// Messages tab is a built-in stopgap — DMs only.
-// Support tab arrives from GET /api/me/profile-panels via workspace_support/contracts/profile.yaml.
-const BUILTIN_TABS = [
-  { id: 'messages', label: 'Messages', builtin: true },
-];
-
 export default function ProfilePage() {
   const params = useParams();
   const location = useLocation();
@@ -636,7 +421,9 @@ export default function ProfilePage() {
   const isOwner = !username;
 
   // Read ?tab from URL to support deep-linking (e.g. from EscalationCard)
-  const urlTabParam = new URLSearchParams(location.search).get('tab') || null;
+  const profileSearchParams = new URLSearchParams(location.search);
+  const urlTabParam = profileSearchParams.get('tab') || null;
+  const urlAppIdParam = profileSearchParams.get('app_id') || profileSearchParams.get('appId') || null;
 
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -675,6 +462,12 @@ export default function ProfilePage() {
     setTabsLoading(true);
     let panelTabs = [];
     let moduleTabs = [];
+    profileTrace('tabs:load:start', {
+      path: location.pathname,
+      urlTabParam,
+      urlAppIdParam,
+      hasBackendUrl: Boolean(backendUrl),
+    });
     if (backendUrl) {
       // profile-panels: older panel contract (title field, workspace_support etc.)
       try {
@@ -688,10 +481,21 @@ export default function ProfilePage() {
           order:     p.order ?? 50,
           error:     p.error || null,
         }));
+        profileTrace('tabs:profile_panels:loaded', {
+          ok: res.ok,
+          status: res.status,
+          count: panelTabs.length,
+          panelIds: panelTabs.map(panel => panel.id),
+          errors: panelTabs.filter(panel => panel.error).map(panel => ({ id: panel.id, error: panel.error })),
+          urlAppIdParam,
+        });
       } catch {
+        profileWarn('tabs:profile_panels:failed', {
+          urlAppIdParam,
+        });
         panelTabs = [];
       }
-      // profile-tabs: social/module tab contract (label field, friends/posts/feed etc.)
+      // profile-tabs: module tab contract (label field, custom module panels, etc.)
       try {
         const res = await fetchWithAuth(`${backendUrl}/api/me/profile-tabs`, {}, auth);
         const body = res.ok ? await res.json() : { tabs: [] };
@@ -703,20 +507,66 @@ export default function ProfilePage() {
           order:     t.order ?? 100,
           error:     t.error || null,
         }));
+        profileTrace('tabs:profile_tabs:loaded', {
+          ok: res.ok,
+          status: res.status,
+          count: moduleTabs.length,
+          tabIds: moduleTabs.map(tab => tab.id),
+          errors: moduleTabs.filter(tab => tab.error).map(tab => ({ id: tab.id, error: tab.error })),
+          urlAppIdParam,
+        });
       } catch {
+        profileWarn('tabs:profile_tabs:failed', {
+          urlAppIdParam,
+        });
         moduleTabs = [];
       }
     }
-    // Merge: builtin first, then panels + module tabs sorted by order
+    // Merge panels + module tabs sorted by order. Social, messaging, and
+    // support tabs are module-owned; the profile page does not invent them.
     const remote = [...panelTabs, ...moduleTabs].sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
-    const merged = [...BUILTIN_TABS, ...remote];
+    const merged = [...remote];
+    profileTrace('tabs:load:complete', {
+      count: merged.length,
+      tabIds: merged.map(tab => tab.id),
+      urlTabParam,
+      urlAppIdParam,
+    });
     setTabs(merged);
-    setActiveTab(prev => prev || merged[0]?.id || null);
     setTabsLoading(false);
-  }, [backendUrl, auth]);
+  }, [backendUrl, auth, location.pathname, urlAppIdParam, urlTabParam]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
   useEffect(() => { loadTabs(); }, [loadTabs]);
+  useEffect(() => {
+    if (!Array.isArray(tabs) || tabs.length === 0) {
+      setActiveTab(null);
+      return;
+    }
+
+    setActiveTab(prev => {
+      if (urlTabParam && tabs.some(tab => tab.id === urlTabParam)) {
+        if (prev !== urlTabParam) {
+          profileTrace('tabs:active:sync_url', {
+            previous: prev,
+            next: urlTabParam,
+            urlAppIdParam,
+          });
+        }
+        return prev === urlTabParam ? prev : urlTabParam;
+      }
+      if (prev && tabs.some(tab => tab.id === prev)) {
+        return prev;
+      }
+      profileTrace('tabs:active:fallback', {
+        previous: prev,
+        next: tabs[0]?.id || null,
+        urlTabParam,
+        urlAppIdParam,
+      });
+      return tabs[0]?.id || null;
+    });
+  }, [tabs, urlTabParam, urlAppIdParam]);
 
   if (profileLoading) return <Spinner />;
   if (profileError && !profile) return <ErrorState message={`Could not load profile: ${profileError}`} />;
@@ -746,13 +596,7 @@ export default function ProfilePage() {
           <>
             <TabBar tabs={tabs} activeId={currentTab?.id} onSelect={handleTabSelect} />
 
-            {currentTab?.builtin && currentTab.id === 'messages' ? (
-              <div className="px-5 sm:px-8 py-6">
-                <UserMessagesTab />
-              </div>
-            ) : (
-              <TabContent tab={currentTab} />
-            )}
+            <TabContent tab={currentTab} />
           </>
         )}
       </div>

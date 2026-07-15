@@ -83,13 +83,50 @@ class IntegrationDeclarationsRepo:
             doc = {**decl, "app_id": app_id, "updated_at": now}
             if not doc.get("declared_at"):
                 doc["declared_at"] = now
+            existing = await coll.find_one({"app_id": app_id, "service": service}, {"removed": 1})
+            if existing and existing.get("removed") and bool(doc.get("defaulted")):
+                continue
+            doc["removed"] = False
+            update: dict[str, Any] = {
+                "$set": doc,
+                "$unset": {"removed_at": "", "removed_by": ""},
+            }
             await coll.update_one(
                 {"app_id": app_id, "service": service},
-                {"$set": doc},
+                update,
                 upsert=True,
             )
             saved.append(doc)
         return saved
+
+    async def soft_delete_declaration(
+        self,
+        *,
+        app_id: str,
+        service: str,
+        removed_by: str | None = None,
+    ) -> bool:
+        """Mark a declaration removed so user removals survive default re-adds."""
+        normalized_service = str(service or "").strip()
+        if not app_id or not normalized_service:
+            return False
+        coll = await self._collection()
+        now = datetime.now(UTC).isoformat()
+        result = await coll.update_one(
+            {"app_id": app_id, "service": normalized_service},
+            {
+                "$set": {
+                    "app_id": app_id,
+                    "service": normalized_service,
+                    "removed": True,
+                    "removed_at": now,
+                    "removed_by": removed_by or "system",
+                    "updated_at": now,
+                }
+            },
+            upsert=True,
+        )
+        return bool(getattr(result, "matched_count", 0) or getattr(result, "upserted_id", None))
 
     async def get_for_app(self, *, app_id: str) -> list[dict[str, Any]]:
         """Return all declarations for an app, sorted by service name."""
@@ -100,7 +137,7 @@ class IntegrationDeclarationsRepo:
     async def get_catalog_usage_counts(self, *, catalog_ids: list[str] | None = None) -> dict[str, int]:
         """Return {catalog_id: distinct_app_count} for the given catalog IDs (or all)."""
         coll = await self._collection()
-        match_filter: dict[str, Any] = {"catalog_id": {"$ne": None}}
+        match_filter: dict[str, Any] = {"catalog_id": {"$ne": None}, "removed": {"$ne": True}}
         if catalog_ids:
             match_filter["catalog_id"] = {"$in": catalog_ids}
         pipeline = [

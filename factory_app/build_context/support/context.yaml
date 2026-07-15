@@ -1,0 +1,25 @@
+context_id: support
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: support
+  status: active
+  capability_source: generated_module
+  requires:
+    - messaging
+capabilities:
+  - capability_id: support.requests.create
+    facade_recommended: support
+  - capability_id: support.requests.list
+    facade_recommended: support
+  - capability_id: support.requests.update_status
+    facade_recommended: support
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs

@@ -1,7 +1,0 @@
-schema_version: mozaiks.runtime_extensions.v1
-extensions:
-  - kind: api_router
-    entrypoint: backend.event_subscriber:get_router
-    prefix: /api/modules/messages
-  - kind: startup_service
-    entrypoint: backend.event_subscriber:get_worker

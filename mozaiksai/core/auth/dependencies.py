@@ -107,6 +107,61 @@ class UserPrincipal:
         )
 
 
+def _csv_request_value(request: Request, *, header: str, cookie: str, query: str) -> list[str] | None:
+    raw = request.headers.get(header) or request.cookies.get(cookie) or request.query_params.get(query)
+    if raw is None:
+        return None
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _no_auth_dev_override_principal(request: Request, principal: UserPrincipal) -> UserPrincipal:
+    """Apply request-scoped local-dev persona overrides when auth is disabled.
+
+    This intentionally runs only from the AUTH_ENABLED=false branch in
+    ``require_user``. It lets local browser profiles test user-to-user flows
+    such as DM notifications without reconfiguring the process-wide no-auth
+    adapter.
+    """
+    requested_user_id = (
+        request.headers.get("X-Mozaiks-Dev-User-Id")
+        or request.cookies.get("mozaiks_dev_user_id")
+        or request.query_params.get("dev_user_id")
+    )
+    if not requested_user_id:
+        return principal
+
+    user_id = validate_path_id(str(requested_user_id).strip(), "dev_user_id")
+    roles = _csv_request_value(
+        request,
+        header="X-Mozaiks-Dev-Roles",
+        cookie="mozaiks_dev_roles",
+        query="dev_roles",
+    )
+    scopes = _csv_request_value(
+        request,
+        header="X-Mozaiks-Dev-Scopes",
+        cookie="mozaiks_dev_scopes",
+        query="dev_scopes",
+    )
+    return UserPrincipal(
+        user_id=user_id,
+        email=request.headers.get("X-Mozaiks-Dev-Email") or principal.email,
+        name=request.headers.get("X-Mozaiks-Dev-Name") or principal.name or user_id,
+        roles=roles if roles is not None else list(principal.roles),
+        scopes=scopes if scopes is not None else list(principal.scopes),
+        raw_claims={
+            **dict(principal.raw_claims or {}),
+            "dev_persona": True,
+            "base_user_id": principal.user_id,
+        },
+        provider=principal.provider,
+        app_id=principal.app_id,
+        chat_id=principal.chat_id,
+        tenant_id=principal.tenant_id,
+        workspace_id=principal.workspace_id,
+    )
+
+
 def _extract_token(
     authorization: HTTPAuthorizationCredentials | None,
     request: Request,
@@ -184,6 +239,7 @@ async def require_user(
                 raw_claims={},
                 provider="none",
             )
+        principal = _no_auth_dev_override_principal(request, principal)
         request.state.user = principal
         request.state.user_id = principal.user_id
         request.state.app_id = principal.app_id

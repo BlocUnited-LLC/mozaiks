@@ -11,65 +11,27 @@
  * Tickets are grouped by app_id so users with tickets across multiple apps
  * see them organised clearly.
  *
- * Falls back to demo data when no real API data is present (OSS/local dev).
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { ChatThread } from '@mozaiks/chat-ui/ui'
 
-// ─── Demo fallback ────────────────────────────────────────────────────────────
-
-const DEMO_REQUESTS = [
-  {
-    request_id: 'sup-8821',
-    ticket_id: 'SUP-8821',
-    app_id: 'my-saas-app',
-    app_label: 'My SaaS App',
-    subject: 'App not loading after update',
-    status: 'open',
-    updated_at: new Date(Date.now() - 2 * 3600000).toISOString(),
-    message: "I can see the issue on our end — pushing a fix now",
-    messages: [
-      { role: 'user',     content: 'My app stopped loading after the latest update. I just see a white screen.' },
-      { role: 'operator', content: "Thanks for reaching out! I can see the issue — config sync missed your workspace. Pushing a fix now.", senderLabel: 'Jordan · Support' },
-      { role: 'user',     content: 'How long will it take?' },
-      { role: 'operator', content: "Under 5 minutes. You'll get an email when done. Let me know if anything else is blocked.", senderLabel: 'Jordan · Support' },
-    ],
-  },
-  {
-    request_id: 'sup-8790',
-    ticket_id: 'SUP-8790',
-    app_id: 'my-saas-app',
-    app_label: 'My SaaS App',
-    subject: 'Usage breakdown for last month',
-    status: 'resolved',
-    updated_at: new Date(Date.now() - 86400000).toISOString(),
-    message: "Report delivered — marking resolved",
-    messages: [
-      { role: 'user',     content: 'Can I get a usage breakdown for last month? Workflow runs and token consumption by workflow.' },
-      { role: 'operator', content: "Absolutely. CSV in 24 hours — anything else to include?", senderLabel: 'Taylor · Support' },
-      { role: 'user',     content: 'That covers it, thanks.' },
-      { role: 'operator', content: "Report sent. Marking resolved — feel free to reopen.", senderLabel: 'Taylor · Support' },
-      { role: 'system',   content: 'Resolved · SUP-8790' },
-    ],
-  },
-  {
-    request_id: 'sup-8750',
-    ticket_id: 'SUP-8750',
-    app_id: 'community-hub',
-    app_label: 'Community Hub',
-    subject: 'Custom domain not propagating',
-    status: 'open',
-    updated_at: new Date(Date.now() - 3 * 86400000).toISOString(),
-    message: "We can see the DNS record — propagation usually takes up to 48h",
-    messages: [
-      { role: 'user',     content: 'Added the CNAME but the custom domain still shows an error after 24h.' },
-      { role: 'operator', content: "We can see the DNS record — propagation can take up to 48h. If still failing after that, let us know.", senderLabel: 'Sam · Support' },
-    ],
-  },
-]
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const SUPPORT_PANEL_LOG_PREFIX = '[mozaiks-support-panel]'
+
+function supportPanelTrace(event, details = {}) {
+  try {
+    console.info(SUPPORT_PANEL_LOG_PREFIX, event, details)
+  } catch (_) {}
+}
+
+function supportPanelWarn(event, details = {}) {
+  try {
+    console.warn(SUPPORT_PANEL_LOG_PREFIX, event, details)
+  } catch (_) {}
+}
 
 function formatRelative(iso) {
   if (!iso) return '—'
@@ -85,26 +47,89 @@ function formatRelative(iso) {
 }
 
 function normaliseRequest(r) {
+  const fallbackMessage = String(r.message || '').trim()
   return {
     id:        r.request_id || r.id,
     ticketId:  r.ticket_id || r.ticketId || r.request_id || r.id,
     appId:     r.app_id || 'platform',
     appLabel:  r.app_label || r.app_name || r.app_id || 'Platform',
+    userId:    r.user_id || r.userId || r.submitted_by || null,
     subject:   r.subject || r.page_title || r.message?.slice(0, 60) || 'Support request',
     status:    r.status || 'open',
     updatedAt: r.updated_at || r.updatedAt || r.created_at,
-    messages:  r.messages || [{ role: 'user', content: r.message || '' }],
+    messages:  Array.isArray(r.messages) ? r.messages : (fallbackMessage ? [{ role: 'user', content: fallbackMessage }] : []),
   }
 }
 
-async function postMessage(requestId, message) {
+async function postMessage({ requestId, appId, userId, message }) {
   try {
-    await fetch('/api/modules/workspace_support/add_support_message', {
+    supportPanelTrace('message:add:start', {
+      requestId,
+      appId,
+      userId,
+      messageLength: String(message || '').length,
+    })
+    const response = await fetch('/api/modules/workspace_support/add_support_message', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id: requestId, message, sender_role: 'user' }),
+      body: JSON.stringify({
+        request_id: requestId,
+        message,
+        sender_role: 'user',
+        app_id: appId,
+        user_id: userId,
+      }),
     })
-  } catch (_) {}
+    if (!response.ok) {
+      supportPanelWarn('message:add:failed_http', {
+        requestId,
+        appId,
+        userId,
+        status: response.status,
+      })
+      return null
+    }
+    const body = await response.json()
+    supportPanelTrace('message:add:success', {
+      requestId,
+      messageId: body?.message_id || null,
+      messageThreadId: body?.message_thread_id || null,
+      success: body?.success,
+    })
+    return body
+  } catch (error) {
+    supportPanelWarn('message:add:failed_exception', {
+      requestId,
+      appId,
+      userId,
+      error: error?.message || String(error || ''),
+    })
+    return null
+  }
+}
+
+async function updateRequestStatus({ requestId, appId, status }) {
+  const response = await fetch('/api/modules/workspace_support/update_support_request_status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId, app_id: appId, status }),
+  })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  const body = await response.json()
+  if (!body?.success) throw new Error(body?.error || 'Status was not updated.')
+  return body
+}
+
+async function deleteRequest({ requestId, appId }) {
+  const response = await fetch('/api/modules/workspace_support/delete_support_request', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId, app_id: appId }),
+  })
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`)
+  const body = await response.json()
+  if (!body?.success) throw new Error(body?.error || 'Request was not removed.')
+  return body
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -152,8 +177,18 @@ function TicketRow({ req, active, onClick }) {
 // ─── Root component ───────────────────────────────────────────────────────────
 
 export default function UserSupportPanel({ panel, data, onNewSupport }) {
-  const rawRequests = data?.requests?.length > 0 ? data.requests : DEMO_REQUESTS
-  const requests = rawRequests.map(normaliseRequest)
+  const location = useLocation()
+  const queryRequestId = new URLSearchParams(location.search || '').get('request_id') || null
+  const rawRequests = data?.requests?.length > 0 ? data.requests : []
+  const [statusOverrides, setStatusOverrides] = useState({})
+  const [hiddenRequestIds, setHiddenRequestIds] = useState({})
+  const [extraMessages, setExtraMessages] = useState({})
+  const [actionError, setActionError] = useState(null)
+  const [busyRequestId, setBusyRequestId] = useState(null)
+  const requests = rawRequests
+    .map(normaliseRequest)
+    .filter((req) => !hiddenRequestIds[req.id])
+    .map((req) => ({ ...req, status: statusOverrides[req.id] || req.status }))
 
   // Group by appId, preserving insertion order
   const groups = []
@@ -168,24 +203,124 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
   }
 
   const firstTicketId = groups[0]?.tickets[0]?.id || null
-  const [selectedId, setSelectedId] = useState(firstTicketId)
+  const [selectedId, setSelectedId] = useState(queryRequestId || firstTicketId)
   const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(groups.map(g => [g.appId, true])))
-  const [extraMessages, setExtraMessages] = useState({})
 
   const allTickets = groups.flatMap(g => g.tickets)
+  const ticketIdsKey = allTickets.map(req => req.id).join('|')
+  const groupIdsKey = groups.map(g => g.appId).join('|')
   const selected = allTickets.find(r => r.id === selectedId) || allTickets[0] || null
+
+  useEffect(() => {
+    supportPanelTrace('data:received', {
+      queryRequestId,
+      rawRequestCount: rawRequests.length,
+      normalisedRequestCount: requests.length,
+      groupCount: groups.length,
+      requestIds: requests.map(req => req.id).slice(0, 10),
+      messageThreadIds: rawRequests.map(req => req.message_thread_id || null).slice(0, 10),
+      selectedId,
+      selectedExists: Boolean(selected),
+      selectedMessageCount: selected?.messages?.length || 0,
+      panelId: panel?.id || null,
+      panelError: panel?.error || null,
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryRequestId, rawRequests.length, ticketIdsKey, selectedId])
+
+  useEffect(() => {
+    setOpenGroups(prev => {
+      const next = { ...prev }
+      for (const group of groups) {
+        if (typeof next[group.appId] === 'undefined') next[group.appId] = true
+      }
+      return next
+    })
+  }, [groupIdsKey])
+
+  useEffect(() => {
+    const hasQueryTicket = queryRequestId && allTickets.some(req => req.id === queryRequestId)
+    if (hasQueryTicket) {
+      supportPanelTrace('selection:query_request_matched', {
+        queryRequestId,
+      })
+      setSelectedId(queryRequestId)
+      return
+    }
+    const hasSelectedTicket = selectedId && allTickets.some(req => req.id === selectedId)
+    if (!hasSelectedTicket) {
+      supportPanelWarn('selection:request_missing', {
+        queryRequestId,
+        previousSelectedId: selectedId,
+        fallbackTicketId: firstTicketId || null,
+        availableRequestIds: allTickets.map(req => req.id).slice(0, 10),
+      })
+      setSelectedId(firstTicketId || null)
+    }
+  }, [queryRequestId, firstTicketId, selectedId, ticketIdsKey])
 
   function toggleGroup(appId) {
     setOpenGroups(prev => ({ ...prev, [appId]: !prev[appId] }))
   }
 
-  function handleSend(text) {
+  async function handleSend(text) {
     if (!selected) return
-    setExtraMessages(prev => ({
-      ...prev,
-      [selected.id]: [...(prev[selected.id] || []), { role: 'user', content: text }],
-    }))
-    postMessage(selected.id, text)
+    setActionError(null)
+    supportPanelTrace('thread:send_start', {
+      requestId: selected.id,
+      ticketId: selected.ticketId,
+      appId: selected.appId,
+      userId: selected.userId,
+      existingMessageCount: threadMessages.length,
+      messageLength: String(text || '').length,
+    })
+    const body = await postMessage({
+      requestId: selected.id,
+      appId: selected.appId,
+      userId: selected.userId,
+      message: text,
+    })
+    if (body?.success) {
+      setExtraMessages(prev => ({
+        ...prev,
+        [selected.id]: [...(prev[selected.id] || []), { role: 'user', content: text }],
+      }))
+    }
+  }
+
+  async function handleStatusChange(nextStatus) {
+    if (!selected || busyRequestId) return
+    setBusyRequestId(selected.id)
+    setActionError(null)
+    try {
+      await updateRequestStatus({
+        requestId: selected.id,
+        appId: selected.appId,
+        status: nextStatus,
+      })
+      setStatusOverrides(prev => ({ ...prev, [selected.id]: nextStatus }))
+    } catch (error) {
+      setActionError(error?.message || 'Status could not be updated.')
+    } finally {
+      setBusyRequestId(null)
+    }
+  }
+
+  async function handleDelete() {
+    if (!selected || busyRequestId) return
+    const confirmed = window.confirm(`Remove support request "${selected.subject}"? This removes the linked conversation.`)
+    if (!confirmed) return
+    setBusyRequestId(selected.id)
+    setActionError(null)
+    try {
+      await deleteRequest({ requestId: selected.id, appId: selected.appId })
+      setHiddenRequestIds(prev => ({ ...prev, [selected.id]: true }))
+      setSelectedId(null)
+    } catch (error) {
+      setActionError(error?.message || 'Support request could not be removed.')
+    } finally {
+      setBusyRequestId(null)
+    }
   }
 
   const threadMessages = selected
@@ -269,6 +404,24 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
               </div>
               <p className="text-sm font-semibold text-foreground truncate">{selected.subject}</p>
             </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleStatusChange(selected.status === 'resolved' ? 'open' : 'resolved')}
+                disabled={busyRequestId === selected.id}
+                className="rounded-lg border border-border/40 bg-card/70 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
+              >
+                {busyRequestId === selected.id ? 'Saving…' : selected.status === 'resolved' ? 'Reopen' : 'Close'}
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={busyRequestId === selected.id}
+                className="rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold text-destructive transition-colors hover:border-destructive/60 hover:bg-destructive/15 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
           </div>
 
           <ChatThread
@@ -279,6 +432,11 @@ export default function UserSupportPanel({ panel, data, onNewSupport }) {
             inputPlaceholder="Reply to this ticket…"
             onSend={selected.status !== 'resolved' ? handleSend : undefined}
           />
+          {actionError && (
+            <div className="border-t border-destructive/20 px-4 py-2 text-xs text-destructive">
+              {actionError}
+            </div>
+          )}
         </div>
       )}
     </div>

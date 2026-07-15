@@ -339,9 +339,10 @@ def test_integrations_route_ownership_is_global_management_plus_app_detail() -> 
     admin_index = (REPO_ROOT / "factory_app/app/admin/index.js").read_text(encoding="utf-8")
     docs = (REPO_ROOT / "docs/architecture/app/integrations-workflow.md").read_text(encoding="utf-8")
 
-    assert "path: /integrations" in admin_registry
-    assert "path: /apps/:appId/integrations" in admin_registry
-    assert "show_in_navigation: false" in admin_registry
+    assert "pages: []" in admin_registry
+    assert "First-party Studio routes are declared in app/ui/route_manifest.json" in admin_registry
+    assert "path: /integrations" not in admin_registry
+    assert "path: /apps/:appId/integrations" not in admin_registry
     assert '"/integrations"' in route_manifest
     assert '"/apps/:appId/integrations"' in route_manifest
     assert '"component": "WorkspaceIntegrationsPage"' in route_manifest

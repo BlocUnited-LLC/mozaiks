@@ -32,6 +32,40 @@ class WorkspaceIntegrationsService:
         self.repo = repo
         self.declarations_repo = declarations_repo
 
+    @staticmethod
+    def _declaration_from_need(
+        *,
+        app_id: str,
+        need: dict[str, Any],
+        declared_at: str,
+    ) -> dict[str, Any] | None:
+        service = str(need.get("service") or "").strip()
+        if not app_id or not service:
+            return None
+        catalog_id = need.get("catalog_id") or (service if service in CATALOG_BY_ID else None)
+        catalog_spec = CATALOG_BY_ID.get(str(catalog_id)) if catalog_id else None
+        workspace_status = need.get("workspace_status")
+        if workspace_status is None and catalog_spec:
+            workspace_status, _ = derive_status(catalog_spec["required_secrets"])
+        required_fields = need.get("required_fields") if isinstance(need.get("required_fields"), list) else []
+        return build_declaration_document(
+            app_id=app_id,
+            service=service,
+            catalog_id=str(catalog_id) if catalog_id else None,
+            display_name=need.get("display_name") or (catalog_spec or {}).get("name") or service,
+            kind=str(need.get("kind") or "api_key"),
+            purpose=need.get("purpose"),
+            required_at=str(need.get("required_at") or "runtime"),
+            optional=bool(need.get("optional", False)),
+            workspace_status=workspace_status,
+            connector_status=str(need.get("connector_status") or "not_configured"),
+            defaulted=bool(need.get("defaulted", False)),
+            removable=bool(need.get("removable", False)),
+            source=str(need.get("source") or "build"),
+            required_fields=required_fields,
+            declared_at=declared_at,
+        )
+
     async def list_integrations(
         self,
         ctx: ModuleContext,
@@ -44,6 +78,11 @@ class WorkspaceIntegrationsService:
         catalog = INTEGRATIONS_CATALOG
         if category:
             catalog = [e for e in catalog if e["category"] == category]
+        catalog_ids = [entry["id"] for entry in catalog]
+        try:
+            usage_counts = await self.declarations_repo.get_catalog_usage_counts(catalog_ids=catalog_ids)
+        except Exception:
+            usage_counts = {}
 
         integrations = []
         counts: dict[str, int] = {"configured": 0, "partial": 0, "missing": 0, "unknown": 0}
@@ -59,6 +98,7 @@ class WorkspaceIntegrationsService:
                     note=notes_by_id.get(spec["id"]),
                 )
             )
+            integrations[-1]["app_usage_count"] = int(usage_counts.get(spec["id"], 0))
 
         return {
             "integrations": integrations,
@@ -66,6 +106,7 @@ class WorkspaceIntegrationsService:
                 "configured": counts["configured"],
                 "partial": counts["partial"],
                 "missing": counts["missing"] + counts["unknown"],
+                "used": sum(1 for count in usage_counts.values() if count > 0),
                 "total": len(integrations),
             },
         }
@@ -128,25 +169,45 @@ class WorkspaceIntegrationsService:
             return {"saved": 0, "app_id": app_id}
 
         docs = [
-            build_declaration_document(
-                app_id=app_id,
-                service=str(n.get("service") or "").strip(),
-                catalog_id=n.get("catalog_id"),
-                display_name=n.get("display_name"),
-                kind=str(n.get("kind") or "api_key"),
-                purpose=n.get("purpose"),
-                required_at=str(n.get("required_at") or "runtime"),
-                optional=bool(n.get("optional", False)),
-                workspace_status=n.get("workspace_status"),
-                connector_status=str(n.get("connector_status") or "not_configured"),
-                declared_at=declared_at,
-            )
+            doc
             for n in needs
-            if n.get("service")
+            if isinstance(n, dict)
+            for doc in [self._declaration_from_need(app_id=app_id, need=n, declared_at=declared_at)]
+            if doc is not None
         ]
 
         saved = await self.declarations_repo.upsert_declarations(app_id=app_id, declarations=docs)
         return {"saved": len(saved), "app_id": app_id}
+
+    async def upsert_app_integration_need(
+        self,
+        *,
+        app_id: str,
+        need: dict[str, Any],
+        declared_at: str,
+    ) -> dict[str, Any]:
+        """Create or update one app integration declaration."""
+        doc = self._declaration_from_need(app_id=app_id, need=need, declared_at=declared_at)
+        if doc is None:
+            raise ValueError("app_id and need.service are required")
+        saved = await self.declarations_repo.upsert_declarations(app_id=app_id, declarations=[doc])
+        declaration = build_declaration_response(saved[0]) if saved else None
+        return {"saved": len(saved), "app_id": app_id, "declaration": declaration}
+
+    async def delete_app_integration_need(
+        self,
+        *,
+        app_id: str,
+        service: str,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Remove an app integration declaration while preserving default-removal intent."""
+        deleted = await self.declarations_repo.soft_delete_declaration(
+            app_id=app_id,
+            service=service,
+            removed_by=user_id,
+        )
+        return {"deleted": deleted, "app_id": app_id, "service": service}
 
     async def save_workspace_connector(
         self,
@@ -202,17 +263,37 @@ class WorkspaceIntegrationsService:
         self,
         *,
         app_id: str,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         """Return all integration declarations for an app with live workspace status overlay."""
         docs = await self.declarations_repo.get_for_app(app_id=app_id)
+        connector_by_service: dict[str, dict[str, Any]] = {}
+        if workspace_id:
+            try:
+                connector_payload = await self.list_workspace_connectors(workspace_id=workspace_id)
+                connector_by_service = {
+                    str(connector.get("service") or ""): connector
+                    for connector in connector_payload.get("connectors", [])
+                    if isinstance(connector, dict) and connector.get("service")
+                }
+            except Exception:
+                connector_by_service = {}
 
         # Overlay current workspace catalog status for catalog-matched entries.
         results = []
         for doc in docs:
+            if doc.get("removed"):
+                continue
             response = build_declaration_response(doc)
+            connector = connector_by_service.get(str(response.get("service") or ""))
+            if connector:
+                response["connector_status"] = "ready" if connector.get("ready") else "partial"
+                response["workspace_connector_status"] = response["connector_status"]
             catalog_id = doc.get("catalog_id")
             if catalog_id and catalog_id in CATALOG_BY_ID:
                 live_status, _ = derive_status(CATALOG_BY_ID[catalog_id]["required_secrets"])
+                if connector and connector.get("ready"):
+                    live_status = "configured"
                 response["workspace_status"] = live_status
                 if live_status == "missing":
                     response["setup_url"] = f"/integrations/{catalog_id}"
@@ -221,7 +302,13 @@ class WorkspaceIntegrationsService:
             results.append(response)
 
         required = [r for r in results if not r.get("optional")]
-        blocking = [r for r in required if r.get("workspace_status") in {"missing", "partial"} or r.get("connector_status") == "not_configured"]
+
+        def _is_blocking_requirement(item: dict[str, Any]) -> bool:
+            if item.get("catalog_id"):
+                return item.get("workspace_status") in {"missing", "partial"}
+            return item.get("connector_status") in {"not_configured", "partial"}
+
+        blocking = [r for r in required if _is_blocking_requirement(r)]
         return {
             "app_id": app_id,
             "declarations": results,

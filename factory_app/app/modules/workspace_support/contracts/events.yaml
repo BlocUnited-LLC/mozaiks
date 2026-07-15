@@ -6,14 +6,49 @@ events:
     producer: workspace_support
     payload_schema:
       type: object
-      required: [request_id, app_id, severity, message]
+      required: [request_id, app_id, subject_app_id, severity, message]
       properties:
         request_id: { type: string }
         app_id:     { type: string }
+        subject_app_id: { type: string }
         severity:   { type: string }
         message:    { type: string }
         page_url:   { type: string }
         page_title: { type: string }
+        message_thread_id: { type: string }
+
+  - type: domain.workspace_support.message_added
+    version: 1
+    description: Emitted when an operator or user adds a reply to a support thread.
+    producer: workspace_support
+    payload_schema:
+      type: object
+      required: [request_id, message_id, app_id, subject_app_id, sender_role]
+      properties:
+        request_id:      { type: string }
+        message_id:      { type: string }
+        app_id:          { type: string }
+        subject_app_id:  { type: string }
+        sender_role:     { type: string }
+        sender_id:       { type: string }
+        ticket_user_id:  { type: string }
+        message_preview: { type: string }
+        message_thread_id: { type: string }
+
+  - type: domain.workspace_support.request_status_changed
+    version: 1
+    description: Emitted when a support request is resolved or reopened.
+    producer: workspace_support
+    payload_schema:
+      type: object
+      required: [request_id, app_id, subject_app_id, status]
+      properties:
+        request_id: { type: string }
+        app_id: { type: string }
+        subject_app_id: { type: string }
+        status: { type: string }
+        changed_by: { type: string }
+        message_thread_id: { type: string }
 
   - type: domain.workspace_support.negative_feedback
     version: 1
@@ -21,9 +56,24 @@ events:
     producer: workspace_support
     payload_schema:
       type: object
-      required: [feedback_id, app_id]
+      required: [feedback_id, app_id, subject_app_id]
       properties:
         feedback_id:   { type: string }
         app_id:        { type: string }
+        subject_app_id: { type: string }
         session_id:    { type: string }
         workflow_name: { type: string }
+
+  - type: domain.workspace_support.request_deleted
+    version: 1
+    description: Emitted when a support request and its linked message thread are deleted.
+    producer: workspace_support
+    payload_schema:
+      type: object
+      required: [request_id, app_id]
+      properties:
+        request_id: { type: string }
+        app_id: { type: string }
+        subject_app_id: { type: string }
+        message_thread_id: { type: string }
+        deleted_messages: { type: integer }

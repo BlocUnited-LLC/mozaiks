@@ -92,16 +92,18 @@ action?
 
 | Area | Content |
 | --- | --- |
-| Hero | Workspace integration purpose and refresh status. |
-| Summary | Configured, partial, missing, and total providers. |
-| Catalog | Provider cards grouped by category. |
-| Detail | Required env vars, safe presence status, setup steps, operator note. |
+| Header | Workspace integration purpose in one sentence. |
+| Summary | Connected, needs setup, and used-by-apps counts. |
+| Needs attention | Services currently used by apps but missing setup. |
+| Connected | Services ready from environment variables or saved workspace connectors. |
+| Available | Supported services that are not blocking any app. |
+| Detail | Status, app usage, credential source, operator note, collapsed advanced setup. |
 
 **UI primitives:**
 
 - `PageHeader` or `WorkspaceStudioHero`
 - `SummaryStrip`
-- `SurfaceCard` for provider cards
+- `Panel` plus compact rows for provider lists
 - `StatusPill` for configured/partial/missing
 - `StudioSlideOver` for setup detail
 - `Alert` for save/load errors only
@@ -109,8 +111,58 @@ action?
 **UX rules:**
 
 - Global setup owns shared provider credentials and notes.
+- Organize by task state, not provider category. Categories may appear as small
+  metadata pills, but they should not be the main page structure.
+- Catalog entries are permanent inventory. The global detail drawer may delete
+  a saved workspace connector, but it must not imply that environment-managed
+  credentials or catalog providers can be deleted from the UI.
 - App-specific integration requirements should summarize on app Overview and
   link to the hidden app integration detail route.
+- The workspace catalog ordering still leads with AI providers, then Payments,
+  then operational providers inside task sections. The app dashboard should not
+  list providers the app did not declare or inherit from a selected managed
+  capability.
+- Mozaiks Pay is shown as the removable default payments integration for
+  monetized apps. Removing it writes an app-level removal record so later
+  defaulting passes do not silently restore it.
 - Never display secret values. Only display names and presence status.
-- Group by human provider category such as payments, email, auth, storage,
-  analytics, and source control.
+- Required environment names and setup steps belong in collapsed advanced
+  details, not in the default page scan.
+
+## Support
+
+**Route:** `/support`
+
+**User question:** Which apps have support conversations that need attention?
+
+**Primary action:** Open the selected app's support dashboard.
+
+**Content contract:**
+
+| Area | Content |
+| --- | --- |
+| Header | Workspace support purpose in one sentence. |
+| Summary | Apps with open support, needs-reply count, in-progress count, resolved count. |
+| App list | App name, support status, open chat count, latest user message preview, action. |
+| Detail | Opens only after selecting an app or routing to `/apps/:appId/support`. |
+
+**UI primitives:**
+
+- `WorkspaceLayout`
+- `WorkspaceStudioHero`
+- `SummaryStrip`
+- `ResourceList`
+- `StatusPill`
+- `LinkButton`
+- `InlineEmptyState`
+
+**UX rules:**
+
+- Keep the global support page as an app index. Do not show every chat across
+  every app by default.
+- Use the same app drill-down pattern as `/apps` and `/usage`.
+- User-facing statuses are `Needs reply`, `In progress`, and `Resolved`.
+- Conversation storage belongs to the `messages` module; support owns tickets
+  and routes the user to the app-specific support page.
+- Global Support groups records by the ticket's subject app id. It should not
+  expose workspace-wide social DMs or friends activity.

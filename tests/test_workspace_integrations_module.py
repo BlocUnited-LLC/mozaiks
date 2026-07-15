@@ -11,6 +11,7 @@ from factory_app.app.modules.workspace_integrations.backend.policy import (
     derive_status,
     is_catalog_only_mode,
 )
+from factory_app.app.modules.workspace_integrations.backend.handler import WorkspaceIntegrationsModule
 from factory_app.app.modules.workspace_integrations.backend.repo import WorkspaceIntegrationsRepo
 from factory_app.app.modules.workspace_integrations.backend.schemas import (
     CATALOG_BY_ID,
@@ -72,6 +73,28 @@ def test_build_context_catalog_matches_runtime_catalog() -> None:
     runtime_mozaikspay = CATALOG_BY_ID["mozaikspay"]
     assert yaml_mozaikspay["required_secrets"] == runtime_mozaikspay["required_secrets"]
     assert yaml_mozaikspay["optional_secrets"] == runtime_mozaikspay["optional_secrets"]
+    assert [entry["id"] for entry in yaml_entries] == [entry["id"] for entry in INTEGRATIONS_CATALOG]
+
+
+def test_integrations_catalog_orders_payments_after_ai() -> None:
+    assert [entry["id"] for entry in INTEGRATIONS_CATALOG[:3]] == [
+        "openai",
+        "anthropic",
+        "mozaikspay",
+    ]
+    assert [entry["category"] for entry in INTEGRATIONS_CATALOG[:3]] == ["ai", "ai", "payments"]
+
+
+def test_mozaikspay_catalog_is_default_removable_monetization_integration() -> None:
+    spec = CATALOG_BY_ID["mozaikspay"]
+    assert spec["category"] == "payments"
+    assert spec["default_for"] == ["monetized_app"]
+    assert spec["removable_default"] is True
+    assert set(spec["required_secrets"]) == {
+        "MOZAIKSPAY_API_BASE",
+        "MOZAIKSPAY_CLIENT_ID",
+        "MOZAIKSPAY_CLIENT_SECRET",
+    }
 
 
 # ── module.yaml contract ──────────────────────────────────────────────────────
@@ -89,6 +112,8 @@ def test_workspace_integrations_module_yaml_contract() -> None:
         "set_integration_note",
         "declare_app_integration_needs",
         "list_app_integration_needs",
+        "upsert_app_integration_need",
+        "delete_app_integration_need",
         "save_workspace_connector",
         "list_workspace_connectors",
         "delete_workspace_connector",
@@ -99,6 +124,11 @@ def test_workspace_integrations_module_yaml_contract() -> None:
     assert (module_root / "backend" / "repo.py").exists()
     assert (module_root / "backend" / "policy.py").exists()
     assert (module_root / "backend" / "schemas.py").exists()
+
+    by_id = {a["id"]: a for a in manifest["actions"]}
+    assert "workspace_id" not in set(by_id["list_workspace_connectors"]["input_schema"].get("required") or [])
+    assert "workspace_id" not in set(by_id["delete_workspace_connector"]["input_schema"].get("required") or [])
+    assert "workspace_id" not in set(by_id["save_workspace_connector"]["input_schema"].get("required") or [])
 
 
 # ── policy: derive_status ─────────────────────────────────────────────────────
@@ -207,8 +237,48 @@ class _FakeRepo:
         self.upserted = kwargs
 
 
+class _FakeUsageDeclarationsRepo:
+    def __init__(self, usage_counts: dict[str, int] | None = None) -> None:
+        self.usage_counts = usage_counts or {}
+        self.requested_catalog_ids: list[str] | None = None
+
+    async def get_catalog_usage_counts(self, *, catalog_ids: list[str] | None = None) -> dict[str, int]:
+        self.requested_catalog_ids = catalog_ids
+        if not catalog_ids:
+            return self.usage_counts
+        return {key: value for key, value in self.usage_counts.items() if key in catalog_ids}
+
+
 class _FakeCtx:
     user_id = "user_1"
+    tenant_id = None
+    workspace_id = None
+
+
+class _FakeConnectorActionService:
+    def __init__(self) -> None:
+        self.workspace_ids: list[str] = []
+
+    async def list_workspace_connectors(self, *, workspace_id: str) -> dict[str, Any]:
+        self.workspace_ids.append(workspace_id)
+        return {"connectors": [], "total": 0}
+
+    async def delete_workspace_connector(self, *, workspace_id: str, service: str) -> dict[str, Any]:
+        self.workspace_ids.append(workspace_id)
+        return {"deleted": True, "service": service, "secret_deleted": False}
+
+
+@pytest.mark.asyncio
+async def test_handler_workspace_connector_actions_default_to_context_workspace() -> None:
+    ctx = _FakeCtx()
+    ctx.workspace_id = "workspace_123"
+    service = _FakeConnectorActionService()
+    module = WorkspaceIntegrationsModule(service=service)  # type: ignore[arg-type]
+
+    await module.list_workspace_connectors(ctx)
+    await module.delete_workspace_connector(ctx, service="openai")
+
+    assert service.workspace_ids == ["workspace_123", "workspace_123"]
 
 
 class _WrapperStyleCollection:
@@ -252,6 +322,21 @@ async def test_service_list_integrations_returns_all_catalog_entries() -> None:
     summary = result["summary"]
     assert summary["total"] == len(INTEGRATIONS_CATALOG)
     assert summary["configured"] + summary["partial"] + summary["missing"] == summary["total"]
+
+
+@pytest.mark.asyncio
+async def test_service_list_integrations_includes_app_usage_count() -> None:
+    declarations_repo = _FakeUsageDeclarationsRepo({"mozaikspay": 2})
+    service = WorkspaceIntegrationsService(repo=_FakeRepo(), declarations_repo=declarations_repo)  # type: ignore[arg-type]
+
+    result = await service.list_integrations(_FakeCtx())
+
+    mozaikspay = next(item for item in result["integrations"] if item["id"] == "mozaikspay")
+    openai = next(item for item in result["integrations"] if item["id"] == "openai")
+    assert mozaikspay["app_usage_count"] == 2
+    assert openai["app_usage_count"] == 0
+    assert result["summary"]["used"] == 1
+    assert declarations_repo.requested_catalog_ids == [entry["id"] for entry in INTEGRATIONS_CATALOG]
 
 
 @pytest.mark.asyncio
@@ -388,6 +473,27 @@ def test_build_declaration_response_no_setup_url_for_uncatalogued() -> None:
     assert response["setup_url"] is None
 
 
+def test_build_declaration_response_includes_removable_default_metadata() -> None:
+    doc = build_declaration_document(
+        app_id="app_1",
+        service="mozaikspay",
+        catalog_id="mozaikspay",
+        display_name="Mozaiks Pay",
+        workspace_status="missing",
+        connector_status="not_configured",
+        defaulted=True,
+        removable=True,
+        source="monetization_default",
+        required_fields=[{"name": "client_secret", "type": "secret", "frontend_safe": False}],
+        declared_at="2026-07-11T00:00:00Z",
+    )
+    response = build_declaration_response(doc)
+    assert response["defaulted"] is True
+    assert response["removable"] is True
+    assert response["source"] == "monetization_default"
+    assert response["required_fields"][0]["name"] == "client_secret"
+
+
 def test_declarations_entity_constant_is_set() -> None:
     assert DECLARATIONS_ENTITY == "integration_declarations"
 
@@ -401,11 +507,40 @@ class _FakeDeclarationsRepo:
 
     async def upsert_declarations(self, *, app_id: str, declarations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self.upserted = declarations
-        self._stored = [d for d in declarations]
+        for declaration in declarations:
+            service = declaration.get("service")
+            self._stored = [
+                existing
+                for existing in self._stored
+                if not (existing.get("app_id") == app_id and existing.get("service") == service)
+            ]
+            self._stored.append(declaration)
         return declarations
 
     async def get_for_app(self, *, app_id: str) -> list[dict[str, Any]]:
         return [d for d in self._stored if d.get("app_id") == app_id]
+
+    async def soft_delete_declaration(
+        self,
+        *,
+        app_id: str,
+        service: str,
+        removed_by: str | None = None,
+    ) -> bool:
+        self._stored = [
+            existing
+            for existing in self._stored
+            if not (existing.get("app_id") == app_id and existing.get("service") == service)
+        ]
+        self._stored.append(
+            {
+                "app_id": app_id,
+                "service": service,
+                "removed": True,
+                "removed_by": removed_by,
+            }
+        )
+        return True
 
 
 @pytest.mark.asyncio
@@ -425,6 +560,54 @@ async def test_declare_app_integration_needs_persists_docs() -> None:
     assert decl_repo.upserted is not None
     services = {d["service"] for d in decl_repo.upserted}
     assert services == {"resend", "twilio"}
+
+
+@pytest.mark.asyncio
+async def test_upsert_app_integration_need_persists_single_record() -> None:
+    decl_repo = _FakeDeclarationsRepo()
+    service = WorkspaceIntegrationsService(repo=_FakeRepo(), declarations_repo=decl_repo)
+    result = await service.upsert_app_integration_need(
+        app_id="app_pay",
+        need={
+            "service": "mozaikspay",
+            "catalog_id": "mozaikspay",
+            "defaulted": True,
+            "removable": True,
+            "source": "monetization_default",
+        },
+        declared_at="2026-07-11T00:00:00Z",
+    )
+    assert result["saved"] == 1
+    assert result["declaration"]["service"] == "mozaikspay"
+    assert result["declaration"]["defaulted"] is True
+    assert decl_repo.upserted is not None
+    assert decl_repo.upserted[0]["removable"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_app_integration_need_hides_removed_declaration() -> None:
+    stored = [
+        build_declaration_document(
+            app_id="app_pay",
+            service="mozaikspay",
+            catalog_id="mozaikspay",
+            defaulted=True,
+            removable=True,
+            declared_at="2026-07-11T00:00:00Z",
+        )
+    ]
+    decl_repo = _FakeDeclarationsRepo(stored=stored)
+    service = WorkspaceIntegrationsService(repo=_FakeRepo(), declarations_repo=decl_repo)
+
+    deleted = await service.delete_app_integration_need(
+        app_id="app_pay",
+        service="mozaikspay",
+        user_id="operator_1",
+    )
+    listed = await service.list_app_integration_needs(app_id="app_pay")
+
+    assert deleted["deleted"] is True
+    assert listed["declarations"] == []
 
 
 @pytest.mark.asyncio
@@ -523,6 +706,78 @@ async def test_list_app_integration_needs_summary_counts(monkeypatch: pytest.Mon
     assert summary["required"] == 1   # resend is required, twilio is optional
     # both are missing from workspace, but only resend is required → blocking = 1
     assert summary["blocking"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_app_integration_needs_does_not_block_catalog_service_configured_by_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    stored = [
+        build_declaration_document(
+            app_id="app_env",
+            service="openai",
+            catalog_id="openai",
+            workspace_status="missing",
+            connector_status="not_configured",
+            optional=False,
+            declared_at="2026-07-11T00:00:00Z",
+        )
+    ]
+    decl_repo = _FakeDeclarationsRepo(stored=stored)
+    service = WorkspaceIntegrationsService(repo=_FakeRepo(), declarations_repo=decl_repo)
+
+    result = await service.list_app_integration_needs(app_id="app_env")
+
+    declaration = result["declarations"][0]
+    assert declaration["workspace_status"] == "configured"
+    assert declaration["connector_status"] == "not_configured"
+    assert result["summary"]["blocking"] == 0
+
+
+@pytest.mark.asyncio
+async def test_list_app_integration_needs_treats_ready_workspace_connector_as_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    stored = [
+        build_declaration_document(
+            app_id="app_connector",
+            service="resend",
+            catalog_id="resend",
+            workspace_status="missing",
+            connector_status="not_configured",
+            optional=False,
+            declared_at="2026-07-11T00:00:00Z",
+        )
+    ]
+    decl_repo = _FakeDeclarationsRepo(stored=stored)
+    service = WorkspaceIntegrationsService(repo=_FakeRepo(), declarations_repo=decl_repo)
+
+    async def fake_list_workspace_connectors(*, workspace_id: str) -> dict[str, Any]:
+        assert workspace_id == "workspace_1"
+        return {
+            "connectors": [
+                {
+                    "service": "resend",
+                    "ready": True,
+                    "configured": True,
+                    "health": {"status": "configured"},
+                }
+            ],
+            "total": 1,
+        }
+
+    service.list_workspace_connectors = fake_list_workspace_connectors  # type: ignore[method-assign]
+
+    result = await service.list_app_integration_needs(app_id="app_connector", workspace_id="workspace_1")
+
+    declaration = result["declarations"][0]
+    assert declaration["workspace_status"] == "configured"
+    assert declaration["connector_status"] == "ready"
+    assert declaration["workspace_connector_status"] == "ready"
+    assert declaration.get("setup_url") is None
+    assert result["summary"]["blocking"] == 0
 
 
 @pytest.mark.asyncio

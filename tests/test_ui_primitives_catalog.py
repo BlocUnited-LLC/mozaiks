@@ -40,12 +40,15 @@ def test_component_and_page_primitive_catalogs_match_runtime_exports() -> None:
     expected_component = tuple(
         sorted(
             set(expected_page)
-            | {
-                "CollectionToolbar",
-                "AnalyticsSummaryStrip",
-                "ContentRail",
-                "FocusTrap",
-                "IconButton",
+                | {
+                    "CollectionToolbar",
+                    "AnalyticsSummaryStrip",
+                    "ChatInput",
+                    "ChatMessageBubble",
+                    "ChatThread",
+                    "ContentRail",
+                    "FocusTrap",
+                    "IconButton",
                 "LinkButton",
                 "PerformanceTileGrid",
                 "ResourceList",

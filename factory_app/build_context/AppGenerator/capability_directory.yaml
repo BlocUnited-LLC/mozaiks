@@ -44,7 +44,7 @@ capabilities:
           - Keep provider-specific mechanics under app/services/adapters/payments/.
 
   - id: messaging_pack
-    label: Messaging and Real-Time Chat
+    label: Messaging
     capability_kind: operator_pack
     recommendation_rank: 2
     domains:
@@ -52,12 +52,11 @@ capabilities:
       - chat
       - direct_messages
       - threads
-      - real_time
     intent_signals:
       - App needs users to send messages to each other.
-      - App needs DM threads, group channels, or real-time conversation.
+      - App needs DM threads, group channels, support conversations, or threaded conversation history.
       - Product spec mentions chat, inbox, messaging, conversations, or threads.
-      - App needs read/unread state, typing indicators, or delivery receipts.
+      - App needs read/unread state for persisted internal conversations.
     selection_aliases:
       - messaging
       - messaging_pack
@@ -67,21 +66,87 @@ capabilities:
       - threads
     generator_notes:
       - Select the messaging operator_pack when messaging is in the product brief.
-      - Generate only the app-specific page composition and facade wiring — never regenerate pack module internals.
-      - The messages module owns threads and messages persistence; page actions call module actions directly.
-      - Pair with the contacts module (included in this pack) to give users a DM-ready contact list.
-      - Use notifications pack for email/push delivery of new message alerts — wire via reactions.yaml.
-      - Admin panel for thread moderation is declared in contracts/admin.yaml; never generate a custom admin route.
+      - The messages module owns threads, messages, read state, and in-app notification events.
+      - Messaging has scope_type app/workspace and subject_app_id so support can be app-scoped while future social DMs can be workspace-scoped.
+      - Do not generate contacts, friends, follows, invites, or feeds inside the messaging pack; those belong to social_pack.
+      - Use support_pack for help desk ticket metadata and support pages.
+      - Use notifications pack only for email/push delivery beyond runtime in-app notifications.
     capabilities_provided:
       - messaging.threads.list
       - messaging.messages.send
-      - messaging.contacts.list
-      - messaging.contacts.add
+
+  - id: support_pack
+    label: Support Desk
+    capability_kind: operator_pack
+    recommendation_rank: 3
+    domains:
+      - support
+      - helpdesk
+      - customer_operations
+      - app_operations
+    intent_signals:
+      - App needs users to ask for help or open support tickets.
+      - App needs an operator inbox, support replies, escalations, or per-app support follow-up.
+      - Product spec mentions support desk, help desk, helpdesk, ticket, customer support, or operator follow-up.
+    selection_aliases:
+      - support
+      - support_pack
+      - help desk
+      - helpdesk
+      - customer support
+      - support tickets
+    generator_notes:
+      - Select support_pack only when the app needs support request metadata or a support inbox.
+      - support_pack requires messaging_pack. The support module stores request metadata and message_thread_id; the messages module stores all conversation bodies.
+      - Support requests must carry subject_app_id so admin views can group support by app.
+      - Do not hardcode support transcripts. Support messages must come from persisted messages threads.
+      - Do not use support_pack for social DMs, friends, follows, invites, forums, proposals, or governance voting.
+    capabilities_provided:
+      - support.requests.create
+      - support.requests.list
+      - support.requests.update_status
+
+  - id: social_pack
+    label: Social Graph and Feed
+    capability_kind: operator_pack
+    recommendation_rank: 4
+    domains:
+      - social
+      - community
+      - friends
+      - invites
+      - feed
+      - posts
+    intent_signals:
+      - App needs friends, follows, invitations, user posts, comments, reactions, or activity feeds.
+      - App is a social network, creator platform, community app, member graph, or feed-based product.
+      - Product spec mentions friends list, inviting friends, following users, posts, comments, likes, or activity feed.
+    selection_aliases:
+      - social
+      - social_pack
+      - friends
+      - invites
+      - activity feed
+      - posts
+    generator_notes:
+      - Select social_pack only for apps where social graph or feed behavior is part of the product concept.
+      - The social pack owns friends, follows/invites, user posts, reactions, comments, and feed records.
+      - Use messaging_pack for DMs only when the app also needs private conversations.
+      - Do not make governance features first-class here. Threads with voting, proposals, quorum, treasury, moderation policy, or member governance belong to an app-specific module or a future governance pack.
+      - Dummy friend/post examples may be used in demo UI fallbacks, but persisted user social data must come from module actions.
+    capabilities_provided:
+      - social.friends.list
+      - social.friends.connect
+      - social.feed.read
+      - social.posts.create
+      - social.posts.list
+      - social.posts.react
+      - social.posts.comment
 
   - id: commerce_pack
     label: Commerce Storefront
     capability_kind: operator_pack
-    recommendation_rank: 4
+    recommendation_rank: 5
     domains:
       - commerce
       - ecommerce

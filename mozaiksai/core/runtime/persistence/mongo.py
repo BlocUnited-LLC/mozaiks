@@ -104,6 +104,12 @@ class MongoPersistenceCollection:
             upsert=upsert,
         )
 
+    async def delete_one(self, query: Query) -> Any:
+        return await self._collection.delete_one(self._scoped_query(query))
+
+    async def delete_many(self, query: Query) -> Any:
+        return await self._collection.delete_many(self._scoped_query(query))
+
     async def count(self, query: Query) -> int:
         return int(await self._collection.count_documents(self._scoped_query(query)))
 

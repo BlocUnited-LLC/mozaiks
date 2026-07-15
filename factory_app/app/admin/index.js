@@ -26,6 +26,8 @@ const AppUsagePage       = lazy(() => import('./pages/AppUsagePage.jsx'))
 const AppBuildHistoryPage = lazy(() => import('./pages/AppBuildHistoryPage.jsx'))
 const AppIntegrationsPage = lazy(() => import('./pages/AppIntegrationsPage.jsx'))
 const AppSupportPage      = lazy(() => import('./pages/AppSupportPage.jsx'))
+const UserSupportPage     = lazy(() => import('./pages/UserSupportPage.jsx'))
+const UserSupportPanel    = lazy(() => import('./pages/UserSupportPanel.jsx'))
 const ProfilePage         = lazy(() => import('@mozaiks/chat-ui/pages/ProfilePage.jsx'))
 
 export function registerAdminComponents(registerComponent) {
@@ -79,6 +81,14 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('AppSupportPage', AppSupportPage, {
     description: 'App support surface — help desk notes, escalations, stalled runs, and support-facing diagnostics.',
+  })
+
+  registerComponent('UserSupportPage', UserSupportPage, {
+    description: 'User-facing support surface — file help requests and track operator conversations.',
+  })
+
+  registerComponent('UserSupportPanel', UserSupportPanel, {
+    description: 'Profile panel for workspace_support — shows the user\'s support ticket list and thread view. Declared by workspace_support/contracts/profile.yaml.',
   })
 
   registerComponent('AppBuildHistoryPage', AppBuildHistoryPage, {

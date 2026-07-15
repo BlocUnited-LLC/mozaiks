@@ -226,8 +226,8 @@ function AppDashboardBanner({ appId, summary, dataMode }) {
           /* No image: bold gradient so the strip looks intentional */
           <>
             <div className="absolute inset-0 bg-gradient-to-br from-primary/70 via-primary/30 to-secondary/60" />
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_0%_0%,rgba(255,255,255,0.12),transparent)]" />
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_50%_50%_at_100%_100%,rgba(255,255,255,0.06),transparent)]" />
+            <div className="absolute left-0 top-0 h-24 w-1/2 rounded-br-full bg-background/10 blur-2xl" />
+            <div className="absolute bottom-0 right-0 h-20 w-1/3 rounded-tl-full bg-secondary/10 blur-2xl" />
           </>
         )}
 

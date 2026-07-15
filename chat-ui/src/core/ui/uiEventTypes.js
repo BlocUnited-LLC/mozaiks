@@ -49,6 +49,9 @@ export const UI_PRIMITIVES = /** @type {const} */ ({
   FORM_CARD: 'FormCard',
   CONFIRMATION_SUMMARY: 'ConfirmationSummary',
 
+  // Support / escalation
+  ESCALATION_CARD: 'EscalationCard',
+
   // Display primitives
   DATA_TABLE: 'DataTable',
   TIMELINE: 'Timeline',

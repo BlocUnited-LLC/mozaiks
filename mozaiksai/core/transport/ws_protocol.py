@@ -328,8 +328,26 @@ class WebSocketProtocolMixin:
     # CONNECTION CLEANUP
     # ==================================================================================
 
-    async def _cleanup_connection(self, chat_id: str) -> None:
-        """Clean up connection resources."""
+    async def _cleanup_connection(self, chat_id: str, ws_id: int | None = None) -> None:
+        """Clean up connection resources.
+
+        If ``ws_id`` is supplied the cleanup is guarded: if another WebSocket
+        connection has already taken over the slot for ``chat_id`` (e.g. a fast
+        reconnect or React StrictMode's double-invoke), this method returns
+        without touching that new connection's resources.  The eviction path
+        does *not* supply ``ws_id`` so it always cleans up unconditionally.
+        """
+        if ws_id is not None:
+            current = self.connections.get(chat_id)
+            if current is not None and current.get("ws_id") != ws_id:
+                logger.debug(
+                    "WS_CONN_CLEANUP_SKIPPED chat=%s ws_id=%s (slot now owned by ws_id=%s)",
+                    chat_id,
+                    ws_id,
+                    current.get("ws_id"),
+                )
+                return
+
         if chat_id in self.connections:
             del self.connections[chat_id]
 

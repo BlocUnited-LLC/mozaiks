@@ -136,9 +136,13 @@ typed selection/output/boundary rules, and `templates/` mirrors the generated
 app bundle paths.
 
 - `messaging`: generated module templates for threads, messages, read state,
-  and message-related contracts.
-- `social_graph`: generated module templates for communities, memberships,
-  invitations, public browse, and role-scoped management.
+  app/workspace conversation scope, and message-related contracts.
+- `support`: generated module templates for support request metadata and a
+  support inbox. It requires `messaging`; support stores `message_thread_id`
+  and never owns a second transcript store.
+- `social`: generated module templates for friends, invitations, user posts,
+  reactions, comments, and activity feeds. Social may pair with `messaging`
+  for DMs, but it owns social graph state.
 - `commerce`: generated module templates for single-merchant storefronts:
   product catalog, inventory, cart, checkout requests, orders, and fulfillment
   state. Payment processor mechanics stay outside the commerce module and are

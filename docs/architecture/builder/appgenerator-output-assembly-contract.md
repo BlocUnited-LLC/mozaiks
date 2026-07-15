@@ -203,6 +203,9 @@ Rules:
 
 - Always emits `overview` and `settings` app-scope pages
 - Includes additional **standard** pages (`access`, `billing`, `usage`, `activity`, `operations`, `integrations`, `support`) based on `app_build_plan.capability_packs` entity domains and `auth_strategy`
+- Standard pages are modular, not a "full app" bundle preset. A generated app
+  should only receive pages whose source capability, entity domain, integration
+  need, or access model creates a real operator task for that page.
 - Includes **operator-only** pages (e.g. `hosting`) only when `capability_packs` is non-empty and explicitly targets hosted/operator app management — never in plain OSS contexts without workspace build context
 - Uses `scope: app` for all generated app pages; workspace-scope pages only for hosted operator contexts
 - Hosted global operator registries belong to hosted product workspaces and must not be emitted into standard generated app bundles
@@ -297,6 +300,14 @@ Rules:
   `non_secret_fields`, `permissions_required`, and resume context.
 - Persist newly supplied credentials through the platform connector service so
   `/apps/{appId}/integrations` reflects the result.
+- Treat the workspace integration catalog as inventory only. The app's
+  integration page is driven by `integration_needs` and managed capability
+  requirements, not by every available catalog entry.
+- For monetized apps, `save_integration_manifest` records `mozaikspay` as a
+  removable default app integration when the build did not explicitly declare a
+  monetization connector. This default is optional and operator-removable; an
+  explicit `capability_packs[].required_integrations` entry remains the source
+  of truth for blocking credential requirements.
 - Persist only frontend-safe non-secret config in connector metadata. Secret
   fields are write-only and must not be returned to chat, generated code, or
   frontend read APIs.

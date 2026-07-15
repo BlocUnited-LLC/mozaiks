@@ -113,6 +113,10 @@ task_contracts:
       - Emit contracts/relationships.yaml only when a module can enumerate current-user relationships to its own resources for generic My Apps, Portfolio, or My Resources surfaces.
       - relationships.yaml providers must bind to module actions declared in module.yaml. Provider actions must return normalized relationship rows with resource_type, resource_id, relationship_type, primary_route, capabilities, status, and metadata as needed.
       - Do not encode app-specific monetization, payment-provider, ownership-rights, or hosted-product policy in relationships.yaml. Keep it to generic resource relationship discovery.
+      - Emit contracts/notifications.yaml only when one or more declared module events should create user-facing notifications. Notification rules are deterministic event-to-intent mappings consumed by the OSS runtime; generated apps must not create a standalone notifications module, notification persistence repo, or notification websocket worker for ordinary in-app alerts.
+      - Notification rules must use schema_version mozaiks.notifications.v1, stable notification ids, event_type values declared in contracts/events.yaml or canonical app/domain/platform/hosted namespaces, controlled channels from [in_app, email, push, sms], and explicit audience roles/permissions, audience.user_id_field for event-payload target users, or a declared module-local resolver hook.
+      - Use channel in_app by default. Add email, push, or sms only when the app plan explicitly requires external delivery and the corresponding operator pack or app-owned provider adapter is available. Do not invent provider delivery internals in module business logic.
+      - Use context_fields only for non-secret identifiers or display context needed by the notification center. Never include token, key, password, credential, payment provider, or idempotency fields.
       - Persistent modules express collection ownership through data_contract, not ad hoc database files.
       - backend/repo.py owns persistence operations and must not contain product policy.
       - backend/schemas.py owns typed DTO/document shapes and pure helpers.

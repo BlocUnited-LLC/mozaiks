@@ -16,3 +16,13 @@ class SupportRequest:
     created_at: str
     resolved_at: str | None = None
     notes: str | None = None
+
+
+@dataclass
+class SupportMessage:
+    message_id: str
+    request_id: str
+    sender_role: str  # user | operator
+    sender_id: str | None
+    message: str
+    created_at: str

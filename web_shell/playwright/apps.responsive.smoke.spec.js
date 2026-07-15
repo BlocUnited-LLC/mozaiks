@@ -299,16 +299,17 @@ function buildWorkspaceIntegrationsPayload() {
     integrations: [
       {
         id: 'mozaikspay',
-        name: 'MozaiksPay',
+        name: 'Mozaiks Pay',
         category: 'payments',
         description: 'Payment processing and subscription checkout.',
         status: 'configured',
+        app_usage_count: 2,
         note: 'Production key managed by workspace operators.',
         secrets: [
           { name: 'MOZAIKSPAY_CLIENT_SECRET', present: true },
           { name: 'MOZAIKSPAY_WEBHOOK_SECRET', present: true },
         ],
-        setup_steps: ['Create a restricted MozaiksPay key.', 'Add webhook signing secret.'],
+        setup_steps: ['Create a restricted Mozaiks Pay key.', 'Add webhook signing secret.'],
       },
       {
         id: 'postmark',
@@ -316,6 +317,7 @@ function buildWorkspaceIntegrationsPayload() {
         category: 'email',
         description: 'Transactional email delivery.',
         status: 'partial',
+        app_usage_count: 1,
         note: '',
         secrets: [
           { name: 'POSTMARK_SERVER_TOKEN', present: true },
@@ -329,6 +331,7 @@ function buildWorkspaceIntegrationsPayload() {
         category: 'notifications',
         description: 'Operator notifications.',
         status: 'missing',
+        app_usage_count: 0,
         note: '',
         secrets: [
           { name: 'SLACK_BOT_TOKEN', present: false },
@@ -342,7 +345,28 @@ function buildWorkspaceIntegrationsPayload() {
       partial: 1,
       missing: 1,
       unknown: 0,
+      used: 2,
     },
+  };
+}
+
+function buildWorkspaceConnectorsPayload() {
+  return {
+    connectors: [
+      {
+        service: 'mozaikspay',
+        display_name: 'Mozaiks Pay',
+        secret_available: true,
+        configured: true,
+        ready: true,
+        health: {
+          status: 'configured',
+          message: 'Required configuration is present.',
+          missing_fields: [],
+        },
+      },
+    ],
+    total: 1,
   };
 }
 
@@ -353,10 +377,13 @@ function buildAppIntegrationDeclarationsPayload(appId = APP_ID) {
       {
         service: 'mozaikspay',
         catalog_id: 'mozaikspay',
-        display_name: 'MozaiksPay',
+        display_name: 'Mozaiks Pay',
         purpose: 'Paid memberships and subscription checkout.',
         required_at: 'runtime',
-        optional: false,
+        optional: true,
+        defaulted: true,
+        removable: true,
+        source: 'monetization_default',
         workspace_status: 'configured',
         connector_status: 'ready',
       },
@@ -482,6 +509,50 @@ function buildWorkspaceUsagePayload() {
   return {
     totals,
     events: runs,
+  };
+}
+
+function buildWorkspaceSupportPayload() {
+  return {
+    requests: [
+      {
+        request_id: 'sup-8821',
+        app_id: APP_ID,
+        app_name: 'Campaign Revision Workbench',
+        subject: 'App not loading after update',
+        message: 'White screen on launch after latest update.',
+        status: 'open',
+        severity: 'high',
+        user_id: 'alex@example.com',
+        created_at: '2025-02-05T14:30:00Z',
+        updated_at: '2025-02-05T15:30:00Z',
+      },
+      {
+        request_id: 'sup-8819',
+        app_id: APP_ID,
+        app_name: 'Campaign Revision Workbench',
+        subject: 'Invite email not delivered',
+        message: 'Reviewer invite was not delivered.',
+        status: 'resolved',
+        severity: 'low',
+        user_id: 'dana@example.com',
+        created_at: '2025-02-04T13:00:00Z',
+        updated_at: '2025-02-04T14:00:00Z',
+      },
+      {
+        request_id: 'sup-8772',
+        app_id: 'partner-delivery-studio',
+        app_name: 'Partner Delivery Studio',
+        subject: 'Escalation queue rules need review',
+        message: 'Partner launch support queue needs a routing review.',
+        status: 'open',
+        severity: 'medium',
+        user_id: 'jules@example.com',
+        created_at: '2025-02-05T10:00:00Z',
+        updated_at: '2025-02-05T11:00:00Z',
+      },
+    ],
+    total: 3,
   };
 }
 
@@ -614,6 +685,22 @@ async function mockStudioApis(page) {
     });
   });
 
+  await page.route('**/api/modules/workspace_integrations/list_workspace_connectors**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildWorkspaceConnectorsPayload()),
+    });
+  });
+
+  await page.route('**/api/modules/workspace_integrations/delete_workspace_connector**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ deleted: true, service: 'mozaikspay', secret_deleted: true }),
+    });
+  });
+
   await page.route('**/api/modules/workspace_integrations/list_app_integration_needs**', async (route) => {
     let appId = APP_ID;
     try {
@@ -626,6 +713,22 @@ async function mockStudioApis(page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(buildAppIntegrationDeclarationsPayload(appId)),
+    });
+  });
+
+  await page.route('**/api/modules/workspace_integrations/delete_app_integration_need**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ deleted: true, app_id: APP_ID, service: 'mozaikspay' }),
+    });
+  });
+
+  await page.route('**/api/modules/workspace_support/list_support_requests**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildWorkspaceSupportPayload()),
     });
   });
 
@@ -755,15 +858,27 @@ test('workspace integrations route stays responsive across desktop and mobile wi
   await page.goto('/integrations');
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Workspace Integrations', exact: true })).toBeVisible();
-  await main.getByRole('button', { name: 'All' }).click();
-  await expect(main.getByText('MozaiksPay')).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Integrations', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Needs attention' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Connected' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Available' })).toBeVisible();
+  await expect(main.getByText('Mozaiks Pay')).toBeVisible();
   await expect(main.getByText('Postmark')).toBeVisible();
   await expect(main.getByText('Slack')).toBeVisible();
-  await expect(main.getByText('Configured', { exact: true }).first()).toBeVisible();
-  await expect(main.getByText('Partial', { exact: true }).first()).toBeVisible();
-  await expect(main.getByText('Not configured', { exact: true }).first()).toBeVisible();
+  await expect(main.getByText('Connected', { exact: true }).first()).toBeVisible();
+  await expect(main.getByText('Needs setup', { exact: true }).first()).toBeVisible();
+  await expect(main.getByText('Available', { exact: true }).first()).toBeVisible();
+  await expect(main.getByText('Used by 2 apps').first()).toBeVisible();
+  await expect(main.getByText('Not used yet').first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
+
+  await main.getByRole('button', { name: 'Manage' }).first().click();
+  const drawer = page.getByRole('dialog', { name: 'Mozaiks Pay' });
+  await expect(drawer.getByText('Credential source')).toBeVisible();
+  await expect(drawer.getByText('Workspace connector', { exact: true })).toBeVisible();
+  await expect(drawer.getByRole('button', { name: 'Delete connector' })).toBeVisible();
+  await expect(drawer.getByText('Advanced setup details')).toBeVisible();
+  await drawer.getByRole('button', { name: 'Close', exact: true }).click();
 
   const viewport = page.viewportSize();
   expect(viewport).not.toBeNull();
@@ -771,6 +886,37 @@ test('workspace integrations route stays responsive across desktop and mobile wi
   if (viewport.width < 768) {
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
   } else {
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
+  }
+});
+
+test('workspace support route stays responsive across desktop and mobile widths', async ({ page }) => {
+  await page.goto('/support');
+  const main = page.locator('main');
+
+  await expect(main.getByRole('heading', { name: 'Support', exact: true })).toBeVisible();
+  await expect(main.getByPlaceholder('Search apps...')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+
+  if (viewport.width < 768) {
+    const campaignCard = main.locator('article').filter({ hasText: 'Campaign Revision Workbench' }).first();
+    await expect(campaignCard).toBeVisible();
+    await expect(campaignCard).toContainText('Needs reply');
+    await expect(campaignCard).toContainText('2 support chats');
+    await expect(campaignCard.getByRole('button', { name: 'Dashboard' })).toBeVisible();
+    await expect(main.getByText('App not loading after update')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeVisible();
+  } else {
+    const campaignRow = main.getByRole('row', { name: /Campaign Revision Workbench/ }).first();
+    await expect(campaignRow).toBeVisible();
+    await expect(campaignRow).toContainText('Needs reply');
+    await expect(campaignRow).toContainText('2 support chats');
+    await expect(campaignRow.getByRole('button', { name: 'Dashboard' })).toBeVisible();
+    await expect(main.getByRole('row', { name: /Partner Delivery Studio/ }).first()).toBeVisible();
+    await expect(main.getByText('App not loading after update')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Open Studio navigation' })).toBeHidden();
   }
 });
@@ -838,16 +984,18 @@ test('app integrations route stays responsive across desktop and mobile widths',
   await page.goto(`/apps/${APP_ID}/integrations`);
   const main = page.locator('main');
 
-  await expect(main.getByRole('heading', { name: 'Integration Setup', exact: true })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'App Integrations', exact: true })).toBeVisible();
   await expect(main.getByRole('button', { name: 'Workspace integrations' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Workspace-managed services' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'App-specific services' })).toBeVisible();
-  await expect(main.getByText('MozaiksPay').first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Required' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Optional' })).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'App-specific' })).toBeVisible();
+  await expect(main.getByText('Mozaiks Pay').first()).toBeVisible();
   await expect(main.getByText('Postmark').first()).toBeVisible();
   await expect(main.getByText('Internal Search API').first()).toBeVisible();
-  await expect(main.getByText('Workspace ready').first()).toBeVisible();
+  await expect(main.getByText('Ready').first()).toBeVisible();
   await expect(main.getByText('Partial setup').first()).toBeVisible();
-  await expect(main.getByText('No credential').first()).toBeVisible();
+  await expect(main.getByText('Configure in app environment').first()).toBeVisible();
+  await expect(main.getByRole('button', { name: 'Remove from app' }).first()).toBeVisible();
   await expect(main.getByText(SECRET_SENTINEL)).toHaveCount(0);
   await expect(main.getByRole('button', { name: 'Add Integration' })).toHaveCount(0);
   await expect(main.getByRole('button', { name: 'Check now' })).toHaveCount(0);
@@ -934,13 +1082,23 @@ test('app health route stays responsive across desktop and mobile widths', async
 });
 
 test('app support route stays responsive across desktop and mobile widths', async ({ page }) => {
+  const supportModuleUrls = [];
+  page.on('request', (request) => {
+    const requestUrl = request.url();
+    if (requestUrl.includes('/api/modules/workspace_support/list_support_requests')) {
+      supportModuleUrls.push(requestUrl);
+    }
+  });
+
   await page.goto(`/apps/${APP_ID}/support`);
   const main = page.locator('main');
 
   await expect(main.getByRole('heading', { name: 'Support', exact: true })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Help desk' })).toBeVisible();
-  await expect(main.getByRole('heading', { name: 'Run review' })).toBeVisible();
-  await expect(main.getByText('Sessions with Errors').first()).toBeVisible();
+  await expect(main.getByRole('heading', { name: 'Support chats' })).toBeVisible();
+  await expect(main.getByText('Needs reply').first()).toBeVisible();
+  await expect(main.getByText('In progress').first()).toBeVisible();
+  await expect(main.getByText('Running')).toHaveCount(0);
+  expect(supportModuleUrls.some((requestUrl) => requestUrl.includes(`app_id=${APP_ID}`))).toBeTruthy();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();
@@ -1040,10 +1198,17 @@ test('mobile workspace Studio navigation keeps route transitions stable', async 
     },
     {
       href: '/integrations',
-      heading: 'Workspace Integrations',
+      heading: 'Integrations',
       detail: async () => {
-        await main.getByRole('button', { name: 'All' }).click();
-        await expect(main.getByText('MozaiksPay')).toBeVisible();
+        await expect(main.getByText('Mozaiks Pay')).toBeVisible();
+      },
+    },
+    {
+      href: '/support',
+      heading: 'Support',
+      detail: async () => {
+        const campaignCard = main.locator('article').filter({ hasText: 'Campaign Revision Workbench' }).first();
+        await expect(campaignCard).toBeVisible();
       },
     },
     {

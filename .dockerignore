@@ -1,0 +1,63 @@
+# Docker build context excludes for infra/docker/Dockerfile.
+#
+# Keep this in sync with what the Dockerfile actually COPYs. Without this
+# file, `docker build` sends the entire repo (node_modules, .git, caches,
+# generated build output) to the daemon, which is slow and can leak local
+# build artifacts into the image build context.
+
+# Version control
+.git
+.github
+
+# Editor / assistant metadata
+.vscode
+.claude
+.agents
+
+# Python virtual environments and caches
+.venv/
+.release-venv/
+.release-local-venv/
+.pkg-venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / frontend build artifacts (never needed inside the Python image)
+**/node_modules/
+**/.vite/
+chat-ui/dist/
+web_shell/dist/
+web_shell/playwright-report/
+web_shell/playwright-report-visual/
+web_shell/test-results/
+
+# Build/output directories not part of the installable package
+build/
+dist/
+site/
+generated/
+tmp/
+mozaiks.egg-info/
+
+# Local runtime output (never bake local logs into the image)
+logs/logs/
+logs/agent_outputs/
+logs/workflow_converter/
+
+# Secrets and local env files
+.env
+.env.*
+!.env.example
+
+# Docs and tests are not part of the runtime image
+docs/
+tests/
+
+# Misc local debug artifacts
+*.log
+*_debug.txt
+test_chat.html

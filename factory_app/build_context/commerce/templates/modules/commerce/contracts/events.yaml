@@ -1,6 +1,6 @@
 schema_version: mozaiks.events.v1
 events:
-  - type: app.commerce.product.created
+  - type: domain.commerce.product.created
     version: 1
     description: Emitted after a product is created.
     producer: commerce
@@ -12,7 +12,7 @@ events:
         status: { type: string }
         created_by: { type: string }
 
-  - type: app.commerce.product.updated
+  - type: domain.commerce.product.updated
     version: 1
     description: Emitted after product metadata, price, status, or inventory policy changes.
     producer: commerce
@@ -26,7 +26,7 @@ events:
           items: { type: string }
         updated_by: { type: string }
 
-  - type: app.commerce.product.archived
+  - type: domain.commerce.product.archived
     version: 1
     description: Emitted after a product is removed from storefront browse results.
     producer: commerce
@@ -37,7 +37,7 @@ events:
         product_id: { type: string }
         archived_by: { type: string }
 
-  - type: app.commerce.inventory.adjusted
+  - type: domain.commerce.inventory.adjusted
     version: 1
     description: Emitted after an operator manually changes tracked inventory.
     producer: commerce
@@ -50,7 +50,7 @@ events:
         reason: { type: string }
         adjusted_by: { type: string }
 
-  - type: app.commerce.cart.updated
+  - type: domain.commerce.cart.updated
     version: 1
     description: Emitted after a viewer changes cart contents.
     producer: commerce
@@ -63,7 +63,7 @@ events:
         item_count: { type: integer }
         subtotal_amount: { type: integer }
 
-  - type: app.commerce.checkout.requested
+  - type: domain.commerce.checkout.requested
     version: 1
     description: >
       Emitted when commerce snapshots a cart into an order and requests a
@@ -80,7 +80,7 @@ events:
         amount: { type: integer }
         currency: { type: string }
 
-  - type: app.commerce.order.paid
+  - type: domain.commerce.order.paid
     version: 1
     description: Emitted after an internal payment facade marks an order paid.
     producer: commerce
@@ -93,7 +93,7 @@ events:
         payment_provider: { type: string }
         provider_reference: { type: string }
 
-  - type: app.commerce.checkout.failed
+  - type: domain.commerce.checkout.failed
     version: 1
     description: Emitted after checkout fails, is cancelled, or expires.
     producer: commerce
@@ -106,7 +106,7 @@ events:
         payment_provider: { type: string }
         provider_reference: { type: string }
 
-  - type: app.commerce.order.updated
+  - type: domain.commerce.order.updated
     version: 1
     description: Emitted after fulfillment or order state changes.
     producer: commerce

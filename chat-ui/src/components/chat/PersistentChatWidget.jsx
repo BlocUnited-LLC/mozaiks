@@ -7,233 +7,265 @@ import {
   applyBrandImageFallback,
   getBrandLogoSrc,
 } from '../../styles/brandAssets';
+import { useWidgetAskWS } from '../../hooks/useWidgetAskWS';
+import {
+  buildSupportConversationTranscript,
+  buildSupportRequestPayload,
+  buildUserSupportPath,
+  resolveSupportRequestScope,
+  shouldOfferHumanSupport,
+  supportTrace,
+  supportWarn,
+} from '../../utils/supportLinks';
 
 /**
- * PersistentChatWidget - Floating chat widget in bottom-right corner
+ * PersistentChatWidget - Floating chat widget in bottom-right corner.
  *
- * Visible on: non-chat routes (via GlobalChatWidgetWrapper) + ChatPage layoutMode='view'
- * (via ArtifactPanel floatingWidget prop). Suppressed on /chat and /app/:id/:workflow routes.
+ * Always runs in ask/general mode — the widget is for quick questions and
+ * page-contextual help on any route. Workflow sessions live in the full
+ * ChatPage; the widget never enters workflow mode.
  *
- * Context-adaptive chat display:
- * - If a workflow is active → shows workflowMessages by default (user stays in their context)
- * - User can click 🧠 to switch to ask context inline (no navigation)
- * - If no workflow → shows askMessages directly
+ * The widget maintains its own WebSocket connection (separate chat_id from any
+ * workflow session) so it works independently of ChatPage. The connection is
+ * established lazily on first open and stays alive for the page session.
  *
- * Header buttons (max 2 — keeps header clean on mobile + desktop):
- * - Left 🧠: when workflow showing → switch to ask context inline
- *            when ask context → navigate to full Ask ChatPage
- * - Right logo: "Back to workspace" → navigate to split/minimized workflow view
- *               hidden when no active workflow
+ * Header:
+ * - Left 🧠 button: opens full ChatPage in ask mode
+ * - Right logo: "Back to workspace" — only shown when a workflow session exists
+ * - ? button: opens the operator support form
  *
- * Compose affordance: "+ New conversation" text link inside body (ask context only)
- * Unread badge: dot on minimized button when unreadChatCount > 0
- *
- * Persistence wiring:
- * - Workflow send: api.sendMessageToWorkflow() routes through the live WS connection
- *   registered by ChatPage. If ChatPage's WS was closed, the send gracefully no-ops
- *   and logs a warning — the user should navigate back to the chat page to reconnect.
- * - New conversation (ask context): generates a local UUID as a new ask session ID
- *   (setActiveGeneralChatId) and clears the message cache. No server round-trip needed
- *   since there is no POST /api/general_chats/start endpoint — general chat sessions
- *   are created lazily on first WebSocket connection in ChatPage.
+ * Ask session persistence:
+ * - activeGeneralChatId is stored in localStorage via setStoredActiveGeneralChatId
+ * - On next page load the widget resumes the same general chat via chat.enter_general_mode
  */
 const PersistentChatWidget = ({
   chatId,
   workflowName,
-  conversationMode: conversationModeProp,
   pageContext = null,
 }) => {
   const {
     setConversationMode,
     activeChatId,
     activeWorkflowName,
-    activeGeneralChatId,
-    setActiveGeneralChatId,
     setActiveChatId,
     setActiveWorkflowName,
+    activeGeneralChatId,
+    setActiveGeneralChatId,
     askMessages,
     setAskMessages,
-    workflowMessages,
-    setWorkflowMessages,
-    workflowStatus,
     unreadChatCount,
     setUnreadChatCount,
     api,
+    auth,
     user,
     config,
   } = useChatUI();
   const navigate = useNavigate();
 
   const [isExpanded, setIsExpanded] = useState(false);
-  const [showRatingBanner, setShowRatingBanner] = useState(false);
+  const [wsEnabled, setWsEnabled] = useState(false);
+  const [inSupportMode, setInSupportMode] = useState(false);
   const [supportMessage, setSupportMessage] = useState('');
   const [supportSent, setSupportSent] = useState(false);
+  const [supportError, setSupportError] = useState(null);
   const [supportLoading, setSupportLoading] = useState(false);
-  const prevWorkflowStatusRef = useRef(null);
 
-  // Detect when a workflow session ends and prompt for a rating
+  // Resolve identity from ChatUIProvider context
+  const resolvedAppId = user?.app_id || config?.appId || config?.app_id || null;
+  const resolvedUserId = user?.id || user?.user_id || user?.sub || null;
+  const [widgetIdentity, setWidgetIdentity] = useState({
+    appId: resolvedAppId,
+    userId: resolvedUserId,
+  });
+  const effectiveAppId = widgetIdentity.appId || resolvedAppId;
+  const effectiveUserId = widgetIdentity.userId || resolvedUserId;
+  const { theme: chatTheme } = useTheme(resolvedAppId);
+  const brandLogoSrc = getBrandLogoSrc(chatTheme);
+
   useEffect(() => {
-    const prev = prevWorkflowStatusRef.current;
-    const current = workflowStatus || 'idle';
-    const wasActive = prev !== null && prev !== 'idle';
-    const isNowIdle = current === 'idle';
+    let cancelled = false;
+    if (effectiveAppId && effectiveUserId) return () => {};
 
-    if (wasActive && isNowIdle && Array.isArray(workflowMessages) && workflowMessages.length > 1) {
-      const sessionId = activeChatId || chatId || null;
-      const ratedKey = `mozaiks.session_rated:${sessionId || 'unknown'}`;
-      try {
-        if (!sessionStorage.getItem(ratedKey)) {
-          setShowRatingBanner(true);
-        }
-      } catch {}
+    resolveSupportRequestScope({
+      api,
+      auth,
+      config,
+      user,
+      fallbackAppId: resolvedAppId,
+      fallbackUserId: resolvedUserId,
+    }).then((scope) => {
+      if (cancelled) return;
+      setWidgetIdentity({
+        appId: scope.appId || resolvedAppId,
+        userId: scope.userId || resolvedUserId,
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, auth, config, effectiveAppId, effectiveUserId, resolvedAppId, resolvedUserId, user]);
+
+  // Enable the WS connection the first time the widget is opened (stays alive after)
+  useEffect(() => {
+    if (isExpanded && !wsEnabled) setWsEnabled(true);
+  }, [isExpanded, wsEnabled]);
+
+  // Widget's own WS connection in ask/general mode.
+  const { send: wsSend, status: wsStatus, isAgentTyping, generalModeReady } = useWidgetAskWS({
+    api,
+    appId: effectiveAppId,
+    userId: effectiveUserId,
+    workflowName: null,
+    activeGeneralChatId,
+    setActiveGeneralChatId,
+    onAgentMessage: (msg) => setAskMessages(prev => [...prev, msg]),
+    enabled: wsEnabled,
+  });
+  const pendingWidgetSendsRef = useRef([]);
+
+  useEffect(() => {
+    if (wsStatus !== 'connected' || !generalModeReady || pendingWidgetSendsRef.current.length === 0) {
+      return;
     }
+    const pending = [...pendingWidgetSendsRef.current];
+    pendingWidgetSendsRef.current = [];
+    pending.forEach((text) => {
+      const sent = wsSend(text);
+      if (!sent) {
+        pendingWidgetSendsRef.current.push(text);
+      }
+    });
+  }, [generalModeReady, wsSend, wsStatus]);
 
-    prevWorkflowStatusRef.current = current;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workflowStatus]);
+  // Workflow session exists → show the "Back to workspace" button
+  const hasActiveWorkflow = !!(activeChatId || chatId);
 
-  const handleRating = useCallback((rating) => {
-    const sessionId = activeChatId || chatId || null;
-    fetch('/api/modules/workspace_support/submit_session_feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionId,
-        workflow_name: activeWorkflowName || workflowName || null,
-        rating,
-      }),
-    }).catch(() => {});
-    try {
-      sessionStorage.setItem(`mozaiks.session_rated:${sessionId || 'unknown'}`, String(rating));
-    } catch {}
-    setShowRatingBanner(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeChatId, chatId, activeWorkflowName, workflowName]);
-
-  // Track message array lengths to increment unread badge when new messages arrive
-  // while the widget is collapsed. Only counts messages added after mount.
-  const prevWorkflowLenRef = useRef(null);
+  // Unread badge: count new messages that arrive while the widget is collapsed
   const prevAskLenRef = useRef(null);
+  const supportCueInjectedRef = useRef(false);
   useEffect(() => {
-    const wLen = Array.isArray(workflowMessages) ? workflowMessages.length : 0;
     const aLen = Array.isArray(askMessages) ? askMessages.length : 0;
-    if (prevWorkflowLenRef.current === null) {
-      // Initial mount — set baseline; don't count existing messages as "new"
-      prevWorkflowLenRef.current = wLen;
+    if (prevAskLenRef.current === null) {
       prevAskLenRef.current = aLen;
       return;
     }
     if (!isExpanded) {
-      const wNew = wLen - (prevWorkflowLenRef.current ?? wLen);
-      const aNew = aLen - (prevAskLenRef.current ?? aLen);
-      const totalNew = (wNew > 0 ? wNew : 0) + (aNew > 0 ? aNew : 0);
-      if (totalNew > 0) {
-        setUnreadChatCount(prev => prev + totalNew);
-      }
+      const delta = aLen - (prevAskLenRef.current ?? aLen);
+      if (delta > 0) setUnreadChatCount(prev => prev + delta);
     }
-    prevWorkflowLenRef.current = wLen;
     prevAskLenRef.current = aLen;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workflowMessages?.length, askMessages?.length]);
+  }, [askMessages?.length]);
 
-  // Resolve app/user identity from context (provided by the host app via ChatUIProvider props)
-  const resolvedAppId = user?.app_id || config?.appId || config?.app_id || null;
-  const resolvedUserId = user?.id || user?.user_id || user?.sub || null;
-  const { theme: chatTheme } = useTheme(resolvedAppId);
-  const brandLogoSrc = getBrandLogoSrc(chatTheme);
-
-  // A workflow is "active" if status is not idle OR there are cached workflow messages
-  const hasActiveWorkflow =
-    (workflowStatus && workflowStatus !== 'idle') ||
-    (Array.isArray(workflowMessages) && workflowMessages.length > 0) ||
-    !!(activeChatId || chatId);
-
-  // widgetContext: 'auto' | 'ask' | 'support'
-  const [widgetContext, setWidgetContext] = useState('auto');
-  const showingWorkflowContext = hasActiveWorkflow && widgetContext !== 'ask';
-
-  const messages = showingWorkflowContext ? workflowMessages : askMessages;
-  const hasBackend = !!api;
-
-  const handleOpenSupport = () => {
-    setSupportSent(false);
-    setSupportMessage('');
-    setWidgetContext('support');
-  };
-
-  const handleSubmitSupport = async () => {
-    const text = supportMessage.trim();
-    if (!text || supportLoading) return;
-    setSupportLoading(true);
-    try {
-      await fetch('/api/modules/workspace_support/create_support_request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          page_url: typeof window !== 'undefined' ? window.location.pathname : null,
-          page_title: pageContext || null,
-          severity: 'low',
-        }),
+  // Programmatic support navigation (e.g. EscalationCard on other pages)
+  useEffect(() => {
+    const handler = () => {
+      supportTrace('open_support:event', {
+        source: 'window_event',
+        resolvedAppId,
+        activeGeneralChatId,
       });
-    } catch (_) {}
-    setSupportLoading(false);
-    setSupportSent(true);
-  };
+      setIsExpanded(false);
+      navigate(buildUserSupportPath({ appId: resolvedAppId }));
+    };
+    window.addEventListener('mozaiks:open_support', handler);
+    return () => window.removeEventListener('mozaiks:open_support', handler);
+  }, [activeGeneralChatId, navigate, resolvedAppId]);
 
   const handleSendMessage = (message) => {
-    if (showingWorkflowContext) {
-      const resolvedChatId = activeChatId || chatId;
-      const resolvedWorkflow = activeWorkflowName || workflowName;
+    const text = message && typeof message === 'object' ? message.content : message;
+    if (!text?.trim()) return;
+    const wantsHumanSupport = shouldOfferHumanSupport(text);
 
-      // Optimistically append user message so the widget feels responsive
-      setWorkflowMessages(prev => [...prev, {
-        id: Date.now(),
-        role: 'user',
-        content: message,
-        timestamp: new Date().toISOString(),
-      }]);
+    // Optimistic — show the user's message immediately
+    setAskMessages(prev => [...prev, {
+      id: `opt_${Date.now()}`,
+      sender: 'user',
+      agentName: 'You',
+      content: text,
+      timestamp: new Date().toISOString(),
+    }]);
 
-      // Route through api.sendMessageToWorkflow — this checks api._chatConnections
-      // for an existing live WebSocket registered by ChatPage. If the connection
-      // was closed when the user navigated away, the send no-ops and logs a warning.
-      if (api?.sendMessageToWorkflow && resolvedAppId && resolvedUserId && resolvedChatId) {
-        api.sendMessageToWorkflow(message, resolvedAppId, resolvedUserId, resolvedWorkflow, resolvedChatId)
-          .then(result => {
-            if (!result || result.success === false) {
-              console.warn('[WIDGET] sendMessageToWorkflow: no live connection — navigate to chat to reconnect');
-            }
-          })
-          .catch(err => console.error('[WIDGET] sendMessageToWorkflow error:', err));
-      } else {
-        console.warn('[WIDGET] Cannot send workflow message: missing api, appId, userId, or chatId', {
-          hasApi: !!api, resolvedAppId, resolvedUserId, resolvedChatId,
-        });
+    if (wantsHumanSupport) {
+      const transcriptSnapshot = buildSupportConversationTranscript(
+        [
+          ...(askMessages || []),
+          {
+            sender: 'user',
+            content: text,
+          },
+        ],
+        { includeMessage: text },
+      );
+      supportTrace('escalation_card:injected', {
+        source: 'widget_ask',
+        activeGeneralChatId,
+        generalModeReady,
+        resolvedAppId,
+        alreadyInjected: supportCueInjectedRef.current,
+        transcriptCount: transcriptSnapshot.length,
+      });
+      if (!supportCueInjectedRef.current) {
+        supportCueInjectedRef.current = true;
+        setAskMessages(prev => [
+          ...prev,
+          {
+            id: `escalation-${Date.now()}`,
+            sender: 'agent',
+            agentName: 'Support',
+            content: '',
+            toolCall: {
+              tool_name: 'EscalationCard',
+              payload: {
+                conversationTranscript: transcriptSnapshot,
+              },
+            },
+            isStreaming: false,
+          },
+        ]);
       }
       return;
     }
 
-    // Ask context — append locally (general chat WebSocket lives in ChatPage,
-    // not in the widget; messages persist in context until user opens ChatPage)
-    setAskMessages(prev => [...prev, {
-      id: Date.now(),
-      role: 'user',
-      content: message,
-      timestamp: new Date().toISOString(),
-    }]);
-    setTimeout(() => {
-      setAskMessages(prev => [...prev, {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: 'Open the full chat to connect to a live session.',
-        timestamp: new Date().toISOString(),
-      }]);
-    }, 500);
+    // Send via the widget's own WS; queue if the user submits before connect finishes.
+    if (wsStatus === 'connected' && generalModeReady) {
+      const sent = wsSend(text);
+      if (!sent) {
+        pendingWidgetSendsRef.current.push(text);
+        setWsEnabled(true);
+      }
+    } else {
+      pendingWidgetSendsRef.current.push(text);
+      setWsEnabled(true);
+    }
   };
 
-  // Right button: "Back to workspace" — navigate to workflow split view
+  // Start a fresh ask conversation
+  const handleNewConversation = () => {
+    const newId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? `ask_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+      : `ask_${Date.now()}`;
+    setAskMessages([]);
+    supportCueInjectedRef.current = false;
+    pendingWidgetSendsRef.current = [];
+    setActiveGeneralChatId(newId);
+  };
+
+  // Navigate to full ask ChatPage
+  const handleOpenAsk = () => {
+    setConversationMode('ask');
+    setIsExpanded(false);
+    const params = new URLSearchParams({ mode: 'ask', force_ask: '1' });
+    if (resolvedAppId) params.set('app_id', resolvedAppId);
+    if (activeGeneralChatId) params.set('general_chat_id', activeGeneralChatId);
+    if (pageContext) params.set('page_context', pageContext);
+    navigate(`/chat?${params.toString()}`);
+  };
+
+  // Navigate back to the active workflow session
   const handleBackToWorkspace = () => {
-    const safeGet = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+    const safeGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
     const resolvedChatId = chatId || activeChatId || safeGet('mozaiks.current_chat_id');
     const resolvedWorkflowName = workflowName || activeWorkflowName || safeGet('mozaiks.current_workflow_name');
 
@@ -249,30 +281,142 @@ const PersistentChatWidget = ({
     setConversationMode('workflow');
     setIsExpanded(false);
 
-    const params = new URLSearchParams();
-    params.set('mode', 'workflow');
+    const params = new URLSearchParams({ mode: 'workflow' });
     if (resolvedChatId) params.set('chat_id', resolvedChatId);
     if (resolvedWorkflowName) params.set('workflow', resolvedWorkflowName);
-    if (!resolvedChatId) params.set('resume', hasBackend ? 'oldest' : 'local');
-    const suffix = params.toString() ? `?${params.toString()}` : '';
-    navigate(`/chat${suffix}`);
+    navigate(`/chat?${params.toString()}`);
   };
 
-  // Compose: start a fresh ask conversation.
-  // Generates a local UUID as the new ask session ID and clears the message cache.
-  // General chat sessions are created lazily by ChatPage's WebSocket on first connect —
-  // no POST /api/general_chats/start endpoint exists. setActiveGeneralChatId signals
-  // to ChatPage that a fresh session should be opened on next navigation.
-  const handleNewConversation = () => {
-    const newGeneralId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-      ? `ask_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
-      : `ask_${Date.now()}`;
-    setWidgetContext('ask');
-    setAskMessages([]);
-    setActiveGeneralChatId(newGeneralId);
+  // Support form handlers
+  const handleOpenSupport = () => {
+    supportTrace('support_form:open', {
+      source: 'widget_header',
+      appId: resolvedAppId,
+      activeGeneralChatId,
+      pageContext,
+    });
+    setSupportSent(false);
+    setSupportError(null);
+    setSupportMessage('');
+    setInSupportMode(true);
   };
 
-  // ─── Minimized state — slim right-edge tab ──────────────────────────────────
+  const openSupportThread = useCallback((created) => {
+    const requestId =
+      created?.request_id ||
+      created?.request?.request_id ||
+      created?.result?.request_id ||
+      created?.data?.request_id ||
+      null;
+    const messageThreadId =
+      created?.message_thread_id ||
+      created?.request?.message_thread_id ||
+      created?.result?.message_thread_id ||
+      created?.data?.message_thread_id ||
+      null;
+    const createdAppId =
+      created?.app_id ||
+      created?.subject_app_id ||
+      created?.request?.app_id ||
+      created?.request?.subject_app_id ||
+      created?.result?.app_id ||
+      created?.result?.subject_app_id ||
+      created?.data?.app_id ||
+      created?.data?.subject_app_id ||
+      resolvedAppId;
+    const path = buildUserSupportPath({ requestId, appId: createdAppId });
+    supportTrace('support_thread:open', {
+      requestId,
+      appId: createdAppId,
+      messageThreadId,
+      path,
+    });
+    if (!requestId) {
+      supportWarn('support_thread:missing_request_id', {
+        appId: resolvedAppId,
+        responseKeys: created && typeof created === 'object' ? Object.keys(created) : [],
+      });
+    }
+    setIsExpanded(false);
+    navigate(path);
+  }, [navigate, resolvedAppId]);
+
+  const createSupportRequest = useCallback(async ({
+    message,
+    conversationTranscript = null,
+    pageTitle = null,
+    pageUrl = null,
+    severity = 'low',
+  }) => {
+    const supportScope = await resolveSupportRequestScope({
+      api,
+      auth,
+      config,
+      user,
+      fallbackAppId: resolvedAppId,
+      fallbackUserId: resolvedUserId,
+    });
+    const payload = buildSupportRequestPayload({
+      message,
+      appId: supportScope.appId || resolvedAppId,
+      userId: supportScope.userId || resolvedUserId,
+      pageUrl: pageUrl || (typeof window !== 'undefined' ? window.location.href : null),
+      pageTitle: pageTitle || pageContext || null,
+      severity,
+      conversationTranscript,
+    });
+    supportTrace('support_request:create:start', {
+      appId: payload.app_id || null,
+      userId: payload.user_id || null,
+      severity,
+      pageUrl: payload.page_url || null,
+      pageTitle: payload.page_title || null,
+      transcriptCount: payload.conversation_transcript?.length || 0,
+      message,
+    });
+    const response = await fetch('/api/modules/workspace_support/create_support_request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      supportWarn('support_request:create:failed_http', {
+        status: response.status,
+        appId: resolvedAppId,
+      });
+      throw new Error(`Support request failed with ${response.status}`);
+    }
+    const created = await response.json();
+    supportTrace('support_request:create:success', {
+      requestId: created?.request_id || created?.request?.request_id || created?.result?.request_id || created?.data?.request_id || null,
+      appId: created?.app_id || created?.subject_app_id || created?.result?.app_id || created?.data?.app_id || resolvedAppId || null,
+      userId: supportScope.userId || resolvedUserId || null,
+      messageThreadId: created?.message_thread_id || created?.request?.message_thread_id || created?.result?.message_thread_id || created?.data?.message_thread_id || null,
+      status: created?.status || created?.request?.status || created?.result?.status || created?.data?.status || null,
+      responseKeys: created && typeof created === 'object' ? Object.keys(created) : [],
+    });
+    return created;
+  }, [api, auth, config, pageContext, resolvedAppId, resolvedUserId, user]);
+
+  const handleSubmitSupport = useCallback(async () => {
+    const text = supportMessage.trim();
+    if (!text || supportLoading) return;
+    setSupportLoading(true);
+    setSupportError(null);
+    try {
+      const created = await createSupportRequest({ message: text });
+      openSupportThread(created);
+    } catch (error) {
+      supportWarn('support_request:create:failed_widget_form', {
+        appId: resolvedAppId,
+        error: error?.message || String(error || ''),
+      });
+      setSupportError('Could not send the request. Open your profile support tab and try again.');
+    }
+    setSupportLoading(false);
+  }, [createSupportRequest, openSupportThread, supportMessage, supportLoading]);
+
+  // ─── Minimized state ────────────────────────────────────────────────────────
   if (!isExpanded) {
     return (
       <div className="fixed right-0 bottom-6 z-50 widget-safe-bottom">
@@ -280,7 +424,7 @@ const PersistentChatWidget = ({
           type="button"
           onClick={() => { setIsExpanded(true); setUnreadChatCount(0); }}
           className="group relative flex flex-col items-center gap-1.5 rounded-l-2xl border border-r-0 border-border/50 bg-card/90 px-2 py-4 shadow-md backdrop-blur-sm transition-all duration-200 hover:border-primary/40 hover:bg-card hover:px-3"
-          title={workflowName ? `Continue: ${workflowName}` : 'Open chat'}
+          title="Open assistant"
         >
           <img
             src={brandLogoSrc}
@@ -302,27 +446,12 @@ const PersistentChatWidget = ({
     );
   }
 
-  // ─── Expanded state ─────────────────────────────────────────────────────────
-  const inSupportMode = widgetContext === 'support';
-  const leftLabel = inSupportMode ? 'Help & Support' : showingWorkflowContext ? 'Ask Mode' : 'mozaiksai';
-  const leftSubLabel = inSupportMode ? 'Talk to an operator' : showingWorkflowContext ? 'Switch to ask' : 'Chat Station';
-  const leftTitle = inSupportMode ? 'Back to chat' : showingWorkflowContext ? 'Switch to ask mode' : 'Open Chat Station';
-
-  const handleLeftButton = () => {
-    if (inSupportMode) {
-      setWidgetContext('auto');
-      setSupportSent(false);
-      setSupportMessage('');
-    } else if (showingWorkflowContext) {
-      setWidgetContext('ask');
-    } else {
-      setConversationMode('ask');
-      setIsExpanded(false);
-      const params = new URLSearchParams({ mode: 'ask' });
-      if (pageContext) params.set('page_context', pageContext);
-      navigate(`/chat?${params.toString()}`);
-    }
-  };
+  // ─── Expanded state ──────────────────────────────────────────────────────────
+  const connectionDot = wsStatus === 'connected'
+    ? 'bg-success'
+    : wsStatus === 'connecting'
+    ? 'bg-warning animate-pulse'
+    : 'bg-muted-foreground/40';
 
   return (
     <div className="fixed right-4 bottom-4 z-50 flex flex-col items-end gap-0 pointer-events-none widget-safe-bottom">
@@ -331,7 +460,7 @@ const PersistentChatWidget = ({
         type="button"
         onClick={() => setIsExpanded(false)}
         className="pointer-events-auto relative group mb-[-1px] z-20"
-        title="Minimize chat"
+        title="Minimize"
       >
         <div className="w-32 h-8 rounded-t-2xl bg-gradient-to-r from-[rgba(var(--color-primary-rgb),0.4)] to-[rgba(var(--color-secondary-rgb),0.4)] border-t border-l border-r border-[rgba(var(--color-primary-light-rgb),0.4)] backdrop-blur-sm flex items-center justify-center group-hover:from-[rgba(var(--color-primary-rgb),0.6)] group-hover:to-[rgba(var(--color-secondary-rgb),0.6)] transition-all">
           <svg className="w-5 h-5 text-[var(--color-primary-light)] group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
@@ -347,12 +476,12 @@ const PersistentChatWidget = ({
         <div className="flex-shrink-0 bg-[rgba(0,0,0,0.6)] border-b border-[rgba(var(--color-primary-light-rgb),0.2)] backdrop-blur-xl">
           <div className="flex flex-row items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3 gap-2">
 
-            {/* Left: context-adaptive label button */}
+            {/* Left: Ask mode label / support label */}
             <button
               type="button"
-              onClick={handleLeftButton}
+              onClick={inSupportMode ? () => { setInSupportMode(false); setSupportSent(false); setSupportError(null); setSupportMessage(''); } : handleOpenAsk}
               className="flex items-center gap-2 sm:gap-3 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-light)]/60 rounded-xl min-w-0 flex-1"
-              title={leftTitle}
+              title={inSupportMode ? 'Back to chat' : 'Open full Ask chat'}
             >
               <span className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 ${inSupportMode ? 'bg-gradient-to-br from-warning/60 to-warning/30' : 'bg-gradient-to-br from-[var(--color-secondary)] to-[var(--color-primary)]'}`}>
                 <span className="text-xl sm:text-2xl" role="img" aria-hidden="true">
@@ -360,14 +489,23 @@ const PersistentChatWidget = ({
                 </span>
               </span>
               <span className="text-left min-w-0 flex-1">
-                <span className="block text-sm sm:text-lg font-bold text-white tracking-tight truncate">{leftLabel}</span>
-                <span className="block text-[10px] sm:text-xs text-gray-400 truncate">{leftSubLabel}</span>
+                <span className="block text-sm sm:text-lg font-bold text-white tracking-tight truncate">
+                  {inSupportMode ? 'Help & Support' : 'mozaiksai'}
+                </span>
+                <span className="block text-[10px] sm:text-xs text-gray-400 truncate flex items-center gap-1.5">
+                  {inSupportMode ? 'Talk to an operator' : (
+                    <>
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${connectionDot}`} />
+                  {wsStatus === 'connected' && generalModeReady ? 'Ask anything' : wsStatus === 'connecting' || (wsStatus === 'connected' && !generalModeReady) ? 'Connecting…' : 'Ask mode'}
+                    </>
+                  )}
+                </span>
               </span>
             </button>
 
             {/* Right actions */}
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {/* Help (?) button — always visible, highlighted when active */}
+              {/* Help (?) */}
               <button
                 type="button"
                 onClick={handleOpenSupport}
@@ -381,7 +519,7 @@ const PersistentChatWidget = ({
                 ?
               </button>
 
-              {/* Back to workspace — only when workflow is active and not in support mode */}
+              {/* Back to workspace — only when a workflow session is active */}
               {hasActiveWorkflow && !inSupportMode && (
                 <button
                   onClick={handleBackToWorkspace}
@@ -400,63 +538,45 @@ const PersistentChatWidget = ({
           </div>
         </div>
 
-        {/* Sub-header: context label / compose / workflow name */}
+        {/* Sub-header: compose link */}
         {!inSupportMode && (
           <div className="flex-shrink-0 px-3 pt-2 pb-1.5 border-b border-[rgba(var(--color-primary-light-rgb),0.06)]">
-            {showingWorkflowContext ? (
-              <div>
-                <span className="text-[10px] text-gray-500 uppercase tracking-wider">
-                  {activeWorkflowName || workflowName || 'Active workflow'}
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleNewConversation}
+                className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-60 hover:opacity-100 flex items-center gap-1"
+              >
+                <span>+</span>
+                <span>New conversation</span>
+              </button>
+              {pageContext && (
+                <span className="text-[10px] text-gray-500 truncate max-w-[8rem]" title={pageContext}>
+                  📍 {pageContext}
                 </span>
-                {showRatingBanner && (
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <span className="text-[10px] text-gray-400">How was your experience?</span>
-                    <button type="button" onClick={() => handleRating(0)} className="text-base leading-none hover:scale-110 transition-transform" title="Poor">👎</button>
-                    <button type="button" onClick={() => handleRating(1)} className="text-base leading-none hover:scale-110 transition-transform" title="Great">👍</button>
-                    <button type="button" onClick={() => setShowRatingBanner(false)} className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors ml-1" title="Dismiss">✕</button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={handleNewConversation}
-                  className="text-[11px] text-[var(--color-primary-light)] hover:text-white transition-colors opacity-60 hover:opacity-100 flex items-center gap-1"
-                >
-                  <span>+</span>
-                  <span>New conversation</span>
-                </button>
-                {pageContext && (
-                  <span className="text-[10px] text-gray-500 truncate max-w-[8rem]" title={pageContext}>
-                    📍 Page active
-                  </span>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
-        {/* Body: support panel OR chat */}
+        {/* Body */}
         {inSupportMode ? (
           <div className="flex flex-1 flex-col overflow-hidden">
             {supportSent ? (
-              /* Confirmation */
               <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-8 text-center">
                 <span className="flex h-14 w-14 items-center justify-center rounded-full bg-success/20 text-3xl">✓</span>
                 <p className="text-sm leading-relaxed text-gray-300">
-                  Got it — your request has been received. An operator will review it and follow up with you shortly.
+                  Got it — your request has been received. An operator will review it and follow up shortly.
                 </p>
                 <button
                   type="button"
-                  onClick={() => { setWidgetContext('auto'); setSupportSent(false); setSupportMessage(''); }}
+                  onClick={() => { setInSupportMode(false); setSupportSent(false); setSupportError(null); setSupportMessage(''); }}
                   className="mt-2 rounded-xl border border-[rgba(var(--color-primary-light-rgb),0.3)] px-4 py-2 text-sm text-gray-300 transition-colors hover:border-[rgba(var(--color-primary-light-rgb),0.6)] hover:text-white"
                 >
                   Back to chat
                 </button>
               </div>
             ) : (
-              /* Support form */
               <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
                 <p className="text-[11px] text-gray-400">
                   Describe what you need help with and an operator will follow up shortly.
@@ -468,6 +588,11 @@ const PersistentChatWidget = ({
                   rows={5}
                   className="flex-1 resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-gray-500 focus:border-[rgba(var(--color-primary-light-rgb),0.4)] focus:outline-none"
                 />
+                {supportError && (
+                  <p className="text-xs leading-relaxed text-red-300">
+                    {supportError}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={handleSubmitSupport}
@@ -480,20 +605,66 @@ const PersistentChatWidget = ({
             )}
           </div>
         ) : (
-          /* Normal chat */
           <div className="flex-1 overflow-hidden">
             <ChatInterface
-              messages={messages}
+              messages={isAgentTyping ? [...askMessages, { id: 'widget-thinking', isThinking: true, agentName: 'Assistant' }] : askMessages}
               onSendMessage={handleSendMessage}
-              loading={false}
-              connectionStatus="disconnected"
-              conversationMode={showingWorkflowContext ? 'workflow' : 'ask'}
+              loading={wsStatus === 'connecting'}
+              connectionStatus={wsStatus === 'connected' ? 'connected' : 'disconnected'}
+              conversationMode="ask"
               onConversationModeChange={(mode) => setConversationMode(mode)}
               isOnChatPage={false}
               hideHeader={true}
               disableMobileShellChrome={true}
               plainContainer={true}
               chatTheme={chatTheme}
+              onAgentAction={async (action) => {
+                if (
+                  action?.type === 'tool_call_response' &&
+                  action?.tool_name === 'EscalationCard' &&
+                  action?.response?.action === 'open_support'
+                ) {
+                  supportTrace('escalation_card:open_support:start', {
+                    source: 'widget_card',
+                    appId: resolvedAppId,
+                    activeGeneralChatId,
+                  });
+                  try {
+                    const latestUserMessage = [...(askMessages || [])]
+                      .reverse()
+                      .find((message) => message?.sender === 'user' && String(message?.content || '').trim());
+                    const supportMessage = String(latestUserMessage?.content || 'Requested operator assistance from chat widget.').trim();
+                    const conversationTranscript = Array.isArray(action?.payload?.conversationTranscript)
+                      ? action.payload.conversationTranscript
+                      : buildSupportConversationTranscript(askMessages, {
+                        includeMessage: supportMessage,
+                      });
+                    supportTrace('escalation_card:open_support:transcript', {
+                      source: action?.payload?.conversationTranscript ? 'card_payload' : 'state_fallback',
+                      transcriptCount: conversationTranscript.length,
+                    });
+                    const created = await createSupportRequest({
+                      message: supportMessage,
+                      conversationTranscript,
+                      pageUrl: window.location.href,
+                    });
+                    openSupportThread(created);
+                    return;
+                  } catch (error) {
+                    supportWarn('escalation_card:open_support:create_failed', {
+                      appId: resolvedAppId,
+                      error: error?.message || String(error || ''),
+                    });
+                  }
+                  setIsExpanded(false);
+                  const fallbackPath = buildUserSupportPath({ appId: resolvedAppId });
+                  supportTrace('escalation_card:open_support:fallback_navigate', {
+                    appId: resolvedAppId,
+                    path: fallbackPath,
+                  });
+                  navigate(fallbackPath);
+                }
+              }}
             />
           </div>
         )}

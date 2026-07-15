@@ -6,6 +6,7 @@ Routes:
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from uuid import uuid4
@@ -19,9 +20,11 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleRequest
 from mozaiksai.core.runtime.composition.platform_hooks import get_platform_hooks
 
 router = APIRouter(tags=["modules"])
+logger = logging.getLogger(__name__)
 
 _MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PUBLIC_MODULE_API_SURFACES = {"public", "public_readonly"}
+_OBSERVED_MODULES = {"messages", "workspace_support"}
 # Actions with these surfaces are only reachable through the internal event bus
 # or direct ModuleExecutor calls.  HTTP dispatch is always rejected regardless
 # of authentication status so that event-pipeline internal handlers cannot be
@@ -130,7 +133,13 @@ async def _execute_module_action(
         or "default"
     )
 
-    requested_user_id = context_overrides.get("user_id") or request.query_params.get("user_id")
+    # HTTP query-string user_id is an authenticated override only. In local
+    # no-auth mode, optional_user already resolves the stable anonymous/dev
+    # principal, and trusted callers that need an explicit execution user pass
+    # context_overrides directly instead of relying on external query params.
+    requested_user_id = context_overrides.get("user_id")
+    if requested_user_id is None and is_auth_enabled():
+        requested_user_id = request.query_params.get("user_id")
     if (
         is_auth_enabled()
         and principal is not None
@@ -172,7 +181,8 @@ async def _execute_module_action(
 
     correlation_id = context_overrides.get("correlation_id") or request.query_params.get("correlation_id") or str(uuid4())
     auth_token = context_overrides.get("auth_token") or _extract_bearer_token(request)
-    user_id = principal.user_id if principal else None
+    principal_user_id = principal.user_id if principal else None
+    user_id = str(requested_user_id).strip() if requested_user_id else principal_user_id
 
     dispatch_scope = await _resolve_module_dispatch_scope(
         request=request,
@@ -214,8 +224,36 @@ async def _execute_module_action(
         granted_permissions=granted_permissions,
     )
 
+    if module_name in _OBSERVED_MODULES:
+        logger.info(
+            "module_dispatch.start module=%s action=%s app_id=%s user_id=%s tenant_id=%s workspace_id=%s correlation_id=%s param_keys=%s auth_enabled=%s",
+            module_name,
+            action_name,
+            module_request.app_id,
+            module_request.user_id,
+            module_request.tenant_id,
+            module_request.workspace_id,
+            module_request.correlation_id,
+            sorted(params.keys()),
+            is_auth_enabled(),
+        )
+
     result = await module_executor.execute(module_request, context=None)
     if result.success:
+        if module_name in _OBSERVED_MODULES:
+            data = result.data if isinstance(result.data, dict) else {}
+            thread = data.get("thread") if isinstance(data.get("thread"), dict) else {}
+            thread_id = data.get("thread_id") or thread.get("thread_id")
+            logger.info(
+                "module_dispatch.success module=%s action=%s correlation_id=%s data_keys=%s request_id=%s thread_id=%s message_thread_id=%s",
+                module_name,
+                action_name,
+                module_request.correlation_id,
+                sorted(data.keys()),
+                data.get("request_id"),
+                thread_id,
+                data.get("message_thread_id"),
+            )
         return result.data if result.data is not None else {}
 
     if result.error_code in {"MODULE_NOT_FOUND", "ACTION_NOT_FOUND"}:
@@ -228,6 +266,17 @@ async def _execute_module_action(
         status_code = 400
     else:
         status_code = 500
+
+    if module_name in _OBSERVED_MODULES:
+        logger.warning(
+            "module_dispatch.failed module=%s action=%s correlation_id=%s status_code=%s error_code=%s error=%s",
+            module_name,
+            action_name,
+            module_request.correlation_id,
+            status_code,
+            result.error_code,
+            result.error,
+        )
 
     raise HTTPException(
         status_code=status_code,

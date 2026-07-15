@@ -52,9 +52,8 @@ async def test_platform_app_exposes_console_routes_only_on_studio_surface(monkey
     assert "/apps/:appId/build" not in console_pages
     assert "/apps/:appId/deploy" not in console_pages
     assert "/apps/:appId/admin" not in console_pages
-    # admin_registry.yaml declares operations and settings as app-scope admin pages
-    assert "/apps/:appId/operations" in console_pages
-    assert "/apps/:appId/settings" in console_pages
+    assert "/apps/:appId/operations" not in console_pages
+    assert "/apps/:appId/settings" not in console_pages
     assert console_pages["/integrations"]["component"] == "WorkspaceIntegrationsPage"
     assert console_pages["/apps/:appId/overview"]["component"] == "AppOverviewPage"
     assert console_pages["/apps/:appId/health"]["component"] == "AppHealthPage"
@@ -101,14 +100,13 @@ def test_app_overview_page_fetches_summary_endpoint() -> None:
     assert "getLifecycleGuidance" in source
     assert "WorkspaceLayout" in source
     assert "nextStep={nextStep}" in source
-    assert "nextStepAction={primaryAction}" in source
+    assert "action={primaryAction}" in source
     assert "SurfaceCard accent" not in source
     assert "AppIdentityMark" in chrome_source
     assert "getAppLogoSrc" in chrome_source
     assert "getAppDescription" in chrome_source
-    assert "AppNextStep" in chrome_source
     assert "AppDashboardBanner" in chrome_source
-    assert "App description will appear after the concept brief is captured." in chrome_source
+    assert "App description appears after the concept brief is captured." in chrome_source
     assert "showBanner" in source
 
 
@@ -120,8 +118,8 @@ def test_app_support_page_is_registered() -> None:
     assert "AppSupportPage" in admin_source
     assert "registerComponent('AppSupportPage'" in admin_source
     assert '"/apps/:appId/support"' in manifest_source
-    assert "Help desk" in support_source
-    assert "Run review" in support_source
+    assert 'title="Support"' in support_source
+    assert "ChatThread" in support_source
 
 
 def test_app_overview_summary_reads_app_identity_metadata(tmp_path: Path) -> None:

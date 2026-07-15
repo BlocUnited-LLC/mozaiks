@@ -24,48 +24,80 @@ import { useEffect, useRef, useState } from 'react'
  * content: string
  * senderLabel: optional override label shown above the bubble
  */
-export function ChatMessageBubble({ role, content, senderLabel }) {
+/**
+ * role:
+ *   'user'      — outgoing (right, primary bg) — all contexts
+ *   'assistant' — AI response (left, card bg, AI avatar)
+ *   'operator'  — support agent reply (left, amber bg + Support badge)
+ *   'peer'      — DM from another person (left, muted bg + initials avatar)
+ *   'system'    — status pill (centered)
+ *
+ * senderLabel — overrides the label shown above the bubble
+ * avatarText  — initials shown in the peer avatar (DMs)
+ */
+export function ChatMessageBubble({ role, content, senderLabel, avatarText }) {
   const isUser      = role === 'user'
   const isOperator  = role === 'operator'
+  const isPeer      = role === 'peer'
   const isSystem    = role === 'system'
-  const alignRight  = isUser || isOperator
+  const isAssistant = role === 'assistant'
+  const alignRight  = isUser
 
   if (isSystem) {
     return (
-      <div className="mx-auto w-full max-w-sm rounded-xl border border-destructive/25 bg-destructive/8 px-3 py-2 text-center text-[11px] text-destructive/80">
+      <div className="mx-auto w-full max-w-sm rounded-xl border border-muted bg-muted/40 px-3 py-2 text-center text-[11px] text-muted-foreground">
         {content}
       </div>
     )
   }
 
-  const label = senderLabel ?? (isOperator ? 'Operator' : null)
+  // Left-side avatar
+  let avatar = null
+  if (isOperator) {
+    avatar = (
+      <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-warning/20 text-[9px] font-bold text-warning ring-1 ring-warning/30">
+        OPS
+      </span>
+    )
+  } else if (isPeer) {
+    avatar = (
+      <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/30 text-[10px] font-bold text-accent-foreground ring-1 ring-border/30">
+        {avatarText || '?'}
+      </span>
+    )
+  } else if (isAssistant) {
+    avatar = (
+      <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
+        AI
+      </span>
+    )
+  }
+
+  const label = senderLabel ?? (isOperator ? 'Support' : isPeer ? (senderLabel || null) : null)
+
+  let bubbleClass = 'w-fit rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words '
+  if (isUser) {
+    bubbleClass += 'rounded-tr-sm bg-primary text-primary-foreground'
+  } else if (isOperator) {
+    bubbleClass += 'rounded-tl-sm border border-warning/30 bg-warning/10 text-foreground'
+  } else if (isPeer) {
+    bubbleClass += 'rounded-tl-sm border border-border/40 bg-muted/60 text-foreground'
+  } else {
+    // assistant
+    bubbleClass += 'rounded-tl-sm border border-border/30 bg-card/80 text-foreground'
+  }
 
   return (
     <div className={`flex w-full gap-2.5 ${alignRight ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* AI avatar — left side only */}
-      {!alignRight && (
-        <span className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[10px] font-bold text-primary">
-          AI
-        </span>
-      )}
+      {!alignRight && avatar}
 
-      {/* Label + bubble — constrained to 72% of thread width */}
       <div className={`flex max-w-[72%] flex-col gap-0.5 ${alignRight ? 'items-end' : 'items-start'}`}>
         {label && (
-          <span className="px-1 text-[10px] font-medium text-muted-foreground/50">{label}</span>
+          <span className={`px-1 text-[10px] font-semibold ${isOperator ? 'text-warning/70' : 'text-muted-foreground/50'}`}>
+            {label}
+          </span>
         )}
-        <div
-          className={[
-            'w-fit rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words',
-            isUser
-              ? 'rounded-tr-sm bg-primary text-primary-foreground'
-              : isOperator
-                ? 'rounded-tr-sm border border-secondary/30 bg-secondary/20 text-foreground'
-                : 'rounded-tl-sm border border-border/30 bg-card/80 text-foreground',
-          ].join(' ')}
-        >
-          {content}
-        </div>
+        <div className={bubbleClass}>{content}</div>
       </div>
     </div>
   )
@@ -97,7 +129,7 @@ export function ChatInput({ onSend, placeholder = 'Type a message…', disabled 
 
   return (
     <div className="px-3 pb-3 pt-2">
-      <div className="flex items-end gap-2 rounded-xl border border-border/30 bg-background/60 px-3 py-2 transition-all focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20">
+      <div className="flex items-end gap-2 rounded-xl border border-border/60 bg-background px-3 py-2 transition-all focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20">
         <textarea
           rows={1}
           value={value}
@@ -105,7 +137,7 @@ export function ChatInput({ onSend, placeholder = 'Type a message…', disabled 
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
-          className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none disabled:opacity-50"
+          className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
           style={{ maxHeight: '96px', overflowY: 'auto' }}
         />
         <button
@@ -121,7 +153,7 @@ export function ChatInput({ onSend, placeholder = 'Type a message…', disabled 
           </svg>
         </button>
       </div>
-      <p className="mt-1 px-1 text-[10px] text-muted-foreground/35">Enter to send · Shift+Enter for new line</p>
+      <p className="mt-1 px-1 text-[10px] text-muted-foreground/50">Enter to send · Shift+Enter for new line</p>
     </div>
   )
 }
@@ -129,11 +161,15 @@ export function ChatInput({ onSend, placeholder = 'Type a message…', disabled 
 // ─── Full thread ──────────────────────────────────────────────────────────────
 
 /**
- * messages: Array<{ role, content, senderLabel? }>
- * onSend(text): called when operator sends a message (omit to hide input)
- * inputPlaceholder: placeholder text for the composer
+ * messages: Array<{ role, content, senderLabel?, avatarText? }>
+ * onSend(text): called when user sends — omit to hide composer
+ * inputPlaceholder: placeholder for the composer
  * emptyText: shown when messages array is empty
  * className: extra classes on the outer container
+ * variant: 'default' | 'support' | 'dm'
+ *   - 'default'  — neutral (AI transcripts, admin inbox)
+ *   - 'support'  — amber accent header bar, ticket feel
+ *   - 'dm'       — teal accent, social messenger feel
  */
 export function ChatThread({
   messages = [],
@@ -141,12 +177,21 @@ export function ChatThread({
   inputPlaceholder = 'Type a message…',
   emptyText = 'No messages yet.',
   className = '',
+  variant = 'default',
 }) {
   const bottomRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
+
+  // Variant-specific composer accent
+  const composerAccent =
+    variant === 'support'
+      ? 'border-t border-warning/30 bg-card/80'
+      : variant === 'dm'
+        ? 'border-t border-border/40 bg-card/80'
+        : 'border-t border-border/30 bg-card/60'
 
   return (
     <div className={`flex flex-col overflow-hidden ${className}`}>
@@ -160,6 +205,7 @@ export function ChatThread({
                 role={msg.role}
                 content={msg.content}
                 senderLabel={msg.senderLabel}
+                avatarText={msg.avatarText}
               />
             ))}
             <div ref={bottomRef} />
@@ -173,7 +219,7 @@ export function ChatThread({
 
       {/* Composer — only rendered when onSend is provided */}
       {onSend && (
-        <div className="border-t border-border/20">
+        <div className={composerAccent}>
           <ChatInput onSend={onSend} placeholder={inputPlaceholder} />
         </div>
       )}

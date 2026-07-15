@@ -275,8 +275,10 @@ const Header = ({
     };
 
     loadNotificationCount();
+    const intervalId = window.setInterval(loadNotificationCount, 15000);
     return () => {
       mounted = false;
+      window.clearInterval(intervalId);
       controller.abort();
     };
   }, [notificationsConfig.show]);

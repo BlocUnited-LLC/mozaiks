@@ -14,6 +14,31 @@ AUTH_ENABLED=false
 
 All requests become anonymous users. No tokens required.
 
+For local user-to-user testing, such as DM notifications, keep auth disabled
+but assign each browser profile a different dev persona. The no-auth dependency
+accepts these request-scoped overrides only when `AUTH_ENABLED=false`:
+
+- Header: `X-Mozaiks-Dev-User-Id: dev_alice`
+- Cookie: `mozaiks_dev_user_id=dev_alice`
+- Query param for one-off API calls: `?dev_user_id=dev_alice`
+
+Optional comma-separated overrides are also supported:
+
+- `X-Mozaiks-Dev-Roles`, `mozaiks_dev_roles`, or `dev_roles`
+- `X-Mozaiks-Dev-Scopes`, `mozaiks_dev_scopes`, or `dev_scopes`
+
+Browser workflow:
+
+```js
+document.cookie = "mozaiks_dev_user_id=dev_alice; path=/";
+document.cookie = "mozaiks_dev_roles=admin,user; path=/";
+```
+
+Use another browser profile or incognito window with
+`mozaiks_dev_user_id=dev_bob`. Sending a DM from `dev_alice` to `dev_bob`
+can create a notification for Bob; sending to yourself will not, because the
+messaging module excludes the sender from `recipient_ids`.
+
 ---
 
 ## Provider Setup

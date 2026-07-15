@@ -82,6 +82,24 @@ def _load_yaml_file(path: Path) -> dict[str, Any]:
     return raw
 
 
+def _normalize_notifications_yaml(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize YAML 1.1 boolean keys such as unquoted `on:` before validation."""
+    notifications = raw.get("notifications")
+    if not isinstance(notifications, list):
+        return raw
+    normalized: list[Any] = []
+    changed = False
+    for item in notifications:
+        if isinstance(item, dict) and True in item and "on" not in item:
+            item = dict(item)
+            item["on"] = item.pop(True)
+            changed = True
+        normalized.append(item)
+    if not changed:
+        return raw
+    return {**raw, "notifications": normalized}
+
+
 def _validate_entrypoint(entrypoint: str) -> tuple[str, str]:
     text = _required_text(entrypoint, field_name="module.handler")
     if ":" not in text:
@@ -394,9 +412,121 @@ class ModuleReactionsManifest(ModuleContractModel):
         return self
 
 
+class ModuleNotificationAudience(ModuleContractModel):
+    roles: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    user_id_field: str | None = None
+    resolver: str | None = None
+
+    @field_validator("roles", "permissions", mode="before")
+    @classmethod
+    def _string_list(cls, value: Any) -> list[str]:
+        return _string_list(value)
+
+    @field_validator("user_id_field", "resolver", mode="before")
+    @classmethod
+    def _optional_resolver(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+
+class ModuleNotificationTemplate(ModuleContractModel):
+    title: str | None = None
+    body: str | None = None
+
+    @field_validator("title", "body", mode="before")
+    @classmethod
+    def _optional_template_text(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+
+class ModuleNotification(ModuleContractModel):
+    id: str
+    event_type: str | None = None
+    # Alternate field accepted by notification contracts.
+    on: str | None = None
+    description: str | None = None
+    condition: dict[str, Any] | None = None
+    channels: list[Literal["in_app", "email", "push", "sms"]] = Field(default_factory=lambda: ["in_app"])
+    audience: ModuleNotificationAudience = Field(default_factory=ModuleNotificationAudience)
+    template: ModuleNotificationTemplate | None = None
+    # AppGenerator's structured output also supports top-level title/body.
+    title: str | None = None
+    body: str | None = None
+    context_fields: list[str] = Field(default_factory=list)
+    preference_key: str | None = None
+    default_enabled: bool = True
+    renderer: str | None = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _required_id(cls, value: Any) -> str:
+        return _required_text(value, field_name="notifications[].id")
+
+    @field_validator("event_type", "on", "description", "preference_key", "renderer", mode="before")
+    @classmethod
+    def _optional_fields(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+    @field_validator("title", "body", mode="before")
+    @classmethod
+    def _optional_message_text(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+    @field_validator("context_fields", mode="before")
+    @classmethod
+    def _context_fields(cls, value: Any) -> list[str]:
+        return _string_list(value)
+
+    @field_validator("channels", mode="before")
+    @classmethod
+    def _channels(cls, value: Any) -> list[str]:
+        channels = _string_list(value)
+        return channels or ["in_app"]
+
+    @model_validator(mode="after")
+    def _normalize(self) -> ModuleNotification:
+        event_type = self.event_type or self.on
+        if not event_type:
+            raise ValueError("notifications.yaml entries must declare event_type")
+        self.event_type = event_type
+        if self.template is None and (self.title or self.body):
+            self.template = ModuleNotificationTemplate(title=self.title, body=self.body)
+        return self
+
+    def as_rule(self) -> dict[str, Any]:
+        data = self.model_dump(mode="python", exclude_none=True)
+        data.pop("on", None)
+        data.pop("title", None)
+        data.pop("body", None)
+        return data
+
+
 class ModuleNotificationsManifest(ModuleContractModel):
     schema_version: Literal["mozaiks.notifications.v1"] = "mozaiks.notifications.v1"
-    notifications: list[dict[str, Any]] = Field(default_factory=list)
+    notifications: list[ModuleNotification] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_yaml_keys(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        notifications = data.get("notifications")
+        if not isinstance(notifications, list):
+            return data
+        normalized: list[Any] = []
+        for item in notifications:
+            if isinstance(item, dict) and True in item and "on" not in item:
+                item = dict(item)
+                item["on"] = item.pop(True)
+            normalized.append(item)
+        return {**data, "notifications": normalized}
+
+    @model_validator(mode="after")
+    def _validate_unique_notifications(self) -> ModuleNotificationsManifest:
+        notification_ids = [notification.id for notification in self.notifications]
+        if len(notification_ids) != len(set(notification_ids)):
+            raise ValueError("notifications.yaml notifications must have unique id values")
+        return self
 
 
 class ModuleSettingsManifest(ModuleContractModel):
@@ -996,7 +1126,10 @@ class ModuleLoader:
             if not path.exists():
                 continue
             try:
-                parsed[key] = model.model_validate(_load_yaml_file(path))  # type: ignore[attr-defined]
+                raw_manifest = _load_yaml_file(path)
+                if key == "notifications":
+                    raw_manifest = _normalize_notifications_yaml(raw_manifest)
+                parsed[key] = model.model_validate(raw_manifest)  # type: ignore[attr-defined]
             except Exception as exc:
                 raise ModuleLoadError(f"Invalid {filename} for {definition.name!r}: {exc}") from exc
 
@@ -1062,9 +1195,7 @@ class ModuleLoader:
 
         if manifests.notifications is not None:
             for notification in manifests.notifications.notifications:
-                if not isinstance(notification, dict):
-                    raise ModuleLoadError("notifications.yaml entries must be objects")
-                event_type = str(notification.get("event_type") or "").strip()
+                event_type = str(getattr(notification, "event_type", "") or "").strip()
                 if event_type and not self._is_known_or_canonical_event(event_type, declared_events):
                     raise ModuleLoadError(
                         f"notifications.yaml references non-canonical event {event_type!r}"

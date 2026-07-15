@@ -2272,6 +2272,12 @@ models:
         type: optional_list
         items: str
         description: Permissions that qualify users for the notification.
+      user_id_field:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: Optional event payload field containing the target user id, such as ticket_user_id for support replies.
       resolver:
         type: union
         variants:
@@ -2287,7 +2293,7 @@ models:
         description: Stable notification rule id.
       event_type:
         type: str
-        description: Event type that creates the notification intent.
+        description: Declared module event type that deterministically creates the notification intent.
       title:
         type: str
         description: Notification title template.
@@ -2297,7 +2303,7 @@ models:
       channels:
         type: list
         items: str
-        description: Delivery channels such as in_app or email.
+        description: Controlled delivery channels. Use in_app by default; use email, push, or sms only when external delivery is explicitly required and backed by an operator pack or app-owned provider adapter.
       audience:
         type: ModuleNotificationAudience
         description: Audience declaration or resolver hook.
@@ -2325,7 +2331,7 @@ models:
       notifications:
         type: list
         items: ModuleNotification
-        description: Event-to-notification intent mappings.
+        description: Deterministic event-to-notification intent mappings consumed by the OSS runtime. Do not use this to request custom notification persistence, websocket workers, or provider internals.
 
   ModuleSetting:
     type: model

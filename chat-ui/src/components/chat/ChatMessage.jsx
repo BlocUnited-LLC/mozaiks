@@ -3,25 +3,20 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import "./ChatMessage.css";
 
-// Local debug flag helper (duplicated intentionally to avoid cross-file import churn)
-const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localStorage.getItem(k)||'').toLowerCase()); } catch { return false; } };
-
- function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMessage, isWarningMessage, isLatest = false, isStructuredCapable = false, structuredOutput = null, structuredSchema = null, isThinking = false, attachment = null, trace = null }) {
+function ChatMessage({ message, message_from, agentName: agentNameRaw, isTokenMessage, isWarningMessage, isLatest = false, isStructuredCapable = false, structuredOutput = null, structuredSchema = null, isThinking = false, attachment = null, trace = null }) {
   const agentName = typeof agentNameRaw === 'string' ? agentNameRaw : (agentNameRaw ? String(agentNameRaw) : null);
   // No local state needed: always show pretty structured output
   const traceItems = Array.isArray(trace) ? trace : [];
   const [traceOpen, setTraceOpen] = React.useState(false);
-  
-  // Debug (disabled by default): uncomment to trace renders
-  if (debugFlag('mozaiks.debug_render')) {
-    try {
-    } catch {}
-  }
 
   // Structured output detection – strict: only use explicit structuredOutput prop
   const detectStructuredOutput = (text) => {
     if (structuredOutput && typeof structuredOutput === 'object') {
       return { type: 'json', data: structuredOutput, raw: JSON.stringify(structuredOutput), textBefore: '', textAfter: '' };
+    }
+    // If content itself is an object (e.g. structured output stored directly as content), render it as JSON
+    if (text && typeof text === 'object') {
+      return { type: 'json', data: text, raw: JSON.stringify(text), textBefore: '', textAfter: '' };
     }
     return null; // Do not attempt heuristic parsing
   };
@@ -151,7 +146,7 @@ const debugFlag = (k) => { try { return ['1','true','on','yes'].includes((localS
   };
 
   // If there's truly no textual content and no structured output and it's not a token/warning system message, avoid rendering any bubble at all
-  const hasRenderableContent = !!(message && String(message).trim().length) || (structuredOutput && typeof structuredOutput === 'object');
+  const hasRenderableContent = !!(message && (typeof message === 'object' || String(message).trim().length)) || (structuredOutput && typeof structuredOutput === 'object');
   
   // Special case: thinking message
   if (isThinking) {

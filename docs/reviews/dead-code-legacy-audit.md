@@ -53,7 +53,7 @@ No active standalone `Stripe`/`STRIPE` payment references were found in the chec
 - Tests and smoke scripts contain fixtures, stubs, demo IDs, and placeholder assertions by design.
 - Generated app templates include placeholder/legal copy where templates explicitly require user replacement.
 - `chat-ui` standalone demo config and workflow stub aliases are development-only package surfaces, not Studio runtime logic.
-- No legacy `autogen.beta.*` imports were found in active code paths; those terms remain only in changelog/test hygiene contexts.
+- No outdated AG2 import namespace usage was found in active code paths.
 
 ## Validation
 

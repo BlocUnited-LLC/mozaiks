@@ -20,6 +20,14 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     [:octicons-arrow-right-24: Studio](../studio/index.md)
 
+-   :material-connection: **Integrations**
+
+    ---
+
+    Connect shared services once and let generated apps declare what they need.
+
+    [:octicons-arrow-right-24: Integrations](integrations/01-overview.md)
+
 -   :material-puzzle-outline: **Add a Module**
 
     ---

@@ -1,18 +1,61 @@
 schema_version: mozaiks.notifications.v1
 
 notifications:
-  - id: operator_reply
-    description: Notify the user when an operator replies to their support request.
-    "on": domain.workspace_support.message_added
-    condition:
-      field: sender_role
-      equals: operator
-    template:
-      title: "Operator replied to your support request"
-      body: "{{message_preview}}"
+  - id: workspace_support.request_created
+    description: Notify support operators when a user submits a support request.
+    event_type: domain.workspace_support.request_created
     channels:
       - in_app
-    audience: {}
+    audience:
+      permissions:
+        - workspace_support.read
+    template:
+      title: "New support request"
+      body: "{{message}}"
     context_fields:
       - request_id
-      - message_preview
+      - app_id
+      - subject_app_id
+      - severity
+      - page_url
+      - page_title
+      - message_thread_id
+
+  - id: workspace_support.user_reply
+    description: Notify support operators when the ticket owner replies.
+    event_type: domain.workspace_support.message_added
+    condition:
+      field: sender_role
+      equals: user
+    channels:
+      - in_app
+    audience:
+      permissions:
+        - workspace_support.read
+    template:
+      title: "Support reply"
+      body: "{{message_preview}}"
+    context_fields:
+      - request_id
+      - app_id
+      - subject_app_id
+      - message_id
+      - message_thread_id
+
+  - id: workspace_support.negative_feedback
+    description: Notify support operators when a user reports a poor session experience.
+    event_type: domain.workspace_support.negative_feedback
+    channels:
+      - in_app
+    audience:
+      permissions:
+        - workspace_support.read
+    template:
+      title: "Negative session feedback"
+      body: "{{workflow_name}}"
+    context_fields:
+      - feedback_id
+      - app_id
+      - subject_app_id
+      - session_id
+      - workflow_name

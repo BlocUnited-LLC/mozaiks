@@ -1,0 +1,38 @@
+schema_version: mozaiks.notifications.v1
+
+notifications:
+  - id: support.request_created
+    description: Notify support operators when a user submits a support request.
+    event_type: domain.support.request_created
+    channels:
+      - in_app
+    audience:
+      permissions:
+        - support.read
+    template:
+      title: "New support request"
+      body: "{{severity | upper}} support request"
+    context_fields:
+      - request_id
+      - app_id
+      - subject_app_id
+      - requester_id
+      - severity
+      - message_thread_id
+
+  - id: support.status_changed
+    description: Notify the requester when their support request status changes.
+    event_type: domain.support.status_changed
+    channels:
+      - in_app
+    audience:
+      user_id_field: requester_id
+    template:
+      title: "Support request updated"
+      body: "Status changed to {{status}}"
+    context_fields:
+      - request_id
+      - app_id
+      - subject_app_id
+      - status
+      - assignee_id

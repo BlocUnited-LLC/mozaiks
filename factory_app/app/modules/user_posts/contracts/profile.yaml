@@ -1,7 +1,0 @@
-schema_version: mozaiks.profile.v1
-tabs:
-  - id: posts
-    label: Posts
-    order: 20
-    action: list_user_posts
-    component: UserPostsTab

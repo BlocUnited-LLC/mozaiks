@@ -1,0 +1,31 @@
+schema_version: mozaiks.events.v1
+events:
+  - type: domain.support.request_created
+    version: 1
+    description: Emitted when a support request metadata record is created.
+    producer: support
+    payload_schema:
+      type: object
+      required: [request_id, app_id, subject_app_id, requester_id, severity]
+      properties:
+        request_id: { type: string }
+        app_id: { type: string }
+        subject_app_id: { type: string }
+        requester_id: { type: string }
+        severity: { type: string }
+        message_thread_id: { type: string }
+
+  - type: domain.support.status_changed
+    version: 1
+    description: Emitted when a support request status changes.
+    producer: support
+    payload_schema:
+      type: object
+      required: [request_id, app_id, status, requester_id, subject_app_id]
+      properties:
+        request_id: { type: string }
+        app_id: { type: string }
+        status: { type: string }
+        assignee_id: { type: string }
+        requester_id: { type: string }
+        subject_app_id: { type: string }

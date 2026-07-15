@@ -87,22 +87,27 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
     const controller = new AbortController();
     let mounted = true;
 
-    fetch("/api/notifications/count", {
-      signal: controller.signal,
-      headers: { Accept: "application/json" },
-    })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((payload) => {
-        if (!mounted || !payload) return;
-        const count = Number(payload.unread_count ?? payload.count ?? 0);
-        if (Number.isFinite(count)) setNotificationCount(Math.max(0, count));
+    const loadNotificationCount = () => {
+      fetch("/api/notifications/count", {
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
       })
-      .catch(() => {
-        if (mounted) setNotificationCount(0);
-      });
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (!mounted || !payload) return;
+          const count = Number(payload.unread_count ?? payload.count ?? 0);
+          if (Number.isFinite(count)) setNotificationCount(Math.max(0, count));
+        })
+        .catch(() => {
+          if (mounted) setNotificationCount(0);
+        });
+    };
 
+    loadNotificationCount();
+    const intervalId = window.setInterval(loadNotificationCount, 15000);
     return () => {
       mounted = false;
+      window.clearInterval(intervalId);
       controller.abort();
     };
   }, [notifications?.show]);

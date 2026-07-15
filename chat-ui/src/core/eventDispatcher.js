@@ -37,7 +37,7 @@ class EventDispatcher {
         });
       }
 
-      const responseHandler = (response) => {
+      const responseHandler = async (response) => {
         if (toolCallId && this.activeEvents.has(toolCallId)) {
           const activeEvent = this.activeEvents.get(toolCallId);
           activeEvent.status = 'completed';
@@ -45,8 +45,9 @@ class EventDispatcher {
           activeEvent.response = response;
         }
         if (onResponse) {
-          onResponse(response);
+          return await onResponse(response);
         }
+        return undefined;
       };
 
       const cancelHandler = (reason) => {

@@ -113,6 +113,35 @@ facades:
         primary_actions:
           - get_usage_status
 
+provider_api_response_contract:
+  spec_file: provider_api_contract.yaml
+  description: >
+    The MozaiksPay hosted platform serves two endpoints consumed by generated apps.
+    Response shapes are pinned in provider_api_contract.yaml. Any change to field
+    names or types on either side is a breaking change requiring coordinated release.
+  subscription_status_required_fields:
+    - success
+    - found
+    - plan_id
+    - plan_name
+    - status
+    - starts_at
+    - expires_at
+    - on_free_plan
+  billing_portal_session_required_fields:
+    - success
+    - portal_url
+    - return_url
+  globally_forbidden_response_fields:
+    - provider_customer_id
+    - provider_subscription_id
+    - payment_provider_customer_id
+    - payment_provider_subscription_id
+    - client_secret
+    - secret_salt
+    - client_secret_hash
+    - session_id
+
 inactive_surfaces:
   - checkout
   - creator_earnings

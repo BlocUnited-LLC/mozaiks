@@ -293,7 +293,7 @@ def _make_app(claims: UserClaims | None = None, raise_error: AuthError | None = 
 
     @app.get("/protected")
     async def protected(user: UserPrincipal = Depends(require_user)):
-        return {"user_id": user.user_id, "roles": user.roles}
+        return {"user_id": user.user_id, "roles": user.roles, "scopes": user.scopes}
 
     @app.get("/admin")
     async def admin_only(user: UserPrincipal = Depends(require_role("admin"))):
@@ -417,3 +417,66 @@ class TestAuthDisabledBypass:
             response = client.get("/optional")
         assert response.status_code == 200
         assert response.json()["user_id"] == "anonymous"
+
+    def test_require_user_accepts_dev_persona_header_when_auth_disabled(self):
+        app = _make_app()
+        adapter = _MockAdapter(
+            claims=UserClaims(
+                user_id="anonymous",
+                roles=["admin", "user"],
+                scopes=["access_as_user", "messages.read"],
+                provider="none",
+            )
+        )
+
+        with patch("mozaiksai.core.auth.dependencies.get_auth_adapter", return_value=adapter), \
+             patch("mozaiksai.core.auth.dependencies.is_auth_enabled", return_value=False):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/protected", headers={"X-Mozaiks-Dev-User-Id": "dev_alice"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "user_id": "dev_alice",
+            "roles": ["admin", "user"],
+            "scopes": ["access_as_user", "messages.read"],
+        }
+
+    def test_require_user_accepts_dev_persona_cookie_when_auth_disabled(self):
+        app = _make_app()
+        adapter = _MockAdapter(claims=UserClaims(user_id="anonymous", roles=["user"], provider="none"))
+
+        with patch("mozaiksai.core.auth.dependencies.get_auth_adapter", return_value=adapter), \
+             patch("mozaiksai.core.auth.dependencies.is_auth_enabled", return_value=False):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/protected", cookies={"mozaiks_dev_user_id": "dev_bob"})
+
+        assert response.status_code == 200
+        assert response.json()["user_id"] == "dev_bob"
+        assert response.json()["roles"] == ["user"]
+
+    def test_dev_persona_can_override_roles_and_scopes_when_auth_disabled(self):
+        app = _make_app()
+        adapter = _MockAdapter(claims=UserClaims(user_id="anonymous", roles=["user"], scopes=["access_as_user"], provider="none"))
+
+        with patch("mozaiksai.core.auth.dependencies.get_auth_adapter", return_value=adapter), \
+             patch("mozaiksai.core.auth.dependencies.is_auth_enabled", return_value=False):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get(
+                "/protected?dev_user_id=dev_operator&dev_roles=admin,user&dev_scopes=access_as_user,workspace_support.manage"
+            )
+
+        assert response.status_code == 200
+        assert response.json()["user_id"] == "dev_operator"
+        assert response.json()["roles"] == ["admin", "user"]
+        assert response.json()["scopes"] == ["access_as_user", "workspace_support.manage"]
+
+    def test_dev_persona_rejects_unsafe_user_id(self):
+        app = _make_app()
+        adapter = _MockAdapter(claims=UserClaims(user_id="anonymous", provider="none"))
+
+        with patch("mozaiksai.core.auth.dependencies.get_auth_adapter", return_value=adapter), \
+             patch("mozaiksai.core.auth.dependencies.is_auth_enabled", return_value=False):
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/protected", headers={"X-Mozaiks-Dev-User-Id": "../bad"})
+
+        assert response.status_code == 400

@@ -169,6 +169,11 @@ reactions:
   AI-driven reactions, use a capability target to trigger a workflow instead.
 - `/api/notifications/count` reads unread platform notification intents for the
   current principal.
+- In local no-auth development, DM notification tests need distinct principals.
+  Set a request-scoped dev persona with `mozaiks_dev_user_id` cookie or
+  `X-Mozaiks-Dev-User-Id` header in each browser profile. If sender and
+  recipient resolve to the same `user_id`, the messaging module emits no
+  recipient for that sender, so no notification record is created.
 
 ### Provider-Neutral Example
 

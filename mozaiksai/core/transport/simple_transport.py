@@ -1582,8 +1582,11 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
             else:
                 logger.warning("WebSocket error for chat %s: %s", chat_id, e)
         finally:
-            # H1-H2: Clean up connection resources (heartbeat, message queues, etc.)
-            await self._cleanup_connection(chat_id)
+            # H1-H2: Clean up connection resources (heartbeat, message queues, etc.).
+            # Pass ws_id so _cleanup_connection skips cleanup when a concurrent
+            # reconnect (e.g. React StrictMode double-invoke) has already evicted
+            # this WS and registered a new one under the same chat_id.
+            await self._cleanup_connection(chat_id, ws_id=ws_id)
             logger.info("WS_DISCONNECTED chat=%s", chat_id)
 
     # NOTE: Workflow integration methods are provided by WorkflowBridgeMixin:

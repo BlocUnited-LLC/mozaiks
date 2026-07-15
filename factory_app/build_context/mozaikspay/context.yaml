@@ -4,6 +4,8 @@ applies_to_workflows:
 assets:
   - path: contract.yaml
     kind: contract
+  - path: provider_api_contract.yaml
+    kind: contract
   - path: templates/
     kind: templates
 pack:

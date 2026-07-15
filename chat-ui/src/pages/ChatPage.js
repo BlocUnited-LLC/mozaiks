@@ -57,6 +57,13 @@ import {
   getAccessToken,
   getUserIdFromToken,
 } from './chatPageHelpers';
+import {
+  buildSupportConversationTranscript,
+  buildSupportRequestPayload,
+  buildUserSupportPath,
+  resolveSupportRequestScope,
+  shouldOfferHumanSupport,
+} from '../utils/supportLinks';
 
 // Extracted hooks for gradual migration
 // Usage: const { messages, addMessage, ... } = useConversation({ chatId, conversationMode, ... });
@@ -94,6 +101,8 @@ const ChatPage = () => {
   const pendingStartRef = useRef(false);
   const conversationBootstrapRef = useRef(false);
   const modeChangeInProgressRef = useRef(false);
+  // Track whether we've already injected an EscalationCard in the current ask session
+  const escalationCardInjectedRef = useRef(false);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   let pathAppId = null;
   let pathWorkflowName = null;
@@ -112,7 +121,11 @@ const ChatPage = () => {
   const queryAppId = searchParams.get('appId') || searchParams.get('app_id');
   const queryWorkflowName = searchParams.get('workflow');
   const queryChatId = searchParams.get('chat_id');
+  const queryGeneralChatId = searchParams.get('general_chat_id') || searchParams.get('generalChatId');
   const queryMode = searchParams.get('mode'); // 'ask' or 'workflow'
+  const queryForceAsk = ['1', 'true', 'yes', 'on'].includes(
+    String(searchParams.get('force_ask') || '').toLowerCase()
+  );
   const queryFreshStart = ['1', 'true', 'yes', 'on'].includes(
     String(searchParams.get('new') || searchParams.get('fresh') || searchParams.get('force_new') || '').toLowerCase()
   );
@@ -151,6 +164,7 @@ const ChatPage = () => {
   const {
     user,
     api,
+    auth,
     config,
     logout,
     activeChatId,
@@ -192,6 +206,10 @@ const ChatPage = () => {
   useEffect(() => {
     surfaceStateRef.current = surfaceState;
   }, [surfaceState]);
+  const conversationModeRef = useRef(conversationMode);
+  useEffect(() => {
+    conversationModeRef.current = conversationMode;
+  }, [conversationMode]);
   const isSidePanelOpen = isArtifactOpen;
   const setIsSidePanelOpen = setIsArtifactOpen;
   const [forceOverlay, setForceOverlay] = useState(false);
@@ -1597,6 +1615,7 @@ const ChatPage = () => {
         const generalId = payload.general_chat_id || payload.chat_id;
         if (generalId) {
           generalMessagesCacheRef.current = [];
+          escalationCardInjectedRef.current = false; // reset per new ask session
           setActiveGeneralChatId(generalId);
           setGeneralChatSummary({
             chatId: generalId,
@@ -1777,6 +1796,28 @@ const ChatPage = () => {
         // Mobile badge: notify if the artifact drawer is covering the chat feed
         if (isMobileView && mobileDrawerState === 'expanded') {
           setHasUnseenChat(true);
+        }
+        // Escalation card: inject inline when the AI response mentions the ? / operator support path
+        if (
+          conversationMode === 'ask' &&
+          finalContent &&
+          !escalationCardInjectedRef.current
+        ) {
+          const ESCALATION_CUE = /\?.*button|\btap\s+the\s+\?|click\s+the\s+\?|reach\s+an?\s+operator|operator\s+directly|connect\s+with\s+an?\s+operator/i;
+          if (ESCALATION_CUE.test(finalContent)) {
+            escalationCardInjectedRef.current = true;
+            setMessagesWithLogging(prev => [
+              ...prev,
+              {
+                id: `escalation-${Date.now()}`,
+                sender: 'agent',
+                agentName: agentNameEnd,
+                content: '',
+                toolCall: { tool_name: 'EscalationCard', payload: {} },
+                isStreaming: false,
+              },
+            ]);
+          }
         }
         return;
       }
@@ -2370,7 +2411,7 @@ const ChatPage = () => {
         const count = Number(data.count ?? payload.count ?? 0);
         const label = count > 0 ? `Running ${count} parallel workflow task${count === 1 ? '' : 's'}...` : 'Running parallel workflow tasks...';
         setMessagesWithLogging(prev => [...prev, {
-          id: `mfj-batch-${Date.now()}`,
+          id: `system-batch-${Date.now()}`,
           sender: 'system',
           agentName: 'System',
           content: `⚙️ ${label}`,
@@ -2378,7 +2419,6 @@ const ChatPage = () => {
           metadata: {
             event_type: 'workflow_batch_started',
             trigger_id: data.trigger_id || payload.trigger_id || null,
-            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
             count: count || null,
           },
         }]);
@@ -2396,7 +2436,7 @@ const ChatPage = () => {
         const progressText = idx > 0 && total > 0 ? ` (${idx}/${total})` : '';
         const icon = ok ? '✅' : '⚠️';
         setMessagesWithLogging(prev => [...prev, {
-          id: `mfj-child-${Date.now()}`,
+          id: `system-child-${Date.now()}`,
           sender: 'system',
           agentName: 'System',
           content: `${icon} Parallel child${progressText}: ${status}`,
@@ -2405,62 +2445,6 @@ const ChatPage = () => {
             event_type: 'workflow_child_completed',
             child_chat_id: data.child_chat_id || payload.child_chat_id || null,
             trigger_id: data.trigger_id || payload.trigger_id || null,
-            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
-          },
-        }]);
-        return;
-      }
-      case 'mfj_fan_in_started': {
-        const payload = data.data || {};
-        setMessagesWithLogging(prev => [...prev, {
-          id: `mfj-fanin-${Date.now()}`,
-          sender: 'system',
-          agentName: 'System',
-          content: `🧩 Merging parallel results...`,
-          isStreaming: false,
-          metadata: {
-            event_type: 'mfj_fan_in_started',
-            trigger_id: data.trigger_id || payload.trigger_id || null,
-            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
-          },
-        }]);
-        return;
-      }
-      case 'mfj_timeout_prompt': {
-        const payload = data.data || {};
-        const failed = Number(data.failed_count ?? payload.failed_count ?? 0);
-        const total = Number(data.total_count ?? payload.total_count ?? 0);
-        const detail = failed > 0 && total > 0 ? ` (${failed}/${total} failed)` : '';
-        setMessagesWithLogging(prev => [...prev, {
-          id: `mfj-timeout-${Date.now()}`,
-          sender: 'system',
-          agentName: 'System',
-          content: `⏱️ Parallel tasks timed out${detail}. Continuing with available results.`,
-          isStreaming: false,
-          metadata: {
-            event_type: 'mfj_timeout_prompt',
-            trigger_id: data.trigger_id || payload.trigger_id || null,
-            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
-          },
-        }]);
-        return;
-      }
-      case 'workflow_resumed': {
-        const payload = data.data || {};
-        const resumeAgent = data.resume_agent || payload.resume_agent || 'resume agent';
-        setMessagesWithLogging(prev => [...prev, {
-          id: `mfj-resume-${Date.now()}`,
-          sender: 'system',
-          agentName: 'System',
-          content: `↩️ Parallel phase complete. Resuming at ${resumeAgent}.`,
-          isStreaming: false,
-          metadata: {
-            event_type: 'workflow_resumed',
-            trigger_id: data.trigger_id || payload.trigger_id || null,
-            mfj_cycle: data.mfj_cycle || payload.mfj_cycle || null,
-            inject_as: data.inject_as || payload.inject_as || null,
-            succeeded_count: data.succeeded_count ?? payload.succeeded_count ?? null,
-            failed_count: data.failed_count ?? payload.failed_count ?? null,
           },
         }]);
         return;
@@ -2896,7 +2880,7 @@ const ChatPage = () => {
       setActiveChatId(null);
     }
 
-    if (!currentChatId && !queryChatId && !queryFreshStart) {
+    if (queryMode !== 'ask' && !queryForceAsk && !currentChatId && !queryChatId && !queryFreshStart) {
       const stored = getStoredActiveChatId();
       if (stored) {
         setCurrentChatId(stored);
@@ -2906,7 +2890,7 @@ const ChatPage = () => {
         }
       }
     }
-  }, [api, currentChatId, currentAppId, queryChatId, queryFreshStart, setActiveChatId]);
+  }, [api, currentChatId, currentAppId, queryChatId, queryFreshStart, queryForceAsk, queryMode, setActiveChatId]);
 
   // NEW: Preflight chat existence + cache clearing logic
 useEffect(() => {
@@ -2923,6 +2907,7 @@ useEffect(() => {
   pendingStartRef.current = true;
   (async () => {
     try {
+      const askCarrierMode = queryMode === 'ask' || queryForceAsk || conversationMode === 'ask';
       let reuseChatId = queryFreshStart ? null : queryChatId;
 
       if (reuseChatId) {
@@ -2939,6 +2924,14 @@ useEffect(() => {
             if (data.exists) {
               setCurrentChatId(reuseChatId);
               setChatExists(true);
+              if (askCarrierMode) {
+                setCurrentWorkflowName(wfName);
+                setConversationMode('ask');
+                setConnectionInitialized(false);
+                connectionInProgressRef.current = false;
+                pendingStartRef.current = false;
+                return;
+              }
               
               // Update global chat context for persistent bubble
               setActiveChatId(reuseChatId);
@@ -2958,6 +2951,14 @@ useEffect(() => {
             console.warn('[EXISTS] Backend returned non-OK; falling back to reuse chat_id');
             setCurrentChatId(reuseChatId);
             setChatExists(null);
+            if (askCarrierMode) {
+              setCurrentWorkflowName(wfName);
+              setConversationMode('ask');
+              setConnectionInitialized(false);
+              connectionInProgressRef.current = false;
+              pendingStartRef.current = false;
+              return;
+            }
             setActiveChatId(reuseChatId);
             setActiveWorkflowName(wfName);
             setChatMinimized(false);
@@ -2968,6 +2969,14 @@ useEffect(() => {
           console.warn('[EXISTS] Existence check failed; reusing chat_id without backend', e);
           setCurrentChatId(reuseChatId);
           setChatExists(null);
+          if (askCarrierMode) {
+            setCurrentWorkflowName(wfName || currentWorkflowName);
+            setConversationMode('ask');
+            setConnectionInitialized(false);
+            connectionInProgressRef.current = false;
+            pendingStartRef.current = false;
+            return;
+          }
           setActiveChatId(reuseChatId);
           setActiveWorkflowName(wfName || null);
           setChatMinimized(false);
@@ -2987,7 +2996,6 @@ useEffect(() => {
         ...(queryChangeClass ? { change_class: queryChangeClass } : {}),
         ...(queryArtifactVersionId ? { artifact_version_id: queryArtifactVersionId } : {}),
       };
-      const askCarrierMode = queryMode === 'ask' || conversationMode === 'ask';
       const sessionOptions = {
         ...(askCarrierMode ? { transportPurpose: 'ask_carrier' } : {}),
         ...(queryFreshStart ? { forceNew: true } : {}),
@@ -3007,6 +3015,17 @@ useEffect(() => {
         const resolvedWorkflowName = result.workflow_name || startWorkflowName;
         setCurrentChatId(newId);
         setChatExists(reused);
+
+        if (askCarrierMode) {
+          setCurrentWorkflowName(resolvedWorkflowName);
+          setConversationMode('ask');
+          setConnectionInitialized(false);
+          connectionInProgressRef.current = false;
+          if (!reused) {
+            clearStoredArtifactState(newId);
+          }
+          return;
+        }
 
         // Keep URL session context canonical after chat creation so refresh/resume
         // paths always keep the concrete chat_id for this workflow run.
@@ -3038,7 +3057,7 @@ useEffect(() => {
     }
   })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, queryDeferStart, resolveKnownWorkflowName, consumeNavigationQueryParams]);
+}, [api, workflowConfigLoaded, currentChatId, currentWorkflowName, currentAppId, currentUserId, queryDeferStart, queryForceAsk, queryMode, conversationMode, resolveKnownWorkflowName, consumeNavigationQueryParams]);
 
   // Ensure resumed workflow chats always keep a canonical URL session context.
   // This prevents ambiguous reconnect behavior when the page was loaded with only ?workflow=...
@@ -3290,7 +3309,9 @@ useEffect(() => {
                 initSpinnerShownRef.current = true; // lock state
               }
             }
-            setStoredActiveChatId(currentChatId);
+            if (conversationModeRef.current === 'workflow') {
+              setStoredActiveChatId(currentChatId);
+            }
           },
           onMessage: (data) => {
             // Ignore callbacks from stale sockets that are no longer active.
@@ -3823,9 +3844,42 @@ useEffect(() => {
     });
     
     if (conversationMode === 'ask') {
-      const targetChatId = activeGeneralChatId || currentChatId;
+      const targetChatId = currentChatId;
       if (!targetChatId) {
         console.error('❌ [SEND] No chat available for ask-mode message');
+        return;
+      }
+
+      if (shouldOfferHumanSupport(messageContent.content)) {
+        const transcriptSnapshot = buildSupportConversationTranscript(
+          [
+            ...(messagesRef.current || []),
+            userMessage,
+          ],
+          { includeMessage: messageContent.content },
+        );
+        if (!escalationCardInjectedRef.current) {
+          escalationCardInjectedRef.current = true;
+          setMessagesWithLogging(prev => [
+            ...prev.filter(m => !m.isThinking),
+            {
+              id: `escalation-${Date.now()}`,
+              sender: 'agent',
+              agentName: 'Support',
+              content: '',
+              toolCall: {
+                tool_name: 'EscalationCard',
+                payload: {
+                  conversationTranscript: transcriptSnapshot,
+                },
+              },
+              isStreaming: false,
+            },
+          ]);
+        } else {
+          setMessagesWithLogging(prev => prev.filter(m => !m.isThinking));
+        }
+        setLoading(false);
         return;
       }
 
@@ -3842,11 +3896,15 @@ useEffect(() => {
       });
       if (!didSend) {
         console.error('❌ [SEND] Failed to send ask-mode message (socket unavailable)');
+        setMessagesWithLogging(prev => [
+          ...prev.filter(m => !m.isThinking),
+        ]);
+        setLoading(false);
       } else {
         setLoading(true);
-        }
-        return;
       }
+      return;
+    }
 
       const pendingComposerInputRequestToolCall = findPendingComposerInputRequestToolCall(messagesRef.current);
       if (pendingComposerInputRequestToolCall?.tool_call_id) {
@@ -4063,6 +4121,7 @@ useEffect(() => {
     restoreViewSnapshot,
     clearViewArtifacts,
     queryMode,
+    queryGeneralChatId,
     setConnectionInitialized,
     connectionInProgressRef,
   });
@@ -4075,6 +4134,7 @@ useEffect(() => {
     refreshWorkflowSessions,
     conversationBootstrapRef,
     queryMode,
+    queryGeneralChatId,
     navigationLoading,
     configuredStartupMode,
     setConversationMode,
@@ -4098,6 +4158,7 @@ useEffect(() => {
     isSidePanelOpen,
     layoutMode,
     activeGeneralChatId,
+    setActiveGeneralChatId,
     generalHydrationPendingRef,
     hydrateGeneralTranscript,
     workflowMessagesCacheRef,
@@ -4197,8 +4258,68 @@ useEffect(() => {
 
   // Handle agent UI actions
   const handleAgentAction = async (action) => {
-    
+
     try {
+      // EscalationCard: create a support request from the current session, then
+      // navigate to the profile support tab so the user sees the new ticket immediately.
+      if (
+        action.type === 'tool_call_response' &&
+        action.tool_name === 'EscalationCard' &&
+        action.response?.action === 'open_support'
+      ) {
+        const latestUserMessage = [...(messagesRef.current || [])]
+          .reverse()
+          .find((message) => message?.sender === 'user' && String(message?.content || '').trim());
+        const supportMessage = String(latestUserMessage?.content || 'Requested operator assistance from chat.').trim();
+        const conversationTranscript = Array.isArray(action?.payload?.conversationTranscript)
+          ? action.payload.conversationTranscript
+          : buildSupportConversationTranscript(messagesRef.current, {
+            includeMessage: supportMessage,
+          });
+        try {
+          const supportScope = await resolveSupportRequestScope({
+            api,
+            auth,
+            config,
+            user,
+            fallbackAppId: currentAppId,
+            fallbackUserId: currentUserId,
+          });
+          const response = await fetch('/api/modules/workspace_support/create_support_request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildSupportRequestPayload({
+              message: supportMessage,
+              appId: supportScope.appId || currentAppId,
+              userId: supportScope.userId || currentUserId,
+              severity: 'low',
+              pageUrl: window.location.href,
+              pageTitle: 'Chat session',
+              conversationTranscript,
+            })),
+          });
+          const created = response.ok ? await response.json().catch(() => ({})) : {};
+          const requestId = created?.request_id || created?.request?.request_id || created?.result?.request_id || created?.data?.request_id;
+          const createdAppId =
+            created?.app_id ||
+            created?.subject_app_id ||
+            created?.request?.app_id ||
+            created?.request?.subject_app_id ||
+            created?.result?.app_id ||
+            created?.result?.subject_app_id ||
+            created?.data?.app_id ||
+            created?.data?.subject_app_id ||
+            supportScope.appId ||
+            currentAppId;
+          if (requestId) {
+            navigate(buildUserSupportPath({ requestId, appId: createdAppId }));
+            return;
+          }
+        } catch (_) {}
+        navigate(buildUserSupportPath({ appId: currentAppId }));
+        return;
+      }
+
       // Handle UI tool responses for the dynamic UI system
       if (action.type === 'tool_call_response') {
 

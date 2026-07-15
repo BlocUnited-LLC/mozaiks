@@ -141,6 +141,34 @@ jobs:
           print(f"OK: {path} is valid (realm={realm['realm']}, enabled={realm['enabled']})")
           PY
 
+      - name: Source hygiene scan
+        # Enforces the repo's clean-source terminology policy (see
+        # SOURCE_HYGIENE_FORBIDDEN in scripts/production_readiness_gate.py).
+        # Loaded by file path (like tests/test_production_readiness_gate.py)
+        # since scripts/ is not a package.
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import sys
+          from pathlib import Path
+
+          file_path = Path("scripts/production_readiness_gate.py").resolve()
+          spec = importlib.util.spec_from_file_location("production_readiness_gate", file_path)
+          module = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = module
+          spec.loader.exec_module(module)
+
+          violations = module.run_source_hygiene_scan()
+          if violations:
+              print("Source hygiene scan failed:", file=sys.stderr)
+              for violation in violations[:50]:
+                  print(f"  {violation}", file=sys.stderr)
+              if len(violations) > 50:
+                  print(f"  ... {len(violations) - 50} more", file=sys.stderr)
+              sys.exit(1)
+          print("Source hygiene scan passed.")
+          PY
+
       - name: Run ruff
         run: ruff check . --output-format=github
 
@@ -317,3 +345,74 @@ jobs:
           mkdir -p /tmp/mozaiks-package-init
           mozaiks init chat --name "CI Package Smoke" --dir /tmp/mozaiks-package-init
           test -f /tmp/mozaiks-package-init/app/brand/theme_config.json
+
+  infra-build:
+    # Proves the repo-local infra/ artifacts (Dockerfile + Helm chart) actually
+    # build and run, instead of only being reviewed by hand. See
+    # docs/architecture/deployment/oss-infra-and-generated-app-deployment.md.
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd="mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build repo host image
+        run: docker build -t mozaiks-repo-host:ci -f infra/docker/Dockerfile .
+
+      - name: Smoke-run repo host image
+        run: |
+          docker run -d --name mozaiks-repo-host-smoke \
+            --network host \
+            -e AUTH_ENABLED=false \
+            -e RATE_LIMIT_ENABLED=false \
+            -e OPENAI_API_KEY=sk-test-placeholder \
+            -e MONGO_URI=mongodb://localhost:27017/ci_mozaiks \
+            mozaiks-repo-host:ci
+
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8000/api/health > /tmp/health.json; then
+              echo "Repo host image is healthy:"
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "Repo host image did not become healthy in time" >&2
+          docker logs mozaiks-repo-host-smoke
+          exit 1
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs mozaiks-repo-host-smoke || true
+
+      - name: Stop smoke container
+        if: always()
+        run: docker rm -f mozaiks-repo-host-smoke || true
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Lint Helm chart
+        run: helm lint infra/helm/mozaiks
+
+      - name: Render Helm chart
+        run: helm template mozaiks infra/helm/mozaiks > /tmp/mozaiks-helm-rendered.yaml
+
+      - name: Verify rendered health probe paths
+        # Regression guard for the /api/health/liveness vs /api/health/live
+        # probe-path drift fixed in infra/helm/mozaiks/values.yaml.
+        run: |
+          grep -q "path: /api/health/live$" /tmp/mozaiks-helm-rendered.yaml
+          grep -q "path: /api/health/readiness$" /tmp/mozaiks-helm-rendered.yaml

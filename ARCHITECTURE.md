@@ -28,6 +28,7 @@ mozaiks/                           # Canonical Mozaiks repo
 │   │   └── tools/                 # Context-loading Python tool implementations
 │   └── workflows/
 ├── generated/                     # Staged generated apps/workflows awaiting promotion
+├── infra/                         # Repo-local operational scaffolding (Docker, Compose, Helm, Keycloak, Grafana)
 ├── mozaiks_cli/                   # CLI for local project and workflow work
 ├── platform/                      # Repo-local infrastructure assets only (not an app workspace)
 ├── mozaiksai/hosts/runtime.py     # Runtime substrate host

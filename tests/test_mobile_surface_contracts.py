@@ -61,6 +61,58 @@ def test_shell_header_and_widget_stay_mobile_tolerant() -> None:
     assert 'w-[26rem] max-w-[calc(100vw-2.5rem)] h-[50vh] md:h-[70vh] min-h-[360px]' in widget_source
 
 
+def test_support_escalation_uses_profile_support_tab() -> None:
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+    chat_page_source = _read("chat-ui/src/pages/ChatPage.js")
+    support_links_source = _read("chat-ui/src/utils/supportLinks.js")
+    profile_source = _read("chat-ui/src/pages/ProfilePage.jsx")
+    profile_panel_source = _read("factory_app/app/admin/pages/UserSupportPanel.jsx")
+    platform_source = _read("mozaiksai/hosts/platform.py")
+
+    assert "buildUserSupportPath" in widget_source
+    assert "buildUserSupportPath" in chat_page_source
+    assert "SUPPORT_PROFILE_TAB_ID = 'support-tickets'" in support_links_source
+    assert "return `/me?${params.toString()}`;" in support_links_source
+    assert "buildSupportRequestPayload" in widget_source
+    assert "buildSupportRequestPayload" in chat_page_source
+    assert "supportError" in widget_source
+    assert "page_title:" not in widget_source
+    assert "page_url:" not in widget_source
+    assert "urlAppIdParam" in profile_source
+    assert "/api/me/profile-panels${panelQuery" not in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-panels`, {}, auth)" in profile_source
+    assert "profileTrace('tabs:profile_panels:loaded'" in profile_source
+    assert "supportTrace('support_request:create:start'" in widget_source
+    assert "supportTrace('support_thread:open'" in widget_source
+    assert "supportPanelTrace('data:received'" in profile_panel_source
+    assert "resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=None)" in platform_source
+    assert 'action_params = {"app_id": app_id} if app_id else {}' in platform_source
+    assert "queryRequestId" in profile_panel_source
+    assert "urlTabParam && tabs.some(tab => tab.id === urlTabParam)" in profile_source
+    assert "return prev === urlTabParam ? prev : urlTabParam;" in profile_source
+    escalation_source = _read("chat-ui/src/core/ui/EscalationCard.js")
+    assert "const handleEscalate = async () =>" in escalation_source
+    assert "await onResponse({ action: 'open_support' })" in escalation_source
+    chat_interface_source = _read("chat-ui/src/components/chat/ChatInterface.jsx")
+    event_dispatcher_source = _read("chat-ui/src/core/eventDispatcher.js")
+    assert "return onAgentAction(action);" in chat_interface_source
+    assert "return handleAgentAction({" in chat_interface_source
+    assert "const responseHandler = async (response) =>" in event_dispatcher_source
+    assert "return await onResponse(response);" in event_dispatcher_source
+
+
+def test_widget_ask_waits_for_persisted_general_mode_before_flushing() -> None:
+    widget_source = _read("chat-ui/src/components/chat/PersistentChatWidget.jsx")
+    widget_ws_source = _read("chat-ui/src/hooks/useWidgetAskWS.js")
+
+    assert "generalModeReady" in widget_source
+    assert "wsStatus !== 'connected' || !generalModeReady" in widget_source
+    assert "wsStatus === 'connected' && generalModeReady" in widget_source
+    assert "const [generalModeReady, setGeneralModeReady] = useState(false);" in widget_ws_source
+    assert "setGeneralModeReady(true);" in widget_ws_source
+    assert "if (!wsRef.current || !generalModeReady) return false;" in widget_ws_source
+
+
 def test_dialog_and_overlay_primitives_use_mobile_sheet_layout() -> None:
     dialog_source = _read("chat-ui/src/ui/base/components/dialog.jsx")
     transition_source = _read("chat-ui/src/ui/screens/TransitionOverlayFrame.jsx")
@@ -102,6 +154,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert (_workspace() / "web_shell" / "playwright" / "apps.responsive.smoke.spec.js").exists()
     assert "workspace usage route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace integrations route stays responsive across desktop and mobile widths" in smoke_source
+    assert "workspace support route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app Studio root redirects to overview" in smoke_source
@@ -133,6 +186,7 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         "AppsPage": "apps route stays responsive across desktop and mobile widths",
         "WorkspaceUsagePage": "workspace usage route stays responsive across desktop and mobile widths",
         "WorkspaceIntegrationsPage": "workspace integrations route stays responsive across desktop and mobile widths",
+        "UserSupportPage": "workspace support route stays responsive across desktop and mobile widths",
         "StudioPage": "app Studio root redirects to overview",
         "AppOverviewPage": "app overview route stays responsive across desktop and mobile widths",
         "AppHealthPage": "app health route stays responsive across desktop and mobile widths",
@@ -162,6 +216,7 @@ def test_factory_app_studio_routes_are_all_covered_by_smoke() -> None:
         "AppStudioChrome",
         "CreateAppRedirectPage",
         "RefinementControls",
+        "UserSupportPanel",
         # Sub-components used by route-backed pages (not directly route-backed)
         "CarryForwardReportSummary",
         "CarryForwardReportPanel",
@@ -191,6 +246,7 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/app/admin/pages/AppStudioChrome.jsx",
         "factory_app/app/admin/pages/CreateAppRedirectPage.jsx",
         "factory_app/app/admin/pages/RefinementControls.jsx",
+        "factory_app/app/admin/pages/UserSupportPanel.jsx",
         # Carry-forward display sub-components (used by route-backed pages)
         "factory_app/app/admin/pages/CarryForwardReportSummary.jsx",
         "factory_app/app/admin/pages/CarryForwardReportPanel.jsx",

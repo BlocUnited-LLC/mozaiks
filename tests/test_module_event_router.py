@@ -520,6 +520,74 @@ class TestCreateNotification:
         assert "extra" not in context
 
     @pytest.mark.asyncio
+    async def test_condition_skips_notification_when_not_matched(self):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        mod = _loaded_module(
+            "m1",
+            notifications=[
+                _notification_rule(
+                    "ev.condition",
+                    rule_id="r1",
+                    module_id="m1",
+                ) | {"condition": {"field": "sender_role", "equals": "operator"}}
+            ],
+        )
+        router = _router([mod], notification_store=notification_store)
+        await router.handle_event("ev.condition", _envelope(payload={"sender_role": "user"}))
+        assert stored == []
+
+    @pytest.mark.asyncio
+    async def test_audience_user_id_field_targets_payload_user(self):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        mod = _loaded_module(
+            "m1",
+            notifications=[
+                _notification_rule(
+                    "ev.audience",
+                    rule_id="r1",
+                    module_id="m1",
+                    audience={"user_id_field": "ticket_user_id"},
+                )
+            ],
+        )
+        router = _router([mod], notification_store=notification_store)
+        await router.handle_event("ev.audience", _envelope(payload={"ticket_user_id": "user-42"}))
+        assert stored[0]["audience"]["user_ids"] == ["user-42"]
+
+    @pytest.mark.asyncio
+    async def test_audience_user_id_field_expands_payload_user_list(self):
+        stored = []
+
+        async def notification_store(record):
+            stored.append(record)
+
+        mod = _loaded_module(
+            "messages",
+            notifications=[
+                _notification_rule(
+                    "domain.messages.message_sent",
+                    rule_id="message_sent",
+                    module_id="messages",
+                    audience={"user_id_field": "recipient_ids"},
+                )
+            ],
+        )
+        router = _router([mod], notification_store=notification_store)
+        await router.handle_event(
+            "domain.messages.message_sent",
+            _envelope(payload={"recipient_ids": ["user-2", "user-3", "user-2"]}),
+        )
+        assert stored[0]["audience"]["user_ids"] == ["user-2", "user-3"]
+
+    @pytest.mark.asyncio
     async def test_secret_keys_stripped_from_context_fields(self):
         stored = []
 
@@ -563,6 +631,10 @@ class TestCreateNotification:
         await router.handle_event("ev.emit", _envelope())
         event_types = [e[0] for e in emitted]
         assert "notification.created" in event_types
+        assert "notification.count_changed" in event_types
+        count_event = next(payload for event_type, payload in emitted if event_type == "notification.count_changed")
+        assert count_event["type"] == "notification.count_changed"
+        assert "notification_id" not in count_event["payload"]
 
     @pytest.mark.asyncio
     async def test_notification_has_required_fields(self):

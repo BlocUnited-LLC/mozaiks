@@ -629,7 +629,7 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
         "wallet": {"id": "wallet", "label": "Wallet", "action": "navigate", "path": "/wallet"},
         "create": {"id": "create", "label": "Create", "action": "navigate", "path": "/create?new=1"},
         "admin": {"id": "admin", "label": "Admin", "action": "navigate", "path": "/admin", "requiresRole": "admin"},
-        "support": {"id": "support", "label": "Support", "action": "navigate", "path": "/support"},
+        "support": {"id": "support", "label": "Support", "action": "navigate", "path": "/me?tab=support-tickets"},
         "signin": {"id": "signin", "label": "Sign In", "action": "signin"},
         "signout": {"id": "signout", "label": "Sign Out", "action": "signout"},
         "legal": {"id": "legal", "label": "Legal Notice", "href": "/legal"},
@@ -1557,12 +1557,24 @@ async def get_profile_panels(
     panel data. Panels whose action fails are still returned with ``data: null``
     and an ``error`` string so the UI can render graceful empty states.
     """
-    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    # Keep profile hydration bound to the active app runtime. The optional
+    # query app_id is contextual data for panel actions, not a persistence scope
+    # override. Support links use it as the subject app id for tickets.
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=None)
     app_root = resolve_app_root()
     raw_panels = load_profile_panels(app_root)
 
     module_executor = executor_registry.module_executor
     hydrated: list[dict[str, Any]] = []
+    action_params = {"app_id": app_id} if app_id else {}
+
+    logger.info(
+        "[profile-panels] load start runtime_app_id=%s requested_app_id=%s user_id=%s panel_count=%s",
+        resolved_app_id,
+        app_id,
+        user_id,
+        len(raw_panels),
+    )
 
     for panel in raw_panels:
         action = panel.get("action")
@@ -1574,7 +1586,7 @@ async def get_profile_panels(
                 req = ModuleRequest(
                     module=module_name,
                     action=action,
-                    params={},
+                    params=action_params,
                     app_id=resolved_app_id,
                     user_id=user_id,
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
@@ -1585,14 +1597,40 @@ async def get_profile_panels(
                 result = await module_executor.execute(req, context=None)
                 if result.success:
                     panel_out["data"] = result.data
+                    logger.info(
+                        "[profile-panels] action success module=%s action=%s panel_id=%s runtime_app_id=%s requested_app_id=%s data_keys=%s item_count=%s",
+                        module_name,
+                        action,
+                        panel.get("id"),
+                        resolved_app_id,
+                        app_id,
+                        sorted((result.data or {}).keys()) if isinstance(result.data, dict) else [],
+                        len((result.data or {}).get("requests", [])) if isinstance(result.data, dict) else None,
+                    )
                 else:
                     panel_out["error"] = result.error or f"Action {action!r} failed"
+                    logger.warning(
+                        "[profile-panels] action failed module=%s action=%s panel_id=%s runtime_app_id=%s requested_app_id=%s error=%s",
+                        module_name,
+                        action,
+                        panel.get("id"),
+                        resolved_app_id,
+                        app_id,
+                        panel_out["error"],
+                    )
             except Exception as exc:
-                logger.warning("[profile-panels] %s.%s failed: %s", module_name, action, exc)
+                logger.warning("[profile-panels] %s.%s failed: %s", module_name, action, exc, exc_info=True)
                 panel_out["error"] = f"Action {action!r} failed"
 
         hydrated.append(panel_out)
 
+    logger.info(
+        "[profile-panels] load complete runtime_app_id=%s requested_app_id=%s hydrated_count=%s panel_ids=%s",
+        resolved_app_id,
+        app_id,
+        len(hydrated),
+        [panel.get("id") for panel in hydrated],
+    )
     return {"panels": hydrated}
 
 
@@ -1608,12 +1646,21 @@ async def get_profile_tabs(
     tab data. Tabs whose action fails are still returned with ``data: null``
     and an ``error`` string so the UI can render graceful empty states.
     """
-    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=app_id)
+    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=None)
     app_root = resolve_app_root()
     raw_tabs = load_profile_tabs(app_root)
 
     module_executor = executor_registry.module_executor
     hydrated: list[dict[str, Any]] = []
+    action_params = {"app_id": app_id} if app_id else {}
+
+    logger.info(
+        "[profile-tabs] load start runtime_app_id=%s requested_app_id=%s user_id=%s tab_count=%s",
+        resolved_app_id,
+        app_id,
+        user_id,
+        len(raw_tabs),
+    )
 
     for tab in raw_tabs:
         action = tab.get("action")
@@ -1625,7 +1672,7 @@ async def get_profile_tabs(
                 req = ModuleRequest(
                     module=module_name,
                     action=action,
-                    params={},
+                    params=action_params,
                     app_id=resolved_app_id,
                     user_id=user_id,
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
@@ -1636,14 +1683,39 @@ async def get_profile_tabs(
                 result = await module_executor.execute(req, context=None)
                 if result.success:
                     tab_out["data"] = result.data
+                    logger.info(
+                        "[profile-tabs] action success module=%s action=%s tab_id=%s runtime_app_id=%s requested_app_id=%s data_keys=%s",
+                        module_name,
+                        action,
+                        tab.get("id"),
+                        resolved_app_id,
+                        app_id,
+                        sorted((result.data or {}).keys()) if isinstance(result.data, dict) else [],
+                    )
                 else:
                     tab_out["error"] = result.error or f"Action {action!r} failed"
+                    logger.warning(
+                        "[profile-tabs] action failed module=%s action=%s tab_id=%s runtime_app_id=%s requested_app_id=%s error=%s",
+                        module_name,
+                        action,
+                        tab.get("id"),
+                        resolved_app_id,
+                        app_id,
+                        tab_out["error"],
+                    )
             except Exception as exc:
-                logger.warning("[profile-tabs] %s.%s failed: %s", module_name, action, exc)
+                logger.warning("[profile-tabs] %s.%s failed: %s", module_name, action, exc, exc_info=True)
                 tab_out["error"] = f"Action {action!r} failed"
 
         hydrated.append(tab_out)
 
+    logger.info(
+        "[profile-tabs] load complete runtime_app_id=%s requested_app_id=%s hydrated_count=%s tab_ids=%s",
+        resolved_app_id,
+        app_id,
+        len(hydrated),
+        [tab.get("id") for tab in hydrated],
+    )
     return {"tabs": hydrated}
 
 

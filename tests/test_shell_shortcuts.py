@@ -88,6 +88,7 @@ def test_shell_shortcut_catalog_uses_workspace_home_primitives_without_dashboard
     assert catalog["profile"]["label"] == "Profile"
     assert catalog["account"]["path"] == "/me"
     assert catalog["account"]["label"] == "Profile"
+    assert catalog["support"]["path"] == "/me?tab=support-tickets"
     assert "dashboard" not in catalog
     assert "admin_portal" not in catalog
 

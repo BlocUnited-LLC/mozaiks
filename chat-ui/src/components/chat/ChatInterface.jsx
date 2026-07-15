@@ -332,8 +332,9 @@ const ModernChatInterface = ({
   // Agent action handler - used by UI tool event responses
   const handleAgentAction = (action) => {
     if (onAgentAction) {
-      onAgentAction(action);
+      return onAgentAction(action);
     }
+    return undefined;
   };
 
   const onSubmitClick = (event) => {
@@ -504,10 +505,11 @@ const ModernChatInterface = ({
               onArtifactAction={onArtifactAction}
               actionStatusMap={actionStatusMap}
               onResponse={(response) => {
-                handleAgentAction({
+                return handleAgentAction({
                   type: 'tool_call_response',
                   tool_name: chat.toolCall.tool_name,
                   tool_call_id: chat.toolCall.tool_call_id,
+                  payload: chat.toolCall.payload,
                   response: response
                 });
               }}

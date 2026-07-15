@@ -63,11 +63,29 @@
         "requiresRole": "admin",
         "title": "Integrations",
         "appShell": true,
-        "ai_context": "The user is on the Workspace Integrations page. It shows all third-party services available to apps in this workspace. Each integration shows its configuration status and which environment variables or credentials it needs.",
+        "ai_context": "The user is on the workspace Integrations page. It shows shared services by task state: app-used services needing setup, connected services ready for reuse, and available services for future apps. Secret values are never displayed.",
         "navigation": {
           "group": "workspace-studio",
           "scope": "local",
           "icon": "plug"
+        }
+      }
+    },
+    {
+      "path": "/support",
+      "component": "UserSupportPage",
+      "label": "Support",
+      "order": 9,
+      "meta": {
+        "surfaces": ["studio"],
+        "requiresAuth": true,
+        "title": "Support",
+        "appShell": true,
+        "ai_context": "The user is on the workspace Support page. It lists apps with support activity and links each row to the app support dashboard for chat details.",
+        "navigation": {
+          "group": "workspace-studio",
+          "scope": "local",
+          "icon": "support"
         }
       }
     },
@@ -146,14 +164,14 @@
     {
       "path": "/apps/:appId/integrations",
       "component": "AppIntegrationsPage",
-      "label": "Integration Setup",
+      "label": "App Integrations",
       "order": 23,
       "meta": {
         "surfaces": ["studio"],
         "requiresRole": "admin",
-        "title": "Integration Setup",
+        "title": "App Integrations",
         "appShell": true,
-        "ai_context": "The user is on the App Integration Setup page. It shows which third-party services this app uses and their configuration status.",
+        "ai_context": "The user is on the App Integrations page. It shows required, optional, and app-specific services for one app, with live workspace setup status overlaid.",
         "navigation": {
           "group": "app-studio",
           "include": false,
@@ -190,7 +208,7 @@
         "requiresRole": "admin",
         "title": "App Support",
         "appShell": true,
-        "ai_context": "The user is on the App Support page. It shows help desk notes, stalled runs, escalations, and support-facing diagnostics for this app.",
+        "ai_context": "The user is on the App Support page. It shows support chats for one app using a simple support taxonomy: Needs reply, In progress, and Resolved.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",

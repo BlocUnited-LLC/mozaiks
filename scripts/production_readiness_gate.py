@@ -138,7 +138,7 @@ SOURCE_HYGIENE_ALLOWED_SNIPPETS: dict[str, tuple[str, ...]] = {
     "docs/reviews/dead-code-legacy-audit.md": (
         "Dead Code And Legacy Logic Audit",
         "legacy/deprecated/obsolete/shim/unused/stub/demo/placeholder",
-        "No legacy `autogen.beta.*`",
+        "No outdated AG2 import namespace usage",
     ),
     # Test files that intentionally reference forbidden terms to verify the system rejects them.
     "tests/test_factory_build_context_contract.py": (

@@ -189,7 +189,7 @@ def test_notification_count_query_uses_platform_notification_intents():
         email="user@example.com",
         name="User",
         roles=["admin"],
-        scopes=[],
+        scopes=["notifications.read"],
         raw_claims={},
         app_id="app_1",
     )
@@ -198,9 +198,16 @@ def test_notification_count_query_uses_platform_notification_intents():
         "status": "unread",
         "app_id": "app_1",
         "$or": [
-            {"actor.id": "user_1"},
+            {"audience.user_ids": "user_1"},
             {"audience.roles": {"$in": ["admin"]}},
-            {"audience.roles": {"$exists": False}},
+            {"audience.permissions": {"$in": ["notifications.read"]}},
+            {
+                "$and": [
+                    {"$or": [{"audience.user_ids": {"$exists": False}}, {"audience.user_ids": []}]},
+                    {"$or": [{"audience.roles": {"$exists": False}}, {"audience.roles": []}]},
+                    {"$or": [{"audience.permissions": {"$exists": False}}, {"audience.permissions": []}]},
+                ]
+            },
         ],
     }
 

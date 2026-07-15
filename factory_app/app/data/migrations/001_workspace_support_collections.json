@@ -1,0 +1,72 @@
+{
+  "migration_id": "workspace_support_001_collections",
+  "schema_version": "mozaiks.data_migration.v1",
+  "description": "Declare workspace support request and feedback indexes.",
+  "operations": [
+    {
+      "type": "ensure_collection",
+      "module_id": "workspace_support",
+      "entity_name": "requests"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "workspace_support",
+      "entity_name": "requests",
+      "index": {
+        "name": "support_requests_by_id",
+        "keys": [["request_id", 1]],
+        "unique": true
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "workspace_support",
+      "entity_name": "requests",
+      "index": {
+        "name": "support_requests_by_subject_app_status_updated",
+        "keys": [["subject_app_id", 1], ["status", 1], ["updated_at", -1]]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "workspace_support",
+      "entity_name": "requests",
+      "index": {
+        "name": "support_requests_by_user_updated",
+        "keys": [["user_id", 1], ["updated_at", -1]]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "workspace_support",
+      "entity_name": "requests",
+      "index": {
+        "name": "support_requests_by_thread",
+        "keys": [["message_thread_id", 1]]
+      }
+    },
+    {
+      "type": "ensure_collection",
+      "module_id": "workspace_support",
+      "entity_name": "feedback"
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "workspace_support",
+      "entity_name": "feedback",
+      "index": {
+        "name": "support_feedback_by_subject_app_created",
+        "keys": [["subject_app_id", 1], ["created_at", -1]]
+      }
+    },
+    {
+      "type": "ensure_index",
+      "module_id": "workspace_support",
+      "entity_name": "feedback",
+      "index": {
+        "name": "support_feedback_by_session",
+        "keys": [["session_id", 1]]
+      }
+    }
+  ]
+}

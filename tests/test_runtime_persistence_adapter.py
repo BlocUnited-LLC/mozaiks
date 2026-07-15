@@ -33,6 +33,12 @@ class FakeCollection:
     ):
         return {"query": dict(query), "update": dict(update), "upsert": upsert}
 
+    async def delete_one(self, query: Mapping[str, Any]):
+        return {"deleted_count": 1 if query else 0}
+
+    async def delete_many(self, query: Mapping[str, Any]):
+        return {"deleted_count": 2 if query else 0}
+
     async def count(self, query: Mapping[str, Any]) -> int:
         return 1 if query else 0
 

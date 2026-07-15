@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from setuptools import find_packages, setup
+from setuptools import find_namespace_packages, setup
 
 PACKAGE_INCLUDES = [
     "factory_app",
@@ -31,8 +31,21 @@ PACKAGE_EXCLUDES = [
 ]
 
 
-packages = find_packages(include=PACKAGE_INCLUDES, exclude=PACKAGE_EXCLUDES)
+packages = find_namespace_packages(include=PACKAGE_INCLUDES, exclude=PACKAGE_EXCLUDES)
 packages.append("mozaiks_chat_ui")
+packages.extend(
+    f"mozaiks_chat_ui.{package_name}"
+    for package_name in find_namespace_packages(
+        where="chat-ui",
+        exclude=[
+            "dist",
+            "dist.*",
+            "node_modules",
+            "node_modules.*",
+        ],
+    )
+)
+packages = sorted(set(packages))
 
 setup(
     packages=packages,
