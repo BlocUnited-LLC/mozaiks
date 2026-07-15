@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 _EVENTS = "activity_feed.events"
 
 

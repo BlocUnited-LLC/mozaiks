@@ -1,0 +1,15 @@
+# Historical test fixture and documentation examples scanned from full Git history.
+2871eeb9904aee29ad2baa7e89602c3fd5ce44ef:tests/test_managed_capability_artifact_replay.py:stripe-access-token:197
+2871eeb9904aee29ad2baa7e89602c3fd5ce44ef:tests/test_managed_capability_artifact_replay.py:stripe-access-token:398
+a385d81b03a6419a09fd82740da806dd357d9721:tests/test_review_redact_and_scan_policy_helpers.py:generic-api-key:61
+30a7f9d92dd7a8b74b89e473367ecf77c2d1989b:tests/test_generated_bundle_scanner.py:stripe-access-token:139
+552142f81a54d34db1b63d57b1fb3fe7d8452fe3:tests/test_connector_store_and_service.py:generic-api-key:273
+552142f81a54d34db1b63d57b1fb3fe7d8452fe3:tests/test_connector_store_and_service.py:generic-api-key:303
+13a383ade56fc1601b92eccb3b879b771e35ff89:docs/ai-runtime/observability.md:generic-api-key:415
+13a383ade56fc1601b92eccb3b879b771e35ff89:docs/reference/api.md:generic-api-key:22
+5daa33442a14556afc7ffff798b65a277936ba57:docs/core/authentication.md:generic-api-key:104
+05950535816d1830e0325d67a196b9f8ca0516b6:backend/src/Identity.API/AuthServer.Api.Tests/bin/Debug/net10.0/firebase-credentials.example.json:private-key:5
+05950535816d1830e0325d67a196b9f8ca0516b6:backend/src/Identity.API/AuthServer.Api.Tests/bin/Debug/net8.0/firebase-credentials.example.json:private-key:5
+05950535816d1830e0325d67a196b9f8ca0516b6:backend/src/Identity.API/AuthServer.Api/bin/Debug/net8.0/firebase-credentials.example.json:private-key:5
+05950535816d1830e0325d67a196b9f8ca0516b6:backend/src/Identity.API/AuthServer.Api/firebase-credentials.example.json:private-key:5
+05950535816d1830e0325d67a196b9f8ca0516b6:runtime/ai/tests/test_insights_auth.py:generic-api-key:23

@@ -73,9 +73,7 @@ jobs:
 
       - name: Scan for secrets
         # --redact masks found secrets in CI output.
-        # To baseline-ignore a false positive, add its fingerprint to .gitleaks-baseline.json:
-        #   gitleaks detect --report-format json --report-path report.json
-        #   gitleaks detect --baseline-path report.json
+        # To ignore a historical false positive, add its fingerprint to .gitleaksignore.
         run: gitleaks detect --source . --log-level warn --redact
 
   dependency-audit:
@@ -92,9 +90,9 @@ jobs:
 
       - name: Install package + audit tool
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip "setuptools>=83.0.0"
           python -m pip install -e ".[dev]"
-          python -m pip install pip-audit
+          python -m pip install --upgrade "setuptools>=83.0.0" pip-audit
 
       - name: Audit Python dependencies
         # Fails if any known vulnerability is found in the installed environment.

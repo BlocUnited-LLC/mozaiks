@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from mozaiksai.control_plane import load_control_plane_config
+from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 from mozaiksai.core.data.persistence.namespaces import (
     SYSTEM_DATABASE,
     BuilderCollections,
     PlatformCollections,
 )
-from mozaiksai.core.data.persistence.connector_store import ConnectorStore
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.workflow.generator_support.app_validation_strategy import (
     build_app_validation_strategy_summary,

@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from mozaiksai.core.runtime.app.module_loader import ModuleLoader
-from mozaiksai.core.runtime.composition.module_executor import _validate_schema
-from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
-from mozaiksai.core.runtime.persistence.migrations import load_data_migrations
 from factory_app.app.modules.workspace_support.backend.service import WorkspaceSupportService
+from mozaiksai.core.runtime.app.module_loader import ModuleLoader
+from mozaiksai.core.runtime.composition.module_event_router import ModuleEventRouter
+from mozaiksai.core.runtime.composition.module_executor import _validate_schema
+from mozaiksai.core.runtime.persistence.migrations import load_data_migrations
 
 
 class _FakeObjectId:
@@ -32,8 +32,8 @@ class _FakeCursor:
     async def __anext__(self):
         try:
             return next(self._iter)
-        except StopIteration:
-            raise StopAsyncIteration
+        except StopIteration as err:
+            raise StopAsyncIteration from err
 
 
 class _FakeCollection:

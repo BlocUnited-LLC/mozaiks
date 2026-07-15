@@ -12,8 +12,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from mozaiksai.core.usage.pricing_catalog import normalize_litellm_pricing_catalog

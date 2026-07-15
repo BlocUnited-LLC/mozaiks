@@ -16,7 +16,7 @@ class _Context:
 
 
 class _FakeDeclarationsRepo:
-    instances: list["_FakeDeclarationsRepo"] = []
+    instances: list[_FakeDeclarationsRepo] = []
 
     def __init__(self) -> None:
         self.saved: list[dict[str, Any]] = []

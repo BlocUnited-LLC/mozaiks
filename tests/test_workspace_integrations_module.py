@@ -7,11 +7,13 @@ from typing import Any
 import pytest
 import yaml
 
+from factory_app.app.modules.workspace_integrations.backend.handler import (
+    WorkspaceIntegrationsModule,
+)
 from factory_app.app.modules.workspace_integrations.backend.policy import (
     derive_status,
     is_catalog_only_mode,
 )
-from factory_app.app.modules.workspace_integrations.backend.handler import WorkspaceIntegrationsModule
 from factory_app.app.modules.workspace_integrations.backend.repo import WorkspaceIntegrationsRepo
 from factory_app.app.modules.workspace_integrations.backend.schemas import (
     CATALOG_BY_ID,

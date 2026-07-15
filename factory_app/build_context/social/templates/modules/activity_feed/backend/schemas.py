@@ -1,7 +1,7 @@
 """Type shapes and constants for the activity_feed module."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 # Activity type constants
@@ -24,7 +24,7 @@ class ActivityEvent(TypedDict, total=False):
 
 
 def timestamp_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def coerce_limit(value: Any, default: int = 20, maximum: int = 100) -> int:

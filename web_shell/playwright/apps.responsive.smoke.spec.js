@@ -519,8 +519,8 @@ function buildWorkspaceSupportPayload() {
         request_id: 'sup-8821',
         app_id: APP_ID,
         app_name: 'Campaign Revision Workbench',
-        subject: 'App not loading after update',
-        message: 'White screen on launch after latest update.',
+        subject: 'Runtime launch regression',
+        message: 'Runtime launch is failing after the latest app update.',
         status: 'open',
         severity: 'high',
         user_id: 'alex@example.com',
@@ -1082,11 +1082,14 @@ test('app health route stays responsive across desktop and mobile widths', async
 });
 
 test('app support route stays responsive across desktop and mobile widths', async ({ page }) => {
-  const supportModuleUrls = [];
+  const supportModuleRequests = [];
   page.on('request', (request) => {
     const requestUrl = request.url();
     if (requestUrl.includes('/api/modules/workspace_support/list_support_requests')) {
-      supportModuleUrls.push(requestUrl);
+      supportModuleRequests.push({
+        url: requestUrl,
+        postData: request.postData() || '',
+      });
     }
   });
 
@@ -1096,9 +1099,9 @@ test('app support route stays responsive across desktop and mobile widths', asyn
   await expect(main.getByRole('heading', { name: 'Support', exact: true })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Support chats' })).toBeVisible();
   await expect(main.getByText('Needs reply').first()).toBeVisible();
-  await expect(main.getByText('In progress').first()).toBeVisible();
+  await expect(main.getByText('Responded').first()).toBeVisible();
   await expect(main.getByText('Running')).toHaveCount(0);
-  expect(supportModuleUrls.some((requestUrl) => requestUrl.includes(`app_id=${APP_ID}`))).toBeTruthy();
+  expect(supportModuleRequests.some(({ postData }) => postData.includes(`"app_id":"${APP_ID}"`))).toBeTruthy();
   await expectNoHorizontalOverflow(page);
 
   const viewport = page.viewportSize();

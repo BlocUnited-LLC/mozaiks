@@ -208,7 +208,7 @@
         "requiresRole": "admin",
         "title": "App Support",
         "appShell": true,
-        "ai_context": "The user is on the App Support page. It shows support chats for one app using a simple support taxonomy: Needs reply, In progress, and Resolved.",
+        "ai_context": "The user is on the App Support page. It shows support chats for one app using a simple support taxonomy: Needs reply, Responded, and Resolved.",
         "navigation": {
           "group": "app-studio",
           "scope": "local",

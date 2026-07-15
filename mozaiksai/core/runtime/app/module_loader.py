@@ -734,7 +734,7 @@ class ModuleProfileTab(ModuleContractModel):
         return _optional_text(value)
 
     @model_validator(mode="after")
-    def _validate_tab_contract(self) -> "ModuleProfileTab":
+    def _validate_tab_contract(self) -> ModuleProfileTab:
         if not self.component and not self.action:
             raise ValueError("profile tabs must declare at least a 'component' or an 'action'")
         return self
@@ -746,7 +746,7 @@ class ModuleProfileManifest(ModuleContractModel):
     tabs: list[ModuleProfileTab] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _unique_ids(self) -> "ModuleProfileManifest":
+    def _unique_ids(self) -> ModuleProfileManifest:
         panel_ids = [p.id for p in self.panels]
         if len(panel_ids) != len(set(panel_ids)):
             raise ValueError("profile.yaml panels must have unique id values")

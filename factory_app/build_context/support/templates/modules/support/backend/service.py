@@ -3,7 +3,13 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from .policy import actor_id, require_support_manage, require_support_read, subject_app_id, support_request_query
+from .policy import (
+    actor_id,
+    require_support_manage,
+    require_support_read,
+    subject_app_id,
+    support_request_query,
+)
 from .repo import SupportRequestRepo
 from .schemas import (
     build_support_request_record,
