@@ -14,6 +14,22 @@ Start with [Getting Started](../getting-started.md) instead.
 - **[Agent Bootstrap Prompt](../agent-bootstrap-prompt.md)** — hand a task to Claude Code, Cursor, or Copilot with the repo-aware bootstrap prompt
 - **[Contributor Guidance Readiness](contributor-guidance-readiness.md)** — current skill coverage, routing map, deferrals, and guidance validation tests
 
+## Preview the Docs Locally
+
+Install the docs dependencies:
+
+```bash
+pip install -e ".[docs]"
+```
+
+Start the live-preview server from the repo root:
+
+```bash
+python -m mkdocs serve
+```
+
+Open **http://127.0.0.1:8000** — the site rebuilds automatically when you save a file.
+
 ## Release and Maintenance
 
 - **[Releasing](../releasing.md)** — tag-driven PyPI publish flow
