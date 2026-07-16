@@ -98,6 +98,7 @@ def test_profile_usage_serializes_subscription_usage_limits():
                 "scope": "user",
                 "auto_debit_usage": True,
                 "allow_negative_balance": False,
+                "depleted_balance": None,
             }
         ],
         "usage_charge_policies": [

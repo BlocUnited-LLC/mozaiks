@@ -147,6 +147,20 @@ def test_load_token_wallets_and_plan_allowances(tmp_path: Path) -> None:
             usage_meter_id: ai_tokens
             scope: user
             auto_debit_usage: true
+            depleted_balance:
+              recovery_action: top_up
+              billing_route: /billing
+              top_up_route: /billing
+              upgrade_route: /pricing
+        top_up_products:
+          - product_id: ai_tokens_10k
+            label: 10K AI tokens
+            wallet_id: ai_tokens
+            token_amount: 10000
+            price:
+              amount_cents: 500
+              currency: USD
+              display: "$5"
         plans:
           - plan_id: pro
             label: Pro
@@ -163,9 +177,80 @@ def test_load_token_wallets_and_plan_allowances(tmp_path: Path) -> None:
     assert config is not None
     assert config.token_wallets[0].wallet_id == "ai_tokens"
     assert config.token_wallets[0].auto_debit_usage is True
+    assert config.token_wallets[0].depleted_balance is not None
+    assert config.token_wallets[0].depleted_balance.recovery_action == "top_up"
+    assert config.top_up_products[0].product_id == "ai_tokens_10k"
+    assert config.top_up_products[0].price.amount_cents == 500
+    assert config.top_up_products[0].price.currency == "usd"
+    assert config.top_up_products_for_wallet("ai_tokens")[0].token_amount == 10000
     assert config.plans[0].token_allowances[0].amount == 100000
     assert config.plan_by_id("missing").plan_id == "pro"
     assert config.token_wallet_by_id("ai_tokens") is config.token_wallets[0]
+
+
+def test_token_top_up_products_must_reference_declared_wallets() -> None:
+    with pytest.raises(ValidationError, match="top_up_product wallet_id"):
+        SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Token SaaS",
+                "default_plan_id": "pro",
+                "token_wallets": [{"wallet_id": "ai_tokens"}],
+                "top_up_products": [
+                    {
+                        "product_id": "other_tokens_10k",
+                        "label": "10K other tokens",
+                        "wallet_id": "other_tokens",
+                        "token_amount": 10000,
+                        "price": {"amount_cents": 500, "currency": "usd"},
+                    }
+                ],
+                "plans": [{"plan_id": "pro", "label": "Pro"}],
+            }
+        )
+
+
+def test_token_top_up_product_price_currency_must_be_three_letter_code() -> None:
+    with pytest.raises(ValidationError, match="three-letter ISO 4217"):
+        SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Token SaaS",
+                "default_plan_id": "pro",
+                "token_wallets": [{"wallet_id": "ai_tokens"}],
+                "top_up_products": [
+                    {
+                        "product_id": "ai_tokens_10k",
+                        "label": "10K AI tokens",
+                        "wallet_id": "ai_tokens",
+                        "token_amount": 10000,
+                        "price": {"amount_cents": 500, "currency": "us-dollar"},
+                    }
+                ],
+                "plans": [{"plan_id": "pro", "label": "Pro"}],
+            }
+        )
+
+
+def test_depleted_balance_routes_must_be_app_local() -> None:
+    with pytest.raises(ValidationError, match="app-local path"):
+        SubscriptionsConfig.model_validate(
+            {
+                "schema_version": "mozaiks.subscriptions.v1",
+                "label": "Token SaaS",
+                "default_plan_id": "pro",
+                "token_wallets": [
+                    {
+                        "wallet_id": "ai_tokens",
+                        "depleted_balance": {
+                            "recovery_action": "top_up",
+                            "billing_route": "https://provider.example/billing",
+                        },
+                    }
+                ],
+                "plans": [{"plan_id": "pro", "label": "Pro"}],
+            }
+        )
 
 
 def test_load_usage_charge_policies(tmp_path: Path) -> None:

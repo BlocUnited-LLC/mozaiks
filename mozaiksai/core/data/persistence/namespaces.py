@@ -23,6 +23,7 @@ class RuntimeCollections:
     RUNTIME_TOKEN_BUDGET_ALERTS = "RuntimeTokenBudgetAlerts"
     RUNTIME_TOKEN_WALLET_BALANCES = "RuntimeTokenWalletBalances"
     RUNTIME_TOKEN_WALLET_ENTRIES = "RuntimeTokenWalletEntries"
+    RUNTIME_BILLING_FULFILLMENT_COMMANDS = "RuntimeBillingFulfillmentCommands"
 
 
 class BuilderCollections:
