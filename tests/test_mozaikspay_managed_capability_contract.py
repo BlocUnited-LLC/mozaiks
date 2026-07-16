@@ -127,14 +127,10 @@ plans:
 """
 
 
-def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict[str, str]]]:
-    capability_packs = [
-        {
-            "id": "mozaikspay",
-            "capability_source": "managed_capability",
-            "pack_source_path": str(_PACK_ROOT),
-        }
-    ]
+def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
+    pack_descriptor = dict(_read_yaml(_CONTEXT_YAML)["pack"])
+    pack_descriptor.setdefault("pack_source_path", str(_PACK_ROOT))
+    capability_packs = [pack_descriptor]
     files = {
         item["filename"]: item["content"]
         for item in resolve_managed_capability_templates(capability_packs)
@@ -150,8 +146,10 @@ def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict[str, str
             include_dockerfiles=True,
             include_workflow=False,
             include_compose=False,
+            extra_required_variables=deployment_env["required"],
             extra_optional_variables=deployment_env["optional"],
             extra_secret_variables=deployment_env["secret"],
+            extra_public_variables=deployment_env["public"],
         )["artifacts"]
     )
     return files, capability_packs
@@ -177,6 +175,15 @@ class TestContextYaml:
     def test_pack_status_is_active(self):
         ctx = _read_yaml(_CONTEXT_YAML)
         assert ctx["pack"]["status"] == "active"
+
+    def test_pack_declares_deployment_env_handles(self):
+        ctx = _read_yaml(_CONTEXT_YAML)
+        deployment_env = ctx["pack"]["deployment_env"]
+
+        assert "MOZAIKS_APP_URL" in deployment_env["optional"]
+        assert "MOZAIKSPAY_API_BASE" in deployment_env["optional"]
+        assert "MOZAIKSPAY_CLIENT_SECRET" in deployment_env["secret"]
+        assert "MOZAIKSPAY_API_KEY" in deployment_env["secret"]
 
     def test_applies_to_app_generator(self):
         ctx = _read_yaml(_CONTEXT_YAML)

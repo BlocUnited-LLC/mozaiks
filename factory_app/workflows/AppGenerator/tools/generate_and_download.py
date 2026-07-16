@@ -131,7 +131,15 @@ def _pack_id(pack: dict[str, Any]) -> str:
 
 def _selected_capability_packs(context_variables: Any | None) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    selected_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def merge_missing(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for key, value in source.items():
+            current = target.get(key)
+            if current in (None, "", [], {}):
+                target[key] = value
+            elif isinstance(current, dict) and isinstance(value, dict):
+                merge_missing(current, value)
 
     def add_many(raw_packs: Any) -> None:
         if not isinstance(raw_packs, list):
@@ -147,10 +155,12 @@ def _selected_capability_packs(context_variables: Any | None) -> list[dict[str, 
                 str(pack.get("capability_source") or "").strip(),
                 str(pack.get("pack_source_path") or "").strip(),
             )
-            if key in seen:
+            if key in selected_by_key:
+                merge_missing(selected_by_key[key], pack)
                 continue
-            seen.add(key)
-            selected.append(pack)
+            normalized = dict(pack)
+            selected_by_key[key] = normalized
+            selected.append(normalized)
 
     app_build_plan = _context_get(context_variables, "app_build_plan")
     if isinstance(app_build_plan, dict):
@@ -159,9 +169,33 @@ def _selected_capability_packs(context_variables: Any | None) -> list[dict[str, 
     return selected
 
 
+def _deployment_env_names(value: Any) -> list[str]:
+    names: list[str] = []
+    if not isinstance(value, list):
+        return names
+    for item in value:
+        raw_name: Any
+        if isinstance(item, str):
+            raw_name = item
+        elif isinstance(item, dict):
+            raw_name = item.get("name") or item.get("variable") or item.get("env")
+        else:
+            continue
+        name = str(raw_name or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 def _deployment_env_for_capability_packs(capability_packs: list[dict[str, Any]]) -> dict[str, list[str]]:
+    required: list[str] = []
     optional: list[str] = []
     secret: list[str] = []
+    public: list[str] = []
+
+    def add_required(name: str) -> None:
+        if name not in required:
+            required.append(name)
 
     def add_optional(name: str) -> None:
         if name not in optional:
@@ -171,23 +205,26 @@ def _deployment_env_for_capability_packs(capability_packs: list[dict[str, Any]])
         if name not in secret:
             secret.append(name)
 
-    for pack in capability_packs:
-        if _pack_id(pack) != "mozaikspay":
-            continue
-        if str(pack.get("capability_source") or "").strip() != "managed_capability":
-            continue
-        for name in (
-            "MOZAIKS_APP_URL",
-            "MOZAIKSPAY_API_BASE",
-            "MOZAIKSPAY_CLIENT_ID",
-            "MOZAIKSPAY_CLIENT_SECRET",
-            "MOZAIKSPAY_API_KEY",
-        ):
-            add_optional(name)
-        add_secret("MOZAIKSPAY_CLIENT_SECRET")
-        add_secret("MOZAIKSPAY_API_KEY")
+    def add_public(name: str) -> None:
+        if name not in public:
+            public.append(name)
 
-    return {"optional": optional, "secret": secret}
+    for pack in capability_packs:
+        deployment_env = pack.get("deployment_env")
+        if not isinstance(deployment_env, dict):
+            continue
+        for name in _deployment_env_names(deployment_env.get("required")):
+            add_required(name)
+        for name in _deployment_env_names(deployment_env.get("optional")):
+            add_optional(name)
+        for name in _deployment_env_names(deployment_env.get("secret")):
+            add_secret(name)
+            if name not in required:
+                add_optional(name)
+        for name in _deployment_env_names(deployment_env.get("public")):
+            add_public(name)
+
+    return {"required": required, "optional": optional, "secret": secret, "public": public}
 
 
 def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
@@ -763,8 +800,10 @@ async def generate_and_download(
             include_dockerfiles=include_dockerfiles,
             include_workflow=include_workflow,
             include_compose=include_compose,
+            extra_required_variables=deployment_env["required"],
             extra_optional_variables=deployment_env["optional"],
             extra_secret_variables=deployment_env["secret"],
+            extra_public_variables=deployment_env["public"],
         )
         deployment_files = deployment_contract.get("artifacts") if isinstance(deployment_contract, dict) else {}
         if isinstance(deployment_files, dict):

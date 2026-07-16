@@ -35,6 +35,16 @@ pack:
           type: secret
           required: true
           frontend_safe: false
+  deployment_env:
+    optional:
+      - MOZAIKS_APP_URL
+      - MOZAIKSPAY_API_BASE
+      - MOZAIKSPAY_CLIENT_ID
+      - MOZAIKSPAY_CLIENT_SECRET
+      - MOZAIKSPAY_API_KEY
+    secret:
+      - MOZAIKSPAY_CLIENT_SECRET
+      - MOZAIKSPAY_API_KEY
 capabilities:
   - capability_id: mozaikspay.billing_portal
     facade_recommended: billing_portal
