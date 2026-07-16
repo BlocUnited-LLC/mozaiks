@@ -25,8 +25,9 @@ Verifies that the generated ui/lib/moduleApi.js template:
  21.  file_contracts.yaml hard_constraints mention moduleAction import rule.
  22.  file_contracts.yaml hard_constraints mention err.error_code error handling.
  23.  Template contains no proprietary product names (payment provider, MozaiksPay, etc.).
- 24.  Custom route JSX fixture: catches err.error_code without parsing body text.
- 25.  Custom route JSX fixture: branches on RECORD_NOT_FOUND error code.
+ 24.  Template exports neutral INSUFFICIENT_TOKENS recovery helpers.
+ 25.  Custom route JSX fixture: catches err.error_code without parsing body text.
+ 26.  Custom route JSX fixture: branches on RECORD_NOT_FOUND error code.
 
 All examples use neutral, generic names:
   inventory, approval_request, onboarding, record_not_found, validation_failed.
@@ -131,6 +132,15 @@ class TestModuleApiTemplateModule:
         assert "export async function moduleAction" in js, (
             "moduleApi.js must export an async moduleAction function"
         )
+
+    def test_template_exports_token_depletion_helpers(self):
+        """Template exports generic insufficient-token recovery helpers."""
+        js = _template_js()
+        assert "export function isInsufficientTokensError" in js
+        assert "export function insufficientTokensRecoveryPath" in js
+        assert "INSUFFICIENT_TOKENS" in js
+        assert "metadata.top_up_route" in js
+        assert "metadata.billing_route" in js
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +316,8 @@ class TestAgentsYamlModuleApiGuidance:
         assert "error_code" in agent_section, (
             "AppSchemaAgent guidance must mention error_code for error branching"
         )
+        assert "INSUFFICIENT_TOKENS" in agent_section
+        assert "insufficientTokensRecoveryPath" in agent_section
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +346,8 @@ class TestFileContractsModuleApi:
         assert "error_code" in page_bundle, (
             "file_contracts hard_constraints must mention err.error_code for error handling"
         )
+        assert "INSUFFICIENT_TOKENS" in page_bundle
+        assert "insufficientTokensRecoveryPath" in page_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +441,33 @@ export default function ApprovalRequestPage() {
 }
 """
 
+    _TOKEN_DEPLETION_JSX = """\
+import {
+  moduleAction,
+  isInsufficientTokensError,
+  insufficientTokensRecoveryPath,
+} from '../../ui/lib/moduleApi.js'
+import { useNavigate } from 'react-router-dom'
+import { useCallback } from 'react'
+
+export default function GenerateReportPage() {
+  const navigate = useNavigate()
+  const handleGenerate = useCallback(async () => {
+    try {
+      await moduleAction('reports', 'generate_report', { topic: 'demo' })
+    } catch (err) {
+      if (isInsufficientTokensError(err)) {
+        navigate(insufficientTokensRecoveryPath(err), { replace: true })
+        return
+      }
+      throw err
+    }
+  }, [navigate])
+
+  return <button onClick={handleGenerate}>Generate</button>
+}
+"""
+
     def test_fixture_imports_module_action_from_module_api(self):
         """Generated JSX imports moduleAction from ../../ui/lib/moduleApi.js."""
         for jsx in (self._INVENTORY_JSX, self._APPROVAL_JSX):
@@ -460,9 +501,16 @@ export default function ApprovalRequestPage() {
         assert "err.error_code === 'REQUEST_ALREADY_APPROVED'" in self._APPROVAL_JSX
         assert "err.error_code === 'VALIDATION_FAILED'" in self._APPROVAL_JSX
 
+    def test_fixture_routes_insufficient_tokens_without_retrying(self):
+        """Custom route JSX redirects depleted users and returns without retry."""
+        jsx = self._TOKEN_DEPLETION_JSX
+        assert "isInsufficientTokensError(err)" in jsx
+        assert "navigate(insufficientTokensRecoveryPath(err), { replace: true })" in jsx
+        assert "return" in jsx.split("navigate(insufficientTokensRecoveryPath(err), { replace: true })", 1)[1]
+
     def test_fixture_no_proprietary_names(self):
         """JSX fixtures contain no proprietary product names."""
-        for jsx in (self._INVENTORY_JSX, self._APPROVAL_JSX):
+        for jsx in (self._INVENTORY_JSX, self._APPROVAL_JSX, self._TOKEN_DEPLETION_JSX):
             for name in _PROPRIETARY_NAMES:
                 assert name not in jsx, (
                     f"JSX fixture must not contain proprietary name '{name}'"

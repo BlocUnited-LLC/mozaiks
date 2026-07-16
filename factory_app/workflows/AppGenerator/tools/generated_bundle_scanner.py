@@ -43,12 +43,33 @@ from mozaiksai.core.runtime.app.paths import (
 # hosted-processor key fingerprints belong in hosted/private validation packs.
 _PAYMENT_PROVIDER_SECRET_LITERAL_RE = re.compile(r"\b(?:payment_provider|provider)_(?:live|test)_[A-Za-z0-9]{10,}")
 _PAYMENT_PROVIDER_IMPORT_RE = re.compile(r"(?m)^\s*(?:import\s+payment_provider\b|from\s+payment_provider\s+import\b)")
+_RAW_PAYMENT_PROVIDER_IMPORT_RE = re.compile(
+    r"(?m)^\s*(?:import\s+(stripe|paddle|paypal|braintree|square)\b|"
+    r"from\s+(stripe|paddle|paypal|braintree|square)\s+import\b)",
+    re.IGNORECASE,
+)
 _PAYMENT_PROVIDER_API_KEY_RE = re.compile(r"\bpayment_provider\s*\.\s*api_key\s*=")
 _PAYMENT_PROVIDER_REFUND_CALL_RE = re.compile(
     r"\bpayment_provider\s*\.\s*(?:Refund\s*\.\s*create|refunds\s*\.\s*create)\s*\(",
     re.IGNORECASE,
 )
 _PAYMENT_PROVIDER_REFUNDS_ENDPOINT_RE = re.compile(r"['\"]?/refunds\b")
+_HOSTED_INTERNAL_ENDPOINT_RE = re.compile(
+    r"['\"]?(/api/modules/(?:mozaikspay|managed_billing|wallet)/[^'\"\s)]*)",
+    re.IGNORECASE,
+)
+_APP_LOCAL_LEDGER_PATH_RE = re.compile(
+    r"(?:^|/)(?:(?:token_)?wallet|(?:token_)?usage)_ledger\.(?:py|js|ts|tsx|jsx)$"
+    r"|(?:^|/)ledgers?/(?:[^/]*)(?:wallet|usage)(?:[^/]*)\.(?:py|js|ts|tsx|jsx)$",
+    re.IGNORECASE,
+)
+_APP_LOCAL_LEDGER_CODE_RE = re.compile(
+    r"\bclass\s+(?:TokenWalletLedger|WalletLedger|RuntimeUsageLedger|UsageLedger|TokenUsageLedger)\b"
+    r"|from\s+mozaiksai\.core\.(?:tokens\.wallet|usage\.ledger)\s+import\s+"
+    r"(?:TokenWalletLedger|get_token_wallet_ledger|RuntimeUsageLedger|get_runtime_usage_ledger)"
+    r"|RuntimeTokenWalletEntries|RuntimeTokenWalletBalances|RuntimeUsageEvents",
+    re.IGNORECASE,
+)
 
 # File suffixes and compound endings that carry executable or config content.
 # Checked via str.endswith so compound extensions like .env.example work.
@@ -394,18 +415,29 @@ def _validate_subscriptions_contract(
         return [f"{path}: invalid subscriptions contract: {exc}"]
 
     errors: list[str] = []
-    if not config.token_wallets:
-        errors.append(f"{path}: generated SaaS apps must declare token_wallets for runtime token balance display/enforcement.")
     plans_with_token_allowances = [
         plan.plan_id for plan in config.plans if plan.token_allowances
     ]
     plans_with_usage_limits = [
         plan.plan_id for plan in config.plans if plan.usage_limits
     ]
-    if not plans_with_token_allowances:
-        errors.append(f"{path}: generated SaaS plans must declare token_allowances for at least one plan.")
-    if not plans_with_usage_limits:
-        errors.append(f"{path}: generated SaaS plans must declare usage_limits for at least one plan.")
+    if not config.token_wallets:
+        if plans_with_token_allowances:
+            errors.append(f"{path}: token_allowances require declared token_wallets.")
+        if config.top_up_products:
+            errors.append(f"{path}: top_up_products require declared token_wallets.")
+        return errors
+
+    if not (
+        plans_with_token_allowances
+        or plans_with_usage_limits
+        or config.top_up_products
+        or config.usage_charge_policies
+    ):
+        errors.append(
+            f"{path}: token_wallets must be emitted only for generated apps that sell "
+            "AI usage, credits, quotas, top-ups, or usage-charge estimates."
+        )
     return errors
 
 
@@ -458,6 +490,24 @@ def _scan_mozaikspay_saas_contract(
             errors.append(
                 "services/integrations/mozaikspay_client.py must resolve the app-scoped "
                 f"mozaikspay connector and env fallback; missing markers: {missing_markers}."
+            )
+
+    env_example = normalized_files.get("env.example", "")
+    if env_example:
+        required_env_handles = {
+            "MOZAIKS_APP_URL",
+            "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY",
+        }
+        missing_env_handles = sorted(
+            name for name in required_env_handles if f"{name}=" not in env_example
+        )
+        if missing_env_handles:
+            errors.append(
+                "env.example must document the MozaiksPay connector/env fallback handles "
+                f"for generated SaaS apps: {missing_env_handles}."
             )
 
     module_content = normalized_files.get("modules/billing_portal/module.yaml", "")
@@ -647,12 +697,33 @@ def scan_generated_bundle(
                 "payment adapter."
             )
 
+        hosted_internal_refs = sorted(set(_HOSTED_INTERNAL_ENDPOINT_RE.findall(content)))
+        if hosted_internal_refs:
+            errors.append(
+                f"{path}: calls hosted managed-capability internals directly: "
+                f"{hosted_internal_refs}. Generated apps must bind through app-owned facade modules."
+            )
+
+        if _APP_LOCAL_LEDGER_PATH_RE.search(_normalized_path(path)) or _APP_LOCAL_LEDGER_CODE_RE.search(content):
+            errors.append(
+                f"{path}: contains app-local token wallet or usage ledger code. Generated apps must "
+                "use OSS runtime token wallet and usage endpoints instead of duplicate ledgers."
+            )
+
         if path.lower().endswith(".py") and _PAYMENT_PROVIDER_IMPORT_RE.search(content):
             errors.append(
                 f"{path}: imports the payment provider SDK directly. Generated apps must "
                 "use generated service boundaries or managed capability adapter clients "
                 "instead of provider SDKs in app business code."
             )
+
+        if path.lower().endswith((".py", ".js", ".jsx", ".ts", ".tsx")):
+            for raw_provider_import in _RAW_PAYMENT_PROVIDER_IMPORT_RE.finditer(content):
+                provider_name = raw_provider_import.group(1) or raw_provider_import.group(2) or ""
+                errors.append(
+                    f"{path}: imports raw payment provider SDK {provider_name!r}. Generated apps must "
+                    "use app-owned facade modules and managed/provider-neutral adapter clients."
+                )
 
     return errors
 

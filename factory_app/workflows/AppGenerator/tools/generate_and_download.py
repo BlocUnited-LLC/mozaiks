@@ -125,6 +125,71 @@ def _context_get(context_variables: Any | None, key: str) -> Any | None:
     return None
 
 
+def _pack_id(pack: dict[str, Any]) -> str:
+    return str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+
+
+def _selected_capability_packs(context_variables: Any | None) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add_many(raw_packs: Any) -> None:
+        if not isinstance(raw_packs, list):
+            return
+        for pack in raw_packs:
+            if not isinstance(pack, dict):
+                continue
+            pack_id = _pack_id(pack)
+            if not pack_id:
+                continue
+            key = (
+                pack_id,
+                str(pack.get("capability_source") or "").strip(),
+                str(pack.get("pack_source_path") or "").strip(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(pack)
+
+    app_build_plan = _context_get(context_variables, "app_build_plan")
+    if isinstance(app_build_plan, dict):
+        add_many(app_build_plan.get("capability_packs"))
+    add_many(_context_get(context_variables, "capability_packs"))
+    return selected
+
+
+def _deployment_env_for_capability_packs(capability_packs: list[dict[str, Any]]) -> dict[str, list[str]]:
+    optional: list[str] = []
+    secret: list[str] = []
+
+    def add_optional(name: str) -> None:
+        if name not in optional:
+            optional.append(name)
+
+    def add_secret(name: str) -> None:
+        if name not in secret:
+            secret.append(name)
+
+    for pack in capability_packs:
+        if _pack_id(pack) != "mozaikspay":
+            continue
+        if str(pack.get("capability_source") or "").strip() != "managed_capability":
+            continue
+        for name in (
+            "MOZAIKS_APP_URL",
+            "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY",
+        ):
+            add_optional(name)
+        add_secret("MOZAIKSPAY_CLIENT_SECRET")
+        add_secret("MOZAIKSPAY_API_KEY")
+
+    return {"optional": optional, "secret": secret}
+
+
 def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None or not hasattr(context_variables, "set"):
         return
@@ -677,6 +742,9 @@ async def generate_and_download(
     if isinstance(pending_migration, dict) and pending_migration.get("migration_id"):
         inject_migration_into_bundle(files_map, pending_migration)
 
+    selected_capability_packs = _selected_capability_packs(context_variables)
+    deployment_env = _deployment_env_for_capability_packs(selected_capability_packs)
+
     # Optional deterministic deployment scaffold outputs.
     # These remain provider-neutral and contain non-secret example env values only.
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -695,6 +763,8 @@ async def generate_and_download(
             include_dockerfiles=include_dockerfiles,
             include_workflow=include_workflow,
             include_compose=include_compose,
+            extra_optional_variables=deployment_env["optional"],
+            extra_secret_variables=deployment_env["secret"],
         )
         deployment_files = deployment_contract.get("artifacts") if isinstance(deployment_contract, dict) else {}
         if isinstance(deployment_files, dict):
@@ -706,13 +776,6 @@ async def generate_and_download(
                 context_variables.set("deployment_contract_validation_errors", deployment_contract.get("bundle_errors") or [])
             except Exception:
                 pass
-
-    app_build_plan = _context_get(context_variables, "app_build_plan")
-    selected_capability_packs: list[dict[str, Any]] = []
-    if isinstance(app_build_plan, dict):
-        raw_packs = app_build_plan.get("capability_packs")
-        if isinstance(raw_packs, list):
-            selected_capability_packs = [pack for pack in raw_packs if isinstance(pack, dict)]
 
     acceptance_result = await run_app_bundle_acceptance_gate(
         files=files_map,
