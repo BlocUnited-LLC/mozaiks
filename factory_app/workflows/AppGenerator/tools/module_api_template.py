@@ -15,6 +15,8 @@ Behavioral contract:
       err.code        — alias when backend uses .code instead of .error_code
       err.status      — HTTP status code (integer)
       err.data        — full parsed body for caller inspection
+      isInsufficientTokensError(err) detects runtime token depletion.
+      insufficientTokensRecoveryPath(err) returns the app-local recovery route.
     This lets generated custom-route JSX branch on backend states:
       try { ... } catch (err) {
         if (err.error_code === 'RECORD_NOT_FOUND') { ... }
@@ -51,6 +53,8 @@ _MODULE_API_TEMPLATE = """\
  *     err.status      — HTTP status integer
  *     err.data        — full parsed response body
  *   Catch and branch on err.error_code to handle specific backend states.
+ *   For INSUFFICIENT_TOKENS, navigate to insufficientTokensRecoveryPath(err)
+ *   and do not retry the action automatically.
  *
  *   Example:
  *     try {
@@ -81,6 +85,31 @@ export function getAccessToken() {
 export function authHeaders() {
   const token = getAccessToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+function tokenRecoveryMetadata(err) {
+  const data = err?.data || {}
+  return data.extra_data || data.metadata || data
+}
+
+export function isInsufficientTokensError(err) {
+  return (
+    err?.error_code === 'INSUFFICIENT_TOKENS' ||
+    err?.code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.error_code === 'INSUFFICIENT_TOKENS' ||
+    err?.data?.extra_data?.error_code === 'INSUFFICIENT_TOKENS'
+  )
+}
+
+export function insufficientTokensRecoveryPath(err, fallback = '/billing') {
+  const metadata = tokenRecoveryMetadata(err)
+  return (
+    metadata.top_up_route ||
+    metadata.billing_route ||
+    metadata.upgrade_route ||
+    metadata.contact_route ||
+    fallback
+  )
 }
 
 export async function moduleAction(moduleName, actionName, input = {}) {

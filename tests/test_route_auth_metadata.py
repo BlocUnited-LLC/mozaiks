@@ -3,11 +3,12 @@
 Documents current truth and the near-term contract:
 
 - requiresAuth is enforced by the shell (RouteRenderer redirect).
-- requiresRole can be declared in route metadata for navigation visibility intent.
+- requiresRole can be declared in route metadata for shell UX gating.
 - Page schema meta.roles normalizes to requiresRole in shell config.
-- requiresRole is NOT yet enforced by RouteWrapper or sidebar filtering.
-  That enforcement is a tracked follow-up.
-- requiresPermission and resource-scoped authorization do not exist yet.
+- requiresRole filters shell navigation and blocks deep links as UX hygiene.
+- routeAuth is the scoped route authorization hook. The shell calls the
+  declared app-owned module action and requires { allowed: true }.
+- requiresPermission does not exist; use routeAuth instead.
 - Module service/policy is the authoritative boundary for fine-grained authorization.
 """
 from __future__ import annotations
@@ -87,6 +88,18 @@ def test_app_custom_route_meta_requires_role_is_nullable() -> None:
     assert requires_role["type"] == "union", "requiresRole must be a union type"
     assert "null" in requires_role["variants"], "requiresRole must allow null"
     assert "str" in requires_role["variants"], "requiresRole must allow str"
+
+
+def test_app_page_meta_declares_route_auth() -> None:
+    """Declarative AppPageSchema routes must support the same routeAuth hook."""
+    so = yaml.safe_load(_read("factory_app/workflows/AppGenerator/structured_outputs.yaml"))
+    page_meta = so["models"]["AppPageMeta"]["fields"]
+    page_schema = so["models"]["AppPageSchema"]["fields"]
+
+    assert "meta" in page_schema
+    assert "AppPageMeta" in page_schema["meta"]["variants"]
+    assert "routeAuth" in page_meta
+    assert "AppRouteAuth" in page_meta["routeAuth"]["variants"]
 
 
 def test_app_custom_route_entry_still_has_requires_auth() -> None:
@@ -237,16 +250,11 @@ def test_route_manifest_requires_auth_still_enforced(monkeypatch, tmp_path: Path
 
 
 # ---------------------------------------------------------------------------
-# 4. requiresRole is NOT yet enforced by RouteWrapper (current truth)
+# 4. routeAuth is enforced by RouteWrapper
 # ---------------------------------------------------------------------------
 
-def test_route_renderer_route_wrapper_does_not_check_requires_role() -> None:
-    """RouteWrapper must only check requiresAuth, not requiresRole.
-
-    This test documents the current state: requiresRole is declaration-only.
-    When frontend enforcement lands (RouteWrapper + WorkspaceLayout), this test
-    must be updated to reflect the new behavior.
-    """
+def test_route_renderer_route_wrapper_checks_route_auth() -> None:
+    """RouteWrapper must call declared routeAuth module actions."""
     source = _read("chat-ui/src/components/RouteRenderer.jsx")
     route_wrapper_start = source.index("const RouteWrapper")
     route_wrapper_end = source.index("\n};", route_wrapper_start) + 3
@@ -255,38 +263,97 @@ def test_route_renderer_route_wrapper_does_not_check_requires_role() -> None:
     assert "meta.requiresAuth" in route_wrapper_body, (
         "RouteWrapper must check requiresAuth"
     )
-    assert "requiresRole" not in route_wrapper_body, (
-        "RouteWrapper must NOT check requiresRole yet — "
-        "enforcement is a tracked follow-up; this field is declaration-only"
-    )
+    assert "roleMatches(requiredRoles, userRoles)" in route_wrapper_body
+    assert "routeAuth" in route_wrapper_body
+    assert "/api/modules/" in route_wrapper_body
+    assert "body?.allowed !== true" in route_wrapper_body
 
 
 # ---------------------------------------------------------------------------
-# 5. requiresPermission and scope do not exist yet
+# 5. routeAuth exists; requiresPermission does not
 # ---------------------------------------------------------------------------
 
 def test_requires_permission_not_in_structured_outputs() -> None:
-    """requiresPermission must not appear in AppCustomRouteMeta or AppCustomRouteEntry.
-
-    This test guards against premature introduction before the contract is designed.
-    """
+    """requiresPermission must not appear; routeAuth is the scoped route auth contract."""
     so = yaml.safe_load(_read("factory_app/workflows/AppGenerator/structured_outputs.yaml"))
     for model_name in ("AppCustomRouteMeta", "AppCustomRouteEntry"):
         fields = so["models"][model_name]["fields"]
         assert "requiresPermission" not in fields, (
-            f"{model_name} must not declare requiresPermission yet — "
-            "that contract is deferred to a future design pass"
+            f"{model_name} must not declare requiresPermission; use routeAuth"
         )
 
 
-def test_route_manifest_meta_scope_auth_contract_not_introduced() -> None:
-    """The scope/resource authorization contract must not be present in route metadata yet."""
+def test_route_auth_declared_in_structured_outputs() -> None:
+    """Route metadata models must declare routeAuth and the AppRouteAuth model."""
     so = yaml.safe_load(_read("factory_app/workflows/AppGenerator/structured_outputs.yaml"))
-    for model_name in ("AppCustomRouteMeta", "AppCustomRouteEntry"):
-        fields = so["models"][model_name]["fields"]
-        assert "scope" not in fields or model_name != "AppCustomRouteMeta", (
-            "AppCustomRouteMeta must not declare a scope authorization field yet"
-        )
+    route_meta = so["models"]["AppCustomRouteMeta"]["fields"]
+    page_meta = so["models"]["AppPageMeta"]["fields"]
+    assert "routeAuth" in route_meta
+    assert "AppRouteAuth" in route_meta["routeAuth"]["variants"]
+    assert "routeAuth" in page_meta
+    assert "AppRouteAuth" in page_meta["routeAuth"]["variants"]
+    route_auth = so["models"]["AppRouteAuth"]["fields"]
+    assert {"module", "action", "params"} <= set(route_auth)
+
+
+def test_route_manifest_route_auth_passes_through(monkeypatch, tmp_path: Path) -> None:
+    """routeAuth declared in route_manifest.json must survive into shell pages."""
+    from mozaiksai.hosts import platform as platform_app
+
+    app_root = _make_app_root(
+        tmp_path,
+        pages=[
+            {
+                "id": "community",
+                "label": "Community",
+                "path": "/apps/:appId/community",
+                "component": "CommunityPage",
+                "meta": {
+                    "routeAuth": {
+                        "module": "community_membership",
+                        "action": "authorize_app_community_route",
+                        "params": {"app_id": "$route.appId"},
+                    }
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+
+    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    matching = [p for p in shell["pages"] if p["path"] == "/apps/:appId/community"]
+    assert matching
+    assert matching[0]["meta"]["routeAuth"]["module"] == "community_membership"
+
+
+def test_declarative_page_route_auth_passes_through(monkeypatch, tmp_path: Path) -> None:
+    """routeAuth declared in ui/pages/*.yaml metadata must survive into shell pages."""
+    from mozaiksai.hosts import platform as platform_app
+
+    app_root = _make_app_root(
+        tmp_path,
+        ui_pages={
+            "project_settings.yaml": {
+                "name": "ProjectSettings",
+                "title": "Project Settings",
+                "route": "/projects/:projectId/settings",
+                "meta": {
+                    "routeAuth": {
+                        "module": "project_access",
+                        "action": "authorize_project_route",
+                        "params": {"project_id": "$route.projectId"},
+                    }
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+
+    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+    matching = [p for p in shell["pages"] if p["path"] == "/projects/:projectId/settings"]
+
+    assert matching
+    assert matching[0]["meta"]["routeAuth"]["action"] == "authorize_project_route"
 
 
 # ---------------------------------------------------------------------------

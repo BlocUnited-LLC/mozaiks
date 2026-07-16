@@ -44,52 +44,6 @@ Every Studio page should answer a concrete operator question:
 If information does not help answer that page's question, it should move to a
 drill-down, hover/detail state, or a different page.
 
-## Product Rules
+---
 
-- Use customer-facing terms: `Apps`, `Overview`, `Access`, `Usage`,
-  `Integrations`, `Create App`, `Continue Build`.
-- Keep internal terms out of primary UI copy: `factory_app`, `Control Plane`,
-  `workflow_sequence`, `extension_registry`, `adapter`.
-- Keep Health and Build History routable as diagnostics, but do not make them
-  primary navigation unless the operator is following a specific issue.
-- Show integration setup globally first. App-specific integration detail is a
-  secondary route.
-- Use `Chats` for end-user activity counts. Avoid `tracked executions` in the
-  UI unless the page is explicitly an engineering diagnostic.
-- Prefer one primary action per page. Secondary actions should be quiet.
-
-## Visual Direction
-
-Studio should feel like a focused operations console: dense enough to scan,
-quiet enough to use repeatedly, and structured enough that users know where to
-click next.
-
-Default layout:
-
-1. Page hero/header with scope, title, short subtitle, and primary actions.
-2. `SummaryStrip` for the 3-4 facts that decide urgency.
-3. One main work surface: list, trend chart, access table, or setup catalog.
-4. Secondary panels only when they add actionability.
-5. Collapsible diagnostics for health, pricing, and setup details.
-
-Avoid marketing-style hero sections, decorative page cards, nested cards, and
-large explanatory blocks inside the app.
-
-## Implementation Sources
-
-The current Studio routes are declared in:
-
-- `factory_app/app/ui/route_manifest.json`
-
-`factory_app/app/admin/admin_registry.yaml` is reserved for AdminPortal extension
-pages and should not duplicate first-party Studio routes.
-
-Reusable UI primitives are owned by `chat-ui` and re-exported through:
-
-- `chat-ui/src/ui/primitives/`
-- `factory_app/app/ui/components/StudioShared.jsx`
-
-Architecture context lives in:
-
-- [Studio Product Model](../architecture/builder/studio-product-model.md)
-- [Admin System](../architecture/app/admin-system.md)
+Working on Studio itself? See [Studio Product Model](../architecture/builder/studio-product-model.md) and [Admin System](../architecture/app/admin-system.md) for design rules, UI primitives, and implementation sources.

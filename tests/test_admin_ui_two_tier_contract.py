@@ -69,6 +69,8 @@ def test_admin_ui_tiers_doc_mentions_tier1_components() -> None:
     assert "AdminPortal" in doc or "admin shell" in doc.lower(), (
         "Tier 1 doc must mention AdminPortal or the admin shell"
     )
+    assert "path: /admin/operations" in doc
+    assert "path: /apps/:appId/operations" not in doc
 
 
 def test_admin_ui_tiers_doc_mentions_tier2_components() -> None:
@@ -180,6 +182,20 @@ def test_admin_system_doc_covers_panel_rendering() -> None:
     doc = _read("docs/architecture/app/admin-system.md")
     assert "contracts/admin.yaml" in doc
     assert "renderer" in doc
+    assert "Generated app AdminPortal routes use `/admin` and `/admin/<page>`" in doc
+    assert "`/apps/:appId/...` route family is reserved" in doc
+
+
+def test_navigation_docs_lock_admin_vs_hosted_app_routes() -> None:
+    navigation = _read("docs/architecture/app/platform-navigation-contract.md")
+    account_admin = _read("docs/architecture/app/account-admin-and-platform-services.md")
+    assembly = _read("docs/architecture/builder/appgenerator-output-assembly-contract.md")
+
+    combined = "\n".join([navigation, account_admin, assembly])
+    assert "Generated app AdminPortal routes live under `/admin`" in combined
+    assert "First-party Studio and hosted-product app operations live under" in combined
+    assert "generated customer apps must not copy that route family" in combined
+    assert "Do not rely on a built-in shell `settings` shortcut" in combined
 
 
 def test_canonical_app_structure_lists_both_tier_files() -> None:

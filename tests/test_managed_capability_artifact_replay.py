@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import textwrap
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +12,28 @@ import yaml
 from factory_app.workflows.AppGenerator.tools.app_build_plan import app_build_plan
 from factory_app.workflows.AppGenerator.tools.app_validation import validate_app_bundle_from_request
 from factory_app.workflows.AppGenerator.tools.assemble_app_tasks import assemble_app_tasks
+from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    generate_deployment_artifacts,
+)
+from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+    _deployment_env_for_capability_packs,
+)
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+from mozaiksai.core.billing.fulfillment import BillingFulfillmentCommand, BillingFulfillmentService
+from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
+from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader
+from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, ModuleRequest
+from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
+from mozaiksai.core.tokens.wallet import TokenWalletLedger
+from mozaiksai.hosts.platform import _current_user_token_wallet_summary
+from tests.test_generated_saas_subscription_runtime_acceptance import (
+    _Collection,
+    _Database,
+    _fake_provider,
+    _FakeLLMClient,
+    _NoopAuditLogger,
+)
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 MOZAIKSPAY_PACK_ROOT = WORKSPACE / "factory_app" / "build_context" / "mozaikspay"
@@ -271,19 +292,34 @@ def _subscriptions_yaml() -> str:
             usage_meter_id: ai_tokens
             scope: user
             auto_debit_usage: true
+            depleted_balance:
+              recovery_action: top_up
+              billing_route: /billing
+              top_up_route: /billing
+              upgrade_route: /pricing
+              message: Add tokens or upgrade to keep using AI features.
+        top_up_products:
+          - product_id: ai_tokens_10k
+            label: 10K AI tokens
+            wallet_id: ai_tokens
+            token_amount: 10000
+            price:
+              amount_cents: 500
+              currency: usd
+              display: $5
         plans:
           - plan_id: free
             label: Free
             capabilities: [billing_portal.read]
           - plan_id: pro
             label: Pro
-            capabilities: [billing_portal.read, billing_portal.manage]
+            capabilities: [billing_portal.read, billing_portal.manage, reports.generate]
             usage_limits:
               - meter_id: ai_tokens
                 label: AI tokens
                 unit: tokens
                 monthly_limit: 1000
-                capability_id: billing_portal.manage
+                capability_id: reports.generate
             token_allowances:
               - wallet_id: ai_tokens
                 amount: 1000
@@ -429,6 +465,7 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
                 {"filename": "services/__init__.py", "content": ""},
                 {"filename": "services/integrations/__init__.py", "content": ""},
                 {"filename": "modules/billing_portal/backend/__init__.py", "content": ""},
+                {"filename": "modules/reports/backend/__init__.py", "content": ""},
             ]
         },
         "subscriptions": {
@@ -441,6 +478,57 @@ def _mozaikspay_task_outputs() -> dict[str, Any]:
                 {
                     "filename": "services/integrations/mozaikspay_client.py",
                     "content": "import payment_provider\npayment_provider.api_key = 'provider_test_1234567890'\n",
+                },
+            ]
+        },
+        "reports": {
+            "code_files": [
+                {
+                    "filename": "modules/reports/module.yaml",
+                    "content": textwrap.dedent(
+                        """
+                        schema_version: mozaiks.module.v1
+                        module:
+                          id: reports
+                          display_name: Reports
+                          version: 1.0.0
+                          handler: backend.handler:ReportsModule
+                        actions:
+                          - id: generate_report
+                            description: Generate an AI report.
+                            handler_method: generate_report
+                            entitlement_gate: reports.generate
+                            input_schema:
+                              type: object
+                              required: [topic]
+                              properties:
+                                topic:
+                                  type: string
+                            output_schema:
+                              type: object
+                              required: [report_id]
+                              properties:
+                                report_id:
+                                  type: string
+                                topic:
+                                  type: string
+                        capabilities:
+                          - capability_id: reports.generate
+                            kind: action
+                            target: generate_report
+                            title: Generate Report
+                        """
+                    ).lstrip(),
+                },
+                {
+                    "filename": "modules/reports/backend/handler.py",
+                    "content": textwrap.dedent(
+                        """
+                        class ReportsModule:
+                            async def generate_report(self, ctx, *, topic):
+                                return {"report_id": "report_1", "topic": topic}
+                        """
+                    ).lstrip(),
                 },
             ]
         },
@@ -497,7 +585,9 @@ async def test_managed_wallet_replay_normalizes_assembles_and_scans(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(tmp_path: Path) -> None:
+async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     descriptor, contract = _load_mozaikspay_descriptor()
     ctx = _Context(
         {
@@ -529,19 +619,44 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(tm
 
     assembled = await assemble_app_tasks(context_variables=ctx)
     files = _file_map(assembled)
+    deployment_env = _deployment_env_for_capability_packs(ctx.get("capability_packs"))
+    files.update(
+        generate_deployment_artifacts(
+            app_id="mozaikspay-replay",
+            deployment_profile="generic_container",
+            include_dockerfiles=True,
+            include_workflow=False,
+            include_compose=False,
+            extra_required_variables=deployment_env["required"],
+            extra_optional_variables=deployment_env["optional"],
+            extra_secret_variables=deployment_env["secret"],
+            extra_public_variables=deployment_env["public"],
+        )["artifacts"]
+    )
 
     assert "config/subscriptions.yaml" in files
     assert "services/integrations/mozaikspay_client.py" in files
     assert "modules/billing_portal/module.yaml" in files
+    assert "modules/reports/module.yaml" in files
     assert "ui/pages/billing.yaml" in files
     assert "ui/pages/pricing.yaml" in files
     assert "ui/pages/usage.yaml" in files
+    assert "env.example" in files
     assert "import payment_provider" not in files["services/integrations/mozaikspay_client.py"]
     assert not any(path.startswith("modules/mozaikspay/") for path in files)
+    assert not any(path.startswith("modules/wallet/") for path in files)
     assert "/api/modules/billing_portal/get_subscription_status" in files["ui/pages/billing.yaml"]
     assert "/api/modules/billing_portal/list_plans" in files["ui/pages/pricing.yaml"]
     assert "/api/modules/billing_portal/open_billing_portal" in files["ui/pages/pricing.yaml"]
     assert "/api/modules/mozaikspay/" not in files["ui/pages/billing.yaml"]
+    for name in (
+        "MOZAIKS_APP_URL",
+        "MOZAIKSPAY_API_BASE",
+        "MOZAIKSPAY_CLIENT_ID",
+        "MOZAIKSPAY_CLIENT_SECRET",
+        "MOZAIKSPAY_API_KEY",
+    ):
+        assert f"{name}=" in files["env.example"]
     assert scan_generated_bundle(files, capability_packs=cached_plan["capability_packs"]) == []
 
     validation = await validate_app_bundle_from_request(
@@ -563,11 +678,168 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(tm
 
     app_root = tmp_path / "app"
     _write_files(app_root, files)
+    monkeypatch.setenv("PLATFORM_PATH", str(app_root))
     loaded = await AppLoader.load(str(app_root))
 
     assert loaded.definition.name == "MozaiksPay Replay"
-    assert [module.name for module in loaded.modules] == ["billing_portal"]
+    assert [module.name for module in loaded.modules] == ["billing_portal", "reports"]
     assert loaded.failed_module_names == []
     assert [page.name for page in loaded.definition.pages] == ["billing", "pricing", "usage"]
     assert loaded.subscriptions_config is not None
     assert loaded.subscriptions_config.default_plan_id == "free"
+    wallet = loaded.subscriptions_config.token_wallet_by_id("ai_tokens")
+    assert wallet is not None
+    assert wallet.depleted_balance is not None
+    assert wallet.depleted_balance.billing_route == "/billing"
+
+    assignments = _Collection([])
+    adapter = ConfiguredEntitlementAdapter(
+        config=loaded.subscriptions_config,
+        collection_resolver=lambda alias: assignments,
+    )
+    executor = ModuleExecutor(entitlement_checker=adapter)
+    monkeypatch.setattr(
+        "mozaiksai.core.runtime.composition.module_executor.get_audit_logger",
+        lambda: _NoopAuditLogger(),
+    )
+    for module in loaded.modules:
+        executor.register(
+            module.name,
+            module.handler,
+            action_method_map=module.action_method_map,
+            action_permissions=module.action_permissions_map,
+            action_schemas=module.action_schemas_map,
+            action_entitlements=module.action_entitlement_map,
+        )
+
+    denied = await executor.execute(
+        ModuleRequest(
+            module="reports",
+            action="generate_report",
+            params={"topic": "retention"},
+            app_id="mozaikspay-replay",
+            user_id="user_1",
+            granted_permissions=[],
+        )
+    )
+    assert denied.success is False
+    assert denied.error_code == "ENTITLEMENT_REQUIRED"
+
+    plan_catalog = await executor.execute(
+        ModuleRequest(
+            module="billing_portal",
+            action="list_plans",
+            params={},
+            app_id="mozaikspay-replay",
+            user_id="user_1",
+            granted_permissions=["billing_portal.read"],
+        )
+    )
+    assert plan_catalog.success is True
+    assert [plan["plan_id"] for plan in plan_catalog.data["plans"]] == ["free", "pro"]
+    assert plan_catalog.data["top_up_products"][0]["product_id"] == "ai_tokens_10k"
+
+    ledger = TokenWalletLedger(database=_Database())
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet.get_token_wallet_ledger",
+        lambda: ledger,
+    )
+    fulfillment = BillingFulfillmentService(
+        config=loaded.subscriptions_config,
+        ledger=ledger,
+        collection_resolver=lambda alias: assignments,
+    )
+    fulfillment_result = await fulfillment.apply(
+        BillingFulfillmentCommand(
+            command_id="cmd_mozaikspay_replay_activate_1",
+            event_type="subscription_activated",
+            source="test",
+            app_id="mozaikspay-replay",
+            user_id="user_1",
+            plan_id="pro",
+            occurred_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+    )
+    assert fulfillment_result.success is True
+
+    granted = await executor.execute(
+        ModuleRequest(
+            module="reports",
+            action="generate_report",
+            params={"topic": "retention"},
+            app_id="mozaikspay-replay",
+            user_id="user_1",
+            granted_permissions=[],
+        )
+    )
+    assert granted.success is True
+    assert granted.data == {"report_id": "report_1", "topic": "retention"}
+
+    tokens_payload = await _current_user_token_wallet_summary(
+        loaded.subscriptions_config,
+        app_id="mozaikspay-replay",
+        user_id="user_1",
+        ensure_allowances=False,
+    )
+    assert tokens_payload["wallets"][0]["wallet_id"] == "ai_tokens"
+    assert tokens_payload["wallets"][0]["balance"]["balance"] == 1000
+
+    token_guard = TokenUsageGuard(
+        config=loaded.subscriptions_config,
+        ledger=ledger,
+        collection_resolver=lambda alias: assignments,
+    )
+    llm_service = SimpleLLMCapabilityService(token_usage_guard=token_guard)
+    fake_client = _FakeLLMClient()
+    llm_service._client = fake_client  # type: ignore[assignment]
+    llm_service._select_provider = _fake_provider  # type: ignore[method-assign]
+
+    llm_result = await llm_service.generate_chat_completion(
+        messages=[{"role": "user", "content": "Write a short retention report."}],
+        llm_config={"model": "stub-generated-saas-model"},
+        app_id="mozaikspay-replay",
+        user_id="user_1",
+    )
+    assert llm_result["content"] == "stubbed generated SaaS report"
+    assert len(fake_client.calls) == 1
+
+    await ledger.record_usage_debit(
+        {
+            "event_id": "usage_evt_mozaikspay_report_1",
+            "app_id": "mozaikspay-replay",
+            "user_id": "user_1",
+            "total_tokens": llm_result["usage"]["total_tokens"],
+        },
+        wallet=wallet,
+    )
+    balance = await ledger.query_balance(app_id="mozaikspay-replay", user_id="user_1")
+    assert balance["balance"] == 875
+
+    await ledger.record_usage_debit(
+        {
+            "event_id": "usage_evt_mozaikspay_report_exhaust",
+            "app_id": "mozaikspay-replay",
+            "user_id": "user_1",
+            "total_tokens": 875,
+        },
+        wallet=wallet,
+    )
+
+    calls_before_denial = len(fake_client.calls)
+    with pytest.raises(TokenUsageDenied) as exc_info:
+        await llm_service.generate_chat_completion(
+            messages=[{"role": "user", "content": "This should not reach the provider."}],
+            llm_config={"model": "stub-generated-saas-model"},
+            app_id="mozaikspay-replay",
+            user_id="user_1",
+        )
+    decision = exc_info.value.decision
+    assert decision.error_code == "INSUFFICIENT_TOKENS"
+    assert decision.wallet_id == "ai_tokens"
+    assert decision.balance == 0
+    assert decision.recovery_action == "top_up"
+    assert decision.billing_route == "/billing"
+    assert decision.top_up_route == "/billing"
+    assert decision.upgrade_route == "/pricing"
+    assert decision.top_up_product_ids == ("ai_tokens_10k",)
+    assert len(fake_client.calls) == calls_before_denial

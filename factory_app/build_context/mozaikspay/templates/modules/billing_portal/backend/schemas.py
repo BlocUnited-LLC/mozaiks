@@ -48,3 +48,19 @@ def safe_portal_response(raw: dict[str, Any]) -> dict[str, Any]:
         "return_url": raw.get("return_url"),
         "error": raw.get("error") or raw.get("error_code"),
     }
+
+
+def safe_checkout_response(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "success": bool(raw.get("success", False)),
+        "checkout_url": raw.get("checkout_url"),
+        "success_url": raw.get("success_url"),
+        "cancel_url": raw.get("cancel_url"),
+        "plan_id": raw.get("plan_id"),
+        "product_id": raw.get("product_id"),
+        "wallet_id": raw.get("wallet_id"),
+        "token_amount": raw.get("token_amount"),
+        "amount_cents": raw.get("amount_cents"),
+        "currency": raw.get("currency"),
+        "error": raw.get("error") or raw.get("error_code"),
+    }

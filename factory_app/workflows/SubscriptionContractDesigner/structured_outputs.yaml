@@ -78,6 +78,37 @@ models:
       allow_negative_balance:
         type: bool
         description: Whether spending may drive balance negative.
+      depleted_balance:
+        type: union
+        variants: [TokenWalletRecovery, 'null']
+        description: User-actionable recovery metadata for insufficient token balance.
+
+  TokenWalletRecovery:
+    type: model
+    fields:
+      recovery_action:
+        type: literal
+        values: [top_up, upgrade, contact_admin]
+        description: Default UI recovery action when this wallet is depleted.
+      billing_route:
+        type: str
+        description: App-local billing route surfaced with INSUFFICIENT_TOKENS.
+      top_up_route:
+        type: union
+        variants: [str, 'null']
+        description: App-local top-up route, or null when top-ups are unavailable.
+      upgrade_route:
+        type: union
+        variants: [str, 'null']
+        description: App-local plan upgrade route, or null.
+      contact_route:
+        type: union
+        variants: [str, 'null']
+        description: App-local admin/support contact route, or null.
+      message:
+        type: union
+        variants: [str, 'null']
+        description: Optional short user-facing recovery message.
 
   TokenAllowance:
     type: model
@@ -96,6 +127,46 @@ models:
         type: union
         variants: [str, 'null']
         description: Human-readable allowance label.
+
+  TokenTopUpPrice:
+    type: model
+    fields:
+      amount_cents:
+        type: int
+        description: Positive cash amount in the smallest currency unit; never a provider price id.
+      currency:
+        type: str
+        description: Lowercase ISO 4217 currency code, such as usd.
+      display:
+        type: union
+        variants: [str, 'null']
+        description: Optional display price such as "$5"; derived from amount_cents/currency, not provider state.
+
+  TokenTopUpProduct:
+    type: model
+    fields:
+      product_id:
+        type: str
+        description: Stable app-owned top-up product id; never a provider price id.
+      label:
+        type: str
+        description: Human-readable token pack label.
+      wallet_id:
+        type: str
+        description: Token wallet credited when this product is fulfilled.
+      token_amount:
+        type: int
+        description: Token amount credited by the product after verified fulfillment.
+      price:
+        type: TokenTopUpPrice
+        description: Provider-neutral cash price used by app facades to start checkout.
+      description:
+        type: union
+        variants: [str, 'null']
+        description: Optional display description.
+      active:
+        type: bool
+        description: Whether the token pack is available for new top-up starts.
 
   UsageChargePolicy:
     type: model
@@ -242,6 +313,10 @@ models:
         type: list
         items: TokenWallet
         description: Provider-neutral token wallets.
+      top_up_products:
+        type: list
+        items: TokenTopUpProduct
+        description: Provider-neutral app-owned token packs for top-up facades.
       usage_charge_policies:
         type: list
         items: UsageChargePolicy

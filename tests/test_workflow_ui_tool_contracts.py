@@ -571,6 +571,8 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
     assert "route_manifest.json" in design_docs
     assert "custom_route_bundle" in design_docs
     assert "generic account/profile/preferences as host-owned platform primitives" in design_docs
+    assert "platform-owned signed-in account surface is `/me`" in design_docs
+    assert "personal preferences belong to `/api/me/preferences`" in design_docs
 
     assert "Typography must come from semantic theme tokens" in agent_generator
     assert "never hardcode `font-family` names in component code" in agent_generator
@@ -582,6 +584,29 @@ def test_frontend_prompts_enforce_theme_shell_ownership_boundaries() -> None:
     assert "Local fonts live under `app/brand/fonts/`" in frontend_rules
     assert "`app/brand/theme_config.json` is the visual identity source of truth" in add_page_skill
     assert "Do not hardcode hex/rgb/hsl colors, font-family declarations" in add_page_skill
+
+
+def test_frontend_prompts_distinguish_settings_from_account_profile() -> None:
+    app_generator = _read("factory_app/workflows/AppGenerator/agents.yaml")
+    design_docs = _read("factory_app/workflows/DesignDocs/agents.yaml")
+    navigation_contract = _read("docs/architecture/app/platform-navigation-contract.md")
+    account_services = _read("docs/architecture/app/account-admin-and-platform-services.md")
+    refinement_contract = _read("docs/architecture/workflows/refinement-control-plane.md")
+
+    combined = "\n".join([app_generator, design_docs, navigation_contract, account_services])
+
+    assert "platform-owned at `/me`" in app_generator
+    assert "Do not generate replacement `/profile`, `/account`, or `/me` pages" in app_generator
+    assert "`page_type: settings` means app/resource/module configuration UI" in app_generator
+    assert "`contracts/settings.yaml` describes module-owned settings" in app_generator
+    assert "Do not rely on a built-in shell `settings` shortcut" in navigation_contract
+    assert "Personal preferences use" in navigation_contract
+    assert "`GET/PUT /api/me/preferences`" in navigation_contract
+    assert "Account/Profile | `/me` via `ProfilePage`" in account_services
+    assert "module-specific config uses `contracts/settings.yaml` outside Profile" in account_services
+    assert "Module-owned settings schema" in refinement_contract
+    assert "User-facing preferences schema" not in refinement_contract
+    assert "/projects/:projectId/settings" in combined
 
 
 def test_agent_generator_primitive_reference_matches_runtime_contract() -> None:

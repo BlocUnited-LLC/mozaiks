@@ -14,7 +14,9 @@ Token tracking in Mozaiks has three runtime layers:
 
 Neither layer owns payment providers, checkout, invoices, or hosted-product
 pricing. Subscription intent is declared in `app/config/subscriptions.yaml`;
-payment fulfillment remains app-owned or hosted-product behavior.
+verified fulfillment is normalized into OSS `BillingFulfillmentCommand` records
+before it mutates subscription assignment state or token wallet balances.
+Payment collection remains app-owned or hosted-product behavior.
 
 Token logic must not leak into workflow authoring or module business logic unless
 a workflow explicitly needs budget-aware behavior. Modules and payment adapters
@@ -28,6 +30,12 @@ workflow decides whether `config/subscriptions.yaml` should exist, what
 `entitlement_gate`, and which generated workflows should carry metering
 declarations. It does not create payment-provider resources or mutate token
 balances.
+
+MozaiksPay is the default managed adapter path for hosted checkout and token
+top-ups. It is not the canonical owner of subscription state, entitlement
+state, token balances, usage records, or wallet ledgers. After MozaiksPay or
+another adapter verifies a payment/subscription fact, it submits a provider-
+neutral fulfillment command to the OSS runtime.
 
 ---
 
@@ -142,6 +150,33 @@ Workspace context participates in active-plan resolution and usage event
 metadata. It does not create a separate wallet balance scope: token balances
 still follow each wallet's declared `scope` value (`user`, `tenant`, or app
 fallback).
+
+### BillingFulfillmentService
+
+`mozaiksai/core/billing/fulfillment.py` owns the provider-neutral bridge from a
+verified billing fact to runtime state. It accepts `BillingFulfillmentCommand`
+objects from trusted adapters and applies deterministic effects:
+
+- `subscription_activated` / `subscription_updated`: upsert the configured
+  assignment-store record and materialize any plan token allowances.
+- `subscription_cancelled`: mark the assignment inactive/cancelled without
+  deleting history.
+- `token_top_up_paid` / `token_credit_granted`: credit the configured token
+  wallet idempotently.
+- `refund_applied` / `chargeback_applied`: debit or reject the reversal without
+  hiding the failed clawback.
+
+The platform ingress is:
+
+```text
+POST /api/billing/fulfillment/apply
+GET  /api/admin/billing/fulfillment
+```
+
+The apply route requires an internal API key or billing-admin authorization.
+Generated app pages should not call it. Generated apps request checkout or
+top-up sessions through an app-owned billing facade; only a trusted adapter
+submits fulfillment after verification.
 
 ### summarize_usage_events
 
@@ -448,7 +483,8 @@ create parallel usage or wallet collections.
 ## Docker-Backed Runtime Smoke
 
 Use this smoke when validating the full subscription/token path against a real
-MongoDB process. It uses a stub LLM provider and does not spend provider tokens.
+MongoDB process. It applies a test fulfillment command, uses a stub LLM
+provider, and does not spend provider tokens.
 
 ```powershell
 docker start mozaiksai-mongo
@@ -461,7 +497,8 @@ The smoke verifies:
 
 - factory-shaped `config/subscriptions.yaml` loading
 - real Mongo subscription assignment lookup
-- token allowance materialization into `RuntimeTokenWallet*` collections
+- provider-neutral fulfillment into the assignment store and
+  `RuntimeTokenWallet*` collections
 - an allowed stub LLM boundary call while balance is sufficient
 - idempotent usage debit
 - depleted-balance denial before the provider client is invoked
@@ -476,6 +513,40 @@ pytest -q tests/test_subscription_token_runtime_real_mongo.py
 
 The smoke creates a unique test database and cleans up its app data and runtime
 token wallet records before exit.
+
+### Local Manual Top-Up Smoke
+
+For local/manual credit tests, use the same fulfillment service with
+`source="test"` or `source="manual"` and no payment secrets:
+
+```python
+from mozaiksai.core.billing.fulfillment import (
+    BillingFulfillmentCommand,
+    BillingFulfillmentService,
+)
+
+service = BillingFulfillmentService(app_root="./my-app/app")
+await service.apply_durable(
+    BillingFulfillmentCommand(
+        command_id="manual_top_up_001",
+        event_type="token_credit_granted",
+        source="test",
+        app_id="my-app",
+        user_id="local-user",
+        wallet_id="ai_tokens",
+        token_amount=10000,
+    )
+)
+```
+
+Then verify:
+
+```powershell
+curl http://localhost:8000/api/me/tokens -H "Authorization: Bearer <local-token>"
+```
+
+This is the supported manual top-up path for OSS/local smoke testing. Do not add
+ad hoc wallet mutation endpoints or generated app-local ledger writes.
 
 ---
 

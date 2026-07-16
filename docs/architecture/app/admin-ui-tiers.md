@@ -61,7 +61,7 @@ pages:
     enabled: true
   - id: operations
     label: Operations
-    path: /apps/:appId/operations
+    path: /admin/operations
     icon: server
     order: 50
     scope: app
@@ -140,7 +140,7 @@ families or ad hoc React shells.
     {
       "id": "support-queue",
       "label": "Support Queue",
-      "path": "/apps/:appId/support-queue",
+      "path": "/admin/support-queue",
       "component": "SupportQueuePage",
       "requiresAuth": true,
       "purpose": "Full-page operator view of the support request queue."

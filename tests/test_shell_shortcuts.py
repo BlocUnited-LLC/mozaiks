@@ -89,8 +89,28 @@ def test_shell_shortcut_catalog_uses_workspace_home_primitives_without_dashboard
     assert catalog["account"]["path"] == "/me"
     assert catalog["account"]["label"] == "Profile"
     assert catalog["support"]["path"] == "/me?tab=support-tickets"
+    assert "settings" not in catalog
     assert "dashboard" not in catalog
     assert "admin_portal" not in catalog
+
+
+def test_shell_shortcut_catalog_allows_app_owned_settings_routes() -> None:
+    from mozaiksai.hosts import platform as platform_app
+
+    catalog = platform_app._shell_shortcut_catalog(
+        [
+            {
+                "id": "settings",
+                "label": "Project Settings",
+                "path": "/projects/:projectId/settings",
+                "component": "SchemaPage",
+            }
+        ],
+        {},
+    )
+
+    assert catalog["settings"]["path"] == "/projects/:projectId/settings"
+    assert catalog["settings"]["label"] == "Project Settings"
 
 
 def test_shell_shortcut_catalog_allows_app_owned_dashboard_routes() -> None:

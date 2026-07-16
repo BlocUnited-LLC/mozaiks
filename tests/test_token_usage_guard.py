@@ -38,6 +38,20 @@ def _write_subscriptions(tmp_path: Path, *, assignment_store: bool = False) -> N
                 scope: user
                 auto_debit_usage: true
                 allow_negative_balance: false
+                depleted_balance:
+                  recovery_action: top_up
+                  billing_route: /billing
+                  top_up_route: /billing
+                  upgrade_route: /pricing
+            top_up_products:
+              - product_id: ai_tokens_10k
+                label: 10K AI tokens
+                wallet_id: ai_tokens
+                token_amount: 10000
+                price:
+                  amount_cents: 500
+                  currency: usd
+                  display: "$5"
             plans:
               - plan_id: pro
                 label: Pro
@@ -124,8 +138,18 @@ async def test_token_usage_guard_denies_before_llm_when_wallet_is_depleted(tmp_p
 
     assert decision.allowed is False
     assert decision.error_code == "INSUFFICIENT_TOKENS"
+    assert decision.app_id == "app_1"
     assert decision.wallet_id == "ai_tokens"
     assert decision.balance == 0
+    assert decision.required_tokens == 1
+    assert decision.scope == "user"
+    assert decision.user_id == "user_1"
+    assert decision.recovery_action == "top_up"
+    assert decision.billing_route == "/billing"
+    assert decision.top_up_route == "/billing"
+    assert decision.upgrade_route == "/pricing"
+    assert decision.top_up_product_ids == ("ai_tokens_10k",)
+    assert decision.to_error_metadata()["top_up_product_ids"] == ["ai_tokens_10k"]
 
 
 @pytest.mark.asyncio

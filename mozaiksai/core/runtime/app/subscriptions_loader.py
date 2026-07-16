@@ -45,6 +45,20 @@ Example::
         usage_meter_id: ai_tokens
         scope: user
         auto_debit_usage: true
+        depleted_balance:
+          recovery_action: top_up
+          billing_route: /billing
+          top_up_route: /billing
+          upgrade_route: /pricing
+    top_up_products:
+      - product_id: ai_tokens_10k
+        label: 10K AI tokens
+        wallet_id: ai_tokens
+        token_amount: 10000
+        price:
+          amount_cents: 500
+          currency: usd
+          display: "$5"
     usage_charge_policies:
       - meter_id: ai_tokens
         label: AI usage
@@ -80,6 +94,7 @@ _DATA_ALIAS_RE = re.compile(r"^[a-z0-9_.-]+$")
 _FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 _CATALOG_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 _CAPABILITY_GROUP_RE = re.compile(r"^[a-z0-9_.-]+$")
+_ROUTE_RE = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*(?:\?[A-Za-z0-9._~!$&'()*+,;=:@/?%-]*)?$")
 
 _CONFIG_PATH = Path("config") / "subscriptions.yaml"
 
@@ -134,11 +149,49 @@ class UsageLimitDef(BaseModel):
         return value
 
 
+class TokenWalletRecoveryDef(BaseModel):
+    """User-actionable recovery metadata when a token wallet is depleted.
+
+    Recovery metadata is UX intent only. It points generated app UI toward a
+    billing/top-up/upgrade route, while payment processors and hosted products
+    continue to own checkout, invoices, taxes, and settlement.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    recovery_action: Literal["top_up", "upgrade", "contact_admin"] = "upgrade"
+    billing_route: str = "/billing"
+    top_up_route: str | None = None
+    upgrade_route: str | None = "/pricing"
+    contact_route: str | None = None
+    message: str | None = None
+
+    @field_validator("billing_route", "top_up_route", "upgrade_route", "contact_route")
+    @classmethod
+    def _validate_route(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if "://" in value or not _ROUTE_RE.match(value):
+            raise ValueError(f"route must be an app-local path, got {value!r}")
+        return value
+
+    @field_validator("message")
+    @classmethod
+    def _validate_message(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
 class TokenWalletDef(BaseModel):
     """A provider-neutral token wallet exposed by the runtime.
 
-    Wallets define the spendable unit and scope. They do not define payment
-    providers, prices, checkout behavior, or hosted-product monetization.
+    Wallets define the spendable unit, scope, and recovery route metadata. They
+    do not define payment providers, checkout behavior, invoices, or settlement.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -150,6 +203,7 @@ class TokenWalletDef(BaseModel):
     scope: Literal["user", "tenant"] = "user"
     auto_debit_usage: bool = False
     allow_negative_balance: bool = False
+    depleted_balance: TokenWalletRecoveryDef | None = None
 
     @field_validator("wallet_id")
     @classmethod
@@ -210,6 +264,87 @@ class TokenAllowanceDef(BaseModel):
     @field_validator("label")
     @classmethod
     def _validate_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class TokenTopUpPriceDef(BaseModel):
+    """Provider-neutral cash price for a token top-up product."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount_cents: int = Field(gt=0)
+    currency: str = "usd"
+    display: str | None = None
+
+    @field_validator("currency")
+    @classmethod
+    def _validate_currency(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not re.match(r"^[a-z]{3}$", value):
+            raise ValueError("currency must be a three-letter ISO 4217 code")
+        return value
+
+    @field_validator("display")
+    @classmethod
+    def _validate_display(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class TokenTopUpProductDef(BaseModel):
+    """Provider-neutral token pack offered by an app billing facade.
+
+    This declares the app-level purchase intent and resulting wallet amount.
+    It intentionally omits payment-provider product ids, price ids, checkout
+    session ids, invoices, taxes, and settlement details.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: str
+    label: str
+    wallet_id: str = "ai_tokens"
+    token_amount: int = Field(gt=0)
+    price: TokenTopUpPriceDef
+    description: str | None = None
+    active: bool = True
+
+    @field_validator("product_id")
+    @classmethod
+    def _validate_product_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _CATALOG_ID_RE.match(value):
+            raise ValueError(
+                f"product_id must match [a-z0-9_-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("label must be non-empty")
+        return value
+
+    @field_validator("wallet_id")
+    @classmethod
+    def _validate_wallet_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _WALLET_ID_RE.match(value):
+            raise ValueError(
+                f"wallet_id must match [a-z0-9_.-]+, got {value!r}"
+            )
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def _validate_description(cls, value: str | None) -> str | None:
         if value is None:
             return None
         value = value.strip()
@@ -546,6 +681,7 @@ class SubscriptionsConfig(BaseModel):
     default_plan_id: str
     assignment_store: SubscriptionAssignmentStoreDef | None = None
     token_wallets: list[TokenWalletDef] = Field(default_factory=list)
+    top_up_products: list[TokenTopUpProductDef] = Field(default_factory=list)
     usage_charge_policies: list[UsageChargePolicyDef] = Field(default_factory=list)
     pricing_catalog: PricingCatalogDef | None = None
     plans: list[PlanDef]
@@ -573,10 +709,18 @@ class SubscriptionsConfig(BaseModel):
         wallet_ids = [wallet.wallet_id for wallet in self.token_wallets]
         if len(wallet_ids) != len(set(wallet_ids)):
             raise ValueError("token_wallet wallet_ids must be unique")
+        top_up_product_ids = [product.product_id for product in self.top_up_products]
+        if len(top_up_product_ids) != len(set(top_up_product_ids)):
+            raise ValueError("top_up_products product_ids must be unique")
         usage_charge_meter_ids = [policy.meter_id for policy in self.usage_charge_policies]
         if len(usage_charge_meter_ids) != len(set(usage_charge_meter_ids)):
             raise ValueError("usage_charge_policies meter_ids must be unique")
         declared_wallet_ids = set(wallet_ids)
+        for product in self.top_up_products:
+            if declared_wallet_ids and product.wallet_id not in declared_wallet_ids:
+                raise ValueError(
+                    f"top_up_product wallet_id {product.wallet_id!r} must reference token_wallets"
+                )
         for plan in self.plans:
             for allowance in plan.token_allowances:
                 if declared_wallet_ids and allowance.wallet_id not in declared_wallet_ids:
@@ -640,6 +784,14 @@ class SubscriptionsConfig(BaseModel):
                 return policy
         return None
 
+    def top_up_products_for_wallet(self, wallet_id: str) -> list[TokenTopUpProductDef]:
+        wallet_key = str(wallet_id or "").strip()
+        return [
+            product
+            for product in self.top_up_products
+            if product.wallet_id == wallet_key and product.active
+        ]
+
 
 # ---------------------------------------------------------------------------
 # Loader
@@ -689,7 +841,10 @@ __all__ = [
     "SubscriptionsConfig",
     "SubscriptionsLoadError",
     "TokenAllowanceDef",
+    "TokenTopUpProductDef",
+    "TokenTopUpPriceDef",
     "TokenWalletDef",
+    "TokenWalletRecoveryDef",
     "UsageChargePolicyDef",
     "UsageLimitDef",
     "load_subscriptions_config",

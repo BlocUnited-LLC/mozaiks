@@ -35,6 +35,51 @@ const getUserRoles = (user) => {
   return [];
 };
 
+const getRequiredRoles = (item) => {
+  if (!item || typeof item !== 'object') return [];
+
+  const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
+  const navigation = item.navigation && typeof item.navigation === 'object' ? item.navigation : {};
+  const metaNavigation = meta.navigation && typeof meta.navigation === 'object' ? meta.navigation : {};
+  const candidates = [
+    item.requiresRole,
+    item.requiredRole,
+    item.roles,
+    meta.requiresRole,
+    meta.requiredRole,
+    meta.roles,
+    navigation.requiresRole,
+    navigation.requiredRole,
+    metaNavigation.requiresRole,
+    metaNavigation.requiredRole,
+  ];
+
+  for (const candidate of candidates) {
+    const roles = normalizeList(candidate).map((role) => role.trim()).filter(Boolean);
+    if (roles.length > 0) return roles;
+  }
+
+  return [];
+};
+
+export function roleMatches(requiredRoles, roles = []) {
+  const required = normalizeList(requiredRoles).map((role) => role.trim()).filter(Boolean);
+  if (required.length === 0) return true;
+
+  const granted = new Set(
+    normalizeList(roles).map((role) => role.trim()).filter(Boolean)
+  );
+  return required.some((role) => granted.has(role));
+}
+
+export function isShellItemVisible(item, roles = []) {
+  if (!item || item.visible === false) return false;
+  const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
+  const navigation = item.navigation && typeof item.navigation === 'object' ? item.navigation : {};
+  if (meta.visible === false || navigation.visible === false) return false;
+  return roleMatches(getRequiredRoles(item), roles);
+}
+
 const firstSearchValue = (searchParams, keys) => {
   for (const key of keys) {
     const value = searchParams.get(key);
@@ -238,7 +283,7 @@ export function resolveShellActions(actions, context = {}) {
   if (!Array.isArray(actions)) return [];
   return actions
     .map((action) => resolveShellAction(action, context))
-    .filter((action) => action?.visible !== false);
+    .filter((action) => isShellItemVisible(action, context.roles || []));
 }
 
 export function getNavigationTargetKey(item) {

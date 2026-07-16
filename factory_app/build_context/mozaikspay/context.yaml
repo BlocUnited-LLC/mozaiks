@@ -35,12 +35,28 @@ pack:
           type: secret
           required: true
           frontend_safe: false
+  deployment_env:
+    optional:
+      - MOZAIKS_APP_URL
+      - MOZAIKSPAY_API_BASE
+      - MOZAIKSPAY_CLIENT_ID
+      - MOZAIKSPAY_CLIENT_SECRET
+      - MOZAIKSPAY_API_KEY
+    secret:
+      - MOZAIKSPAY_CLIENT_SECRET
+      - MOZAIKSPAY_API_KEY
 capabilities:
   - capability_id: mozaikspay.billing_portal
     facade_recommended: billing_portal
   - capability_id: mozaikspay.subscription_status
     facade_recommended: billing_portal
+  - capability_id: mozaikspay.subscription_checkout
+    facade_recommended: billing_portal
   - capability_id: mozaikspay.usage_status
+    facade_recommended: billing_portal
+  - capability_id: mozaikspay.token_status
+    facade_recommended: billing_portal
+  - capability_id: mozaikspay.token_top_up
     facade_recommended: billing_portal
 facades:
   - module_id: billing_portal
@@ -50,8 +66,16 @@ facades:
       - create_billing_portal_session
       - subscription_status
       - get_subscription_status
+      - subscription_checkout
+      - create_subscription_checkout_session
+      - start_subscription_checkout
       - usage_status
       - get_usage_status
+      - token_status
+      - get_token_status
+      - token_top_up
+      - create_token_top_up_session
+      - start_token_top_up
     pages:
       - name: Billing
         route: /billing

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from mozaiksai.core.ports.orchestration import RunStatus
+from mozaiksai.core.tokens.guard import TokenUsageDecision, TokenUsageDenied
 from tests.import_utils import import_module_directly
 
 _bridge_mod = import_module_directly("mozaiksai.core.transport.workflow_bridge")
@@ -124,12 +125,14 @@ class _DummyTransport(WorkflowBridgeMixin):
         error_message: str,
         error_code: str,
         chat_id: str,
+        extra_data: dict | None = None,
     ) -> None:
         self.errors.append(
             {
                 "error_message": error_message,
                 "error_code": error_code,
                 "chat_id": chat_id,
+                "extra_data": extra_data,
             }
         )
 
@@ -418,4 +421,56 @@ async def test_handle_user_input_from_api_skips_synthetic_run_complete_when_pers
 
     assert result["status"] == "success"
     assert transport.sent_ui_events == []
+
+
+@pytest.mark.asyncio
+async def test_handle_user_input_from_api_surfaces_token_denial_with_structured_metadata(monkeypatch) -> None:
+    """TokenUsageDenied must surface as INSUFFICIENT_TOKENS, not WORKFLOW_EXECUTION_FAILED."""
+    persistence_manager = _FakePersistenceManager()
+    transport = _DummyTransport(persistence_manager)
+
+    class _DenyingAdapter:
+        async def run(self, request):  # noqa: ANN001
+            raise TokenUsageDenied(
+                TokenUsageDecision(
+                    allowed=False,
+                    reason="insufficient_balance",
+                    error_code="INSUFFICIENT_TOKENS",
+                    wallet_id="ai_tokens",
+                    balance=0,
+                    required_tokens=1,
+                    recovery_action="top_up_tokens",
+                    billing_route="/billing",
+                )
+            )
+
+        async def resume(self, request):  # noqa: ANN001
+            return SimpleNamespace(status=SimpleNamespace(value="completed"))
+
+    async def _noop_apply_context_updates(**_kwargs):  # noqa: ANN003
+        return {}
+
+    monkeypatch.setattr(_bridge_mod, "get_workflow_lifecycle_hooks", lambda _workflow_name: {})
+    monkeypatch.setattr(_ag2_mod, "get_ag2_adapter", lambda: _DenyingAdapter())
+    monkeypatch.setattr(transport, "_apply_user_text_context_updates", _noop_apply_context_updates)
+
+    result = await transport.handle_user_input_from_api(
+        chat_id="chat-deny",
+        user_id="user-1",
+        workflow_name="AppGenerator",
+        message="Run the AI workflow.",
+        app_id="app-1",
+    )
+
+    assert result["status"] == "error"
+    assert result["message"] == "Insufficient token balance"
+    assert len(transport.errors) == 1
+    err = transport.errors[0]
+    assert err["error_code"] == "INSUFFICIENT_TOKENS"
+    assert err["chat_id"] == "chat-deny"
+    assert err["extra_data"] is not None
+    assert err["extra_data"].get("error_code") == "INSUFFICIENT_TOKENS"
+    assert err["extra_data"].get("wallet_id") == "ai_tokens"
+    assert err["extra_data"].get("recovery_action") == "top_up_tokens"
+    assert err["extra_data"].get("billing_route") == "/billing"
 

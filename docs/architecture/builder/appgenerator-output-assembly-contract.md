@@ -19,7 +19,7 @@ AppGenerator emits deterministic app-bundle artifacts for persistent app UI:
 The artifact split is strict:
 
 - `app.json` defines app identity, targets, auth intent, and startup behavior such as `startup.landing_spot`.
-- `admin/admin_registry.yaml` declares all admin portal pages for the app's Studio management surface. Module panels reference these page ids via the `page` field in `modules/{module}/contracts/admin.yaml`.
+- `admin/admin_registry.yaml` declares all AdminPortal pages for the generated app's admin surface. Module panels reference these page ids via the `page` field in `modules/{module}/contracts/admin.yaml`. Standard generated-app admin paths use `/admin`; `/apps/:appId/...` belongs to first-party Studio or explicit hosted-operator surfaces.
 - `ui/pages/*.yaml` define persistent page structure and route ownership.
 - `brand/theme_config.json` defines visual tokens, shared primitives, and semantic `ui.chat` / `ui.shell` / `ui.page` styling.
 - `config/shell.json` defines compact app-wide shell behavior: header logo/actions, canonical shortcuts, navigation policy, non-page-owned navigation items, and chrome mode defaults.
@@ -124,6 +124,7 @@ Rules:
 - custom routes must be owned exclusively by `custom_route_bundle` (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) and must not duplicate any `ui/pages/*.yaml` route
 - every custom route manifest entry must have exactly one `page_files` entry whose `registry_key` matches the route `component`; `save_app_schema` synthesizes `ui/index.js` from that matched pair
 - `app/ui/index.js` must register every component referenced by `ui/route_manifest.json`; missing registrations are export/download blockers, not runtime surprises
+- scoped private routes should declare route `meta.routeAuth` when route path or query params identify a resource whose visibility depends on membership, ownership, tenant/workspace access, or an invitation/access state. Declarative pages use `ui/pages/*.yaml -> meta.routeAuth`; custom routes use `ui/route_manifest.json -> pages[].meta.routeAuth`.
 - `admin/admin_registry.yaml` declares admin page and panel metadata; it is not a route registry and must not own full-page custom route components
 - managed-capability pages must bind through an app-owned facade module endpoint such as `/api/modules/analytics_dashboard/get_metrics`, never directly to managed-capability internals
 - declarative pages may launch workflow sessions through typed page actions (`action_type: workflow`), but workflow-local React still belongs to AgentGenerator and `chat.tool_call`
@@ -189,6 +190,51 @@ of these are true:
 
 Generation should catch missing or mismatched component registrations before
 download/export.
+
+### Scoped route authorization
+
+`routeAuth` is the first-class route metadata contract for declarative pages
+and custom full-page routes that need a pre-render authorization check. It is
+not app-specific and it does not encode policy in the shell. Route metadata
+names an app-owned module action, and the module action makes the authorization
+decision using the normal service/policy layer.
+
+In AppSchemaAgent structured output, `routeAuth.params` is emitted as strict
+`{key, value}` entries so provider response-format validation remains enabled.
+`save_app_schema` normalizes those entries into the runtime object shape written
+to generated YAML/JSON.
+
+Example:
+
+```json
+{
+  "name": "ProjectSettings",
+  "route": "/projects/:projectId/settings",
+  "title": "Project Settings",
+  "page_type": "settings",
+  "layout": "grid",
+  "meta": {
+    "routeAuth": {
+      "module": "project_access",
+      "action": "authorize_project_route",
+      "params": [{ "key": "project_id", "value": "$route.projectId" }]
+    }
+  },
+  "sections": [
+    {
+      "id": "project-settings-header",
+      "primitive": "PageHeader",
+      "config": { "title": "Project Settings" }
+    }
+  ]
+}
+```
+
+The target module action must return `{ "allowed": true }` to render the
+route. Returning `{ "allowed": false, "reason": "..." }` denies the route and
+lets the shell show the denial reason. This gate protects deep links and avoids
+rendering pages before scope is known, but backend module actions must
+still perform their own authorization checks.
 
 ### 2b. AdminRegistryAgent
 

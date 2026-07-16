@@ -32,9 +32,45 @@ class TokenUsageDecision:
     allowed: bool
     reason: str
     error_code: str | None = None
+    app_id: str | None = None
     wallet_id: str | None = None
     balance: int | None = None
     required_tokens: int | None = None
+    scope: str | None = None
+    user_id: str | None = None
+    tenant_id: str | None = None
+    workspace_id: str | None = None
+    recovery_action: str | None = None
+    billing_route: str | None = None
+    top_up_route: str | None = None
+    upgrade_route: str | None = None
+    contact_route: str | None = None
+    recovery_message: str | None = None
+    top_up_product_ids: tuple[str, ...] = ()
+
+    def to_error_metadata(self) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in {
+                "error_code": self.error_code,
+                "app_id": self.app_id,
+                "wallet_id": self.wallet_id,
+                "balance": self.balance,
+                "required_tokens": self.required_tokens,
+                "scope": self.scope,
+                "user_id": self.user_id,
+                "tenant_id": self.tenant_id,
+                "workspace_id": self.workspace_id,
+                "recovery_action": self.recovery_action,
+                "billing_route": self.billing_route,
+                "top_up_route": self.top_up_route,
+                "upgrade_route": self.upgrade_route,
+                "contact_route": self.contact_route,
+                "recovery_message": self.recovery_message,
+                "top_up_product_ids": list(self.top_up_product_ids),
+            }.items()
+            if value not in (None, "", [])
+        }
 
 
 class TokenUsageDenied(RuntimeError):
@@ -163,9 +199,15 @@ class TokenUsageGuard:
                     allowed=False,
                     reason="insufficient_balance",
                     error_code="INSUFFICIENT_TOKENS",
+                    app_id=app_id_text,
                     wallet_id=wallet.wallet_id,
                     balance=current_balance,
                     required_tokens=required,
+                    scope=wallet.scope,
+                    user_id=user_id_text if wallet.scope == "user" else None,
+                    tenant_id=tenant_id_text if wallet.scope == "tenant" else None,
+                    workspace_id=workspace_id_text,
+                    **self._recovery_metadata(config, wallet),
                 )
 
         return TokenUsageDecision(allowed=True, reason="sufficient_balance")
@@ -212,6 +254,27 @@ class TokenUsageGuard:
                 wallet_id=wallet.wallet_id,
             )
         return None
+
+    @staticmethod
+    def _recovery_metadata(
+        config: SubscriptionsConfig,
+        wallet: TokenWalletDef,
+    ) -> dict[str, Any]:
+        configured = wallet.depleted_balance
+        top_up_products = config.top_up_products_for_wallet(wallet.wallet_id)
+        default_action = "top_up" if top_up_products else "upgrade"
+        billing_route = getattr(configured, "billing_route", None) or "/billing"
+        top_up_route = getattr(configured, "top_up_route", None) or (billing_route if top_up_products else None)
+        upgrade_route = getattr(configured, "upgrade_route", None) or "/pricing"
+        return {
+            "recovery_action": getattr(configured, "recovery_action", None) or default_action,
+            "billing_route": billing_route,
+            "top_up_route": top_up_route,
+            "upgrade_route": upgrade_route,
+            "contact_route": getattr(configured, "contact_route", None),
+            "recovery_message": getattr(configured, "message", None),
+            "top_up_product_ids": tuple(product.product_id for product in top_up_products),
+        }
 
 
 __all__ = ["TokenUsageDecision", "TokenUsageDenied", "TokenUsageGuard"]

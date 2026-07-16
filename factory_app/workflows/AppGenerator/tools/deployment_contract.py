@@ -22,7 +22,7 @@ _PROHIBITED_CONTENT_PATTERNS = [
     re.compile(r"github_pat_[A-Za-z0-9_]{30,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"(?i)azure[_-]?subscription[_-]?id\s*[:=]\s*[0-9a-f-]{36}"),
-    re.compile(r"(?i)(token|secret|password)\s*[:=]\s*[^\s\"']{8,}"),
+    re.compile(r"(?im)(token|secret|password)[ \t]*[:=][ \t]*[^\s\"']{8,}"),
 ]
 _FORBIDDEN_SECRET_KEY_FRAGMENTS = (
     "secret",
@@ -66,6 +66,15 @@ def _list_of_str(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if isinstance(item, str) and str(item).strip()]
+
+
+def _merge_env_names(base: list[str], extra: list[str] | None) -> list[str]:
+    merged: list[str] = []
+    for item in [*base, *list(extra or [])]:
+        name = str(item or "").strip()
+        if name and name not in merged:
+            merged.append(name)
+    return merged
 
 
 def _looks_like_url(value: Any) -> bool:
@@ -555,6 +564,10 @@ def build_deploy_target_spec(
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
     include_compose: bool = False,
+    extra_required_variables: list[str] | None = None,
+    extra_optional_variables: list[str] | None = None,
+    extra_secret_variables: list[str] | None = None,
+    extra_public_variables: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a provider-neutral DeployTargetSpec dictionary."""
     resolved_target_id = str(target_id or deployment_profile or DEFAULT_PROFILE).strip() or DEFAULT_PROFILE
@@ -580,17 +593,29 @@ def build_deploy_target_spec(
         },
         "artifact_outputs": outputs,
         "environment": {
-            "required_variables": ["OPENAI_API_KEY", "MONGO_URI"],
-            "optional_variables": ["MOZAIKS_APP_ID", "MOZAIKS_BACKEND_URL", "INTERNAL_API_KEY"],
-            "secret_variables": ["OPENAI_API_KEY", "MONGO_URI", "INTERNAL_API_KEY"],
-            "public_variables": [
-                "VITE_APP_ID",
-                "VITE_API_URL",
-                "VITE_WS_URL",
-                "VITE_CORE_URL",
-                "VITE_AGENT_WEBSOCKET_URL",
-                "VITE_AGENT_API_URL",
-            ],
+            "required_variables": _merge_env_names(["OPENAI_API_KEY", "MONGO_URI"], extra_required_variables),
+            "optional_variables": _merge_env_names(
+                ["MOZAIKS_APP_ID", "MOZAIKS_BACKEND_URL", "INTERNAL_API_KEY"],
+                extra_optional_variables,
+            ),
+            "secret_variables": _merge_env_names(
+                ["OPENAI_API_KEY", "MONGO_URI", "INTERNAL_API_KEY"],
+                extra_secret_variables,
+            ),
+            "public_variables": _merge_env_names(
+                [
+                    "VITE_APP_ID",
+                    "VITE_API_URL",
+                    "VITE_WS_URL",
+                    "VITE_CORE_URL",
+                    "VITE_AGENT_WEBSOCKET_URL",
+                    "VITE_AGENT_API_URL",
+                    "VITE_OIDC_AUTHORITY",
+                    "VITE_OIDC_CLIENT_ID",
+                    "VITE_OIDC_REDIRECT_URI",
+                ],
+                extra_public_variables,
+            ),
         },
         "image": {
             "image_name": f"{str(app_id).strip() or 'generated-app'}-runtime",
@@ -1031,6 +1056,10 @@ def generate_deployment_artifacts(
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
     include_compose: bool = False,
+    extra_required_variables: list[str] | None = None,
+    extra_optional_variables: list[str] | None = None,
+    extra_secret_variables: list[str] | None = None,
+    extra_public_variables: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate deterministic deployment artifacts and validated manifests."""
     spec = build_deploy_target_spec(
@@ -1041,6 +1070,10 @@ def generate_deployment_artifacts(
         include_dockerfiles=include_dockerfiles,
         include_workflow=include_workflow,
         include_compose=include_compose,
+        extra_required_variables=extra_required_variables,
+        extra_optional_variables=extra_optional_variables,
+        extra_secret_variables=extra_secret_variables,
+        extra_public_variables=extra_public_variables,
     )
     spec_errors = validate_deploy_target_spec(spec)
 

@@ -2146,7 +2146,7 @@ resolver may copy exactly these relative paths (under `modules/{module_id}/`):
 | `contracts/events.yaml` | Domain events emitted by the module |
 | `contracts/reactions.yaml` | Event reactions owned by the module |
 | `contracts/notifications.yaml` | Notification rules per event |
-| `contracts/settings.yaml` | User-facing preferences schema |
+| `contracts/settings.yaml` | Module-owned settings schema for module/admin/config surfaces |
 | `contracts/admin.yaml` | Admin panel declarations |
 | `contracts/profile.yaml` | User profile panel declarations |
 

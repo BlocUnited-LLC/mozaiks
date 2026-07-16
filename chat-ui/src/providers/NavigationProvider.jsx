@@ -29,7 +29,7 @@ const DEFAULT_NAVIGATION = {
     defaultLabel: 'User',
     sublabel: null,
     menu: [
-      { id: 'profile', label: 'Account', action: 'navigate', path: '/profile' },
+      { id: 'profile', label: 'Account', action: 'navigate', path: '/me' },
     ],
   },
   notifications: { icon: null, show: true, path: '/notifications', emptyText: 'No unread notifications' },

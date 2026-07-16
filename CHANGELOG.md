@@ -12,6 +12,27 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+No changes yet.
+
+## 0.1.10 - 2026-07-16
+
+### Added
+
+- Added provider-neutral billing fulfillment primitives for idempotent subscription assignment, token wallet credit/debit, durable command replay/conflict logging, and generated-app cash-to-token runtime integration.
+- Added first-class subscription checkout, token status, token top-up, and depleted-balance recovery contracts to the MozaiksPay generated-app facade path while keeping provider checkout and fulfillment behind MozaiksPay/OSS billing boundaries.
+- Added the generated-app MozaiksPay capability pack contract, provider API contract, billing portal facade updates, and usage/billing pages for provider-neutral SaaS subscription apps.
+- Added workflow transport bridging so generated workflow capabilities can be invoked through the platform capability route contract.
+
+### Changed
+
+- Hardened AppGenerator route metadata, generated UI drift guards, module API template output, generated bundle scanning, and provider-neutral deployment/env manifests for future generated apps.
+- Expanded Mozaiks documentation for local setup, CLI reference, self-hosting, architecture, and the 0.1.10 cash-to-token loop.
+
+### Fixed
+
+- Fixed generated capability env contracts so provider-specific env vars stay metadata-driven instead of being inlined into capability packs.
+- Fixed generated OIDC env placeholders and billing runtime type contracts for stricter CI/runtime validation.
+
 ## 0.1.9 - 2026-07-15
 
 ### Fixed

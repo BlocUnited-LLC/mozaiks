@@ -11,6 +11,13 @@ docs_dir: docs
 # published to docs.mozaiks.ai.
 exclude_docs: |
   architecture/old/**
+  reviews/**
+  operations/**
+  prism/**
+  enterprise-readiness-report.md
+  yc-alignment.md
+  mozaiks-framework-analysis.md
+  architecture/mozaiksai/cash-to-token-loop-0-1-10.md
 
 extra:
   generator: false
@@ -40,6 +47,7 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
+    - navigation.indexes
     - navigation.expand
     - navigation.top
     - search.suggest
@@ -86,31 +94,34 @@ validation:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Key Concepts: concepts.md
+  - CLI Reference: cli-reference.md
   - Guides:
-      - Overview: guides/index.md
+      - guides/index.md
       - Use Studio: guides/studio/01-overview.md
       - Integrations: guides/integrations/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
       - Add a Page: guides/adding-pages/01-overview.md
       - Extending AI Functionality:
-          - Overview: guides/extending-ai-functionality/01-overview.md
-          - AI Runtime Startup: guides/extending-ai-functionality/02-ai-runtime-startup.md
-          - Control-Plane Runtime Policy: guides/extending-ai-functionality/03-control-plane-runtime-policy.md
-          - Control-Plane Manifest: guides/extending-ai-functionality/04-control-plane-manifest.md
-          - Workflow Sequences: guides/extending-ai-functionality/05-workflow-sequences.md
+          - guides/extending-ai-functionality/01-overview.md
+          - Startup Config: guides/extending-ai-functionality/02-ai-runtime-startup.md
+          - Refinement Policy: guides/extending-ai-functionality/03-control-plane-runtime-policy.md
+          - Artifact Routing: guides/extending-ai-functionality/04-control-plane-manifest.md
+          - Workflow Registry: guides/extending-ai-functionality/05-workflow-sequences.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
-      - Platform Intelligence:
+      - Self-Hosting: guides/self-hosting.md
+      - Context & Refinement:
           - Context Graph: guides/platform-intelligence/01-context-graph.md
           - Harness: guides/platform-intelligence/02-harness.md
           - Refinement: guides/platform-intelligence/03-refinement.md
   - Studio:
-      - Overview: studio/index.md
+      - studio/index.md
       - Workspace Pages: studio/workspace-pages.md
       - App Dashboard: studio/app-dashboard.md
-      - UI/UX and Primitives: studio/ui-ux-primitives.md
+      - Interface Conventions: studio/ui-ux-primitives.md
   - Architecture:
-      - Overview: architecture/index.md
+      - architecture/index.md
       - Foundations:
           - Overview: architecture/foundations/overview.md
           - Distribution and Workspace Model: architecture/foundations/distribution-and-workspace-model.md
@@ -121,7 +132,7 @@ nav:
           - Context Graph and Code Intelligence: architecture/foundations/context-graph-and-code-intelligence.md
           - App Context and Brownfield Adoption: architecture/foundations/app-context-and-brownfield-adoption.md
       - App Architecture:
-          - Overview: architecture/app/index.md
+          - architecture/app/index.md
           - Generated App Lifecycle: architecture/app/generated-app-lifecycle-model.md
           - Canonical App Structure: architecture/app/canonical-app-structure.md
           - App Manifest and Platform Targets: architecture/app/app-manifest-and-platform-targets.md
@@ -135,14 +146,14 @@ nav:
           - Tenant Auth and Scope: architecture/app/tenant-auth-and-scope.md
           - App-Local Control Plane Pack: architecture/app/control-plane-pack.md
       - Module Systems:
-          - Overview: architecture/modules-systems/index.md
+          - architecture/modules-systems/index.md
           - Module System: architecture/modules-systems/module-system.md
           - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
           - Internal Messaging: architecture/modules-systems/internal-messaging.md
           - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
           - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
       - Workflows:
-          - Overview: architecture/workflows/index.md
+          - architecture/workflows/index.md
           - Workflow Architecture: architecture/workflows/workflow-architecture.md
           - Workflow Authoring Contracts: architecture/workflows/workflow-authoring-contracts.md
           - Workflow Routing Transitions: architecture/workflows/workflow-routing-transitions.md
@@ -159,7 +170,7 @@ nav:
           - Session Router: architecture/workflows/session-router.md
           - Control-Plane Harness Architecture: architecture/workflows/control-plane-harness-architecture.md
       - MozaiksAI Runtime:
-          - Overview: architecture/mozaiksai/index.md
+          - architecture/mozaiksai/index.md
           - Workflow and Orchestration:
               - Workflow Task Batches: architecture/mozaiksai/task-batches.md
               - Universal Orchestrator: architecture/mozaiksai/universal-orchestrator.md
@@ -197,7 +208,7 @@ nav:
           - OSS Infra and Generated App Deployment: architecture/deployment/oss-infra-and-generated-app-deployment.md
           - Generated App Deployment Contract: architecture/deployment/generated-app-deployment-contract.md
       - Frontend UI:
-          - Overview: architecture/frontend/index.md
+          - architecture/frontend/index.md
           - Chat UI Runtime:
               - UI Surface Model: architecture/frontend/chat-ui/ui-surface-model.md
               - Conversation Modes: architecture/frontend/chat-ui/conversation-modes.md
@@ -215,7 +226,7 @@ nav:
           - Mobile Client Contract: architecture/mobile-client-contract.md
           - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
   - Contributing:
-      - Overview: contributing/index.md
+      - contributing/index.md
       - Contributor Guidance Readiness: contributing/contributor-guidance-readiness.md
       - Local Setup: local-setup.md
       - Manual Smoke Tests:

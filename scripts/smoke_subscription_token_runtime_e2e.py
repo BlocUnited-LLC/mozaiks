@@ -4,8 +4,8 @@ This smoke exercises the generic OSS SaaS runtime path against a real MongoDB
 process and a stub LLM provider:
 
 1. Load a factory-shaped app with config/subscriptions.yaml.
-2. Store an active subscription assignment in the app data database.
-3. Materialize token allowances in RuntimeTokenWallet collections.
+2. Apply a provider-neutral BillingFulfillmentCommand for an active plan.
+3. Verify fulfillment materializes token allowances in RuntimeTokenWallet collections.
 4. Allow an LLM boundary call while balance is sufficient.
 5. Debit usage idempotently.
 6. Deny a later LLM boundary call before the provider is invoked.
@@ -29,6 +29,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from mozaiksai.core.billing.fulfillment import (
+    BillingFulfillmentCommand,
+    BillingFulfillmentCommandStore,
+    BillingFulfillmentService,
+)
 from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
 from mozaiksai.core.core_config import close_mongo_client, get_mongo_client
 from mozaiksai.core.data.persistence.namespaces import SYSTEM_DATABASE, RuntimeCollections
@@ -44,6 +49,7 @@ class SmokeResult:
     app_id: str
     user_id: str
     app_database: str
+    fulfillment_status: str
     initial_balance: int
     balance_after_debit: int
     provider_calls_before_denial: int
@@ -210,7 +216,6 @@ async def run_smoke(
     close_mongo_client()
 
     client = get_mongo_client()
-    app_db = client[app_database_name]
     token_db = client[SYSTEM_DATABASE]
     ledger = TokenWalletLedger()
 
@@ -223,20 +228,22 @@ async def run_smoke(
         wallet = config.token_wallet_by_id("ai_tokens")
         assert wallet is not None
 
-        assignments = app_db["subscription_token_smoke_subscriptions"]
-        await assignments.insert_one(
-            {
-                "app_id": app_id,
-                "user_id": user_id,
-                "tenant_id": None,
-                "workspace_id": None,
-                "plan_id": "pro",
-                "status": "active",
-                "granted_capabilities": [
-                    {"pack_id": "ai", "capability_id": "ai.chat"}
-                ],
-            }
+        fulfillment = BillingFulfillmentService(
+            config=config,
+            ledger=ledger,
+            command_store=BillingFulfillmentCommandStore(database=token_db),
         )
+        fulfillment_result = await fulfillment.apply_durable(
+            BillingFulfillmentCommand(
+                command_id=f"cmd_smoke_activate_{uuid4().hex}",
+                event_type="subscription_activated",
+                source="test",
+                app_id=app_id,
+                user_id=user_id,
+                plan_id="pro",
+            )
+        )
+        assert fulfillment_result.success is True
 
         service = SimpleLLMCapabilityService()
         fake_client = _FakeLLMClient()
@@ -310,6 +317,7 @@ async def run_smoke(
             app_id=app_id,
             user_id=user_id,
             app_database=app_database_name,
+            fulfillment_status=fulfillment_result.status,
             initial_balance=initial_balance,
             balance_after_debit=balance_after_debit,
             provider_calls_before_denial=calls_before_denial,
@@ -319,6 +327,7 @@ async def run_smoke(
     finally:
         await token_db[RuntimeCollections.RUNTIME_TOKEN_WALLET_BALANCES].delete_many({"app_id": app_id})
         await token_db[RuntimeCollections.RUNTIME_TOKEN_WALLET_ENTRIES].delete_many({"app_id": app_id})
+        await token_db[RuntimeCollections.RUNTIME_BILLING_FULFILLMENT_COMMANDS].delete_many({"app_id": app_id})
         await client.drop_database(app_database_name)
         close_mongo_client()
         for key, value in original_env.items():

@@ -46,6 +46,7 @@ task_contracts:
       - The api_endpoint field on a page section is a POST path only — no query strings, fragments, or dynamic path segments. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
       - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
+      - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), navigate to insufficientTokensRecoveryPath(err), and return without retrying automatically.
 
   subscription_config:
     owner_agent: ConfigMiddlewareAgent
@@ -61,12 +62,16 @@ task_contracts:
       - Do not emit modules/{pack_name}/contracts/subscriptions.yaml or any module-local subscriptions.yaml.
       - Do not emit hosted billing admin actions, payment-provider products, price ids, invoices, checkout internals, or settlement logic in this file.
         - token_wallets live at the config root and are provider-neutral.
+        - token_wallets[].depleted_balance declares safe app-local recovery routes for INSUFFICIENT_TOKENS; routes must not be external provider URLs.
+        - top_up_products live at the config root and declare provider-neutral app-owned token packs by product_id, wallet_id, token_amount, and price.amount_cents/currency only.
         - token_allowances live under plans[] and every wallet_id must reference a declared token_wallet.
         - assignment_store declares where active app-owned subscription assignments are read by ConfiguredEntitlementAdapter.
         - Optional usage_charge_policies live at the config root and describe app-level customer charge estimates only; they may use runtime_llm_usage, provider_cost_usd markup, or a fixed token unit price.
         - Optional pricing_catalog groups are display metadata for public pricing tabs/service selectors only. They may group declared plan_ids and app/provider-owned add_on_ids, but they must not grant capabilities or carry payment-provider price IDs.
       - Use pricing_catalog when an app sells multiple service lines on one pricing surface, such as platform access, token packs, hosting, domains, marketing, or support.
       - Generated module actions that require paid access must declare actions[].entitlement_gate with a capability_id granted by at least one plan.
+      - Monetized AI/token apps must expose billing/top-up/usage pages through an app-owned billing_portal facade module; pages must not call hosted or provider internals directly.
+      - Token wallets and token_allowances are only for apps selling AI usage, credits, quotas, token packs, or usage-charge estimates; access-only SaaS plans must omit those fields.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
 
   module_contract:

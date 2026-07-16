@@ -110,8 +110,41 @@ def test_env_example_contains_placeholders_not_secrets() -> None:
 
     assert "OPENAI_API_KEY=" in env_example
     assert "MONGO_URI=" in env_example
+    assert "VITE_OIDC_AUTHORITY=" in env_example
+    assert "VITE_OIDC_CLIENT_ID=" in env_example
+    assert "VITE_OIDC_REDIRECT_URI=" in env_example
     assert "OPENAI_API_KEY=sk-" not in env_example
     assert "MONGO_URI=mongodb+srv://" not in env_example
+
+
+def test_generate_artifacts_accept_extra_capability_env_handles() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        extra_optional_variables=[
+            "MOZAIKS_APP_URL",
+            "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY",
+        ],
+        extra_secret_variables=["MOZAIKSPAY_CLIENT_SECRET", "MOZAIKSPAY_API_KEY"],
+    )
+    manifest = result["deployment_manifest"]
+    env_example = result["artifacts"]["env.example"]
+
+    assert "MOZAIKSPAY_API_BASE=" in env_example
+    assert "MOZAIKSPAY_CLIENT_ID=" in env_example
+    assert "MOZAIKSPAY_CLIENT_SECRET=\n" in env_example
+    assert "MOZAIKSPAY_API_KEY=\n" in env_example
+    assert "MOZAIKS_APP_URL=" in env_example
+    assert "MOZAIKSPAY_CLIENT_SECRET" in manifest["secret_env"]
+    assert "MOZAIKSPAY_API_KEY" in manifest["secret_env"]
+    assert "MOZAIKSPAY_CLIENT_SECRET=secret" not in env_example
+    assert result["bundle_errors"] == []
 
 
 def test_secret_variables_are_listed_but_not_assigned_values() -> None:
