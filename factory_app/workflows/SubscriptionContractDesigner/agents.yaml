@@ -27,6 +27,10 @@ agents:
             when the app has multiple service lines on one pricing surface
           - provider-neutral token_wallets and token_allowances when the app sells
             token budgets or AI usage quotas
+          - provider-neutral top_up_products when users can buy token packs
+            outside a recurring plan
+          - depleted-balance recovery metadata on token wallets so generated UI
+            can route INSUFFICIENT_TOKENS to billing, top-up, upgrade, or admin contact
           - provider-neutral usage_charge_policies when the app charges users
             for measured AI usage, including markup over provider cost or a
             fixed customer token unit price
@@ -106,9 +110,24 @@ agents:
              - Do not invent capabilities just to make tiers look different.
              - Put entitlement gates only on actions that truly require paid
                access. Public readonly plan browsing must stay ungated.
-             - Use usage_limits and token_allowances only for AI, request, credit,
-               or resource budgets that are visible in upstream workflow/module
-               context or explicitly requested by builder_options.
+             - Use usage_limits, token_wallets, and token_allowances only for
+               AI, request, credit, or resource budgets that are visible in
+               upstream workflow/module context or explicitly requested by
+               builder_options.
+             - Do not emit token_wallets, token_allowances, or top_up_products
+               for ordinary subscription tiers that sell access only. Access-only
+               SaaS uses plans, capabilities, assignment_store, and
+               entitlement_gate without token wallet fields.
+             - Use top_up_products only when the app lets users buy additional
+               token packs or credits outside their recurring allowance. These
+               products declare app-owned product ids, wallet ids, token
+               amounts, and provider-neutral price.amount_cents/currency only;
+               never provider price ids or checkout session ids.
+             - When any token_wallet has auto_debit_usage=true and
+               allow_negative_balance=false, include depleted_balance metadata
+               with app-local routes. Prefer recovery_action: top_up when
+               top_up_products exist for the wallet; otherwise prefer upgrade
+               or contact_admin based on the app's plan model.
              - Use usage_charge_policies only when the app charges users for
                measured AI usage. If upstream context does not specify a rate,
                prefer basis: provider_cost_usd with a modest markup_percent and
@@ -160,10 +179,22 @@ agents:
              Do not use hosted-product capability ids.
           6. If a plan grants a capability, the module action that requires it
              must declare actions[].entitlement_gate with that exact capability_id.
-          7. If AI usage or paid-resource usage is sold as a quota, declare a
-             token_wallet at config root and token_allowances on paid plans.
+          7. If AI usage, credits, paid-resource usage, or top-up token packs are
+             sold as a quota, declare a token_wallet at config root and
+             token_allowances on paid plans when the plan includes an allowance.
+             If the app sells access only, omit token_wallets, token_allowances,
+             and top_up_products entirely.
           8. token_allowances.wallet_id must reference a declared token_wallet.
           9. token wallets are provider-neutral. They are not payment providers.
+          9a. top_up_products are provider-neutral app-owned token packs. They
+              must reference declared token_wallets, include a positive
+              price.amount_cents plus lowercase price.currency, and must not
+              contain provider product ids, provider price ids, checkout
+              session ids, invoices, taxes, or settlement details.
+          9b. token_wallets[].depleted_balance declares safe app-local recovery
+              routes for INSUFFICIENT_TOKENS. Routes must be generated app
+              paths such as /billing, /pricing, or /support; never external
+              provider URLs.
           10. usage_charge_policies are provider-neutral customer charge estimate
               policies. Use source: runtime_llm_usage. Use basis: provider_cost_usd
               with markup_percent when the app charges cost-plus. Use basis: tokens

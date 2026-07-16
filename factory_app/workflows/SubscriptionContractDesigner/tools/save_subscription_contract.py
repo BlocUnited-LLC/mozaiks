@@ -88,7 +88,53 @@ def _normalize_subscription_config(raw: Any) -> dict[str, Any]:
     config.setdefault("token_wallets", [])
     config.setdefault("plans", [])
     validated = SubscriptionsConfig.model_validate(config)
-    return validated.model_dump(mode="python", exclude_none=True)
+    normalized = validated.model_dump(mode="python", exclude_none=True)
+    for key in ("token_wallets", "top_up_products", "usage_charge_policies"):
+        if normalized.get(key) == []:
+            normalized.pop(key, None)
+    for plan in normalized.get("plans") or []:
+        if not isinstance(plan, dict):
+            continue
+        if plan.get("usage_limits") == []:
+            plan.pop("usage_limits", None)
+        if plan.get("token_allowances") == []:
+            plan.pop("token_allowances", None)
+    return normalized
+
+
+def _token_wallet_usage_intent_present(
+    output: dict[str, Any],
+    config: SubscriptionsConfig,
+) -> bool:
+    if config.top_up_products or config.usage_charge_policies:
+        return True
+    if any(plan.usage_limits for plan in config.plans):
+        return True
+    if output.get("metering_declarations"):
+        return True
+    for update in output.get("module_contract_updates") or []:
+        if isinstance(update, dict) and update.get("metering"):
+            return True
+    for update in output.get("workflow_contract_updates") or []:
+        if isinstance(update, dict) and update.get("metering"):
+            return True
+    return False
+
+
+def _validate_token_wallet_scope(output: dict[str, Any], config: SubscriptionsConfig) -> None:
+    has_plan_allowances = any(plan.token_allowances for plan in config.plans)
+    if (has_plan_allowances or config.top_up_products) and not config.token_wallets:
+        raise ValueError(
+            "token_allowances and top_up_products require declared token_wallets; "
+            "subscription-only apps must omit all token wallet fields."
+        )
+    if not config.token_wallets:
+        return
+    if not _token_wallet_usage_intent_present(output, config):
+        raise ValueError(
+            "token_wallets are only valid when the app sells AI usage, credits, "
+            "quotas, top-ups, usage charge estimates, or declares metered AI/resource surfaces."
+        )
 
 
 def _yaml_file_content(config: dict[str, Any]) -> str:
@@ -126,7 +172,12 @@ def _normalized_noop(output: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_required(output: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(output)
-    config = _normalize_subscription_config(normalized.get("subscription_config_file"))
+    raw_config = normalized.get("subscription_config_file")
+    config = _normalize_subscription_config(raw_config)
+    _validate_token_wallet_scope(
+        normalized,
+        SubscriptionsConfig.model_validate(config),
+    )
     normalized["subscription_config_file"] = config
     normalized["plan_design_rationale"] = list(normalized.get("plan_design_rationale") or [])
     normalized["code_files"] = [

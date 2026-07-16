@@ -221,6 +221,76 @@ class MozaiksPayClient:
             provider_auth=True,
         )
 
+    async def create_subscription_checkout_session(
+        self,
+        *,
+        plan_id: str,
+        success_url: str,
+        cancel_url: str,
+        customer_email: str | None = None,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a hosted subscription checkout redirect session."""
+        settings = await self._settings()
+        self._require_provider_credentials(settings)
+        api_base = settings.api_base
+        if not api_base:
+            raise MozaiksPayConfigurationError("MozaiksPay provider API base is required.")
+        payload = {
+            "plan_id": plan_id,
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "customer_email": _clean(customer_email),
+            **_scope_params(user_id=user_id, tenant_id=tenant_id, workspace_id=workspace_id),
+        }
+        return await self._request(
+            "POST",
+            f"{api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/subscription/checkout-session",
+            json=payload,
+            settings=settings,
+            provider_auth=True,
+        )
+
+    async def create_token_top_up_session(
+        self,
+        *,
+        product_id: str,
+        success_url: str,
+        cancel_url: str,
+        wallet_id: str,
+        token_amount: int,
+        amount_cents: int,
+        currency: str = "usd",
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a hosted token top-up checkout session when the provider supports it."""
+        settings = await self._settings()
+        self._require_provider_credentials(settings)
+        api_base = settings.api_base
+        if not api_base:
+            raise MozaiksPayConfigurationError("MozaiksPay provider API base is required.")
+        payload: dict[str, Any] = {
+            "product_id": product_id,
+            "wallet_id": wallet_id,
+            "token_amount": int(token_amount),
+            "amount_cents": int(amount_cents),
+            "currency": currency,
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            **_scope_params(user_id=user_id, tenant_id=tenant_id, workspace_id=workspace_id),
+        }
+        return await self._request(
+            "POST",
+            f"{api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/tokens/top-up-session",
+            json=payload,
+            settings=settings,
+            provider_auth=True,
+        )
+
     async def _settings(self) -> MozaiksPayConnectorSettings:
         if self._settings_cache is not None:
             return self._settings_cache

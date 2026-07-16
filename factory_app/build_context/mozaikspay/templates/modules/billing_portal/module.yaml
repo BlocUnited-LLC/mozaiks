@@ -58,6 +58,26 @@ actions:
         source: {type: string}
     permissions: [billing_portal.read]
 
+  - id: get_token_status
+    description: >
+      Return runtime AI token usage plus provider-neutral token wallet and top-up
+      product metadata declared in app/config/subscriptions.yaml.
+    handler_method: get_token_status
+    input_schema:
+      type: object
+      properties:
+        limit: {type: integer, default: 500}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        runtime_ai_usage: {type: object}
+        token_wallets: {type: array}
+        top_up_products: {type: array}
+        source: {type: string}
+    permissions: [billing_portal.read]
+
   - id: list_plans
     description: >
       Return the available plan catalog declared in app/config/subscriptions.yaml.
@@ -82,7 +102,64 @@ actions:
               description: {type: string}
               capabilities: {type: array, items: {type: string}}
               usage_limits: {type: object}
+              token_allowances: {type: array}
+        top_up_products: {type: array}
+        pricing_catalog: {type: object}
     permissions: [billing_portal.read]
+
+  - id: start_subscription_checkout
+    description: >
+      Create a hosted subscription checkout session through MozaiksPayClient and
+      return checkout_url for immediate redirect. The app must not store the URL.
+    handler_method: start_subscription_checkout
+    input_schema:
+      type: object
+      required: [plan_id, success_url, cancel_url]
+      properties:
+        plan_id: {type: string}
+        success_url: {type: string}
+        cancel_url: {type: string}
+        customer_email: {type: string, nullable: true}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        checkout_url: {type: string, nullable: true}
+        success_url: {type: string, nullable: true}
+        cancel_url: {type: string, nullable: true}
+        plan_id: {type: string, nullable: true}
+        error: {type: string, nullable: true}
+    permissions: [billing_portal.manage]
+
+  - id: start_token_top_up
+    description: >
+      Create a hosted token top-up checkout session through MozaiksPayClient for
+      a provider-neutral top_up_products entry declared in subscriptions.yaml.
+      The payment provider must confirm payment before tokens are credited.
+    handler_method: start_token_top_up
+    input_schema:
+      type: object
+      required: [product_id, success_url, cancel_url]
+      properties:
+        product_id: {type: string}
+        success_url: {type: string}
+        cancel_url: {type: string}
+    output_schema:
+      type: object
+      required: [success]
+      properties:
+        success: {type: boolean}
+        checkout_url: {type: string, nullable: true}
+        success_url: {type: string, nullable: true}
+        cancel_url: {type: string, nullable: true}
+        product_id: {type: string, nullable: true}
+        wallet_id: {type: string, nullable: true}
+        token_amount: {type: integer, nullable: true}
+        amount_cents: {type: integer, nullable: true}
+        currency: {type: string, nullable: true}
+        error: {type: string, nullable: true}
+    permissions: [billing_portal.manage]
 
   - id: open_billing_portal
     description: >

@@ -23,12 +23,33 @@ class BillingPortalHandler:
     ) -> dict[str, Any]:
         return await self.service.get_usage_status(ctx, **params)
 
+    async def get_token_status(
+        self,
+        ctx: Any,
+        **params: Any,
+    ) -> dict[str, Any]:
+        return await self.service.get_token_status(ctx, **params)
+
     async def list_plans(
         self,
         ctx: Any,
         **params: Any,
     ) -> dict[str, Any]:
         return await self.service.list_plans(ctx)
+
+    async def start_subscription_checkout(
+        self,
+        ctx: Any,
+        **params: Any,
+    ) -> dict[str, Any]:
+        return await self.service.start_subscription_checkout(ctx, **params)
+
+    async def start_token_top_up(
+        self,
+        ctx: Any,
+        **params: Any,
+    ) -> dict[str, Any]:
+        return await self.service.start_token_top_up(ctx, **params)
 
     async def open_billing_portal(
         self,

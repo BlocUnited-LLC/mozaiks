@@ -80,7 +80,9 @@ runtime_boundaries:
   - id: usage_runtime
     rule: Read runtime token usage through /api/me/usage or /api/admin/usage; use the OSS token wallet ledger for balances instead of app-local duplicate ledgers.
   - id: plan_limits
-    rule: Use app/config/subscriptions.yaml usage_limits, token_wallets, and token_allowances for generated SaaS plan limits and token allowances.
+    rule: Use app/config/subscriptions.yaml usage_limits, token_wallets, token_allowances, depleted_balance, and top_up_products for generated SaaS plan limits, token allowances, and recovery paths only when the app sells AI usage, credits, quotas, or token packs; access-only plans omit token wallet fields.
+  - id: token_top_ups
+    rule: Token top-up products are provider-neutral app contract entries; MozaiksPay only creates checkout sessions and must confirm payment before OSS billing fulfillment credits tokens.
   - id: managed_internals
     rule: Do not generate managed service internals, checkout, wallet, settlement logic, private APIs, or provider credentials.
   - id: connector_boundary
@@ -96,8 +98,16 @@ facades:
       - create_billing_portal_session
       - subscription_status
       - get_subscription_status
+      - subscription_checkout
+      - create_subscription_checkout_session
+      - start_subscription_checkout
       - usage_status
       - get_usage_status
+      - token_status
+      - get_token_status
+      - token_top_up
+      - create_token_top_up_session
+      - start_token_top_up
     pages:
       - name: Billing
         route: /billing
@@ -105,18 +115,23 @@ facades:
           - subscription
         primary_actions:
           - get_subscription_status
+          - list_plans
+          - start_subscription_checkout
           - open_billing_portal
       - name: Usage
         route: /usage
         primary_entities:
           - runtime_usage
+          - token_wallet
         primary_actions:
           - get_usage_status
+          - get_token_status
+          - start_token_top_up
 
 provider_api_response_contract:
   spec_file: provider_api_contract.yaml
   description: >
-    The MozaiksPay hosted platform serves two endpoints consumed by generated apps.
+    The MozaiksPay hosted platform serves provider API endpoints consumed by generated apps.
     Response shapes are pinned in provider_api_contract.yaml. Any change to field
     names or types on either side is a breaking change requiring coordinated release.
   subscription_status_required_fields:
@@ -132,6 +147,20 @@ provider_api_response_contract:
     - success
     - portal_url
     - return_url
+  subscription_checkout_session_required_fields:
+    - success
+    - checkout_url
+    - success_url
+    - cancel_url
+    - plan_id
+  token_top_up_session_required_fields:
+    - success
+    - checkout_url
+    - success_url
+    - cancel_url
+    - product_id
+    - wallet_id
+    - token_amount
   globally_forbidden_response_fields:
     - provider_customer_id
     - provider_subscription_id

@@ -24,5 +24,15 @@ sections:
         - runtime_ai_usage.totals.prompt_tokens
         - runtime_ai_usage.totals.completion_tokens
         - runtime_ai_usage.totals.llm_calls
+  - id: token-status
+    primitive: DataPanel
+    title: Token Balance
+    config:
+      api_endpoint: /api/modules/billing_portal/get_token_status
+      method: POST
+      fields:
+        - runtime_ai_usage
+        - token_wallets
+        - top_up_products
 roles: null
 extensions: null

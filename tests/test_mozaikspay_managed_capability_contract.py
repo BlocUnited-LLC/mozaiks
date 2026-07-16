@@ -17,6 +17,19 @@ from pathlib import Path
 
 import yaml
 
+from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    generate_deployment_artifacts,
+)
+from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+    _deployment_env_for_capability_packs,
+)
+from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+    scan_generated_bundle,
+)
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_managed_capability_templates,
+)
+
 # ---------------------------------------------------------------------------
 # Pack paths
 # ---------------------------------------------------------------------------
@@ -57,6 +70,91 @@ def _required_integration_fields(requirement: dict) -> set[str]:
         for field in requirement.get("required_fields", [])
         if isinstance(field, dict)
     }
+
+
+def _golden_subscriptions_yaml() -> str:
+    return """
+schema_version: mozaiks.subscriptions.v1
+label: Golden SaaS Plans
+default_plan_id: free
+assignment_store:
+  data_alias: billing.subscriptions
+  user_id_field: user_id
+  active_statuses: [active, pending]
+token_wallets:
+  - wallet_id: ai_tokens
+    label: AI tokens
+    unit: tokens
+    usage_meter_id: ai_tokens
+    scope: user
+    auto_debit_usage: true
+    depleted_balance:
+      recovery_action: top_up
+      billing_route: /billing
+      top_up_route: /billing
+      upgrade_route: /pricing
+top_up_products:
+  - product_id: ai_tokens_10k
+    label: 10K AI tokens
+    wallet_id: ai_tokens
+    token_amount: 10000
+    price:
+      amount_cents: 500
+      currency: usd
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: [billing_portal.read]
+    usage_limits:
+      - meter_id: ai_tokens
+        unit: tokens
+        monthly_limit: 1000
+    token_allowances:
+      - wallet_id: ai_tokens
+        amount: 1000
+        cadence: monthly
+  - plan_id: pro
+    label: Pro
+    capabilities: [billing_portal.read, billing_portal.manage, reports.generate]
+    usage_limits:
+      - meter_id: ai_tokens
+        unit: tokens
+        monthly_limit: 100000
+    token_allowances:
+      - wallet_id: ai_tokens
+        amount: 100000
+        cadence: monthly
+"""
+
+
+def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict[str, str]]]:
+    capability_packs = [
+        {
+            "id": "mozaikspay",
+            "capability_source": "managed_capability",
+            "pack_source_path": str(_PACK_ROOT),
+        }
+    ]
+    files = {
+        item["filename"]: item["content"]
+        for item in resolve_managed_capability_templates(capability_packs)
+    }
+    files["app.json"] = '{"name":"Golden MozaiksPay SaaS","version":"1.0.0"}\n'
+    files["config/subscriptions.yaml"] = _golden_subscriptions_yaml()
+
+    deployment_env = _deployment_env_for_capability_packs(capability_packs)
+    files.update(
+        generate_deployment_artifacts(
+            app_id="golden-mozaikspay-saas",
+            deployment_profile="generic_container",
+            include_dockerfiles=True,
+            include_workflow=False,
+            include_compose=False,
+            extra_optional_variables=deployment_env["optional"],
+            extra_secret_variables=deployment_env["secret"],
+        )["artifacts"]
+    )
+    return files, capability_packs
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +457,51 @@ class TestPageYamls:
 
 
 # ---------------------------------------------------------------------------
-# 8. Pack-wide drift guard — no provider internals in any template
+# 8. Golden generated bundle replay
+# ---------------------------------------------------------------------------
+
+class TestGoldenGeneratedMozaiksPaySaasBundle:
+    def test_replayed_pack_templates_scan_as_exportable_generated_app(self):
+        files, capability_packs = _golden_mozaikspay_saas_bundle()
+
+        errors = scan_generated_bundle(
+            files,
+            capability_packs=capability_packs,
+            require_deployment_artifacts=True,
+        )
+
+        assert errors == []
+        assert {
+            "services/integrations/mozaikspay_client.py",
+            "modules/billing_portal/module.yaml",
+            "modules/billing_portal/backend/handler.py",
+            "modules/billing_portal/backend/service.py",
+            "modules/billing_portal/backend/schemas.py",
+            "config/subscriptions.yaml",
+            "ui/pages/billing.yaml",
+            "ui/pages/usage.yaml",
+            "env.example",
+            "deployment.manifest.json",
+        } <= set(files)
+
+        env_example = files["env.example"]
+        for name in (
+            "MOZAIKS_APP_URL",
+            "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY",
+        ):
+            assert f"{name}=" in env_example
+
+        rendered = "\n".join(files.values())
+        assert "/api/modules/mozaikspay/" not in rendered
+        assert "/api/modules/managed_billing/" not in rendered
+        assert "import stripe" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 9. Pack-wide drift guard — no provider internals in any template
 # ---------------------------------------------------------------------------
 
 class TestPackDriftGuard:
