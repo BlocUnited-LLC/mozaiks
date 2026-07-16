@@ -13,6 +13,10 @@ App Studio keeps these pages visible instead:
 /apps/:appId/support
 ```
 
+Generated app AdminPortal routes use `/admin` and `/admin/<page>` paths. The
+`/apps/:appId/...` route family is reserved for first-party Studio and hosted
+product app operations.
+
 Framework-owned admin composition remains internal and host-owned. Build,
 Usage, app access, and support are product surfaces; they are not admin
 sections. Deep diagnostic routes such as `/apps/:appId/health`,

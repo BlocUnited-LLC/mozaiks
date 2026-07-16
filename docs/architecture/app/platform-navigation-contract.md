@@ -34,7 +34,9 @@ from changing the meaning of the Create entrypoint.
 
 ## Profile Boundary
 
-Profile is an account surface. It is intentionally small.
+Profile is an account surface. It is intentionally small. The canonical
+signed-in account route is `/me`; generated apps must not create a replacement
+`/profile`, `/account`, or `/me` page.
 
 Profile may render:
 
@@ -58,19 +60,32 @@ They can link to each other, but they do not replace each other.
 - Use Admin Portal for app access, roles, health, usage, integrations,
   governance, billing, and deployment posture.
 - Use App Shell for the app's normal domain workflow once the app is running.
+- Generated app AdminPortal routes live under `/admin` and `/admin/<page>`.
+  First-party Studio and hosted-product app operations live under
+  `/apps/:appId/...`; generated customer apps must not copy that route family
+  for their own admin registry pages.
 
 ## Generator Requirements
 
 Generators must not create duplicate surfaces for these platform-owned areas.
 
 - Do not scaffold replacement `/profile`, `/admin`, or Studio build-history
-  pages inside generated app UI.
+  pages inside generated app UI. `/me` is also platform-owned and should only
+  be extended through profile panel/tab contracts.
 - Do not put Create/continue behavior into profile panels.
 - Do not route app-management pages through the app domain shell unless they are
   app-owned business pages rather than management surfaces.
 - When an app concept needs billing, roles, integrations, deployment, or build
   continuation, emit module/admin contracts or Studio metadata instead of
   profile UI.
+- Treat "settings" as resource/module configuration unless the requirement is
+  explicitly personal account preferences. Personal preferences use
+  `GET/PUT /api/me/preferences`; module configuration uses
+  `contracts/settings.yaml` plus app-owned module actions; resource settings
+  use scoped routes such as `/projects/:projectId/settings`.
+- Do not rely on a built-in shell `settings` shortcut. App-owned settings
+  pages must declare their own page route/navigation, while account access
+  uses `/me`.
 
 ## Runtime And Frontend Contract
 

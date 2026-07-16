@@ -2066,7 +2066,7 @@ models:
         description: Human-facing page label shown in the admin portal nav.
       path:
         type: str
-        description: URL path for this admin page. Use :appId as a placeholder for the app context (e.g. /apps/:appId/orders).
+        description: URL path for this generated-app AdminPortal page. Standard generated-app admin pages use /admin and /admin/<page>; /apps/:appId/... is reserved for first-party Studio or explicit hosted-operator contexts.
       icon:
         type: union
         variants:
@@ -4395,6 +4395,52 @@ models:
         - 'null'
         description: Optional placement override. Omit to let shell navigation policy decide per viewport.
 
+  AppPageMeta:
+    type: model
+    fields:
+      requiresAuth:
+        type: union
+        variants:
+        - bool
+        - 'null'
+        default: null
+        description: Optional route auth override. Omit for the default authenticated page behavior; set false only for public pages.
+      requiresRole:
+        type: union
+        variants:
+        - str
+        - 'null'
+        default: null
+        description: >
+          Optional single-role shell gate for route rendering and navigation
+          visibility. Use AppPageSchema.roles for ordinary page-role intent;
+          keep module service/policy authorization as the authoritative boundary.
+      authRedirect:
+        type: union
+        variants:
+        - str
+        - 'null'
+        default: null
+        description: Optional login redirect path for authenticated pages.
+      shellMode:
+        type: union
+        variants:
+        - AppShellMode
+        - 'null'
+        default: null
+        description: Optional route chrome mode override; prefer AppPageSchema.shell_mode for ordinary pages.
+      routeAuth:
+        type: union
+        variants:
+        - AppRouteAuth
+        - 'null'
+        default: null
+        description: >
+          Optional scoped route authorization hook for declarative pages. Use
+          when the page route carries tenant, workspace, ownership, membership,
+          invitation, or other scoped resource identifiers that require an
+          app-owned authorize_*_route module action before render.
+
   AppPageSchema:
     type: model
     fields:
@@ -4467,6 +4513,16 @@ models:
         description: >
           Optional route-level navigation contribution consumed by the shell navigation resolver.
           Prefer this for page-owned global or local nav so config/shell.json stays policy-focused.
+      meta:
+        type: union
+        variants:
+        - AppPageMeta
+        - 'null'
+        default: null
+        description: >
+          Optional route metadata consumed by the shell. Prefer top-level
+          roles and shell_mode for simple page-level gates; use meta.routeAuth
+          for scoped resource routes that need an app-owned module action before render.
       sections:
         type: list
         items: AppPageSection
@@ -4636,11 +4692,50 @@ models:
         - str
         - 'null'
         description: >
-          Optional role gate for navigation visibility (e.g. "admin"). Declaration
-          intent only — shell enforcement for route rendering and sidebar filtering
-          is not yet implemented. Do not rely on this field as a security boundary;
-          module authorization/service/policy remains the authoritative enforcement layer for
-          resource-scoped authorization.
+          Optional role gate for route rendering and navigation visibility
+          (e.g. "admin"). This is shell UX gating only; module
+          authorization/service/policy remains the authoritative enforcement
+          layer for resource-scoped authorization.
+      routeAuth:
+        type: union
+        variants:
+        - AppRouteAuth
+        - 'null'
+        default: null
+        description: >
+          Optional scoped route authorization hook. When declared, the shell calls
+          the app-owned module action and renders the route only when the response
+          returns allowed: true. Keep product-specific authorization decisions in
+          the app module action; this metadata only names the generic hook.
+
+  AppRouteAuth:
+    type: model
+    fields:
+      module:
+        type: str
+        description: Module id that owns the route authorization action.
+      action:
+        type: str
+        description: Module action that returns an allowed true or false result.
+      params:
+        type: optional_list
+        items: AppRouteAuthParam
+        description: >
+          Optional strict key/value input mapping for the authorization action.
+          The save_app_schema tool normalizes this list into the runtime
+          routeAuth.params object written to ui/pages/*.yaml or
+          ui/route_manifest.json. Values may use shell placeholders such as
+          $route.appId, $query.community, $path, or $user.id.
+
+  AppRouteAuthParam:
+    type: model
+    fields:
+      key:
+        type: str
+        description: Action input field name, e.g. project_id or workspace_id.
+      value:
+        type: str
+        description: Shell placeholder or literal string passed to the route authorization action.
 
   AppCustomPageFile:
     type: model

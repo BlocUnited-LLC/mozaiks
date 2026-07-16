@@ -327,7 +327,7 @@ hooks: []
 
 ### `contracts/profile.yaml`
 
-Declare panels this module contributes to the user profile page (`/profile`).
+Declare panels this module contributes to the user profile page (`/me`).
 Only add this file when the module has user-scoped account data worth surfacing
 there — for example, activity summaries, notification preferences, or usage
 stats. Do not add it to every module.

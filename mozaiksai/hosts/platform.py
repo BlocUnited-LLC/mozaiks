@@ -115,6 +115,7 @@ except Exception as exc:  # pragma: no cover
 
 # Router modules extracted from platform.py for code organization.
 from mozaiksai.hosts.routers.account import router as _account_router  # noqa: E402
+from mozaiksai.hosts.routers.billing import router as _billing_router  # noqa: E402
 from mozaiksai.hosts.routers.chat import router as _chat_router  # noqa: E402
 from mozaiksai.hosts.routers.modules import router as _modules_router  # noqa: E402
 from mozaiksai.hosts.routers.notifications import router as _notifications_router  # noqa: E402
@@ -124,6 +125,7 @@ from mozaiksai.hosts.routers.transitions import router as _transitions_router  #
 from mozaiksai.hosts.routers.workflows import router as _workflows_router  # noqa: E402
 
 app.include_router(_account_router)
+app.include_router(_billing_router)
 app.include_router(_modules_router)
 app.include_router(_notifications_router)
 app.include_router(_shell_router)
@@ -623,7 +625,6 @@ def _shell_shortcut_catalog(pages: list[dict], shortcuts: dict[str, Any]) -> dic
         "workspace": {"id": "workspace", "label": "Workspace", "action": "navigate", "path": "/apps"},
         "profile": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/me"},
         "account": {"id": "profile", "label": "Profile", "action": "navigate", "path": "/me"},
-        "settings": {"id": "settings", "label": "Settings", "action": "navigate", "path": "/settings"},
         "notifications": {"id": "notifications", "label": "Alerts", "action": "navigate", "path": "/notifications"},
         "marketplace": {"id": "marketplace", "label": "Marketplace", "action": "navigate", "path": "/marketplace"},
         "wallet": {"id": "wallet", "label": "Wallet", "action": "navigate", "path": "/wallet"},
@@ -904,7 +905,13 @@ def _footer_link_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
     href = _clean_string(item.get("href")) or _clean_string(item.get("path"))
     if not href:
         return None
-    return {"label": item.get("label") or _title_from_id(str(item.get("id") or "link")), "href": href}
+    link = {"label": item.get("label") or _title_from_id(str(item.get("id") or "link")), "href": href}
+    requires_role = _clean_string(item.get("requiresRole"))
+    if requires_role:
+        link["requiresRole"] = requires_role
+    if isinstance(item.get("visible"), bool):
+        link["visible"] = item["visible"]
+    return link
 
 
 def _header_action_targets(header: Any) -> set[str]:
@@ -1839,13 +1846,13 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> dict | N
 
 
 def _coerce_requires_role(value: Any) -> str | None:
-    """Normalize route-role metadata without treating it as security enforcement.
+    """Normalize route-role metadata for shell visibility and deep-link gating.
 
     Current shell route metadata is single-role only. If route or page schema
     content provides a role list, keep the first non-empty role as
-    declaration and visibility intent only. Module policy remains the
-    authoritative security boundary for resource-scoped authorization until
-    frontend role checks and scoped route auth land.
+    declaration and visibility intent only. Frontend role checks are UX gates;
+    module policy remains the authoritative security boundary for
+    resource-scoped authorization.
     """
 
     if isinstance(value, str):
@@ -1923,17 +1930,25 @@ def _load_page_schema_routes(app_root: Path) -> list[dict]:
             raw_requires_role = raw_meta.get("roles")
         if raw_requires_role is None:
             raw_requires_role = raw.get("roles")
-        meta: dict = _normalize_route_requires_role_meta(
-            {
-                "title": title,
-                "appShell": True,
-                "requiresAuth": True,
-                **({"requiresRole": raw_requires_role} if raw_requires_role is not None else {}),
-            }
-        )
+        meta_seed: dict[str, Any] = {
+            "title": title,
+            "appShell": True,
+            "requiresAuth": True,
+        }
+        for key in ("authRedirect", "routeAuth", "requiresAuth", "shellMode", "shell_mode", "ai_context"):
+            if key in raw_meta:
+                meta_seed[key] = raw_meta[key]
+        if raw_requires_role is not None:
+            meta_seed["requiresRole"] = raw_requires_role
+        meta: dict = _normalize_route_requires_role_meta(meta_seed)
         if isinstance(raw.get("navigation"), dict):
             meta["navigation"] = raw["navigation"]
-        shell_mode = _normalize_shell_mode(raw.get("shell_mode")) or _normalize_shell_mode(raw.get("shellMode"))
+        shell_mode = (
+            _normalize_shell_mode(raw.get("shell_mode"))
+            or _normalize_shell_mode(raw.get("shellMode"))
+            or _normalize_shell_mode(raw_meta.get("shellMode"))
+            or _normalize_shell_mode(raw_meta.get("shell_mode"))
+        )
         if shell_mode:
             meta["shellMode"] = shell_mode
         pages.append({

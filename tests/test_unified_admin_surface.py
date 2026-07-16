@@ -111,6 +111,8 @@ def test_profile_menu_uses_framework_defaults() -> None:
 
     assert "getDefaultProfileMenu" in source
     assert '"profile"' in source
+    assert 'href: "/me"' in source
+    assert 'href: "/profile"' not in source
     assert 'href: "/admin"' not in source
     assert '"admin-portal"' not in source
     assert '"signin"' in source

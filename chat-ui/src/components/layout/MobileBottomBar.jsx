@@ -2,20 +2,19 @@ import React, { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useNavigation } from "../../providers/NavigationProvider";
 import { useNavigationActions } from "../../navigation/useNavigationActions";
-import { deriveShellActionContext, resolveShellActions } from "../../navigation/shellActions";
+import { deriveShellActionContext, isShellItemVisible, resolveShellActions } from "../../navigation/shellActions";
 import { useChatUI } from "../../context/ChatUIContext";
 import { useAppEventBus } from "../../ui/hooks/useAppEventBus.js";
 import "./header-styles.css";
 
-const isVisible = (item) => item && item.visible !== false;
-
 const buildAutoItems = ({ headerPages, header, notifications, profile, actionContext }) => {
   const items = [];
+  const roles = actionContext?.roles || [];
 
   if (Array.isArray(headerPages)) {
     for (const item of headerPages) {
       if (items.length >= 3) break;
-      if (isVisible(item) && item.path) {
+      if (isShellItemVisible(item, roles) && item.path) {
         items.push({
           id: item.id || item.path,
           label: item.label || item.id || "Page",
@@ -29,7 +28,7 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
   const resolvedActions = Array.isArray(header?.actions)
     ? resolveShellActions(header.actions, actionContext)
     : [];
-  const primaryAction = resolvedActions.find((item) => isVisible(item) && (item.path || item.href || item.trigger));
+  const primaryAction = resolvedActions.find((item) => item?.path || item?.href || item?.trigger);
   if (primaryAction) {
     items.push({
       id: primaryAction.id || primaryAction.path || primaryAction.href,
@@ -51,7 +50,12 @@ const buildAutoItems = ({ headerPages, header, notifications, profile, actionCon
   }
 
   const profileItem = Array.isArray(profile?.menu)
-    ? profile.menu.find((item) => isVisible(item) && item.action !== "signout" && item.action !== "signin" && item.path)
+    ? profile.menu.find((item) => (
+      isShellItemVisible(item, roles) &&
+      item.action !== "signout" &&
+      item.action !== "signin" &&
+      item.path
+    ))
     : null;
   if (profile?.show !== false && profileItem) {
     items.push({
@@ -125,7 +129,9 @@ const MobileBottomBar = ({ route = null, shellMode = null }) => {
   });
 
   const bottomBar = mobile?.bottomBar || {};
-  const configuredItems = Array.isArray(bottomBar.items) ? bottomBar.items.filter(isVisible) : [];
+  const configuredItems = Array.isArray(bottomBar.items)
+    ? bottomBar.items.filter((item) => isShellItemVisible(item, actionContext.roles || []))
+    : [];
   const items = useMemo(
     () => configuredItems.length > 0
       ? configuredItems.slice(0, 5)

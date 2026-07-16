@@ -17,7 +17,7 @@ Studio, not in Profile.
 
 - Treat these concerns as first-class platform services.
 - Do not model them as app-specific `capability_packs` in AppGenerator.
-- Do not generate replacement `/profile` or `/admin` shells.
+- Do not generate replacement `/profile`, `/account`, `/me`, or `/admin` shells.
 - Keep deterministic state, policies, and CRUD behind the app backend and
   module contracts.
 - Add AI only as augmentation on top of these services, never as the source of
@@ -36,14 +36,15 @@ things to scaffold as product-specific packs.
 
 Mozaiks ships the visible shell surfaces for account and admin flows.
 
-- `/profile` is rendered by the core `ProfilePage` component and labeled
+- `/me` is rendered by the core `ProfilePage` component and labeled
   "Account" in shell navigation.
-- `/profile` is only for the signed-in person's account data and personal
+- `/me` is only for the signed-in person's account data and personal
   preferences. It is not an app/workspace management surface.
 - current-user relationship inventory is exposed through
   `GET /api/me/relationships` for My Apps, Portfolio, and My Resources
   surfaces.
 - Generated app admin routes are rendered by the core `AdminPortal` component.
+- Generated app admin routes use `/admin` and `/admin/<page>` paths.
 - Studio's first-party Admin Portal entry routes to `/apps`, not a standalone
   `/admin` page.
 - These surfaces are first-class shell components, not app-authored page
@@ -99,9 +100,9 @@ Use the canonical `handler.py`, `service.py`, `repo.py`, `policy.py`, and
 
 | Concern | Primary UX surface | Source of truth | Extension contract | Not owned by |
 |---|---|---|---|---|
-| Account/Profile | `/profile` via `ProfilePage` | `GET/PUT /api/me` | `modules/{module}/contracts/profile.yaml` for module panels | workflows, generated page bundles |
+| Account/Profile | `/me` via `ProfilePage` | `GET/PUT /api/me` | `modules/{module}/contracts/profile.yaml` for module panels | workflows, generated page bundles |
 | Resource relationships | My Apps/Portfolio/My Resources surfaces | `GET /api/me/relationships` | `modules/{module}/contracts/relationships.yaml` | workflows, generated page bundles, admin shell |
-| Preferences | `/profile` preferences section | `GET/PUT /api/me/preferences` | `modules/{module}/contracts/settings.yaml` when settings runtime support exists | workflow prompts |
+| Preferences | `/me` preferences section | `GET/PUT /api/me/preferences` | none for generic preferences; module-specific config uses `contracts/settings.yaml` outside Profile | workflow prompts |
 | Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/contracts/notifications.yaml` | workflows as source of truth |
 | Subscriptions and entitlements | Admin Portal billing/access views and gated capability behavior | app backend entitlement state | billing/subscription modules | Profile, capability-pack generation |
 | Build continuation | Studio/App Studio build history | build/app records plus selected `chat_id` | Studio build metadata | Profile, shell Create action |
@@ -114,7 +115,7 @@ registry.
 
 Current behavior:
 
-- it renders the current user's account view at `/profile`
+- it renders the current user's account view at `/me`
 - it loads and updates profile data from `/api/me`
 - it loads app/user preference data from `/api/me/preferences`
 - it loads module profile panels from `/api/me/profile-panels`
@@ -122,8 +123,8 @@ Current behavior:
 
 Important boundary:
 
-- `/profile` is not a generated page bundle
-- `/profile` is not a workflow artifact
+- `/me` is not a generated page bundle
+- `/me` is not a workflow artifact
 - `contracts/profile.yaml` is only for module-contributed account/profile
   panels; it does not replace identity, preferences, My Apps, Portfolio, build
   history, billing, app access, deployment, governance, or admin operations
@@ -162,7 +163,7 @@ Important boundary:
 ### Account Preferences
 
 User-scoped preferences belong behind the account API surface, currently exposed
-through `/api/me/preferences` and rendered inside `/profile`.
+through `/api/me/preferences` and rendered inside `/me`.
 
 ### Module Settings
 
@@ -248,7 +249,7 @@ When AppGenerator is planning an app:
   `contracts/relationships.yaml` plus `GET /api/me/relationships`, not custom
   generated profile/admin pages
 - the generated app may wire config and module manifests around these systems
-- the generated app should not scaffold replacement `/profile` or `/admin`
+- the generated app should not scaffold replacement `/profile`, `/account`, `/me`, or `/admin`
   surfaces
 
 This keeps the deterministic product foundation stable while still allowing app-

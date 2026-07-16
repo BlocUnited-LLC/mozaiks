@@ -11,6 +11,8 @@ import {
   RiUser3Fill,
 } from 'react-icons/ri'
 import { useNavigation } from '../providers/NavigationProvider.jsx'
+import { useChatUI } from '../context/ChatUIContext.jsx'
+import { getUserRoles, isShellItemVisible } from '../navigation/shellActions.js'
 
 const ICON_MAP = {
   apps: RiAppsFill,
@@ -49,10 +51,11 @@ function resolveIcon(iconHint) {
   return ICON_MAP[iconHint] || RiDashboardFill
 }
 
-function buildNavGroupsFromPages(pages, appId = null) {
+function buildNavGroupsFromPages(pages, appId = null, roles = []) {
   const group = appId ? 'app-studio' : 'workspace-studio'
   const items = (Array.isArray(pages) ? pages : [])
     .filter((page) => page && page.meta?.appShell)
+    .filter((page) => isShellItemVisible(page, roles))
     .filter((page) => resolvePageNavigation(page).group === group)
     .filter((page) => resolvePageNavigation(page).include !== false)
     .map((page) => {
@@ -212,8 +215,10 @@ export function WorkspaceLayout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const { pages } = useNavigation()
+  const { user } = useChatUI()
+  const userRoles = useMemo(() => getUserRoles(user), [user])
   const appId = resolveAppId(location.pathname)
-  const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId), [pages, appId])
+  const navGroups = useMemo(() => buildNavGroupsFromPages(pages, appId, userRoles), [pages, appId, userRoles])
   const activeNav = useMemo(() => getActiveNavItem(navGroups, location), [navGroups, location])
   const activeLabel = activeNav.item?.label || activeNav.group?.label || 'Studio'
 

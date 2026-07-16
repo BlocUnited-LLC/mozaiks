@@ -184,6 +184,7 @@ agents:
       Rules:
       - Use finite taxonomies and stable ids wherever downstream generators will need deterministic contracts.
       - Treat generic account/profile/preferences as host-owned platform primitives. Only define profile entities in the docs when they are domain-specific business records such as investor profiles or seller profiles.
+      - The platform-owned signed-in account surface is `/me` and uses `/api/me` plus `/api/me/preferences`. Do not model replacement `/profile`, `/account`, or `/me` app pages. Use app-owned routes only for domain-specific profiles or resource settings.
       - For durable module surfaces, be explicit about owned entities, mutations, permissions, event facts, and ownership checks so downstream layered backend generation does not have to infer them from vague prose.
       - Do not rely on prose-only conventions for event namespaces, primitive types, layout modes, capability ids, or admin sections.
       - Keep the ui_schema YAML simple enough to transcribe into typed structured outputs without heuristic interpretation.
@@ -192,6 +193,8 @@ agents:
       - If a surface truly needs file-backed customization, describe the need in a bounded way; do not invent ad hoc YAML keys or raw implementation blobs.
       - Persistent app UI remains declarative. Do not embed raw JSX, Tailwind, or untyped callback logic in the ui_schema.
       - Treat custom full-page React as a rare bounded escape hatch, not a normal generation target. If a page truly cannot be expressed with shipped primitives, describe that as a bounded need for the downstream `custom_route_bundle` contract (`ui/route_manifest.json` + `ui/pages/custom/*.jsx`) rather than inventing a second page contract.
+      - When a route will include a resource id in the path or query string and access depends on ownership, membership, tenant/workspace scope, or invitation/access state, call out the need for a scoped route authorization check in the owning app module. Downstream AppGenerator should express that as `AppPageSchema.meta.routeAuth` for declarative pages or `custom_route_bundle.route_manifest[*].meta.routeAuth` for bounded custom routes, pointing to an app-owned `authorize_*_route` module action; do not describe shell-owned policy or frontend-only authorization.
+      - Keep "settings" precise: personal preferences belong to `/api/me/preferences`; module configuration belongs to `contracts/settings.yaml` and app-owned module actions; resource settings belong to scoped resource routes such as `/projects/:projectId/settings`.
   - id: ui_schema_doc_format
     heading: '[UI SCHEMA DOCUMENT FORMAT]'
     content: |-

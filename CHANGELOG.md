@@ -12,6 +12,11 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Added provider-neutral billing fulfillment primitives for idempotent subscription assignment, token wallet credit/debit, durable command replay/conflict logging, and generated-app cash-to-token runtime integration.
+- Added first-class subscription checkout, token status, token top-up, and depleted-balance recovery contracts to the MozaiksPay generated-app facade path while keeping provider checkout and fulfillment behind MozaiksPay/OSS billing boundaries.
+
 ## 0.1.9 - 2026-07-15
 
 ### Fixed
