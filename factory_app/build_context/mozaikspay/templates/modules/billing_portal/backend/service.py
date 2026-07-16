@@ -31,16 +31,40 @@ def _ctx_scope(ctx: Any) -> dict[str, str | None]:
 
 
 def _subscriptions_config() -> dict[str, Any]:
-    subs_path = Path.cwd() / "app" / "config" / "subscriptions.yaml"
-    if not subs_path.exists():
-        return {}
+    candidates: list[Path] = []
+    active_app_root: Path | None = None
     try:
-        import yaml
+        from mozaiksai.core.workflow.paths import resolve_active_app_root
 
-        raw = yaml.safe_load(subs_path.read_text(encoding="utf-8"))
+        active_app_root = resolve_active_app_root()
     except Exception:
-        return {}
-    return raw if isinstance(raw, dict) else {}
+        active_app_root = None
+
+    if active_app_root is not None:
+        candidates.append(active_app_root / "config" / "subscriptions.yaml")
+
+    cwd = Path.cwd()
+    candidates.extend(
+        [
+            cwd / "config" / "subscriptions.yaml",
+            cwd / "app" / "config" / "subscriptions.yaml",
+        ]
+    )
+
+    seen: set[Path] = set()
+    for subs_path in candidates:
+        resolved = subs_path.resolve()
+        if resolved in seen or not resolved.exists():
+            continue
+        seen.add(resolved)
+        try:
+            import yaml
+
+            raw = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        return raw if isinstance(raw, dict) else {}
+    return {}
 
 
 def _safe_https_url(value: str) -> bool:
