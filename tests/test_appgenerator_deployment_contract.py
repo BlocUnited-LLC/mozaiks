@@ -110,6 +110,9 @@ def test_env_example_contains_placeholders_not_secrets() -> None:
 
     assert "OPENAI_API_KEY=" in env_example
     assert "MONGO_URI=" in env_example
+    assert "VITE_OIDC_AUTHORITY=" in env_example
+    assert "VITE_OIDC_CLIENT_ID=" in env_example
+    assert "VITE_OIDC_REDIRECT_URI=" in env_example
     assert "OPENAI_API_KEY=sk-" not in env_example
     assert "MONGO_URI=mongodb+srv://" not in env_example
 
