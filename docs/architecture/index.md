@@ -1,8 +1,13 @@
 # Architecture
 
-This section explains the Mozaiks framework model: the AI runtime, app
+!!! note "This section is for framework contributors"
+    If you are building an app with Mozaiks, you do not need this section.
+    Start with [Getting Started](../getting-started.md) or the [Guides](../guides/index.md).
+
+This section documents the Mozaiks framework internals: the AI runtime, app
 workspace contract, module system, workflow authoring model, event/data model,
-and frontend surfaces.
+and frontend surfaces. It is reference material for contributors working on the
+framework itself.
 
 The authoritative repository-level reference is
 [ARCHITECTURE.md](https://github.com/BlocUnited-LLC/mozaiks/blob/main/ARCHITECTURE.md).

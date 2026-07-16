@@ -48,8 +48,8 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     ---
 
-    Extend a generated app's AI behavior through app config, the control-plane
-    manifest, and the workflow registry.
+    Tune startup config, enable refinement, and control which workflows re-run
+    when users request changes.
 
     [:octicons-arrow-right-24: Extending AI Functionality](extending-ai-functionality/01-overview.md)
 
@@ -60,5 +60,13 @@ Step-by-step guides for building and customizing Mozaiks apps.
     Customize themes, navigation, logos, and shell behavior.
 
     [:octicons-arrow-right-24: Branding](custom-brand-integration/01-overview.md)
+
+-   :material-robot-outline: **Use AI Coding Agents**
+
+    ---
+
+    Hand a task to Claude Code, Cursor, or Copilot with full Mozaiks repo context.
+
+    [:octicons-arrow-right-24: Agent Bootstrap](../agent-bootstrap-prompt.md)
 
 </div>

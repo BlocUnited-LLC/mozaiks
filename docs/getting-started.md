@@ -8,18 +8,34 @@
 
 ## 1. Install
 
-```powershell
-pip install mozaiks
-```
+=== "Windows"
+
+    ```powershell
+    pip install mozaiks
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    pip install mozaiks
+    ```
 
 ## 2. Start MongoDB
 
 Mozaiks requires a database to store your apps, build history, and workspace
-state. The easiest way to start one is via a docker using the following command:
+state. The easiest way to start one is via Docker:
 
-```powershell
-docker run -d --name mozaiks-mongo -p 27017:27017 mongo:7
-```
+=== "Windows"
+
+    ```powershell
+    docker run -d --name mozaiks-mongo -p 27017:27017 mongo:7
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    docker run -d --name mozaiks-mongo -p 27017:27017 mongo:7
+    ```
 
 !!! note "Don't want Docker?"
     Use [MongoDB Atlas](https://www.mongodb.com/atlas) (free tier, cloud-hosted,
@@ -27,10 +43,19 @@ docker run -d --name mozaiks-mongo -p 27017:27017 mongo:7
 
 ## 3. Set environment variables
 
-```powershell
-$env:MONGO_URI="mongodb://localhost:27017/mozaiks"
-$env:OPENAI_API_KEY="sk-..."
-```
+=== "Windows"
+
+    ```powershell
+    $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
+    $env:OPENAI_API_KEY="sk-..."
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    export MONGO_URI="mongodb://localhost:27017/mozaiks"
+    export OPENAI_API_KEY="sk-..."
+    ```
 
 !!! note "Other providers"
     Using Atlas? Replace `MONGO_URI` with your Atlas connection string.
@@ -41,9 +66,17 @@ $env:OPENAI_API_KEY="sk-..."
 
 Replace `my-workspace` with whatever you want to name your app folder:
 
-```powershell
-python -m mozaiks quickstart --dir .\my-workspace
-```
+=== "Windows"
+
+    ```powershell
+    python -m mozaiks quickstart --dir .\my-workspace
+    ```
+
+=== "macOS / Linux"
+
+    ```bash
+    python -m mozaiks quickstart --dir ./my-workspace
+    ```
 
 This scaffolds the workspace, starts the backend and frontend, and opens
 Studio in your browser at `http://localhost:3000`.
@@ -58,30 +91,88 @@ Studio in your browser at `http://localhost:3000`.
 In-progress builds stay in **Apps** so you can always pick up where you left off.
 
 !!! tip "Coming back to an existing workspace"
-    ```powershell
-    docker start mozaiks-mongo   # bring MongoDB back up if your PC restarted
-    python -m mozaiks studio --dir .\my-workspace --open
-    ```
+
+    === "Windows"
+
+        ```powershell
+        docker start mozaiks-mongo   # bring MongoDB back up if your PC restarted
+        python -m mozaiks studio --dir .\my-workspace --open
+        ```
+
+    === "macOS / Linux"
+
+        ```bash
+        docker start mozaiks-mongo   # bring MongoDB back up if your machine restarted
+        python -m mozaiks studio --dir ./my-workspace --open
+        ```
 
 ## Troubleshooting
 
 ??? "MongoDB connection error"
     Make sure Docker is running and the MongoDB container is up:
 
-    ```powershell
-    docker start mozaiks-mongo
-    ```
+    === "Windows"
+
+        ```powershell
+        docker start mozaiks-mongo
+        ```
+
+    === "macOS / Linux"
+
+        ```bash
+        docker start mozaiks-mongo
+        ```
 
     If you used Atlas, double-check the connection string is correct and the
     cluster is reachable.
 
 ??? "`mozaiks` is not recognized"
     Use `python -m mozaiks` instead. The `mozaiks` shortcut requires your Python
-    scripts directory to be on PATH, which Windows doesn't always do automatically.
+    scripts directory to be on PATH, which some systems don't configure automatically.
 
 ??? "Builds fail or hang"
     Make sure `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` is set in your current
     shell session. You can open Studio without a key but builds will not run.
+
+---
+
+## What's Next
+
+<div class="grid cards" markdown>
+
+-   :material-lightbulb-outline: **Key Concepts**
+
+    ---
+
+    Workspaces, apps, modules, workflows — the full mental model in one page.
+
+    [:octicons-arrow-right-24: Key Concepts](concepts.md)
+
+-   :material-console: **CLI Reference**
+
+    ---
+
+    Every `mozaiks` command in one place.
+
+    [:octicons-arrow-right-24: CLI Reference](cli-reference.md)
+
+-   :material-view-dashboard: **Use Studio**
+
+    ---
+
+    Learn the workspace and app dashboard surfaces.
+
+    [:octicons-arrow-right-24: Studio](studio/index.md)
+
+-   :material-puzzle-outline: **Guides**
+
+    ---
+
+    Add modules, pages, workflows, integrations, and more.
+
+    [:octicons-arrow-right-24: Guides](guides/index.md)
+
+</div>
 
 ---
 

@@ -73,6 +73,14 @@ separate from builder workflows.
 
     [:octicons-arrow-right-24: Get Started](getting-started.md)
 
+-   :material-lightbulb-outline: **Key Concepts**
+
+    ---
+
+    Workspaces, apps, modules, workflows, pages — the mental model in one page.
+
+    [:octicons-arrow-right-24: Key Concepts](concepts.md)
+
 -   :material-sitemap: **Add a Workflow**
 
     ---
@@ -112,6 +120,14 @@ separate from builder workflows.
     Change themes, navigation, and shell behavior.
 
     [:octicons-arrow-right-24: Branding](guides/custom-brand-integration/01-overview.md)
+
+-   :material-robot-outline: **Use AI Coding Agents**
+
+    ---
+
+    Hand a task to Claude Code, Cursor, or Copilot with full Mozaiks repo context.
+
+    [:octicons-arrow-right-24: Agent Bootstrap](agent-bootstrap-prompt.md)
 
 -   :material-source-branch: **Contributing**
 
