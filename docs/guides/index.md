@@ -61,6 +61,14 @@ Step-by-step guides for building and customizing Mozaiks apps.
 
     [:octicons-arrow-right-24: Branding](custom-brand-integration/01-overview.md)
 
+-   :material-server: **Self-Hosting**
+
+    ---
+
+    Run Mozaiks on your own server — Docker, Docker Compose, or Kubernetes.
+
+    [:octicons-arrow-right-24: Self-Hosting](self-hosting.md)
+
 -   :material-robot-outline: **Use AI Coding Agents**
 
     ---

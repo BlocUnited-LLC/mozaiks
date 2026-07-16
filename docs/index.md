@@ -121,6 +121,14 @@ separate from builder workflows.
 
     [:octicons-arrow-right-24: Branding](guides/custom-brand-integration/01-overview.md)
 
+-   :material-server: **Self-Hosting**
+
+    ---
+
+    Run Mozaiks on your own server — Docker, Docker Compose, or Kubernetes.
+
+    [:octicons-arrow-right-24: Self-Hosting](guides/self-hosting.md)
+
 -   :material-robot-outline: **Use AI Coding Agents**
 
     ---

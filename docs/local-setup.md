@@ -26,6 +26,10 @@ MongoDB Atlas, a native local MongoDB server, or Docker only if you prefer
 containerized MongoDB. Set `MONGO_URI` to the reachable database before
 launching Studio.
 
+!!! tip "Want the full stack — MongoDB + Keycloak + app — all in one command?"
+    Use the Docker Compose stack in `infra/compose/`. See the
+    [Self-Hosting guide](guides/self-hosting.md) for a walkthrough.
+
 ## Prerequisites
 
 - Python 3.11+

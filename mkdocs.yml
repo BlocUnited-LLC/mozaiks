@@ -110,6 +110,7 @@ nav:
           - Artifact Routing: guides/extending-ai-functionality/04-control-plane-manifest.md
           - Workflow Registry: guides/extending-ai-functionality/05-workflow-sequences.md
       - App Shell & Branding: guides/custom-brand-integration/01-overview.md
+      - Self-Hosting: guides/self-hosting.md
       - Context & Refinement:
           - Context Graph: guides/platform-intelligence/01-context-graph.md
           - Harness: guides/platform-intelligence/02-harness.md
