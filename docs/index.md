@@ -137,12 +137,5 @@ separate from builder workflows.
 
     [:octicons-arrow-right-24: Agent Bootstrap](agent-bootstrap-prompt.md)
 
--   :material-source-branch: **Contributing**
-
-    ---
-
-    Working on the framework itself? Start here.
-
-    [:octicons-arrow-right-24: Contributing](contributing/index.md)
 
 </div>
