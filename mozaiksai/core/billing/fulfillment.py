@@ -106,9 +106,20 @@ def _iso(value: Any) -> str | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             value = value.replace(tzinfo=UTC)
-        return value.astimezone(UTC).isoformat()
+        return str(value.astimezone(UTC).isoformat())
     text = _text(value)
     return text or None
+
+
+def _effect_status(value: Any) -> Literal["applied", "skipped", "rejected"]:
+    text = str(value or "").strip()
+    if text == "applied":
+        return "applied"
+    if text == "skipped" or text == "pending":
+        return "skipped"
+    if text == "rejected":
+        return "rejected"
+    return "rejected"
 
 
 def _default_database_name() -> str:
@@ -910,7 +921,7 @@ class BillingFulfillmentService:
 
         return BillingFulfillmentEffectResult(
             effect="wallet_credit",
-            status=result.status,
+            status=_effect_status(result.status),
             reason=result.entry.get("rejection_reason"),
             details={
                 "wallet_id": command.wallet_id,
@@ -947,7 +958,7 @@ class BillingFulfillmentService:
 
         return BillingFulfillmentEffectResult(
             effect="wallet_debit",
-            status=result.status,
+            status=_effect_status(result.status),
             reason=result.entry.get("rejection_reason"),
             details={
                 "wallet_id": command.wallet_id,

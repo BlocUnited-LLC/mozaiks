@@ -79,7 +79,8 @@ def _safe_token_wallet(wallet: dict[str, Any]) -> dict[str, Any]:
 
 
 def _safe_top_up_product(product: dict[str, Any]) -> dict[str, Any]:
-    price = product.get("price") if isinstance(product.get("price"), dict) else {}
+    raw_price = product.get("price")
+    price = raw_price if isinstance(raw_price, dict) else {}
     currency = str(price.get("currency") or "usd").strip().lower()
     return {
         "product_id": product.get("product_id", ""),

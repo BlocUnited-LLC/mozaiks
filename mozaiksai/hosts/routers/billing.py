@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac
 import os
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -85,7 +85,7 @@ async def _emit_billing_event(payload: dict[str, Any]) -> None:
 def _fulfillment_service(request: Request) -> BillingFulfillmentService:
     factory = getattr(request.app.state, "billing_fulfillment_service_factory", None)
     if callable(factory):
-        return factory(request)
+        return cast(BillingFulfillmentService, factory(request))
     return BillingFulfillmentService(
         config=getattr(request.app.state, "subscriptions_config", None),
         command_store=_command_store(request),
