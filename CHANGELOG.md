@@ -12,7 +12,9 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
-No changes yet.
+### Changed
+
+- Expanded the production-readiness gate so the 0.1.10 cash-to-token loop is covered by generated SaaS acceptance, subscription/token runtime, scanner, and opt-in Docker/Mongo smoke checks.
 
 ## 0.1.10 - 2026-07-16
 

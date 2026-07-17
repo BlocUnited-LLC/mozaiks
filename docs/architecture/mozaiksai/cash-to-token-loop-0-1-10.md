@@ -632,3 +632,25 @@ platform.
 - The complete loop works in an OSS smoke test without real payment secrets.
 - MozaiksPay remains an adapter path, not the canonical owner of wallet or
   subscription state.
+
+## Release-Candidate Gate
+
+Before publishing any release artifact, run the OSS production gate and the
+clean package smoke locally:
+
+```powershell
+python scripts\production_readiness_gate.py --quick --skip-frontend
+python -m pytest tests\test_release_packaging_contract.py -q --no-cov
+```
+
+When Docker Mongo is available, add the real runtime smoke:
+
+```powershell
+python scripts\production_readiness_gate.py --quick --skip-frontend --include-docker-smoke
+```
+
+For a clean wheel install check, build a wheel, install it into a fresh virtual
+environment, and run the same installed-wheel contract smoke used by CI from a
+directory outside the source checkout so local files cannot shadow packaged
+resources. This is preparation only; do not tag, publish, or create a GitHub
+release until the release hold is explicitly lifted.

@@ -26,6 +26,12 @@ PYTEST_GATE_TARGETS = [
     "tests/test_managed_capability_template_expansion.py",
     "tests/test_managed_capability_artifact_replay.py",
     "tests/test_mozaikspay_managed_capability_contract.py",
+    "tests/test_generated_saas_subscription_runtime_acceptance.py",
+    "tests/test_subscription_contract_designer.py",
+    "tests/test_subscriptions_loader.py",
+    "tests/test_token_usage_guard.py",
+    "tests/test_token_wallet_ledger.py",
+    "tests/test_token_wallet_usage_ingest.py",
     "tests/test_production_readiness_gate.py",
     "tests/test_app_loader.py",
     "tests/test_appgenerator_ui_quality_gate.py",
@@ -59,6 +65,12 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_managed_capability_template_expansion.py",
     "tests/test_managed_capability_artifact_replay.py",
     "tests/test_mozaikspay_managed_capability_contract.py",
+    "tests/test_generated_saas_subscription_runtime_acceptance.py",
+    "tests/test_subscription_contract_designer.py",
+    "tests/test_subscriptions_loader.py",
+    "tests/test_token_usage_guard.py",
+    "tests/test_token_wallet_ledger.py",
+    "tests/test_token_wallet_usage_ingest.py",
     "tests/test_production_readiness_gate.py",
     "tests/test_app_loader.py",
     "tests/test_studio_host_smoke.py",
@@ -74,6 +86,10 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_platform_module_dispatch.py",
     "tests/test_module_executor_dispatch.py",
     "tests/test_app_validation_strategy.py",
+]
+
+DOCKER_SMOKE_PYTEST_TARGETS = [
+    "tests/test_subscription_token_runtime_real_mongo.py",
 ]
 
 SOURCE_HYGIENE_SUFFIXES = {
@@ -202,14 +218,19 @@ def run_source_hygiene_scan() -> list[str]:
 
 
 def _build_steps(args: argparse.Namespace) -> list[GateStep]:
-    pytest_targets = QUICK_PYTEST_TARGETS if args.quick else PYTEST_GATE_TARGETS
+    pytest_targets = list(QUICK_PYTEST_TARGETS if args.quick else PYTEST_GATE_TARGETS)
+    env = _base_env()
+    if args.include_docker_smoke:
+        pytest_targets.extend(DOCKER_SMOKE_PYTEST_TARGETS)
+        env["MOZAIKS_RUN_SUBSCRIPTION_TOKEN_DOCKER_SMOKE"] = "1"
+
     pytest_command = [sys.executable, "-m", "pytest", "-q", *pytest_targets]
 
     steps = [
         GateStep(
             name="offline contract and smoke tests",
             command=pytest_command,
-            env=_base_env(),
+            env=env,
         )
     ]
 
@@ -256,6 +277,11 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-frontend",
         action="store_true",
         help="Skip the web_shell production build.",
+    )
+    parser.add_argument(
+        "--include-docker-smoke",
+        action="store_true",
+        help="Include Docker/Mongo cash-to-token runtime smoke tests.",
     )
     parser.add_argument(
         "--list",
