@@ -1879,7 +1879,7 @@ models:
           workflow = named lifecycle/state behavior implemented through canonical module contracts and backend policy helpers.
           event_pipeline = automated multi-step lifecycle driven by events, reactions, and optional background polling.
           transactional = append-only ledger for value movements.
-          billing = plan-gated entitlements, checkout sessions, subscription lifecycle, and webhook-driven state transitions.
+          billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
       description:
         type: str
         description: Short module summary.

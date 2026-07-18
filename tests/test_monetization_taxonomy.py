@@ -102,6 +102,25 @@ def test_generator_prompts_refuse_blanket_monetized_equals_subscriptions() -> No
     assert "sponsored listings" in subscription_agents
 
 
+def test_workflow_agent_prompts_keep_monetization_inside_runtime_and_facades() -> None:
+    agent_generator = _read("factory_app/workflows/AgentGenerator/agents.yaml")
+    universal_prompt = _read("factory_app/workflows/AgentGenerator/tools/hook_universal_prompts.py")
+    app_structured = _read("factory_app/workflows/AppGenerator/structured_outputs.yaml")
+    archetypes = _read("factory_app/build_context/AppGenerator/module_archetypes.yaml")
+
+    assert "Monetization Boundary" in universal_prompt
+    assert "declared app module actions, managed-capability facade actions" in universal_prompt
+    assert "must not call raw payment providers" in universal_prompt
+    assert "INSUFFICIENT_TOKENS" in universal_prompt
+    assert "INSUFFICIENT_TOKENS" in agent_generator
+
+    assert "hosted billing lifecycle events or BillingFulfillmentCommand inputs" in archetypes
+    assert "managed lifecycle event or fulfillment-command state transitions" in app_structured
+    assert "reacts to payment provider webhooks" not in archetypes
+    assert "webhook-driven state transitions" not in app_structured
+    assert "payment provider, SendGrid" not in universal_prompt
+
+
 def test_monetization_taxonomy_doc_is_present_and_boundary_aware() -> None:
     doc = _read("docs/architecture/mozaiksai/monetization-taxonomy.md")
 

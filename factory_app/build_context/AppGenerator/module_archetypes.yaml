@@ -212,14 +212,15 @@ archetypes:
   billing:
     summary: >
       Deterministic module that gates features behind subscription plans, reacts
-      to payment lifecycle events, and exposes self-serve upgrade/cancellation
-      surfaces. Use when an app monetizes through subscriptions, pay-per-use, or
-      one-time purchases and needs entitlement enforcement at the action level.
+      to managed billing lifecycle events or fulfillment commands, and exposes
+      self-serve upgrade/cancellation surfaces. Use when an app monetizes
+      through subscriptions, pay-per-use, or one-time purchases and needs
+      entitlement enforcement at the action level.
     select_when:
-      - The module owns plan assignment, subscription lifecycle, or checkout sessions.
+      - The module owns app-facing plan status, entitlement presentation, or checkout session facade actions.
       - Actions must be gated by entitlement_gate declarations tied to plan capabilities.
-      - The module reacts to payment provider webhooks (checkout.session.completed,
-        invoice.paid, subscription.cancelled, etc.) to update subscription state.
+      - The module reacts to hosted billing lifecycle events or BillingFulfillmentCommand inputs
+        to update app-facing subscription state.
       - Usage metering or token allowance sync is required on plan activation.
     canonical_yaml_family:
       always:
@@ -248,17 +249,21 @@ archetypes:
         records, invoices, payment secrets, or customer identity data.
       - The service layer never checks entitlements itself — entitlement_gate on
         the action declaration is the authorization boundary.
-      - Subscription state transitions are driven by payment provider webhook events
-        reacted to via reactions.yaml, not by direct operator calls.
+      - Subscription state transitions are driven by hosted billing lifecycle
+        events or BillingFulfillmentCommand inputs reacted to via reactions.yaml,
+        not by direct payment provider webhooks or operator calls.
       - Usage meters (token_wallets, usage_limits) are synced from the plan
         snapshot captured at subscription activation time, not derived live.
       - The schemas layer exposes plan_snapshot, catalog_id, and catalog_version
         fields on subscription records for downstream audit traceability.
       - Emit hosted.* namespaced events for platform subscription lifecycle;
         emit domain.* events for app-level entitlement changes that other modules react to.
-      - Checkout sessions are append-only records; never mutate a completed session.
-      - Refund and cancellation flows must emit events that downstream entitlement
-        and wallet modules can react to independently.
+      - Generated OSS app modules must not own payment provider webhook receivers,
+        payment provider SDK imports, customer/payment-provider mappings, refunds,
+        wallet ledgers, payouts, or provider credential handling.
+      - Checkout session facade records are append-only; never mutate a completed session.
+      - Cancellation or plan-update facade flows must emit events that downstream
+        entitlement and token-metered modules can react to independently.
       - >
         Any module that writes time-bounded pending records (checkout sessions,
         reservations, invitations, etc.) must include a background expiry watcher
