@@ -13,7 +13,7 @@ tools:
       component: SubscriptionContractReview
       mode: artifact
       workflow_primitive: approval_card
-      realization: generated_component
+      realization: workflow_wrapper
     ui_contract:
       surface_kind: agent_tool
       payload_schema:

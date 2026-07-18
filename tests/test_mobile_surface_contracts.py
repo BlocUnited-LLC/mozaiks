@@ -256,6 +256,8 @@ def test_factory_app_react_files_are_classified() -> None:
         "factory_app/workflows/ExistingAppDiscovery/ui/DiscoveryBriefCard.jsx",
         # AppReview workflow agentic UI artifact — emitted by present_review_summary
         "factory_app/workflows/AppReview/ui/AppReview/AppReviewSummary.jsx",
+        # SubscriptionContractDesigner agentic UI artifact — approval card for contract review
+        "factory_app/workflows/SubscriptionContractDesigner/ui/SubscriptionContractDesigner/SubscriptionContractReview.jsx",
     }
 
     assert react_files == route_backed_files | support_files
