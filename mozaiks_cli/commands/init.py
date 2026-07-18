@@ -221,7 +221,6 @@ def _create_bundle_scaffold(
 ) -> None:
   app_root = target_dir / "app"
   config_dir = app_root / "config"
-  control_plane_config_dir = target_dir / "control_plane" / "config"
   security_dir = app_root / "security"
   services_dir = app_root / "services"
   service_integrations_dir = services_dir / "integrations"
@@ -241,7 +240,6 @@ def _create_bundle_scaffold(
   for directory in (
     app_root,
     config_dir,
-    control_plane_config_dir,
     security_dir,
     services_dir,
     service_integrations_dir,
@@ -296,10 +294,10 @@ def _create_bundle_scaffold(
   print("Created app/config/ai.json")
 
   _write_text(
-    control_plane_config_dir / "runtime.yaml",
+    config_dir / "llm.yaml",
     yaml.safe_dump(build_default_control_plane_config(), sort_keys=False, allow_unicode=False),
   )
-  print("Created control_plane/config/runtime.yaml")
+  print("Created app/config/llm.yaml")
 
   _write_json(config_dir / "shell.json", _build_shell_config(app_name))
   print("Created app/config/shell.json")
@@ -884,7 +882,7 @@ def _load_factory_control_plane_runtime_config() -> dict:
     if factory_root is None:
         raise FileNotFoundError("Unable to resolve the packaged factory_app root.")
 
-    config_path = factory_root / "control_plane" / "config" / "runtime.yaml"
+    config_path = factory_root / "app" / "config" / "llm.yaml"
     if not config_path.exists():
         return {}
 

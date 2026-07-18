@@ -12,7 +12,7 @@ from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
 )
 
 _CONTROL_PLANE_CONFIG = "control_plane/config/control_plane.yaml"
-_CONTROL_PLANE_RUNTIME = "control_plane/config/runtime.yaml"
+_CONTROL_PLANE_RUNTIME = "app/config/llm.yaml"
 _CONTROL_PLANE_TOOLS = "control_plane/config/tools.yaml"
 _CONTROL_PLANE_POLICIES = "control_plane/config/policies.yaml"
 

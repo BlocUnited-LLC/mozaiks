@@ -1,6 +1,6 @@
 # Control-Plane Runtime Policy
 
-`control_plane/config/runtime.yaml` is the app-local runtime policy for the
+`app/config/llm.yaml` is the app-local runtime policy for the
 control plane. It decides whether the harness is enabled and which model
 profiles its capabilities use.
 

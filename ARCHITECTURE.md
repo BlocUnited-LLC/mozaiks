@@ -417,7 +417,7 @@ mozaiksai/control_plane/
 
 ### Runtime Capabilities
 
-`factory_app/control_plane/config/runtime.yaml` declares which control-plane capabilities are active and which LLM profile each uses. These are loaded into `ControlPlaneConfig` at startup.
+`factory_app/app/config/llm.yaml` declares which control-plane capabilities are active and which LLM profile each uses. These are loaded into `ControlPlaneConfig` at startup.
 
 | Capability | Field | Purpose | Default profile |
 |------------|-------|---------|-----------------|
@@ -426,7 +426,7 @@ mozaiksai/control_plane/
 | Contract surface | `contract_surface` | Validates and refines module/workflow contracts | `codegen` |
 | Scope proposal | `scope` | Proposes the narrowest safe file scope for a coding refinement | `codegen` (falls back to `coding` if not declared) |
 
-Each capability has `enabled: bool` and an `llm_profile` reference. Operator packs can override the LLM profile or disable individual capabilities without affecting others. The `scope` capability drives `ScopeProposer` — it resolves `scope` first, then falls back to `coding`, so existing `runtime.yaml` files that predate `scope` continue to work.
+Each capability has `enabled: bool` and an `llm_profile` reference. Operator packs can override the LLM profile or disable individual capabilities without affecting others. The `scope` capability drives `ScopeProposer` — it resolves `scope` first, then falls back to `coding`, so existing `llm.yaml` files that predate `scope` continue to work.
 
 ### Checkpoints
 

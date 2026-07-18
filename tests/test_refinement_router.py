@@ -2003,7 +2003,7 @@ async def test_design_route_context_seed_has_no_llm_profile() -> None:
 # ---------------------------------------------------------------------------
 
 def _load_ai_json() -> dict:
-    runtime_yaml_path = Path(__file__).resolve().parents[1] / "factory_app" / "control_plane" / "config" / "runtime.yaml"
+    runtime_yaml_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "llm.yaml"
     return yaml.safe_load(runtime_yaml_path.read_text(encoding="utf-8"))
 
 

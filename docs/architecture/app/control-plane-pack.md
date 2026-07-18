@@ -45,7 +45,7 @@ A generated app control plane pack lives at the workspace root:
 control_plane/
   config/
     control_plane.yaml    required — harness manifest, routing, checkpoints
-    runtime.yaml          required — LLM profiles and capability feature flags
+    llm.yaml              required — LLM profiles and capability feature flags
     tools.yaml            required — context tool declarations
     policies.yaml         optional — deterministic scope bounds
   prompts/
@@ -96,12 +96,12 @@ To override the LLM model for a specific capability, add `llm_config`:
 }
 ```
 
-App-level `llm_config` overrides the profile declared in `runtime.yaml`. Only
+App-level `llm_config` overrides the profile declared in `llm.yaml`. Only
 add it when the app needs a different model than the pack default.
 
 ---
 
-## `control_plane/config/runtime.yaml` — Minimal Starter
+## `app/config/llm.yaml` — Minimal Starter
 
 Declares LLM profiles for each capability. The classifier and codegen profiles
 are the two required for refinement-capable apps.
@@ -229,7 +229,7 @@ surface-level targeting before workflow re-entry), add the checkpoint:
       - get_contract_surface_context
 ```
 
-And add `contract_surface` to `runtime.yaml` as shown above.
+And add `contract_surface` to `llm.yaml` as shown above.
 
 ### Multi-Artifact Routing
 
@@ -420,6 +420,6 @@ Generated control-plane packs are declarative only:
 - no `module.yaml` — the harness is not a module
 - no `app/modules/*/backend/control_plane*.py` — no custom harness Python
 - no business-domain logic in prompts
-- no hardcoded model names as prompt content — model config belongs in `runtime.yaml`
+- no hardcoded model names as prompt content — model config belongs in `llm.yaml`
 - no `affected_workflows` or `affected_families` in `control_plane.yaml` routes
 - no `context_variables.yaml` — the harness is not a workflow

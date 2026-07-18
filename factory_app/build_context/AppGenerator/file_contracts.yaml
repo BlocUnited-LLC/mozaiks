@@ -209,7 +209,7 @@ task_contracts:
       the app needs checkpoint/routing/refinement behavior beyond ordinary
       extension_registry.json transitions and workflow_sequences.
     required_outputs:
-      - control_plane/config/runtime.yaml
+      - app/config/llm.yaml
       - control_plane/config/control_plane.yaml
       - control_plane/config/tools.yaml
     optional_outputs:
@@ -220,7 +220,7 @@ task_contracts:
       - Do NOT generate module.yaml, handler.py, service.py, repo.py, backend/control_plane/*.py, or other module/runtime files.
       - Do NOT register this surface as a runtime module under app/modules/.
       - Stay within current_build_task.owned_paths.
-      - control_plane/config/runtime.yaml is the app-local control-plane runtime policy seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into control_plane.yaml.
+      - app/config/llm.yaml is the app-local control-plane LLM profile seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into control_plane.yaml.
       - control_plane.yaml routes declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
       - Every workflow_sequence referenced by control_plane.yaml must exist in workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
       - Use shipped mozaiksai.control_plane implementations and tool entrypoints unless a future custom-harness Python contract is explicitly introduced.

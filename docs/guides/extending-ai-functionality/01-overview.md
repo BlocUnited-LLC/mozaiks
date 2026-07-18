@@ -8,7 +8,7 @@ The key idea is that Mozaiks separates ordinary runtime startup from
 artifact-aware refinement policy:
 
 - `app/config/ai.json` starts ask, chat, and workflow behavior.
-- `control_plane/config/runtime.yaml` enables the control-plane runtime profile
+- `app/config/llm.yaml` enables the control-plane runtime profile
   and model budgets.
 - `control_plane/config/control_plane.yaml` declares artifact routing plus
   LLM-backed checkpoint events, prompt ids, and tool ids.
@@ -38,7 +38,7 @@ In this repo's first-party builder workspace, the same contract is dogfooded
 under:
 
 - `factory_app/app/config/ai.json`
-- `factory_app/control_plane/config/runtime.yaml`
+- `factory_app/app/config/llm.yaml`
 - `factory_app/control_plane/config/control_plane.yaml`
 - `factory_app/workflows/extended_orchestration/extension_registry.json`
 
