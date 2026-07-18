@@ -200,6 +200,197 @@ class OrdersRepo:
     }
 
 
+def _generated_saas_build_files() -> dict[str, str]:
+    """Minimal self-hosted SaaS app with subscriptions, entitlement_dispatch, and a gated module."""
+    return {
+        "app.json": json.dumps(
+            {
+                "appId": "analytics-saas",
+                "appName": "Analytics SaaS",
+                "version": "1.0.0",
+                "startup": {"landing_spot": "/reports"},
+            }
+        ),
+        "config/ai.json": json.dumps(
+            {"chat": {"chat_startup_mode": "ask"}, "workflows": {"entry_point": None}}
+        ),
+        "config/shell.json": json.dumps(
+            {"navigation": {"autoFromPages": True}, "header": {"show": True}}
+        ),
+        "config/subscriptions.yaml": """\
+schema_version: mozaiks.subscriptions.v1
+label: Analytics SaaS Plans
+default_plan_id: free
+assignment_store:
+  data_alias: billing.subscriptions
+  user_id_field: user_id
+  active_statuses:
+    - active
+plans:
+  - plan_id: free
+    label: Free
+    capabilities:
+      - reports.view
+  - plan_id: pro
+    label: Pro
+    capabilities:
+      - reports.view
+      - reports.export
+""",
+        "ui/route_manifest.json": json.dumps(
+            {
+                "pages": [
+                    {
+                        "path": "/reports",
+                        "component": "SchemaPage",
+                        "label": "Reports",
+                        "order": 10,
+                        "schema": "reports",
+                        "navigation": {"group": "main"},
+                        "meta": {"title": "Reports"},
+                    }
+                ]
+            }
+        ),
+        "ui/pages/reports.yaml": """\
+name: Reports
+route: /reports
+title: Reports
+sections:
+  - id: reports-list
+    type: record_list
+    config:
+      api_endpoint: /api/modules/reports/list_reports
+""",
+        "modules/reports/module.yaml": """\
+schema_version: mozaiks.module.v1
+module:
+  id: reports
+  display_name: Reports
+  version: 1.0.0
+  handler: backend.handler:ReportsModule
+actions:
+  - id: list_reports
+    description: List reports visible to the authenticated user.
+    handler_method: list_reports
+    permissions:
+      - reports.read
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+  - id: export_report
+    description: Export a report as CSV. Requires Pro plan.
+    handler_method: export_report
+    entitlement_gate: reports.export
+    permissions:
+      - reports.read
+    input_schema:
+      type: object
+      required:
+        - report_id
+      properties:
+        report_id:
+          type: string
+    output_schema:
+      type: object
+capabilities:
+  - capability_id: reports.view
+    kind: action
+    target: list_reports
+    title: View reports
+  - capability_id: reports.export
+    kind: action
+    target: export_report
+    title: Export reports
+""",
+        "modules/reports/backend/__init__.py": "",
+        "modules/reports/backend/handler.py": """\
+from .service import ReportsService
+
+
+class ReportsModule:
+    def __init__(self):
+        self.service = ReportsService()
+
+    async def list_reports(self, ctx, **params):
+        return await self.service.list_reports(ctx, **params)
+
+    async def export_report(self, ctx, **params):
+        return await self.service.export_report(ctx, **params)
+""",
+        "modules/reports/backend/service.py": """\
+class ReportsService:
+    async def list_reports(self, ctx, **params):
+        return {"reports": []}
+
+    async def export_report(self, ctx, **params):
+        return {"csv": ""}
+""",
+        "modules/entitlement_dispatch/module.yaml": """\
+schema_version: mozaiks.module.v1
+module:
+  id: entitlement_dispatch
+  display_name: Entitlement Dispatch
+  version: 1.0.0
+  handler: backend.handler:EntitlementDispatchModule
+actions:
+  - id: activate_subscription
+    description: >
+      Write a subscription assignment record to the configured assignment_store
+      so that ConfiguredEntitlementAdapter can grant capabilities for the plan.
+    handler_method: activate_subscription
+    input_schema:
+      type: object
+      required:
+        - user_id
+        - plan_id
+      properties:
+        user_id:
+          type: string
+        plan_id:
+          type: string
+        external_subscription_id:
+          type: string
+    output_schema:
+      type: object
+  - id: deactivate_subscription
+    description: Cancel the subscription assignment for the requesting user.
+    handler_method: deactivate_subscription
+    input_schema:
+      type: object
+      properties: {}
+    output_schema:
+      type: object
+capabilities: []
+""",
+        "modules/entitlement_dispatch/backend/__init__.py": "",
+        "modules/entitlement_dispatch/backend/handler.py": """\
+from .service import EntitlementDispatchService
+
+
+class EntitlementDispatchModule:
+    def __init__(self):
+        self.service = EntitlementDispatchService()
+
+    async def activate_subscription(self, ctx, **params):
+        return await self.service.activate_subscription(ctx, **params)
+
+    async def deactivate_subscription(self, ctx, **params):
+        return await self.service.deactivate_subscription(ctx, **params)
+""",
+        "modules/entitlement_dispatch/backend/service.py": """\
+class EntitlementDispatchService:
+    async def activate_subscription(self, ctx, **params):
+        return {"activated": True}
+
+    async def deactivate_subscription(self, ctx, **params):
+        return {"deactivated": True}
+""",
+    }
+
+
 def _write_files(root: Path, files: dict[str, str]) -> None:
     for rel_path, content in files.items():
         path = root / rel_path
@@ -353,3 +544,76 @@ class OrdersService:
         item["gate"] == "app_runtime_load" and item["test"] == "app_runtime_module_load"
         for item in acceptance["failed_tests"]
     )
+
+
+def test_scan_generated_saas_bundle_passes() -> None:
+    """Self-hosted SaaS fixture with subscriptions + entitlement_dispatch passes the bundle scanner."""
+    files = _generated_saas_build_files()
+    errors = scan_generated_bundle(files)
+    assert errors == []
+
+
+def test_scan_flags_missing_entitlement_dispatch() -> None:
+    """Scanner rejects a SaaS bundle that declares assignment_store but omits entitlement_dispatch."""
+    files = _generated_saas_build_files()
+    # Remove the entitlement_dispatch module entirely
+    for key in list(files.keys()):
+        if "entitlement_dispatch" in key:
+            del files[key]
+
+    errors = scan_generated_bundle(files)
+    assert any("entitlement_dispatch" in e for e in errors)
+
+
+def test_scan_flags_unknown_entitlement_gate() -> None:
+    """Scanner rejects a module.yaml whose entitlement_gate is not in any subscriptions.yaml plan."""
+    files = _generated_saas_build_files()
+    files["modules/reports/module.yaml"] = files["modules/reports/module.yaml"].replace(
+        "entitlement_gate: reports.export",
+        "entitlement_gate: reports.nonexistent_capability",
+    )
+
+    errors = scan_generated_bundle(files)
+    assert any("reports.nonexistent_capability" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_offline_saas_build_acceptance_gate_passes() -> None:
+    """Happy-path acceptance gate for a self-hosted SaaS app with entitlement gating."""
+    files = _generated_saas_build_files()
+    context = _Context(
+        {
+            "workflow_name": "AppGenerator",
+            "app_id": "analytics-saas",
+            "chat_id": "offline-saas-acceptance",
+            "generated_files": files,
+            "app_build_plan": {
+                "capability_packs": [
+                    {"module_id": "reports", "actions": ["list_reports", "export_report"]},
+                    {"module_id": "entitlement_dispatch", "actions": ["activate_subscription", "deactivate_subscription"]},
+                ]
+            },
+        }
+    )
+
+    scan_errors = scan_generated_bundle(files)
+    assert scan_errors == []
+
+    validation = await validate_app_bundle_from_request(
+        {
+            "validation_strategy": "skip",
+            "start_dev_server": False,
+        },
+        context_variables=context,
+    )
+
+    assert validation["status"] == "success"
+    assert validation["app_bundle_acceptance_result"]["status"] == "passed"
+    assert validation["integration_tests_passed"] is True
+    assert context.get("app_bundle_acceptance_status") == "passed"
+    assert context.get("app_bundle_validation_evidence")["failed"] == []
+    assert context.get("bundle_scan_result")["passed"] is True
+    assert context.get("wiring_validation_result")["passed"] is True
+    assert context.get("module_implementation_validation_result")["passed"] is True
+    assert context.get("module_runtime_quality_result")["passed"] is True
+    assert context.get("app_runtime_load_passed") is True

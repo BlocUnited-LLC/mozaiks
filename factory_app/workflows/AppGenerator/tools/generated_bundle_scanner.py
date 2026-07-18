@@ -610,6 +610,122 @@ def _scan_mozaikspay_saas_contract(
     return errors
 
 
+def _entitlement_gates_from_module_yaml(path: str, content: str) -> set[str]:
+    parsed, error = _load_yaml_mapping_from_file({path: content}, path)
+    if error or not isinstance(parsed, dict):
+        return set()
+    gates: set[str] = set()
+    for action in (parsed.get("actions") or []):
+        if not isinstance(action, dict):
+            continue
+        gate = str(action.get("entitlement_gate") or "").strip()
+        if gate:
+            gates.add(gate)
+    return gates
+
+
+def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
+    try:
+        config = yaml.safe_load(content) or {}
+    except Exception:
+        return set()
+    capability_ids: set[str] = set()
+    for plan in (config.get("plans") or []):
+        if not isinstance(plan, dict):
+            continue
+        for cap in (plan.get("capabilities") or []):
+            if isinstance(cap, str) and cap.strip():
+                capability_ids.add(cap.strip())
+    return capability_ids
+
+
+def _scan_self_hosted_entitlement_dispatch_contract(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Validate the self-hosted entitlement_dispatch module contract.
+
+    Fires when config/subscriptions.yaml declares an assignment_store and
+    the mozaikspay managed pack is NOT selected. In that case the generated
+    app owns the subscription assignment write path, and an entitlement_dispatch
+    module is required.
+    """
+    mozaikspay_pack = _selected_pack_descriptor(capability_packs, "mozaikspay")
+    if mozaikspay_pack and str(mozaikspay_pack.get("capability_source") or "").strip() == "managed_capability":
+        return []
+
+    normalized_files = _normalized_files_map(files_map)
+    subs_content = normalized_files.get("config/subscriptions.yaml")
+    if not subs_content:
+        return []
+
+    try:
+        subs_config = yaml.safe_load(subs_content) or {}
+    except Exception:
+        return []
+
+    if not isinstance(subs_config, dict) or not subs_config.get("assignment_store"):
+        return []
+
+    errors: list[str] = []
+    dispatch_path = "modules/entitlement_dispatch/module.yaml"
+    dispatch_content = normalized_files.get(dispatch_path)
+    if not dispatch_content:
+        errors.append(
+            "config/subscriptions.yaml declares assignment_store but "
+            f"{dispatch_path} is missing. Self-hosted apps require an "
+            "entitlement_dispatch module to write subscription assignment records."
+        )
+        return errors
+
+    declared_id = _declared_module_id_from_yaml(dispatch_path, dispatch_content)
+    if declared_id != "entitlement_dispatch":
+        errors.append(
+            f"{dispatch_path}: module.id must be 'entitlement_dispatch', got {declared_id!r}."
+        )
+
+    actions = _module_actions_from_yaml(dispatch_path, dispatch_content)
+    required_actions = {"activate_subscription", "deactivate_subscription"}
+    missing_actions = sorted(required_actions - actions)
+    if missing_actions:
+        errors.append(
+            f"{dispatch_path}: entitlement_dispatch module must declare actions "
+            f"{sorted(required_actions)}; missing: {missing_actions}."
+        )
+
+    return errors
+
+
+def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> list[str]:
+    """Validate that all entitlement_gate values in module.yaml files reference
+    capability_ids that appear in at least one plan in config/subscriptions.yaml.
+    """
+    normalized_files = _normalized_files_map(files_map)
+    subs_content = normalized_files.get("config/subscriptions.yaml")
+    if not subs_content:
+        return []
+
+    plan_capabilities = _capability_ids_from_subscriptions_yaml(subs_content)
+    if not plan_capabilities:
+        return []
+
+    errors: list[str] = []
+    for path, content in normalized_files.items():
+        if not path.startswith("modules/") or not path.endswith("/module.yaml"):
+            continue
+        gates = _entitlement_gates_from_module_yaml(path, content)
+        unknown = sorted(gate for gate in gates if gate not in plan_capabilities)
+        if unknown:
+            errors.append(
+                f"{path}: entitlement_gate values {unknown} do not appear in any "
+                "plan's capabilities in config/subscriptions.yaml. Each gated capability "
+                "must be listed under at least one plan."
+            )
+
+    return errors
+
+
 def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
     normalized_files = _normalized_files_map(files_map)
     deployment_artifacts: dict[str, str] = {
@@ -732,6 +848,13 @@ def scan_generated_bundle(
             capability_packs=capability_packs,
         )
     )
+    errors.extend(
+        _scan_self_hosted_entitlement_dispatch_contract(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(_scan_entitlement_gate_capability_alignment(files_map))
     if require_deployment_artifacts:
         errors.extend(_scan_deployment_artifacts_contract(files_map))
         errors.extend(_scan_auth_deployment_contract(files_map))
