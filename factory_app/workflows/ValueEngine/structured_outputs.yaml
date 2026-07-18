@@ -228,8 +228,8 @@ models:
         description: >
           Advisory revenue-model signal for downstream planning. Set this when
           monetization_enabled is true or the concept itself mentions payment,
-          subscription, usage credits, checkout, marketplace fees, sponsored
-          placement, donations, or community funding. Use null when no revenue
+          subscription, usage credits, checkout, marketplace commercial policy,
+          sponsored placement, donations, or community funding. Use null when no revenue
           flow is implied.
       surface_candidate_hints:
         type: optional_list

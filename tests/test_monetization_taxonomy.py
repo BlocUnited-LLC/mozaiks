@@ -65,7 +65,7 @@ def test_valueengine_concept_blueprint_emits_advisory_monetization_hint() -> Non
     agents = _read("factory_app/workflows/ValueEngine/agents.yaml")
     assert "Do not treat \"monetized\" as a final model" in agents
     assert "transactional checkout" in agents
-    assert "marketplace fee" in agents
+    assert "marketplace commercial policy" in agents
     assert "sponsored placement" in agents
 
 
