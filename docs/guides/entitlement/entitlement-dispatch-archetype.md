@@ -204,7 +204,7 @@ Self-hosted apps can connect to the hosted MozaiksPay service using an API key:
 
 ```
 MOZAIKSPAY_API_BASE=https://pay.mozaiks.app
-MOZAIKSPAY_API_KEY=mzk_pay_live_...
+MOZAIKSPAY_API_KEY=mzk_live_...
 ```
 
 The payment adapter (`services/adapters/payments/mozaikspay.py`) normalizes

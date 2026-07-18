@@ -58,7 +58,7 @@ transaction even for self-hosted apps.
 2. Add to your `.env.staging` / `.env.production`:
    ```
    MOZAIKSPAY_API_BASE=https://pay.mozaiks.app
-   MOZAIKSPAY_API_KEY=mzk_pay_live_...
+   MOZAIKSPAY_API_KEY=mzk_live_...
    ```
 3. Add `MOZAIKSPAY_API_KEY` to `app/security/secrets.yaml`:
    ```yaml
@@ -75,7 +75,7 @@ transaction even for self-hosted apps.
 - Hosted subscription checkout sessions (Stripe Connect under the hood, opaque to your app)
 - Billing portal for plan upgrades/downgrades
 - Webhook-normalized subscription lifecycle events your `entitlement_dispatch` module reacts to
-- Opaque `mzk_pay_xxx` IDs — your app never sees Stripe IDs directly
+- Opaque `mzk_pay_xxx` payment IDs — your app never sees payment-provider IDs directly
 
 **What stays on the hosted platform (not available via API key):**
 

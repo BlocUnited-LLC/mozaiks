@@ -93,9 +93,10 @@ plans, usage allowances, and markup policy.
 MozaiksPay Checkout is the default hosted checkout surface for generated SaaS
 subscription and token top-up flows. Generated apps call the MozaiksPay hosted
 billing API at `/api/mozaikspay/v1/...` through the app-owned MozaiksPay client
-and billing facade. The separate merchant payments API at `/api/v1/mozaikspay/...`
-is for app/merchant payment operations and should not be substituted into the
-subscription entitlement flow.
+and billing facade using `MOZAIKSPAY_API_BASE` plus an app-scoped
+`MOZAIKSPAY_API_KEY`. The separate merchant payments API at
+`/api/v1/mozaikspay/...` is for app/merchant payment operations and should not
+be substituted into the subscription entitlement flow.
 
 ## Generation
 

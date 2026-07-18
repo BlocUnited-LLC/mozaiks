@@ -10,20 +10,32 @@ description: >
   logic, fee calculations, or subscription business rules belong here.
 
 auth:
-  scheme: client_credentials
+  scheme: mozaikspay_api_key
   headers:
-    - name: X-MozaiksPay-Client-Id
-      description: App-scoped client ID issued by the hosted platform (mpc_ prefix).
-      required: true
-      secret: false
     - name: Authorization
-      format: "Bearer {client_secret}"
-      description: App-scoped client secret issued by the hosted platform (mps_ prefix).
+      format: "Bearer {api_key}"
+      description: App-scoped MozaiksPay API key issued by the hosted platform (mzk_live_ or mzk_test_ prefix).
       required: true
       secret: true
   credential_prefixes:
-    client_id: "mpc_"
-    client_secret: "mps_"
+    api_key:
+      - "mzk_live_"
+      - "mzk_test_"
+  compatibility_auth:
+    scheme: client_credentials
+    headers:
+      - name: X-MozaiksPay-Client-Id
+        description: App-scoped client ID issued by the hosted platform (mpc_ prefix).
+        required: true
+        secret: false
+      - name: Authorization
+        format: "Bearer {client_secret}"
+        description: App-scoped client secret issued by the hosted platform (mps_ prefix).
+        required: true
+        secret: true
+    credential_prefixes:
+      client_id: "mpc_"
+      client_secret: "mps_"
 
 endpoints:
   - id: subscription_status
@@ -195,8 +207,8 @@ endpoints:
 
 error_handling:
   http_errors:
-    401: "Missing or invalid client credentials."
-    403: "Client credential scope does not allow the requested user/tenant/workspace scope."
+    401: "Missing or invalid MozaiksPay API key or client credentials."
+    403: "MozaiksPay credential app or user/tenant/workspace scope does not allow this request."
     400: "Invalid request body (missing return_url, unsafe URL, etc.)."
     404: "No subscription found for this scope (subscription_status only — not an HTTP 404)."
   application_errors:

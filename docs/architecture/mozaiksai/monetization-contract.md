@@ -69,9 +69,8 @@ The generated app should see MozaiksPay-branded configuration, such as:
 
 ```text
 MOZAIKSPAY_API_BASE
-MOZAIKSPAY_CLIENT_ID
-MOZAIKSPAY_CLIENT_SECRET
 MOZAIKSPAY_API_KEY
+MOZAIKS_APP_URL
 ```
 
 It should never see raw payment-provider imports, provider price IDs, checkout

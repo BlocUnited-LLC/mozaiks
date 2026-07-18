@@ -495,8 +495,7 @@ def _scan_mozaikspay_saas_contract(
             "ConnectorStore": "ConnectorStore",
             "get_connector_vault_backend": "get_connector_vault_backend",
             "MOZAIKSPAY_API_BASE": "MOZAIKSPAY_API_BASE",
-            "MOZAIKSPAY_CLIENT_ID": "MOZAIKSPAY_CLIENT_ID",
-            "MOZAIKSPAY_CLIENT_SECRET": "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY": "MOZAIKSPAY_API_KEY",
         }
         missing_markers = [
             label for label, marker in required_markers.items() if marker not in client_content
