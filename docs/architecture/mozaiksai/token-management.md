@@ -184,6 +184,12 @@ Generated app pages should not call it. Generated apps request checkout or
 top-up sessions through an app-owned billing facade; only a trusted adapter
 submits fulfillment after verification.
 
+Generated app runtime acceptance tests cover this ingress as part of the full
+chain: `POST /api/billing/fulfillment/apply` writes the configured
+`assignment_store`, `ConfiguredEntitlementAdapter` grants the gated action,
+plan allowances appear in `/api/me/tokens`, and depleted wallets raise
+`INSUFFICIENT_TOKENS` before the LLM provider call.
+
 ### summarize_usage_events
 
 `summarize_usage_events(events)` in `ledger.py` aggregates a list of raw events

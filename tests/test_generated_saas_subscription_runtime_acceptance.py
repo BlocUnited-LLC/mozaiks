@@ -8,9 +8,15 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pymongo.errors import DuplicateKeyError
 
-from mozaiksai.core.billing.fulfillment import BillingFulfillmentCommand, BillingFulfillmentService
+from mozaiksai.core.billing.fulfillment import (
+    BillingFulfillmentCommand,
+    BillingFulfillmentCommandStore,
+    BillingFulfillmentService,
+)
 from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
 from mozaiksai.core.runtime.app.loader import AppLoader
@@ -18,6 +24,7 @@ from mozaiksai.core.runtime.composition.module_executor import ModuleExecutor, M
 from mozaiksai.core.tokens.guard import TokenUsageDenied, TokenUsageGuard
 from mozaiksai.core.tokens.wallet import TokenWalletLedger
 from mozaiksai.hosts.platform import _current_user_token_wallet_summary
+from mozaiksai.hosts.routers.billing import router as billing_router
 
 
 class _Cursor:
@@ -163,6 +170,9 @@ class _Database:
 
 
 class _NoopAuditLogger:
+    async def log(self, record: Any) -> None:
+        return None
+
     async def log_module_action(self, **kwargs):  # noqa: ANN003
         return None
 
@@ -247,6 +257,20 @@ def _generated_saas_files() -> dict[str, str]:
                 usage_meter_id: ai_tokens
                 scope: user
                 auto_debit_usage: true
+                depleted_balance:
+                  recovery_action: top_up
+                  billing_route: /billing
+                  top_up_route: /billing
+                  upgrade_route: /pricing
+            top_up_products:
+              - product_id: ai_tokens_10k
+                label: 10K AI tokens
+                wallet_id: ai_tokens
+                token_amount: 10000
+                price:
+                  amount_cents: 500
+                  currency: USD
+                  display: "$5"
             plans:
               - plan_id: free
                 label: Free
@@ -506,3 +530,171 @@ async def test_factory_shaped_saas_app_fulfills_runs_debits_and_blocks_depleted_
     )
     assert cancelled.success is False
     assert cancelled.error_code == "ENTITLEMENT_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_generated_saas_app_http_fulfillment_closes_entitlement_and_token_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_root = tmp_path / "app"
+    _write_files(app_root, _generated_saas_files())
+    loaded = await AppLoader.load(str(app_root))
+    assert loaded.subscriptions_config is not None
+
+    monkeypatch.setenv("INTERNAL_API_KEY", "generated-saas-test-key")
+    monkeypatch.setattr(
+        "mozaiksai.core.runtime.composition.module_executor.get_audit_logger",
+        lambda: _NoopAuditLogger(),
+    )
+    monkeypatch.setattr(
+        "mozaiksai.hosts.routers.billing.get_audit_logger",
+        lambda: _NoopAuditLogger(),
+    )
+
+    database = _Database()
+    assignments = _Collection([])
+    ledger = TokenWalletLedger(database=database)
+    command_store = BillingFulfillmentCommandStore(database=database)
+
+    app = FastAPI()
+    app.state.subscriptions_config = loaded.subscriptions_config
+    app.state.billing_fulfillment_command_store = command_store
+    app.state.billing_fulfillment_service_factory = lambda request: BillingFulfillmentService(
+        config=loaded.subscriptions_config,
+        ledger=ledger,
+        collection_resolver=lambda alias: assignments,
+        command_store=command_store,
+    )
+    app.include_router(billing_router)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    adapter = ConfiguredEntitlementAdapter(
+        config=loaded.subscriptions_config,
+        collection_resolver=lambda alias: assignments,
+    )
+    executor = ModuleExecutor(entitlement_checker=adapter)
+    for module in loaded.modules:
+        executor.register(
+            module.name,
+            module.handler,
+            action_method_map=module.action_method_map,
+            action_permissions=module.action_permissions_map,
+            action_schemas=module.action_schemas_map,
+            action_entitlements=module.action_entitlement_map,
+        )
+
+    denied_before_fulfillment = await executor.execute(
+        ModuleRequest(
+            module="reports",
+            action="generate_report",
+            params={"topic": "retention"},
+            app_id="generated-saas",
+            user_id="user_1",
+            granted_permissions=[],
+        )
+    )
+    assert denied_before_fulfillment.success is False
+    assert denied_before_fulfillment.error_code == "ENTITLEMENT_REQUIRED"
+
+    response = client.post(
+        "/api/billing/fulfillment/apply",
+        json={
+            "command_id": "cmd_generated_saas_http_activate_1",
+            "event_type": "subscription_activated",
+            "source": "mozaikspay",
+            "app_id": "generated-saas",
+            "user_id": "user_1",
+            "plan_id": "pro",
+            "occurred_at": "2026-07-01T00:00:00+00:00",
+        },
+        headers={"x-internal-api-key": "generated-saas-test-key"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["status"] == "applied"
+    assert {effect["effect"] for effect in payload["effects"]} == {
+        "assignment_upsert",
+        "plan_allowances",
+    }
+
+    assignment = await assignments.find_one(
+        {"app_id": "generated-saas", "tenant_id": None, "user_id": "user_1"}
+    )
+    assert assignment["plan_id"] == "pro"
+    assert assignment["status"] == "active"
+    assert assignment["billing_fulfillment"]["command_id"] == "cmd_generated_saas_http_activate_1"
+    assert assignment["plan_snapshot"]["granted_capabilities"] == [
+        {"capability_id": "reports.view"},
+        {"capability_id": "reports.generate"},
+    ]
+
+    granted_after_fulfillment = await executor.execute(
+        ModuleRequest(
+            module="reports",
+            action="generate_report",
+            params={"topic": "retention"},
+            app_id="generated-saas",
+            user_id="user_1",
+            granted_permissions=[],
+        )
+    )
+    assert granted_after_fulfillment.success is True
+
+    monkeypatch.setattr(
+        "mozaiksai.core.tokens.wallet.get_token_wallet_ledger",
+        lambda: ledger,
+    )
+    tokens_payload = await _current_user_token_wallet_summary(
+        loaded.subscriptions_config,
+        app_id="generated-saas",
+        user_id="user_1",
+        ensure_allowances=False,
+    )
+    assert tokens_payload["wallets"][0]["balance"]["balance"] == 1000
+
+    token_guard = TokenUsageGuard(
+        config=loaded.subscriptions_config,
+        ledger=ledger,
+        collection_resolver=lambda alias: assignments,
+    )
+    llm_service = SimpleLLMCapabilityService(token_usage_guard=token_guard)
+    fake_client = _FakeLLMClient()
+    llm_service._client = fake_client  # type: ignore[assignment]
+    llm_service._select_provider = _fake_provider  # type: ignore[method-assign]
+
+    llm_result = await llm_service.generate_chat_completion(
+        messages=[{"role": "user", "content": "Write a short retention report."}],
+        llm_config={"model": "stub-generated-saas-model"},
+        app_id="generated-saas",
+        user_id="user_1",
+    )
+    assert llm_result["content"] == "stubbed generated SaaS report"
+    assert len(fake_client.calls) == 1
+
+    wallet = loaded.subscriptions_config.token_wallet_by_id("ai_tokens")
+    assert wallet is not None
+    await ledger.record_usage_debit(
+        {
+            "event_id": "usage_evt_generated_saas_http_exhaust",
+            "app_id": "generated-saas",
+            "user_id": "user_1",
+            "total_tokens": 1000,
+        },
+        wallet=wallet,
+    )
+
+    calls_before_denial = len(fake_client.calls)
+    with pytest.raises(TokenUsageDenied) as exc_info:
+        await llm_service.generate_chat_completion(
+            messages=[{"role": "user", "content": "This should not reach the provider."}],
+            llm_config={"model": "stub-generated-saas-model"},
+            app_id="generated-saas",
+            user_id="user_1",
+        )
+    decision = exc_info.value.decision
+    assert decision.error_code == "INSUFFICIENT_TOKENS"
+    assert decision.recovery_action == "top_up"
+    assert decision.billing_route == "/billing"
+    assert len(fake_client.calls) == calls_before_denial
