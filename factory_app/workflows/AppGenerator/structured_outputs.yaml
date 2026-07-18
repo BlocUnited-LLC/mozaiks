@@ -6014,6 +6014,7 @@ registry:
   ControllerAgent: ControllerOutput
   AssemblyAgent: CodeFilesOutput
   AppValidationAgent: AppValidationRequestCall
+  InfraScaffoldAgent: CodeFilesOutput
   DownloadAgent: DownloadRequestCall
 
 

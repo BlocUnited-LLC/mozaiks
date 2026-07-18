@@ -1,0 +1,22 @@
+context_id: infra
+pack_id: infra
+label: Infra Scaffold
+version: 1
+
+applies_to_workflows:
+  - AppGenerator
+
+# Template variables substituted by InfraScaffoldAgent's save_infra_scaffold tool:
+#   APP_NAME / APP_SLUG   — app slug used in image tags and storage key prefix
+#   TOKEN_KEY_PREFIX      — sessionStorage key prefix (defaults to APP_SLUG)
+#   OIDC_CLIENT_ID        — OIDC client_id baked into the Vite bundle
+#   MOZAIKS_VERSION       — pinned mozaiks version from requirements.txt
+#   REGISTRY              — container registry prefix (e.g. ghcr.io/your-org)
+#   DEPLOY_TARGET         — azure_container_apps | fly | render | generic
+
+assets:
+  - path: templates
+    kind: templates
+    description: >
+      Provider-neutral deployment scaffold templates emitted by InfraScaffoldAgent.
+      Operator-owned after first emit; regeneration is explicit and opt-in.

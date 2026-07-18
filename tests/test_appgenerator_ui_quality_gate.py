@@ -484,7 +484,8 @@ def test_appgenerator_ui_quality_handoffs_and_tools_are_canonical() -> None:
     assert ("AdminRegistryAgent", "AssemblyAgent") in handoff_pairs
     assert ("AssemblyAgent", "IntegrationReadinessAgent") in handoff_pairs
     assert ("IntegrationReadinessAgent", "AppValidationAgent") in handoff_pairs
-    assert ("AppValidationAgent", "DownloadAgent") in handoff_pairs
+    assert ("AppValidationAgent", "InfraScaffoldAgent") in handoff_pairs
+    assert ("InfraScaffoldAgent", "DownloadAgent") in handoff_pairs
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_type"] == "context_equals"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_key"] == "app_ui_quality_status"
     assert handoff_pairs[("AppUIQualityAgent", "user")]["condition_value"] == "blocked"

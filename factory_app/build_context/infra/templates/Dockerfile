@@ -166,7 +166,6 @@ COPY --from=frontend-builder /build-frontend/dist /opt/web_shell_dist/
 COPY app/           ./app/
 COPY workflows/     ./workflows/
 COPY build_context/ ./build_context/
-COPY control_plane/ ./control_plane/
 
 # nginx: replace main config and install the SPA + API/WS proxy server block.
 COPY infra/nginx-main.conf /etc/nginx/nginx.conf
