@@ -95,6 +95,7 @@ from mozaiksai.core.secrets import get_connector_vault_backend
 
 _CONNECTOR_SERVICE = "mozaikspay"
 MOZAIKSPAY_API_BASE = "MOZAIKSPAY_API_BASE"
+MOZAIKSPAY_API_KEY = "MOZAIKSPAY_API_KEY"
 MOZAIKSPAY_CLIENT_ID = "MOZAIKSPAY_CLIENT_ID"
 MOZAIKSPAY_CLIENT_SECRET = "MOZAIKSPAY_CLIENT_SECRET"
 
@@ -404,6 +405,40 @@ def test_scan_generated_bundle_accepts_mozaikspay_saas_contract_with_deployment_
         capability_packs=_mozaikspay_pack(),
         require_deployment_artifacts=True,
     )
+
+    assert errors == []
+
+
+def test_scan_generated_bundle_rejects_authenticated_app_without_auth_deploy_contract() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=False,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("Authenticated generated apps must document" in error for error in errors)
+    assert any("auth.required=true" in error for error in errors)
+    assert any("AUTH_PROVIDER" in error for error in errors)
+
+
+def test_scan_generated_bundle_accepts_authenticated_app_deploy_contract() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
     assert errors == []
 

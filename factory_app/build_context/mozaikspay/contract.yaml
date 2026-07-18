@@ -38,15 +38,21 @@ required_integrations:
         type: url
         required: true
         frontend_safe: true
+      - name: api_key
+        label: MozaiksPay API Key
+        type: secret
+        required: true
+        frontend_safe: false
+    optional_fields:
       - name: client_id
         label: Client ID
         type: text
-        required: true
+        required: false
         frontend_safe: true
       - name: client_secret
         label: Client Secret
         type: secret
-        required: true
+        required: false
         frontend_safe: false
 
 required_outputs:

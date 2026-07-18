@@ -4,10 +4,63 @@ tools:
     function: save_subscription_contract
     description: >-
       Validate and persist the provider-neutral generated-app subscription/token
-      contract. This tool never creates payment-provider resources, subscriptions,
-      invoices, host-owned billing records, or token ledger entries.
-    tool_type: Agent_Tool
+      contract, then request user confirmation when a chat UI is available. This
+      tool never creates payment-provider resources, subscriptions, invoices,
+      host-owned billing records, or token ledger entries.
+    tool_type: UI_Tool
     auto_tool_call: true
+    ui:
+      component: SubscriptionContractReview
+      mode: artifact
+      workflow_primitive: approval_card
+      realization: workflow_wrapper
+    ui_contract:
+      surface_kind: agent_tool
+      payload_schema:
+        type: object
+        properties:
+          title:
+            type: string
+          contract_required:
+            type: boolean
+          plans:
+            type: array
+          token_wallets:
+            type: array
+          module_contract_updates:
+            type: array
+          yaml_preview:
+            type: string
+        additionalProperties: true
+      actions_schema:
+        - id: confirm
+          description: Confirm this provider-neutral subscription contract for downstream generation.
+          label: Confirm Subscription Plan Contract
+          variant: primary
+          approved: true
+          payload_schema:
+            type: object
+            properties:
+              action:
+                type: string
+              approved:
+                type: boolean
+            additionalProperties: true
+        - id: request_changes
+          description: Request a revised subscription contract before downstream generation.
+          label: Request Changes
+          variant: secondary
+          approved: false
+          payload_schema:
+            type: object
+            properties:
+              action:
+                type: string
+              approved:
+                type: boolean
+              requested_changes:
+                type: string
+            additionalProperties: true
 lifecycle_tools:
   - trigger: on_start
     agent: null

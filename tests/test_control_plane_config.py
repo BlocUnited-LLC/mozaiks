@@ -20,20 +20,22 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
     assert tuple(config.llm_profiles.keys()) == ALLOWED_CONTROL_PLANE_LLM_PROFILE_IDS
     assert config.classifier.enabled is True
     assert config.classifier.llm_profile == "classifier"
-    assert config.resolve_capability_llm_config("classifier") == {
-        "model": "gpt-5-nano",
-    }
+    classifier_cfg = config.resolve_capability_llm_config("classifier")
+    assert classifier_cfg is not None
+    assert classifier_cfg["model"] == "gpt-5-nano"
+    assert classifier_cfg.get("api_type", "openai") == "openai"
     assert config.coding.enabled is True
     assert config.coding.llm_profile == "codegen"
-    assert config.resolve_capability_llm_config("coding") == {
-        "model": "gpt-4o",
-        "temperature": 0.1,
-    }
+    coding_cfg = config.resolve_capability_llm_config("coding")
+    assert coding_cfg is not None
+    assert coding_cfg["model"] == "gpt-4o"
+    assert coding_cfg["temperature"] == 0.1
+    assert coding_cfg.get("api_type", "openai") == "openai"
 
 
-def test_factory_control_plane_runtime_config_is_staged_under_control_plane_dir() -> None:
+def test_factory_control_plane_runtime_config_is_staged_under_app_config() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    runtime_path = repo_root / "factory_app" / "control_plane" / "config" / "runtime.yaml"
+    runtime_path = repo_root / "factory_app" / "app" / "config" / "llm.yaml"
     data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
 
     assert data["enabled"] is True
@@ -114,7 +116,7 @@ def test_factory_workflows_do_not_reference_undeclared_llm_profiles() -> None:
     references: list[str] = []
 
     control_plane = yaml.safe_load(
-        (repo_root / "factory_app" / "control_plane" / "config" / "runtime.yaml").read_text(encoding="utf-8")
+        (repo_root / "factory_app" / "app" / "config" / "llm.yaml").read_text(encoding="utf-8")
     )
     for value in control_plane.values():
         if isinstance(value, dict) and isinstance(value.get("llm_profile"), str):

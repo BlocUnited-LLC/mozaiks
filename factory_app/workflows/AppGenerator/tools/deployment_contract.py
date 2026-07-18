@@ -17,6 +17,35 @@ DEFAULT_PROFILE = "generic_container"
 _TARGET_KINDS = {"container", "compose", "external_adapter"}
 _TAG_STRATEGIES = {"commit_sha", "timestamp", "manual"}
 _BUILD_STATUSES = {"pending", "running", "succeeded", "failed"}
+_AUTH_PROVIDER_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_AUTH_RUNTIME_REQUIRED_ENV = ["AUTH_ENABLED", "AUTH_PROVIDER"]
+_AUTH_RUNTIME_OPTIONAL_ENV = [
+    "AUTH_AUDIENCE",
+    "AUTH_REQUIRED_SCOPE",
+    "AUTH_ISSUER",
+    "AUTH_JWKS_URL",
+    "MOZAIKS_OIDC_AUTHORITY",
+    "MOZAIKS_OIDC_TENANT_ID",
+    "MOZAIKS_OIDC_DISCOVERY_URL",
+    "AUTH_USER_ID_CLAIM",
+    "AUTH_EMAIL_CLAIM",
+    "AUTH_NAME_CLAIM",
+    "AUTH_ROLES_CLAIM",
+    "AUTH_SCOPES_CLAIM",
+    "AUTH_SCOPES_FORMAT",
+    "AUTH_APP_ID_CLAIM",
+    "AUTH_CHAT_ID_CLAIM",
+    "AUTH_TENANT_ID_CLAIM",
+    "AUTH_WORKSPACE_ID_CLAIM",
+    "AUTH_ALGORITHMS",
+]
+_AUTH_PUBLIC_ENV = [
+    "VITE_OIDC_AUTHORITY",
+    "VITE_OIDC_DISCOVERY_URL",
+    "VITE_OIDC_CLIENT_ID",
+    "VITE_OIDC_SCOPE",
+    "VITE_OIDC_REDIRECT_URI",
+]
 _PROHIBITED_CONTENT_PATTERNS = [
     re.compile(r"ghp_[A-Za-z0-9]{30,}"),
     re.compile(r"github_pat_[A-Za-z0-9_]{30,}"),
@@ -75,6 +104,27 @@ def _merge_env_names(base: list[str], extra: list[str] | None) -> list[str]:
         if name and name not in merged:
             merged.append(name)
     return merged
+
+
+def _auth_provider_name(value: str | None) -> str:
+    provider = str(value or "jwt").strip().lower()
+    return provider if _AUTH_PROVIDER_RE.fullmatch(provider) else "jwt"
+
+
+def _auth_contract(*, auth_required: bool, auth_provider: str | None) -> dict[str, Any]:
+    provider = _auth_provider_name(auth_provider)
+    return {
+        "required": bool(auth_required),
+        "provider": provider,
+        "runtime_required_variables": list(_AUTH_RUNTIME_REQUIRED_ENV) if auth_required else [],
+        "runtime_optional_variables": list(_AUTH_RUNTIME_OPTIONAL_ENV),
+        "public_variables": list(_AUTH_PUBLIC_ENV),
+        "notes": (
+            "Auth uses the OSS provider-neutral adapter. For AUTH_PROVIDER=jwt, configure "
+            "MOZAIKS_OIDC_DISCOVERY_URL or MOZAIKS_OIDC_AUTHORITY, or provide both "
+            "AUTH_ISSUER and AUTH_JWKS_URL. Frontend OIDC values are public build-time vars."
+        ),
+    }
 
 
 def _looks_like_url(value: Any) -> bool:
@@ -208,41 +258,58 @@ def _normalize_ci_secret_requirements(value: Any) -> dict[str, list[dict[str, An
     return normalized
 
 
-def _default_readiness_requirements() -> dict[str, list[dict[str, Any]]]:
-    return {
-        "checks": [
+def _default_readiness_requirements(*, auth_required: bool = False) -> dict[str, list[dict[str, Any]]]:
+    checks = [
+        {
+            "id": "runtime_environment",
+            "category": "runtime",
+            "label": "Runtime environment configured",
+            "implemented_score": 7,
+            "required_env": ["OPENAI_API_KEY", "MONGO_URI"],
+            "required_evidence": [],
+            "canonical_paths": ["env.example", "deployment.manifest.json"],
+            "notes": "Host or operator must provide required runtime variables before deploy.",
+        },
+        {
+            "id": "container_smoke",
+            "category": "deployment",
+            "label": "Container build and smoke check",
+            "implemented_score": 7,
+            "required_env": [],
+            "required_evidence": ["APP_IMAGE_SMOKE_VERIFIED_AT"],
+            "canonical_paths": ["Dockerfile", "deployment.manifest.json"],
+            "notes": "Evidence stamp should reference a CI run, artifact, or change record.",
+        },
+        {
+            "id": "healthcheck",
+            "category": "deployment",
+            "label": "Health endpoint check",
+            "implemented_score": 7,
+            "required_env": [],
+            "required_evidence": ["APP_HEALTHCHECK_VERIFIED_AT"],
+            "canonical_paths": ["deployment.manifest.json"],
+            "notes": "Evidence stamp should be set only after the configured health path succeeds.",
+        },
+    ]
+    if auth_required:
+        checks.append(
             {
-                "id": "runtime_environment",
-                "category": "runtime",
-                "label": "Runtime environment configured",
+                "id": "auth_configuration",
+                "category": "auth",
+                "label": "OIDC/JWT auth configured",
                 "implemented_score": 7,
-                "required_env": ["OPENAI_API_KEY", "MONGO_URI"],
-                "required_evidence": [],
+                "required_env": ["AUTH_ENABLED", "AUTH_PROVIDER"],
+                "required_evidence": ["APP_AUTH_SMOKE_VERIFIED_AT"],
                 "canonical_paths": ["env.example", "deployment.manifest.json"],
-                "notes": "Host or operator must provide required runtime variables before deploy.",
-            },
-            {
-                "id": "container_smoke",
-                "category": "deployment",
-                "label": "Container build and smoke check",
-                "implemented_score": 7,
-                "required_env": [],
-                "required_evidence": ["APP_IMAGE_SMOKE_VERIFIED_AT"],
-                "canonical_paths": ["Dockerfile", "deployment.manifest.json"],
-                "notes": "Evidence stamp should reference a CI run, artifact, or change record.",
-            },
-            {
-                "id": "healthcheck",
-                "category": "deployment",
-                "label": "Health endpoint check",
-                "implemented_score": 7,
-                "required_env": [],
-                "required_evidence": ["APP_HEALTHCHECK_VERIFIED_AT"],
-                "canonical_paths": ["deployment.manifest.json"],
-                "notes": "Evidence stamp should be set only after the configured health path succeeds.",
-            },
-        ]
-    }
+                "notes": (
+                    "Set AUTH_PROVIDER=jwt for the OSS generic adapter and configure "
+                    "MOZAIKS_OIDC_DISCOVERY_URL or MOZAIKS_OIDC_AUTHORITY, or set both "
+                    "AUTH_ISSUER and AUTH_JWKS_URL. Verify login and token validation "
+                    "before production promotion."
+                ),
+            }
+        )
+    return {"checks": checks}
 
 
 def _normalize_readiness_requirements(value: Any) -> dict[str, list[dict[str, Any]]]:
@@ -564,6 +631,8 @@ def build_deploy_target_spec(
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
     include_compose: bool = False,
+    auth_required: bool = False,
+    auth_provider: str = "jwt",
     extra_required_variables: list[str] | None = None,
     extra_optional_variables: list[str] | None = None,
     extra_secret_variables: list[str] | None = None,
@@ -583,6 +652,11 @@ def build_deploy_target_spec(
     if _bool(include_workflow, True):
         outputs.append(".github/workflows/deploy.yml")
 
+    auth = _auth_contract(auth_required=_bool(auth_required, False), auth_provider=auth_provider)
+    auth_required_env = auth["runtime_required_variables"] if auth["required"] else []
+    auth_optional_env = auth["runtime_optional_variables"]
+    auth_public_env = auth["public_variables"]
+
     return {
         "target_id": resolved_target_id,
         "target_kind": resolved_kind,
@@ -592,10 +666,14 @@ def build_deploy_target_spec(
             "start_command": None,
         },
         "artifact_outputs": outputs,
+        "auth": auth,
         "environment": {
-            "required_variables": _merge_env_names(["OPENAI_API_KEY", "MONGO_URI"], extra_required_variables),
+            "required_variables": _merge_env_names(
+                ["OPENAI_API_KEY", "MONGO_URI", *auth_required_env],
+                extra_required_variables,
+            ),
             "optional_variables": _merge_env_names(
-                ["MOZAIKS_APP_ID", "MOZAIKS_BACKEND_URL", "INTERNAL_API_KEY"],
+                ["MOZAIKS_APP_ID", "MOZAIKS_BACKEND_URL", "INTERNAL_API_KEY", *auth_optional_env],
                 extra_optional_variables,
             ),
             "secret_variables": _merge_env_names(
@@ -610,9 +688,7 @@ def build_deploy_target_spec(
                     "VITE_CORE_URL",
                     "VITE_AGENT_WEBSOCKET_URL",
                     "VITE_AGENT_API_URL",
-                    "VITE_OIDC_AUTHORITY",
-                    "VITE_OIDC_CLIENT_ID",
-                    "VITE_OIDC_REDIRECT_URI",
+                    *auth_public_env,
                 ],
                 extra_public_variables,
             ),
@@ -639,7 +715,9 @@ def build_deploy_target_spec(
         "ci_secret_requirements": _default_ci_secret_requirements(
             include_workflow=_bool(include_workflow, True)
         ),
-        "readiness_requirements": _default_readiness_requirements(),
+        "readiness_requirements": _default_readiness_requirements(
+            auth_required=bool(auth["required"])
+        ),
     }
 
 
@@ -677,6 +755,41 @@ def validate_deploy_target_spec(spec: dict[str, Any]) -> list[str]:
         errors.append("environment.required_variables must not be empty")
     if set(secret_env) & set(public_env):
         errors.append("environment.secret_variables and environment.public_variables must not overlap")
+
+    auth = spec.get("auth")
+    if auth is not None:
+        if not isinstance(auth, dict):
+            errors.append("auth must be an object when present")
+        else:
+            if not isinstance(auth.get("required"), bool):
+                errors.append("auth.required must be boolean")
+            provider = str(auth.get("provider") or "").strip()
+            if not provider:
+                errors.append("auth.provider is required")
+            elif not _AUTH_PROVIDER_RE.fullmatch(provider):
+                errors.append("auth.provider must be a lowercase identifier using letters, digits, underscores, or hyphens")
+            for bucket in (
+                "runtime_required_variables",
+                "runtime_optional_variables",
+                "public_variables",
+            ):
+                values = auth.get(bucket, [])
+                if not isinstance(values, list):
+                    errors.append(f"auth.{bucket} must be a list")
+                    continue
+                for idx, raw_value in enumerate(values):
+                    value = str(raw_value or "").strip()
+                    if not value or not _SECRET_NAME_RE.fullmatch(value):
+                        errors.append(f"auth.{bucket}[{idx}] must be an uppercase env identifier")
+            if auth.get("required"):
+                missing_auth_required = sorted(
+                    name for name in _AUTH_RUNTIME_REQUIRED_ENV if name not in required_env
+                )
+                if missing_auth_required:
+                    errors.append(
+                        "authenticated deployment specs must include runtime auth required variables: "
+                        + ", ".join(missing_auth_required)
+                    )
 
     image = spec.get("image") if isinstance(spec.get("image"), dict) else {}
     if not str(image.get("image_name") or "").strip():  # type: ignore[union-attr]
@@ -735,6 +848,8 @@ def build_deployment_template_manifest(
         "generated_files": file_paths,
         "required_env": _list_of_str(env.get("required_variables")),  # type: ignore[union-attr]
         "secret_env": _list_of_str(env.get("secret_variables")),  # type: ignore[union-attr]
+        "public_env": _list_of_str(env.get("public_variables")),  # type: ignore[union-attr]
+        "auth": deploy_target_spec.get("auth") if isinstance(deploy_target_spec.get("auth"), dict) else None,
         "exposed_ports": [int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)],  # type: ignore[union-attr]
         "healthcheck": {
             "path": str(runtime.get("health_path") or DEFAULT_HEALTH_PATH),  # type: ignore[union-attr]
@@ -781,8 +896,33 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
         errors.append("required_env must be a list")
     if not isinstance(manifest.get("secret_env"), list):
         errors.append("secret_env must be a list")
+    if "public_env" in manifest and not isinstance(manifest.get("public_env"), list):
+        errors.append("public_env must be a list")
     if not isinstance(manifest.get("exposed_ports"), list):
         errors.append("exposed_ports must be a list")
+
+    auth = manifest.get("auth")
+    if auth is not None:
+        if not isinstance(auth, dict):
+            errors.append("auth must be an object when present")
+        else:
+            if not isinstance(auth.get("required"), bool):
+                errors.append("auth.required must be boolean")
+            provider = str(auth.get("provider") or "").strip()
+            if not provider:
+                errors.append("auth.provider is required")
+            elif not _AUTH_PROVIDER_RE.fullmatch(provider):
+                errors.append("auth.provider must be a lowercase identifier using letters, digits, underscores, or hyphens")
+            if auth.get("required"):
+                required_env = set(str(item) for item in manifest.get("required_env") or [])
+                missing_auth_required = sorted(
+                    name for name in _AUTH_RUNTIME_REQUIRED_ENV if name not in required_env
+                )
+                if missing_auth_required:
+                    errors.append(
+                        "auth.required manifests must include required_env entries: "
+                        + ", ".join(missing_auth_required)
+                    )
 
     ci_secret_requirements = manifest.get("ci_secret_requirements")
     errors.extend(
@@ -1056,6 +1196,8 @@ def generate_deployment_artifacts(
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
     include_compose: bool = False,
+    auth_required: bool = False,
+    auth_provider: str = "jwt",
     extra_required_variables: list[str] | None = None,
     extra_optional_variables: list[str] | None = None,
     extra_secret_variables: list[str] | None = None,
@@ -1070,6 +1212,8 @@ def generate_deployment_artifacts(
         include_dockerfiles=include_dockerfiles,
         include_workflow=include_workflow,
         include_compose=include_compose,
+        auth_required=auth_required,
+        auth_provider=auth_provider,
         extra_required_variables=extra_required_variables,
         extra_optional_variables=extra_optional_variables,
         extra_secret_variables=extra_secret_variables,

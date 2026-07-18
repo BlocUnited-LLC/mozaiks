@@ -173,6 +173,14 @@ tools:
   description: Record an integration need discovered while generating an API adapter or controller surface.
   tool_type: Agent_Tool
   auto_tool_call: false
+- agent: InfraScaffoldAgent
+  file: render_infra_scaffold.py
+  function: save_infra_scaffold
+  description: Render infra scaffold (Dockerfile, deploy.yml, provision.sh) and auth
+    adapter (ui/auth/authAdapter.js) from build-context templates and emit as code_files.
+  tool_type: Agent_Tool
+  auto_tool_call: true
+  bind_to_agent: false
 - agent: DownloadAgent
   file: generate_and_download.py
   function: generate_and_download

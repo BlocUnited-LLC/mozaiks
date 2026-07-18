@@ -256,6 +256,23 @@ def _discover_context_files(context_variables: Any | None) -> dict[str, str]:
     return out
 
 
+def _generated_app_auth_required(files_map: dict[str, str]) -> bool:
+    """Return whether the generated app manifest requires authentication."""
+    for manifest_path in ("app.json", "app/app.json"):
+        raw = files_map.get(manifest_path)
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(str(raw))
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        if isinstance(parsed.get("authRequired"), bool):
+            return bool(parsed["authRequired"])
+    return False
+
+
 def _format_bytes(num: int) -> str:
     try:
         value: float = float(num)
@@ -800,6 +817,7 @@ async def generate_and_download(
             include_dockerfiles=include_dockerfiles,
             include_workflow=include_workflow,
             include_compose=include_compose,
+            auth_required=_generated_app_auth_required(files_map),
             extra_required_variables=deployment_env["required"],
             extra_optional_variables=deployment_env["optional"],
             extra_secret_variables=deployment_env["secret"],

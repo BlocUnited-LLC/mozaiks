@@ -7,20 +7,29 @@
 # AG2 natively iterates config_list entries on failure, so the Mozaiks adapter
 # only needs to construct the ordered list correctly.
 #
+# Also provides ``llm_config_to_ag2_config`` which converts a config_list dict
+# to the typed AG2 ModelConfig subclass for the selected provider.
+#
 # Integration points:
 #   ag2_runner.build_llm_config()  — accepts fallback_models kwarg
 #   ag2_network_runner             — callers pass llm_config built here
 #
 # Env vars (all optional; defaults keep existing behavior):
+#   LLM_PRIMARY_API_TYPE         provider type: openai | google | anthropic | ollama (openai)
 #   LLM_PRIMARY_MODEL            model id for primary provider (gpt-4o)
-#   LLM_PRIMARY_API_KEY          api key for primary provider (OPENAI_API_KEY)
-#   LLM_PRIMARY_BASE_URL         optional base URL override (Azure, local, etc.)
+#   LLM_PRIMARY_API_KEY          api key for primary provider (falls back to provider-specific var)
+#   LLM_PRIMARY_BASE_URL         optional base URL override (Azure, Ollama host, etc.)
 #   LLM_FALLBACK_MODELS          comma-separated model ids, in priority order
 #   LLM_FALLBACK_API_KEYS        comma-separated api keys, parallel to models
 #   LLM_FALLBACK_BASE_URLS       comma-separated base URLs, parallel to models
 #   LLM_TEMPERATURE              shared temperature (0.0)
 #   LLM_TIMEOUT_SECONDS          shared request timeout (120)
 #   LLM_FALLBACK_ENABLED         set to "false" to disable fallback (true)
+#
+# Provider-specific API key env vars (resolved when LLM_PRIMARY_API_KEY is unset):
+#   GEMINI_API_KEY / GOOGLE_API_KEY   — used when LLM_PRIMARY_API_TYPE=google
+#   ANTHROPIC_API_KEY                 — used when LLM_PRIMARY_API_TYPE=anthropic
+#   OPENAI_API_KEY                    — used when LLM_PRIMARY_API_TYPE=openai (default)
 # ==============================================================================
 from __future__ import annotations
 
@@ -48,10 +57,24 @@ def _env_list(key: str) -> list[str]:
 # Fallback config builder
 # ---------------------------------------------------------------------------
 
+def _resolve_api_key(api_type: str, explicit_key: str | None = None) -> str:
+    """Resolve API key for ``api_type``, preferring an explicit value then
+    provider-specific env vars then the generic ``LLM_PRIMARY_API_KEY``."""
+    if explicit_key:
+        return explicit_key
+    if api_type == "google":
+        return _env("GEMINI_API_KEY") or _env("GOOGLE_API_KEY") or _env("LLM_PRIMARY_API_KEY")
+    if api_type == "anthropic":
+        return _env("ANTHROPIC_API_KEY") or _env("LLM_PRIMARY_API_KEY")
+    # openai / azure / default
+    return _env("LLM_PRIMARY_API_KEY") or _env("OPENAI_API_KEY")
+
+
 def build_fallback_config_list(
     *,
     primary_model: str | None = None,
     primary_api_key: str | None = None,
+    primary_api_type: str | None = None,
     primary_base_url: str | None = None,
     fallback_models: list[str] | None = None,
     fallback_api_keys: list[str] | None = None,
@@ -63,6 +86,10 @@ def build_fallback_config_list(
 
     AG2 iterates entries in ``config_list`` in order when a model returns a
     rate-limit or availability error, so ordering here controls failover priority.
+
+    Each entry includes an ``api_type`` field so downstream routing (via
+    ``llm_config_to_ag2_config``) can select the right AG2 config class without
+    inspecting model name patterns.
 
     Returns a list with at least one entry (the primary). Falls back to env
     vars for any kwarg not explicitly provided.
@@ -78,15 +105,12 @@ def build_fallback_config_list(
     fallback_enabled = _env("LLM_FALLBACK_ENABLED", "true").lower() != "false"
 
     # ---- Primary ----
+    resolved_api_type = (primary_api_type or _env("LLM_PRIMARY_API_TYPE", "openai")).lower()
     resolved_primary = primary_model or _env("LLM_PRIMARY_MODEL", "gpt-4o")
-    resolved_api_key = (
-        primary_api_key
-        or _env("LLM_PRIMARY_API_KEY")
-        or _env("OPENAI_API_KEY")
-    )
+    resolved_api_key = _resolve_api_key(resolved_api_type, primary_api_key or None)
     resolved_base_url = primary_base_url or _env("LLM_PRIMARY_BASE_URL") or None
 
-    primary_entry: dict[str, Any] = {"model": resolved_primary}
+    primary_entry: dict[str, Any] = {"model": resolved_primary, "api_type": resolved_api_type}
     if resolved_api_key:
         primary_entry["api_key"] = resolved_api_key
     if resolved_base_url:
@@ -128,6 +152,7 @@ def build_fallback_llm_config(
     *,
     primary_model: str | None = None,
     primary_api_key: str | None = None,
+    primary_api_type: str | None = None,
     primary_base_url: str | None = None,
     fallback_models: list[str] | None = None,
     fallback_api_keys: list[str] | None = None,
@@ -158,6 +183,7 @@ def build_fallback_llm_config(
         "config_list": build_fallback_config_list(
             primary_model=primary_model,
             primary_api_key=primary_api_key,
+            primary_api_type=primary_api_type,
             primary_base_url=primary_base_url,
             fallback_models=fallback_models,
             fallback_api_keys=fallback_api_keys,
@@ -171,6 +197,52 @@ def build_fallback_llm_config(
     if extra:
         config.update(extra)
     return config
+
+
+# ---------------------------------------------------------------------------
+# AG2 typed config factory
+# ---------------------------------------------------------------------------
+
+def llm_config_to_ag2_config(llm_config: dict[str, Any]) -> Any:
+    """Convert an AG2 ``llm_config`` dict to a typed AG2 ``ModelConfig`` instance.
+
+    Routes to the correct provider config class based on the ``api_type`` field
+    in the first ``config_list`` entry.  Supported api_type values:
+
+    - ``"openai"`` (default) → ``OpenAIConfig``
+    - ``"google"``           → ``GeminiConfig``  (Google AI Studio free tier or Vertex AI)
+    - ``"anthropic"``        → ``AnthropicConfig``
+    - ``"ollama"``           → ``OllamaConfig``  (local inference)
+
+    Any unrecognised api_type falls through to ``OpenAIConfig``.
+    """
+    config_list = llm_config.get("config_list") or []
+    if not config_list:
+        raise ValueError("llm_config has no config_list entries")
+    entry = config_list[0]
+    api_type = (entry.get("api_type") or "openai").lower()
+    model = entry.get("model") or "gpt-4o-mini"
+    api_key = entry.get("api_key") or None
+    base_url = entry.get("base_url") or None
+    temperature = llm_config.get("temperature")
+
+    if api_type == "google":
+        from ag2.config import GeminiConfig  # type: ignore[attr-defined]
+        return GeminiConfig(model=model, api_key=api_key, temperature=temperature, streaming=True)
+    if api_type == "anthropic":
+        from ag2.config import AnthropicConfig  # type: ignore[attr-defined]
+        return AnthropicConfig(model=model, api_key=api_key, temperature=temperature, streaming=True)
+    if api_type == "ollama":
+        from ag2.config import OllamaConfig  # type: ignore[attr-defined]
+        return OllamaConfig(
+            model=model,
+            host=base_url or "http://localhost:11434",
+            temperature=temperature,
+            streaming=True,
+        )
+    # openai / azure / default
+    from ag2.config import OpenAIConfig
+    return OpenAIConfig(model=model, api_key=api_key, base_url=base_url, temperature=temperature, streaming=True)
 
 
 # ---------------------------------------------------------------------------
@@ -214,4 +286,5 @@ __all__ = [
     "build_fallback_config_list",
     "build_fallback_llm_config",
     "get_healthy_config_list",
+    "llm_config_to_ag2_config",
 ]

@@ -1015,7 +1015,7 @@ async def _run_config_task(
     from mozaiksai.core.workflow.agents import create_agents
     from mozaiksai.core.workflow.agents.factory import (
         ContextVariablesBridge,
-        llm_config_to_openai_config,
+        llm_config_to_ag2_config,
     )
     from mozaiksai.core.workflow.outputs.structured import (
         get_llm_for_workflow,
@@ -1041,7 +1041,7 @@ async def _run_config_task(
     agent = Agent(
         "ConfigMiddlewareAgent",
         prompt=system_prompt,
-        config=llm_config_to_openai_config(llm_config),
+        config=llm_config_to_ag2_config(llm_config),
     )
     task_prompt = "\n\n".join(
         [

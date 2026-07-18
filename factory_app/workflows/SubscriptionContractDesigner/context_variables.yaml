@@ -156,6 +156,18 @@ definitions:
     source:
       type: computed
       default: []
+  subscription_contract_review_status:
+    type: string
+    description: Review UI result for the normalized subscription contract.
+    source:
+      type: computed
+      default: not_requested
+  subscription_contract_review_response:
+    type: object
+    description: Last user response from the subscription contract review UI.
+    source:
+      type: computed
+      default: null
 agents:
   ContractDesignerAgent:
     variables:
@@ -178,3 +190,5 @@ agents:
       - design_surface_map
       - experience_spec
       - subscription_contract
+      - subscription_contract_review_status
+      - subscription_contract_review_response

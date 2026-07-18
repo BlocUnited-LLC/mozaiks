@@ -23,7 +23,7 @@ def _read_yaml(path: Path) -> dict:
 def _workflow_text() -> str:
     parts: list[str] = []
     for path in SUBSCRIPTION_WORKFLOW.rglob("*"):
-        if path.is_file() and path.suffix in {".yaml", ".py", ".md"}:
+        if path.is_file() and path.suffix in {".yaml", ".py", ".md", ".jsx", ".js"}:
             parts.append(path.read_text(encoding="utf-8"))
     return "\n".join(parts)
 
@@ -289,6 +289,34 @@ def test_subscription_contract_designer_prompt_maps_plans_to_upstream_context() 
     assert "access only" in agents_text
 
 
+def test_subscription_contract_designer_exposes_review_ui() -> None:
+    orchestrator = _read_yaml(SUBSCRIPTION_WORKFLOW / "orchestrator.yaml")
+    tools = _read_yaml(SUBSCRIPTION_WORKFLOW / "tools.yaml")
+    ui_config = _read_yaml(SUBSCRIPTION_WORKFLOW / "ui_config.yaml")
+    ui_index = (SUBSCRIPTION_WORKFLOW / "ui" / "index.js").read_text(encoding="utf-8")
+    ui_source = (
+        SUBSCRIPTION_WORKFLOW
+        / "ui"
+        / "SubscriptionContractDesigner"
+        / "SubscriptionContractReview.jsx"
+    ).read_text(encoding="utf-8")
+
+    assert orchestrator["human_in_the_loop"] is True
+    assert "ContractDesignerAgent" in ui_config["visual_agents"]
+    tool = tools["tools"][0]
+    assert tool["function"] == "save_subscription_contract"
+    assert tool["tool_type"] == "UI_Tool"
+    assert tool["ui"]["component"] == "SubscriptionContractReview"
+    assert tool["ui"]["mode"] == "artifact"
+    assert tool["ui_contract"]["actions_schema"][0]["id"] == "confirm"
+    assert "SubscriptionContractReview" in ui_index
+    assert "Confirm Subscription Plan Contract" in ui_source
+    assert "matches what the user wants" in ui_source
+    assert "does not charge anyone" in ui_source
+    assert "Request Changes" in ui_source
+    assert "canRequestChanges" in ui_source
+
+
 def test_appgenerator_and_agentgenerator_receive_subscription_contract_context() -> None:
     app_context = _read_yaml(WORKFLOWS_ROOT / "AppGenerator" / "context_variables.yaml")
     agent_context = _read_yaml(WORKFLOWS_ROOT / "AgentGenerator" / "context_variables.yaml")
@@ -452,6 +480,11 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
         return SimpleNamespace(id="av_subscription_contract")
 
     monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
+
+    async def _fake_use_ui_tool(*args, **kwargs):
+        return {"action": "confirm", "approved": True, "status": "approved"}
+
+    monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
     context = {
         "app_id": "app_test",
         "chat_id": "chat_1",
@@ -462,7 +495,10 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     result = await module.save_subscription_contract(context)
 
     assert result["success"] is True
+    assert result["review_status"] == "confirmed"
     assert context["subscription_contract"]["contract_required"] is True
+    assert context["subscription_contract"]["user_confirmed"] is True
+    assert context["subscription_contract_review_status"] == "confirmed"
     assert context["subscription_contract_files"][0]["filename"] == "config/subscriptions.yaml"
     parsed = yaml.safe_load(context["subscription_contract_files"][0]["content"])
     config = SubscriptionsConfig.model_validate(parsed)
@@ -482,6 +518,45 @@ async def test_save_subscription_contract_validates_and_persists_provider_neutra
     assert persisted["artifact_kind"] == "subscription_contract"
     assert persisted["artifact_key"] == "subscription_contract"
     assert persisted["input_artifact_kinds"] == ("concept", "build_plan", "design_docs")
+
+
+@pytest.mark.asyncio
+async def test_save_subscription_contract_blocks_downstream_context_when_review_requests_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from factory_app.workflows.SubscriptionContractDesigner.tools import (
+        save_subscription_contract as module,
+    )
+
+    async def _fake_persist_summary_artifact(**kwargs):
+        raise AssertionError("unconfirmed subscription contracts must not be persisted")
+
+    async def _fake_use_ui_tool(*args, **kwargs):
+        return {
+            "action": "request_changes",
+            "approved": False,
+            "status": "changes_requested",
+            "requested_changes": "Make the free plan access-only.",
+        }
+
+    monkeypatch.setattr(module, "persist_summary_artifact", _fake_persist_summary_artifact)
+    monkeypatch.setattr(module, "use_ui_tool", _fake_use_ui_tool)
+
+    context = {
+        "app_id": "app_test",
+        "chat_id": "chat_1",
+        "user_id": "user_1",
+        "structured_output": _sample_contract(),
+    }
+
+    result = await module.save_subscription_contract(context)
+
+    assert result["success"] is False
+    assert result["review_status"] == "changes_requested"
+    assert result["requested_changes"] == "Make the free plan access-only."
+    assert context["subscription_contract"] is None
+    assert context["subscription_contract_files"] == []
+    assert context["subscription_contract_review_status"] == "changes_requested"
 
 
 def test_subscription_contract_normalizer_rejects_hosted_product_terms() -> None:

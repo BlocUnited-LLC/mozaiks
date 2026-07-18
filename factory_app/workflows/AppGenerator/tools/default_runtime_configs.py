@@ -24,10 +24,10 @@ def load_default_ai_config() -> dict[str, Any]:
 
 
 def load_default_control_plane_runtime_config() -> dict[str, Any]:
-    path = _repo_root() / "factory_app" / "control_plane" / "config" / "runtime.yaml"
+    path = _repo_root() / "factory_app" / "app" / "config" / "llm.yaml"
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError(f"Factory runtime.yaml must contain a YAML object: {path}")
+        raise ValueError(f"Factory llm.yaml must contain a YAML object: {path}")
     return data
 
 

@@ -113,6 +113,21 @@ def _normalized_files_map(files_map: dict[str, str]) -> dict[str, str]:
     return normalized
 
 
+def _app_manifest_auth_required(files_map: dict[str, str]) -> bool:
+    normalized = _normalized_files_map(files_map)
+    for path in ("app.json", "app/app.json"):
+        raw = normalized.get(path)
+        if not raw:
+            continue
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("authRequired"), bool):
+            return bool(payload["authRequired"])
+    return False
+
+
 def _iter_module_yaml_paths(files_map: dict[str, str]) -> dict[str, str]:
     modules: dict[str, str] = {}
     for raw_path in files_map:
@@ -480,8 +495,7 @@ def _scan_mozaikspay_saas_contract(
             "ConnectorStore": "ConnectorStore",
             "get_connector_vault_backend": "get_connector_vault_backend",
             "MOZAIKSPAY_API_BASE": "MOZAIKSPAY_API_BASE",
-            "MOZAIKSPAY_CLIENT_ID": "MOZAIKSPAY_CLIENT_ID",
-            "MOZAIKSPAY_CLIENT_SECRET": "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY": "MOZAIKSPAY_API_KEY",
         }
         missing_markers = [
             label for label, marker in required_markers.items() if marker not in client_content
@@ -626,6 +640,68 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
     return []
 
 
+def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
+    """Require deploy-time JWT/OIDC contract metadata for authenticated apps."""
+    if not _app_manifest_auth_required(files_map):
+        return []
+
+    normalized_files = _normalized_files_map(files_map)
+    errors: list[str] = []
+
+    env_example = normalized_files.get("env.example", "")
+    required_env_handles = {
+        "AUTH_ENABLED",
+        "AUTH_PROVIDER",
+        "AUTH_AUDIENCE",
+        "MOZAIKS_OIDC_DISCOVERY_URL",
+        "MOZAIKS_OIDC_AUTHORITY",
+        "AUTH_ISSUER",
+        "AUTH_JWKS_URL",
+        "VITE_OIDC_CLIENT_ID",
+        "VITE_OIDC_REDIRECT_URI",
+    }
+    missing_env_handles = sorted(
+        name for name in required_env_handles if f"{name}=" not in env_example
+    )
+    if missing_env_handles:
+        errors.append(
+            "Authenticated generated apps must document provider-neutral OIDC/JWT "
+            "runtime and frontend env handles in env.example: "
+            f"{missing_env_handles}."
+        )
+
+    manifest_text = normalized_files.get("deployment.manifest.json", "")
+    if manifest_text:
+        try:
+            manifest = json.loads(manifest_text)
+        except Exception as exc:
+            errors.append(f"deployment.manifest.json must be valid JSON for auth contract scan: {exc}")
+            return errors
+
+        if not isinstance(manifest, dict):
+            errors.append("deployment.manifest.json must be an object for auth contract scan.")
+            return errors
+
+        auth = manifest.get("auth")
+        if not isinstance(auth, dict) or auth.get("required") is not True:
+            errors.append(
+                "Authenticated generated apps must carry auth.required=true in "
+                "deployment.manifest.json."
+            )
+
+        required_env = {str(item) for item in manifest.get("required_env") or []}
+        missing_required_env = sorted(
+            name for name in ("AUTH_ENABLED", "AUTH_PROVIDER") if name not in required_env
+        )
+        if missing_required_env:
+            errors.append(
+                "Authenticated generated apps must include runtime auth required_env entries "
+                f"in deployment.manifest.json: {missing_required_env}."
+            )
+
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -658,6 +734,7 @@ def scan_generated_bundle(
     )
     if require_deployment_artifacts:
         errors.extend(_scan_deployment_artifacts_contract(files_map))
+        errors.extend(_scan_auth_deployment_contract(files_map))
 
     for path, content in files_map.items():
         if not isinstance(path, str) or not isinstance(content, str):

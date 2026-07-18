@@ -29,11 +29,11 @@ integrations:
     description: Managed monetization, subscription billing, billing portal, and usage display for Mozaiks apps.
     required_secrets:
       - MOZAIKSPAY_API_BASE
+      - MOZAIKSPAY_API_KEY
+    optional_secrets:
+      - MOZAIKS_APP_URL
       - MOZAIKSPAY_CLIENT_ID
       - MOZAIKSPAY_CLIENT_SECRET
-    optional_secrets:
-      - MOZAIKSPAY_API_KEY
-      - MOZAIKS_APP_URL
     default_for:
       - monetized_app
     removable_default: true
@@ -43,7 +43,7 @@ integrations:
       - billing_portal
     setup_steps:
       - Open the workspace Integrations page and select Mozaiks Pay
-      - Enter the Mozaiks Pay API base URL, client ID, and client secret
+      - Enter the Mozaiks Pay API base URL and app-scoped API key
       - Save the connector before launching paid plans or billing portal pages
 
   - id: resend

@@ -31,6 +31,13 @@ validation_hooks:
     function: run_app_ui_quality_gate
 
 assets:
+  - path: templates
+    kind: templates
+    description: >
+      Web app scaffold templates emitted by InfraScaffoldAgent for generated apps.
+      Currently includes ui/auth/authAdapter.js (PKCE OIDC auth adapter).
+      Template variables: APP_SLUG, TOKEN_KEY_PREFIX, OIDC_CLIENT_ID.
+
   - path: language_profile.yaml
     kind: catalog
     projections:

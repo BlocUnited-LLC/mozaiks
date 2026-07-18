@@ -189,11 +189,15 @@ transition_rules:
   condition_value: failed
   transition_target: RevertToUserTarget
 - source_agent: AppValidationAgent
-  target_agent: DownloadAgent
+  target_agent: InfraScaffoldAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: integration_tests_passed
   condition_value: true
+  transition_target: AgentTarget
+- source_agent: InfraScaffoldAgent
+  target_agent: DownloadAgent
+  transition_type: after_turn
   transition_target: AgentTarget
 - source_agent: DownloadAgent
   target_agent: terminate

@@ -27,7 +27,7 @@ Examples:
 
 In the first-party builder experience today, this refinement loop is driven by
 startup declared through `app/config/ai.json`, control-plane runtime policy in
-`control_plane/config/runtime.yaml`, and the selected
+`app/config/llm.yaml`, and the selected
 `control_plane/config/control_plane.yaml` pack. Do not document a dedicated `RefinementWorkflow` unless the runtime actually introduces one.
 
 Those requests need:
@@ -239,7 +239,7 @@ First-party builder/reference app declaratives and builder-specific tools.
 factory_app/control_plane/
   config/
     control_plane.yaml
-    runtime.yaml
+    llm.yaml
     tools.yaml
     policies.yaml
   prompts/
@@ -348,7 +348,7 @@ checkpoints and tools a generated app should include.
 Keep startup separate from the harness pack:
 
 - `app/config/ai.json` owns `ask`, `chat`, and `workflows` startup
-- `control_plane/config/runtime.yaml` owns runtime policy (LLM profiles, feature flags)
+- `app/config/llm.yaml` owns runtime policy (LLM profiles, feature flags)
 - `control_plane/config/control_plane.yaml` owns declarative checkpoints and routing
 
 ### AppGenerator Build Task
@@ -361,7 +361,7 @@ surface_kind: control_plane
 capability_pack_id: null
 initial_agent: ControlPlaneAgent
 owned_paths:
-  - control_plane/config/runtime.yaml
+  - app/config/llm.yaml
   - control_plane/config/control_plane.yaml
   - control_plane/config/tools.yaml
 ```
@@ -689,7 +689,7 @@ AG2 at all — they derive results from typed inputs and routing tables.
 
 LLM config flows from the declarative pack, not from workflow-local AG2 config:
 
-1. `control_plane/config/runtime.yaml` declares `llm_profiles` keyed by
+1. `app/config/llm.yaml` declares `llm_profiles` keyed by
    capability name, each with `model` and `temperature`.
 2. `ControlPlaneConfig.resolve_capability_llm_config(capability)` returns a flat
    `{"model": ..., "temperature": ...}` dict for the resolved profile.
@@ -705,7 +705,7 @@ default.
 At runtime:
 
 1. `mozaiksai/core/runtime/app/ai_config.py` resolves startup from `app/config/ai.json`
-2. `mozaiksai/control_plane/config.py` resolves runtime policy from `control_plane/config/runtime.yaml`
+2. `mozaiksai/control_plane/config.py` resolves runtime policy from `app/config/llm.yaml`
 3. `mozaiksai/control_plane/loader.py` resolves the active pack from `control_plane/config/control_plane.yaml`
 4. `mozaiksai/control_plane/runtime.py` builds a checkpoint runtime
 5. the harness entrypoint is instantiated from `harness.implementation`

@@ -94,8 +94,7 @@ def test_mozaikspay_catalog_is_default_removable_monetization_integration() -> N
     assert spec["removable_default"] is True
     assert set(spec["required_secrets"]) == {
         "MOZAIKSPAY_API_BASE",
-        "MOZAIKSPAY_CLIENT_ID",
-        "MOZAIKSPAY_CLIENT_SECRET",
+        "MOZAIKSPAY_API_KEY",
     }
 
 
@@ -189,7 +188,7 @@ def test_build_integration_response_never_exposes_secret_values() -> None:
     response = build_integration_response(
         spec,
         status="partial",
-        missing_secrets=["MOZAIKSPAY_CLIENT_SECRET"],
+        missing_secrets=["MOZAIKSPAY_API_KEY"],
     )
     assert response["id"] == "mozaikspay"
     assert response["status"] == "partial"
@@ -200,7 +199,7 @@ def test_build_integration_response_never_exposes_secret_values() -> None:
         assert "value" not in s
         assert "present" in s
     # the missing secret is marked not present; the other is present
-    missing_entry = next(s for s in secrets if s["name"] == "MOZAIKSPAY_CLIENT_SECRET")
+    missing_entry = next(s for s in secrets if s["name"] == "MOZAIKSPAY_API_KEY")
     assert missing_entry["present"] is False
     present_entry = next(s for s in secrets if s["name"] == "MOZAIKSPAY_API_BASE")
     assert present_entry["present"] is True

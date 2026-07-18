@@ -15,6 +15,7 @@ import yaml
 
 from mozaiksai.core.artifacts import persist_summary_artifact
 from mozaiksai.core.runtime.app.subscriptions_loader import SubscriptionsConfig
+from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,76 @@ def _yaml_file_content(config: dict[str, Any]) -> str:
     ))
 
 
+def _build_review_payload(
+    output: dict[str, Any],
+    *,
+    app_id: str,
+    workflow_name: str,
+) -> dict[str, Any]:
+    config = output.get("subscription_config_file")
+    if not isinstance(config, dict):
+        config = {}
+    files = list(output.get("code_files") or [])
+    yaml_preview = ""
+    for file in files:
+        if isinstance(file, dict) and file.get("filename") == "config/subscriptions.yaml":
+            yaml_preview = str(file.get("content") or "")
+            break
+
+    return {
+        "title": "Subscription Plan Review",
+        "app_id": app_id,
+        "app_name": output.get("app_name") or app_id,
+        "workflow_name": workflow_name,
+        "contract_required": bool(output.get("contract_required")),
+        "rationale": output.get("rationale") or "",
+        "plans": list(config.get("plans") or []),
+        "default_plan_id": config.get("default_plan_id"),
+        "assignment_store": config.get("assignment_store"),
+        "token_wallets": list(config.get("token_wallets") or []),
+        "top_up_products": list(config.get("top_up_products") or []),
+        "usage_charge_policies": list(config.get("usage_charge_policies") or []),
+        "pricing_groups": list((config.get("pricing_catalog") or {}).get("groups") or []),
+        "plan_design_rationale": list(output.get("plan_design_rationale") or []),
+        "metering_declarations": list(output.get("metering_declarations") or []),
+        "module_contract_updates": list(output.get("module_contract_updates") or []),
+        "workflow_contract_updates": list(output.get("workflow_contract_updates") or []),
+        "page_surface_requirements": list(output.get("page_surface_requirements") or []),
+        "generated_files": files,
+        "yaml_preview": yaml_preview,
+        "forbidden_outputs": list(output.get("forbidden_outputs") or []),
+        "validation_notes": list(output.get("validation_notes") or []),
+        "review_boundary": {
+            "confirmation_label": "Confirm Subscription Plan Contract",
+            "change_label": "Request Changes",
+            "summary": (
+                "This confirms the provider-neutral subscription contract for downstream "
+                "app generation. It does not create checkout sessions, assign customers, "
+                "grant entitlements, or credit token wallets."
+            ),
+        },
+    }
+
+
+def _approved_review_response(response: Any) -> bool:
+    if not isinstance(response, dict):
+        return False
+    if response.get("approved") is True:
+        return True
+    action = str(response.get("action") or response.get("status") or "").strip().lower()
+    return action in {"confirm", "approved", "approve"}
+
+
+def _review_change_request(response: Any) -> str | None:
+    if not isinstance(response, dict):
+        return None
+    for key in ("requested_changes", "rationale", "message"):
+        value = response.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _normalized_noop(output: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(output)
     normalized["contract_required"] = False
@@ -231,8 +302,54 @@ async def save_subscription_contract(
     except Exception as exc:
         return {"success": False, "error": "invalid_subscription_contract", "details": str(exc)}
 
+    review_status = "not_requested_headless"
+    review_response: dict[str, Any] | None = None
+    if chat_id:
+        payload = _build_review_payload(
+            normalized,
+            app_id=str(app_id),
+            workflow_name=str(workflow_name or "SubscriptionContractDesigner"),
+        )
+        try:
+            response = await use_ui_tool(
+                "save_subscription_contract",
+                payload,
+                chat_id=str(chat_id),
+                workflow_name=str(workflow_name or "SubscriptionContractDesigner"),
+                display="artifact",
+            )
+        except UIToolError as exc:
+            logger.warning("[SubscriptionContractDesigner] Review UI unavailable: %s", exc)
+            review_status = "ui_unavailable"
+        else:
+            review_response = dict(response) if isinstance(response, dict) else {"response": response}
+            if not _approved_review_response(response):
+                requested_changes = _review_change_request(response)
+                _cv_set(context_variables, "subscription_contract", None)
+                _cv_set(context_variables, "subscription_contract_files", [])
+                _cv_set(context_variables, "subscription_contract_review_status", "changes_requested")
+                _cv_set(context_variables, "subscription_contract_review_response", review_response)
+                return {
+                    "success": False,
+                    "review_status": "changes_requested",
+                    "requested_changes": requested_changes,
+                    "message": (
+                        "Subscription contract changes were requested. Revise the "
+                        "structured output before downstream generation."
+                    ),
+                }
+            review_status = "confirmed"
+
+    normalized["review_status"] = review_status
+    normalized["user_confirmed"] = review_status == "confirmed"
+    if review_response:
+        normalized["review_response"] = review_response
+
     _cv_set(context_variables, "subscription_contract", normalized)
     _cv_set(context_variables, "subscription_contract_files", normalized.get("code_files") or [])
+    _cv_set(context_variables, "subscription_contract_review_status", review_status)
+    if review_response:
+        _cv_set(context_variables, "subscription_contract_review_response", review_response)
 
     try:
         artifact = await persist_summary_artifact(
@@ -253,6 +370,7 @@ async def save_subscription_contract(
     return {
         "success": True,
         "contract_required": bool(normalized.get("contract_required")),
+        "review_status": review_status,
         "app_id": str(app_id),
         "file_count": len(normalized.get("code_files") or []),
         "message": "Subscription contract saved for downstream generator context.",
@@ -260,6 +378,7 @@ async def save_subscription_contract(
 
 
 __all__ = [
+    "_build_review_payload",
     "normalize_subscription_contract",
     "save_subscription_contract",
 ]

@@ -416,8 +416,8 @@ layers:
         subscription_contract: conditional
         use_when: >
           The app combines multiple revenue models, such as SaaS access plus
-          ecommerce, marketplace fees plus seller subscriptions, or usage credits
-          plus sponsored placements.
+          ecommerce, marketplace commercial policy plus seller subscriptions,
+          or usage credits plus sponsored placements.
         build_tasks_required:
           - surface_kind: control_plane
             notes: >

@@ -212,8 +212,8 @@ class TestContextYaml:
         assert mozaikspay is not None
         assert mozaikspay["kind"] == "api_key"
         assert mozaikspay["provider"] == "mozaikspay"
-        assert _required_integration_fields(mozaikspay) == {"api_base", "client_id", "client_secret"}
-        secret_field = next(field for field in mozaikspay["required_fields"] if field["name"] == "client_secret")
+        assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
+        secret_field = next(field for field in mozaikspay["required_fields"] if field["name"] == "api_key")
         assert secret_field["frontend_safe"] is False
 
 
@@ -261,7 +261,7 @@ class TestContractYaml:
         requirements = c.get("required_integrations") or []
         mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
         assert mozaikspay is not None
-        assert _required_integration_fields(mozaikspay) == {"api_base", "client_id", "client_secret"}
+        assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
 
     def test_provider_api_contract_forbids_provider_neutral_internal_ids(self):
         c = _read_yaml(_CONTRACT_YAML)
@@ -347,6 +347,7 @@ class TestMozaiksPayClientTemplate:
         assert "ConnectorStore" in content
         assert "get_connector_vault_backend" in content
         assert "MOZAIKSPAY_API_BASE" in content
+        assert "MOZAIKSPAY_API_KEY" in content
         assert "MOZAIKSPAY_CLIENT_ID" in content
         assert "MOZAIKSPAY_CLIENT_SECRET" in content
         # Must not hardcode any production or staging URL
@@ -369,6 +370,7 @@ class TestMozaiksPayClientTemplate:
         assert "_PROVIDER_API_PREFIX = \"/api/mozaikspay/v1\"" in content
         assert "/subscription/status" in content
         assert "/billing-portal/session" in content
+        assert "settings.api_key" in content
         assert "X-MozaiksPay-Client-Id" in content
         assert "ConnectorStore().get(" in content
         assert "get_connector_vault_backend" in content

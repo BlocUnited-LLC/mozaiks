@@ -60,7 +60,7 @@ def run(args) -> None:
     app_json_path = app_root / "app.json"
     ai_json_path = app_root / "config" / "ai.json"
     shell_json_path = app_root / "config" / "shell.json"
-    control_plane_runtime_path = workspace_root / "control_plane" / "config" / "runtime.yaml"
+    control_plane_runtime_path = app_root / "config" / "llm.yaml"
 
     app_config = _read_json(app_json_path)
     ai_config = _read_json(ai_json_path)

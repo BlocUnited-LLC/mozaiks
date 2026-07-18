@@ -11,7 +11,8 @@ from functools import wraps
 from typing import Any
 
 from ag2 import Agent
-from ag2.config import OpenAIConfig
+
+from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
 
 from ..context.context_utils import (
     apply_context_exposures as _apply_context_exposures,
@@ -103,25 +104,6 @@ class ContextVariablesBridge:
     @property
     def data(self) -> dict[str, Any]:
         return self._data
-
-
-# ------------------------------------------------------------------
-# LLM CONFIG BRIDGE
-# ------------------------------------------------------------------
-
-def llm_config_to_openai_config(llm_config: dict[str, Any]) -> OpenAIConfig:
-    """Convert an AG2 llm_config dict to an OpenAIConfig."""
-    config_list = llm_config.get("config_list") or []
-    if not config_list:
-        raise ValueError("llm_config has no config_list entries")
-    entry = config_list[0]
-    return OpenAIConfig(
-        model=entry.get("model", "gpt-4o-mini"),
-        api_key=entry.get("api_key") or None,
-        base_url=entry.get("base_url") or None,
-        temperature=llm_config.get("temperature"),
-        streaming=True,
-    )
 
 
 # ------------------------------------------------------------------
@@ -301,7 +283,7 @@ async def create_agents(
                 logger.error("[AGENTS] A2A agent '%s' failed: %s", agent_name, a2a_err)
                 raise
 
-        # Per-agent LLM config → OpenAIConfig
+        # Per-agent LLM config → AG2 ModelConfig
         try:
             from ..outputs.structured import get_llm_for_workflow as _get_structured_llm
 
@@ -313,9 +295,9 @@ async def create_agents(
             llm_config_dict = base_llm_config
 
         try:
-            model_config = llm_config_to_openai_config(llm_config_dict)
+            model_config = llm_config_to_ag2_config(llm_config_dict)
         except Exception as cfg_err:
-            logger.error("[AGENTS] Cannot build OpenAIConfig for '%s': %s", agent_name, cfg_err)
+            logger.error("[AGENTS] Cannot build AG2 ModelConfig for '%s': %s", agent_name, cfg_err)
             raise
 
         # System prompt
@@ -407,12 +389,13 @@ async def create_agents(
         try:
             from mozaiksai.core.observability import build_ag2_telemetry_middleware
 
+            _cfg_entry = ((llm_config_dict or {}).get("config_list") or [{}])[0]
             telemetry_middleware = build_ag2_telemetry_middleware(
                 agent_name=agent_name,
                 workflow_name=workflow_name,
                 context_variables=context_bridge,
-                provider_name="openai",
-                model_name=str((llm_config_dict or {}).get("model") or "").strip() or None,
+                provider_name=(_cfg_entry.get("api_type") or "openai"),
+                model_name=str(_cfg_entry.get("model") or "").strip() or None,
             )
             if telemetry_middleware is not None:
                 middleware.append(telemetry_middleware)
@@ -428,7 +411,7 @@ async def create_agents(
                     agent_name=agent_name,
                     workflow_name=workflow_name,
                     context_variables=context_bridge,
-                    model_name=str((llm_config_dict or {}).get("model") or "").strip() or None,
+                    model_name=str(_cfg_entry.get("model") or "").strip() or None,
                 )
             )
         except Exception as usage_err:
@@ -516,7 +499,7 @@ def list_middleware_for_workflow(agents: dict[str, Any]) -> dict[str, dict[str, 
 __all__ = [
     "create_agents",
     "ContextVariablesBridge",
-    "llm_config_to_openai_config",
+    "llm_config_to_ag2_config",
     "list_agent_middleware",
     "list_middleware_for_workflow",
 ]
