@@ -243,6 +243,25 @@ def _top_up_config() -> SubscriptionsConfig:
     )
 
 
+class _AllowancePeriodLedger:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def ensure_plan_allowances(self, **kwargs):
+        self.calls.append(kwargs)
+        return [
+            type(
+                "Result",
+                (),
+                {
+                    "status": "applied",
+                    "entry": {"wallet_id": "ai_tokens", "amount": 1000},
+                    "balance": {"balance": 1000},
+                },
+            )()
+        ]
+
+
 def test_fulfillment_command_rejects_secret_shaped_metadata() -> None:
     with pytest.raises(ValueError, match="secret-shaped"):
         BillingFulfillmentCommand.model_validate(
@@ -291,6 +310,33 @@ async def test_subscription_activation_upserts_assignment_and_idempotent_allowan
     assert balance["balance"] == 1000
     assert balance["total_allocated"] == 1000
     assert balance["entry_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_subscription_update_uses_occurred_at_for_allowance_period() -> None:
+    assignments = _Collection()
+    ledger = _AllowancePeriodLedger()
+    service = BillingFulfillmentService(
+        config=_subscriptions_config(),
+        ledger=ledger,  # type: ignore[arg-type]
+        collection_resolver=lambda alias: assignments,
+    )
+
+    result = await service.apply(
+        BillingFulfillmentCommand(
+            command_id="cmd_renewal_period_1",
+            event_type="subscription_updated",
+            source="test",
+            app_id="app_1",
+            user_id="user_1",
+            plan_id="pro",
+            starts_at=datetime(2026, 6, 1, tzinfo=UTC),
+            occurred_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+    )
+
+    assert result.success is True
+    assert ledger.calls[0]["period_start"] == datetime(2026, 7, 1, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

@@ -846,7 +846,7 @@ class BillingFulfillmentService:
                 ],
                 user_id=command.user_id,
                 tenant_id=command.tenant_id,
-                period_start=command.starts_at or command.occurred_at or _now(),
+                period_start=command.occurred_at or command.starts_at or _now(),
             )
         except Exception as exc:
             return BillingFulfillmentEffectResult(
