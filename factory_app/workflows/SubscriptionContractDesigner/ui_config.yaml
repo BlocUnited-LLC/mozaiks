@@ -1,1 +1,2 @@
-visual_agents: []
+visual_agents:
+  - ContractDesignerAgent

@@ -66,6 +66,8 @@ def _trim_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
 
     allowed = {
         "contract_required",
+        "review_status",
+        "user_confirmed",
         "rationale",
         "plan_design_rationale",
         "app_name",

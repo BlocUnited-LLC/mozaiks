@@ -107,15 +107,6 @@ class ContextVariablesBridge:
 
 
 # ------------------------------------------------------------------
-# LLM CONFIG BRIDGE
-# ------------------------------------------------------------------
-
-# llm_config_to_ag2_config lives in mozaiksai.core.adapters.llm_fallback and is
-# imported above.  Re-export under the old name for any remaining call sites.
-llm_config_to_openai_config = llm_config_to_ag2_config
-
-
-# ------------------------------------------------------------------
 # PROMPT SECTION COMPOSITION
 # ------------------------------------------------------------------
 
@@ -509,7 +500,6 @@ __all__ = [
     "create_agents",
     "ContextVariablesBridge",
     "llm_config_to_ag2_config",
-    "llm_config_to_openai_config",  # backward-compat alias
     "list_agent_middleware",
     "list_middleware_for_workflow",
 ]

@@ -1,6 +1,6 @@
 workflow_name: SubscriptionContractDesigner
 max_turns: 6
-human_in_the_loop: false
+human_in_the_loop: true
 workflow_startup_mode: AgentDriven
 orchestration_pattern: ag2_network
 initial_message: >-

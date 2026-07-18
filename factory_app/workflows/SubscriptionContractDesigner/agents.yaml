@@ -39,6 +39,11 @@ agents:
           - usage/billing page requirements for AppSchemaAgent
           - AppGenerator instructions that describe the exact generated files and
             runtime primitives to use
+
+          The save tool presents the normalized contract in a review UI when a
+          chat surface is available. If the user requests changes, revise the
+          structured output before downstream AppGenerator or AgentGenerator
+          context is allowed to consume it.
       - id: context
         heading: '[CONTEXT]'
         content: |-

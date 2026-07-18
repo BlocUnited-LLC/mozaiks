@@ -90,6 +90,13 @@ plans, usage allowances, and markup policy.
 - Generated pages should render groups when present and fall back to a single
   plan-card group when absent.
 
+MozaiksPay Checkout is the default hosted checkout surface for generated SaaS
+subscription and token top-up flows. Generated apps call the MozaiksPay hosted
+billing API at `/api/mozaikspay/v1/...` through the app-owned MozaiksPay client
+and billing facade. The separate merchant payments API at `/api/v1/mozaikspay/...`
+is for app/merchant payment operations and should not be substituted into the
+subscription entitlement flow.
+
 ## Generation
 
 `SubscriptionContractDesigner` owns the semantic plan decision. It reads upstream
@@ -104,6 +111,14 @@ context from `concept_overview`, `concept_blueprint`, `backend_design_document`,
   pricing policy inside that same payload
 - `plan_design_rationale`: traceable reasons that map upstream signals to plan,
   entitlement, quota, and pricing group decisions
+
+When a chat UI is available, the workflow presents the normalized output as a
+`SubscriptionContractReview` artifact before downstream generators consume it.
+The review surface shows the subscription plans, token wallets, token
+allowances, gated module actions, workflow metering declarations, generated file
+preview, and guardrails. The user must confirm that the subscription plan
+contract matches what they want; requesting changes leaves downstream
+`subscription_contract` context empty until the agent revises the contract.
 
 `AppGenerator` and `AgentGenerator` consume the saved contract. They may choose
 different UI primitive variants for the pricing surface, but the data source
