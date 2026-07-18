@@ -163,7 +163,7 @@ agents:
              - OMIT a carry-forward module if it is domain-specific to the old concept (old CRM contacts/pipeline, old domain pages, concept-specific workflows). Note the omission in build plan rationale.
              - Do not reference or copy files from `previous_app_bundle_ref`. No merge or file-copy behavior exists.
              - `preserve_families` and `pivot_description` are additional advisory context — use them to understand what the user intends to keep and what the pivot is about.
-             - **Module contract read-back** (when `previous_app_bundle_ref` is present): for modules classified `needs_adaptation`, call `read_carry_forward_module_contract` to inspect their prior contracts before deciding. Allowed files: `module.yaml`, `runtime_extensions.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`, `contracts/notifications.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`, `contracts/profile.yaml`, `contracts/relationships.yaml`. Do NOT request `backend/*.py` — backend source is not accessible in this phase. Do NOT copy or merge file content into the new app bundle. Contract content is advisory context only.
+             - **Module contract read-back** (when `previous_app_bundle_ref` is present): for modules classified `needs_adaptation`, call `read_carry_forward_module_contract` to inspect their prior contracts before deciding. Allowed files: `module.yaml`, `runtime_extensions.yaml`, `contracts/events.yaml`, `contracts/reactions.yaml`, `contracts/notifications.yaml`, `contracts/policy_hooks.yaml`, `contracts/settings.yaml`, `contracts/admin.yaml`, `contracts/profile.yaml`, `contracts/relationships.yaml`. Do NOT request `backend/*.py` — backend source is not accessible in this phase. Do NOT copy or merge file content into the new app bundle. Contract content is advisory context only.
              - **carry_forward_decisions output** (when `carry_forward_modules` is present): emit one `CarryForwardDecision` per carry-forward candidate in the `carry_forward_decisions` field of your `AppBuildPlan`. For each candidate choose one of:
                - `reuse`: module role preserved in the new plan. Does not copy old files. Explain why the role fits.
                - `adapt`: create a new/updated module task inspired by the prior contract. Reference what changes.
@@ -275,6 +275,7 @@ agents:
           Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `data/contract.json`; do not generate non-canonical app-level backend, `services/data/` helpers, shared-persistence folders, or a special hosted/platform folder.
           `config/data.json` is a removed path and must never appear in owned_paths, initial_message, data_contract, database_files, code_files, or task output.
           Each module-local task must set `capability_pack_id` to the module id. For a projects/tasks app, this means separate task trios with literal owned paths under `modules/projects/` and `modules/tasks/`; do not collapse them into one `project_management` module or rename them to `projects_core` / `tasks_core`.
+        - **Resource-scoped user class modules**: when the product needs durable user classes, app-local roles, membership, collaborators, invite/accept flows, route access by ownership/membership, current-user resource inventory, review authority, app-owned decision inputs, or custom classification/weight rules, plan a dedicated membership-style module using the injected `membership` module archetype. Do not represent those classes only as JWT claims, app.json admins, frontend route metadata, or fields scattered across unrelated resource modules. The module contract task must include `contracts/relationships.yaml` when the current user's resources should appear in `/api/me/relationships`, include `contracts/policy_hooks.yaml` only when another module, route guard, admin panel, or app-owned process needs to ask the membership module for deterministic policy input, include an `authorize_<resource>_route` action when scoped private routes need `meta.routeAuth`, and include `backend/account_data_handler.py` when `module.user_data_scope=true`.
         - If `subscription_contract.contract_required` is true, include exactly one
           app-level build task with `task_type: subscription_config`,
           `capability_pack_id: null`, `surface_id: "subscription_contract"`,
@@ -289,6 +290,29 @@ agents:
           Usage/billing page requirements may read the platform-owned endpoints
           `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`; do
           not plan generated modules or custom ledgers just to back those pages.
+          When `subscription_contract.subscription_config_file` declares an
+          `assignment_store` and the build does NOT include a `mozaikspay`
+          managed_capability pack, the app owns the subscription assignment
+          write path. In that case, also plan an `entitlement_dispatch` module
+          task set alongside the other module tasks:
+          - one `module_contract` task: `capability_pack_id: "entitlement_dispatch"`,
+            `surface_kind: "module"`, `initial_agent: "ConfigMiddlewareAgent"`,
+            `owned_paths: ["modules/entitlement_dispatch/module.yaml"]`. Its
+            `initial_message` must declare exactly two actions:
+            `activate_subscription` (writes a subscription assignment record to
+            the assignment_store collection so `ConfiguredEntitlementAdapter`
+            can grant capabilities for the plan) and `deactivate_subscription`
+            (marks the record inactive). No `entitlement_gate`, no `permissions`,
+            `capabilities: []`.
+          - one `business_services` task: `capability_pack_id: "entitlement_dispatch"`,
+            `initial_agent: "ServiceAgent"`, `owned_paths:
+            ["modules/entitlement_dispatch/backend/handler.py",
+            "modules/entitlement_dispatch/backend/service.py",
+            "modules/entitlement_dispatch/backend/repo.py"]`. The repo must write
+            to `ctx.persistence.collection("entitlement_dispatch", "subscriptions")`
+            using the `data_alias` declared in `assignment_store`.
+          The bundle scanner rejects the app bundle when `assignment_store` is
+          present without this module.
         - If `subscription_contract.contract_required` is false or absent, do not
           plan a `subscription_config` task and do not emit config/subscriptions.yaml.
       11a. Treat persistent application UI as schema-first:
@@ -1631,7 +1655,7 @@ agents:
          - Treat event declarations as explicit only. Do not invent events from action verbs. If `current_build_task.initial_message` does not name event types, set `actions[].emits: []` and `events_yaml.events: []`.
       3. Produce exactly the YAML files listed in `current_build_task.owned_paths`. Do not produce Python files here.
       4. First produce a typed `module_contract` object matching the ConfigMiddlewareOutput schema. Do not use freeform placeholder blobs where a typed sub-object exists.
-         - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `relationships_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
+         - `module_contract` must be a `ModuleContractBundle` wrapper with `module_id`, `module_yaml`, `events_yaml`, `reactions_yaml`, `notifications_yaml`, `settings_yaml`, `admin_yaml`, `profile_yaml`, `relationships_yaml`, `policy_hooks_yaml`, `python_stubs`, `js_stubs`, and `runtime_extensions_yaml`.
          - Do not put `schema_version`, `module`, `actions`, or `capabilities` directly under `module_contract`; those belong inside `module_contract.module_yaml`.
       5. **module.yaml**: include `schema_version: mozaiks.module.v1`, module identity (including a `type` field — one of `standard`, `messaging`, `workflow`, `event_pipeline`, or `transactional`), `handler: backend.handler:{PascalModuleName}Module`, permissions, actions, and capabilities. Actions must use `handler_method`, `api_surface`, JSON-schema-like `input_schema`/`output_schema`, permissions, and `emits`. Select the type using the decision guide: `messaging` if the module manages real-time participant communication with read/unread state; `workflow` if the module manages a named state machine with transitions and roles; `event_pipeline` if the module reacts to external or domain events through an automated lifecycle; `transactional` if the module manages a ledger or append-only value record; `standard` for everything else.
          - `module_contract.module_yaml` must use the runtime loader shape exactly:
@@ -1675,6 +1699,12 @@ agents:
          - **Provider binding**: each provider's `action` field must reference an action id declared in `module.yaml`. The platform calls that action at `/api/me/relationships` request time.
          - **Provider output**: actions should return a `relationships` array whose rows include `resource_type`, `resource_id`, `resource_label`, `relationship_type`, `status`, `capabilities`, `primary_route`, optional `secondary_routes`, and optional `metadata`.
          - **Boundaries**: keep the contract host-agnostic. Do not expose payment-provider implementation details, ownership-rights claims, hosted monetization policy, secrets, or cross-tenant data through relationships providers.
+         - **Membership/user-class modules**: when this module represents durable resource-scoped classes such as owner, member, collaborator, reviewer, teacher, student, seller, buyer, moderator, participant, or viewer, set the module type/archetype to `membership`, declare class assignment actions such as `get_my_membership`, `update_member_class`, `authorize_<resource>_route`, and `list_user_relationships`, and set `module.user_data_scope=true` with `backend/account_data_handler.py` in `python_stubs`. Membership records must be scoped by `resource_type`/`resource_id` plus app/tenant/workspace context where applicable.
+      9c. **policy_hooks.yaml** (optional — emit only when warranted): set `policy_hooks_yaml` to a `ModulePolicyHooksManifest` object when another module, route guard, admin panel, or app-owned process needs to ask this module a generic policy question such as access, classification, or deterministic decision input. Otherwise set `policy_hooks_yaml` to null.
+         - **Schema version**: always `mozaiks.policy_hooks.v1`.
+         - **Provider binding**: each hook provider's `action` field must reference an action id declared in `module.yaml`. Use `hook_type: access`, `classification`, `decision_input`, or `custom`.
+         - **Provider output**: actions must return allowlisted DTOs only, such as `eligible`, `resource_type`, `resource_id`, `user_id`, `class_ids`, `capabilities`, `decision_inputs`, and policy version/source metadata. Never return raw membership records, secrets, payment fields, ledger rows, or hosted-provider details.
+         - **Boundaries**: policy hooks do not execute payments, grant equity, mutate subscription state, run hosted-product provider logic, or define Mozaiks App governance/revenue/campaign behavior.
       10. **admin.yaml**: always emit `schema_version: mozaiks.admin.v2`. **Derive admin panels from the module's declared actions** — do not leave `panels[]` empty for durable module surfaces. Apply this derivation:
          - **One record panel per primary list/query action**: for each `list_*`, `search_*`, or collection-returning `get_*` action, emit one `ResourceTable` or `DataTable` panel. Bind it via `config.api_endpoint: /api/modules/{module_id}/{action_id}`. Set `layout: full-width`.
          - **SummaryStrip panel for stats/metrics**: if the module declares a `*_stats`, `*_summary`, `*_metrics`, or `get_{entity}_count` action, add a `SummaryStrip` panel in the same section as the record panel and bind it to that action. Use `value_key` only for fields declared by the action output schema. Use `trend_key` only when the action contract explicitly describes a real historical comparison or metrics snapshot; otherwise omit trend fields so the UI renders no fake change value.
@@ -1833,6 +1863,7 @@ agents:
           "admin_yaml": { "schema_version": "mozaiks.admin.v2", "panels": [], "hooks": [] },
           "profile_yaml": null,
           "relationships_yaml": null,
+          "policy_hooks_yaml": null,
           "python_stubs": [],
           "js_stubs": [],
           "runtime_extensions_yaml": null
@@ -2371,7 +2402,7 @@ agents:
       **Inputs**:
       - Code Context: `config_config`, `database_config`, `model_context` (injected by hook).
       - `app_backend_url`: Base URL of the active Mozaiks app host. Non-null means a live backend exists and services must publish real events. Null still requires runtime-safe code: guard `context.events` before publishing instead of leaving TODO comments.
-      - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml/contracts/profile.yaml/contracts/relationships.yaml.
+      - `current_build_task`: contains `capability_pack_id` (the module name) and references to the `module_contract` task's module.yaml/contracts/events.yaml/contracts/reactions.yaml/contracts/settings.yaml/contracts/notifications.yaml/contracts/admin.yaml/contracts/profile.yaml/contracts/relationships.yaml/contracts/policy_hooks.yaml.
       - `dependency_task_outputs`: completed upstream task outputs keyed by task_id. Read the module contract, data model, and persistence outputs from this map before generating backend implementation files.
       - `app_task_batch_results`: the current batch result map, including completed upstream task outputs and `_meta`.
       - `[MODULE ARCHETYPES CONTEXT]` is injected into your system message. Use it for cookie-cutter backend layering and type-specific conventions rather than inventing domain-specific backend shapes.
@@ -2393,6 +2424,7 @@ agents:
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
       - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `context.events.publish(...)` for event emission.
+      - For membership-style modules, implement resource-scoped user class records in the generated module itself. Policy checks must combine `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, and module-owned membership records. Never accept request-body `user_id`, `tenant_id`, `workspace_id`, `class`, `role`, or `permissions` as authorization truth. `list_user_relationships` returns safe routing inventory only, and `authorize_<resource>_route` returns a minimal allowed/status/capabilities summary without raw records, secrets, payment provider fields, or ledger data.
       - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
       - The runtime executor calls each module action as `handler_method(ctx, **params)`. Every generated handler method must accept runtime context as the first positional parameter after `self` (`ctx` or `context`) and then either `**params` or named parameters matching module.yaml input_schema fields.
       - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `data/contract.json`.
@@ -2454,6 +2486,7 @@ agents:
              rows = await self.repo.list_items(context=context, query=query, limit=limit)
              items = [_serialize_inventory_row(r) for r in rows]
              return {"success": True, "items": items, "count": len(items)}
+      20b. For membership-style modules, implement `backend/account_data_handler.py` when declared, export/delete membership and invitation records by `app_id` and `user_id`, and keep relationship/profile outputs allowlisted. If class assignments affect voting, approval, judging, or app-owned allocation eligibility, expose a declared policy-hook/evaluator action that returns allowlisted deterministic inputs. The consuming feature module owns any decision record, freeze behavior, or frozen process record it needs; do not make snapshots a generic membership service behavior.
   - id: self_validation
     heading: '[SELF-VALIDATION]'
     content: |-

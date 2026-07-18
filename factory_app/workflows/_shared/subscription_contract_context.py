@@ -106,6 +106,7 @@ def _render_contract(contract: Mapping[str, Any]) -> str:
             "Use this provider-neutral contract as the source of truth for generated SaaS plans, entitlement gates, token wallets, depleted-balance recovery metadata, top-up products with price.amount_cents/currency, token allowances, usage pages, and workflow metering declarations.",
             "Do not implement a custom usage ledger or token wallet. Use the OSS runtime subscription/token primitives.",
             "Do not add hosted-product provider behavior here; payment checkout, invoices, and settlement are app-owned or host-provided integration concerns.",
+            "If this contract's subscription_config_file declares assignment_store and the app does not use the mozaikspay managed_capability, AppPlanAgent must include an entitlement_dispatch module task set (module_contract + business_services). That module is the write-side partner for ConfiguredEntitlementAdapter (the runtime read side). The bundle scanner rejects apps that declare assignment_store without this module.",
             body,
         ]
     )
