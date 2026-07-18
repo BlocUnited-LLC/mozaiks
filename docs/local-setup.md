@@ -35,7 +35,7 @@ launching Studio.
 - Python 3.11+
 - Node.js 18+
 - MongoDB Atlas or a local MongoDB server
-- one LLM provider key, usually `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
+- one LLM provider key — `GEMINI_API_KEY` (free, default), `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
 
 Check local tools:
 
@@ -105,29 +105,41 @@ Set the minimum required environment:
 === "Windows"
 
     ```powershell
-    $env:OPENAI_API_KEY="sk-..."
+    $env:GEMINI_API_KEY="your-key-here"
     $env:MONGO_URI="mongodb://localhost:27017/mozaiks"
     ```
 
 === "macOS / Linux"
 
     ```bash
-    export OPENAI_API_KEY="sk-..."
+    export GEMINI_API_KEY="your-key-here"
     export MONGO_URI="mongodb://localhost:27017/mozaiks"
     ```
 
-Use Anthropic instead of OpenAI if preferred:
+!!! tip "Free LLM key — Google Gemini"
+    The default provider is **Google Gemini** (free tier, no credit card required).
+    Get your key at [aistudio.google.com](https://aistudio.google.com) → **Get API key**.
+
+To use OpenAI or Anthropic instead, set the matching key and override the provider:
 
 === "Windows"
 
     ```powershell
+    $env:OPENAI_API_KEY="sk-..."
+    $env:LLM_PRIMARY_API_TYPE="openai"
+    # or
     $env:ANTHROPIC_API_KEY="sk-ant-..."
+    $env:LLM_PRIMARY_API_TYPE="anthropic"
     ```
 
 === "macOS / Linux"
 
     ```bash
+    export OPENAI_API_KEY="sk-..."
+    export LLM_PRIMARY_API_TYPE="openai"
+    # or
     export ANTHROPIC_API_KEY="sk-ant-..."
+    export LLM_PRIMARY_API_TYPE="anthropic"
     ```
 
 Start the repo development Studio:
@@ -300,10 +312,13 @@ connection string.
 
 ### LLM key errors
 
-Set the provider key matching the model/provider you selected:
+Set the key matching the provider you are using:
 
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
+| Provider | Key variable | Notes |
+|---|---|---|
+| Google Gemini (default) | `GEMINI_API_KEY` | Free tier — get key at [aistudio.google.com](https://aistudio.google.com) |
+| OpenAI | `OPENAI_API_KEY` | Also set `LLM_PRIMARY_API_TYPE=openai` |
+| Anthropic | `ANTHROPIC_API_KEY` | Also set `LLM_PRIMARY_API_TYPE=anthropic` |
 
 ### Port already in use
 
