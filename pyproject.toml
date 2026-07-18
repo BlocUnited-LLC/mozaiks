@@ -47,6 +47,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gemini = [
+    "ag2[gemini]==1.0.0b0",
+]
+anthropic = [
+    "ag2[anthropic]==1.0.0b0",
+]
 azure = [
     "azure-identity>=1.15.0",
     "azure-keyvault-secrets>=4.7.0",
