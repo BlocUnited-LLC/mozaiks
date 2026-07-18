@@ -713,6 +713,8 @@ models:
         - control_plane_pack
         - ai_disclosure_docs
         - legal_docs
+        - infra_scaffold
+        - auth_adapter
         description: >
           Explicit build-task type used for downstream execution planning. Persistent
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
@@ -746,6 +748,13 @@ models:
           services/adapters/, explicit services/routes/, or security/secrets.yaml, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
+          `infra_scaffold` emits Dockerfile, .github/workflows/deploy.yml, and
+          scripts/provision.sh from infra templates. Emitted once at generation
+          time; InfraScaffoldAgent owns these files and skips regeneration if
+          Dockerfile already exists unless --force-infra is set.
+          `auth_adapter` emits ui/auth/authAdapter.js from the webapp_builder
+          auth template when app/config/auth.yaml declares an OIDC provider.
+          Re-emitted on auth config changes. AppSchemaAgent owns this task.
       capability_pack_id:
         type: union
         variants:
@@ -1872,6 +1881,7 @@ models:
         - event_pipeline
         - transactional
         - billing
+        - entitlement_dispatch
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
           standard = request/response CRUD (default).
@@ -1880,6 +1890,7 @@ models:
           event_pipeline = automated multi-step lifecycle driven by events, reactions, and optional background polling.
           transactional = append-only ledger for value movements.
           billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
+          entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
       description:
         type: str
         description: Short module summary.

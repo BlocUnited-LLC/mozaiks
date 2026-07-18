@@ -74,6 +74,46 @@ task_contracts:
       - Token wallets and token_allowances are only for apps selling AI usage, credits, quotas, token packs, or usage-charge estimates; access-only SaaS plans must omit those fields.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
 
+  infra_scaffold:
+    owner_agent: InfraScaffoldAgent
+    summary: >
+      Deployment infrastructure scaffold emitted once at app generation time.
+      Includes Dockerfile, CI/CD workflow, and provision script derived from
+      the factory_app/build_context/infra/ templates. After first emit the
+      operator owns these files; regeneration is explicit and opt-in.
+    required_outputs:
+      - Dockerfile
+      - .github/workflows/deploy.yml
+      - scripts/provision.sh
+    optional_outputs:
+      - .github/workflows/readiness.yml
+      - .env.example
+    hard_constraints:
+      - Emit once; do not overwrite on routine regeneration. Skip if Dockerfile already exists in the output directory unless --force-infra is passed.
+      - Dockerfile must use multi-stage build with frontend-builder, py-builder, and runtime stages derived from the infra Dockerfile.template.
+      - CI/CD workflows must consume secrets from GitHub environment secrets; never inline secret values or provider tenant identifiers.
+      - provision.sh must read required secret names from app/security/secrets.yaml and validate all required secrets are present before syncing.
+      - .env.example must list all names from app/security/secrets.yaml with placeholder values only; never emit real secret values.
+      - Do not emit VITE_ env var values (OIDC URLs, redirect URIs) into committed files; they are environment-specific and supplied at build time as Docker build args and GitHub secrets.
+      - Replace all template variables ({{APP_NAME}}, {{MOZAIKS_VERSION}}, {{OIDC_CLIENT_ID}}, {{REGISTRY}}, {{DEPLOY_TARGET}}) with values from the app context before emitting.
+      - Deploy target defaults to azure_container_apps; stubs for fly and render must be present as inline comments in deploy.yml.
+
+  auth_adapter:
+    owner_agent: AppSchemaAgent
+    summary: Generated browser OIDC adapter consumed by ChatUIProvider. Re-emitted when app/config/auth.yaml changes.
+    required_outputs:
+      - ui/auth/authAdapter.js
+    optional_outputs:
+      - ui/auth/authAdapter.mock.js
+    hard_constraints:
+      - Use PKCE auth-code flow via OIDC discovery endpoint. All OIDC provider URLs come from VITE_ env vars resolved at Vite build time; never hard-code provider URLs.
+      - Implement the authAdapter contract (getCurrentUser, onAuthStateChange, login, logout, getAccessToken, handleCallback) consumed by ChatUIProvider.
+      - Mock mode (VITE_MOCK_MODE=true) bypasses all OIDC redirects and returns a static user — required for local dev without an OIDC provider.
+      - Token storage must use sessionStorage only, never localStorage.
+      - Re-emit when app/config/auth.yaml changes; operator must review the diff before deploying.
+      - When app/config/auth.yaml declares provider=mock or auth config is absent, emit authAdapter.mock.js only.
+      - Token key prefix is derived from app.json .slug (e.g. myapp_access_token, myapp_user).
+
   module_contract:
     owner_agent: ConfigMiddlewareAgent
     summary: Canonical module contract bundle that declares module behavior before Python or JS implementation.

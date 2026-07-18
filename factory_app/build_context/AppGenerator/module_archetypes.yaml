@@ -275,3 +275,76 @@ archetypes:
         and tests can exercise it without spawning the startup service. The watcher
         uses a direct Motor connection (AsyncIOMotorClient via MONGO_URI /
         MONGO_DB_NAME) because it runs outside any module request context.
+
+  entitlement_dispatch:
+    summary: >
+      Self-hosted entitlement dispatch module. Writes subscription assignment
+      records to the collection declared in config/subscriptions.yaml
+      assignment_store so that ConfiguredEntitlementAdapter can grant or deny
+      capability access at module action dispatch time. Use in self-hosted OSS
+      apps that manage their own subscriptions without the mozaiks-app hosted
+      entitlement service.
+    select_when:
+      - App declares config/subscriptions.yaml with at least one plan that grants capabilities.
+      - App is self-hosted (not deployed on the mozaiks-app hosted platform).
+      - App needs to activate or deactivate capability grants when subscription events arrive.
+      - App integrates with an external payment provider that emits normalized domain events.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+        - contracts/events.yaml
+        - contracts/reactions.yaml
+      optional:
+        - notifications.yaml
+        - admin.yaml
+    backend_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/schemas.py
+    key_actions:
+      - activate_subscription: >
+          Writes a grant record to the assignment_store collection with
+          plan_id, granted_capabilities (copied from the plan snapshot in
+          config/subscriptions.yaml), status=active, and optional expires_at.
+          Input: { user_id, plan_id, granted_at?, expires_at? }.
+      - deactivate_subscription: >
+          Updates the assignment record status to cancelled or expired.
+          Input: { user_id, reason }.
+      - get_entitlement_status: >
+          Read-only status check safe to expose to authenticated UI callers.
+          Returns current plan_id, status, and granted_capabilities for the
+          requesting user. No entitlement_gate — this action is itself free.
+    assignment_store_convention: >
+      The module repo writes to the collection declared in
+      config/subscriptions.yaml assignment_store.data_alias. The record schema
+      must include fields that ConfiguredEntitlementAdapter expects:
+        app_id, user_id (or tenant_id/workspace_id for non-user-scoped grants),
+        plan_id, granted_capabilities (list of capability_id strings or
+        { pack_id, capability_id } dicts), status (must be one of the
+        active_statuses declared in assignment_store), expires_at (ISO-8601 or null).
+      Use ctx.persistence.collection(assignment_store_alias) in backend/repo.py.
+      Do not hard-code the collection name — read it from the loaded subscriptions
+      config at startup or pass it from the service layer.
+    hard_constraints:
+      - This archetype is for self-hosted apps only. Apps on the mozaiks-app
+        hosted platform must not instantiate this module; the hosted entitlement
+        service manages grants for hosted apps and is the authoritative source.
+      - Do not call Stripe, MozaiksPay, or any payment provider from this module.
+        Payment events are provider-specific. This module receives normalized
+        domain events only (e.g. subscription.activated, subscription.cancelled)
+        and reacts to them via contracts/reactions.yaml. The payment-event adapter
+        lives in services/adapters/payments/{provider}.py.
+      - The service layer must be idempotent — duplicate activation events for
+        the same user/plan must not create duplicate grant records.
+      - activate_subscription must snapshot the plan's capability_ids from
+        config/subscriptions.yaml at activation time and store the snapshot.
+        ConfiguredEntitlementAdapter may use the snapshot rather than re-reading
+        the catalog at check time (see plan_snapshot field behavior in entitlements.py).
+      - Never emit or handle direct payment provider webhook events (Stripe, etc.).
+        Those belong in services/adapters/payments/{provider}.py and are normalized
+        before reaching this module.
+      - get_entitlement_status is the only action whose result is safe to return
+        directly to the UI. activate_subscription and deactivate_subscription are
+        internal actions (api_surface=internal) triggered via reactions.yaml.
