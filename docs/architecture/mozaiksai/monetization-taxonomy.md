@@ -17,7 +17,7 @@ generate.
 | `sponsored` | Sponsored listings, boosted placement, ad slots, paid visibility, campaign budgets, or marketing packages. | Not required |
 | `donations` | Tips, donations, pledges, optional contributions, or patron support. | Conditional |
 | `community_funded` | Campaign-style backing, milestone funding, community contribution pools, or app/operator-specific funding policy. | Conditional |
-| `hybrid` | More than one money flow, such as subscriptions plus ecommerce or marketplace fees plus seller tiers. | Conditional |
+| `hybrid` | More than one money flow, such as subscriptions plus ecommerce or marketplace commercial policy plus seller tiers. | Conditional |
 
 Aliased values are mapped by agents:
 
@@ -67,3 +67,8 @@ Hosted product policy remains app-owned or operator-owned. For example,
 campaign funding terms, sponsored placement approval, payout rules, investment
 review, settlement, regulatory handling, and marketplace promotion admin are not
 generic OSS subscription primitives.
+
+See [Monetization Contract](monetization-contract.md) for the durable boundary:
+MozaiksPay is the default managed adapter for supported generated-app
+monetization surfaces, while provider mechanics, hosted commercial policy,
+payouts, campaign terms, and proprietary revenue distribution stay outside OSS.

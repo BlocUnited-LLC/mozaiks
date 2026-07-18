@@ -37,6 +37,12 @@ state, token balances, usage records, or wallet ledgers. After MozaiksPay or
 another adapter verifies a payment/subscription fact, it submits a provider-
 neutral fulfillment command to the OSS runtime.
 
+For the broader app monetization boundary, see
+[Monetization Contract](monetization-contract.md). The short rule is that OSS
+defines the subscription, token, entitlement, facade, and fulfillment contracts;
+hosted products or app-owned adapters verify money movement and submit the
+provider-neutral effects.
+
 ---
 
 ## How Tokens Are Captured

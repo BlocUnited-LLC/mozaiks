@@ -33,6 +33,8 @@ model. If you are evaluating Mozaiks runtime differentiators first, start with
 
 ## Tokens and Cost Control
 
+- [Monetization Contract](monetization-contract.md)
+- [Monetization Taxonomy](monetization-taxonomy.md)
 - [Token Management](token-management.md)
 
 ## Reading Order
