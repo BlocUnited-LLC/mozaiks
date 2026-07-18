@@ -83,3 +83,14 @@ def test_source_hygiene_excludes_release_local_virtualenv() -> None:
 
     assert ".release-local-venv" in gate.SOURCE_HYGIENE_EXCLUDED_DIRS
 
+
+def test_source_hygiene_excludes_local_agent_worktrees_but_keeps_repo_rules() -> None:
+    gate = _load_gate_module()
+
+    assert gate._source_hygiene_excluded(
+        gate.REPO_ROOT / ".claude" / "worktrees" / "agent-a" / "tests" / "example.py"
+    )
+    assert not gate._source_hygiene_excluded(
+        gate.REPO_ROOT / ".claude" / "rules" / "testing.md"
+    )
+

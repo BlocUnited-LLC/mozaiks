@@ -1881,6 +1881,7 @@ models:
         - event_pipeline
         - transactional
         - billing
+        - membership
         - entitlement_dispatch
         description: >
           Module type governs scaffold conventions and type-specific YAML additions.
@@ -1890,6 +1891,7 @@ models:
           event_pipeline = automated multi-step lifecycle driven by events, reactions, and optional background polling.
           transactional = append-only ledger for value movements.
           billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
+          membership = resource-scoped user classes, collaborators, invitations, access summaries, and immutable snapshots for app-owned participation flows.
           entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
       description:
         type: str

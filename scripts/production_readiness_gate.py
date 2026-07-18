@@ -121,6 +121,9 @@ SOURCE_HYGIENE_EXCLUDED_DIRS = {
     "site",
     "venv",
 }
+SOURCE_HYGIENE_EXCLUDED_PATH_PREFIXES = {
+    ".claude/worktrees",
+}
 
 
 def _source_hygiene_pattern(*parts: str, flags: int = 0) -> re.Pattern[str]:
@@ -184,10 +187,20 @@ def _base_env() -> dict[str, str]:
     return env
 
 
+def _source_hygiene_excluded(path: Path) -> bool:
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    if any(part in SOURCE_HYGIENE_EXCLUDED_DIRS for part in path.parts):
+        return True
+    return any(
+        relative == prefix or relative.startswith(f"{prefix}/")
+        for prefix in SOURCE_HYGIENE_EXCLUDED_PATH_PREFIXES
+    )
+
+
 def _source_hygiene_files() -> list[Path]:
     files: list[Path] = []
     for path in REPO_ROOT.rglob("*"):
-        if any(part in SOURCE_HYGIENE_EXCLUDED_DIRS for part in path.parts):
+        if _source_hygiene_excluded(path):
             continue
         if not path.is_file():
             continue
@@ -203,7 +216,7 @@ def run_source_hygiene_scan() -> list[str]:
     for path in _source_hygiene_files():
         try:
             text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
+        except (OSError, UnicodeDecodeError):
             continue
         relative = path.relative_to(REPO_ROOT).as_posix()
         allowed_snippets = SOURCE_HYGIENE_ALLOWED_SNIPPETS.get(relative, ())
