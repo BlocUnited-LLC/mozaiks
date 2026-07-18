@@ -135,17 +135,22 @@ def load_ai_config_json(app_root: Path | None = None) -> dict[str, Any]:
 
 
 def resolve_control_plane_runtime_config_path(app_root: Path | None = None) -> Path:
+    """Return the path to the workspace LLM profile config (``app/config/llm.yaml``).
+
+    The canonical location is ``{workspace}/app/config/llm.yaml`` — co-located
+    with ``ai.json`` in the operator-facing config directory.
+    """
     if app_root is not None:
-        return (app_root.parent / "control_plane" / "config" / "runtime.yaml").resolve()
+        return (app_root / "config" / "llm.yaml").resolve()
 
     active_root = resolve_active_app_root()
-    active_path = (active_root.parent / "control_plane" / "config" / "runtime.yaml").resolve()
+    active_path = (active_root / "config" / "llm.yaml").resolve()
     if active_path.exists():
         return active_path
 
     factory_root = resolve_factory_app_root()
     if factory_root is not None:
-        factory_path = (factory_root / "control_plane" / "config" / "runtime.yaml").resolve()
+        factory_path = (factory_root / "app" / "config" / "llm.yaml").resolve()
         if factory_path.exists():
             return factory_path
 

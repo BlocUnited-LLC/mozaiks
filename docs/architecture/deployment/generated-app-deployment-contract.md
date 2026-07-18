@@ -57,6 +57,12 @@ Required shape:
   - `optional_variables`
   - `secret_variables`
   - `public_variables`
+- `auth`
+  - `required`
+  - `provider`
+  - `runtime_required_variables`
+  - `runtime_optional_variables`
+  - `public_variables`
 - `image`
   - `image_name`
   - `tag_strategy`
@@ -88,6 +94,8 @@ Required shape:
 - `generated_files`
 - `required_env`
 - `secret_env`
+- `public_env`
+- `auth`
 - `exposed_ports`
 - `healthcheck`
 - `ci_workflow`
@@ -126,6 +134,10 @@ Default generated checks are provider-neutral:
   - requires evidence stamp `APP_IMAGE_SMOKE_VERIFIED_AT`
 - `healthcheck`
   - requires evidence stamp `APP_HEALTHCHECK_VERIFIED_AT`
+- `auth_configuration`
+  - emitted only when `app.json.authRequired=true`
+  - requires `AUTH_ENABLED` and `AUTH_PROVIDER`
+  - requires evidence stamp `APP_AUTH_SMOKE_VERIFIED_AT`
 
 Rules:
 
@@ -138,6 +150,33 @@ Rules:
 5. Hosted products may add product-specific checks outside generated app
    bundles, then evaluate both layers with the OSS
    `mozaiksai.core.runtime.readiness` primitive.
+
+### Authenticated App Contract
+
+Generated apps declare whether their runtime requires login through
+`app.json.authRequired`.
+
+When `authRequired=true`, AppGenerator emits a provider-neutral JWT/OIDC auth
+contract in `deployment.manifest.json`:
+
+- `auth.required=true`
+- `auth.provider=jwt` by default
+- backend required env handles: `AUTH_ENABLED`, `AUTH_PROVIDER`
+- backend optional env handles for issuer, JWKS, discovery, audience, scopes,
+  and claim mapping
+- public frontend env handles: `VITE_OIDC_AUTHORITY`,
+  `VITE_OIDC_DISCOVERY_URL`, `VITE_OIDC_CLIENT_ID`, `VITE_OIDC_SCOPE`, and
+  `VITE_OIDC_REDIRECT_URI`
+
+The generated app bundle carries names only. It does not carry tenant ids,
+client secrets, provider credentials, hosted-product auth policy, Keycloak-only
+paths, Entra-only paths, or Mozaiks hosted product auth adapters.
+
+At deploy time, a host or self-host operator configures one real OIDC/JWT
+provider by setting either discovery/authority values or explicit
+`AUTH_ISSUER` plus `AUTH_JWKS_URL`. The OSS runtime validates tokens through the
+configured auth adapter; generated app modules continue to enforce permissions
+and entitlement gates through declarative module contracts.
 
 ### CI Workflow Secret Requirements
 

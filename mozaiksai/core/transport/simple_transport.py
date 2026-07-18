@@ -1378,19 +1378,23 @@ class SimpleTransport(WebSocketProtocolMixin, WorkflowBridgeMixin, GeneralModeMi
         self,
         error_message: str,
         error_code: str = "GENERAL_ERROR",
-        chat_id: str | None = None
+        chat_id: str | None = None,
+        extra_data: dict | None = None,
     ) -> None:
         """Send error message to UI via WebSocket"""
+        data: dict = {
+            "message": error_message,
+            "error_code": error_code,
+            "chat_id": chat_id,
+        }
+        if extra_data:
+            data.update(extra_data)
         event_data = {
             "type": "error",
-            "data": {
-                "message": error_message,
-                "error_code": error_code,
-                "chat_id": chat_id
-            },
+            "data": data,
             "timestamp": datetime.now(UTC).isoformat()
         }
-        
+
         await self._broadcast_to_websockets(event_data, chat_id)
         logger.error("Error: %s", error_message)
         

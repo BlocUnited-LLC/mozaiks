@@ -226,6 +226,13 @@ artifact metadata. They must not contain raw secret values, cloud tenant ids,
 provider credentials, hosted product policy defaults, or customer-specific
 provider execution code.
 
+When `app.json.authRequired=true`, the deployment artifacts also declare the
+provider-neutral JWT/OIDC auth contract: backend `AUTH_*` /
+`MOZAIKS_OIDC_*` handles, public `VITE_OIDC_*` handles, `auth.required=true`
+in `deployment.manifest.json`, and an `APP_AUTH_SMOKE_VERIFIED_AT` readiness
+evidence stamp. Generated apps do not hardcode Keycloak, Entra, hosted Mozaiks
+auth, tenant ids, client secrets, or provider paths.
+
 AppGenerator build tasks do not own these files. They are emitted by the
 DownloadAgent through the provider-neutral deployment contract renderer in
 `generate_and_download` when `deployment_profile`, `include_dockerfiles`,

@@ -152,6 +152,16 @@ Custom route ownership has three required pieces and they must stay in sync:
 - `ui/pages/custom/*.jsx` provides the full-page React component
 - `ui/index.js` registers the same component key with `registerComponent`
 
+Scoped private routes may declare `meta.routeAuth`. Declarative pages put it in
+`ui/pages/*.yaml`; custom routes put it in `ui/route_manifest.json`
+`pages[].meta.routeAuth`. Use it when a path or query parameter identifies a
+resource and access depends on app-owned membership, ownership, tenant,
+workspace, or invitation state. The shell resolves placeholders such as
+`$route.projectId`, `$query.team`, `$user.id`, and `$path`, calls the declared
+app module action, and renders only when the response contains `allowed: true`.
+This is a pre-render/deep-link gate; the target module action and all backend
+module actions remain responsible for authoritative authorization.
+
 `admin/admin_registry.yaml` is not a route registry. It declares admin page ids,
 paths, scope, ordering, and labels for the admin shell. Full-page custom React
 routes must use the route manifest and component registry contract above.

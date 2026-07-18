@@ -131,6 +131,105 @@ archetypes:
       - Transition events include from_state and to_state when declared.
       - If the workflow module's managed documents are owned by a specific user (e.g. user-submitted requests, approvals initiated by a user), set module.user_data_scope=true and generate backend/account_data_handler.py. delete_user_data must delete or anonymise records where user_id matches the deleted user. export_user_data must return all user-initiated workflow records. Omit user_data_scope if the module owns only app-scoped or tenant-scoped state with no direct user_id ownership.
 
+  membership:
+    summary: >
+      Deterministic module for resource-scoped user classes, memberships,
+      invitations, collaborators, moderators, participants, and route access
+      summaries. Use when an app needs durable app-local roles such as teacher,
+      student, seller, buyer, project_owner, collaborator, reviewer, moderator,
+      member, or viewer.
+    select_when:
+      - The app needs resource-scoped user classes, memberships, collaborators,
+        participants, or invite/accept/remove flows.
+      - Access to a route or record depends on a user's relationship to a
+        specific resource, not only on global auth roles or token scopes.
+      - My Apps, Portfolio, My Communities, or My Resources should list
+        resources connected to the current user.
+      - Vote weights, approval quorums, review authority, or other
+        time-sensitive decisions need immutable membership snapshots.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+      optional:
+        - contracts/events.yaml
+        - contracts/reactions.yaml
+        - contracts/notifications.yaml
+        - contracts/settings.yaml
+        - contracts/admin.yaml
+        - contracts/profile.yaml
+        - contracts/relationships.yaml
+    backend_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/schemas.py
+      - backend/account_data_handler.py
+    key_actions:
+      - invite_member: >
+          Create a pending invitation for a resource-scoped user class. The
+          actor must be authorized through ctx.user_id, ctx.tenant_id,
+          ctx.workspace_id, ctx.permissions, and existing module-owned
+          membership records.
+      - accept_invitation: >
+          Accept the current user's pending invitation and create or activate
+          a membership assignment. The service must ignore any request-body
+          user_id that conflicts with ctx.user_id.
+      - update_member_class: >
+          Change a member's class or status for a scoped resource. Only
+          authorized owners/admins/managers for that resource may call it.
+      - list_members: >
+          List members for an authorized resource using serialized allowlist
+          rows. Never return raw membership records.
+      - get_my_membership: >
+          Return the current user's active membership summary for a resource.
+      - authorize_resource_route: >
+          Return a minimal route authorization summary with allowed,
+          resource_type, resource_id, viewer_class, status, capabilities, and
+          safe display metadata only.
+      - list_user_relationships: >
+          Return current-user resource relationship rows for
+          contracts/relationships.yaml hydration.
+      - create_membership_snapshot: >
+          Create an immutable snapshot of eligible class/weight rows when a
+          proposal, approval, review, contest, or app-owned settlement process
+          opens. Later class changes must not rewrite the snapshot.
+    hard_constraints:
+      - Auth identity and /api/me remain platform-owned. Do not create a
+        replacement account/profile/user table to identify the signed-in user.
+      - Durable app-specific classes are module-owned records scoped to
+        resource_type/resource_id plus app/tenant/workspace context; they are
+        not only JWT roles or frontend state.
+      - backend/policy.py must derive access from ctx.user_id, ctx.tenant_id,
+        ctx.workspace_id, ctx.permissions, and module-owned membership records.
+        Do not trust request payload user_id, tenant_id, workspace_id, class,
+        role, or permission fields as authorization truth.
+      - Membership assignment records should include user_id, resource_type,
+        resource_id, class_id or role, status, created_by, created_at, and
+        updated_at. Include tenant_id/workspace_id when the app uses those
+        scopes.
+      - Set module.user_data_scope=true when the module owns membership or
+        invitation records for users, and generate backend/account_data_handler.py.
+        Delete/export behavior must be tenant/app scoped and documented.
+      - Use contracts/relationships.yaml when the module can enumerate
+        current-user resources. Provider actions must return normalized
+        relationship rows only; relationship rows are routing inventory and
+        never grant rights by themselves.
+      - Private scoped routes must use meta.routeAuth pointing to an
+        app-owned authorize_*_route action. Do not rely on frontend-only
+        checks or global shell role strings for resource-scoped access.
+      - contracts/profile.yaml is optional and only for personal account
+        panels backed by user-scoped module data. It does not replace /api/me
+        identity or resource administration surfaces.
+      - If membership controls vote weights, approval quorum, judging weight,
+        or app-owned settlement allocation, create an immutable snapshot when
+        the process opens. Later membership or class changes must not mutate
+        open or closed process results.
+      - This archetype is host-agnostic. Do not include MozaiksPay, wallet,
+        payout, hosted billing, managed hosting, growth campaign returns,
+        investor marketplace policy, ownership-right claims, or hosted product
+        revenue-share logic in generated membership modules.
+
   event_pipeline:
     summary: >
       Deterministic module that drives an automated multi-step pipeline through
@@ -212,14 +311,15 @@ archetypes:
   billing:
     summary: >
       Deterministic module that gates features behind subscription plans, reacts
-      to payment lifecycle events, and exposes self-serve upgrade/cancellation
-      surfaces. Use when an app monetizes through subscriptions, pay-per-use, or
-      one-time purchases and needs entitlement enforcement at the action level.
+      to managed billing lifecycle events or fulfillment commands, and exposes
+      self-serve upgrade/cancellation surfaces. Use when an app monetizes
+      through subscriptions, pay-per-use, or one-time purchases and needs
+      entitlement enforcement at the action level.
     select_when:
-      - The module owns plan assignment, subscription lifecycle, or checkout sessions.
+      - The module owns app-facing plan status, entitlement presentation, or checkout session facade actions.
       - Actions must be gated by entitlement_gate declarations tied to plan capabilities.
-      - The module reacts to payment provider webhooks (checkout.session.completed,
-        invoice.paid, subscription.cancelled, etc.) to update subscription state.
+      - The module reacts to hosted billing lifecycle events or BillingFulfillmentCommand inputs
+        to update app-facing subscription state.
       - Usage metering or token allowance sync is required on plan activation.
     canonical_yaml_family:
       always:
@@ -248,17 +348,21 @@ archetypes:
         records, invoices, payment secrets, or customer identity data.
       - The service layer never checks entitlements itself — entitlement_gate on
         the action declaration is the authorization boundary.
-      - Subscription state transitions are driven by payment provider webhook events
-        reacted to via reactions.yaml, not by direct operator calls.
+      - Subscription state transitions are driven by hosted billing lifecycle
+        events or BillingFulfillmentCommand inputs reacted to via reactions.yaml,
+        not by direct payment provider webhooks or operator calls.
       - Usage meters (token_wallets, usage_limits) are synced from the plan
         snapshot captured at subscription activation time, not derived live.
       - The schemas layer exposes plan_snapshot, catalog_id, and catalog_version
         fields on subscription records for downstream audit traceability.
       - Emit hosted.* namespaced events for platform subscription lifecycle;
         emit domain.* events for app-level entitlement changes that other modules react to.
-      - Checkout sessions are append-only records; never mutate a completed session.
-      - Refund and cancellation flows must emit events that downstream entitlement
-        and wallet modules can react to independently.
+      - Generated OSS app modules must not own payment provider webhook receivers,
+        payment provider SDK imports, customer/payment-provider mappings, refunds,
+        wallet ledgers, payouts, or provider credential handling.
+      - Checkout session facade records are append-only; never mutate a completed session.
+      - Cancellation or plan-update facade flows must emit events that downstream
+        entitlement and token-metered modules can react to independently.
       - >
         Any module that writes time-bounded pending records (checkout sessions,
         reservations, invitations, etc.) must include a background expiry watcher
@@ -270,3 +374,76 @@ archetypes:
         and tests can exercise it without spawning the startup service. The watcher
         uses a direct Motor connection (AsyncIOMotorClient via MONGO_URI /
         MONGO_DB_NAME) because it runs outside any module request context.
+
+  entitlement_dispatch:
+    summary: >
+      Self-hosted entitlement dispatch module. Writes subscription assignment
+      records to the collection declared in config/subscriptions.yaml
+      assignment_store so that ConfiguredEntitlementAdapter can grant or deny
+      capability access at module action dispatch time. Use in self-hosted OSS
+      apps that manage their own subscriptions without the mozaiks-app hosted
+      entitlement service.
+    select_when:
+      - App declares config/subscriptions.yaml with at least one plan that grants capabilities.
+      - App is self-hosted (not deployed on the mozaiks-app hosted platform).
+      - App needs to activate or deactivate capability grants when subscription events arrive.
+      - App integrates with an external payment provider that emits normalized domain events.
+    canonical_yaml_family:
+      always:
+        - module.yaml
+        - contracts/events.yaml
+        - contracts/reactions.yaml
+      optional:
+        - notifications.yaml
+        - admin.yaml
+    backend_stub_defaults:
+      - backend/handler.py
+      - backend/service.py
+      - backend/repo.py
+      - backend/policy.py
+      - backend/schemas.py
+    key_actions:
+      - activate_subscription: >
+          Writes a grant record to the assignment_store collection with
+          plan_id, granted_capabilities (copied from the plan snapshot in
+          config/subscriptions.yaml), status=active, and optional expires_at.
+          Input: { user_id, plan_id, granted_at?, expires_at? }.
+      - deactivate_subscription: >
+          Updates the assignment record status to cancelled or expired.
+          Input: { user_id, reason }.
+      - get_entitlement_status: >
+          Read-only status check safe to expose to authenticated UI callers.
+          Returns current plan_id, status, and granted_capabilities for the
+          requesting user. No entitlement_gate — this action is itself free.
+    assignment_store_convention: >
+      The module repo writes to the collection declared in
+      config/subscriptions.yaml assignment_store.data_alias. The record schema
+      must include fields that ConfiguredEntitlementAdapter expects:
+        app_id, user_id (or tenant_id/workspace_id for non-user-scoped grants),
+        plan_id, granted_capabilities (list of capability_id strings or
+        { pack_id, capability_id } dicts), status (must be one of the
+        active_statuses declared in assignment_store), expires_at (ISO-8601 or null).
+      Use ctx.persistence.collection(assignment_store_alias) in backend/repo.py.
+      Do not hard-code the collection name — read it from the loaded subscriptions
+      config at startup or pass it from the service layer.
+    hard_constraints:
+      - This archetype is for self-hosted apps only. Apps on the mozaiks-app
+        hosted platform must not instantiate this module; the hosted entitlement
+        service manages grants for hosted apps and is the authoritative source.
+      - Do not call Stripe, MozaiksPay, or any payment provider from this module.
+        Payment events are provider-specific. This module receives normalized
+        domain events only (e.g. subscription.activated, subscription.cancelled)
+        and reacts to them via contracts/reactions.yaml. The payment-event adapter
+        lives in services/adapters/payments/{provider}.py.
+      - The service layer must be idempotent — duplicate activation events for
+        the same user/plan must not create duplicate grant records.
+      - activate_subscription must snapshot the plan's capability_ids from
+        config/subscriptions.yaml at activation time and store the snapshot.
+        ConfiguredEntitlementAdapter may use the snapshot rather than re-reading
+        the catalog at check time (see plan_snapshot field behavior in entitlements.py).
+      - Never emit or handle direct payment provider webhook events (Stripe, etc.).
+        Those belong in services/adapters/payments/{provider}.py and are normalized
+        before reaching this module.
+      - get_entitlement_status is the only action whose result is safe to return
+        directly to the UI. activate_subscription and deactivate_subscription are
+        internal actions (api_surface=internal) triggered via reactions.yaml.

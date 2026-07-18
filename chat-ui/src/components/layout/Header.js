@@ -7,6 +7,7 @@ import {
   deriveShellActionContext,
   getNavigationTargetKey,
   getUserRoles,
+  isShellItemVisible,
   resolveShellAction,
   resolveShellActions,
 } from "../../navigation/shellActions";
@@ -35,12 +36,6 @@ const getUserSubLabel = (user, fallback) => {
   return user.email || user.title || fallback;
 };
 
-const isMenuItemVisible = (item, roles) => {
-  if (!item || item.visible === false) return false;
-  if (!item.requiresRole) return true;
-  return roles.includes(item.requiresRole);
-};
-
 const isAuthenticatedUser = (user) => {
   const id = String(user?.id || user?.user_id || "").toLowerCase();
   return Boolean(user) && id !== "anonymous" && id !== "guest";
@@ -53,7 +48,7 @@ const getDefaultProfileMenu = (user) => {
       id: "profile",
       label: "Account",
       action: "navigate",
-      href: "/profile",
+      href: "/me",
     },
   ];
 
@@ -194,6 +189,7 @@ const Header = ({
     );
 
     return headerPages.filter((item) => {
+      if (!isShellItemVisible(item, userRoles)) return false;
       const target = getNavigationTargetKey(item);
       return !target || !actionTargets.has(target);
     });
@@ -204,7 +200,7 @@ const Header = ({
   );
   const profileMenu = useMemo(
     () => mergeProfileMenu(getDefaultProfileMenu(currentUser), profileConfig.menu)
-      .filter((item) => isMenuItemVisible(item, userRoles)),
+      .filter((item) => isShellItemVisible(item, userRoles)),
     [currentUser, profileConfig.menu, userRoles]
   );
 

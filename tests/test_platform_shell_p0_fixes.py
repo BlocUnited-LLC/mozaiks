@@ -186,7 +186,7 @@ def test_inject_admin_portal_inserts_before_signout() -> None:
         "profile": {
             "show": True,
             "menu": [
-                {"id": "profile", "action": "navigate", "path": "/profile"},
+                {"id": "profile", "action": "navigate", "path": "/me"},
                 {"id": "signout", "action": "signout"},
             ],
         }
@@ -206,7 +206,7 @@ def test_inject_admin_portal_appends_when_no_signout() -> None:
         "profile": {
             "show": True,
             "menu": [
-                {"id": "profile", "action": "navigate", "path": "/profile"},
+                {"id": "profile", "action": "navigate", "path": "/me"},
             ],
         }
     }
@@ -224,7 +224,7 @@ def test_inject_admin_portal_is_idempotent() -> None:
         "profile": {
             "show": True,
             "menu": [
-                {"id": "profile", "action": "navigate", "path": "/profile"},
+                {"id": "profile", "action": "navigate", "path": "/me"},
                 {"id": "signout", "action": "signout"},
             ],
         }

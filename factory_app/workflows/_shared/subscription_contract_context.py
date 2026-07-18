@@ -66,6 +66,8 @@ def _trim_contract(contract: Mapping[str, Any]) -> dict[str, Any]:
 
     allowed = {
         "contract_required",
+        "review_status",
+        "user_confirmed",
         "rationale",
         "plan_design_rationale",
         "app_name",
@@ -101,7 +103,7 @@ def _render_contract(contract: Mapping[str, Any]) -> str:
     return "\n".join(
         [
             "[SUBSCRIPTION CONTRACT CONTEXT]",
-            "Use this provider-neutral contract as the source of truth for generated SaaS plans, entitlement gates, token wallets, token allowances, usage pages, and workflow metering declarations.",
+            "Use this provider-neutral contract as the source of truth for generated SaaS plans, entitlement gates, token wallets, depleted-balance recovery metadata, top-up products with price.amount_cents/currency, token allowances, usage pages, and workflow metering declarations.",
             "Do not implement a custom usage ledger or token wallet. Use the OSS runtime subscription/token primitives.",
             "Do not add hosted-product provider behavior here; payment checkout, invoices, and settlement are app-owned or host-provided integration concerns.",
             body,

@@ -48,6 +48,7 @@ class MozaiksPayApplicationError(MozaiksPayError):
 @dataclass(frozen=True)
 class MozaiksPayConnectorSettings:
     api_base: str | None = None
+    api_key: str | None = None
     client_id: str | None = None
     client_secret: str | None = None
     runtime_base: str | None = None
@@ -55,7 +56,7 @@ class MozaiksPayConnectorSettings:
 
     @property
     def has_provider_credentials(self) -> bool:
-        return bool(self.api_base and self.client_id and self.client_secret)
+        return bool(self.api_base and (self.api_key or (self.client_id and self.client_secret)))
 
 
 ConnectorSettingsLoader = Callable[[str | None], Awaitable[MozaiksPayConnectorSettings | None]]
@@ -70,12 +71,9 @@ def _env_settings() -> MozaiksPayConnectorSettings:
     runtime_base = _clean(os.getenv("MOZAIKS_APP_URL")) or None
     return MozaiksPayConnectorSettings(
         api_base=api_base,
+        api_key=_clean(os.getenv("MOZAIKSPAY_API_KEY")) or None,
         client_id=_clean(os.getenv("MOZAIKSPAY_CLIENT_ID")) or None,
-        client_secret=(
-            _clean(os.getenv("MOZAIKSPAY_CLIENT_SECRET"))
-            or _clean(os.getenv("MOZAIKSPAY_API_KEY"))
-            or None
-        ),
+        client_secret=_clean(os.getenv("MOZAIKSPAY_CLIENT_SECRET")) or None,
         runtime_base=runtime_base,
         source="env",
     )
@@ -104,14 +102,17 @@ async def _load_connector_settings(app_id: str | None) -> MozaiksPayConnectorSet
             scope_id=str(app_id),
             service=_CONNECTOR_SERVICE,
         )
-        client_secret = _clean(secret_result.get("secret_value")) if isinstance(secret_result, dict) else ""
+        credential = _clean(secret_result.get("secret_value")) if isinstance(secret_result, dict) else ""
         api_base = _clean(public_config.get("api_base")) or _clean(public_config.get("base_url")) or None
         client_id = _clean(public_config.get("client_id")) or None
         runtime_base = _clean(public_config.get("runtime_base")) or _clean(os.getenv("MOZAIKS_APP_URL")) or None
-        if not any([api_base, client_id, client_secret]):
+        api_key = credential if not client_id else ""
+        client_secret = credential if client_id else ""
+        if not any([api_base, api_key, client_id, client_secret]):
             return None
         return MozaiksPayConnectorSettings(
             api_base=api_base,
+            api_key=api_key or None,
             client_id=client_id,
             client_secret=client_secret or None,
             runtime_base=runtime_base,
@@ -132,6 +133,7 @@ class MozaiksPayClient:
         self,
         api_base: str | None = None,
         runtime_base: str | None = None,
+        api_key: str | None = None,
         client_id: str | None = None,
         client_secret: str | None = None,
         auth_token: str | None = None,
@@ -141,6 +143,7 @@ class MozaiksPayClient:
     ) -> None:
         self._api_base = _clean(api_base) or None
         self._runtime_base = _clean(runtime_base) or None
+        self._api_key = _clean(api_key) or None
         self._client_id = _clean(client_id) or None
         self._client_secret = _clean(client_secret) or None
         self._auth_token = _clean(auth_token) or None
@@ -221,6 +224,76 @@ class MozaiksPayClient:
             provider_auth=True,
         )
 
+    async def create_subscription_checkout_session(
+        self,
+        *,
+        plan_id: str,
+        success_url: str,
+        cancel_url: str,
+        customer_email: str | None = None,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a hosted subscription checkout redirect session."""
+        settings = await self._settings()
+        self._require_provider_credentials(settings)
+        api_base = settings.api_base
+        if not api_base:
+            raise MozaiksPayConfigurationError("MozaiksPay provider API base is required.")
+        payload = {
+            "plan_id": plan_id,
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "customer_email": _clean(customer_email),
+            **_scope_params(user_id=user_id, tenant_id=tenant_id, workspace_id=workspace_id),
+        }
+        return await self._request(
+            "POST",
+            f"{api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/subscription/checkout-session",
+            json=payload,
+            settings=settings,
+            provider_auth=True,
+        )
+
+    async def create_token_top_up_session(
+        self,
+        *,
+        product_id: str,
+        success_url: str,
+        cancel_url: str,
+        wallet_id: str,
+        token_amount: int,
+        amount_cents: int,
+        currency: str = "usd",
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a hosted token top-up checkout session when the provider supports it."""
+        settings = await self._settings()
+        self._require_provider_credentials(settings)
+        api_base = settings.api_base
+        if not api_base:
+            raise MozaiksPayConfigurationError("MozaiksPay provider API base is required.")
+        payload: dict[str, Any] = {
+            "product_id": product_id,
+            "wallet_id": wallet_id,
+            "token_amount": int(token_amount),
+            "amount_cents": int(amount_cents),
+            "currency": currency,
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            **_scope_params(user_id=user_id, tenant_id=tenant_id, workspace_id=workspace_id),
+        }
+        return await self._request(
+            "POST",
+            f"{api_base.rstrip('/')}{_PROVIDER_API_PREFIX}/tokens/top-up-session",
+            json=payload,
+            settings=settings,
+            provider_auth=True,
+        )
+
     async def _settings(self) -> MozaiksPayConnectorSettings:
         if self._settings_cache is not None:
             return self._settings_cache
@@ -229,10 +302,11 @@ class MozaiksPayClient:
         env = _env_settings()
         settings = MozaiksPayConnectorSettings(
             api_base=self._api_base or (connector.api_base if connector else None) or env.api_base,
+            api_key=self._api_key or (connector.api_key if connector else None) or env.api_key,
             client_id=self._client_id or (connector.client_id if connector else None) or env.client_id,
             client_secret=self._client_secret or (connector.client_secret if connector else None) or env.client_secret,
             runtime_base=self._runtime_base or (connector.runtime_base if connector else None) or env.runtime_base,
-            source="explicit" if self._api_base or self._client_id or self._client_secret else (connector.source if connector else env.source),
+            source="explicit" if self._api_base or self._api_key or self._client_id or self._client_secret else (connector.source if connector else env.source),
         )
         if not settings.api_base:
             raise MozaiksPayConfigurationError(
@@ -246,7 +320,9 @@ class MozaiksPayClient:
         if not settings.has_provider_credentials:
             raise MozaiksPayConfigurationError(
                 "MozaiksPay provider credentials are required. Configure the mozaikspay "
-                "connector with api_base, client_id, and client_secret."
+                "connector with api_base and api_key, or set MOZAIKSPAY_API_KEY. "
+                "Client ID and client secret credentials are also accepted when issued "
+                "by the hosted MozaiksPay service."
             )
 
     async def _request(
@@ -260,9 +336,11 @@ class MozaiksPayClient:
         provider_auth: bool,
     ) -> dict[str, Any]:
         headers: dict[str, str] = {"Content-Type": "application/json"}
-        if provider_auth and settings.client_id and settings.client_secret:
-            headers["X-MozaiksPay-Client-Id"] = settings.client_id
-            headers["Authorization"] = _authorization_header(settings.client_secret)
+        provider_credential = settings.api_key or settings.client_secret
+        if provider_auth and provider_credential:
+            if not settings.api_key and settings.client_id:
+                headers["X-MozaiksPay-Client-Id"] = settings.client_id
+            headers["Authorization"] = _authorization_header(provider_credential)
         elif self._auth_token:
             headers["Authorization"] = _authorization_header(self._auth_token)
 

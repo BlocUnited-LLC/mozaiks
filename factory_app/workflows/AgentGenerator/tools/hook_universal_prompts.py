@@ -111,16 +111,25 @@ The MozaiksCore platform provides these capabilities automatically. NEVER design
 
 **What Workflows SHOULD Define**:
 1. Agent Roles & Prompts - What each agent does and how it thinks
-2. Tools & Integrations - External APIs and business logic (payment provider, SendGrid, OpenAI, etc.)
+2. Tools & Integrations - Declared external APIs, managed facades, and domain business logic
 3. Orchestration Flow - How agents coordinate and hand off
 4. Context Variables - Domain-specific state the workflow tracks
 5. Human Interaction Points - Where users provide input or approval
 6. Lifecycle Hooks - Custom initialization/cleanup beyond runtime defaults
 
+**Monetization Boundary**:
+- Workflows may call declared app module actions, managed-capability facade actions,
+  or workflow-local tools supplied by the app bundle.
+- Workflows must not call raw payment providers, hosted product internals, wallet
+  ledgers, subscription ledgers, or billing service endpoints directly.
+- When a tool or module action returns `INSUFFICIENT_TOKENS`, stop that paid path
+  and surface the structured recovery metadata. Do not retry automatically or
+  attempt to bypass token/entitlement checks.
+
 **Anti-Patterns to Avoid**:
 ❌ "ChatAgent" or "UserProxyAgent" - Runtime handles user communication
 ❌ "PersistenceAgent" or "DatabaseAgent" - Use context variables; runtime persists
-❌ "TokenTracker" or "UsageMonitor" - the hosted wallet service handles automatically
+❌ "TokenTracker" or "UsageMonitor" - OSS runtime token wallet and usage primitives handle this automatically
 ❌ "WebSocketHandler" or "MessageRouter" - Transport layer is provided
 ❌ "SessionManager" or "LoggingAgent" - Runtime manages these
 """

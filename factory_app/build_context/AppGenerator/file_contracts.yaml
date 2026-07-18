@@ -46,6 +46,7 @@ task_contracts:
       - The api_endpoint field on a page section is a POST path only — no query strings, fragments, or dynamic path segments. Page-level filters, pagination limits, and record identifiers must go in payload or the module action input schema.
       - Custom route JSX must call module actions through moduleAction() imported from ui/lib/moduleApi.js. This file is always present in the generated bundle. Do not write raw fetch() calls to /api/modules/** directly in page components.
       - Custom route error handling must use err.error_code (and err.code) from the caught error object to branch on backend states. The generated moduleApi.js preserves structured error fields on thrown errors. Do not parse raw response text or HTTP status codes to infer error state.
+      - Custom routes that launch LLM-backed or token-metered actions/workflows must detect INSUFFICIENT_TOKENS with isInsufficientTokensError(err), navigate to insufficientTokensRecoveryPath(err), and return without retrying automatically.
 
   subscription_config:
     owner_agent: ConfigMiddlewareAgent
@@ -61,13 +62,57 @@ task_contracts:
       - Do not emit modules/{pack_name}/contracts/subscriptions.yaml or any module-local subscriptions.yaml.
       - Do not emit hosted billing admin actions, payment-provider products, price ids, invoices, checkout internals, or settlement logic in this file.
         - token_wallets live at the config root and are provider-neutral.
+        - token_wallets[].depleted_balance declares safe app-local recovery routes for INSUFFICIENT_TOKENS; routes must not be external provider URLs.
+        - top_up_products live at the config root and declare provider-neutral app-owned token packs by product_id, wallet_id, token_amount, and price.amount_cents/currency only.
         - token_allowances live under plans[] and every wallet_id must reference a declared token_wallet.
         - assignment_store declares where active app-owned subscription assignments are read by ConfiguredEntitlementAdapter.
         - Optional usage_charge_policies live at the config root and describe app-level customer charge estimates only; they may use runtime_llm_usage, provider_cost_usd markup, or a fixed token unit price.
         - Optional pricing_catalog groups are display metadata for public pricing tabs/service selectors only. They may group declared plan_ids and app/provider-owned add_on_ids, but they must not grant capabilities or carry payment-provider price IDs.
       - Use pricing_catalog when an app sells multiple service lines on one pricing surface, such as platform access, token packs, hosting, domains, marketing, or support.
       - Generated module actions that require paid access must declare actions[].entitlement_gate with a capability_id granted by at least one plan.
+      - Monetized AI/token apps must expose billing/top-up/usage pages through an app-owned billing_portal facade module; pages must not call hosted or provider internals directly.
+      - Token wallets and token_allowances are only for apps selling AI usage, credits, quotas, token packs, or usage-charge estimates; access-only SaaS plans must omit those fields.
       - Runtime token usage measurement and token wallet accounting are OSS runtime primitives; generated apps must not create duplicate usage or balance ledgers.
+
+  infra_scaffold:
+    owner_agent: InfraScaffoldAgent
+    summary: >
+      Deployment infrastructure scaffold emitted once at app generation time.
+      Includes Dockerfile, CI/CD workflow, and provision script derived from
+      the factory_app/build_context/infra/ templates. After first emit the
+      operator owns these files; regeneration is explicit and opt-in.
+    required_outputs:
+      - Dockerfile
+      - .github/workflows/deploy.yml
+      - scripts/provision.sh
+    optional_outputs:
+      - .github/workflows/readiness.yml
+      - .env.example
+    hard_constraints:
+      - Emit once; do not overwrite on routine regeneration. Skip if Dockerfile already exists in the output directory unless --force-infra is passed.
+      - Dockerfile must use multi-stage build with frontend-builder, py-builder, and runtime stages derived from the infra Dockerfile.template.
+      - CI/CD workflows must consume secrets from GitHub environment secrets; never inline secret values or provider tenant identifiers.
+      - provision.sh must read required secret names from app/security/secrets.yaml and validate all required secrets are present before syncing.
+      - .env.example must list all names from app/security/secrets.yaml with placeholder values only; never emit real secret values.
+      - Do not emit VITE_ env var values (OIDC URLs, redirect URIs) into committed files; they are environment-specific and supplied at build time as Docker build args and GitHub secrets.
+      - Replace all template variables ({{APP_NAME}}, {{MOZAIKS_VERSION}}, {{OIDC_CLIENT_ID}}, {{REGISTRY}}, {{DEPLOY_TARGET}}) with values from the app context before emitting.
+      - Deploy target defaults to azure_container_apps; stubs for fly and render must be present as inline comments in deploy.yml.
+
+  auth_adapter:
+    owner_agent: AppSchemaAgent
+    summary: Generated browser OIDC adapter consumed by ChatUIProvider. Re-emitted when app/config/auth.yaml changes.
+    required_outputs:
+      - ui/auth/authAdapter.js
+    optional_outputs:
+      - ui/auth/authAdapter.mock.js
+    hard_constraints:
+      - Use PKCE auth-code flow via OIDC discovery endpoint. All OIDC provider URLs come from VITE_ env vars resolved at Vite build time; never hard-code provider URLs.
+      - Implement the authAdapter contract (getCurrentUser, onAuthStateChange, login, logout, getAccessToken, handleCallback) consumed by ChatUIProvider.
+      - Mock mode (VITE_MOCK_MODE=true) bypasses all OIDC redirects and returns a static user — required for local dev without an OIDC provider.
+      - Token storage must use sessionStorage only, never localStorage.
+      - Re-emit when app/config/auth.yaml changes; operator must review the diff before deploying.
+      - When app/config/auth.yaml declares provider=mock or auth config is absent, emit authAdapter.mock.js only.
+      - Token key prefix is derived from app.json .slug (e.g. myapp_access_token, myapp_user).
 
   module_contract:
     owner_agent: ConfigMiddlewareAgent
@@ -113,6 +158,12 @@ task_contracts:
       - Emit contracts/relationships.yaml only when a module can enumerate current-user relationships to its own resources for generic My Apps, Portfolio, or My Resources surfaces.
       - relationships.yaml providers must bind to module actions declared in module.yaml. Provider actions must return normalized relationship rows with resource_type, resource_id, relationship_type, primary_route, capabilities, status, and metadata as needed.
       - Do not encode app-specific monetization, payment-provider, ownership-rights, or hosted-product policy in relationships.yaml. Keep it to generic resource relationship discovery.
+      - When an app needs durable user classes, team membership, project collaborators, moderators, participants, invite flows, or resource-scoped route access, emit a membership-style module instead of storing app classes only in auth claims, app.json admins, frontend route metadata, or unrelated resource records.
+      - Membership-style modules own resource-scoped class assignment records. Records should include user_id, resource_type, resource_id, class_id or role, status, created_by, created_at, and updated_at, plus tenant_id/workspace_id when the app uses those scopes.
+      - Membership-style module policy must resolve authority from ctx.user_id, ctx.tenant_id, ctx.workspace_id, ctx.permissions, and module-owned records. Do not trust request body user_id, tenant_id, workspace_id, class, role, or permission fields for authorization.
+      - Scoped private routes whose visibility depends on membership, ownership, invitation state, tenant/workspace scope, or resource access must declare meta.routeAuth pointing to an app-owned authorize_*_route module action. The action returns a minimal allowed/status/capabilities summary and must not return raw records, secrets, payment provider fields, or ledger data.
+      - If class assignments affect vote weights, approval quorum, judging weight, or app-owned settlement allocation, the owning module must snapshot eligible class/weight rows when the process opens. Later class or membership changes must not mutate open or closed process results.
+      - Do not encode MozaiksPay, wallet, payout, hosted billing, managed hosting, growth campaign returns, investor marketplace policy, ownership-right claims, or hosted product revenue-share rules in generated membership modules. Those are hosted-product or app-specific economics concerns, not OSS user-class primitives.
       - Emit contracts/notifications.yaml only when one or more declared module events should create user-facing notifications. Notification rules are deterministic event-to-intent mappings consumed by the OSS runtime; generated apps must not create a standalone notifications module, notification persistence repo, or notification websocket worker for ordinary in-app alerts.
       - Notification rules must use schema_version mozaiks.notifications.v1, stable notification ids, event_type values declared in contracts/events.yaml or canonical app/domain/platform/hosted namespaces, controlled channels from [in_app, email, push, sms], and explicit audience roles/permissions, audience.user_id_field for event-payload target users, or a declared module-local resolver hook.
       - Use channel in_app by default. Add email, push, or sms only when the app plan explicitly requires external delivery and the corresponding operator pack or app-owned provider adapter is available. Do not invent provider delivery internals in module business logic.
@@ -204,7 +255,7 @@ task_contracts:
       the app needs checkpoint/routing/refinement behavior beyond ordinary
       extension_registry.json transitions and workflow_sequences.
     required_outputs:
-      - control_plane/config/runtime.yaml
+      - app/config/llm.yaml
       - control_plane/config/control_plane.yaml
       - control_plane/config/tools.yaml
     optional_outputs:
@@ -215,7 +266,7 @@ task_contracts:
       - Do NOT generate module.yaml, handler.py, service.py, repo.py, backend/control_plane/*.py, or other module/runtime files.
       - Do NOT register this surface as a runtime module under app/modules/.
       - Stay within current_build_task.owned_paths.
-      - control_plane/config/runtime.yaml is the app-local control-plane runtime policy seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into control_plane.yaml.
+      - app/config/llm.yaml is the app-local control-plane LLM profile seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into control_plane.yaml.
       - control_plane.yaml routes declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
       - Every workflow_sequence referenced by control_plane.yaml must exist in workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
       - Use shipped mozaiksai.control_plane implementations and tool entrypoints unless a future custom-harness Python contract is explicitly introduced.

@@ -125,6 +125,108 @@ def _context_get(context_variables: Any | None, key: str) -> Any | None:
     return None
 
 
+def _pack_id(pack: dict[str, Any]) -> str:
+    return str(pack.get("id") or pack.get("pack_id") or pack.get("capability_pack_id") or "").strip()
+
+
+def _selected_capability_packs(context_variables: Any | None) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    selected_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def merge_missing(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for key, value in source.items():
+            current = target.get(key)
+            if current in (None, "", [], {}):
+                target[key] = value
+            elif isinstance(current, dict) and isinstance(value, dict):
+                merge_missing(current, value)
+
+    def add_many(raw_packs: Any) -> None:
+        if not isinstance(raw_packs, list):
+            return
+        for pack in raw_packs:
+            if not isinstance(pack, dict):
+                continue
+            pack_id = _pack_id(pack)
+            if not pack_id:
+                continue
+            key = (
+                pack_id,
+                str(pack.get("capability_source") or "").strip(),
+                str(pack.get("pack_source_path") or "").strip(),
+            )
+            if key in selected_by_key:
+                merge_missing(selected_by_key[key], pack)
+                continue
+            normalized = dict(pack)
+            selected_by_key[key] = normalized
+            selected.append(normalized)
+
+    app_build_plan = _context_get(context_variables, "app_build_plan")
+    if isinstance(app_build_plan, dict):
+        add_many(app_build_plan.get("capability_packs"))
+    add_many(_context_get(context_variables, "capability_packs"))
+    return selected
+
+
+def _deployment_env_names(value: Any) -> list[str]:
+    names: list[str] = []
+    if not isinstance(value, list):
+        return names
+    for item in value:
+        raw_name: Any
+        if isinstance(item, str):
+            raw_name = item
+        elif isinstance(item, dict):
+            raw_name = item.get("name") or item.get("variable") or item.get("env")
+        else:
+            continue
+        name = str(raw_name or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _deployment_env_for_capability_packs(capability_packs: list[dict[str, Any]]) -> dict[str, list[str]]:
+    required: list[str] = []
+    optional: list[str] = []
+    secret: list[str] = []
+    public: list[str] = []
+
+    def add_required(name: str) -> None:
+        if name not in required:
+            required.append(name)
+
+    def add_optional(name: str) -> None:
+        if name not in optional:
+            optional.append(name)
+
+    def add_secret(name: str) -> None:
+        if name not in secret:
+            secret.append(name)
+
+    def add_public(name: str) -> None:
+        if name not in public:
+            public.append(name)
+
+    for pack in capability_packs:
+        deployment_env = pack.get("deployment_env")
+        if not isinstance(deployment_env, dict):
+            continue
+        for name in _deployment_env_names(deployment_env.get("required")):
+            add_required(name)
+        for name in _deployment_env_names(deployment_env.get("optional")):
+            add_optional(name)
+        for name in _deployment_env_names(deployment_env.get("secret")):
+            add_secret(name)
+            if name not in required:
+                add_optional(name)
+        for name in _deployment_env_names(deployment_env.get("public")):
+            add_public(name)
+
+    return {"required": required, "optional": optional, "secret": secret, "public": public}
+
+
 def _context_set(context_variables: Any | None, key: str, value: Any) -> None:
     if context_variables is None or not hasattr(context_variables, "set"):
         return
@@ -152,6 +254,23 @@ def _discover_context_files(context_variables: Any | None) -> dict[str, str]:
         if safe:
             out[safe] = str(content)
     return out
+
+
+def _generated_app_auth_required(files_map: dict[str, str]) -> bool:
+    """Return whether the generated app manifest requires authentication."""
+    for manifest_path in ("app.json", "app/app.json"):
+        raw = files_map.get(manifest_path)
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(str(raw))
+        except Exception:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        if isinstance(parsed.get("authRequired"), bool):
+            return bool(parsed["authRequired"])
+    return False
 
 
 def _format_bytes(num: int) -> str:
@@ -677,6 +796,9 @@ async def generate_and_download(
     if isinstance(pending_migration, dict) and pending_migration.get("migration_id"):
         inject_migration_into_bundle(files_map, pending_migration)
 
+    selected_capability_packs = _selected_capability_packs(context_variables)
+    deployment_env = _deployment_env_for_capability_packs(selected_capability_packs)
+
     # Optional deterministic deployment scaffold outputs.
     # These remain provider-neutral and contain non-secret example env values only.
     if context_variables is not None and hasattr(context_variables, "get"):
@@ -695,6 +817,11 @@ async def generate_and_download(
             include_dockerfiles=include_dockerfiles,
             include_workflow=include_workflow,
             include_compose=include_compose,
+            auth_required=_generated_app_auth_required(files_map),
+            extra_required_variables=deployment_env["required"],
+            extra_optional_variables=deployment_env["optional"],
+            extra_secret_variables=deployment_env["secret"],
+            extra_public_variables=deployment_env["public"],
         )
         deployment_files = deployment_contract.get("artifacts") if isinstance(deployment_contract, dict) else {}
         if isinstance(deployment_files, dict):
@@ -706,13 +833,6 @@ async def generate_and_download(
                 context_variables.set("deployment_contract_validation_errors", deployment_contract.get("bundle_errors") or [])
             except Exception:
                 pass
-
-    app_build_plan = _context_get(context_variables, "app_build_plan")
-    selected_capability_packs: list[dict[str, Any]] = []
-    if isinstance(app_build_plan, dict):
-        raw_packs = app_build_plan.get("capability_packs")
-        if isinstance(raw_packs, list):
-            selected_capability_packs = [pack for pack in raw_packs if isinstance(pack, dict)]
 
     acceptance_result = await run_app_bundle_acceptance_gate(
         files=files_map,

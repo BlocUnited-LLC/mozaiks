@@ -11,7 +11,7 @@
  */
 
 import { Suspense, useMemo, useEffect, useState, useCallback } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useNavigation } from '../providers/NavigationProvider';
 import { getComponent, hasComponent } from '../registry/componentRegistry';
 import { TransitionScreen } from '../ui/screens/TransitionScreen';
@@ -21,6 +21,7 @@ import Footer from './layout/Footer';
 import MobileBottomBar from './layout/MobileBottomBar';
 import { useTheme } from '../styles/useTheme';
 import { getChatBackgroundSrc } from '../styles/brandAssets';
+import { getUserRoles, roleMatches } from '../navigation/shellActions';
 
 /**
  * Core routes that are ALWAYS mounted — not driven by owner manifests.
@@ -98,6 +99,56 @@ const viewportClassName = ({ desktop, mobile }) => {
   if (!desktop && mobile) return 'md:hidden';
   return 'hidden';
 };
+
+const getAccessToken = () => {
+  if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
+    return window.mozaiksAuth.getAccessToken();
+  }
+  if (typeof localStorage === 'undefined') return null;
+  return (
+    localStorage.getItem('mozaiks_access_token') ||
+    localStorage.getItem('chatui_token') ||
+    localStorage.getItem('access_token')
+  );
+};
+
+const authHeaders = () => {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+const getValueByPath = (source, path) => {
+  if (!source || typeof path !== 'string' || !path) return undefined;
+  return path.split('.').reduce((current, key) => (
+    current && typeof current === 'object' ? current[key] : undefined
+  ), source);
+};
+
+const resolveRouteAuthParam = (value, { routeParams, query, route, user }) => {
+  if (typeof value !== 'string') return value;
+  if (value.startsWith('$route.')) return routeParams[value.slice('$route.'.length)] || '';
+  if (value.startsWith('$query.')) return query.get(value.slice('$query.'.length)) || '';
+  if (value.startsWith('$meta.')) return getValueByPath(route?.meta, value.slice('$meta.'.length)) || '';
+  if (value.startsWith('$user.')) return getValueByPath(user, value.slice('$user.'.length)) || '';
+  if (value === '$path') return route?.path || '';
+  return value;
+};
+
+const buildRouteAuthInput = (routeAuth, context) => {
+  const params = routeAuth?.params && typeof routeAuth.params === 'object' ? routeAuth.params : {};
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key, resolveRouteAuthParam(value, context)])
+  );
+};
+
+const RouteAccessDenied = ({ message = 'You do not have access to this page.' }) => (
+  <div className="flex min-h-screen items-center justify-center bg-background px-6">
+    <div className="max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm">
+      <h1 className="text-lg font-semibold text-foreground">Access denied</h1>
+      <p className="mt-2 text-sm text-muted-foreground">{message}</p>
+    </div>
+  </div>
+);
 
 /**
  * Default loading component for lazy-loaded routes
@@ -336,6 +387,88 @@ const RouteWrapper = ({
   wrapInAppShell = false,
 }) => {
   const { meta = {} } = route;
+  const routeParams = useParams();
+  const location = useLocation();
+  const { user } = useChatUI();
+  const userRoles = useMemo(() => getUserRoles(user), [user]);
+  const requiredRoles = meta.requiresRole || meta.requiredRole || meta.roles;
+  const hasRequiredRole = roleMatches(requiredRoles, userRoles);
+  const routeAuth = meta.routeAuth && typeof meta.routeAuth === 'object' ? meta.routeAuth : null;
+  const routeAuthKey = JSON.stringify({
+    path: location.pathname,
+    search: location.search,
+    params: routeParams,
+    routeAuth,
+  });
+  const [routeAuthState, setRouteAuthState] = useState({ key: '', status: 'idle', message: '' });
+
+  useEffect(() => {
+    if (meta.title) {
+      const appName = document.title.split(' - ')[0] || 'Mozaiks';
+      document.title = `${meta.title} - ${appName}`;
+    }
+  }, [meta.title]);
+
+  useEffect(() => {
+    if (!routeAuth) {
+      setRouteAuthState({ key: routeAuthKey, status: 'allowed', message: '' });
+      return undefined;
+    }
+    if (meta.requiresAuth && !isAuthenticated) {
+      setRouteAuthState({ key: routeAuthKey, status: 'idle', message: '' });
+      return undefined;
+    }
+    if (!hasRequiredRole) {
+      setRouteAuthState({ key: routeAuthKey, status: 'idle', message: '' });
+      return undefined;
+    }
+    const moduleName = typeof routeAuth.module === 'string' ? routeAuth.module.trim() : '';
+    const actionName = typeof routeAuth.action === 'string' ? routeAuth.action.trim() : '';
+    if (!moduleName || !actionName) {
+      setRouteAuthState({
+        key: routeAuthKey,
+        status: 'denied',
+        message: 'Route authorization is not configured correctly.',
+      });
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const query = new URLSearchParams(location.search);
+    const input = buildRouteAuthInput(routeAuth, { routeParams, query, route, user });
+    setRouteAuthState({ key: routeAuthKey, status: 'loading', message: '' });
+
+    fetch(`/api/modules/${encodeURIComponent(moduleName)}/${encodeURIComponent(actionName)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...authHeaders(),
+      },
+      body: JSON.stringify(input || {}),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(body?.error || body?.message || 'Route authorization failed.');
+        }
+        if (body?.allowed !== true) {
+          throw new Error(body?.reason || body?.error || 'You do not have access to this page.');
+        }
+        setRouteAuthState({ key: routeAuthKey, status: 'allowed', message: '' });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setRouteAuthState({
+          key: routeAuthKey,
+          status: 'denied',
+          message: error instanceof Error ? error.message : 'You do not have access to this page.',
+        });
+      });
+
+    return () => controller.abort();
+  }, [routeAuthKey, routeAuth, route, user, meta.requiresAuth, isAuthenticated, hasRequiredRole]);
 
   // Check auth requirement
   if (meta.requiresAuth && !isAuthenticated) {
@@ -345,13 +478,17 @@ const RouteWrapper = ({
     return <Navigate to={meta.authRedirect || '/login'} replace />;
   }
 
-  // Update document title if specified
-  useEffect(() => {
-    if (meta.title) {
-      const appName = document.title.split(' - ')[0] || 'Mozaiks';
-      document.title = `${meta.title} - ${appName}`;
-    }
-  }, [meta.title]);
+  if (!hasRequiredRole) {
+    return <RouteAccessDenied message="You do not have access to this page." />;
+  }
+
+  if (routeAuth && routeAuthState.key === routeAuthKey && routeAuthState.status === 'loading') {
+    return <DefaultLoadingFallback />;
+  }
+
+  if (routeAuth && routeAuthState.key === routeAuthKey && routeAuthState.status === 'denied') {
+    return <RouteAccessDenied message={routeAuthState.message} />;
+  }
 
   const content = <Component route={route} />;
   if (wrapInAppShell) {

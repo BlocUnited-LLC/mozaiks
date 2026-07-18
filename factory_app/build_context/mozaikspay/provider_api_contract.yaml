@@ -10,20 +10,32 @@ description: >
   logic, fee calculations, or subscription business rules belong here.
 
 auth:
-  scheme: client_credentials
+  scheme: mozaikspay_api_key
   headers:
-    - name: X-MozaiksPay-Client-Id
-      description: App-scoped client ID issued by the hosted platform (mpc_ prefix).
-      required: true
-      secret: false
     - name: Authorization
-      format: "Bearer {client_secret}"
-      description: App-scoped client secret issued by the hosted platform (mps_ prefix).
+      format: "Bearer {api_key}"
+      description: App-scoped MozaiksPay API key issued by the hosted platform (mzk_live_ or mzk_test_ prefix).
       required: true
       secret: true
   credential_prefixes:
-    client_id: "mpc_"
-    client_secret: "mps_"
+    api_key:
+      - "mzk_live_"
+      - "mzk_test_"
+  compatibility_auth:
+    scheme: client_credentials
+    headers:
+      - name: X-MozaiksPay-Client-Id
+        description: App-scoped client ID issued by the hosted platform (mpc_ prefix).
+        required: true
+        secret: false
+      - name: Authorization
+        format: "Bearer {client_secret}"
+        description: App-scoped client secret issued by the hosted platform (mps_ prefix).
+        required: true
+        secret: true
+    credential_prefixes:
+      client_id: "mpc_"
+      client_secret: "mps_"
 
 endpoints:
   - id: subscription_status
@@ -105,10 +117,98 @@ endpoints:
         - client_secret
         - secret_salt
 
+  - id: subscription_checkout_session
+    method: POST
+    path: /api/mozaikspay/v1/subscription/checkout-session
+    description: >
+      Create a hosted subscription checkout redirect session for a paid plan.
+      The caller redirects their end-user to checkout_url. No OSS runtime state
+      is mutated by this call; subscription fulfillment is driven by the hosted
+      billing webhook after the payment provider confirms the subscription.
+    request_body:
+      plan_id: { type: string, required: true }
+      success_url: { type: string, format: https_url, required: true }
+      cancel_url: { type: string, format: https_url, required: true }
+      customer_email: { type: string, required: false }
+      user_id: { type: string, required: false }
+      tenant_id: { type: string, required: false }
+      workspace_id: { type: string, required: false }
+    response:
+      success_shape:
+        success: { type: boolean, value: true }
+        checkout_url: { type: string, format: https_url }
+        success_url: { type: string, format: https_url }
+        cancel_url: { type: string, format: https_url }
+        plan_id: { type: string }
+        expires_at: { type: string, format: iso8601, nullable: true }
+        dry_run: { type: boolean, nullable: true }
+      error_shape:
+        success: { type: boolean, value: false }
+        error_code: { type: string }
+        portal_available: { type: boolean, nullable: true }
+        missing_env: { type: string, nullable: true }
+      forbidden_fields:
+        - provider_price_id
+        - payment_provider_price_id
+        - provider_customer_id
+        - provider_subscription_id
+        - payment_provider_customer_id
+        - payment_provider_subscription_id
+        - session_id
+        - client_secret
+        - secret_salt
+
+  - id: token_top_up_session
+    method: POST
+    path: /api/mozaikspay/v1/tokens/top-up-session
+    description: >
+      Create a hosted token top-up checkout session for a provider-neutral
+      top_up_products entry declared by the generated app. Payment confirmation
+      must produce an OSS BillingFulfillmentCommand with event_type
+      token_top_up_paid before tokens are credited.
+    request_body:
+      product_id: { type: string, required: true }
+      wallet_id: { type: string, required: true }
+      token_amount: { type: integer, required: true }
+      amount_cents: { type: integer, required: true }
+      currency: { type: string, required: true }
+      success_url: { type: string, format: https_url, required: true }
+      cancel_url: { type: string, format: https_url, required: true }
+      user_id: { type: string, required: false }
+      tenant_id: { type: string, required: false }
+      workspace_id: { type: string, required: false }
+    response:
+      success_shape:
+        success: { type: boolean, value: true }
+        checkout_url: { type: string, format: https_url }
+        success_url: { type: string, format: https_url }
+        cancel_url: { type: string, format: https_url }
+        product_id: { type: string }
+        wallet_id: { type: string }
+        token_amount: { type: integer }
+        amount_cents: { type: integer }
+        currency: { type: string }
+        expires_at: { type: string, format: iso8601, nullable: true }
+      error_shape:
+        success: { type: boolean, value: false }
+        error_code: { type: string }
+        product_id: { type: string, nullable: true }
+        wallet_id: { type: string, nullable: true }
+        amount_cents: { type: integer, nullable: true }
+        currency: { type: string, nullable: true }
+      forbidden_fields:
+        - provider_price_id
+        - payment_provider_price_id
+        - provider_customer_id
+        - payment_provider_customer_id
+        - session_id
+        - client_secret
+        - secret_salt
+
 error_handling:
   http_errors:
-    401: "Missing or invalid client credentials."
-    403: "Client credential scope does not allow the requested user/tenant/workspace scope."
+    401: "Missing or invalid MozaiksPay API key or client credentials."
+    403: "MozaiksPay credential app or user/tenant/workspace scope does not allow this request."
     400: "Invalid request body (missing return_url, unsafe URL, etc.)."
     404: "No subscription found for this scope (subscription_status only — not an HTTP 404)."
   application_errors:
@@ -117,6 +217,11 @@ error_handling:
     MOZAIKSPAY_BILLING_NOT_CONFIGURED: "Hosted platform billing provider is not configured."
     MOZAIKSPAY_BILLING_API_ERROR: "Billing provider returned an error."
     INVALID_INPUT: "Required field missing or unsafe URL."
+    PLAN_NOT_CHECKOUTABLE: "Free/default plan cannot be purchased through checkout."
+    CUSTOM_PLAN_REQUIRES_SALES: "Plan requires operator setup before self-serve checkout."
+    SUBSCRIPTION_ALREADY_EXISTS: "The requested billing scope already has an active paid subscription."
+    MOZAIKSPAY_PRICE_NOT_CONFIGURED: "Hosted platform has no provider price mapping for the plan."
+    TOKEN_TOP_UP_PRODUCT_NOT_FOUND: "The requested token top-up product is not declared by the app."
 
 drift_guard:
   description: >

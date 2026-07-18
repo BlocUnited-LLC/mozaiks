@@ -4,9 +4,10 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from ag2 import Agent, MemoryStream
-from ag2.config import OpenAIConfig
 from ag2.middleware.builtin import RetryMiddleware
 from ag2.observers import TokenMonitor
+
+from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
 from pydantic import BaseModel
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
@@ -67,11 +68,18 @@ class AG2StructuredAgentRunner:
     ) -> Any:
         if self._agent_factory is not None:
             return self._agent_factory(system_prompt, llm_config)
-        config_kwargs: dict[str, Any] = {"model": llm_config.get("model") or "gpt-4o"}
-        temperature = llm_config.get("temperature")
-        if temperature is not None:
-            config_kwargs["temperature"] = temperature
-        return Agent(agent_name, system_prompt, config=OpenAIConfig(**config_kwargs))
+        # Normalise flat llm_config dict into the config_list shape expected by
+        # llm_config_to_ag2_config so provider routing works correctly.
+        config_list_llm: dict[str, Any] = {
+            "config_list": [{
+                "model": llm_config.get("model") or "gpt-4o",
+                "api_type": llm_config.get("api_type", "openai"),
+                "api_key": llm_config.get("api_key"),
+                "base_url": llm_config.get("base_url"),
+            }],
+            "temperature": llm_config.get("temperature"),
+        }
+        return Agent(agent_name, system_prompt, config=llm_config_to_ag2_config(config_list_llm))
 
 
 __all__ = ["AG2StructuredAgentRunner"]

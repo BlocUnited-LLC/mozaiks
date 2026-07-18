@@ -24,6 +24,15 @@ sections:
         - status
         - starts_at
         - expires_at
+  - id: billing-catalog
+    primitive: DataPanel
+    title: Plans and Token Packs
+    config:
+      api_endpoint: /api/modules/billing_portal/list_plans
+      method: POST
+      fields:
+        - plans
+        - top_up_products
   - id: manage-billing
     primitive: ActionButton
     title: Manage Billing

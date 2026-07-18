@@ -17,6 +17,19 @@ from pathlib import Path
 
 import yaml
 
+from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    generate_deployment_artifacts,
+)
+from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+    _deployment_env_for_capability_packs,
+)
+from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
+    scan_generated_bundle,
+)
+from factory_app.workflows.AppGenerator.tools.resolve_managed_capability_templates import (
+    resolve_managed_capability_templates,
+)
+
 # ---------------------------------------------------------------------------
 # Pack paths
 # ---------------------------------------------------------------------------
@@ -59,6 +72,89 @@ def _required_integration_fields(requirement: dict) -> set[str]:
     }
 
 
+def _golden_subscriptions_yaml() -> str:
+    return """
+schema_version: mozaiks.subscriptions.v1
+label: Golden SaaS Plans
+default_plan_id: free
+assignment_store:
+  data_alias: billing.subscriptions
+  user_id_field: user_id
+  active_statuses: [active, pending]
+token_wallets:
+  - wallet_id: ai_tokens
+    label: AI tokens
+    unit: tokens
+    usage_meter_id: ai_tokens
+    scope: user
+    auto_debit_usage: true
+    depleted_balance:
+      recovery_action: top_up
+      billing_route: /billing
+      top_up_route: /billing
+      upgrade_route: /pricing
+top_up_products:
+  - product_id: ai_tokens_10k
+    label: 10K AI tokens
+    wallet_id: ai_tokens
+    token_amount: 10000
+    price:
+      amount_cents: 500
+      currency: usd
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: [billing_portal.read]
+    usage_limits:
+      - meter_id: ai_tokens
+        unit: tokens
+        monthly_limit: 1000
+    token_allowances:
+      - wallet_id: ai_tokens
+        amount: 1000
+        cadence: monthly
+  - plan_id: pro
+    label: Pro
+    capabilities: [billing_portal.read, billing_portal.manage, reports.generate]
+    usage_limits:
+      - meter_id: ai_tokens
+        unit: tokens
+        monthly_limit: 100000
+    token_allowances:
+      - wallet_id: ai_tokens
+        amount: 100000
+        cadence: monthly
+"""
+
+
+def _golden_mozaikspay_saas_bundle() -> tuple[dict[str, str], list[dict]]:
+    pack_descriptor = dict(_read_yaml(_CONTEXT_YAML)["pack"])
+    pack_descriptor.setdefault("pack_source_path", str(_PACK_ROOT))
+    capability_packs = [pack_descriptor]
+    files = {
+        item["filename"]: item["content"]
+        for item in resolve_managed_capability_templates(capability_packs)
+    }
+    files["app.json"] = '{"name":"Golden MozaiksPay SaaS","version":"1.0.0"}\n'
+    files["config/subscriptions.yaml"] = _golden_subscriptions_yaml()
+
+    deployment_env = _deployment_env_for_capability_packs(capability_packs)
+    files.update(
+        generate_deployment_artifacts(
+            app_id="golden-mozaikspay-saas",
+            deployment_profile="generic_container",
+            include_dockerfiles=True,
+            include_workflow=False,
+            include_compose=False,
+            extra_required_variables=deployment_env["required"],
+            extra_optional_variables=deployment_env["optional"],
+            extra_secret_variables=deployment_env["secret"],
+            extra_public_variables=deployment_env["public"],
+        )["artifacts"]
+    )
+    return files, capability_packs
+
+
 # ---------------------------------------------------------------------------
 # 1. context.yaml contract
 # ---------------------------------------------------------------------------
@@ -79,6 +175,15 @@ class TestContextYaml:
     def test_pack_status_is_active(self):
         ctx = _read_yaml(_CONTEXT_YAML)
         assert ctx["pack"]["status"] == "active"
+
+    def test_pack_declares_deployment_env_handles(self):
+        ctx = _read_yaml(_CONTEXT_YAML)
+        deployment_env = ctx["pack"]["deployment_env"]
+
+        assert "MOZAIKS_APP_URL" in deployment_env["optional"]
+        assert "MOZAIKSPAY_API_BASE" in deployment_env["optional"]
+        assert "MOZAIKSPAY_CLIENT_SECRET" in deployment_env["secret"]
+        assert "MOZAIKSPAY_API_KEY" in deployment_env["secret"]
 
     def test_applies_to_app_generator(self):
         ctx = _read_yaml(_CONTEXT_YAML)
@@ -107,8 +212,8 @@ class TestContextYaml:
         assert mozaikspay is not None
         assert mozaikspay["kind"] == "api_key"
         assert mozaikspay["provider"] == "mozaikspay"
-        assert _required_integration_fields(mozaikspay) == {"api_base", "client_id", "client_secret"}
-        secret_field = next(field for field in mozaikspay["required_fields"] if field["name"] == "client_secret")
+        assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
+        secret_field = next(field for field in mozaikspay["required_fields"] if field["name"] == "api_key")
         assert secret_field["frontend_safe"] is False
 
 
@@ -156,7 +261,7 @@ class TestContractYaml:
         requirements = c.get("required_integrations") or []
         mozaikspay = next((item for item in requirements if item.get("service") == "mozaikspay"), None)
         assert mozaikspay is not None
-        assert _required_integration_fields(mozaikspay) == {"api_base", "client_id", "client_secret"}
+        assert _required_integration_fields(mozaikspay) == {"api_base", "api_key"}
 
     def test_provider_api_contract_forbids_provider_neutral_internal_ids(self):
         c = _read_yaml(_CONTRACT_YAML)
@@ -242,6 +347,7 @@ class TestMozaiksPayClientTemplate:
         assert "ConnectorStore" in content
         assert "get_connector_vault_backend" in content
         assert "MOZAIKSPAY_API_BASE" in content
+        assert "MOZAIKSPAY_API_KEY" in content
         assert "MOZAIKSPAY_CLIENT_ID" in content
         assert "MOZAIKSPAY_CLIENT_SECRET" in content
         # Must not hardcode any production or staging URL
@@ -264,6 +370,7 @@ class TestMozaiksPayClientTemplate:
         assert "_PROVIDER_API_PREFIX = \"/api/mozaikspay/v1\"" in content
         assert "/subscription/status" in content
         assert "/billing-portal/session" in content
+        assert "settings.api_key" in content
         assert "X-MozaiksPay-Client-Id" in content
         assert "ConnectorStore().get(" in content
         assert "get_connector_vault_backend" in content
@@ -359,7 +466,51 @@ class TestPageYamls:
 
 
 # ---------------------------------------------------------------------------
-# 8. Pack-wide drift guard — no provider internals in any template
+# 8. Golden generated bundle replay
+# ---------------------------------------------------------------------------
+
+class TestGoldenGeneratedMozaiksPaySaasBundle:
+    def test_replayed_pack_templates_scan_as_exportable_generated_app(self):
+        files, capability_packs = _golden_mozaikspay_saas_bundle()
+
+        errors = scan_generated_bundle(
+            files,
+            capability_packs=capability_packs,
+            require_deployment_artifacts=True,
+        )
+
+        assert errors == []
+        assert {
+            "services/integrations/mozaikspay_client.py",
+            "modules/billing_portal/module.yaml",
+            "modules/billing_portal/backend/handler.py",
+            "modules/billing_portal/backend/service.py",
+            "modules/billing_portal/backend/schemas.py",
+            "config/subscriptions.yaml",
+            "ui/pages/billing.yaml",
+            "ui/pages/usage.yaml",
+            "env.example",
+            "deployment.manifest.json",
+        } <= set(files)
+
+        env_example = files["env.example"]
+        for name in (
+            "MOZAIKS_APP_URL",
+            "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY",
+        ):
+            assert f"{name}=" in env_example
+
+        rendered = "\n".join(files.values())
+        assert "/api/modules/mozaikspay/" not in rendered
+        assert "/api/modules/managed_billing/" not in rendered
+        assert "import stripe" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 9. Pack-wide drift guard — no provider internals in any template
 # ---------------------------------------------------------------------------
 
 class TestPackDriftGuard:

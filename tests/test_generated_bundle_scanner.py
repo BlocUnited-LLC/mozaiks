@@ -95,6 +95,7 @@ from mozaiksai.core.secrets import get_connector_vault_backend
 
 _CONNECTOR_SERVICE = "mozaikspay"
 MOZAIKSPAY_API_BASE = "MOZAIKSPAY_API_BASE"
+MOZAIKSPAY_API_KEY = "MOZAIKSPAY_API_KEY"
 MOZAIKSPAY_CLIENT_ID = "MOZAIKSPAY_CLIENT_ID"
 MOZAIKSPAY_CLIENT_SECRET = "MOZAIKSPAY_CLIENT_SECRET"
 
@@ -163,6 +164,17 @@ sections:
                 include_dockerfiles=True,
                 include_workflow=False,
                 include_compose=False,
+                extra_optional_variables=[
+                    "MOZAIKS_APP_URL",
+                    "MOZAIKSPAY_API_BASE",
+                    "MOZAIKSPAY_CLIENT_ID",
+                    "MOZAIKSPAY_CLIENT_SECRET",
+                    "MOZAIKSPAY_API_KEY",
+                ],
+                extra_secret_variables=[
+                    "MOZAIKSPAY_CLIENT_SECRET",
+                    "MOZAIKSPAY_API_KEY",
+                ],
             )["artifacts"]
         )
     return files
@@ -300,6 +312,44 @@ def test_scan_generated_bundle_rejects_direct_provider_refund_calls() -> None:
     assert any("/refunds" in error for error in errors)
 
 
+def test_scan_generated_bundle_rejects_raw_payment_provider_imports() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/billing/backend/service.py": "import stripe\nfrom paddle import Client\n",
+        }
+    )
+
+    assert any("raw payment provider SDK" in error and "stripe" in error for error in errors)
+    assert any("raw payment provider SDK" in error and "paddle" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_app_local_wallet_and_usage_ledgers() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/billing/backend/token_wallet_ledger.py": "class TokenWalletLedger:\n    pass\n",
+            "services/ledgers/usage.py": (
+                "from mozaiksai.core.usage.ledger import RuntimeUsageLedger\n"
+            ),
+        }
+    )
+
+    assert sum("app-local token wallet or usage ledger" in error for error in errors) == 2
+
+
+def test_scan_generated_bundle_rejects_direct_hosted_internal_calls() -> None:
+    errors = scan_generated_bundle(
+        {
+            "modules/billing_portal/backend/service.py": (
+                'endpoint = "/api/modules/mozaikspay/create_checkout_session"\n'
+                'other = "/api/modules/managed_billing/assign_plan"\n'
+            ),
+        }
+    )
+
+    assert any("hosted managed-capability internals" in error for error in errors)
+    assert any("/api/modules/mozaikspay/create_checkout_session" in error for error in errors)
+
+
 def test_scan_generated_bundle_allows_managed_refund_adapter_call() -> None:
     errors = scan_generated_bundle(
         {
@@ -357,6 +407,117 @@ def test_scan_generated_bundle_accepts_mozaikspay_saas_contract_with_deployment_
     )
 
     assert errors == []
+
+
+def test_scan_generated_bundle_rejects_authenticated_app_without_auth_deploy_contract() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=False,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("Authenticated generated apps must document" in error for error in errors)
+    assert any("auth.required=true" in error for error in errors)
+    assert any("AUTH_PROVIDER" in error for error in errors)
+
+
+def test_scan_generated_bundle_accepts_authenticated_app_deploy_contract() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert errors == []
+
+
+def test_scan_generated_bundle_rejects_mozaikspay_saas_without_env_handles() -> None:
+    files = _valid_mozaikspay_saas_bundle(include_deployment=True)
+    files["env.example"] = "OPENAI_API_KEY=\nMONGO_URI=\n"
+
+    errors = scan_generated_bundle(
+        files,
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert any("env.example must document" in error for error in errors)
+    assert any("MOZAIKSPAY_API_BASE" in error for error in errors)
+
+
+def test_scan_generated_bundle_accepts_subscription_only_mozaikspay_saas_without_token_wallets() -> None:
+    files = _valid_mozaikspay_saas_bundle()
+    files["config/subscriptions.yaml"] = """
+schema_version: mozaiks.subscriptions.v1
+label: SaaS Smoke Plans
+default_plan_id: free
+assignment_store:
+  data_alias: subscriptions.assignments
+  user_id_field: user_id
+  active_statuses: [active, pending]
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: []
+  - plan_id: pro
+    label: Pro
+    capabilities: [billing_portal.read]
+"""
+
+    errors = scan_generated_bundle(
+        files,
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert errors == []
+
+
+def test_scan_generated_bundle_rejects_token_wallets_without_usage_credit_or_quota_contract() -> None:
+    files = _valid_mozaikspay_saas_bundle()
+    files["config/subscriptions.yaml"] = """
+schema_version: mozaiks.subscriptions.v1
+label: SaaS Smoke Plans
+default_plan_id: free
+assignment_store:
+  data_alias: subscriptions.assignments
+  user_id_field: user_id
+  active_statuses: [active, pending]
+token_wallets:
+  - wallet_id: ai_tokens
+    label: AI tokens
+    unit: tokens
+    usage_meter_id: ai_tokens
+    scope: user
+    auto_debit_usage: true
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: []
+  - plan_id: pro
+    label: Pro
+    capabilities: [billing_portal.read]
+"""
+
+    errors = scan_generated_bundle(
+        files,
+        capability_packs=_mozaikspay_pack(),
+        require_deployment_artifacts=True,
+    )
+
+    assert any("token_wallets must be emitted only" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_mozaikspay_saas_without_subscriptions() -> None:

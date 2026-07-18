@@ -187,6 +187,8 @@ nav:
               - Context Variables Complete: architecture/mozaiksai/context-variables-complete.md
               - Auto Tool Execution: architecture/mozaiksai/auto-tool-execution.md
           - Tokens and Cost Control:
+              - Monetization Contract: architecture/mozaiksai/monetization-contract.md
+              - Monetization Taxonomy: architecture/mozaiksai/monetization-taxonomy.md
               - Token Management: architecture/mozaiksai/token-management.md
       - Events and Data:
           - Event System: architecture/foundations/events-and-data/event-system.md

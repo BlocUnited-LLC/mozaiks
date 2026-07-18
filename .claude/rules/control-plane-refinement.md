@@ -16,7 +16,7 @@ artifact routing, or checkpoint re-entry behavior.
 ## Current Truth
 
 - Refinement today is checkpoint/control-plane re-entry driven by
-  `app/config/ai.json` startup plus `control_plane/config/runtime.yaml`
+  `app/config/ai.json` startup plus `app/config/llm.yaml`
   runtime policy and the selected `control_plane/config/control_plane.yaml`
   pack.
 - Do not document or assume a dedicated `RefinementWorkflow` unless the runtime

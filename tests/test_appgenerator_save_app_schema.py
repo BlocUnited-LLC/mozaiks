@@ -438,6 +438,121 @@ def test_save_app_schema_preserves_custom_route_requiresrole_metadata(
     assert context.data["app_custom_route_bundle"]["route_manifest"][0]["meta"]["requiresRole"] == "admin"
 
 
+def test_save_app_schema_preserves_custom_route_routeauth_metadata(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context()
+    manifest = {
+        "app_name": "Investor Room",
+        "version": "1.0.0",
+        "default_route": "/deals/:dealId/room",
+        "pages": [],
+        "custom_routes": ["deal-room"],
+    }
+    custom_bundle = _custom_route_bundle()
+    custom_bundle["route_manifest"][0]["path"] = "/deals/:dealId/room"
+    custom_bundle["route_manifest"][0]["meta"]["routeAuth"] = {
+        "module": "deal_access",
+        "action": "authorize_deal_route",
+        "params": {"deal_id": "$route.dealId"},
+    }
+
+    save_app_schema_module.save_app_schema(
+        manifest=manifest,
+        pages=[],
+        custom_route_bundle=custom_bundle,
+        context_variables=context,
+    )
+
+    route_manifest = json.loads((tmp_path / "ui" / "route_manifest.json").read_text(encoding="utf-8"))
+
+    route_auth = route_manifest["pages"][0]["meta"]["routeAuth"]
+    assert route_auth["module"] == "deal_access"
+    assert route_auth["action"] == "authorize_deal_route"
+    assert route_auth["params"] == {"deal_id": "$route.dealId"}
+
+
+def test_save_app_schema_preserves_declarative_page_routeauth_metadata(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    context = _Context()
+    page = _base_page()
+    page["route"] = "/projects/:projectId/settings"
+    page["meta"] = {
+        "routeAuth": {
+            "module": "project_access",
+            "action": "authorize_project_route",
+            "params": [{"key": "project_id", "value": "$route.projectId"}],
+        }
+    }
+    manifest = _base_manifest()
+    manifest["default_route"] = "/projects/:projectId/settings"
+
+    save_app_schema_module.save_app_schema(
+        manifest=manifest,
+        pages=[page],
+        custom_route_bundle=None,
+        context_variables=context,
+    )
+
+    page_yaml = (tmp_path / "ui" / "pages" / "Dashboard.yaml").read_text(encoding="utf-8")
+
+    assert "routeAuth:" in page_yaml
+    assert "module: project_access" in page_yaml
+    assert context.data["app_pages"][0]["meta"]["routeAuth"]["action"] == "authorize_project_route"
+    assert context.data["app_pages"][0]["meta"]["routeAuth"]["params"] == {"project_id": "$route.projectId"}
+
+
+def test_save_app_schema_rejects_invalid_custom_route_routeauth(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    manifest = {
+        "app_name": "Investor Room",
+        "version": "1.0.0",
+        "default_route": "/deal-room",
+        "pages": [],
+        "custom_routes": ["deal-room"],
+    }
+    custom_bundle = _custom_route_bundle()
+    custom_bundle["route_manifest"][0]["meta"]["routeAuth"] = {
+        "module": "",
+        "action": "authorize_deal_route",
+        "params": {},
+    }
+
+    with pytest.raises(ValueError, match=r"meta\.routeAuth\.module is required"):
+        save_app_schema_module.save_app_schema(
+            manifest=manifest,
+            pages=[],
+            custom_route_bundle=custom_bundle,
+            context_variables=_Context(),
+        )
+
+
+def test_save_app_schema_rejects_invalid_declarative_page_routeauth(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)
+    page = _base_page()
+    page["meta"] = {
+        "routeAuth": {
+            "module": "",
+            "action": "authorize_project_route",
+            "params": {},
+        }
+    }
+
+    with pytest.raises(ValueError, match=r"Page 'Dashboard'\.meta\.routeAuth\.module is required"):
+        save_app_schema_module.save_app_schema(
+            manifest=_base_manifest(),
+            pages=[page],
+            custom_route_bundle=None,
+            context_variables=_Context(),
+        )
+
 
 def test_save_app_schema_canonicalizes_manifest_page_index(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(save_app_schema_module, "_resolve_output_dir", lambda **_: tmp_path)

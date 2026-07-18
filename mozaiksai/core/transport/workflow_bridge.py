@@ -416,6 +416,26 @@ class WorkflowBridgeMixin:
             }
 
         except Exception as e:
+            # Surface token denial before the generic failure path so the UI
+            # receives structured recovery metadata instead of WORKFLOW_EXECUTION_FAILED.
+            if e.__class__.__name__ == "TokenUsageDenied":
+                decision = getattr(e, "decision", None)
+                extra_data = (
+                    decision.to_error_metadata()
+                    if hasattr(decision, "to_error_metadata")
+                    else {"error_code": getattr(decision, "error_code", "INSUFFICIENT_TOKENS")}
+                )
+                logger.warning(
+                    "Token usage denied during workflow execution chat=%s: %s", chat_id, e
+                )
+                await self.send_error(
+                    error_message=str(e),
+                    error_code=extra_data.get("error_code", "INSUFFICIENT_TOKENS"),
+                    chat_id=chat_id,
+                    extra_data=extra_data,
+                )
+                return {"status": "error", "chat_id": chat_id, "message": "Insufficient token balance"}
+
             logger.error("User input handling failed for chat %s: %s", chat_id, e, exc_info=True)
             if starting_new_workflow and _emit_execution_failed is not None:
                 try:
@@ -704,6 +724,26 @@ class WorkflowBridgeMixin:
             )
             raise
         except Exception as e:
+            if e.__class__.__name__ == "TokenUsageDenied":
+                decision = getattr(e, "decision", None)
+                extra_data = (
+                    decision.to_error_metadata()
+                    if hasattr(decision, "to_error_metadata")
+                    else {"error_code": getattr(decision, "error_code", "INSUFFICIENT_TOKENS")}
+                )
+                logger.warning(
+                    "Token usage denied in background workflow=%s chat=%s: %s", workflow_name, chat_id, e
+                )
+                try:
+                    await self.send_error(
+                        error_message=str(e),
+                        error_code=extra_data.get("error_code", "INSUFFICIENT_TOKENS"),
+                        chat_id=chat_id,
+                        extra_data=extra_data,
+                    )
+                except Exception as _send_exc:
+                    logger.debug("WORKFLOW_BACKGROUND_TOKEN_DENIAL_SEND_FAILED chat=%s: %s", chat_id, _send_exc)
+                return
             logger.error(
                 "Background workflow run failed (workflow=%s chat=%s): %s", workflow_name, chat_id, e,
                 exc_info=True,

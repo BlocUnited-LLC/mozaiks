@@ -191,13 +191,19 @@ class GeneralModeMixin:
             )
         except Exception as exc:
             if exc.__class__.__name__ == "TokenUsageDenied":
+                decision = getattr(exc, "decision", None)
+                error_metadata = (
+                    decision.to_error_metadata()
+                    if hasattr(decision, "to_error_metadata")
+                    else {"error_code": getattr(decision, "error_code", None)}
+                )
                 await self.send_chat_message(
                     str(exc),
                     agent_name="System",
                     chat_id=chat_id,
                     metadata={
                         **metadata_base,
-                        "error_code": getattr(getattr(exc, "decision", None), "error_code", None),
+                        **error_metadata,
                     },
                 )
                 return

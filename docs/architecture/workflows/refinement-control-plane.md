@@ -20,7 +20,7 @@ The goal is simple:
 - the control plane decides when a change is small, scoped, design-only, or concept-breaking
 
 The refinement control plane uses `app/config/ai.json` for runtime startup,
-`control_plane/config/runtime.yaml` for control-plane runtime policy, and
+`app/config/llm.yaml` for control-plane runtime policy, and
 `control_plane/config/control_plane.yaml` for checkpoint and routing
 declarations. LLM-backed control-plane checkpoints do not read workflow-local
 AG2 config for this.
@@ -2146,7 +2146,7 @@ resolver may copy exactly these relative paths (under `modules/{module_id}/`):
 | `contracts/events.yaml` | Domain events emitted by the module |
 | `contracts/reactions.yaml` | Event reactions owned by the module |
 | `contracts/notifications.yaml` | Notification rules per event |
-| `contracts/settings.yaml` | User-facing preferences schema |
+| `contracts/settings.yaml` | Module-owned settings schema for module/admin/config surfaces |
 | `contracts/admin.yaml` | Admin panel declarations |
 | `contracts/profile.yaml` | User profile panel declarations |
 

@@ -110,8 +110,86 @@ def test_env_example_contains_placeholders_not_secrets() -> None:
 
     assert "OPENAI_API_KEY=" in env_example
     assert "MONGO_URI=" in env_example
+    assert "VITE_OIDC_AUTHORITY=" in env_example
+    assert "VITE_OIDC_CLIENT_ID=" in env_example
+    assert "VITE_OIDC_REDIRECT_URI=" in env_example
     assert "OPENAI_API_KEY=sk-" not in env_example
     assert "MONGO_URI=mongodb+srv://" not in env_example
+
+
+def test_public_deployment_contract_does_not_require_runtime_auth() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+    )
+    manifest = result["deployment_manifest"]
+
+    assert manifest["auth"]["required"] is False
+    assert "AUTH_PROVIDER" not in manifest["required_env"]
+    assert "AUTH_PROVIDER" not in manifest["deploy_target_spec"]["environment"]["optional_variables"]
+    assert "VITE_OIDC_DISCOVERY_URL" in manifest["public_env"]
+
+
+def test_authenticated_deployment_contract_includes_oidc_runtime_env_and_readiness() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=True,
+        include_compose=False,
+        auth_required=True,
+    )
+    manifest = result["deployment_manifest"]
+    env_example = result["artifacts"]["env.example"]
+    checks = {item["id"]: item for item in manifest["readiness_requirements"]["checks"]}
+
+    assert result["bundle_errors"] == []
+    assert manifest["auth"]["required"] is True
+    assert manifest["auth"]["provider"] == "jwt"
+    assert "AUTH_ENABLED" in manifest["required_env"]
+    assert "AUTH_PROVIDER" in manifest["required_env"]
+    assert "VITE_OIDC_DISCOVERY_URL" in manifest["public_env"]
+    assert "AUTH_ENABLED=" in env_example
+    assert "AUTH_PROVIDER=" in env_example
+    assert "AUTH_AUDIENCE=" in env_example
+    assert "MOZAIKS_OIDC_DISCOVERY_URL=" in env_example
+    assert "VITE_OIDC_DISCOVERY_URL=" in env_example
+    assert "VITE_OIDC_SCOPE=" in env_example
+    assert checks["auth_configuration"]["required_env"] == ["AUTH_ENABLED", "AUTH_PROVIDER"]
+    assert "APP_AUTH_SMOKE_VERIFIED_AT" in checks["auth_configuration"]["required_evidence"]
+
+
+def test_generate_artifacts_accept_extra_capability_env_handles() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        extra_optional_variables=[
+            "MOZAIKS_APP_URL",
+            "MOZAIKSPAY_API_BASE",
+            "MOZAIKSPAY_CLIENT_ID",
+            "MOZAIKSPAY_CLIENT_SECRET",
+            "MOZAIKSPAY_API_KEY",
+        ],
+        extra_secret_variables=["MOZAIKSPAY_CLIENT_SECRET", "MOZAIKSPAY_API_KEY"],
+    )
+    manifest = result["deployment_manifest"]
+    env_example = result["artifacts"]["env.example"]
+
+    assert "MOZAIKSPAY_API_BASE=" in env_example
+    assert "MOZAIKSPAY_CLIENT_ID=" in env_example
+    assert "MOZAIKSPAY_CLIENT_SECRET=\n" in env_example
+    assert "MOZAIKSPAY_API_KEY=\n" in env_example
+    assert "MOZAIKS_APP_URL=" in env_example
+    assert "MOZAIKSPAY_CLIENT_SECRET" in manifest["secret_env"]
+    assert "MOZAIKSPAY_API_KEY" in manifest["secret_env"]
+    assert "MOZAIKSPAY_CLIENT_SECRET=secret" not in env_example
+    assert result["bundle_errors"] == []
 
 
 def test_secret_variables_are_listed_but_not_assigned_values() -> None:
@@ -389,6 +467,9 @@ def test_self_host_docker_compose_path_is_documented() -> None:
     assert "local Docker" in source
     assert "local Compose" in source
     assert "ci_secret_requirements" in source
+    assert "app.json.authRequired" in source
+    assert "auth.required=true" in source
+    assert "APP_AUTH_SMOKE_VERIFIED_AT" in source
     assert "how does this generated app run" in source
     assert "must not include hosted product provider adapters" in source
     assert "App Zero dogfooding follows the same handoff" in source
@@ -399,6 +480,8 @@ def test_canonical_app_structure_documents_deploy_artifact_boundary() -> None:
     assert "Dockerfile" in source
     assert "deployment.manifest.json" in source
     assert "Root deployment artifacts declare how the app runs" in source
+    assert "app.json.authRequired" in source
+    assert "provider-neutral JWT/OIDC auth contract" in source
     assert "AppGenerator build tasks do not own these files" in source
     assert "must not generate hosted platform provider adapters into customer app bundles" in source
 

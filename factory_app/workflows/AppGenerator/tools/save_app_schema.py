@@ -328,10 +328,22 @@ def _normalize_page_schema(page: Any) -> Any:
     page = _strip_none(_to_plain(page))
     if not isinstance(page, dict):
         return page
+    meta = page.get("meta")
+    if isinstance(meta, dict) and "routeAuth" in meta:
+        meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
     sections = page.get("sections")
     if isinstance(sections, list):
         page["sections"] = [_normalize_page_section(section) for section in sections]
     return _strip_none(page)
+
+
+def _normalize_route_auth(route_auth: Any) -> Any:
+    route_auth = _strip_none(_to_plain(route_auth))
+    if not isinstance(route_auth, dict):
+        return route_auth
+    if "params" in route_auth:
+        route_auth["params"] = _key_value_entries_to_dict(route_auth.get("params"))
+    return _strip_none(route_auth)
 
 
 def _normalize_custom_route_bundle(bundle: Any) -> Any:
@@ -340,7 +352,15 @@ def _normalize_custom_route_bundle(bundle: Any) -> Any:
         return bundle
     route_manifest = bundle.get("route_manifest")
     if isinstance(route_manifest, list):
-        bundle["route_manifest"] = [_strip_none(_to_plain(entry)) for entry in route_manifest]
+        normalized_routes: list[Any] = []
+        for entry in route_manifest:
+            entry = _strip_none(_to_plain(entry))
+            if isinstance(entry, dict):
+                meta = entry.get("meta")
+                if isinstance(meta, dict) and "routeAuth" in meta:
+                    meta["routeAuth"] = _normalize_route_auth(meta.get("routeAuth"))
+            normalized_routes.append(entry)
+        bundle["route_manifest"] = normalized_routes
     page_files = bundle.get("page_files")
     if isinstance(page_files, list):
         bundle["page_files"] = [_strip_none(_to_plain(entry)) for entry in page_files]
@@ -575,6 +595,24 @@ def _validate_data_contract(data_contract: Any) -> None:
             raise ValueError(f"data_contract.shared_collections[{index}] is required")
 
 
+def _validate_route_auth(route_auth: Any, *, field: str) -> None:
+    if route_auth is None:
+        return
+    if not isinstance(route_auth, dict):
+        raise ValueError(f"{field} must be an object or null")
+    if not _is_non_empty_string(route_auth.get("module")):
+        raise ValueError(f"{field}.module is required")
+    if not _is_non_empty_string(route_auth.get("action")):
+        raise ValueError(f"{field}.action is required")
+    params = route_auth.get("params")
+    if params is not None and not isinstance(params, dict):
+        raise ValueError(f"{field}.params must be an object or null")
+    if isinstance(params, dict):
+        for key in params:
+            if not _is_non_empty_string(key):
+                raise ValueError(f"{field}.params keys must be non-empty strings")
+
+
 def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
     if custom_route_bundle is None:
         return
@@ -626,6 +664,7 @@ def _validate_custom_route_bundle(custom_route_bundle: Any) -> None:
                 meta.get("shellMode", meta.get("shell_mode")),
                 field=f"{path}.meta.shellMode",
             )
+            _validate_route_auth(meta.get("routeAuth"), field=f"{path}.meta.routeAuth")
         if not _is_non_empty_string(entry.get("purpose")):
             raise ValueError(f"{path}.purpose is required")
         route_ids.add(route_id)  # type: ignore[arg-type]
@@ -1625,6 +1664,15 @@ def save_app_schema(
         if not _is_non_empty_string(page.get("title")):
             raise ValueError(f"Page '{page.get('name')}' must have a valid title")
         _validate_shell_mode(page.get("shell_mode", page.get("shellMode")), field=f"Page '{page.get('name')}'.shell_mode")
+        page_meta = page.get("meta")
+        if page_meta is not None and not isinstance(page_meta, dict):
+            raise ValueError(f"Page '{page.get('name')}'.meta must be an object or null")
+        if isinstance(page_meta, dict):
+            _validate_shell_mode(
+                page_meta.get("shellMode", page_meta.get("shell_mode")),
+                field=f"Page '{page.get('name')}'.meta.shellMode",
+            )
+            _validate_route_auth(page_meta.get("routeAuth"), field=f"Page '{page.get('name')}'.meta.routeAuth")
         if not page.get("sections"):
             raise ValueError(f"Page '{page.get('name')}' must have at least one section")
         if not isinstance(page.get("sections"), list):

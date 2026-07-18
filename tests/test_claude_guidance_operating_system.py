@@ -36,7 +36,7 @@ def test_new_rule_files_cover_requested_contributor_layers() -> None:
 
     assert "checkpoint/control-plane re-entry" in control_plane_rule
     assert "RefinementWorkflow" in control_plane_rule
-    assert "control_plane/config/runtime.yaml" in control_plane_rule
+    assert "app/config/llm.yaml" in control_plane_rule
     assert "control_plane/config/control_plane.yaml" in control_plane_rule
     assert "patch" in control_plane_rule
     assert "design" in control_plane_rule
@@ -114,7 +114,7 @@ def test_high_value_skill_stubs_anchor_current_truth() -> None:
     assert "entrypoints[]" in build_skill
 
     assert "app/config/ai.json" in control_plane_skill
-    assert "runtime.yaml" in control_plane_skill
+    assert "llm.yaml" in control_plane_skill
     assert "control_plane/config/control_plane.yaml" in control_plane_skill
     assert "RefinementWorkflow" in control_plane_skill
     assert "factory_control_plane" in control_plane_skill

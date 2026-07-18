@@ -37,8 +37,8 @@ def _build_workspace(tmp_path: Path) -> Path:
             "workflows": {"entry_point": "ValueEngine"},
         },
     )
-    (bundle_root / "control_plane" / "config").mkdir(parents=True, exist_ok=True)
-    (bundle_root / "control_plane" / "config" / "runtime.yaml").write_text(
+    (bundle_root / "app" / "config").mkdir(parents=True, exist_ok=True)
+    (bundle_root / "app" / "config" / "llm.yaml").write_text(
         "\n".join(
             [
                 "schema_version: mozaiks.control_plane.runtime",

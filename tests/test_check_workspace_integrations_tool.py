@@ -59,8 +59,7 @@ async def test_filtered_check_only_returns_requested_ids() -> None:
 @pytest.mark.asyncio
 async def test_mozaikspay_configured_when_secrets_present(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MOZAIKSPAY_API_BASE", "https://pay.mozaiks.test")
-    monkeypatch.setenv("MOZAIKSPAY_CLIENT_ID", "client_abc")
-    monkeypatch.setenv("MOZAIKSPAY_CLIENT_SECRET", "secret_xyz")
+    monkeypatch.setenv("MOZAIKSPAY_API_KEY", "mzk_test_key")
     result = await check_workspace_integrations(integration_ids=["mozaikspay"])
     available_ids = [e["id"] for e in result["available"]]
     assert "mozaikspay" in available_ids

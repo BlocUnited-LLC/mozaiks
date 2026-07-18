@@ -56,6 +56,7 @@ DEEP_IMPORT_FLAGS = (
     "../ui/",
 )
 VALID_CUSTOM_ROUTE_EXTENSIONS = {".jsx"}
+YAML_PAGE_EXTENSIONS = {".yaml", ".yml"}
 
 REMOVED_COLOR_PATTERNS = (
     re.compile(r"\bbg-(gray|slate|zinc|neutral|stone|white|black)-"),
@@ -322,6 +323,135 @@ def _parse_admin_registry(content: str, *, source_label: str) -> tuple[dict[str,
     return data, []
 
 
+def _parse_yaml_mapping_content(
+    content: str,
+    *,
+    source_label: str,
+    file_label: str,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    if yaml is None:
+        return None, [f"{source_label} {file_label} could not be parsed because PyYAML is unavailable."]
+    try:
+        data = yaml.safe_load(content) or {}
+    except Exception as exc:
+        return None, [f"{source_label} {file_label} is not valid YAML: {exc}."]
+    if not isinstance(data, dict):
+        return None, [f"{source_label} {file_label} must be an object."]
+    return data, []
+
+
+def _is_module_contract_path(filename: str) -> bool:
+    path = PurePosixPath(filename)
+    return len(path.parts) == 3 and path.parts[0] == "modules" and path.parts[2] == "module.yaml"
+
+
+def _module_contracts_from_files(
+    files: dict[str, str],
+    *,
+    source_label: str,
+) -> tuple[dict[str, dict[str, Any]], bool, list[str]]:
+    contracts: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    saw_module_contract = False
+
+    for filename, content in sorted(files.items()):
+        if not _is_module_contract_path(filename):
+            continue
+        saw_module_contract = True
+        data, parse_warnings = _parse_yaml_mapping_content(
+            content,
+            source_label=source_label,
+            file_label=filename,
+        )
+        warnings.extend(parse_warnings)
+        if not isinstance(data, dict):
+            continue
+
+        module_block = data.get("module") if isinstance(data.get("module"), dict) else data
+        module_id = str(module_block.get("id") if isinstance(module_block, dict) else "").strip()
+        if not module_id:
+            parts = PurePosixPath(filename).parts
+            module_id = parts[1] if len(parts) > 1 else ""
+        if not module_id:
+            warnings.append(f"{source_label} {filename} must declare module.id or top-level id.")
+            continue
+
+        actions = data.get("actions") or []
+        if not isinstance(actions, list):
+            warnings.append(f"{source_label} {filename}.actions must be a list.")
+            actions = []
+
+        action_ids: set[str] = set()
+        for action in actions:
+            if isinstance(action, dict):
+                action_id = str(action.get("id") or action.get("name") or "").strip()
+            elif isinstance(action, str):
+                action_id = action.strip()
+            else:
+                continue
+            if action_id:
+                action_ids.add(action_id)
+
+        if module_id in contracts:
+            warnings.append(
+                f"{source_label} {filename} duplicates module id '{module_id}' already declared by {contracts[module_id]['path']}."
+            )
+            contracts[module_id]["actions"].update(action_ids)
+            continue
+        contracts[module_id] = {"path": filename, "actions": action_ids}
+
+    return contracts, saw_module_contract, warnings
+
+
+def _route_auth_reference(route_auth: Any, *, path: str) -> dict[str, str] | None:
+    if not isinstance(route_auth, dict):
+        return None
+    module_id = str(route_auth.get("module") or "").strip()
+    action_id = str(route_auth.get("action") or "").strip()
+    if not module_id or not action_id:
+        return None
+    return {"path": path, "module": module_id, "action": action_id}
+
+
+def _audit_route_auth_action_contracts(
+    route_auth_refs: Sequence[dict[str, str]],
+    module_contracts: dict[str, dict[str, Any]],
+    *,
+    saw_module_contract: bool,
+    source_label: str,
+) -> list[str]:
+    if not saw_module_contract:
+        return []
+
+    warnings: list[str] = []
+    for ref in route_auth_refs:
+        module_id = ref["module"]
+        action_id = ref["action"]
+        contract = module_contracts.get(module_id)
+        if contract is None:
+            warnings.append(
+                f"{source_label} {ref['path']} references module '{module_id}' but no generated module contract with that id was found."
+            )
+            continue
+        if action_id not in contract["actions"]:
+            warnings.append(
+                f"{source_label} {ref['path']} references action '{module_id}/{action_id}' but {contract['path']} does not declare that action."
+            )
+    return warnings
+
+
+def _yaml_page_files(files: dict[str, str]) -> list[tuple[str, str]]:
+    page_files: list[tuple[str, str]] = []
+    for filename, content in sorted(files.items()):
+        path = PurePosixPath(filename)
+        if not filename.startswith("ui/pages/"):
+            continue
+        if path.suffix.lower() not in YAML_PAGE_EXTENSIONS:
+            continue
+        page_files.append((filename, content))
+    return page_files
+
+
 def audit_generated_react_files(
     code_files: Sequence[dict[str, Any]],
     *,
@@ -560,6 +690,12 @@ def audit_page_schemas(
         page_path = f"{source_label} '{page_name}'"
         primitive_counts: dict[str, int] = {}
 
+        meta = page.get("meta")
+        if meta is not None and not isinstance(meta, dict):
+            warnings.append(f"{page_path}.meta must be an object or null.")
+        elif isinstance(meta, dict):
+            warnings.extend(_audit_route_auth(meta.get("routeAuth"), path=f"{page_path}.meta.routeAuth"))
+
         page_type = page.get("page_type")
         if not page_type:
             warnings.append(
@@ -712,6 +848,27 @@ def _non_empty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _audit_route_auth(route_auth: Any, *, path: str) -> list[str]:
+    if route_auth is None:
+        return []
+    warnings: list[str] = []
+    if not isinstance(route_auth, dict):
+        return [f"{path} must be an object or null."]
+    if not _non_empty_string(route_auth.get("module")):
+        warnings.append(f"{path}.module is required.")
+    if not _non_empty_string(route_auth.get("action")):
+        warnings.append(f"{path}.action is required.")
+    params = route_auth.get("params")
+    if params is not None and not isinstance(params, dict):
+        warnings.append(f"{path}.params must be an object or null.")
+    elif isinstance(params, dict):
+        for key in params:
+            if not _non_empty_string(key):
+                warnings.append(f"{path}.params keys must be non-empty strings.")
+                break
+    return warnings
+
+
 def audit_custom_route_bundle_integrity(
     custom_route_bundle: Any,
     *,
@@ -791,6 +948,8 @@ def audit_custom_route_bundle_integrity(
         meta = route.get("meta")
         if meta is not None and not isinstance(meta, dict):
             warnings.append(f"{path}.meta must be an object or null.")
+        elif isinstance(meta, dict):
+            warnings.extend(_audit_route_auth(meta.get("routeAuth"), path=f"{path}.meta.routeAuth"))
 
         if not _non_empty_string(route.get("purpose")):
             warnings.append(f"{path}.purpose must explain why YAML primitives cannot own this route.")
@@ -917,6 +1076,7 @@ def audit_app_ui_bundle_integrity(
     warnings: list[str] = []
     file_names = set(files)
     route_pages: list[dict[str, Any]] = []
+    route_auth_refs: list[dict[str, str]] = []
 
     route_manifest_content = files.get("ui/route_manifest.json")
     if route_manifest_content is not None:
@@ -925,6 +1085,36 @@ def audit_app_ui_bundle_integrity(
             source_label=source_label,
         )
         warnings.extend(manifest_warnings)
+
+    module_contracts, saw_module_contract, module_warnings = _module_contracts_from_files(
+        files,
+        source_label=source_label,
+    )
+    warnings.extend(module_warnings)
+
+    for filename, content in _yaml_page_files(files):
+        page_schema, page_warnings = _parse_yaml_mapping_content(
+            content,
+            source_label=source_label,
+            file_label=filename,
+        )
+        warnings.extend(page_warnings)
+        if not isinstance(page_schema, dict):
+            continue
+        meta = page_schema.get("meta")
+        if meta is not None and not isinstance(meta, dict):
+            warnings.append(f"{source_label} {filename}.meta must be an object or null.")
+            continue
+        if not isinstance(meta, dict):
+            continue
+        route_auth = meta.get("routeAuth")
+        warnings.extend(
+            f"{source_label} {warning}"
+            for warning in _audit_route_auth(route_auth, path=f"{filename}.meta.routeAuth")
+        )
+        ref = _route_auth_reference(route_auth, path=f"{filename}.meta.routeAuth")
+        if ref is not None:
+            route_auth_refs.append(ref)
 
     registry_files = {
         filename: content
@@ -947,6 +1137,17 @@ def audit_app_ui_bundle_integrity(
         route_path = str(page.get("path") or page.get("route") or "").strip()
         component = str(page.get("component") or "").strip()
         label = f"route_manifest.json pages[{index}]"
+        meta = page.get("meta")
+        if meta is not None and not isinstance(meta, dict):
+            warnings.append(f"{source_label} {label}.meta must be an object or null.")
+        elif isinstance(meta, dict):
+            warnings.extend(
+                f"{source_label} {warning}"
+                for warning in _audit_route_auth(meta.get("routeAuth"), path=f"{label}.meta.routeAuth")
+            )
+            ref = _route_auth_reference(meta.get("routeAuth"), path=f"{label}.meta.routeAuth")
+            if ref is not None:
+                route_auth_refs.append(ref)
         if not component:
             continue
         route_components.setdefault(component, set()).add(route_path or "<missing path>")
@@ -1027,6 +1228,27 @@ def audit_app_ui_bundle_integrity(
                     warnings.append(
                         f"{source_label} admin/admin_registry.yaml page '{page_id}' uses unsupported custom route ownership fields ({', '.join(forbidden_keys)}); full-page React routes belong in ui/route_manifest.json and ui/index.js."
                     )
+                page_path = str(page.get("path") or "")
+                page_scope = str(page.get("scope") or "app")
+                surfaces = page.get("surfaces")
+                explicit_host_surface = isinstance(surfaces, list) and bool(surfaces)
+                if (
+                    page_scope == "app"
+                    and page_path.startswith("/apps/:appId")
+                    and not explicit_host_surface
+                ):
+                    warnings.append(
+                        f"{source_label} admin/admin_registry.yaml page '{page_id}' uses hosted Studio path '{page_path}'. Standard generated-app AdminPortal pages must use /admin paths; /apps/:appId/... belongs to first-party Studio or explicit hosted-operator surfaces."
+                    )
+
+    warnings.extend(
+        _audit_route_auth_action_contracts(
+            route_auth_refs,
+            module_contracts,
+            saw_module_contract=saw_module_contract,
+            source_label=source_label,
+        )
+    )
 
     return dedupe(warnings)
 

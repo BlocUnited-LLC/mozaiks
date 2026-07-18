@@ -506,6 +506,13 @@ agents:
       but must not implement reserve/commit logic, a custom token ledger, custom
       usage ledger, payment checkout, invoices, or hosted billing internals.
       Token accounting belongs to the OSS runtime token wallet primitives.
+      Workflows must call declared app module actions, managed-capability facade
+      actions, or workflow-local tools only; they must not call raw payment
+      providers, hosted product internals, wallet ledgers, or billing service
+      endpoints directly. If a tool or module action returns
+      `INSUFFICIENT_TOKENS`, preserve the structured recovery metadata and stop
+      that paid action path instead of retrying, degrading to a provider call, or
+      attempting a bypass.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
