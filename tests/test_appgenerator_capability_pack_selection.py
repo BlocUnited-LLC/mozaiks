@@ -62,6 +62,33 @@ def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> 
     assert "Do not generate checkout, webhook handlers" in notes
 
 
+def test_managed_adapter_rules_keep_default_packs_app_agnostic() -> None:
+    directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
+    app_agnostic_rules = " ".join(directory.get("app_agnostic_rules", []))
+
+    assert "recommendation-only" in app_agnostic_rules
+    assert "runtime requirements" in app_agnostic_rules
+    assert "provider-neutral" in app_agnostic_rules
+    assert "external_adapter replacement path" in app_agnostic_rules
+
+
+def test_mozaikspay_declares_replaceable_adapter_boundary() -> None:
+    directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
+    by_id = {capability["id"]: capability for capability in directory["capabilities"]}
+
+    mozaikspay = by_id["mozaikspay"]
+    adapter_contract = mozaikspay["adapter_contract"]
+    alternatives = mozaikspay.get("alternatives", [])
+
+    assert adapter_contract["role"] == "default_managed_adapter"
+    assert adapter_contract["replacement_kind"] == "external_adapter"
+    assert adapter_contract["runtime_effect_boundary"] == "BillingFulfillmentCommand"
+    assert adapter_contract["runtime_read_boundary"] == "EntitlementPort"
+    assert "billing_portal" in adapter_contract["app_facing_facades"]
+    assert "app/config/subscriptions.yaml" in adapter_contract["canonical_runtime_state"]
+    assert any(alt.get("capability_kind") == "external_adapter" for alt in alternatives)
+
+
 def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
     routing = _read_yaml("factory_app/build_context/AppGenerator/capability_routing.yaml")
     entries = routing["layers"]["monetization"]["entries"]
@@ -106,6 +133,32 @@ def test_entitlement_dispatch_pack_is_generated_module_not_managed() -> None:
         "entitlement_dispatch is a generated module archetype — AppGenerator generates the files, "
         "it is not a managed_capability that should be declared as external_integration"
     )
+
+
+def test_entitlement_dispatch_contract_uses_capability_based_skip_mechanism() -> None:
+    contract = _read_yaml("factory_app/build_context/entitlement_dispatch/contract.yaml")
+    writer_contract = contract["managed_assignment_writer_contract"]
+    cross_pack_items = contract["cross_pack_integrations"]
+    cross_pack_notes = " ".join(item.get("description", "") for item in cross_pack_items)
+
+    # The OSS contract must NOT name a specific pack — it declares a capability flag.
+    assert "current_default_managed_adapter" not in writer_contract, (
+        "managed_assignment_writer_contract must not name a specific pack; "
+        "use selection_mechanism with provides_capabilities instead"
+    )
+    assert "selection_mechanism" in writer_contract, (
+        "managed_assignment_writer_contract must describe the pack-driven selection mechanism"
+    )
+    assert "provides_capabilities" in writer_contract["selection_mechanism"]
+    assert "subscription_write_path" in writer_contract["selection_mechanism"]
+    assert "provider-neutral fulfillment effects" in writer_contract["replacement_rule"]
+
+    # cross_pack_integrations must reference the capability flag, not a specific pack name.
+    capability_flags = [item.get("provides_capability") for item in cross_pack_items]
+    assert "subscription_write_path" in capability_flags, (
+        "cross_pack_integrations must reference provides_capability: subscription_write_path"
+    )
+    assert "NOT be included alongside" in cross_pack_notes
 
 
 def test_messaging_pack_is_thread_substrate_without_contacts_or_runtime_worker() -> None:

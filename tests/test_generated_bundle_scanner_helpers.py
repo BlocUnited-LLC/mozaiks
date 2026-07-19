@@ -109,6 +109,7 @@ from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
     _normalized_files_map,
     _normalized_path,
     _pack_id_from_descriptor,
+    _packs_providing,
     _path_matches_prefix,
     _selected_managed_capability_ids,
 )
@@ -558,3 +559,77 @@ class TestIterApiEndpointLiterals:
     def test_non_api_modules_path_not_found(self):
         result = _iter_api_endpoint_literals('url = "/api/other/endpoint"')
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# 13. _packs_providing
+# ---------------------------------------------------------------------------
+
+class TestPacksProviding:
+    def test_none_returns_empty(self):
+        assert _packs_providing(None, "subscription_write_path") == []
+
+    def test_empty_list_returns_empty(self):
+        assert _packs_providing([], "subscription_write_path") == []
+
+    def test_inline_provides_capabilities_match(self):
+        pack = {"id": "custompay", "provides_capabilities": ["subscription_write_path"]}
+        result = _packs_providing([pack], "subscription_write_path")
+        assert result == [pack]
+
+    def test_inline_provides_capabilities_no_match(self):
+        pack = {"id": "custompay", "provides_capabilities": ["other_capability"]}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_inline_provides_capabilities_missing(self):
+        pack = {"id": "custompay"}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_non_dict_item_skipped(self):
+        assert _packs_providing(["string_item"], "subscription_write_path") == []
+
+    def test_pack_source_path_loads_contract(self, tmp_path: Path):
+        (tmp_path / "contract.yaml").write_text(
+            "provides_capabilities:\n  - subscription_write_path\n",
+            encoding="utf-8",
+        )
+        pack = {"id": "testpay", "pack_source_path": str(tmp_path)}
+        result = _packs_providing([pack], "subscription_write_path")
+        assert result == [pack]
+
+    def test_pack_source_path_contract_missing_capability(self, tmp_path: Path):
+        (tmp_path / "contract.yaml").write_text(
+            "provides_capabilities:\n  - other_capability\n",
+            encoding="utf-8",
+        )
+        pack = {"id": "testpay", "pack_source_path": str(tmp_path)}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_pack_source_path_missing_contract_returns_empty(self, tmp_path: Path):
+        pack = {"id": "testpay", "pack_source_path": str(tmp_path)}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_inline_takes_precedence_over_pack_source_path(self, tmp_path: Path):
+        """If inline provides_capabilities matches, pack_source_path is not consulted."""
+        pack = {
+            "id": "testpay",
+            "provides_capabilities": ["subscription_write_path"],
+            "pack_source_path": str(tmp_path),  # no contract.yaml here
+        }
+        result = _packs_providing([pack], "subscription_write_path")
+        assert result == [pack]
+
+    def test_multiple_packs_only_matching_returned(self, tmp_path: Path):
+        (tmp_path / "contract.yaml").write_text(
+            "provides_capabilities:\n  - subscription_write_path\n",
+            encoding="utf-8",
+        )
+        packs = [
+            {"id": "matching", "provides_capabilities": ["subscription_write_path"]},
+            {"id": "from_file", "pack_source_path": str(tmp_path)},
+            {"id": "no_match"},
+        ]
+        result = _packs_providing(packs, "subscription_write_path")
+        assert len(result) == 2
+        ids = {p["id"] for p in result}
+        assert ids == {"matching", "from_file"}

@@ -54,10 +54,6 @@ _PAYMENT_PROVIDER_REFUND_CALL_RE = re.compile(
     re.IGNORECASE,
 )
 _PAYMENT_PROVIDER_REFUNDS_ENDPOINT_RE = re.compile(r"['\"]?/refunds\b")
-_HOSTED_INTERNAL_ENDPOINT_RE = re.compile(
-    r"['\"]?(/api/modules/(?:mozaikspay(?:_[A-Za-z0-9_]+)?|managed_billing|hosted_billing|wallet)/[^'\"\s)]*)",
-    re.IGNORECASE,
-)
 _APP_LOCAL_LEDGER_PATH_RE = re.compile(
     r"(?:^|/)(?:(?:token_)?wallet|(?:token_)?usage)_ledger\.(?:py|js|ts|tsx|jsx)$"
     r"|(?:^|/)ledgers?/(?:[^/]*)(?:wallet|usage)(?:[^/]*)\.(?:py|js|ts|tsx|jsx)$",
@@ -331,6 +327,40 @@ def _selected_pack_descriptor(
     return None
 
 
+def _packs_providing(
+    capability_packs: list[dict[str, Any]] | None,
+    capability: str,
+) -> list[dict[str, Any]]:
+    """Return pack descriptors that declare they provide the given capability.
+
+    Checks the in-memory ``provides_capabilities`` list first; if absent,
+    falls back to loading ``provides_capabilities`` from
+    ``pack_source_path/contract.yaml``.  This lets operator packs declare
+    their capabilities without the OSS scanner hardcoding any pack name.
+    """
+    result: list[dict[str, Any]] = []
+    for pack in capability_packs or []:
+        if not isinstance(pack, dict):
+            continue
+        inline = pack.get("provides_capabilities")
+        if isinstance(inline, list) and capability in inline:
+            result.append(pack)
+            continue
+        raw_source_path = str(pack.get("pack_source_path") or "").strip()
+        if not raw_source_path:
+            continue
+        contract_path = Path(raw_source_path) / "contract.yaml"
+        try:
+            contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        if isinstance(contract, dict):
+            from_contract = contract.get("provides_capabilities") or []
+            if isinstance(from_contract, list) and capability in from_contract:
+                result.append(pack)
+    return result
+
+
 def _normalized_forbidden_output_prefix(value: Any) -> str:
     raw = value
     if isinstance(value, dict):
@@ -423,13 +453,13 @@ def _scan_selected_managed_capability_boundaries(
 
         direct_endpoint_prefix = f"/api/modules/{pack_id}/"
         for path, content in normalized_files.items():
-            if not path.startswith("ui/pages/"):
+            if not _is_scannable(path):
                 continue
             for endpoint in _iter_api_endpoint_literals(content):
                 if endpoint.startswith(direct_endpoint_prefix):
                     errors.append(
-                        f"{path}: page binds directly to managed capability endpoint "
-                        f"{endpoint}. Bind pages to an app-owned facade module instead."
+                        f"{path}: calls managed capability endpoint "
+                        f"{endpoint} directly. Use an app-owned facade module instead."
                     )
     return errors
 
@@ -708,8 +738,14 @@ def _scan_self_hosted_entitlement_dispatch_contract(
     app owns the subscription assignment write path, and an entitlement_dispatch
     module is required.
     """
-    mozaikspay_pack = _selected_pack_descriptor(capability_packs, "mozaikspay")
-    if mozaikspay_pack and str(mozaikspay_pack.get("capability_source") or "").strip() == "managed_capability":
+    # Any managed capability pack that declares provides_capabilities:
+    # [subscription_write_path] owns the subscription assignment write path.
+    # entitlement_dispatch is only needed when no such pack is selected.
+    managed_writers = [
+        p for p in _packs_providing(capability_packs, "subscription_write_path")
+        if str(p.get("capability_source") or "").strip() == "managed_capability"
+    ]
+    if managed_writers:
         return []
 
     normalized_files = _normalized_files_map(files_map)
@@ -952,13 +988,6 @@ def scan_generated_bundle(
                 f"{path}: references a refunds endpoint (/refunds) directly. Generated apps must "
                 "route refund mutations through an app-owned facade or managed "
                 "payment adapter."
-            )
-
-        hosted_internal_refs = sorted(set(_HOSTED_INTERNAL_ENDPOINT_RE.findall(content)))
-        if hosted_internal_refs:
-            errors.append(
-                f"{path}: calls hosted managed-capability internals directly: "
-                f"{hosted_internal_refs}. Generated apps must bind through app-owned facade modules."
             )
 
         if _APP_LOCAL_LEDGER_PATH_RE.search(_normalized_path(path)) or _APP_LOCAL_LEDGER_CODE_RE.search(content):
