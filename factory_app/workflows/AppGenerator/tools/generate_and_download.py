@@ -25,6 +25,7 @@ from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     extract_code_file_map_from_payload,
 )
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    PRODUCTION_DEPLOYMENT_PROFILES,
     generate_deployment_artifacts,
 )
 from factory_app.workflows.AppGenerator.tools.export_app_code import (
@@ -810,7 +811,10 @@ async def generate_and_download(
         except Exception:
             pass
     deployment_profile = str(deployment_profile or "generic_container")
-    if include_dockerfiles or include_workflow or include_compose:
+    production_deployment_profile = deployment_profile.strip().lower() in PRODUCTION_DEPLOYMENT_PROFILES
+    if production_deployment_profile:
+        include_dockerfiles = True
+    if include_dockerfiles or include_workflow or include_compose or production_deployment_profile:
         deployment_contract = generate_deployment_artifacts(
             app_id=str(app_id),
             deployment_profile=deployment_profile,
