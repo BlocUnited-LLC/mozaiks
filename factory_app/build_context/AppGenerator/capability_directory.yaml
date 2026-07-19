@@ -9,11 +9,27 @@ global_rules:
   - Do not force a provider when the user names a different provider.
   - If a recommended pack is selected, use app-owned facade modules and thin service clients.
   - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, token usage measurement, and token wallet accounting are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
+app_agnostic_rules:
+  - Default managed adapters are recommendation-only and must not become runtime requirements.
+  - A selected managed adapter must cross runtime state changes through provider-neutral commands, events, or configured records.
+  - Generated app pages must call app-owned facade modules; they must not call hosted product internals or payment provider SDKs directly.
+  - Any default managed adapter must declare an external_adapter replacement path so user-selected providers can satisfy the same app-facing contract.
 capabilities:
   - id: mozaikspay
     label: MozaiksPay Managed SaaS Billing
     capability_kind: operator_pack
     recommendation_rank: 1
+    adapter_contract:
+      role: default_managed_adapter
+      app_facing_facades:
+        - billing_portal
+      replacement_kind: external_adapter
+      runtime_effect_boundary: BillingFulfillmentCommand
+      runtime_read_boundary: EntitlementPort
+      canonical_runtime_state:
+        - app/config/subscriptions.yaml
+        - subscription assignment_store records
+        - OSS token wallet ledger
     domains:
       - billing
       - subscriptions
@@ -135,7 +151,7 @@ capabilities:
       - Select social_pack only for apps where social graph or feed behavior is part of the product concept.
       - The social pack owns friends, follows/invites, user posts, reactions, comments, and feed records.
       - Use messaging_pack for DMs only when the app also needs private conversations.
-      - Do not make governance features first-class here. Threads with voting, proposals, quorum, treasury, moderation policy, or member governance belong to the community_governance_pack.
+      - Do not make governance features first-class here. Threads with voting, proposals, quorum, treasury, moderation policy, or member governance are app-specific — build them as app-owned modules, not as packs.
       - Dummy friend/post examples may be used in demo UI fallbacks, but persisted user social data must come from module actions.
     capabilities_provided:
       - social.friends.list
@@ -191,51 +207,3 @@ capabilities:
       - commerce.cart.manage
       - commerce.checkout.start
       - commerce.orders.manage
-
-  - id: community_governance_pack
-    label: Community Governance
-    capability_kind: app_pack
-    recommendation_rank: 8
-    domains:
-      - governance
-      - community
-      - proposals
-      - voting
-      - membership
-    intent_signals:
-      - App needs members to vote on decisions, proposals, or changes.
-      - App needs proposal creation, quorum, and outcome calculation.
-      - App has community roles with different voting weights.
-      - App needs governance mode (creator-controlled vs member-governed).
-      - Product spec mentions DAO, community vote, governance, proposals, or member decisions.
-    selection_aliases:
-      - governance
-      - community governance
-      - proposals
-      - voting
-      - dao
-      - community decisions
-    generator_notes:
-      - Select community_governance_pack when voting, proposals, or member-governed decisions are in the product brief.
-      - The pack scaffolds a governance module with proposal lifecycle (draft, open, closed), vote records, and outcome calculation.
-      - Governance mode is app-owned state — the app determines who can create proposals and how vote weight is computed. The pack provides hook contracts (policy_hooks.yaml) that the app's governance module uses; the app defines the values.
-      - Do NOT hard-code governance semantics (e.g. "founder_led", "community_dao") into the scaffolded module. Those are the app product's own vocabulary. The module scaffold uses generic terms: creator_controlled and member_governed (or the app renames them). The app product owns the labels and their meaning.
-      - Do NOT assume revenue participation, token distribution, or payout mechanics. Those belong to a separate economics module or hosted product capability, not the governance scaffold.
-      - Governance vote weight inputs are provided through policy_hooks.yaml hook contracts. The governance module calls the hook to get inputs; it does not own the weight formula.
-      - app_context.governance.mode is the canonical key for storing governance mode in the app record when using this pack. The governance module owns reading and writing this key.
-      - Emit domain.app.<app_id>.governance.mode_changed when governance mode transitions so other modules can react without coupling to the governance module directly.
-    capabilities_provided:
-      - governance.proposals.create
-      - governance.proposals.list
-      - governance.proposals.vote
-      - governance.proposals.calculate_outcome
-      - governance.members.list
-      - governance.mode.get
-      - governance.mode.set
-    app_context_keys:
-      - key: governance.mode
-        description: Current governance mode. Values are app-defined. Common values — creator_controlled, member_governed — but the app product chooses its own vocabulary and transition rules.
-        owned_by: governance module
-      - key: governance.policy_id
-        description: ID of the active participation/weight policy record, if the app uses a separate policy module. Nullable.
-        owned_by: governance module

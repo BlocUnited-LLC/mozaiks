@@ -78,49 +78,53 @@ recommend packs based on product intent signals.
 
 ### Existing packs
 
+Packs are for capabilities that many apps will need but that are not first-class
+framework features. The bar is broad applicability — billing, messaging, social,
+commerce. Niche app-specific capabilities (governance, DAOs, revenue participation,
+investor marketplaces) are app-owned modules, not packs.
+
 | Pack | What it adds |
 |------|--------------|
 | `mozaikspay` | Managed billing, subscriptions, checkout, wallet |
 | `messaging_pack` | DM threads, inbox, read state |
 | `social_pack` | Social graph, posts, feed, reactions |
 | `commerce_pack` | Product catalog, cart, checkout, orders |
-| `community_governance_pack` | Proposals, voting, governance mode, weight hooks |
 
 ### Pack isolation rule
 
-Packs must not depend on each other at the module level. If `community_governance_pack`
-needs vote weight inputs from a participation policy module, it does that through
-a `policy_hooks.yaml` hook contract — not by importing or directly calling the
-policy module. The governance module calls the hook; whatever module is wired
-to answer that hook is the app's choice.
+Packs must not depend on each other at the module level. If a pack needs
+inputs from another module, it uses a `policy_hooks.yaml` hook contract — not
+a direct module import or call. The pack module calls the hook; whatever module
+is wired to answer it is the app's choice.
 
 ---
 
 ## The Hook Contract Pattern (`policy_hooks.yaml`)
 
 A module can declare hook slots in `contracts/policy_hooks.yaml`. A hook slot
-is a named input point where another module provides data.
+is a named input point where another module provides data at runtime.
 
-Example from a governance module:
+Example from a billing-adjacent module that needs to know which features a user
+has access to without owning the entitlement logic itself:
 
 ```yaml
 schema_version: mozaiks.policy_hooks.v1
 hooks:
-  - id: governance-weight-inputs
+  - id: access-classification-inputs
     description: >
-      Called when a proposal opens to snapshot vote weight inputs.
-      The answering module returns user/weight rows. If no module answers,
-      the governance module falls back to role-weight defaults.
-    input: { proposal_id: string, community_id: string }
-    output: { rows: [{ user_id: string, weight: integer }], total_power: integer }
+      Called when evaluating feature access. The answering module returns
+      the active entitlement class for this user+resource. If no module
+      answers, the calling module applies its default access rules.
+    input: { user_id: string, resource_id: string, resource_type: string }
+    output: { class_id: string, allowed: boolean, capabilities: [string] }
 ```
 
-The hook is a contract. The governance module defines the slot. A separate
-policy or participation module provides the implementation. The OSS runtime
+The hook is a contract. The calling module defines the slot. A separate
+entitlement or subscription module provides the implementation. The OSS runtime
 dispatches the hook call to whichever module is registered to answer it.
 
-This is how complex capabilities compose without creating circular module
-dependencies or baking product logic into the framework.
+This is how complex capabilities compose without circular dependencies or
+product logic baked into the framework.
 
 ---
 
