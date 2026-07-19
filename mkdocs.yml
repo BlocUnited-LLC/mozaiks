@@ -151,6 +151,7 @@ nav:
           - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
           - Internal Messaging: architecture/modules-systems/internal-messaging.md
           - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
+          - Managed Capability Packs: architecture/modules-systems/managed-capability-packs.md
           - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
       - Workflows:
           - architecture/workflows/index.md

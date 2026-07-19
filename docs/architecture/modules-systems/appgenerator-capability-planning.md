@@ -8,6 +8,8 @@ that a reusable package exists on disk.
 
 This logic is not to be confused around the build-time context packages for factory workflows.
 Documented separately in [Build Context Packs](../workflows/build-context-packs.md).
+For the app-facing contract used by hosted/operator-managed services, see
+[Managed Capability Packs](managed-capability-packs.md).
 
 ## Purpose
 
@@ -204,3 +206,4 @@ Ask these questions when classifying a planned capability:
 
 - [Module System](module-system.md)
 - [Framework Capability Classification](framework-capability-classification.md)
+- [Managed Capability Packs](managed-capability-packs.md)

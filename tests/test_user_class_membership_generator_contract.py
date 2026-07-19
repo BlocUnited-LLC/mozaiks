@@ -242,6 +242,41 @@ def _private_participation_generated_app_fixture() -> dict[str, str]:
                 deterministic: true
             """
         ).lstrip(),
+        "modules/project_membership/contracts/settings.yaml": dedent(
+            """
+            schema_version: mozaiks.settings.v1
+            settings:
+              - id: class_catalog_version
+                label: Class Catalog Version
+                type: string
+                default: private-project.classes.v1
+            features:
+              - id: participation_class_catalog
+                label: Participation Class Catalog
+                description: Configurable class defaults for private project participation.
+                classes:
+                  - id: owner
+                    label: Owner
+                    categories: [governance, economics]
+                    governance_weight: 100
+                    distribution_weight: 100
+                  - id: builder
+                    label: Builder
+                    categories: [governance, economics]
+                    governance_weight: 25
+                    distribution_weight: 25
+                  - id: contributor
+                    label: Contributor
+                    categories: [governance]
+                    governance_weight: 10
+                    distribution_weight: 0
+                  - id: viewer
+                    label: Viewer
+                    categories: [access]
+                    governance_weight: 0
+                    distribution_weight: 0
+            """
+        ).lstrip(),
         "modules/project_governance/module.yaml": dedent(
             """
             schema_version: mozaiks.module.v1
@@ -343,6 +378,7 @@ def test_membership_archetype_is_host_agnostic_and_resource_scoped() -> None:
     assert "resource-scoped user classes" in membership["summary"]
     assert "contracts/relationships.yaml" in membership["canonical_yaml_family"]["optional"]
     assert "contracts/policy_hooks.yaml" in membership["canonical_yaml_family"]["optional"]
+    assert "contracts/settings.yaml" in membership["canonical_yaml_family"]["optional"]
     assert "backend/account_data_handler.py" in membership["backend_stub_defaults"]
 
     key_action_ids = {next(iter(item)) for item in membership["key_actions"]}
@@ -364,6 +400,8 @@ def test_membership_archetype_is_host_agnostic_and_resource_scoped() -> None:
     assert "meta.routeAuth" in constraints
     assert "contracts/relationships.yaml" in constraints
     assert "contracts/policy_hooks.yaml" in constraints
+    assert "contracts/settings.yaml" in constraints
+    assert "Do not hardcode class defaults" in constraints
     assert "decision records or freeze semantics" in constraints
 
     forbidden = [
@@ -391,6 +429,8 @@ def test_file_contracts_require_membership_module_for_durable_user_classes() -> 
     assert "Do not trust request body user_id" in module_constraints
     assert "meta.routeAuth" in module_constraints
     assert "contracts/policy_hooks.yaml" in module_constraints
+    assert "contracts/settings.yaml" in module_constraints
+    assert "Do not hardcode class defaults" in module_constraints
     assert "consuming feature module owns any decision record" in module_constraints
     assert "Do not encode MozaiksPay" in module_constraints
 
@@ -408,6 +448,8 @@ def test_appgenerator_agents_prompt_resource_scoped_user_class_modules() -> None
     assert "Never accept request-body `user_id`" in agents
     assert "safe routing inventory only" in agents
     assert "contracts/policy_hooks.yaml" in agents
+    assert "contracts/settings.yaml" in agents
+    assert "class labels/categories/default weights" in agents
     assert "consuming feature module owns any decision record" in agents
 
 
@@ -441,6 +483,7 @@ def test_private_participation_generated_app_fixture_uses_oss_primitives() -> No
         ModuleDefinition,
         ModulePolicyHooksManifest,
         ModuleRelationshipsManifest,
+        ModuleSettingsManifest,
     )
 
     files = _private_participation_generated_app_fixture()
@@ -456,6 +499,9 @@ def test_private_participation_generated_app_fixture_uses_oss_primitives() -> No
     )
     policy_hooks = ModulePolicyHooksManifest.model_validate(
         _read_fixture_yaml(files, "modules/project_membership/contracts/policy_hooks.yaml")
+    )
+    settings = ModuleSettingsManifest.model_validate(
+        _read_fixture_yaml(files, "modules/project_membership/contracts/settings.yaml")
     )
 
     assert membership.module.type == "membership"
@@ -489,6 +535,13 @@ def test_private_participation_generated_app_fixture_uses_oss_primitives() -> No
     policy_input_fields = policy_hook.output_schema["properties"]["inputs"]["items"]["properties"]
     assert {"vote_weight", "distribution_weight"} <= set(policy_input_fields)
 
+    class_catalog = settings.features[0]
+    assert class_catalog["id"] == "participation_class_catalog"
+    classes = {row["id"]: row for row in class_catalog["classes"]}
+    assert classes["owner"]["governance_weight"] == 100
+    assert classes["builder"]["distribution_weight"] == 25
+    assert classes["viewer"]["governance_weight"] == 0
+
     governance_actions = {action.id: action for action in governance.actions}
     assert {"open_proposal", "cast_vote", "calculate_outcome"} <= set(governance_actions)
     assert "decision_record" in governance_actions["open_proposal"].description
@@ -509,6 +562,7 @@ def test_private_participation_generated_app_fixture_uses_oss_primitives() -> No
     membership_source = files["modules/project_membership/module.yaml"].lower()
     assert "decision_record" not in membership_source
     assert "frozen_participation_inputs" not in membership_source
+    assert "default_class_weights" not in membership_source
 
     combined_source = "\n".join(files.values()).lower()
     for forbidden in (

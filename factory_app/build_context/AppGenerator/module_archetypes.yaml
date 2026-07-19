@@ -231,6 +231,10 @@ archetypes:
         policy question. Hook actions return allowlisted eligibility,
         class/relationship, capability, or decision-input values; consuming
         modules own any decision records or freeze semantics they require.
+      - If the app needs configurable class labels, categories, or default
+        voting/allocation weights, put that class catalog in
+        contracts/settings.yaml. Do not hardcode class defaults in generated
+        Python constants; active membership/policy records still grant rights.
       - This archetype is host-agnostic. Do not include MozaiksPay, wallet,
         payout, hosted billing, managed hosting, growth campaign returns,
         investor marketplace policy, ownership-right claims, or hosted product

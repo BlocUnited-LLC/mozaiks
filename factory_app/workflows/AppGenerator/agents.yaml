@@ -275,7 +275,7 @@ agents:
           Data contracts are an explicit exception for apps that need a canonical app data contract or explicit existing-DB integration. When used, route it through `data/contract.json`; do not generate non-canonical app-level backend, `services/data/` helpers, shared-persistence folders, or a special hosted/platform folder.
           `config/data.json` is a removed path and must never appear in owned_paths, initial_message, data_contract, database_files, code_files, or task output.
           Each module-local task must set `capability_pack_id` to the module id. For a projects/tasks app, this means separate task trios with literal owned paths under `modules/projects/` and `modules/tasks/`; do not collapse them into one `project_management` module or rename them to `projects_core` / `tasks_core`.
-        - **Resource-scoped user class modules**: when the product needs durable user classes, app-local roles, membership, collaborators, invite/accept flows, route access by ownership/membership, current-user resource inventory, review authority, app-owned decision inputs, or custom classification/weight rules, plan a dedicated membership-style module using the injected `membership` module archetype. Do not represent those classes only as JWT claims, app.json admins, frontend route metadata, or fields scattered across unrelated resource modules. The module contract task must include `contracts/relationships.yaml` when the current user's resources should appear in `/api/me/relationships`, include `contracts/policy_hooks.yaml` only when another module, route guard, admin panel, or app-owned process needs to ask the membership module for deterministic policy input, include an `authorize_<resource>_route` action when scoped private routes need `meta.routeAuth`, and include `backend/account_data_handler.py` when `module.user_data_scope=true`.
+        - **Resource-scoped user class modules**: when the product needs durable user classes, app-local roles, membership, collaborators, invite/accept flows, route access by ownership/membership, current-user resource inventory, review authority, app-owned decision inputs, or custom classification/weight rules, plan a dedicated membership-style module using the injected `membership` module archetype. Do not represent those classes only as JWT claims, app.json admins, frontend route metadata, or fields scattered across unrelated resource modules. The module contract task must include `contracts/relationships.yaml` when the current user's resources should appear in `/api/me/relationships`, include `contracts/policy_hooks.yaml` only when another module, route guard, admin panel, or app-owned process needs to ask the membership module for deterministic policy input, include `contracts/settings.yaml` when class labels/categories/default weights should be configurable, include an `authorize_<resource>_route` action when scoped private routes need `meta.routeAuth`, and include `backend/account_data_handler.py` when `module.user_data_scope=true`.
         - If `subscription_contract.contract_required` is true, include exactly one
           app-level build task with `task_type: subscription_config`,
           `capability_pack_id: null`, `surface_id: "subscription_contract"`,
@@ -295,6 +295,16 @@ agents:
           managed_capability pack, the app owns the subscription assignment
           write path. In that case, also plan an `entitlement_dispatch` module
           task set alongside the other module tasks:
+          - one `data_migrations` task: `capability_pack_id: "entitlement_dispatch"`,
+            `surface_kind: "data_migrations"`, `initial_agent: "DatabaseAgent"`,
+            `owned_paths: ["data/migrations/001_entitlement_dispatch_collections.json"]`.
+            This migration declares the `billing.subscriptions` data alias with
+            `mongo_collection: "entitlement_dispatch_subscriptions"`. It must run
+            before the business_services task because `repo.py` uses
+            `app_data_from_context(ctx).collection("billing.subscriptions")` which
+            resolves the alias from `data/contract.json` built from this migration.
+            `ConfiguredEntitlementAdapter` (the runtime read side) also resolves
+            the collection via this same alias.
           - one `module_contract` task: `capability_pack_id: "entitlement_dispatch"`,
             `surface_kind: "module"`, `initial_agent: "ConfigMiddlewareAgent"`,
             `owned_paths: ["modules/entitlement_dispatch/module.yaml"]`. Its
@@ -303,14 +313,16 @@ agents:
             the assignment_store collection so `ConfiguredEntitlementAdapter`
             can grant capabilities for the plan) and `deactivate_subscription`
             (marks the record inactive). No `entitlement_gate`, no `permissions`,
-            `capabilities: []`.
+            `capabilities: []`, `type: internal_system`, `visibility: private`.
           - one `business_services` task: `capability_pack_id: "entitlement_dispatch"`,
             `initial_agent: "ServiceAgent"`, `owned_paths:
             ["modules/entitlement_dispatch/backend/handler.py",
             "modules/entitlement_dispatch/backend/service.py",
-            "modules/entitlement_dispatch/backend/repo.py"]`. The repo must write
-            to `ctx.persistence.collection("entitlement_dispatch", "subscriptions")`
-            using the `data_alias` declared in `assignment_store`.
+            "modules/entitlement_dispatch/backend/repo.py"]`. The repo must use
+            `app_data_from_context(ctx).collection("billing.subscriptions")` to
+            write subscription assignment documents (not
+            `ctx.persistence.collection(...)`). Every document must include
+            `app_id` so `ConfiguredEntitlementAdapter` can scope queries by app.
           The bundle scanner rejects the app bundle when `assignment_store` is
           present without this module.
         - If `subscription_contract.contract_required` is false or absent, do not
@@ -2424,7 +2436,7 @@ agents:
       - Optional hook files go in `modules/{capability_pack_id}/backend/settings.py`, `subscriptions.py`, `notifications.py`, or `admin.py` only when referenced by YAML.
       - `module_contract.python_stubs` is the authoritative list of backend stub files to implement. Do not invent undeclared Python files.
       - Prefer the injected runtime module context as the primary dependency boundary: `context.app_id`, `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, roles/principal metadata, `context.persistence` in `backend/repo.py`, and `context.events.publish(...)` for event emission.
-      - For membership-style modules, implement resource-scoped user class records in the generated module itself. Policy checks must combine `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, and module-owned membership records. Never accept request-body `user_id`, `tenant_id`, `workspace_id`, `class`, `role`, or `permissions` as authorization truth. `list_user_relationships` returns safe routing inventory only, and `authorize_<resource>_route` returns a minimal allowed/status/capabilities summary without raw records, secrets, payment provider fields, or ledger data.
+      - For membership-style modules, implement resource-scoped user class records in the generated module itself. Policy checks must combine `context.user_id`, `context.tenant_id`, `context.workspace_id`, `context.permissions`, and module-owned membership records. Never accept request-body `user_id`, `tenant_id`, `workspace_id`, `class`, `role`, or `permissions` as authorization truth. `list_user_relationships` returns safe routing inventory only, and `authorize_<resource>_route` returns a minimal allowed/status/capabilities summary without raw records, secrets, payment provider fields, or ledger data. If class labels/categories/default weights are needed, load them from `contracts/settings.yaml` or module-owned records instead of hardcoding Python constants.
       - `backend/repo.py` is the only generated backend layer that touches `context.persistence`. `backend/service.py` calls repo methods, and `backend/handler.py` never touches persistence.
       - The runtime executor calls each module action as `handler_method(ctx, **params)`. Every generated handler method must accept runtime context as the first positional parameter after `self` (`ctx` or `context`) and then either `**params` or named parameters matching module.yaml input_schema fields.
       - Generated `backend/repo.py` must use `context.persistence.collection(module_id, entity_name)` with module/entity values aligned to `data_contract` and `data/contract.json`.

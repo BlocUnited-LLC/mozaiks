@@ -1,0 +1,88 @@
+contract_id: entitlement_dispatch
+contract_type: build_pack_instructions
+
+# entitlement_dispatch is not selected by LLM intent matching.
+# AppPlanAgent includes it automatically when:
+#   - config/subscriptions.yaml declares assignment_store
+#   - the build does NOT include mozaikspay as a managed_capability
+# The selection rule is injected by subscription_contract_context.py.
+selection_rules:
+  - id: implicit_for_self_hosted_saas
+    when:
+      intent_any:
+        - self-hosted subscription billing
+        - entitlement dispatch
+        - subscription assignment store
+    action: select_pack
+
+recommended_domains:
+  - saas
+  - subscriptions
+  - entitlements
+  - self-hosted billing
+
+required_outputs:
+  - path: data/migrations/001_entitlement_dispatch_collections.json
+    owner: templates
+  - path: modules/entitlement_dispatch/module.yaml
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/__init__.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/handler.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/service.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/repo.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/schemas.py
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/subscriptions/
+  - path_prefix: modules/billing/
+  - path_prefix: services/billing/
+  - path_prefix: services/adapters/payments/
+  - path_prefix: app/capability_packs/
+
+runtime_boundaries:
+  - id: write_path_only
+    rule: >
+      entitlement_dispatch is the app-owned write path for subscription
+      assignments. ConfiguredEntitlementAdapter is the read path. Do not
+      duplicate ledger, capability-grant, or entitlement check logic here.
+  - id: assignment_store_alias
+    rule: >
+      repo.py must write to the billing.subscriptions data alias declared in
+      data/contract.json. The assignment_store.data_alias in
+      config/subscriptions.yaml must match this alias. Do not invent a
+      separate collection or bypass the data contract alias.
+  - id: app_id_required_in_document
+    rule: >
+      Every written document must include app_id from ctx.app_id.
+      ConfiguredEntitlementAdapter queries with {app_id_field: app_id} so the
+      field must be present in the stored record.
+  - id: action_contract
+    rule: >
+      The module must declare exactly two actions — activate_subscription and
+      deactivate_subscription — with no entitlement_gate, no permissions, and
+      capabilities: []. This is an internal system module; do not add
+      user-facing queries, admin surfaces, or UI pages.
+  - id: no_provider_logic
+    rule: >
+      Do not call any payment provider SDK, billing API, or external service.
+      The module only writes MongoDB records. Payment confirmation, webhook
+      verification, and plan change policy belong in the app's billing facade
+      or a managed MozaiksPay integration — not here.
+
+facades: []
+
+cross_pack_integrations:
+  - pack: mozaikspay
+    description: >
+      When mozaikspay is selected, it owns the subscription assignment write
+      path (the hosted MozaiksPay service writes assignments after checkout).
+      The entitlement_dispatch pack must NOT be included alongside mozaikspay
+      as managed_capability — AppPlanAgent only plans entitlement_dispatch when
+      mozaikspay is absent from the build.
+    optional: false
+    integration_surface: []
