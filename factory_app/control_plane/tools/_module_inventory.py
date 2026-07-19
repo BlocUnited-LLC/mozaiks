@@ -126,6 +126,7 @@ class ModuleInventoryEntry(BaseModel):
     # Contract presence flags
     has_reactions: bool = Field(default=False, description="True if contracts/reactions.yaml exists.")
     has_notifications: bool = Field(default=False, description="True if contracts/notifications.yaml exists.")
+    has_policy_hooks: bool = Field(default=False, description="True if contracts/policy_hooks.yaml exists.")
     has_settings: bool = Field(default=False, description="True if contracts/settings.yaml exists.")
     has_admin: bool = Field(default=False, description="True if contracts/admin.yaml exists.")
     has_profile: bool = Field(default=False, description="True if contracts/profile.yaml exists.")
@@ -280,6 +281,8 @@ def classify_module_carry_forward(entry: ModuleInventoryEntry) -> tuple[str, lis
             reasons.append("has_profile=True: user profile surface is generic across concepts")
         if entry.has_relationships:
             reasons.append("has_relationships=True: current-user resource relationships are generic across concepts")
+        if entry.has_policy_hooks:
+            reasons.append("has_policy_hooks=True: policy hook declarations are generic across concepts")
         if entry.has_persistence:
             reasons.append(
                 "has_persistence=True: state exists but module is known-safe; "
@@ -297,6 +300,8 @@ def classify_module_carry_forward(entry: ModuleInventoryEntry) -> tuple[str, lis
         infra_signals.append("has_profile=True with no persistence: display-only profile surface")
     if entry.has_relationships and not entry.has_persistence:
         infra_signals.append("has_relationships=True with no persistence: display-only relationship surface")
+    if entry.has_policy_hooks and not entry.has_persistence:
+        infra_signals.append("has_policy_hooks=True with no persistence: policy-hook declaration only")
 
     if infra_signals and not entry.has_admin and not entry.has_reactions and not entry.event_types:
         reasons.extend(infra_signals)
@@ -415,6 +420,7 @@ def extract_module_inventory(file_map: dict[str, str]) -> list[ModuleInventoryEn
 
         has_reactions = f"{contracts_prefix}reactions.yaml" in file_map
         has_notifications = f"{contracts_prefix}notifications.yaml" in file_map
+        has_policy_hooks = f"{contracts_prefix}policy_hooks.yaml" in file_map
         has_settings = f"{contracts_prefix}settings.yaml" in file_map
         has_admin = f"{contracts_prefix}admin.yaml" in file_map
         has_profile = f"{contracts_prefix}profile.yaml" in file_map
@@ -443,6 +449,7 @@ def extract_module_inventory(file_map: dict[str, str]) -> list[ModuleInventoryEn
             event_types=event_types,
             has_reactions=has_reactions,
             has_notifications=has_notifications,
+            has_policy_hooks=has_policy_hooks,
             has_settings=has_settings,
             has_admin=has_admin,
             has_profile=has_profile,

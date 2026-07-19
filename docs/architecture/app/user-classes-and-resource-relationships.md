@@ -22,12 +22,16 @@ Mozaiks App billing, wallet, campaign, hosting, or payout logic.
   project, team, community, listing, document, or campaign.
 - `contracts/relationships.yaml` remains a resource inventory and routing
   contract. It does not grant rights by itself.
+- `contracts/policy_hooks.yaml` is the optional generic hook contract for
+  app-owned modules that need classification, access, or decision inputs.
 - Authorization remains in module service/policy code using `ctx.user_id`,
   `ctx.tenant_id`, `ctx.workspace_id`, `ctx.permissions`, and module-owned
   records.
 - Generated apps that need durable roles or memberships should receive a
   membership/user-class module from AppGenerator instead of ad hoc fields on
   unrelated records.
+- Frozen vote, approval, judging, or allocation records are owned by the
+  consuming app module. They are not a universal OSS product feature.
 - Hosted products can build proprietary policy on top of these primitives, but
   OSS must not hardcode hosted Mozaiks business classes like platform billing
   owner, MozaiksPay payout recipient, campaign backer return rights, or managed
@@ -43,7 +47,8 @@ Mozaiks App billing, wallet, campaign, hosting, or payout logic.
 | Resource relationship | A current-user row that says which resource the user is connected to and where the shell should route them. |
 | Class assignment | Durable app-owned record that gives a user a class for a scoped resource. |
 | Capability hint | UI-safe description of what the user may see or open. It is not authorization truth. |
-| Policy snapshot | Immutable copy of class/weight/share rows used by a vote, settlement, approval, or other deterministic process. |
+| Policy hook | Module-declared action contract that lets another app module ask for access, classification, or deterministic decision input. |
+| Decision record | App-owned immutable process record, such as a vote roster or review roster, created by the consuming module when that domain requires frozen inputs. |
 
 ## Existing Foundation
 
@@ -58,6 +63,7 @@ The OSS runtime already provides:
 - entitlement gates
 - app-scoped persistence through `ctx.persistence.collection(...)`
 - `contracts/relationships.yaml`
+- `contracts/policy_hooks.yaml`
 - `/api/me/relationships`
 - route authorization metadata that can call app-owned module actions
 
@@ -82,8 +88,13 @@ Apps own:
 - which resources can have class assignments
 - invite/accept/remove flows
 - per-resource authorization policy
+- policy hook actions, when another module needs classification, access, or
+  decision-input answers
 - whether class assignments imply voting weight, moderation access, workflow
-  approval authority, or other app-specific behavior
+  approval authority, app-owned allocation eligibility, or other app-specific
+  behavior
+- decision records or freeze semantics for votes, reviews, approvals, contests,
+  or app-owned allocations
 
 Hosted products own:
 
@@ -107,6 +118,7 @@ app/modules/{membership_module}/
     notifications.yaml      # optional
     settings.yaml           # optional
     admin.yaml              # optional
+    policy_hooks.yaml       # optional
   backend/
     handler.py
     service.py
@@ -145,6 +157,7 @@ The module should declare actions such as:
 - `get_my_membership`
 - `authorize_resource_route`
 - `list_user_relationships`
+- `evaluate_policy_hook`
 
 The module should own records shaped like:
 
@@ -210,6 +223,55 @@ what payout should this user receive?
 which private provider secret should this user see?
 ```
 
+## Policy Hooks
+
+When one app module needs to ask another module how a user or resource should
+be classified, it should use a declared policy hook instead of importing service
+internals or inventing a global score field.
+
+Example:
+
+```yaml
+schema_version: mozaiks.policy_hooks.v1
+
+hooks:
+  - id: project-participation
+    label: Project Participation
+    hook_type: decision_input
+    action: evaluate_project_participation
+    resource_types: [project]
+    deterministic: true
+```
+
+The hook action returns an allowlisted, app-owned shape. For example:
+
+```json
+{
+  "eligible": true,
+  "resource_type": "project",
+  "resource_id": "project_abc",
+  "user_id": "user_123",
+  "class_ids": ["collaborator"],
+  "capabilities": ["project.read", "task.write"],
+  "decision_inputs": {
+    "review_weight": 10
+  },
+  "policy_version": "2026-07-18"
+}
+```
+
+Policy hook rules:
+
+- hooks point to declared module actions
+- hook actions derive scope from `ctx.user_id`, `ctx.tenant_id`,
+  `ctx.workspace_id`, `ctx.permissions`, and module-owned records
+- outputs are allowlisted DTOs, not raw membership or ledger documents
+- app-owned Python evaluators may live in normal module backend code, reviewed
+  and deployed with the app bundle
+- admin-authored raw Python is not a production-safe OSS feature
+- hooks do not execute payments, grant equity, modify subscriptions, or run
+  hosted-product provider logic
+
 ## Route Authorization Summary
 
 When a generated app has scoped private routes, route authorization should call
@@ -241,10 +303,10 @@ The action should return a minimal shape:
 It must not return secret fields, payment provider internals, private ledger
 rows, or raw membership documents.
 
-## Policy Snapshots
+## Decision Records
 
-Some generated apps need durable decisions that must not change when a user's
-class changes later.
+Some generated apps need durable domain decisions that must not change when a
+user's class changes later.
 
 Examples:
 
@@ -255,16 +317,19 @@ Examples:
 - revenue share, when an app explicitly implements its own compliant
   monetization policy
 
-For these cases, generated modules should snapshot class rows at the moment
-the process becomes active.
+For these cases, the consuming module should store its own decision record at
+the moment the process becomes active. The membership or policy module can
+provide policy-hook inputs, but it should not own every downstream product's
+freeze semantics.
 
 Required rules:
 
-- snapshot before votes, approvals, settlements, or score calculations are
-  counted
-- store snapshot rows in the owning module or a declared data contract alias
-- store snapshot version/hash
-- never mutate prior snapshots to reflect later membership changes
+- freeze app-owned inputs before votes, approvals, reviews, allocations, or
+  other decision calculations are counted
+- store the frozen decision rows in the consuming module or a declared data
+  contract alias
+- store policy version/hash or source metadata where relevant
+- never mutate prior decision records to reflect later membership changes
 - create a new process record if the policy needs to change
 
 ## AppGenerator Work Required
@@ -288,6 +353,7 @@ The archetype should apply when an app requires:
 - private resource routes
 - role-based workflow approvals
 - deterministic vote or review weights
+- app-owned policy hook inputs for decisions
 
 ### File Contracts
 
@@ -304,7 +370,9 @@ Required guidance:
 - define class assignment records in module schemas
 - keep route authorization summaries minimal
 - use `contracts/relationships.yaml` for current-user resource inventory
-- use snapshots for time-sensitive decisions
+- use `contracts/policy_hooks.yaml` when another module needs deterministic
+  access/classification/decision inputs
+- keep decision records and freeze semantics in the consuming feature module
 
 ### Structured Outputs
 
@@ -331,6 +399,8 @@ Add tests that prove generated membership modules:
 - scope queries in `backend/policy.py`
 - serialize list responses through allowlist helpers
 - expose relationships through `contracts/relationships.yaml`
+- expose policy hooks through `contracts/policy_hooks.yaml` when another
+  module needs deterministic policy input
 - do not trust request body role/class fields
 - do not hardcode hosted Mozaiks App classes or MozaiksPay concepts
 
@@ -382,7 +452,7 @@ Classes:
 - `viewer`
 
 Governance, vote weights, and any economic participation must be explicit
-module policy and snapshot-based. They are not automatic consequences of auth.
+app module policy. They are not automatic consequences of auth.
 
 ## Acceptance Criteria
 
@@ -395,7 +465,9 @@ The OSS user-class model is ready when:
   strings alone.
 - `/api/me/relationships` can list user resources without granting rights.
 - Authorization remains in module policy/service code.
-- Snapshot guidance exists for votes, approvals, and settlements.
+- Optional `contracts/policy_hooks.yaml` lets generated modules expose
+  deterministic policy inputs without hardcoding governance or economics.
+- Modules that need frozen outcomes store their own decision records.
 - No proprietary Mozaiks App billing, wallet, campaign, or payout policy
   appears in OSS templates, prompts, generated examples, or tests.
 

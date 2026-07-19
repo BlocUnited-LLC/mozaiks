@@ -123,6 +123,7 @@ task_contracts:
       - modules/{pack_name}/contracts/events.yaml
       - modules/{pack_name}/contracts/reactions.yaml
       - modules/{pack_name}/contracts/notifications.yaml
+      - modules/{pack_name}/contracts/policy_hooks.yaml
       - modules/{pack_name}/contracts/settings.yaml
       - modules/{pack_name}/contracts/admin.yaml
       - modules/{pack_name}/contracts/profile.yaml
@@ -150,6 +151,7 @@ task_contracts:
       - actions[].api_surface is part of the module contract. Use public or public_readonly only for anonymous-safe HTTP actions. Omit it or use internal/admin_internal for actions that require an authenticated token when AUTH_ENABLED=true.
       - Public/public_readonly actions are only anonymous entrypoints; they still receive a concrete granted_permissions list and still run actions[].permissions and actions[].entitlement_gate checks.
       - External HTTP dispatch and internal runtime dispatch are separate paths. Internal event reactions may use api_surface=internal and permissions=[] because the event bus is the authorization boundary; do not mark internal reaction handlers public.
+      - contracts/reactions.yaml target.kind may be handler, capability, notification, or service_adapter. service_adapter targets must declare target.adapter and target.adapter_method, point only to app-owned services/adapters/* support code, and must not be used to bypass facade modules, module state ownership, or managed-provider boundaries.
       - JS stubs are allowed only for declared customization surfaces.
       - Emit contracts/profile.yaml only when a module has user-scoped data worth surfacing on the profile page (e.g. account summary, notification preferences, usage stats). Do not emit profile.yaml for every module.
       - profile.yaml panels must bind to module actions declared in module.yaml. Do not expose admin-only actions or secrets through profile panels.
@@ -162,10 +164,11 @@ task_contracts:
       - Membership-style modules own resource-scoped class assignment records. Records should include user_id, resource_type, resource_id, class_id or role, status, created_by, created_at, and updated_at, plus tenant_id/workspace_id when the app uses those scopes.
       - Membership-style module policy must resolve authority from ctx.user_id, ctx.tenant_id, ctx.workspace_id, ctx.permissions, and module-owned records. Do not trust request body user_id, tenant_id, workspace_id, class, role, or permission fields for authorization.
       - Scoped private routes whose visibility depends on membership, ownership, invitation state, tenant/workspace scope, or resource access must declare meta.routeAuth pointing to an app-owned authorize_*_route module action. The action returns a minimal allowed/status/capabilities summary and must not return raw records, secrets, payment provider fields, or ledger data.
-      - If class assignments affect vote weights, approval quorum, judging weight, or app-owned settlement allocation, the owning module must snapshot eligible class/weight rows when the process opens. Later class or membership changes must not mutate open or closed process results.
+      - Emit contracts/policy_hooks.yaml only when another module, route guard, admin panel, or app-owned process needs to ask this module a generic policy question such as access, classification, or deterministic decision input. Hook providers must point to declared module actions and return allowlisted result shapes.
+      - If class assignments affect vote weights, approval quorum, judging weight, or app-owned allocation logic, expose an app-owned policy hook or evaluator action from the membership/policy module. The consuming feature module owns any decision record, freeze semantics, or frozen process record it requires. Do not make snapshots a generic membership-module product feature.
       - Do not encode MozaiksPay, wallet, payout, hosted billing, managed hosting, growth campaign returns, investor marketplace policy, ownership-right claims, or hosted product revenue-share rules in generated membership modules. Those are hosted-product or app-specific economics concerns, not OSS user-class primitives.
       - Emit contracts/notifications.yaml only when one or more declared module events should create user-facing notifications. Notification rules are deterministic event-to-intent mappings consumed by the OSS runtime; generated apps must not create a standalone notifications module, notification persistence repo, or notification websocket worker for ordinary in-app alerts.
-      - Notification rules must use schema_version mozaiks.notifications.v1, stable notification ids, event_type values declared in contracts/events.yaml or canonical app/domain/platform/hosted namespaces, controlled channels from [in_app, email, push, sms], and explicit audience roles/permissions, audience.user_id_field for event-payload target users, or a declared module-local resolver hook.
+      - Notification rules must use schema_version mozaiks.notifications.v1, stable notification ids, event_type values declared in contracts/events.yaml or canonical domain/platform/hosted/mozaikspay namespaces, controlled channels from [in_app, email, push, sms], and explicit audience roles/permissions, audience.user_id_field for event-payload target users, or a declared module-local resolver hook.
       - Use channel in_app by default. Add email, push, or sms only when the app plan explicitly requires external delivery and the corresponding operator pack or app-owned provider adapter is available. Do not invent provider delivery internals in module business logic.
       - Use context_fields only for non-secret identifiers or display context needed by the notification center. Never include token, key, password, credential, payment provider, or idempotency fields.
       - Persistent modules express collection ownership through data_contract, not ad hoc database files.

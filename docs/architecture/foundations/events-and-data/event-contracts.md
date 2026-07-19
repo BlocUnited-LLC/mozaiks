@@ -303,12 +303,37 @@ source:
   module_id: investor_marketplace
 ```
 
+### `mozaikspay.*`
+
+Owner:
+MozaiksPay managed capability.
+
+Allowed publishers:
+MozaiksPay-owned hosted modules that expose public MozaiksPay capability
+lifecycle facts.
+
+Allowed subscribers:
+MozaiksPay hosted modules and product services.
+
+Allowed in generic modules:
+no.
+
+Hosted-only:
+yes.
+
+Example:
+
+```yaml
+type: mozaikspay.self_hosted_app_registered
+```
+
 ## Module Event Files
 
 ### `contracts/events.yaml`
 
 Declares events the module may publish. Event types must use a valid namespace
-owned by the emitting layer such as `domain.*`, `platform.*`, or `hosted.*`.
+owned by the emitting layer such as `domain.*`, `platform.*`, `hosted.*`, or
+a bounded first-party managed-capability namespace such as `mozaikspay.*`.
 For app modules, `module.yaml.actions[].emits` must reference event types
 declared here and those emitted types are normally `domain.*`.
 
@@ -343,12 +368,15 @@ Targets may be:
 - `handler`
 - `capability`
 - `notification`
+- `service_adapter`
 
 Target field mapping:
 
 - `target.kind: handler` uses `target.handler_method`
 - `target.kind: capability` uses `target.capability_id`
 - `target.kind: notification` uses `target.notification_id`
+- `target.kind: service_adapter` uses `target.adapter` and
+  `target.adapter_method`
 
 Current platform support:
 
@@ -361,9 +389,18 @@ Current platform support:
 - `handler` targets are active. `ModuleEventRouter` invokes
   `target.handler_method` on the module handler class and passes event payload
   fields as keyword arguments.
+- `service_adapter` targets are active. `ModuleEventRouter` imports the
+  app-owned adapter class declared by `target.adapter`, instantiates it, and
+  calls `target.adapter_method` with the event payload and optional event
+  metadata parameters.
 
 Workflow starts must go through capability resolution or workflow trigger
 resolution. Do not hardcode workflow internals in module code.
+
+Service adapter starts must stay app-owned. Use them for provider or
+hosted-product mechanics that belong under `app/services/adapters/...`; do not
+use them for durable module state changes, public user actions, permissions,
+subscription or wallet authority, or hosted-product entitlement policy.
 
 ### `contracts/notifications.yaml`
 
@@ -410,7 +447,10 @@ triggers:
 - `notifications.yaml` and `reactions.yaml` must reference declared or
   imported event types.
 - Generic generated modules may not publish `platform.*`, `hosted.*`,
-  `runtime.*`, `workflow.*`, or `chat.*`.
+  `mozaikspay.*`, `runtime.*`, `workflow.*`, or `chat.*`.
+- `service_adapter` reactions must declare both `target.adapter` and
+  `target.adapter_method`, and must not also declare `handler_method`,
+  `capability_id`, or `notification_id`.
 - Runtime stream events must not be routed as app-domain facts.
 - UI events must not be required for durable state correctness.
 - Hosted-only events must not be loaded by runtime-only hosts.

@@ -40,6 +40,7 @@ _SETTINGS_YAML_CONTENT = "schema_version: v1\npreferences: []\n"
 _ADMIN_YAML_CONTENT = "schema_version: v1\npanels: []\n"
 _PROFILE_YAML_CONTENT = "schema_version: mozaiks.profile.v1\npanels: []\n"
 _RELATIONSHIPS_YAML_CONTENT = "schema_version: mozaiks.relationships.v1\nproviders: []\n"
+_POLICY_HOOKS_YAML_CONTENT = "schema_version: mozaiks.policy_hooks.v1\nhooks: []\n"
 _RUNTIME_EXT_CONTENT = "api_router:\n  enabled: false\n"
 
 
@@ -256,6 +257,30 @@ class TestSelectedContractFiles:
 
         assert "contracts/relationships.yaml" in result["files"]
         assert result["files"]["contracts/relationships.yaml"] == _RELATIONSHIPS_YAML_CONTENT
+
+    @pytest.mark.asyncio
+    async def test_policy_hooks_yaml_returnable(self) -> None:
+        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+            read_carry_forward_module_contract,
+        )
+        file_map = _make_file_map(
+            "notifications",
+            **{"modules/notifications/contracts/policy_hooks.yaml": _POLICY_HOOKS_YAML_CONTENT},
+        )
+
+        with patch(
+            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            new_callable=AsyncMock,
+            return_value=_make_workspace(file_map),
+        ):
+            result = await read_carry_forward_module_contract(
+                "notifications",
+                files=["contracts/policy_hooks.yaml"],
+                context_variables=_ctx(),
+            )
+
+        assert "contracts/policy_hooks.yaml" in result["files"]
+        assert result["files"]["contracts/policy_hooks.yaml"] == _POLICY_HOOKS_YAML_CONTENT
 
 
 # ---------------------------------------------------------------------------
@@ -864,6 +889,7 @@ class TestExistingTestsUnaffected:
             "contracts/events.yaml",
             "contracts/reactions.yaml",
             "contracts/notifications.yaml",
+            "contracts/policy_hooks.yaml",
             "contracts/settings.yaml",
             "contracts/admin.yaml",
             "contracts/profile.yaml",

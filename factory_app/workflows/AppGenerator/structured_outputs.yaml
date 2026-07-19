@@ -1855,8 +1855,8 @@ models:
   # CANONICAL MODULE CONTRACT MODELS
   # ConfigMiddlewareAgent emits these typed objects before serializing them to
   # modules/{module_id}/{module.yaml,contracts/events.yaml,contracts/reactions.yaml,
-  # contracts/notifications.yaml,contracts/settings.yaml,contracts/admin.yaml,
-  # contracts/profile.yaml,contracts/relationships.yaml}. YAML declares the contract; Python files
+  # contracts/notifications.yaml,contracts/policy_hooks.yaml,contracts/settings.yaml,
+  # contracts/admin.yaml,contracts/profile.yaml,contracts/relationships.yaml}. YAML declares the contract; Python files
   # implement behavior through referenced handlers/hooks.
   # ===========================================================================
 
@@ -1891,7 +1891,7 @@ models:
           event_pipeline = automated multi-step lifecycle driven by events, reactions, and optional background polling.
           transactional = append-only ledger for value movements.
           billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
-          membership = resource-scoped user classes, collaborators, invitations, access summaries, and immutable snapshots for app-owned participation flows.
+          membership = resource-scoped user classes, collaborators, invitations, access summaries, and deterministic policy inputs for app-owned participation flows; consuming modules own any decision records or freeze semantics.
           entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
       description:
         type: str
@@ -2742,6 +2742,68 @@ models:
           relationship rows for resources the current user owns, administers,
           belongs to, watches, backs, or is invited to.
 
+  ModulePolicyHookProvider:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable hook provider id unique within contracts/policy_hooks.yaml.
+      label:
+        type: str
+        description: Human-readable hook label for admin/developer surfaces.
+      description:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: Optional helper text describing what this hook evaluates.
+      order:
+        type: union
+        variants:
+          - int
+          - 'null'
+        description: Optional display/discovery order. Defaults to 100.
+      hook_type:
+        type: literal
+        values:
+          - access
+          - classification
+          - decision_input
+          - custom
+        description: Generic hook type. Do not encode hosted-product governance, wallet, billing, payout, or campaign semantics here.
+      action:
+        type: str
+        description: Module action id that evaluates this hook. Must reference an action declared in module.yaml.
+      resource_types:
+        type: list
+        items: str
+        description: Non-empty list of resource types this hook may evaluate, for example app, project, team, community, or campaign.
+      input_schema:
+        type: JsonSchemaContract
+        description: Optional JSON schema describing the hook request payload.
+      output_schema:
+        type: JsonSchemaContract
+        description: Optional JSON schema describing the hook response payload.
+      deterministic:
+        type: bool
+        description: True when this hook is deterministic for the same versioned records and request context.
+
+  ModulePolicyHooksManifest:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+          - mozaiks.policy_hooks.v1
+        description: Must be mozaiks.policy_hooks.v1.
+      hooks:
+        type: list
+        items: ModulePolicyHookProvider
+        description: >
+          Optional module-declared policy hook providers. Hooks route policy
+          questions to app-owned module actions; they do not define hosted
+          governance, wallet, payout, billing, campaign, or revenue behavior.
+
   ModuleContractBundle:
     type: model
     fields:
@@ -2785,6 +2847,16 @@ models:
           Optional contracts/relationships.yaml. Emit only when this module can
           enumerate current-user relationships to module-owned resources for a
           generic My Apps, Portfolio, or My Resources surface. Null for most modules.
+      policy_hooks_yaml:
+        type: union
+        variants:
+          - ModulePolicyHooksManifest
+          - 'null'
+        description: >
+          Optional contracts/policy_hooks.yaml. Emit only when another module,
+          route guard, admin panel, or app-owned process needs to ask this
+          module a generic policy question such as access, classification, or
+          deterministic decision input. Null for most modules.
       python_stubs:
         type: optional_list
         items: ModulePythonStub
