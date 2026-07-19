@@ -829,33 +829,31 @@ models:
   AppMonetizationPlan:
     type: model
     description: >
-      Resolved monetization taxonomy for this app. "Monetized" is not a build
-      route by itself; this object records the concrete money-flow model and
-      whether the OSS subscription runtime is actually required.
+      Resolved core OSS monetization route for this app. "Monetized" is not a
+      build route by itself; this object records whether the app needs the
+      first-class subscription/usage runtime or a custom app/operator money-flow
+      boundary.
     fields:
       monetized:
         type: bool
-        description: True when the app has any revenue, payment, contribution, sponsored, or paid-access flow.
+        description: True when the app has a paid-access, usage, token, checkout, contribution, or other money-flow surface.
       revenue_model:
         type: literal
         values:
         - free
         - subscriptions
         - usage_based
-        - transactional
-        - marketplace
-        - sponsored
-        - donations
-        - community_funded
+        - custom
         - hybrid
         description: >
-          Concrete revenue route. Do not use "monetized" as the value. Use
-          subscriptions only for recurring access, seats, paid feature gates,
-          quotas, credits, or token allowances. Use transactional for product,
-          booking, download, invoice, or one-time checkout flows. Use marketplace
-          for multi-party buyer/seller flows. Use sponsored for paid placement,
-          ad, boost, or campaign visibility flows. Use community_funded for
-          campaign-style backing/funding windows with app/operator-specific policy.
+          Concrete OSS monetization route. Do not use "monetized" as the value.
+          Use subscriptions only for recurring access, seats, paid feature gates,
+          quotas, credits, or token allowances. Use usage_based for metered
+          billing, AI-token usage, prepaid credits, or quotas. Use custom for
+          ecommerce, bookings, marketplace, sponsorship, contribution, campaign
+          funding, revenue-share, or any other money flow whose policy belongs in
+          app-owned or hosted-product modules. Use hybrid only when a first-class
+          subscription/usage route and a custom money-flow route are both present.
       subscription_contract_requirement:
         type: literal
         values:
@@ -865,28 +863,28 @@ models:
         description: >
           Whether SubscriptionContractDesigner should produce config/subscriptions.yaml.
           Required only for subscriptions or usage models with plan gates, seats,
-          quotas, credits, or token allowances. Transactional, marketplace,
-          sponsored, donation, and community-funded apps set this to not_required
-          unless they also sell app access tiers or usage budgets.
+          quotas, credits, token allowances, or token wallets. Custom money-flow
+          apps set this to not_required unless they also sell app access tiers,
+          quotas, credits, or token allowances.
       primary_payer:
         type: union
         variants:
         - str
         - 'null'
-        description: User or organization expected to pay, such as customer, buyer, seller, creator, team admin, sponsor, donor, or backer.
+        description: User or organization expected to pay, such as customer, buyer, seller, creator, team admin, or account owner.
       primary_payee:
         type: union
         variants:
         - str
         - 'null'
-        description: Recipient of funds or value flow, such as app owner, seller, creator, service provider, campaign owner, or platform.
+        description: Recipient of funds or value flow, such as app owner, seller, creator, service provider, or platform.
       money_flow_summary:
         type: str
         description: One-sentence explanation of what is being paid for and when value is delivered.
       required_capability_routes:
         type: optional_list
         items: str
-        description: Capability routes required by the taxonomy, such as mozaikspay, usage_metering, commerce, marketplace, sponsored_placements, donations, or investor_marketplace.
+        description: Capability routes required by the selected model, such as mozaikspay, usage_metering, commerce, external_adapter, custom_owned, or an available managed_capability pack.
       rationale:
         type: str
         description: >
@@ -1023,15 +1021,16 @@ models:
         description: >
           Resolved revenue model for the app. "Monetized" is not a valid final
           model; it must resolve to one of:
-          free | subscriptions | usage_based | transactional | marketplace |
-          sponsored | donations | community_funded | hybrid.
+          free | subscriptions | usage_based | custom | hybrid.
 
           Aliased values are mapped: pay_per_use -> usage_based;
-          one_time_purchase -> transactional.
+          one_time_purchase -> custom.
 
-          This field drives which billing, checkout, usage, marketplace,
-          sponsored-placement, donation, campaign, entitlement, and plan-catalog
-          artifacts are required in build_tasks. Null is treated as free.
+          This field drives whether subscription, usage, entitlement, token, and
+          plan-catalog artifacts are required in build_tasks; custom money-flow
+          behavior uses domain modules, policy hooks, managed facades, or
+          external_adapter boundaries without becoming an OSS monetization
+          primitive. Null is treated as free.
       monetization_plan:
         type: union
         variants:
@@ -1039,11 +1038,10 @@ models:
         - 'null'
         default: null
         description: >
-          Detailed monetization taxonomy decision. Required when revenue_model is
+          Detailed core monetization decision. Required when revenue_model is
           not free. It records whether config/subscriptions.yaml is required or
-          whether the app should route to commerce, marketplace, sponsored,
-          donation, campaign, or custom/operator capabilities without a
-          subscription contract.
+          whether the app should route to custom app/operator capabilities
+          without a subscription contract.
       external_integrations:
         type: optional_list
         items: AppBuildIntegration

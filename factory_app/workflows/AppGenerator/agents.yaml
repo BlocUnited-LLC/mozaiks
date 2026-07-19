@@ -192,7 +192,7 @@ agents:
          - Every capability pack must declare `surface_id` and `surface_kind`.
          - Prefer canonical packs such as `crud_pack`, `messaging_pack`, `commerce_pack`, `marketplace_pack`, `campaigns_pack`, `mozaikspay`, `billing_pack`, `notifications_pack`, `analytics_pack`, and `agent_backend_integration`.
          - Use `commerce_pack` for storefronts, product catalogs, carts, checkout request flows, orders, and inventory. Keep payment provider mechanics outside the commerce module; pair with a selected managed payment pack or a user-requested provider adapter when checkout processing is required.
-         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS subscriptions, plan-gated access, seats, billing portal, or usage budgets, prioritize the managed `mozaikspay` capability pack when it is available and the user has not explicitly requested another billing provider. Generate only app-owned billing facades and clients that call the hosted MozaiksPay API; never generate provider internals. If MozaiksPay is unavailable or the user names another provider, generate a provider-neutral `external_adapter` path. For transactional checkout, use `commerce_pack` plus the selected payment/operator pack. For multi-party seller/buyer flows, use `marketplace_pack` or a custom-owned marketplace boundary. Do not collapse all revenue into billing.
+         - Use the injected `[CAPABILITY DIRECTORY]` as the deterministic recommendation order for known build packs. For SaaS subscriptions, plan-gated access, seats, billing portal, AI credits, token top-ups, or usage budgets, prioritize the managed `mozaikspay` capability pack when it is available and the user has not explicitly requested another billing provider. Generate only app-owned billing facades and clients that call the hosted MozaiksPay API; never generate provider internals. If MozaiksPay is unavailable or the user names another provider, generate a provider-neutral `external_adapter` path. For ecommerce checkout, marketplace, sponsorship, contributions, campaign funding, revenue-share, or other product-specific money flows, set `revenue_model: custom` and use the relevant domain pack, custom_owned module, managed facade, or policy hook. Do not collapse all revenue into billing.
          - **NEVER include these as capability packs** — they are first-class runtime features already provided by the Mozaiks platform host and must not be scaffolded:
            `user_management`, `auth`, `authentication`, `login`, `registration`, `profile`, `user_profile`, `admin_users`, `settings`, `notifications`, `websocket`, `token_usage_ledger`, `ai_token_metering`
            If the product spec mentions any of these, reference them as existing runtime capabilities in `service_scope`, not as packs to generate.
@@ -200,17 +200,13 @@ agents:
          - Distinguish deterministic product behavior from optional agentic augmentation.
       4a. Resolve monetization before deriving monetization build tasks.
          - `monetization_enabled=true`, `builder_options.monetization.enabled=true`, or `builder_options.provider_backed_capabilities[].intent_id == "monetization"` means only that a revenue model is desired. It does not mean subscriptions.
-         - Set `revenue_model` to one concrete taxonomy value: `free`, `subscriptions`, `usage_based`, `transactional`, `marketplace`, `sponsored`, `donations`, `community_funded`, or `hybrid`. Never set it to `monetized`.
+         - Set `revenue_model` to one concrete core OSS value: `free`, `subscriptions`, `usage_based`, `custom`, or `hybrid`. Never set it to `monetized`.
          - Populate `monetization_plan` whenever `revenue_model` is not `free`. Include payer, payee, money_flow_summary, required_capability_routes, subscription_contract_requirement, and rationale.
          - Use `subscriptions` only for recurring access, seats, paid feature gates, account-level quotas, AI credits, or token allowances.
          - Treat `concept_blueprint.monetization_intent` as advisory input. It helps choose the revenue model, but the final `revenue_model`, `monetization_plan`, build tasks, and subscription-contract requirement must still match the actual module/page/workflow surfaces in the current app plan.
          - Use `usage_based` for pay-per-meter, pay-per-token, pay-per-job, API-call, export, render, or credit flows. It requires `config/subscriptions.yaml` only when the app grants plan allowances, token wallets, prepaid credits, or quotas.
-         - Use `transactional` for ecommerce, bookings, paid downloads, invoices, event tickets, or one-time service checkout. Route this through commerce/checkout. Do not create `config/subscriptions.yaml` unless the app also sells access tiers or quotas.
-         - Use `marketplace` for multi-party buyer/seller, creator/customer, provider/client, commission, payout, dispute, or platform-fee flows. Do not use `config/subscriptions.yaml` to model orders, ownership, payouts, commissions, or settlement.
-         - Use `sponsored` for ad slots, promoted listings, boosted placement, paid visibility, or marketing packages. Treat campaign windows, placement inventory, and performance records as app/operator module state, not subscriptions.
-         - Use `donations` for optional tips, pledges, patron support, or contributions. Add subscriptions only if the app also sells recurring memberships or access tiers.
-         - Use `community_funded` for campaign-style backing/funding windows with app/operator-specific policy. Do not model investment-like terms, returns, or settlement as OSS subscription primitives.
-         - Use `hybrid` only when multiple money flows are truly present. Split each route into its owning capability pack, and generate exactly one `config/subscriptions.yaml` only for the access/quota/credit part when SubscriptionContractDesigner requires it.
+         - Use `custom` for ecommerce, bookings, paid downloads, invoices, event tickets, one-time checkout, marketplace, sponsorship, contributions, campaign funding, revenue-share, or any other app-specific money flow. Route this through the relevant domain pack, custom_owned module, managed facade, or external_adapter boundary. Do not create `config/subscriptions.yaml` unless the app also sells access tiers, quotas, credits, token wallets, or token allowances. Do not use `config/subscriptions.yaml` to model orders, ownership, payouts, commissions, or settlement.
+         - Use `hybrid` only when the app has a first-class subscription/usage route plus a custom money-flow route. Split each route into its owning capability pack, and generate exactly one `config/subscriptions.yaml` only for the access/quota/credit/token part when SubscriptionContractDesigner requires it.
       5. Derive the minimum complete set of pages/screens required by the selected capability packs, and identify whether each route is global navigation, local/module navigation, profile/account navigation, footer/legal navigation, or direct-link only. Also classify the intended shell chrome mode for each route: standard, workspace, conversation, focused, immersive, or public.
       5a. **When `experience_spec.pages[]` is present, use the designed pages as the canonical page list** — do not invent or re-derive page structure from capability packs. For each designed page:
          - Preserve `name`, `route`, `layout`, and `intent` from the design.
@@ -291,10 +287,13 @@ agents:
           `/api/me/usage`, `/api/me/tokens`, and `/api/me/tokens/ledger`; do
           not plan generated modules or custom ledgers just to back those pages.
           When `subscription_contract.subscription_config_file` declares an
-          `assignment_store` and the build does NOT include a `mozaikspay`
-          managed_capability pack, the app owns the subscription assignment
-          write path. In that case, also plan an `entitlement_dispatch` module
-          task set alongside the other module tasks:
+          `assignment_store` and the build does NOT include a managed capability
+          pack that owns subscription assignment writes, the app owns the
+          subscription assignment write path. The current default managed
+          assignment writer is the `mozaikspay` pack, but that default is
+          recommendation-only and must not become a runtime dependency. In that
+          case, also plan an `entitlement_dispatch` module task set alongside
+          the other module tasks:
           - one `data_migrations` task: `capability_pack_id: "entitlement_dispatch"`,
             `surface_kind: "module"`, `initial_agent: "DatabaseAgent"`,
             `owned_paths: ["data/migrations/001_entitlement_dispatch_collections.json"]`.
@@ -324,7 +323,7 @@ agents:
             `ctx.persistence.collection(...)`). Every document must include
             `app_id` so `ConfiguredEntitlementAdapter` can scope queries by app.
           The bundle scanner rejects the app bundle when `assignment_store` is
-          present without this module.
+          present without either this module or a managed assignment writer.
         - If `subscription_contract.contract_required` is false or absent, do not
           plan a `subscription_config` task and do not emit config/subscriptions.yaml.
       11a. Treat persistent application UI as schema-first:
@@ -405,7 +404,7 @@ agents:
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract`, `data_models`, and `business_services` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no provider business logic. Use app-bundle-relative `services/integrations/{service}_client.py` for external or managed API clients. Use `services/adapters/{area}/{provider}.py` for provider-specific implementation boundaries only when the generated app itself directly owns that provider integration and modules/workflows call it. Use `services/routes/` for app-level routes only when needed. These assemble into physical `app/services/**` workspace paths. Valid adapter areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is app-owned provider mechanics rather than managed platform operations.
         - Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities. Do not generate provider adapters for those operations into a customer app bundle. The generated app consumes the managed platform through managed capability API clients/facade modules and host-owned records.
-        - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, DownloadAgent must use the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `env.example`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
+        - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, DownloadAgent must use the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `env.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
         - If an app needs durable runtime secrets, plan `security/secrets.yaml` as a names-only contract for provider/vault policy, env handles, and secret names. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
         - `surface_kind = control_plane` packs are optional app-local harness packs. Do not invent a control-plane surface inside AppGenerator; only materialize one when DesignDocs resolved an explicit app-owned `surface_kind = control_plane` surface.
@@ -2314,6 +2313,9 @@ agents:
       - Decide whether to emit infra scaffold files (emit_infra_scaffold rule).
       - Decide whether to emit the auth adapter (emit_auth_adapter rule).
       - Emit a short confirmation message.
+      - Keep terminology explicit: artifact review staging is the Mozaiks/Studio
+        review area before promotion; environment staging is the operator or host
+        environment proved by readiness/deploy workflows.
   - id: decision_rules
     heading: '[DECISION RULES]'
     content: |-
@@ -2347,6 +2349,9 @@ agents:
       - Rendered files are added to code_files alongside other generated app files.
       - These files are operator-owned after first emit; DownloadAgent will not overwrite them
         unless --force-infra is passed.
+      - The readiness workflow is a provider-neutral environment-staging gate.
+        It validates names-only env/secret handles, builds/smokes the image, and
+        optionally checks a deployed staging URL. It does not create cloud resources.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
@@ -2396,6 +2401,7 @@ agents:
       - Deployment scaffold outputs are pre-deploy validation/preview only.
       - When enabled, includeDockerfiles/includeWorkflow/includeCompose produce deterministic provider-neutral outputs from the deployment contract.
       - These artifacts describe how the generated app runs; they do not contain provider-owned adapters or host-specific execution policy.
+      - If includeWorkflow is enabled, generated outputs include separate readiness and deploy workflows. Readiness proves the operator's environment staging; it is not the same as Mozaiks artifact review staging or ArtifactVersion promotion.
       - When includeWorkflow is enabled, workflow secret references and workflow inputs must be declared as names-only `ci_secret_requirements` in the deployment manifest.
       - Provider-specific deployment behavior is handled by adapters outside generic AppGenerator.
       - Generated artifacts must never commit secrets.
