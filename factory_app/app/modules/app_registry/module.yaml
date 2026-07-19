@@ -59,6 +59,19 @@ actions:
         current_build_run:
           type: object
           description: Active build run pointer used by Studio continue-build and control-plane re-entry.
+        governance_mode:
+          type: string
+          enum:
+            - founder_led
+            - community_dao
+          description: >
+            Governance mode for the app. founder_led means the creator and their
+            invited team control all proposals, voting weight, and revenue decisions.
+            community_dao means the community earns governance rights through
+            participation — voting weight is distributed by the app's participation
+            policy and any member above threshold can create proposals.
+            Defaults to founder_led. Hosted products may extend this with a
+            set_governance_mode action and react to the domain.app_registry.governance_mode_changed event.
     output_schema:
       type: object
       properties:
@@ -167,6 +180,33 @@ actions:
       - app_registry.write
     emits:
       - domain.app_registry.app_promoted
+  - id: set_governance_mode
+    description: >
+      Transition the app's governance mode between founder_led and community_dao.
+      founder_led means the creator controls all governance and economics.
+      community_dao means the community earns governance rights through participation.
+      Hosted products should react to domain.app_registry.governance_mode_changed
+      to apply product-specific policy transitions (e.g. MozaiksScore redistribution,
+      community join-flow activation, participation policy migration).
+      Only the app owner or a platform admin may call this action.
+    handler_method: set_governance_mode
+    input_schema:
+      type: object
+      required: [build_registry_id, governance_mode]
+      properties:
+        build_registry_id: { type: string }
+        governance_mode:
+          type: string
+          enum: [founder_led, community_dao]
+    output_schema:
+      type: object
+      properties:
+        success: { type: boolean }
+        governance_mode: { type: string }
+    permissions:
+      - app_registry.write
+    emits:
+      - domain.app_registry.governance_mode_changed
 capabilities:
   - capability_id: app_registry.list
     kind: action
