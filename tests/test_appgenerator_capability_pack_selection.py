@@ -76,7 +76,7 @@ def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
     assert "billing provider" in rule
 
 
-@pytest.mark.parametrize("pack_id", ["messaging", "support", "social"])
+@pytest.mark.parametrize("pack_id", ["messaging", "support", "social", "entitlement_dispatch"])
 def test_pack_contexts_are_registered_for_appgenerator(pack_id: str) -> None:
     context = _read_yaml(f"factory_app/build_context/{pack_id}/context.yaml")
 
@@ -84,6 +84,28 @@ def test_pack_contexts_are_registered_for_appgenerator(pack_id: str) -> None:
     assert context["pack"]["id"] == pack_id
     assert context["pack"]["status"] == "active"
     assert {asset["kind"] for asset in context["assets"]} == {"contract", "templates"}
+
+
+def test_entitlement_dispatch_context_projects_capability_packs_and_operator_contracts() -> None:
+    context = _read_yaml("factory_app/build_context/entitlement_dispatch/context.yaml")
+    projections = context.get("projections", {}).get("context_variables", {})
+
+    assert "capability_packs" in projections, (
+        "entitlement_dispatch must project capability_packs so AppPlanAgent can see the pack descriptor"
+    )
+    assert projections["capability_packs"].get("from") == "capability_packs"
+    assert "operator_contracts" in projections, (
+        "entitlement_dispatch must project operator_contracts so the contract constraints reach the agent prompt"
+    )
+    assert projections["operator_contracts"].get("from") == "operator_contracts"
+
+
+def test_entitlement_dispatch_pack_is_generated_module_not_managed() -> None:
+    context = _read_yaml("factory_app/build_context/entitlement_dispatch/context.yaml")
+    assert context["pack"]["capability_source"] == "generated_module", (
+        "entitlement_dispatch is a generated module archetype — AppGenerator generates the files, "
+        "it is not a managed_capability that should be declared as external_integration"
+    )
 
 
 def test_messaging_pack_is_thread_substrate_without_contacts_or_runtime_worker() -> None:
