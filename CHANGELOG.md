@@ -12,6 +12,17 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Default OSS LLM provider is now free Google Gemini (gemini-2.0-flash / gemini-2.5-flash). Set `GEMINI_API_KEY` from aistudio.google.com and `LLM_PRIMARY_API_TYPE=google`. OpenAI remains available as an alternative via `LLM_PRIMARY_API_TYPE=openai`.
+- Self-hosted SaaS apps now get deterministic entitlement dispatch: AppGenerator plans an `entitlement_dispatch` module (activate/deactivate subscription actions) whenever `config/subscriptions.yaml` declares an `assignment_store` and the mozaikspay managed pack is not selected. `ConfiguredEntitlementAdapter` reads those assignment records for all entitlement gate checks.
+- `scan_generated_bundle` now validates the self-hosted entitlement dispatch contract: rejects bundles with `assignment_store` but no `entitlement_dispatch` module, and rejects any `entitlement_gate` value not declared in at least one plan's capabilities.
+- Added offline SaaS acceptance gate tests and a live AppPlanAgent smoke test (with committed fixture for CI replay) that verifies `entitlement_dispatch` task planning end-to-end against gpt-4o.
+
+### Fixed
+
+- Removed `@stripe/stripe-js` from the OSS `web_shell` dependencies. Stripe belongs in `mozaiks-app` only; the package was unused in any source file.
+
 ### Changed
 
 - Expanded the production-readiness gate so the 0.1.10 cash-to-token loop is covered by generated SaaS acceptance, subscription/token runtime, scanner, and opt-in Docker/Mongo smoke checks.
