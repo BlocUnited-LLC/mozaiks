@@ -971,6 +971,7 @@ def _optional_task_output_paths(task: dict[str, Any]) -> set[str]:
     prefix = f"modules/{module_id}"
     return {
         f"{prefix}/contracts/notifications.yaml",
+        f"{prefix}/contracts/policy_hooks.yaml",
         f"{prefix}/contracts/profile.yaml",
         f"{prefix}/contracts/relationships.yaml",
         f"{prefix}/contracts/reactions.yaml",

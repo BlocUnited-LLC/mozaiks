@@ -102,6 +102,30 @@ def _handler_target_reaction(
     )
 
 
+class RecordingServiceAdapter:
+    calls: list[dict[str, Any]] = []
+
+    async def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.__class__.calls.append(dict(payload))
+        return {"success": True, "seen": payload.get("build_registry_id")}
+
+
+def _service_adapter_target_reaction(
+    event_type: str,
+    *,
+    reaction_id: str = "r-adapter",
+) -> MagicMock:
+    return _reaction_model(
+        event_type,
+        id=reaction_id,
+        target={
+            "kind": "service_adapter",
+            "adapter": f"{__name__}:RecordingServiceAdapter",
+            "adapter_method": "handle",
+        },
+    )
+
+
 def _notification_target_reaction(
     event_type: str,
     *,
@@ -703,3 +727,25 @@ class TestEmitPlatformReaction:
         router = _router([mod], event_emitter=event_emitter, capability_invoker=capability_invoker)
         await router.handle_event("ev.cap", _envelope())
         assert "my_capability" in invoker_calls
+
+    @pytest.mark.asyncio
+    async def test_service_adapter_target_invokes_adapter_and_emits_result(self):
+        RecordingServiceAdapter.calls = []
+        emitted = []
+
+        async def event_emitter(event_type, payload):
+            emitted.append((event_type, payload))
+
+        reaction = _service_adapter_target_reaction("hosted.hosting.ci_provision.requested")
+        mod = _loaded_module("hosting", reactions=[reaction])
+        router = _router([mod], event_emitter=event_emitter)
+
+        await router.handle_event(
+            "hosted.hosting.ci_provision.requested",
+            _envelope(payload={"build_registry_id": "owner/app"}),
+        )
+
+        assert RecordingServiceAdapter.calls == [{"build_registry_id": "owner/app"}]
+        event_type, event = emitted[0]
+        assert event_type == "platform.reaction.service_adapter_dispatched"
+        assert event["payload"]["result"] == {"success": True, "seen": "owner/app"}

@@ -12,6 +12,7 @@ This keeps module event meaning above the runtime kernel.
 """
 
 import inspect
+import importlib
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable
@@ -99,6 +100,14 @@ class ModuleEventRouter:
                     emitted_notifications.add(key)
             elif target_kind == "handler":
                 await self._dispatch_handler(reaction, event_type, envelope)
+            elif target_kind == "service_adapter":
+                adapter_result = await self._dispatch_service_adapter(reaction, event_type, envelope)
+                await self._emit_platform_reaction(
+                    reaction,
+                    event_type,
+                    envelope,
+                    reaction_result=adapter_result,
+                )
             elif target_kind:
                 await self._emit_platform_reaction(reaction, event_type, envelope)
 
@@ -167,12 +176,13 @@ class ModuleEventRouter:
         reaction: dict,
         event_type: str,
         envelope: dict[str, Any],
+        reaction_result: Any = None,
     ) -> None:
         if self._event_emitter is None:
             return
         target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
         target_kind = str(target.get("kind") or "unknown").strip() or "unknown"
-        capability_result = None
+        dispatch_result = reaction_result
         if target_kind == "capability":
             capability_id = str(
                 target.get("capability_id")
@@ -181,7 +191,7 @@ class ModuleEventRouter:
                 or ""
             ).strip()
             if capability_id and self._capability_invoker is not None:
-                capability_result = await self._maybe_await(
+                dispatch_result = await self._maybe_await(
                     self._capability_invoker(capability_id, envelope, reaction)
                 )
 
@@ -205,9 +215,51 @@ class ModuleEventRouter:
             },
             "visibility": "internal",
         }
-        if capability_result is not None:
-            reaction_payload["payload"]["result"] = capability_result
+        if dispatch_result is not None:
+            reaction_payload["payload"]["result"] = dispatch_result
         await self._maybe_await(self._event_emitter(reaction_event_type, reaction_payload))
+
+    async def _dispatch_service_adapter(
+        self,
+        reaction: dict,
+        event_type: str,
+        envelope: dict[str, Any],
+    ) -> Any:
+        target = reaction.get("target") if isinstance(reaction.get("target"), dict) else {}
+        adapter_ref = str(target.get("adapter") or "").strip()
+        adapter_method = str(target.get("adapter_method") or "").strip()
+        if not adapter_ref or not adapter_method:
+            logger.warning(
+                "SERVICE_ADAPTER_TARGET_SKIPPED: reaction %r missing adapter or adapter_method",
+                reaction.get("id"),
+            )
+            return None
+
+        module_path, separator, attr_name = adapter_ref.partition(":")
+        if not separator or not module_path or not attr_name:
+            logger.warning(
+                "SERVICE_ADAPTER_TARGET_SKIPPED: reaction %r has invalid adapter ref %r",
+                reaction.get("id"),
+                adapter_ref,
+            )
+            return None
+
+        try:
+            adapter_module = importlib.import_module(module_path)
+            adapter_type = getattr(adapter_module, attr_name)
+            adapter = adapter_type()
+            method = getattr(adapter, adapter_method)
+            payload = envelope.get("payload") if isinstance(envelope.get("payload"), dict) else {}
+            return await self._maybe_await(_call_service_adapter(method, payload, event_type, envelope, reaction))
+        except Exception as exc:
+            logger.error(
+                "SERVICE_ADAPTER_DISPATCH_ERROR: %r.%r raised %s",
+                adapter_ref,
+                adapter_method,
+                exc,
+                exc_info=True,
+            )
+            return {"success": False, "error_code": "SERVICE_ADAPTER_DISPATCH_ERROR"}
 
     async def _dispatch_handler(
         self,
@@ -434,6 +486,42 @@ def _notification_rule_matches(rule: dict[str, Any], envelope: dict[str, Any]) -
     if "in" in condition and isinstance(condition.get("in"), list):
         return value in condition["in"]
     return True
+
+
+def _call_service_adapter(
+    method: Callable[..., Any],
+    payload: dict[str, Any],
+    event_type: str,
+    envelope: dict[str, Any],
+    reaction: dict[str, Any],
+) -> Any:
+    """Call a contract-declared service adapter with the narrowest useful args."""
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        return method(payload)
+
+    params = signature.parameters
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return method(
+            payload=payload,
+            event_type=event_type,
+            envelope=envelope,
+            reaction=reaction,
+        )
+
+    kwargs: dict[str, Any] = {}
+    if "payload" in params:
+        kwargs["payload"] = payload
+    if "event_type" in params:
+        kwargs["event_type"] = event_type
+    if "envelope" in params:
+        kwargs["envelope"] = envelope
+    if "reaction" in params:
+        kwargs["reaction"] = reaction
+    if kwargs:
+        return method(**kwargs)
+    return method(payload)
 
 
 def _render_template(template: str, payload: dict[str, Any]) -> str:
