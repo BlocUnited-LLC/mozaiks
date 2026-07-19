@@ -13,6 +13,13 @@ from typing import Any
 DEFAULT_RUNTIME_PORT = 8000
 DEFAULT_HEALTH_PATH = "/api/health"
 DEFAULT_PROFILE = "generic_container"
+PRODUCTION_DEPLOYMENT_PROFILES = frozenset(
+    {
+        "production",
+        "production_container",
+        "managed_production_container",
+    }
+)
 
 _TARGET_KINDS = {"container", "compose", "external_adapter"}
 _TAG_STRATEGIES = {"commit_sha", "timestamp", "manual"}
@@ -82,6 +89,27 @@ def _bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes"}
     return default
+
+
+def _is_production_deployment_profile(value: str | None) -> bool:
+    return str(value or "").strip().lower() in PRODUCTION_DEPLOYMENT_PROFILES
+
+
+def _deployment_artifact_flags(
+    *,
+    deployment_profile: str | None,
+    include_dockerfiles: bool,
+    include_workflow: bool,
+    include_readiness_workflow: bool | None,
+) -> tuple[bool, bool, bool]:
+    production_profile = _is_production_deployment_profile(deployment_profile)
+    dockerfiles = _bool(include_dockerfiles, True) or production_profile
+    deploy_workflow = _bool(include_workflow, True)
+    if include_readiness_workflow is None:
+        readiness_workflow = deploy_workflow or production_profile
+    else:
+        readiness_workflow = _bool(include_readiness_workflow, False) or production_profile
+    return dockerfiles, readiness_workflow, deploy_workflow
 
 
 def _int_or_default(value: Any, default: int = 0) -> int:
@@ -630,6 +658,7 @@ def build_deploy_target_spec(
     target_kind: str = "container",
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
+    include_readiness_workflow: bool | None = None,
     include_compose: bool = False,
     auth_required: bool = False,
     auth_provider: str = "jwt",
@@ -643,14 +672,21 @@ def build_deploy_target_spec(
     resolved_kind = str(target_kind or "container").strip() or "container"
     if resolved_kind not in _TARGET_KINDS:
         resolved_kind = "container"
+    dockerfiles, readiness_workflow, deploy_workflow = _deployment_artifact_flags(
+        deployment_profile=deployment_profile,
+        include_dockerfiles=include_dockerfiles,
+        include_workflow=include_workflow,
+        include_readiness_workflow=include_readiness_workflow,
+    )
 
     outputs = ["env.example", "deployment.manifest.json"]
-    if _bool(include_dockerfiles, True):
+    if dockerfiles:
         outputs.append("Dockerfile")
     if _bool(include_compose, False):
         outputs.append("docker-compose.yml")
-    if _bool(include_workflow, True):
+    if readiness_workflow:
         outputs.append(".github/workflows/readiness.yml")
+    if deploy_workflow:
         outputs.append(".github/workflows/deploy.yml")
 
     auth = _auth_contract(auth_required=_bool(auth_required, False), auth_provider=auth_provider)
@@ -709,12 +745,13 @@ def build_deploy_target_spec(
             "metadata": {},
         },
         "deployment_profile": str(deployment_profile or DEFAULT_PROFILE),
+        "deployment_profile_kind": "production" if _is_production_deployment_profile(deployment_profile) else "generic",
         "deploy_environments": {
             "staging": "staging",
             "production": "production",
         },
         "ci_secret_requirements": _default_ci_secret_requirements(
-            include_workflow=_bool(include_workflow, True)
+            include_workflow=deploy_workflow
         ),
         "readiness_requirements": _default_readiness_requirements(
             auth_required=bool(auth["required"])
@@ -1375,6 +1412,7 @@ def generate_deployment_artifacts(
     deployment_profile: str = DEFAULT_PROFILE,
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
+    include_readiness_workflow: bool | None = None,
     include_compose: bool = False,
     auth_required: bool = False,
     auth_provider: str = "jwt",
@@ -1384,13 +1422,20 @@ def generate_deployment_artifacts(
     extra_public_variables: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate deterministic deployment artifacts and validated manifests."""
+    dockerfiles, readiness_workflow, deploy_workflow = _deployment_artifact_flags(
+        deployment_profile=deployment_profile,
+        include_dockerfiles=include_dockerfiles,
+        include_workflow=include_workflow,
+        include_readiness_workflow=include_readiness_workflow,
+    )
     spec = build_deploy_target_spec(
         app_id=app_id,
         deployment_profile=deployment_profile,
         target_id=deployment_profile,
         target_kind="compose" if _bool(include_compose, False) else "container",
-        include_dockerfiles=include_dockerfiles,
-        include_workflow=include_workflow,
+        include_dockerfiles=dockerfiles,
+        include_workflow=deploy_workflow,
+        include_readiness_workflow=readiness_workflow,
         include_compose=include_compose,
         auth_required=auth_required,
         auth_provider=auth_provider,
@@ -1404,12 +1449,13 @@ def generate_deployment_artifacts(
     files: dict[str, str] = {
         "env.example": _render_env_example(spec),
     }
-    if _bool(include_dockerfiles, True):
+    if dockerfiles:
         files["Dockerfile"] = _render_dockerfile(spec)
     if _bool(include_compose, False):
         files["docker-compose.yml"] = _render_compose(spec)
-    if _bool(include_workflow, True):
+    if readiness_workflow:
         files[".github/workflows/readiness.yml"] = _render_readiness_workflow(spec)
+    if deploy_workflow:
         files[".github/workflows/deploy.yml"] = _render_workflow(spec)
 
     manifest = build_deployment_template_manifest(
@@ -1422,8 +1468,9 @@ def generate_deployment_artifacts(
 
     bundle_errors = validate_generated_deployment_bundle(
         files,
-        include_dockerfiles=_bool(include_dockerfiles, True),
-        include_workflow=_bool(include_workflow, True),
+        include_dockerfiles=dockerfiles,
+        include_readiness_workflow=readiness_workflow,
+        include_workflow=deploy_workflow,
     )
 
     return {
@@ -1440,17 +1487,20 @@ def validate_generated_deployment_bundle(
     *,
     include_dockerfiles: bool,
     include_workflow: bool,
+    include_readiness_workflow: bool | None = None,
 ) -> list[str]:
     """Validate artifact presence and verify forbidden secret/provider markers are absent."""
     errors: list[str] = []
     if not isinstance(artifacts, dict):
         return ["artifacts must be a dictionary"]
+    readiness_workflow = _bool(include_readiness_workflow, _bool(include_workflow, False))
 
     required_files = {"env.example", "deployment.manifest.json"}
     if include_dockerfiles:
         required_files.add("Dockerfile")
-    if include_workflow:
+    if readiness_workflow:
         required_files.add(".github/workflows/readiness.yml")
+    if include_workflow:
         required_files.add(".github/workflows/deploy.yml")
 
     missing = sorted(path for path in required_files if path not in artifacts)
