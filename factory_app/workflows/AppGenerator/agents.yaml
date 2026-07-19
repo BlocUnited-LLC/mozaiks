@@ -1420,7 +1420,49 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      **Greenfield path (build_mode != revision)**:
+      **data_migrations task path (current_build_task_type == "data_migrations")**:
+
+      A `data_migrations` task emits a capability-pack-owned additive migration
+      file that declares new data aliases or collections needed by a capability
+      pack module. It does NOT modify `data/contract.json`.
+
+      1. Read `initial_message` for the exact migration file path and content to
+         produce. The path will be `data/migrations/{migration_id}.json`.
+      2. Emit the migration file verbatim from the capability pack template.
+         Do not infer or change field names, indexes, or alias names.
+      3. Produce one `database_files` entry and one `code_files` entry, both at
+         the declared migration path with kind `data_migration_json`.
+      4. Set `pending_schema_migration` to a summary that identifies the
+         migration_id and what alias/collection it declares.
+      5. Do NOT emit or modify `data/contract.json` in this task — that file is
+         owned by the primary `persistence_contract` task.
+      6. Confirm in `agent_message` which alias/collection was declared and that
+         the file was emitted from the pack template unchanged.
+
+      Example (entitlement_dispatch):
+      ```json
+      {
+        "database_files": [{
+          "path": "data/migrations/001_entitlement_dispatch_collections.json",
+          "kind": "data_migration_json",
+          "purpose": "Declares billing.subscriptions data alias for entitlement_dispatch module.",
+          "entity_refs": ["entitlement_dispatch"],
+          "content": "{\"migration_id\": \"entitlement_dispatch_001_collections\", \"surfaces\": [{\"surface_id\": \"entitlement_dispatch\", \"collections\": [{\"mongo_collection\": \"entitlement_dispatch_subscriptions\", \"data_alias\": \"billing.subscriptions\", \"indexes\": [{\"name\": \"subscriptions_by_app_user\", \"keys\": [{\"field\": \"app_id\", \"order\": 1}, {\"field\": \"user_id\", \"order\": 1}], \"unique\": true}]}]}]}"
+        }],
+        "code_files": [{
+          "filename": "data/migrations/001_entitlement_dispatch_collections.json",
+          "content": "{\"migration_id\": \"entitlement_dispatch_001_collections\", ...}"
+        }],
+        "pending_schema_migration": {
+          "migration_id": "entitlement_dispatch_001_collections",
+          "capability_pack_id": "entitlement_dispatch",
+          "declares_alias": "billing.subscriptions"
+        },
+        "agent_message": "Emitted entitlement_dispatch_001_collections migration declaring billing.subscriptions → entitlement_dispatch_subscriptions."
+      }
+      ```
+
+      **Greenfield path (build_mode != revision, current_build_task_type != "data_migrations")**:
       1. Read `data_contract` from context.
       2. Reconcile it with `app_build_plan.entities` and `database_design_document`.
       3. If it is missing or incomplete for a persistent module, describe the gap in `agent_message`.
