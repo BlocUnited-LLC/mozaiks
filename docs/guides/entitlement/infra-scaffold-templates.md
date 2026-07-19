@@ -3,6 +3,20 @@
 Templates emitted by `InfraScaffoldAgent` during app generation.
 After first emit the operator owns these files — regeneration is explicit and opt-in.
 
+## Staging Terms
+
+Mozaiks uses two different staging concepts:
+
+- **Artifact review staging** is the Mozaiks/Studio control-plane area where
+  generated or refined files wait for validation, review, `ArtifactVersion`
+  acceptance, and promotion.
+- **Environment staging** is the operator or hosted deployment target used to
+  prove a promoted/exported app before production, such as a GitHub `staging`
+  environment or preview runtime.
+
+These templates only handle environment staging. They do not bypass artifact
+review, mutate source during generation, or provision hosted product resources.
+
 ## Template Variables
 
 | Variable | Source | Description |
@@ -33,17 +47,27 @@ Auth adapter templates live in `webapp_builder/templates/ui/auth/`:
 
 ## Usage After Generation
 
-1. Copy template files to the generated app bundle root (substituting variables).
-2. Fill in deploy target–specific sections (registry login, deploy command, rollback).
-3. Copy `.env.staging.example` → `.env.staging` and fill in secrets.
-4. Run `scripts/provision.sh staging` to validate and sync secrets.
-5. Push to `main` or `staging` to trigger the deploy workflow.
+1. Copy template files to the generated app bundle root, substituting variables.
+2. Review generated `deployment.manifest.json` and `env.example`; both carry
+   names only, never secret values.
+3. Fill in deploy target–specific workflow sections such as registry login,
+   deploy command, rollback, and any provider-specific secret sync.
+4. Copy `env.example` to an ignored environment file such as `.env.staging`
+   and fill values outside source control.
+5. Run `scripts/provision.sh staging` when the target provider uses the
+   generated provision helper.
+6. Run `.github/workflows/readiness.yml` before production promotion/deploy.
+7. Push to `main` or `staging`, or use workflow dispatch, to trigger deploy.
 
 ## Operator Ownership
 
 Generated infra files belong to the operator after first emit.
 The generator will not overwrite them on subsequent runs unless `--force-infra` is passed.
 Review the diff carefully before accepting any regenerated infrastructure changes.
+
+Hosted products may consume the generated manifest and map it into provider
+records, secrets, readiness gates, and deployment status. Those hosted records
+and provider adapters stay outside the generated app bundle.
 
 ## MozaiksPay API Key Integration
 

@@ -161,6 +161,30 @@ def test_entitlement_dispatch_contract_uses_capability_based_skip_mechanism() ->
     assert "NOT be included alongside" in cross_pack_notes
 
 
+def test_mozaikspay_contract_declares_subscription_write_path_capability() -> None:
+    contract = _read_yaml("factory_app/build_context/mozaikspay/contract.yaml")
+
+    assert "subscription_write_path" in contract.get("provides_capabilities", []), (
+        "The default MozaiksPay managed pack must declare the generic "
+        "subscription_write_path capability instead of relying on pack-name "
+        "special casing."
+    )
+
+
+def test_app_agnostic_monetization_docs_describe_subscription_write_path_flag() -> None:
+    doc_paths = [
+        "docs/architecture/mozaiksai/monetization-contract.md",
+        "docs/architecture/builder/appgenerator-output-assembly-contract.md",
+        "docs/architecture/app/app-bundle-declaratives.md",
+        "docs/architecture/modules-systems/managed-capability-packs.md",
+    ]
+
+    for doc_path in doc_paths:
+        text = (REPO_ROOT / doc_path).read_text(encoding="utf-8")
+        assert "provides_capabilities" in text, f"{doc_path} must document the pack capability flag."
+        assert "subscription_write_path" in text, f"{doc_path} must document the subscription writer flag."
+
+
 def test_messaging_pack_is_thread_substrate_without_contacts_or_runtime_worker() -> None:
     context = _read_yaml("factory_app/build_context/messaging/context.yaml")
     contract = _read_yaml("factory_app/build_context/messaging/contract.yaml")

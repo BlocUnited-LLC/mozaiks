@@ -36,6 +36,47 @@ service engine.
 | Runtime effects | Provider-neutral commands and runtime enforcement | Verification of the commercial/provider fact |
 | Scanner guards | Forbidden generated output rules | Private implementation inventory and readiness |
 
+## App-Agnostic Contract
+
+Managed capabilities must be app-agnostic at the OSS layer. A pack can be
+recommended by default, but it must not become a runtime requirement or a hidden
+Mozaiks product assumption.
+
+The generic OSS contract is:
+
+- a build-context pack descriptor that declares the capability and output rules
+- app-owned facade modules that pages call through normal module actions
+- thin integration clients under `app/services/integrations/`
+- names-only env and secret handles
+- provider-neutral runtime effects such as `BillingFulfillmentCommand`,
+  `EntitlementPort`, subscription assignment records, and token-wallet debits
+- scanner rules that reject hosted internals, provider SDK leakage, raw secrets,
+  app-local wallet ledgers, and app-local usage ledgers
+
+The selected adapter owns only the external fact source. For monetization, that
+fact could come from MozaiksPay, another hosted operator service, an enterprise
+invoice system, a self-hosted payment adapter, or a test fulfillment command.
+After verification, the effect must cross into OSS through the same
+provider-neutral fulfillment and entitlement boundaries.
+
+This means generated apps should not require a rewrite when the payment adapter
+changes. Replacing the adapter should preserve the app-facing facade actions,
+`config/subscriptions.yaml`, entitlement gates, and token guard behavior.
+
+Pack-level capability flags are the machine-readable part of that boundary.
+For monetization, a managed pack that owns subscription assignment writes must
+declare the following in `contract.yaml`:
+
+```yaml
+provides_capabilities:
+  - subscription_write_path
+```
+
+The factory and generated bundle scanner use this flag to decide whether
+`entitlement_dispatch` is required. The decision is not hardcoded to MozaiksPay:
+any selected `managed_capability` pack can provide the same capability, and no
+non-managed pack can bypass the generated app's self-hosted assignment writer.
+
 ## Pack Shape
 
 Reusable packs live under a named build context:

@@ -734,9 +734,10 @@ def _scan_self_hosted_entitlement_dispatch_contract(
     """Validate the self-hosted entitlement_dispatch module contract.
 
     Fires when config/subscriptions.yaml declares an assignment_store and
-    the mozaikspay managed pack is NOT selected. In that case the generated
-    app owns the subscription assignment write path, and an entitlement_dispatch
-    module is required.
+    no selected managed-capability pack declares provides_capabilities:
+    [subscription_write_path]. In that case the generated app owns the
+    subscription assignment write path, and an entitlement_dispatch module is
+    required.
     """
     # Any managed capability pack that declares provides_capabilities:
     # [subscription_write_path] owns the subscription assignment write path.

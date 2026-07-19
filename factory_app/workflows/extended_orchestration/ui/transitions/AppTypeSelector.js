@@ -36,14 +36,10 @@ const MONETIZATION_SELECTION = {
   allowed_revenue_models: [
     'subscriptions',
     'usage_based',
-    'transactional',
-    'marketplace',
-    'sponsored',
-    'donations',
-    'community_funded',
+    'custom',
     'hybrid',
   ],
-  surfaces: ['pricing', 'checkout', 'billing', 'usage', 'marketplace'],
+  surfaces: ['pricing', 'checkout', 'billing', 'usage'],
   source: 'factory_app_transition',
 };
 

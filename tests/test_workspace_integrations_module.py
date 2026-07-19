@@ -90,7 +90,7 @@ def test_integrations_catalog_orders_payments_after_ai() -> None:
 def test_mozaikspay_catalog_is_default_removable_monetization_integration() -> None:
     spec = CATALOG_BY_ID["mozaikspay"]
     assert spec["category"] == "payments"
-    assert spec["default_for"] == ["monetized_app"]
+    assert spec["default_for"] == ["subscription_or_usage_app"]
     assert spec["removable_default"] is True
     assert set(spec["required_secrets"]) == {
         "MOZAIKSPAY_API_BASE",

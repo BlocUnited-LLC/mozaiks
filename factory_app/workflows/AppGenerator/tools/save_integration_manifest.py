@@ -25,7 +25,9 @@ from factory_app.app.modules.workspace_integrations.backend.schemas import (
 logger = logging.getLogger(__name__)
 
 _VALID_CONNECTOR_STATUSES = frozenset({"ready", "not_configured", "partial"})
-_FREE_REVENUE_MODELS = frozenset({"", "free", "none", "not_monetized", "non_monetized"})
+_CORE_MOZAIKSPAY_REVENUE_MODELS = frozenset(
+    {"subscriptions", "subscription", "usage_based", "usage", "metered", "pay_per_use"}
+)
 _MOZAIKSPAY_REQUIRED_FIELDS = [
     {
         "name": "api_base",
@@ -89,8 +91,8 @@ def _is_truthy(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 
-def _is_monetizable_context(context_variables: Any) -> bool:
-    """Return true when upstream builder state says this app is monetized."""
+def _requires_default_mozaikspay_context(context_variables: Any) -> bool:
+    """Return true when upstream state requires first-class subscription/usage billing."""
     subscription_contract = _context_get(context_variables, "subscription_contract")
     if isinstance(subscription_contract, dict) and bool(subscription_contract.get("contract_required")):
         return True
@@ -98,14 +100,32 @@ def _is_monetizable_context(context_variables: Any) -> bool:
     app_build_plan = _context_get(context_variables, "app_build_plan")
     if isinstance(app_build_plan, dict):
         revenue_model = str(app_build_plan.get("revenue_model") or "").strip().lower()
-        if revenue_model not in _FREE_REVENUE_MODELS:
+        if revenue_model in _CORE_MOZAIKSPAY_REVENUE_MODELS:
             return True
         monetization_plan = app_build_plan.get("monetization_plan")
-        if isinstance(monetization_plan, dict) and monetization_plan:
-            return True
+        if isinstance(monetization_plan, dict):
+            plan_revenue_model = str(monetization_plan.get("revenue_model") or "").strip().lower()
+            if plan_revenue_model in _CORE_MOZAIKSPAY_REVENUE_MODELS:
+                return True
+            requirement = str(monetization_plan.get("subscription_contract_requirement") or "").strip().lower()
+            if requirement == "required":
+                return True
 
-    if _is_truthy(_context_get(context_variables, "monetization_enabled")):
+    subscription_requirement = str(
+        _context_get(context_variables, "subscription_contract_requirement") or ""
+    ).strip().lower()
+    if subscription_requirement == "required":
         return True
+
+    if _is_truthy(_context_get(context_variables, "subscription_contract_required")):
+        return True
+
+    if _is_truthy(_context_get(context_variables, "token_wallet_required")):
+        return True
+
+    if _is_truthy(_context_get(context_variables, "usage_billing_required")):
+        return True
+
     return False
 
 
@@ -114,13 +134,13 @@ def _with_default_mozaikspay_need(
     *,
     context_variables: Any,
 ) -> list[dict[str, Any]]:
-    """Add a removable Mozaiks Pay declaration for monetized apps unless explicit."""
+    """Add a removable Mozaiks Pay declaration for first-class billing unless explicit."""
     normalized_services = {
         str(need.get("service") or need.get("integration_id") or "").strip().lower()
         for need in integration_needs
         if isinstance(need, dict)
     }
-    if "mozaikspay" in normalized_services or not _is_monetizable_context(context_variables):
+    if "mozaikspay" in normalized_services or not _requires_default_mozaikspay_context(context_variables):
         return integration_needs
     return [
         *integration_needs,
@@ -131,8 +151,8 @@ def _with_default_mozaikspay_need(
             "display_name": "Mozaiks Pay",
             "kind": "api_key",
             "purpose": (
-                "Default monetization connector for this app. Remove it from app integrations "
-                "if this app should use a different monetization path."
+                "Default connector for subscription, usage, and token billing. Remove it from "
+                "app integrations if this app should use a different billing path."
             ),
             "required_at": "runtime",
             "optional": True,

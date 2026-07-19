@@ -160,13 +160,23 @@ For SaaS apps that select the `mozaikspay` managed capability, the generated
 app bundle must include the portable SaaS contract, not managed provider
 internals:
 
-- `config/subscriptions.yaml` with token wallets, token allowances, and usage
-  limits
+- `config/subscriptions.yaml` with plans, gates, and only the token wallets,
+  token allowances, top-up products, and usage limits required by the app's AI
+  usage, credit, or quota model
 - `services/integrations/mozaikspay_client.py` as the app-side connector client
 - `modules/billing_portal/` as the app-owned facade module
 - billing and usage pages bound only to `/api/modules/billing_portal/*`
 - no `modules/mozaikspay/`, managed billing module, wallet module, or direct
   provider SDK ownership in the generated app
+
+Managed packs that own subscription assignment writes must declare that through
+`provides_capabilities: [subscription_write_path]` in the pack `contract.yaml`.
+The scanner uses that provider-neutral capability flag to skip
+`entitlement_dispatch`; otherwise any generated app with
+`config/subscriptions.yaml -> assignment_store` must include the
+`entitlement_dispatch` generated module so self-hosted and custom-provider apps
+still have a deterministic assignment writer. This rule is pack-driven and must
+not special-case MozaiksPay in scanner logic.
 
 The deterministic app-bundle acceptance gate enforces this boundary on the
 assembled bundle, not on isolated task output. A selected managed capability

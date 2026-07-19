@@ -22,7 +22,7 @@ To generate the fixture for CI replay:
 
 Validated invariants (fixture replay):
     1. Plan validates with app_build_plan.py without raising.
-    2. No mozaikspay managed_capability pack.
+    2. No managed assignment writer such as the mozaikspay managed_capability pack.
     3. subscription_config task present with config/subscriptions.yaml path.
     4. entitlement_dispatch module_contract task present.
     5. entitlement_dispatch module_contract task owns modules/entitlement_dispatch/module.yaml.
@@ -122,7 +122,7 @@ class TestAppPlanAgentSaasLiveRun:
     Expected output:
         - subscription_config task with config/subscriptions.yaml.
         - entitlement_dispatch module_contract + business_services tasks.
-        - No mozaikspay managed_capability pack.
+        - No managed assignment writer such as the mozaikspay managed_capability pack.
         - Validation: PASSED.
     """
 
@@ -230,7 +230,7 @@ class TestAppPlanAgentSaasFixtureReplay:
         tasks = _get_tasks_by_cap(self.build_tasks, "module_contract", "entitlement_dispatch")
         assert tasks, (
             "Missing module_contract task for entitlement_dispatch. "
-            "AppPlanAgent must include this when assignment_store is declared without mozaikspay."
+            "AppPlanAgent must include this when assignment_store is declared without a managed assignment writer."
         )
 
     def test_entitlement_dispatch_module_contract_owns_module_yaml(self) -> None:

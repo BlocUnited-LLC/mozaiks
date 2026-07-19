@@ -198,18 +198,19 @@ layers:
 
   monetization:
     description: >
-      Revenue and payment capabilities. "Monetized" is only an intent signal;
-      it is not itself a build route. Resolve monetized apps into a declared
-      revenue_model before choosing files, modules, or provider packs. Domain
-      catalogs may suggest likely models, but AppPlanAgent must make the model
-      explicit in AppBuildPlan and explain it from concept/design context.
+      Core OSS monetization capabilities. "Monetized" is only an intent signal;
+      it is not itself a build route. Resolve monetized apps into one of the
+      small first-class OSS routes before choosing files, modules, or provider
+      packs: free, subscriptions, usage_based, custom, or hybrid.
 
       Subscription contracts are required only when the app sells recurring
-      access, gated features, seats, quotas, credits, or token allowances. Apps
-      that only sell products, collect one-time payments, process marketplace
-      orders, accept tips, sell ads, or run sponsored placement flows should use
-      the relevant commerce/operator route and must not create
-      config/subscriptions.yaml unless they also sell app access tiers or quotas.
+      access, gated features, seats, quotas, credits, token wallets, or token
+      allowances. Apps that only sell products, collect one-time payments,
+      process marketplace orders, accept contributions, sell ads, run paid
+      placement flows, or handle campaign funding should use custom app/operator modules,
+      policy hooks, managed facades, or external adapters and must not create
+      config/subscriptions.yaml unless they also sell app access tiers, quotas,
+      credits, token wallets, or token allowances.
     entries:
       - revenue_model: free
         capability_pack: none
@@ -289,147 +290,56 @@ layers:
           as the metering primitive. The generated app declares meter_id on usage
           actions; the platform tracks running totals.
 
-      - revenue_model: transactional
-        capability_pack: commerce
-        capability_kind: operator_pack
+      - revenue_model: custom
+        capability_pack: custom_owned
+        capability_kind: custom_owned_or_managed_capability
         subscription_contract: not_required
         aliases:
           - one_time_purchase
         use_when: >
-          The app sells products, bookings, downloads, services, events,
-          invoices, or other one-time purchases. Product/order/cart state belongs
-          to the app's commerce module; payment provider mechanics stay in the
-          selected checkout pack.
+          The app has a money flow outside the first-class OSS subscription and
+          usage runtime: ecommerce, bookings, paid downloads, invoices, event
+          tickets, marketplace, sponsorship, contributions, campaign funding,
+          revenue-share, commissions, payout policy, or any other
+          app/operator-specific commercial behavior.
         build_tasks_required:
-          - module_id: commerce
-            archetype: billing
+          - module_id: custom_monetization
+            archetype: standard
             surface_kind: module
             notes: >
-              Product catalog, cart/order lifecycle, inventory when relevant,
-              and a start_checkout facade. checkout.session.completed or the
-              host checkout callback marks purchase fulfillment.
-          - surface_kind: page
-            page_type: checkout_success
-            route: /checkout/success
-            notes: Post-purchase confirmation page.
+              Generate the product/domain records and app-owned action facade
+              needed for the requested money flow, or select an available domain
+              pack such as commerce. Do not implement provider mechanics,
+              settlement, payout logic, or hosted-product policy inside OSS.
         operator_pack_note: >
-          When mozaikspay or another checkout pack is available in
-          capability_packs, generate only the app-specific commerce facade:
-          product/order/cart state → create_checkout_session → success page.
-          Never regenerate payment provider internals or raw provider credential handling.
-
-      - revenue_model: marketplace
-        capability_pack: marketplace
-        capability_kind: operator_or_custom_owned
-        subscription_contract: conditional
-        use_when: >
-          The app connects buyers and sellers, creators and customers, service
-          providers and clients, or other multi-party transactions with
-          commissions, seller onboarding, escrow-like holds, payouts, disputes,
-          or platform fees.
-        build_tasks_required:
-          - module_id: marketplace
-            archetype: billing
-            surface_kind: module
-            notes: >
-              Listing discovery, seller profile boundaries, order/offer records,
-              platform fee metadata, payout state, and provider-neutral payment
-              facades. If no marketplace operator pack exists, route as
-              custom_owned with declared interfaces only.
-        operator_pack_note: >
-          Use config/subscriptions.yaml only when sellers or buyers also buy
-          access tiers, listing quotas, premium tools, or AI credits. Do not use
-          subscriptions.yaml to model individual order ownership, payouts,
-          commissions, or settlement.
-
-      - revenue_model: sponsored
-        capability_pack: sponsored_placements
-        capability_kind: operator_or_custom_owned
-        subscription_contract: not_required
-        aliases:
-          - advertising
-          - paid_placement
-        use_when: >
-          The app sells sponsored listings, promoted content, ad slots, boosted
-          placement, campaign budgets, creator promotions, or marketing packages.
-        build_tasks_required:
-          - module_id: placements
-            archetype: billing
-            surface_kind: module
-            notes: >
-              Placement inventory, campaign windows, budget/intake records,
-              review status, and performance readouts. Provider-specific ad
-              networks and settlement stay in app-owned/operator adapters.
-        operator_pack_note: >
-          Sponsored placement is not a generic subscription contract. Add
-          subscriptions only if the app also sells recurring platform access or
-          placement-plan tiers.
-
-      - revenue_model: donations
-        capability_pack: donations
-        capability_kind: operator_or_custom_owned
-        subscription_contract: conditional
-        use_when: >
-          The app accepts tips, donations, patron support, pledges, or optional
-          contributions without a mandatory purchase or product fulfillment.
-        build_tasks_required:
-          - module_id: contributions
-            archetype: billing
-            surface_kind: module
-            notes: >
-              Contribution intent records, supporter-visible receipts/status,
-              and checkout facade. Recurring memberships may additionally route
-              to subscriptions.
-
-      - revenue_model: community_funded
-        capability_pack: investor_marketplace
-        capability_kind: operator_pack
-        subscription_contract: conditional
-        use_when: >
-          The app has campaign-style funding windows, community backing,
-          milestone-based commitments, creator/founder campaigns, or other
-          contribution pools whose business meaning is not normal product
-          checkout. This is usually host/app-specific policy, not a generic OSS
-          subscription primitive.
-        build_tasks_required:
-          - module_id: campaign
-            archetype: workflow
-            surface_kind: module
-            notes: >
-              Campaign listing, contribution tracking, goal progress.
-              Investor interest expressions backed by investor_marketplace.
-          - surface_kind: page
-            page_type: gallery
-            route: /campaigns
-            notes: Campaign discovery and contribution page.
-        operator_pack_note: >
-          When investor_marketplace is available in capability_packs, the
-          generated app wires campaign events to the marketplace listing flow.
-          Campaign backing, campaign returns, investment-like terms, settlement,
-          and regulatory policy are not OSS first-class primitives. Use
-          app-owned/operator modules. Add config/subscriptions.yaml only when
-          the same app also sells recurring access, quotas, seats, or credits.
+          If an appropriate operator or managed-capability pack is selected, use
+          only its public facade/client contract. Otherwise generate app-owned
+          module interfaces and policy hooks. A custom money flow can call a
+          checkout facade, but payment provider mechanics, payout rules,
+          settlement, campaign terms, and revenue-share policy remain outside
+          first-class OSS monetization.
 
       - revenue_model: hybrid
         capability_pack: mixed
         capability_kind: composite
         subscription_contract: conditional
         use_when: >
-          The app combines multiple revenue models, such as SaaS access plus
-          ecommerce, marketplace commercial policy plus seller subscriptions,
-          or usage credits plus sponsored placements.
+          The app combines a first-class OSS route with a custom money flow,
+          such as SaaS access plus ecommerce, usage credits plus marketplace
+          features, or token allowances plus app/operator-specific checkout.
         build_tasks_required:
           - surface_kind: control_plane
             notes: >
-              Split each money flow into its own capability route. Generate one
-              config/subscriptions.yaml only for the access/quota/credit portion;
-              keep transaction/order/payout/campaign records in their owning
-              modules.
+              Split each route into its owning capability boundary. Generate one
+              config/subscriptions.yaml only for the access/quota/credit/token
+              portion; keep custom money-flow records and policy in their owning
+              app/operator modules.
 
     rule: >
       For any app with monetization_enabled=true or builder_options.monetization.enabled=true:
         1. Treat monetized as "revenue model unresolved" until AppPlanAgent sets
-           AppBuildPlan.revenue_model to a concrete value from this taxonomy.
+           AppBuildPlan.revenue_model to free, subscriptions, usage_based,
+           custom, or hybrid.
         2. Declare the corresponding capability_pack in AppBuildPlan.capability_packs.
         3. Include the required build_tasks in AppBuildPlan.build_tasks.
         4. Set revenue_model in AppBuildPlan so downstream agents enforce contracts.
@@ -437,8 +347,8 @@ layers:
            true only for subscriptions, plan gates, seats, quotas, credits, token
            allowances, or usage budgets that need the OSS subscription runtime.
         6. If the operator pack is not available in context capability_packs,
-           declare the billing/commerce/marketplace module as custom_owned with
-           the same interface contract instead of inventing provider internals.
+           declare the app-specific module as custom_owned with the same
+           interface contract instead of inventing provider internals.
         7. For SaaS subscriptions, paid tiers, seats, credits, usage limits, or
            billing portal requests, prioritize the managed mozaikspay capability pack
            when it is available and the user has not explicitly requested a different

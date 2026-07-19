@@ -40,6 +40,25 @@ def test_production_readiness_gate_includes_core_offline_targets() -> None:
     assert "tests/test_module_executor_permission_enforcement.py" in targets
 
 
+def test_production_readiness_gate_includes_core_monetization_targets() -> None:
+    gate = _load_gate_module()
+
+    expected = {
+        "tests/test_monetization_taxonomy.py",
+        "tests/test_appgenerator_integration_manifest.py",
+        "tests/test_workspace_integrations_module.py",
+        "tests/test_appgenerator_capability_pack_selection.py",
+        "tests/test_generated_bundle_scanner.py",
+        "tests/test_mozaikspay_managed_capability_contract.py",
+        "tests/test_managed_capability_artifact_replay.py",
+        "tests/test_generated_saas_subscription_runtime_acceptance.py",
+    }
+
+    assert set(gate.CORE_MONETIZATION_GATE_TARGETS) == expected
+    assert expected <= set(gate.PYTEST_GATE_TARGETS)
+    assert expected <= set(gate.QUICK_PYTEST_TARGETS)
+
+
 def test_production_readiness_gate_can_list_without_running() -> None:
     gate = _load_gate_module()
 

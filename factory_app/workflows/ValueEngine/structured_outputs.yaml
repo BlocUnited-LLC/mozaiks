@@ -119,21 +119,24 @@ models:
   MonetizationIntentHint:
     type: model
     description: >
-      Advisory concept-level monetization taxonomy. This is not a final build
-      contract; AppGenerator resolves the final revenue_model and
+      Advisory concept-level monetization hint. This is not a final build
+      contract; AppGenerator resolves the final core OSS revenue_model and
       SubscriptionContractDesigner decides whether config/subscriptions.yaml is
       required.
     fields:
       monetized:
         type: bool
-        description: True when the concept has any revenue, payment, contribution, sponsored, or paid-access flow.
+        description: True when the concept has any paid access, usage, token, checkout, contribution, or other money-flow surface.
       likely_revenue_models:
         type: optional_list
         items: str
         description: >
-          Candidate models from the OSS taxonomy: subscriptions, usage_based,
-          transactional, marketplace, sponsored, donations, community_funded,
-          or hybrid. Use free or an empty list when no revenue flow is implied.
+          Candidate core OSS models: subscriptions, usage_based, custom, or
+          hybrid. Use custom for ecommerce, marketplace, sponsorship,
+          contributions,
+          campaign funding, revenue-share, or any money-flow policy outside the
+          OSS subscription/token runtime. Use free or an empty list when no
+          money flow is implied.
       subscription_contract_likely:
         type: bool
         description: >
@@ -228,9 +231,9 @@ models:
         description: >
           Advisory revenue-model signal for downstream planning. Set this when
           monetization_enabled is true or the concept itself mentions payment,
-          subscription, usage credits, checkout, marketplace commercial policy,
-          sponsored placement, donations, or community funding. Use null when no revenue
-          flow is implied.
+          subscription, usage credits, checkout, marketplace, sponsorship,
+          contributions, campaign funding, or revenue-share. Use null when no
+          money flow is implied.
       surface_candidate_hints:
         type: optional_list
         items: SurfaceCandidateHint

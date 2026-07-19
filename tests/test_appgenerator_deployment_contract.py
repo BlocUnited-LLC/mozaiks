@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
+from factory_app.workflows.AppGenerator.tools.render_infra_scaffold import save_infra_scaffold
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     _default_ci_secret_requirements,
     _render_workflow,
@@ -96,6 +98,46 @@ def test_generate_artifacts_include_workflow_when_requested() -> None:
     artifacts = result["artifacts"]
 
     assert ".github/workflows/deploy.yml" in artifacts
+    assert ".github/workflows/readiness.yml" in artifacts
+
+
+def test_deployment_manifest_links_readiness_workflow_when_emitted() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=True,
+        include_compose=False,
+    )
+    manifest = result["deployment_manifest"]
+
+    assert manifest["ci_workflow"] == ".github/workflows/deploy.yml"
+    assert manifest["readiness_workflow"] == ".github/workflows/readiness.yml"
+    assert ".github/workflows/readiness.yml" in manifest["generated_files"]
+
+
+def test_generated_readiness_workflow_is_environment_staging_gate() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=True,
+        include_compose=False,
+        auth_required=True,
+    )
+    workflow = result["artifacts"][".github/workflows/readiness.yml"]
+
+    assert "environment: staging" in workflow
+    assert "Artifact review staging happens inside Mozaiks/Studio" in workflow
+    assert "Validate readiness contract" in workflow
+    assert "docker build -t generated-app:readiness ." in workflow
+    assert "APP_IMAGE_SMOKE_VERIFIED_AT.txt" in workflow
+    assert "APP_HEALTHCHECK_VERIFIED_AT.txt" in workflow
+    assert "APP_AUTH_SMOKE_VERIFIED_AT" in workflow
+    assert "${{ secrets.OPENAI_API_KEY }}" in workflow
+    assert "${{ secrets.MONGO_URI }}" in workflow
+    assert "AZURE_SUBSCRIPTION_ID" not in workflow
+    assert "MOZAIKSPAY" not in workflow
 
 
 def test_env_example_contains_placeholders_not_secrets() -> None:
@@ -459,6 +501,9 @@ def test_appgenerator_guidance_mentions_provider_neutral_target_profiles() -> No
     assert "provider-owned adapters" in source
     assert "deployment_profile" in source
     assert "ci_secret_requirements" in source
+    assert ".github/workflows/readiness.yml" in source
+    assert "ArtifactVersion promotion" in source
+    assert "environment staging" in source
 
 
 def test_self_host_docker_compose_path_is_documented() -> None:
@@ -467,6 +512,9 @@ def test_self_host_docker_compose_path_is_documented() -> None:
     assert "local Docker" in source
     assert "local Compose" in source
     assert "ci_secret_requirements" in source
+    assert ".github/workflows/readiness.yml" in source
+    assert "Artifact review staging" in source
+    assert "Environment staging" in source
     assert "app.json.authRequired" in source
     assert "auth.required=true" in source
     assert "APP_AUTH_SMOKE_VERIFIED_AT" in source
@@ -635,6 +683,22 @@ def test_generated_workflow_has_staging_environment_on_build_job() -> None:
     )
     workflow = result["artifacts"][".github/workflows/deploy.yml"]
     assert "environment: staging" in workflow
+
+
+def test_infra_scaffold_emits_readiness_workflow_from_documented_template() -> None:
+    result = asyncio.run(
+        save_infra_scaffold(
+            emit_infra=True,
+            emit_auth_adapter=False,
+            context_variables={"app_slug": "Demo App"},
+        )
+    )
+    files = {item["filename"]: item["content"] for item in result["code_files"]}
+
+    assert ".github/workflows/readiness.yml" in files
+    assert ".github/workflows/deploy.yml" in files
+    assert "environment staging" in files[".github/workflows/readiness.yml"].lower()
+    assert "artifact review staging" in files[".github/workflows/readiness.yml"].lower()
 
 
 def test_generated_workflow_has_production_environment_on_deploy_job() -> None:

@@ -2,6 +2,8 @@
 # ============================================================================
 # {{APP_NAME}} — Deploy workflow
 # Template variables: {{APP_NAME}}, {{REGISTRY}}, {{DEPLOY_TARGET}}
+# Environment names such as staging/production belong to the operator or host.
+# They are separate from Mozaiks artifact review staging and promotion.
 # ============================================================================
 name: Deploy
 

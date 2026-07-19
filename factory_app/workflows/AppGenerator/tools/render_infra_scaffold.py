@@ -23,11 +23,13 @@ _BUILD_CONTEXT_DIR = _FACTORY_APP_DIR / "build_context"
 _INFRA_TEMPLATES_DIR = _BUILD_CONTEXT_DIR / "infra" / "templates"
 _WEBAPP_BUILDER_TEMPLATES_DIR = _BUILD_CONTEXT_DIR / "webapp_builder" / "templates"
 
-# Infra template files → output path in the generated bundle.
-# Source paths mirror the output paths under templates/.
+# Infra template files -> output path in the generated bundle.
+# Workflow templates live under templates/workflows/ and are emitted into the
+# GitHub workflow directory for app operators to customize.
 _INFRA_TEMPLATES: list[tuple[Path, str]] = [
     (_INFRA_TEMPLATES_DIR / "Dockerfile", "Dockerfile"),
-    (_INFRA_TEMPLATES_DIR / ".github" / "workflows" / "deploy.yml", ".github/workflows/deploy.yml"),
+    (_INFRA_TEMPLATES_DIR / "workflows" / "readiness.yml", ".github/workflows/readiness.yml"),
+    (_INFRA_TEMPLATES_DIR / "workflows" / "deploy.yml", ".github/workflows/deploy.yml"),
     (_INFRA_TEMPLATES_DIR / "scripts" / "provision.sh", "scripts/provision.sh"),
 ]
 

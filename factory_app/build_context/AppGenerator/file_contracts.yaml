@@ -78,15 +78,16 @@ task_contracts:
     owner_agent: InfraScaffoldAgent
     summary: >
       Deployment infrastructure scaffold emitted once at app generation time.
-      Includes Dockerfile, CI/CD workflow, and provision script derived from
-      the factory_app/build_context/infra/ templates. After first emit the
+      Includes Dockerfile, readiness workflow, deploy workflow, and provision
+      script derived from the factory_app/build_context/infra/ templates.
+      After first emit the
       operator owns these files; regeneration is explicit and opt-in.
     required_outputs:
       - Dockerfile
+      - .github/workflows/readiness.yml
       - .github/workflows/deploy.yml
       - scripts/provision.sh
     optional_outputs:
-      - .github/workflows/readiness.yml
       - .env.example
     hard_constraints:
       - Emit once; do not overwrite on routine regeneration. Skip if Dockerfile already exists in the output directory unless --force-infra is passed.
@@ -95,6 +96,7 @@ task_contracts:
       - provision.sh must read required secret names from app/security/secrets.yaml and validate all required secrets are present before syncing.
       - .env.example must list all names from app/security/secrets.yaml with placeholder values only; never emit real secret values.
       - Do not emit VITE_ env var values (OIDC URLs, redirect URIs) into committed files; they are environment-specific and supplied at build time as Docker build args and GitHub secrets.
+      - Use "artifact review staging" for generated/refined files awaiting review and "environment staging" for deploy/readiness targets such as GitHub environments or cloud preview instances.
       - Replace all template variables ({{APP_NAME}}, {{MOZAIKS_VERSION}}, {{OIDC_CLIENT_ID}}, {{REGISTRY}}, {{DEPLOY_TARGET}}) with values from the app context before emitting.
       - Deploy target defaults to azure_container_apps; stubs for fly and render must be present as inline comments in deploy.yml.
 

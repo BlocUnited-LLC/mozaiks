@@ -678,3 +678,18 @@ def test_scan_generated_bundle_requires_entitlement_dispatch_when_no_managed_sub
     )
     assert any("entitlement_dispatch" in error for error in errors)
     assert any("assignment_store" in error for error in errors)
+
+
+def test_scan_generated_bundle_does_not_skip_entitlement_dispatch_for_non_managed_subscription_writer() -> None:
+    """Only selected managed_capability packs can own the subscription write path."""
+    errors = scan_generated_bundle(
+        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML},
+        capability_packs=[{
+            "id": "custombilling",
+            "capability_source": "operator_pack",
+            "provides_capabilities": ["subscription_write_path"],
+        }],
+    )
+
+    assert any("entitlement_dispatch" in error for error in errors)
+    assert any("assignment_store" in error for error in errors)

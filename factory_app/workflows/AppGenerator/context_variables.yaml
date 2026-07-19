@@ -464,14 +464,13 @@ definitions:
   revenue_model:
     type: string
     description: >
-      Revenue model for the app being built. Determines which billing modules,
-      entitlement gates, payment surfaces, and plan catalog artifacts are included
-      in the build plan. "Monetized" is not a valid final model; it must resolve
-      to one of the concrete money-flow models.
-      Valid values: free | subscriptions | usage_based | transactional |
-      marketplace | sponsored | donations | community_funded | hybrid.
+      Core OSS monetization route for the app being built. Determines whether
+      subscription contracts, entitlement gates, token wallets, usage meters,
+      and plan catalog artifacts are included in the build plan. "Monetized" is
+      not a valid final model; it must resolve to a concrete route.
+      Valid values: free | subscriptions | usage_based | custom | hybrid.
       Aliased values are mapped: pay_per_use -> usage_based and
-      one_time_purchase -> transactional.
+      one_time_purchase -> custom.
     source:
       type: state
       default: free
