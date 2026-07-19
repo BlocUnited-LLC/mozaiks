@@ -16,6 +16,21 @@ The contract answers "how does this generated app run?" It does not answer
 mutate infrastructure?" Hosted products convert the contract into their own
 records, approvals, provider calls, and status surfaces.
 
+## Staging Terminology
+
+Use these terms precisely:
+
+- **Artifact review staging** is the Mozaiks/Studio control-plane stage where
+  generated or refined files are held for validation, review, `ArtifactVersion`
+  acceptance, and explicit promotion into an app workspace.
+- **Environment staging** is an operator or hosted deployment target used to
+  prove a promoted/exported app before production, for example a GitHub
+  `staging` environment, preview container, or hosted staging URL.
+
+Generated deployment artifacts may include environment-staging workflows, but
+they do not replace artifact review staging. Generation remains non-mutating;
+promotion remains explicit.
+
 ## Production Boundary
 
 Generated apps use a repo-per-app (workspace-per-app) boundary.
@@ -50,6 +65,7 @@ Required shape:
   - `Dockerfile` (optional)
   - `docker-compose.yml` (optional)
   - `.github/workflows/deploy.yml` (optional)
+  - `.github/workflows/readiness.yml` (optional when workflow artifacts are emitted)
   - `env.example`
   - `deployment.manifest.json`
 - `environment`
@@ -99,6 +115,7 @@ Required shape:
 - `exposed_ports`
 - `healthcheck`
 - `ci_workflow`
+- `readiness_workflow` (optional)
 - `ci_secret_requirements` (optional)
 - `readiness_requirements`
 - `dockerfile`
@@ -250,6 +267,7 @@ When deployment artifacts are requested by scaffold/export flags, AppGenerator e
 - `Dockerfile` (optional)
 - `docker-compose.yml` (optional)
 - `.github/workflows/deploy.yml` (optional)
+- `.github/workflows/readiness.yml` (optional when workflow artifacts are emitted)
 - `env.example`
 - `deployment.manifest.json`
 
@@ -285,6 +303,7 @@ OSS AppGenerator emits and validates:
 - provider-neutral build output handoff contract
 - names-only CI workflow secret requirements contract
 - provider-neutral readiness requirements contract
+- optional readiness workflow scaffolding for environment-staging proof
 
 Adapter layers outside AppGenerator handle:
 
@@ -294,6 +313,7 @@ Adapter layers outside AppGenerator handle:
 - secret delivery and rotation
 - persistence of build outputs in host deployment records
 - mapping names-only CI secret requirements to provider-specific secret stores
+- mapping generated readiness requirements into hosted staging gates
 - async deployment status polling (see below)
 
 ### Async Provider Deployment Status
@@ -327,10 +347,9 @@ Rules:
    The hosted module must handle both synchronous and asynchronous adapters uniformly.
 
 For Mozaiks-hosted apps, the generated bundle may include `Dockerfile`,
-`env.example`, `.github/workflows/deploy.yml`, and
-`deployment.manifest.json`, but it must not include hosted product provider adapters
-such as DNS, registrar, cloud deployment, wallet, billing, or hosted
-policy implementations. The hosted product owns those adapters and consumes the
+`env.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`,
+and `deployment.manifest.json`, but it must not include hosted product provider adapters
+such as DNS, registrar, cloud deployment, wallet, billing, or hosted policy implementations. The hosted product owns those adapters and consumes the
 generated contract through platform records/APIs.
 
 ## E2B Role
