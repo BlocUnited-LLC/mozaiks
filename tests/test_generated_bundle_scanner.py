@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     generate_deployment_artifacts,
 )
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+
+_WORKSPACE = Path(__file__).resolve().parents[1]
+_MOZAIKSPAY_PACK_ROOT = _WORKSPACE / "factory_app" / "build_context" / "mozaikspay"
 
 
 def _data_contract(*, module_id: str = "tickets") -> str:
@@ -342,12 +346,16 @@ def test_scan_generated_bundle_rejects_direct_hosted_internal_calls() -> None:
             "modules/billing_portal/backend/service.py": (
                 'endpoint = "/api/modules/mozaikspay/create_checkout_session"\n'
                 'other = "/api/modules/managed_billing/assign_plan"\n'
+                'hosted = "/api/modules/hosted_billing/assign_plan"\n'
+                'keys = "/api/modules/mozaikspay_api_keys/issue_key"\n'
             ),
         }
     )
 
     assert any("hosted managed-capability internals" in error for error in errors)
     assert any("/api/modules/mozaikspay/create_checkout_session" in error for error in errors)
+    assert any("/api/modules/hosted_billing/assign_plan" in error for error in errors)
+    assert any("/api/modules/mozaikspay_api_keys/issue_key" in error for error in errors)
 
 
 def test_scan_generated_bundle_allows_managed_refund_adapter_call() -> None:
@@ -385,6 +393,44 @@ def test_scan_generated_bundle_rejects_selected_managed_capability_internals() -
     )
 
     assert any("must not generate provider internals" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_inline_pack_forbidden_output_prefixes() -> None:
+    errors = scan_generated_bundle(
+        {
+            "services/integrations/testpay_client.py": "class TestPayClient: pass\n",
+            "modules/provider_ledger/module.yaml": "module:\n  id: provider_ledger\n",
+        },
+        capability_packs=[
+            {
+                "id": "testpay",
+                "capability_source": "managed_capability",
+                "forbidden_outputs": [{"path_prefix": "modules/provider_ledger/"}],
+            }
+        ],
+    )
+
+    assert any("forbidden output prefixes" in error for error in errors)
+    assert any("modules/provider_ledger/module.yaml" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_mozaikspay_contract_forbidden_output_prefixes() -> None:
+    errors = scan_generated_bundle(
+        {
+            "services/integrations/mozaikspay_client.py": "class MozaiksPayClient: pass\n",
+            "modules/wallet/module.yaml": "module:\n  id: wallet\n",
+        },
+        capability_packs=[
+            {
+                "id": "mozaikspay",
+                "capability_source": "managed_capability",
+                "pack_source_path": str(_MOZAIKSPAY_PACK_ROOT),
+            }
+        ],
+    )
+
+    assert any("forbidden output prefixes" in error for error in errors)
+    assert any("modules/wallet/module.yaml" in error for error in errors)
 
 
 def test_scan_generated_bundle_rejects_page_binding_to_selected_managed_capability() -> None:

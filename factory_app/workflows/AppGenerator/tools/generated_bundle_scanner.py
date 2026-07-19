@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -55,7 +55,7 @@ _PAYMENT_PROVIDER_REFUND_CALL_RE = re.compile(
 )
 _PAYMENT_PROVIDER_REFUNDS_ENDPOINT_RE = re.compile(r"['\"]?/refunds\b")
 _HOSTED_INTERNAL_ENDPOINT_RE = re.compile(
-    r"['\"]?(/api/modules/(?:mozaikspay|managed_billing|wallet)/[^'\"\s)]*)",
+    r"['\"]?(/api/modules/(?:mozaikspay(?:_[A-Za-z0-9_]+)?|managed_billing|hosted_billing|wallet)/[^'\"\s)]*)",
     re.IGNORECASE,
 )
 _APP_LOCAL_LEDGER_PATH_RE = re.compile(
@@ -331,6 +331,48 @@ def _selected_pack_descriptor(
     return None
 
 
+def _normalized_forbidden_output_prefix(value: Any) -> str:
+    raw = value
+    if isinstance(value, dict):
+        raw = value.get("path_prefix") or value.get("path") or ""
+    prefix = _normalized_path(str(raw or "")).lstrip("/")
+    if prefix.startswith("app/"):
+        prefix = prefix.removeprefix("app/")
+    return prefix.rstrip("/")
+
+
+def _forbidden_output_prefixes_from_pack(pack: dict[str, Any]) -> list[str]:
+    prefixes: list[str] = []
+
+    def add_many(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            prefix = _normalized_forbidden_output_prefix(item)
+            if prefix and prefix not in prefixes:
+                prefixes.append(prefix)
+
+    add_many(pack.get("forbidden_outputs"))
+
+    raw_source_path = str(pack.get("pack_source_path") or "").strip()
+    if raw_source_path:
+        contract_path = Path(raw_source_path) / "contract.yaml"
+        try:
+            contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            contract = {}
+        if isinstance(contract, dict):
+            add_many(contract.get("forbidden_outputs"))
+
+    return sorted(prefixes)
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    normalized_path = _normalized_path(path).rstrip("/")
+    normalized_prefix = _normalized_path(prefix).rstrip("/")
+    return normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
+
+
 def _iter_api_endpoint_literals(content: str) -> list[str]:
     return re.findall(r'["\'](/api/modules/[^"\']+)["\']', content)
 
@@ -347,6 +389,21 @@ def _scan_selected_managed_capability_boundaries(
     normalized_files = _normalized_files_map(files_map)
     errors: list[str] = []
     for pack_id in sorted(managed_capability_ids):
+        pack = _selected_pack_descriptor(capability_packs, pack_id) or {"id": pack_id}
+        forbidden_prefixes = _forbidden_output_prefixes_from_pack(pack)
+        forbidden_output_paths = {
+            path
+            for path in normalized_files
+            for prefix in forbidden_prefixes
+            if _path_matches_prefix(path, prefix)
+        }
+        if forbidden_output_paths:
+            errors.append(
+                f"Selected managed capability '{pack_id}' declares forbidden output prefixes "
+                f"{forbidden_prefixes}; generated bundle contains forbidden paths: "
+                f"{sorted(forbidden_output_paths)}."
+            )
+
         managed_capability_module_prefix = f"modules/{pack_id}/"
         managed_capability_module_paths = [
             path for path in normalized_files if path.startswith(managed_capability_module_prefix)

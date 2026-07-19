@@ -208,8 +208,11 @@ Generated bundle scanners should reject managed-capability leakage:
 - provider customer/account IDs in generated config
 - raw secrets in source, config, deployment artifacts, or docs
 
-Scanner rules should be derived from pack `forbidden_outputs` and known
-managed-service path patterns.
+Scanner rules are contract driven. A selected managed capability pack may
+declare `forbidden_outputs` either on the pack descriptor or in its
+`contract.yaml`; those path prefixes are enforced by the generated bundle
+scanner. Shared scanner rules also block known managed-service route patterns
+such as direct `/api/modules/{hosted_internal}/...` calls.
 
 ## Decision Checklist
 

@@ -296,7 +296,7 @@ agents:
           write path. In that case, also plan an `entitlement_dispatch` module
           task set alongside the other module tasks:
           - one `data_migrations` task: `capability_pack_id: "entitlement_dispatch"`,
-            `surface_kind: "data_migrations"`, `initial_agent: "DatabaseAgent"`,
+            `surface_kind: "module"`, `initial_agent: "DatabaseAgent"`,
             `owned_paths: ["data/migrations/001_entitlement_dispatch_collections.json"]`.
             This migration declares the `billing.subscriptions` data alias with
             `mongo_collection: "entitlement_dispatch_subscriptions"`. It must run
@@ -313,7 +313,7 @@ agents:
             the assignment_store collection so `ConfiguredEntitlementAdapter`
             can grant capabilities for the plan) and `deactivate_subscription`
             (marks the record inactive). No `entitlement_gate`, no `permissions`,
-            `capabilities: []`, `type: internal_system`, `visibility: private`.
+            `capabilities: []`, `type: entitlement_dispatch`, `visibility: private`.
           - one `business_services` task: `capability_pack_id: "entitlement_dispatch"`,
             `initial_agent: "ServiceAgent"`, `owned_paths:
             ["modules/entitlement_dispatch/backend/handler.py",

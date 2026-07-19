@@ -873,9 +873,113 @@ def build_acceptance_files(subscription_yaml: str, module_yaml: str) -> dict[str
             """
         ).strip() + "\n",
         "modules/reports/module.yaml": module_yaml,
+        "modules/entitlement_dispatch/module.yaml": textwrap.dedent(
+            """
+            schema_version: mozaiks.module.v1
+            module:
+              id: entitlement_dispatch
+              display_name: Entitlement Dispatch
+              version: 1.0.0
+              description: >
+                Write-side partner for ConfiguredEntitlementAdapter. Activates and
+                deactivates subscription assignment records in the billing.subscriptions
+                collection so the runtime entitlement gate can enforce plan-based
+                capability access on module actions.
+              owner: app
+              visibility: private
+              type: entitlement_dispatch
+              handler: backend.handler:EntitlementDispatchHandler
+
+            permissions: []
+
+            actions:
+              - id: activate_subscription
+                description: Write an active subscription assignment record.
+                handler_method: activate_subscription
+                input_schema:
+                  type: object
+                  required: [user_id, plan_id]
+                  properties:
+                    user_id: {type: string}
+                    plan_id: {type: string}
+                output_schema:
+                  type: object
+                  required: [activated]
+                  properties:
+                    activated: {type: boolean}
+
+              - id: deactivate_subscription
+                description: Mark the active subscription assignment as cancelled.
+                handler_method: deactivate_subscription
+                input_schema:
+                  type: object
+                  required: [user_id]
+                  properties:
+                    user_id: {type: string}
+                output_schema:
+                  type: object
+                  required: [deactivated]
+                  properties:
+                    deactivated: {type: boolean}
+
+            capabilities: []
+            """
+        ).strip() + "\n",
     }
     files.update(_backend_files(module_yaml))
+    files.update(_entitlement_dispatch_backend_files())
     return files
+
+
+def _entitlement_dispatch_backend_files() -> dict[str, str]:
+    """Minimal entitlement_dispatch backend stubs for smoke bundle validation."""
+    return {
+        "modules/entitlement_dispatch/backend/__init__.py": "",
+        "modules/entitlement_dispatch/backend/handler.py": textwrap.dedent(
+            """
+            from .service import EntitlementDispatchService
+
+
+            class EntitlementDispatchHandler:
+                def __init__(self):
+                    self.service = EntitlementDispatchService()
+
+                async def activate_subscription(self, ctx, **kwargs):
+                    return await self.service.activate_subscription(ctx, **kwargs)
+
+                async def deactivate_subscription(self, ctx, **kwargs):
+                    return await self.service.deactivate_subscription(ctx, **kwargs)
+            """
+        ).strip() + "\n",
+        "modules/entitlement_dispatch/backend/service.py": textwrap.dedent(
+            """
+            from .repo import EntitlementDispatchRepo
+
+
+            class EntitlementDispatchService:
+                def __init__(self):
+                    self.repo = EntitlementDispatchRepo()
+
+                async def activate_subscription(self, ctx, *, user_id, plan_id, **kwargs):
+                    await self.repo.activate(ctx, user_id=user_id, plan_id=plan_id)
+                    return {"activated": True, "plan_id": plan_id}
+
+                async def deactivate_subscription(self, ctx, *, user_id, plan_id=None, **kwargs):
+                    deactivated = await self.repo.deactivate(ctx, user_id=user_id, plan_id=plan_id)
+                    return {"deactivated": deactivated}
+            """
+        ).strip() + "\n",
+        "modules/entitlement_dispatch/backend/repo.py": textwrap.dedent(
+            """
+            class EntitlementDispatchRepo:
+                async def activate(self, ctx, *, user_id, plan_id, **kwargs):
+                    return None
+
+                async def deactivate(self, ctx, *, user_id, plan_id=None):
+                    return True
+            """
+        ).strip() + "\n",
+    }
 
 
 def _write_files(root: Path, files: dict[str, str]) -> None:

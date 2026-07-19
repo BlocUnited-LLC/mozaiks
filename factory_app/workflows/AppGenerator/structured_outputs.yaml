@@ -705,6 +705,7 @@ models:
         - service_foundation
         - module_contract
         - persistence_contract
+        - data_migrations
         - data_models
         - business_services
         - api_surface
@@ -728,6 +729,12 @@ models:
           `business_services` emits module backend implementation files such as
           handler.py, service.py, repo.py, policy.py, and declared hooks; it must
           start at ServiceAgent and must not own schemas.py in task-batch execution.
+          `data_migrations` emits additive data migration JSON files under
+          data/migrations/. Must start at DatabaseAgent and must declare
+          capability_pack_id. owned_paths must only contain data/migrations/*.json
+          files. Use this for capability-pack-owned collection and alias declarations
+          that extend the app data contract (e.g. entitlement_dispatch collections).
+          Use surface_kind=module for these tasks (not a separate surface_kind).
           `service_foundation` emits app-level support code at app-bundle-relative
           services/integrations/ clients, services/adapters/ provider boundaries,
           services/routes/ route files, and security/secrets.yaml when a names-only
