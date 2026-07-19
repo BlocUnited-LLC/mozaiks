@@ -1,9 +1,0 @@
-{
-  "appName": "cli-smoke",
-  "preset": "chat",
-  "targets": {
-    "web": true,
-    "mobile": false
-  },
-  "authRequired": false
-}

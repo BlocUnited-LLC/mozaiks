@@ -1,5 +1,0 @@
-visual_agents:
-  - GreeterAgent
-chat_pane_agents:
-  - GreeterAgent
-artifact_agents: []
