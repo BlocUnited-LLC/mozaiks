@@ -348,6 +348,8 @@ def resolve_field_type(
     if 'default' in field_def:
         field_kwargs['default'] = field_def['default']
     if field_type_str == 'optional_dict':
+        if 'default' not in field_kwargs:
+            field_kwargs['default'] = None
         return Optional[dict[str, Any]], _build_field(field_kwargs)  # type: ignore[return-value]  # noqa: UP045
     # Primitive
     if field_type_str in {'list', 'optional_list'}:
@@ -360,9 +362,13 @@ def resolve_field_type(
         else:
             raise ValueError("Unsupported list items spec")
         if field_type_str == 'optional_list':
+            if 'default' not in field_kwargs:
+                field_kwargs['default'] = None
             return Optional[base], _build_field(field_kwargs)  # type: ignore[return-value]  # noqa: UP045
         return base, _build_field(field_kwargs)  # type: ignore[return-value]
     if field_type_str in TYPE_MAP:
+        if field_type_str in ('optional_str', 'Optional[str]') and 'default' not in field_kwargs:
+            field_kwargs['default'] = None
         return TYPE_MAP[field_type_str], _build_field(field_kwargs)
     # Literal -> Enum
     if field_type_str == 'literal':
@@ -401,6 +407,8 @@ def resolve_field_type(
         base_type = unique_types[0] if len(unique_types) == 1 else Union[tuple(unique_types)]  # type: ignore[misc]  # noqa: UP007
         if optional_variant:
             base_type = Optional[base_type]  # type: ignore[assignment]  # noqa: UP045
+            if 'default' not in field_kwargs:
+                field_kwargs['default'] = None
         return base_type, _build_field(field_kwargs)
     # direct model ref
     if field_type_str in available_models or field_type_str in alias_defs:

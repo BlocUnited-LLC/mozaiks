@@ -579,6 +579,7 @@ def deterministic_module_contract_output() -> dict[str, Any]:
           owner: app
           visibility: internal
           handler: backend.handler:ReportsModule
+        permissions: []
         actions:
           - id: list_reports
             description: List reports visible to the current user.
