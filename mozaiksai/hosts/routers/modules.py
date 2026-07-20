@@ -75,13 +75,15 @@ def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     still treat reserved words as execution context and remove them from action
     params to preserve the old dispatch contract.
     """
-    has_params_envelope = isinstance(body.get("params"), dict)
-    params = dict(body.get("params") or {}) if has_params_envelope else dict(body)
-    context_overrides: dict[str, Any] = (
-        dict(body.get("context"))
-        if isinstance(body.get("context"), dict)
-        else {}
-    )
+    params_body = body.get("params")
+    context_body = body.get("context")
+    if isinstance(params_body, dict):
+        has_params_envelope = True
+        params = dict(params_body)
+    else:
+        has_params_envelope = False
+        params = dict(body)
+    context_overrides: dict[str, Any] = dict(context_body) if isinstance(context_body, dict) else {}
 
     for key in _RESERVED_CONTEXT_KEYS:
         if key in params and key not in context_overrides:
