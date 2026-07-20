@@ -12,7 +12,11 @@ from mozaiksai.core.workflow.generator_support.page_plan_utils import (
 )
 
 from .assembly_phase import assemble_features
-from .code_file_utils import collect_generated_app_file_entries
+from .code_file_utils import (
+    collect_generated_app_file_entries,
+    extract_code_file_entries_from_payload,
+    extract_deleted_file_paths_from_payload,
+)
 from .generate_module_interface_files import generate_module_interface_files
 from .resolve_managed_capability_templates import resolve_managed_capability_templates
 
@@ -156,6 +160,43 @@ def _apply_managed_capability_templates(
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
+def _context_code_file_output(context_variables: Any | None) -> dict[str, list[dict[str, str]]] | None:
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return None
+    try:
+        raw = context_variables.get("code_files")
+    except Exception:
+        raw = None
+    code_files = extract_code_file_entries_from_payload({"code_files": raw})
+    if not code_files:
+        return None
+    return {"code_files": code_files}
+
+
+def _context_deleted_files(context_variables: Any | None) -> list[str]:
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return []
+    try:
+        raw = context_variables.get("deleted_files")
+    except Exception:
+        raw = None
+    return extract_deleted_file_paths_from_payload({"deleted_files": raw})
+
+
+def _apply_deleted_files(
+    code_files: list[dict[str, str]],
+    deleted_files: list[str],
+) -> list[dict[str, str]]:
+    if not deleted_files:
+        return code_files
+    deleted = set(deleted_files)
+    return [
+        file
+        for file in code_files
+        if str(file.get("filename") or "") not in deleted
+    ]
+
+
 async def assemble_app_tasks(
     *,
     context_variables: Annotated[
@@ -212,11 +253,15 @@ async def assemble_app_tasks(
                 if isinstance(value, dict):
                     feature_outputs.append(value)
 
+        context_code_files = _context_code_file_output(context_variables)
+        if context_code_files:
+            feature_outputs.append(context_code_files)
+
     if not app_id:
         raise ValueError("app_id is required to assemble task outputs")
 
     if not feature_outputs:
-        raise ValueError("No AppGenerator schema artifacts or task batch outputs are available for assembly")
+        raise ValueError("No AppGenerator schema artifacts, task batch outputs, or accumulated code files are available for assembly")
 
     result = await assemble_features(
         app_id=str(app_id),
@@ -247,6 +292,7 @@ async def assemble_app_tasks(
         app_build_plan=app_build_plan,
         context_variables=context_variables,
     )
+    code_files = _apply_deleted_files(code_files, _context_deleted_files(context_variables))
 
     # Write the assembled flat file map to context so the carry-forward
     # preservation resolver (which runs after AssemblyAgent's turn) can read

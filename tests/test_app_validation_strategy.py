@@ -578,6 +578,61 @@ async def test_app_bundle_acceptance_schedules_service_agent_bundle_repair() -> 
 
 
 @pytest.mark.asyncio
+async def test_app_bundle_repair_deletion_closes_acceptance_and_export_gate() -> None:
+    validation_module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    export_module = importlib.import_module("factory_app.workflows.AppGenerator.tools.export_app_code")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    forbidden_path = "modules/support_tickets/backend/token_wallet_ledger.py"
+    files[forbidden_path] = (
+        "class TokenWalletLedger:\n"
+        "    pass\n"
+    )
+    context = _Context(
+        {
+            "app_id": "repair-app",
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    failed = await validation_module.run_app_bundle_acceptance_gate(
+        files=files,
+        context_variables=context,
+    )
+
+    assert failed["passed"] is False
+    assert failed["bundle_repair"]["target_agent"] == "ServiceAgent"
+
+    context.set("deleted_files", [forbidden_path])
+    repaired = await validation_module.run_app_bundle_acceptance_gate(
+        context_variables=context,
+    )
+
+    assert repaired["passed"] is True
+    assert repaired["bundle_repair"]["status"] == "passed"
+    assert context.get("bundle_repair_status") == "passed"
+    assert context.get("bundle_repair_target") is None
+    assert forbidden_path not in context.get("generated_files")
+    assert context.get("integration_tests_passed") is True
+
+    context.set("app_validation_status", "skipped")
+    context.set("app_validation_strategy_used", "skip")
+    export_gate = export_module.resolve_export_gate(context)
+
+    assert export_gate["allow_export"] is True
+    assert export_gate["reasons"] == []
+
+
+@pytest.mark.asyncio
 async def test_app_bundle_acceptance_schedules_app_schema_repair_for_direct_managed_endpoint() -> None:
     module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
     from scripts.smoke_appgenerator_live_acceptance import (

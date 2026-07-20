@@ -15,6 +15,9 @@ import re
 from typing import Any
 
 from factory_app.workflows._shared.hook_utils import update_agent_section
+from factory_app.workflows.AppGenerator.tools.code_file_utils import (
+    extract_deleted_file_paths_from_payload,
+)
 from factory_app.workflows.AppGenerator.tools.module_runtime_quality import (
     review_module_runtime_quality,
 )
@@ -128,12 +131,37 @@ def _merge_code_files(context_variables: Any | None, incoming: list[dict[str, st
     _context_set(context_variables, "code_files", [merged[key] for key in sorted(merged)])
 
 
+def _merge_deleted_files(context_variables: Any | None, incoming: list[str]) -> None:
+    if not incoming:
+        return
+    existing = _context_get(context_variables, "deleted_files", []) or []
+    merged: list[str] = []
+    seen: set[str] = set()
+    if isinstance(existing, list):
+        for item in existing:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            path = item.strip()
+            if path in seen:
+                continue
+            seen.add(path)
+            merged.append(path)
+    for path in incoming:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        merged.append(path)
+    _context_set(context_variables, "deleted_files", merged)
+
+
 def _persist_latest_service_output(agent: Any, messages: list[dict[str, Any]]) -> None:
     payload = _latest_service_output(messages)
     if not payload:
         return
     code_files = extract_code_file_entries_from_payload(payload)
-    _merge_code_files(getattr(agent, "context_variables", None), code_files)
+    context_variables = getattr(agent, "context_variables", None)
+    _merge_code_files(context_variables, code_files)
+    _merge_deleted_files(context_variables, extract_deleted_file_paths_from_payload(payload))
 
 
 def run_module_runtime_quality_gate(agent: Any, messages: list[dict[str, Any]]) -> None:

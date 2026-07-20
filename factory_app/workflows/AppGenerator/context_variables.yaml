@@ -1227,6 +1227,25 @@ definitions:
     source:
       type: computed
       default: null
+  code_files:
+    type: array
+    description: >
+      Accumulated generated file overlay entries emitted by AppGenerator agents
+      and auto-save tools before AssemblyAgent writes the canonical
+      generated_files map. Later entries with the same filename replace earlier
+      entries.
+    source:
+      type: computed
+      default: []
+  deleted_files:
+    type: array
+    description: >
+      Relative generated file paths that should be removed from the current
+      assembled bundle during repair/refinement. Used when a stale or forbidden
+      artifact must be deleted rather than overwritten.
+    source:
+      type: computed
+      default: []
   generated_files:
     type: object
     description: Canonical generated app bundle file map assembled from schema and task-batch outputs.
@@ -1371,6 +1390,8 @@ agents:
     - app_asset_manifest
     - app_custom_route_bundle
     - app_schema_ready
+    - code_files
+    - deleted_files
   IntegrationReadinessAgent:
     variables:
     - app_build_plan
@@ -1517,6 +1538,8 @@ agents:
   AppValidationAgent:
     variables:
     - generated_files
+    - code_files
+    - deleted_files
     - assembled_source
     - app_task_batch_status
     - app_task_batch_results_summary
@@ -1562,6 +1585,8 @@ agents:
     - wiring_validation_passed
     - module_implementation_validation_passed
     - generated_files
+    - code_files
+    - deleted_files
     - assembled_source
     - agent_api_url
     - agent_websocket_url

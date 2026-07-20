@@ -65,6 +65,38 @@ def extract_code_file_entries_from_payload(payload: Any) -> list[dict[str, str]]
     return [{"filename": name, "content": content} for name, content in sorted(file_map.items())]
 
 
+def extract_deleted_file_paths_from_payload(payload: Any) -> list[str]:
+    """Resolve deleted generated file paths from a structured output payload."""
+
+    if isinstance(payload, dict) and len(payload) == 1:
+        key, value = next(iter(payload.items()))
+        if isinstance(key, str) and key.endswith("Output") and isinstance(value, dict):
+            payload = value
+
+    if not isinstance(payload, dict):
+        return []
+
+    raw_deleted = payload.get("deleted_files")
+    if not isinstance(raw_deleted, list):
+        return []
+
+    paths: list[str] = []
+    seen: set[str] = set()
+    for item in raw_deleted:
+        if isinstance(item, str):
+            raw_path = item
+        elif isinstance(item, dict):
+            raw_path = str(item.get("filename") or item.get("path") or "")
+        else:
+            continue
+        safe = safe_relpath(raw_path)
+        if not safe or safe in seen:
+            continue
+        seen.add(safe)
+        paths.append(safe)
+    return paths
+
+
 def collect_generated_app_file_map(
     generated_app_dir: Any,
     *,
@@ -115,6 +147,7 @@ __all__ = [
     "collect_generated_app_file_map",
     "extract_code_file_entries_from_payload",
     "extract_code_file_map_from_payload",
+    "extract_deleted_file_paths_from_payload",
     "safe_relpath",
 ]
 

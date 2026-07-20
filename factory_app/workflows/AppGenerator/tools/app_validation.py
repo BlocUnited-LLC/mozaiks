@@ -32,6 +32,7 @@ from factory_app.workflows._shared.workflow_integration import (
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     collect_generated_app_file_map,
     extract_code_file_map_from_payload,
+    extract_deleted_file_paths_from_payload,
 )
 from logs.logging_config import get_workflow_logger
 from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
@@ -115,6 +116,66 @@ def _extract_code_files(collected: dict[str, Any]) -> dict[str, str]:
             continue
         out.update(extract_code_file_map_from_payload(data))
     return out
+
+
+def _extract_deleted_files(collected: dict[str, Any]) -> list[str]:
+    deleted: list[str] = []
+    seen: set[str] = set()
+    for _agent_name, data in (collected or {}).items():
+        if not isinstance(data, dict):
+            continue
+        for path in extract_deleted_file_paths_from_payload(data):
+            if path in seen:
+                continue
+            seen.add(path)
+            deleted.append(path)
+    return deleted
+
+
+def _context_code_files(context_variables: Any | None) -> dict[str, str]:
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return {}
+    try:
+        raw = context_variables.get("code_files")
+    except Exception:
+        raw = None
+    return extract_code_file_map_from_payload({"code_files": raw})
+
+
+def _context_deleted_files(context_variables: Any | None) -> list[str]:
+    if context_variables is None or not hasattr(context_variables, "get"):
+        return []
+    try:
+        raw = context_variables.get("deleted_files")
+    except Exception:
+        raw = None
+    return extract_deleted_file_paths_from_payload({"deleted_files": raw})
+
+
+def _apply_deleted_files(files: dict[str, str], deleted_files: list[str]) -> dict[str, str]:
+    if not deleted_files:
+        return files
+    merged = dict(files)
+    for path in deleted_files:
+        merged.pop(path, None)
+    return merged
+
+
+async def _merge_latest_persisted_agent_outputs(
+    files: dict[str, str],
+    *,
+    chat_id: Any | None,
+    app_id: Any | None,
+) -> dict[str, str]:
+    if not chat_id or not app_id:
+        return files
+    pm = AG2PersistenceManager()
+    collected = await pm.gather_latest_agent_jsons(chat_id=str(chat_id), app_id=str(app_id))
+    if not collected:
+        return files
+    merged = dict(files)
+    merged.update(_extract_code_files(collected))
+    return _apply_deleted_files(merged, _extract_deleted_files(collected))
 
 
 def _append_command_output(result: dict[str, Any], *, command: str, stdout: str, stderr: str) -> None:
@@ -221,21 +282,29 @@ async def _resolve_files(
         if context_variables is not None and hasattr(context_variables, "get"):
             chat_id = context_variables.get("chat_id")
             app_id = context_variables.get("app_id")
-            ctx_files = context_variables.get("generated_files")
-            if isinstance(ctx_files, dict) and ctx_files:
-                safe_ctx: dict[str, str] = {}
-                for raw_path, content in ctx_files.items():
-                    safe = _safe_relpath(str(raw_path))
-                    if not safe:
-                        continue
-                    safe_ctx[safe] = str(content)
-                if safe_ctx:
-                    return safe_ctx, chat_id, app_id
+            safe_ctx = _generated_files_from_context(context_variables)
+            if safe_ctx:
+                safe_ctx = await _merge_latest_persisted_agent_outputs(
+                    safe_ctx,
+                    chat_id=chat_id,
+                    app_id=app_id,
+                )
+                return safe_ctx, chat_id, app_id
             if _is_truthy(context_variables.get("app_schema_ready")):
                 schema_files = collect_generated_app_file_map(
                     context_variables.get("generated_app_dir")
                 )
                 if schema_files:
+                    schema_files.update(_context_code_files(context_variables))
+                    schema_files = _apply_deleted_files(
+                        schema_files,
+                        _context_deleted_files(context_variables),
+                    )
+                    schema_files = await _merge_latest_persisted_agent_outputs(
+                        schema_files,
+                        chat_id=chat_id,
+                        app_id=app_id,
+                    )
                     return schema_files, chat_id, app_id
     except Exception:
         pass
@@ -246,6 +315,7 @@ async def _resolve_files(
     pm = AG2PersistenceManager()
     collected = await pm.gather_latest_agent_jsons(chat_id=str(chat_id), app_id=str(app_id))
     resolved = _extract_code_files(collected)
+    resolved = _apply_deleted_files(resolved, _extract_deleted_files(collected))
     if not resolved:
         wf_logger.warning("No code_files found in persisted agent outputs for validation.")
     return resolved, str(chat_id), str(app_id)
@@ -276,6 +346,8 @@ def _generated_files_from_context(context_variables: Any | None) -> dict[str, st
         safe = _safe_relpath(str(raw_path))
         if safe:
             files[safe] = str(content)
+    files.update(_context_code_files(context_variables))
+    files = _apply_deleted_files(files, _context_deleted_files(context_variables))
     return files
 
 
@@ -1768,6 +1840,7 @@ def _bundle_repair_request(
     lines = [
         f"Repair generated app bundle scanner failures in {target_label} only.",
         "Use generated_files as the current source of truth and emit only files owned by this agent's canonical output lane.",
+        "When a named stale/forbidden artifact must be removed rather than overwritten, put its relative path in deleted_files.",
         "Do not introduce payment-provider SDKs, app-local ledgers, hosted internal endpoints, raw secrets, or hosted product policy.",
     ]
     for error in target_errors:
@@ -1969,7 +2042,25 @@ async def run_app_bundle_acceptance_gate(
     registered as validated, or promoted.
     """
 
-    generated_files = _safe_files_map(files) or _generated_files_from_context(context_variables)
+    explicit_files = _safe_files_map(files)
+    if explicit_files:
+        generated_files = explicit_files
+    else:
+        generated_files = _generated_files_from_context(context_variables)
+        chat_id = None
+        app_id = None
+        if context_variables is not None and hasattr(context_variables, "get"):
+            try:
+                chat_id = context_variables.get("chat_id")
+                app_id = context_variables.get("app_id")
+            except Exception:
+                chat_id = None
+                app_id = None
+        generated_files = await _merge_latest_persisted_agent_outputs(
+            generated_files,
+            chat_id=chat_id,
+            app_id=app_id,
+        )
     selected_capability_packs = (
         [pack for pack in capability_packs if isinstance(pack, dict)]
         if isinstance(capability_packs, list)
