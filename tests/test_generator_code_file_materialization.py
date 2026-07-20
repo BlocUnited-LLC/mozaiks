@@ -88,6 +88,7 @@ def test_extract_code_file_map_canonicalizes_module_contract_paths() -> None:
         "code_files": [
             {"filename": "modules/tickets/events.yaml", "content": "events: []\n"},
             {"filename": "modules/tickets/admin.yaml", "content": "panels: []\n"},
+            {"filename": "modules/tickets/policy_hooks.yaml", "content": "hooks: []\n"},
             {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"},
         ]
     }
@@ -97,6 +98,7 @@ def test_extract_code_file_map_canonicalizes_module_contract_paths() -> None:
     assert file_map == {
         "modules/tickets/contracts/admin.yaml": "panels: []\n",
         "modules/tickets/contracts/events.yaml": "events: []\n",
+        "modules/tickets/contracts/policy_hooks.yaml": "hooks: []\n",
         "modules/tickets/module.yaml": "id: tickets\n",
     }
 
@@ -217,6 +219,36 @@ def test_extract_code_file_map_materializes_module_contract_with_relationships_y
     assert parsed["schema_version"] == "mozaiks.relationships.v1"
     assert parsed["providers"][0]["id"] == "owned-projects"
     assert parsed["providers"][0]["resource_types"] == ["project"]
+
+
+def test_extract_code_file_map_materializes_module_contract_with_policy_hooks_yaml() -> None:
+    payload = {
+        "module_contract": {
+            "module_id": "project_membership",
+            "module_yaml": {"schema_version": "mozaiks.module.v1", "id": "project_membership", "actions": []},
+            "policy_hooks_yaml": {
+                "schema_version": "mozaiks.policy_hooks.v1",
+                "hooks": [
+                    {
+                        "id": "project-participation",
+                        "label": "Project Participation",
+                        "hook_type": "decision_input",
+                        "action": "evaluate_project_participation",
+                        "resource_types": ["project"],
+                        "deterministic": True,
+                    }
+                ],
+            },
+        }
+    }
+
+    file_map = extract_code_file_map_from_payload(payload)
+
+    assert "modules/project_membership/contracts/policy_hooks.yaml" in file_map
+    parsed = yaml.safe_load(file_map["modules/project_membership/contracts/policy_hooks.yaml"])
+    assert parsed["schema_version"] == "mozaiks.policy_hooks.v1"
+    assert parsed["hooks"][0]["id"] == "project-participation"
+    assert parsed["hooks"][0]["resource_types"] == ["project"]
 
 
 def test_extract_code_file_map_materializes_app_schema_output() -> None:

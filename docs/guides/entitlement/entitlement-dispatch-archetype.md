@@ -26,8 +26,8 @@ Select `entitlement_dispatch` when all of the following are true:
 2. The app is self-hosted (not deployed on mozaiks-app hosted platform).
 3. The app needs to activate or deactivate capability grants when subscription
    events arrive.
-4. The app integrates with an external payment provider (e.g. Stripe, MozaiksPay
-   via API key) that emits normalized domain events.
+4. The app integrates with a billing adapter that emits normalized subscription
+   domain events instead of applying a `BillingFulfillmentCommand` directly.
 
 ---
 
@@ -229,26 +229,31 @@ reactions:
 
 ---
 
-## Connecting to MozaiksPay (Self-Hosted)
+## Connecting to a Billing Adapter
 
-Self-hosted apps can connect to the hosted MozaiksPay service using an API key:
+Self-hosted apps can connect to a managed billing service such as MozaiksPay
+using an API key:
 
 ```
 MOZAIKSPAY_API_BASE=https://pay.mozaiks.app
 MOZAIKSPAY_API_KEY=mzk_live_...
 ```
 
-The payment adapter (`services/adapters/payments/mozaikspay.py`) normalizes
-MozaiksPay webhooks into `subscription.activated` / `subscription.cancelled`
-domain events. This module then reacts to those events — no provider-specific
-code lives here. If the integration can call the OSS fulfillment ingress
-directly, prefer `BillingFulfillmentCommand(event_type="subscription_activated")`
-instead of adding an `entitlement_dispatch` module just to rewrite the same
-assignment.
+The app-facing facade or adapter can either:
 
-**The MozaiksPay connection and this module are independent:** either can be
-swapped without touching the other. You can use MozaiksPay with a different
-entitlement write-path, or use a different payment provider with this module.
+- apply a verified provider-neutral `BillingFulfillmentCommand` directly through
+  the OSS fulfillment ingress
+- normalize the verified billing fact into `subscription.activated` /
+  `subscription.cancelled` domain events that this module reacts to
+
+No provider-specific code lives in `entitlement_dispatch`. If the integration
+can call the OSS fulfillment ingress directly, prefer
+`BillingFulfillmentCommand(event_type="subscription_activated")` instead of
+adding this module just to rewrite the same assignment.
+
+**The billing adapter and this module are independent:** either can be swapped
+without touching the other. You can use MozaiksPay with a different entitlement
+write path, or use a different billing provider with this module.
 
 ---
 

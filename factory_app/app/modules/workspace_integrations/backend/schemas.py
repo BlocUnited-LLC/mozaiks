@@ -37,10 +37,10 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
         "id": "mozaikspay",
         "name": "Mozaiks Pay",
         "category": "payments",
-        "description": "Managed monetization, subscription billing, billing portal, and usage display for Mozaiks apps.",
+        "description": "Managed subscription billing, token billing, billing portal, and usage display for Mozaiks apps.",
         "required_secrets": ["MOZAIKSPAY_API_BASE", "MOZAIKSPAY_API_KEY"],
         "optional_secrets": ["MOZAIKS_APP_URL", "MOZAIKSPAY_CLIENT_ID", "MOZAIKSPAY_CLIENT_SECRET"],
-        "default_for": ["monetized_app"],
+        "default_for": ["subscription_or_usage_app"],
         "removable_default": True,
         "capabilities": ["subscriptions", "usage_billing", "billing_portal"],
         "setup_steps": [

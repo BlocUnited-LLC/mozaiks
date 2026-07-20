@@ -381,6 +381,46 @@ def test_factory_workflow_transition_rules_compile_to_ag2_network_graphs():
         assert isinstance(graph, TransitionGraph), transition_path
 
 
+def test_appgenerator_validation_routes_repair_context_before_user_fallback():
+    workflow_dir = Path("factory_app/workflows/AppGenerator")
+    transitions = yaml.safe_load((workflow_dir / "transition_graph.yaml").read_text(encoding="utf-8")) or {}
+    orchestrator = yaml.safe_load((workflow_dir / "orchestrator.yaml").read_text(encoding="utf-8")) or {}
+    agents_raw = yaml.safe_load((workflow_dir / "agents.yaml").read_text(encoding="utf-8")) or {}
+    agent_names = [
+        str(agent.get("name")).strip()
+        for agent in agents_raw.get("agents", [])
+        if isinstance(agent, dict) and str(agent.get("name") or "").strip()
+    ]
+    agent_name_by_id = {name: name for name in agent_names}
+    participant_order = [*agent_names, "user"]
+    graph = compile_transition_rules_to_graph(
+        transitions.get("transition_rules", []),
+        initial_agent_name=str(orchestrator.get("initial_agent") or agent_names[0]),
+        agent_id_by_name=agent_name_by_id,
+        max_turns=orchestrator.get("max_turns"),
+    )
+
+    def route(context_variables: dict) -> str | None:
+        return resolve_next_agent(
+            graph,
+            current_agent_name="AppValidationAgent",
+            context_variables=context_variables,
+            agent_name_by_id=agent_name_by_id,
+            participant_order=participant_order,
+        )
+
+    assert route({"workflow_integration_repair_status": "needs_revision"}) == "ConfigMiddlewareAgent"
+    assert route({"bundle_repair_target": "AppSchemaAgent"}) == "AppSchemaAgent"
+    assert route({"bundle_repair_target": "ConfigMiddlewareAgent"}) == "ConfigMiddlewareAgent"
+    assert route({"bundle_repair_target": "ServiceAgent"}) == "ServiceAgent"
+    assert route({"bundle_repair_target": "FrontendStubAgent"}) == "FrontendStubAgent"
+    assert route({"bundle_repair_status": "blocked"}) == "user"
+    assert route({"workflow_integration_repair_status": "blocked"}) == "user"
+    assert route({"app_validation_status": "failed"}) == "user"
+    assert route({"integration_tests_passed": True}) == "InfraScaffoldAgent"
+    assert route({}) == "user"
+
+
 def test_transition_graph_validator_accepts_user_as_special_source(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         workflow_manager,

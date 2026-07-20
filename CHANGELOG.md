@@ -12,9 +12,23 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+### Added
+
+- Default OSS LLM provider is now free Google Gemini (gemini-2.0-flash / gemini-2.5-flash). Set `GEMINI_API_KEY` from aistudio.google.com and `LLM_PRIMARY_API_TYPE=google`. OpenAI remains available as an alternative via `LLM_PRIMARY_API_TYPE=openai`.
+- Self-hosted SaaS apps now get deterministic entitlement dispatch: AppGenerator plans an `entitlement_dispatch` module (activate/deactivate subscription actions) whenever `config/subscriptions.yaml` declares an `assignment_store` and the mozaikspay managed pack is not selected. `ConfiguredEntitlementAdapter` reads those assignment records for all entitlement gate checks.
+- `scan_generated_bundle` now validates the self-hosted entitlement dispatch contract: rejects bundles with `assignment_store` but no `entitlement_dispatch` module, and rejects any `entitlement_gate` value not declared in at least one plan's capabilities.
+- Added offline SaaS acceptance gate tests and a live AppPlanAgent smoke test (with committed fixture for CI replay) that verifies `entitlement_dispatch` task planning end-to-end against gpt-4o.
+- Generated deployment bundles now emit `.github/workflows/readiness.yml` alongside `deploy.yml` when workflow artifacts are requested. The readiness workflow provides an environment-staging gate separate from artifact review staging; `deployment.manifest.json` carries a `readiness_workflow` field linking to it.
+
+### Fixed
+
+- Removed `@stripe/stripe-js` from the OSS `web_shell` dependencies. Stripe belongs in `mozaiks-app` only; the package was unused in any source file.
+
 ### Changed
 
 - Expanded the production-readiness gate so the 0.1.10 cash-to-token loop is covered by generated SaaS acceptance, subscription/token runtime, scanner, and opt-in Docker/Mongo smoke checks.
+- Monetization taxonomy simplified to 5 canonical OSS routes: `free`, `subscriptions`, `usage_based`, `custom`, `hybrid`. `custom` covers all app/operator-specific money flows (ecommerce, marketplace, sponsorship, contributions, campaign funding, revenue-share, payout policy) through app-owned modules, policy hooks, managed facades, or external adapters. The old granular models (`transactional`, `marketplace`, `sponsored`, `donations`, `community_funded`) are removed.
+- Capability dispatch planning is now fully app-agnostic: managed packs declare `provides_capabilities: [subscription_write_path]` in their `contract.yaml` to signal ownership of the subscription assignment write path, replacing all hardcoded MozaiksPay name checks in OSS scanner and planning logic. Any operator pack can now own this role.
 
 ## 0.1.10 - 2026-07-16
 

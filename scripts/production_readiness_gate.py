@@ -18,15 +18,24 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+CORE_MONETIZATION_GATE_TARGETS = [
+    "tests/test_monetization_taxonomy.py",
+    "tests/test_appgenerator_integration_manifest.py",
+    "tests/test_workspace_integrations_module.py",
+    "tests/test_appgenerator_capability_pack_selection.py",
+    "tests/test_generated_bundle_scanner.py",
+    "tests/test_mozaikspay_managed_capability_contract.py",
+    "tests/test_managed_capability_artifact_replay.py",
+    "tests/test_generated_saas_subscription_runtime_acceptance.py",
+]
+
 PYTEST_GATE_TARGETS = [
     "tests/test_appgenerator_canonical_generation.py",
     "tests/test_appgenerator_module_contracts.py",
     "tests/test_appgenerator_save_app_schema.py",
     "tests/test_appgenerator_managed_capability_smoke.py",
     "tests/test_managed_capability_template_expansion.py",
-    "tests/test_managed_capability_artifact_replay.py",
-    "tests/test_mozaikspay_managed_capability_contract.py",
-    "tests/test_generated_saas_subscription_runtime_acceptance.py",
+    *CORE_MONETIZATION_GATE_TARGETS,
     "tests/test_subscription_contract_designer.py",
     "tests/test_subscriptions_loader.py",
     "tests/test_token_usage_guard.py",
@@ -45,7 +54,7 @@ PYTEST_GATE_TARGETS = [
     "tests/test_module_executor_permission_enforcement.py",
     "tests/test_platform_hook_registry.py",
     "tests/test_offline_generated_build_acceptance.py",
-    "tests/test_generated_bundle_scanner.py",
+    "tests/test_smoke_appgenerator_live_acceptance.py",
     "tests/test_workflow_declarative_contracts.py",
     "tests/test_workflow_entry_point_config.py",
     "tests/test_factory_workflow_integration_contracts.py",
@@ -63,9 +72,7 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_appgenerator_module_contracts.py",
     "tests/test_appgenerator_save_app_schema.py",
     "tests/test_managed_capability_template_expansion.py",
-    "tests/test_managed_capability_artifact_replay.py",
-    "tests/test_mozaikspay_managed_capability_contract.py",
-    "tests/test_generated_saas_subscription_runtime_acceptance.py",
+    *CORE_MONETIZATION_GATE_TARGETS,
     "tests/test_subscription_contract_designer.py",
     "tests/test_subscriptions_loader.py",
     "tests/test_token_usage_guard.py",
@@ -78,6 +85,7 @@ QUICK_PYTEST_TARGETS = [
     "tests/test_profile_contract.py",
     "tests/test_module_executor_permission_enforcement.py",
     "tests/test_offline_generated_build_acceptance.py",
+    "tests/test_smoke_appgenerator_live_acceptance.py",
     "tests/test_security_hardening.py",
     "tests/test_rate_limit_helpers.py",
     "tests/test_rate_limit_middleware.py",

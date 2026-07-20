@@ -5,11 +5,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 LEGACY_WORKFLOW_SCHEMA_TERMS = (
-    "hooks.yaml",
+    # Old filename was contracts/hooks.yaml; policy_hooks.yaml is the
+    # current replacement and must not match this guard.
+    "/hooks.yaml",
     "handoffs.yaml",
     "update_agent_state",
     "hook_agent:",
-    "hook_type:",
+    # hook_type: is a valid current field in contracts/policy_hooks.yaml — not a banned term.
     "handoff_rules",
     "handoff_type:",
     "after_work",

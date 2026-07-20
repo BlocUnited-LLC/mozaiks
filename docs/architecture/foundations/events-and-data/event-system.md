@@ -21,6 +21,7 @@ Event ownership follows the layer that owns the fact.
 | `notification.*` | platform host notification service | notification lifecycle | no |
 | `platform.*` | product/platform layer | hosted product facts | no |
 | `hosted.*` | hosted-only capability packs | paid hosted product capabilities | no |
+| `mozaikspay.*` | MozaiksPay managed capability | public MozaiksPay capability lifecycle facts | no |
 
 The runtime may transport many event families. Transport is not ownership.
 
@@ -109,6 +110,9 @@ Current implementation:
 - Capability resolution emits `platform.workflow_capability_started`.
 - Handler targets route the event payload directly to a named module action
   method, enabling module-to-module event-driven calls without HTTP indirection.
+- Service adapter targets route the event payload to an app-owned
+  `app.services.adapters.*` class for provider or hosted-product integration
+  mechanics while keeping durable facts and public actions module-owned.
 
 ### Module Event/Reaction Contract
 
@@ -156,9 +160,20 @@ reactions:
     target:
       kind: handler
       handler_method: handle_task_created
+
+  - id: provider_bridge
+    event_type: hosted.hosting.ci_provision.requested
+
+    # Target kind 4: service_adapter
+    # Calls app-owned service adapter code declared outside modules.
+    # Use for provider mechanics, not module-owned state or public actions.
+    target:
+      kind: service_adapter
+      adapter: app.services.adapters.ci.managed_ci_provisioner:ManagedCIProvisioner
+      adapter_method: handle
 ```
 
-**Handler target rules:**
+**Reaction target rules:**
 
 - Use `target.kind: handler` with `target.handler_method`.
 - `target.handler_method` names a method on this module's `backend/handler.py` class.
@@ -167,6 +182,14 @@ reactions:
   a documented reaction handler on the handler class.
 - Handler targets are for deterministic module-to-module reactions. For
   AI-driven reactions, use a capability target to trigger a workflow instead.
+- Use `target.kind: service_adapter` with `target.adapter` and
+  `target.adapter_method`.
+- `target.adapter` uses `module.path:ClassName` import syntax and should point
+  to app-owned support code such as `app.services.adapters.<area>.<provider>`.
+- Service adapters may receive `payload`, `event_type`, `envelope`, and
+  `reaction` when their method declares those parameters. They must not own
+  durable module state, subscription/wallet state, public actions, permissions,
+  or hosted-product entitlement policy.
 - `/api/notifications/count` reads unread platform notification intents for the
   current principal.
 - In local no-auth development, DM notification tests need distinct principals.
@@ -190,8 +213,9 @@ reactions:
 ```
 
 Workflow-trigger resolution stays platform-owned: modules publish validated
-`domain.*`, `platform.*`, or `hosted.*` events, and the platform host resolves them to
-workflow sessions without module code importing workflow internals.
+`domain.*`, `platform.*`, `hosted.*`, or bounded managed-capability events such
+as `mozaikspay.*`, and the platform host resolves them to workflow sessions
+without module code importing workflow internals.
 
 ### Studio And Hosted Products
 
@@ -199,7 +223,10 @@ workflow sessions without module code importing workflow internals.
 product workspaces may own product-layer events for hosted-only concerns such
 as marketplace, collaboration, billing, and deployment.
 
-These are product facts, not universal runtime assumptions. Product-layer modules publish `hosted.*` events and stay out of generated app bundles unless the hosted product explicitly includes them.
+These are product facts, not universal runtime assumptions. Product-layer
+modules publish `hosted.*` or bounded product namespaces such as
+`mozaikspay.*` and stay out of generated app bundles unless the hosted product
+explicitly includes them.
 
 ### Modules
 
@@ -400,9 +427,12 @@ browser surface and should not be used for business correctness.
 
 ## Hosted Capability Events
 
-Hosted-only capabilities such as MozaiksPay use `hosted.*` or product-scoped
-`platform.*` events. They plug into the platform/product layer as capability
-packs. They must not become kernel assumptions.
+Hosted-only capabilities normally use `hosted.*` or product-scoped
+`platform.*` events. A first-party managed capability may also define a bounded
+branded namespace, currently `mozaikspay.*`, when the event is part of that
+capability's public lifecycle contract. These namespaces plug into the
+platform/product layer as capability packs. They must not become kernel
+assumptions.
 
 ## Collapse Rules
 

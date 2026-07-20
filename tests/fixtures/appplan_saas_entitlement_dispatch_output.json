@@ -1,0 +1,340 @@
+{
+  "AppBuildPlan": {
+    "agent_message": "Building an Analytics SaaS app with subscription-based access control for viewing and exporting reports.",
+    "app_kind": "analytics_saas",
+    "pages": [
+      {
+        "name": "Reports",
+        "route": "/reports",
+        "purpose": "View and export analytics reports",
+        "primary_entities": [
+          "Report"
+        ],
+        "primary_actions": [
+          "view_report",
+          "export_report"
+        ],
+        "page_type_hint": "record_list",
+        "ui_layout": "grid",
+        "sections_hint": [
+          {
+            "primitive": "DataTable",
+            "config_hint": "{\"columns\": [\"id\", \"title\", \"created_at\"], \"selection\": \"single\", \"search\": true, \"api_endpoint\": \"/api/modules/reports/view_report\"}",
+            "section_id_hint": "report-table",
+            "title_hint": "All Reports"
+          },
+          {
+            "primitive": "ActionButton",
+            "config_hint": "{\"layout\": \"row\", \"actions\": [{\"label\": \"Export Report\", \"action_type\": \"event\", \"event_type\": \"ui.modal.open\", \"entitlement_gate\": \"reports.export\"}]}",
+            "section_id_hint": "export-action",
+            "title_hint": null
+          }
+        ]
+      }
+    ],
+    "entities": [
+      {
+        "name": "Report",
+        "operations": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ],
+        "notes": null
+      }
+    ],
+    "roles": [
+      "user",
+      "admin"
+    ],
+    "auth_strategy": "role_based",
+    "service_scope": [
+      "reports"
+    ],
+    "frontend_scope": [
+      "reports"
+    ],
+    "theme_preferences": "minimal",
+    "brand_intent": {
+      "style_summary": "Professional and clean analytics interface",
+      "brand_keywords": [
+        "analytics",
+        "reports",
+        "data-driven"
+      ],
+      "experience_goals": [
+        "Provide clear insights",
+        "Enable data export for pro users"
+      ],
+      "appearance_hint": "techy"
+    },
+    "capability_packs": [
+      {
+        "capability_pack_id": "analytics_pack",
+        "surface_id": "reports",
+        "surface_kind": "module",
+        "pack_type": "analytics_pack",
+        "label": "Analytics Reports",
+        "summary": "Provides functionality for viewing and exporting analytics reports.",
+        "implementation_mode": "hybrid",
+        "primary_entities": [
+          "Report"
+        ],
+        "primary_pages": [
+          "Reports"
+        ],
+        "operations": [
+          "view_report",
+          "export_report"
+        ],
+        "required_integrations": [],
+        "agentic_extensions": []
+      }
+    ],
+    "external_integrations": [],
+    "agent_backend_required": false,
+    "build_tasks": [
+      {
+        "task_id": "task_entitlement_dispatch_module",
+        "task_type": "module_contract",
+        "capability_pack_id": "entitlement_dispatch",
+        "surface_id": "entitlement_dispatch",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Generate the entitlement dispatch module for handling subscription assignments.",
+        "initial_message": "Generate entitlement_dispatch module.yaml. This module handles subscription assignments and entitlement checks.",
+        "owned_paths": [
+          "modules/entitlement_dispatch/module.yaml"
+        ],
+        "depends_on": [
+          "task_subscription_config"
+        ],
+        "acceptance_criteria": [
+          "module.yaml declares entitlement dispatch actions"
+        ]
+      },
+      {
+        "task_id": "task_entitlement_dispatch_services",
+        "task_type": "business_services",
+        "capability_pack_id": "entitlement_dispatch",
+        "surface_id": "entitlement_dispatch",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ServiceAgent",
+        "description": "Generate entitlement dispatch module handler, service, and repo layers.",
+        "initial_message": "Generate only modules/entitlement_dispatch/backend/handler.py, service.py, and repo.py. Ensure these handle subscription assignments and entitlement checks.",
+        "owned_paths": [
+          "modules/entitlement_dispatch/backend/handler.py",
+          "modules/entitlement_dispatch/backend/service.py",
+          "modules/entitlement_dispatch/backend/repo.py"
+        ],
+        "depends_on": [
+          "task_entitlement_dispatch_module"
+        ],
+        "acceptance_criteria": [
+          "repo.py handles subscription assignments",
+          "service.py checks entitlements",
+          "handler.py remains thin dispatch"
+        ]
+      },
+      {
+        "task_id": "task_report_pages",
+        "task_type": "page_bundle",
+        "capability_pack_id": null,
+        "surface_id": "report_pages",
+        "surface_kind": "ui_only",
+        "execution_target": "AppGenerator",
+        "initial_agent": "AppSchemaAgent",
+        "description": "Generate declarative report list pages.",
+        "initial_message": "Generate app.json and ui/pages/reports.yaml pages that bind to app-owned module actions such as /api/modules/reports/view_report and /api/modules/reports/export_report.",
+        "owned_paths": [
+          "app.json",
+          "ui/pages/reports.yaml"
+        ],
+        "depends_on": [
+          "task_reports_module",
+          "task_reports_services"
+        ],
+        "acceptance_criteria": [
+          "page endpoints bind to app-owned modules",
+          "persistent pages are declarative"
+        ]
+      },
+      {
+        "task_id": "task_reports_models",
+        "task_type": "data_models",
+        "capability_pack_id": "reports",
+        "surface_id": "reports",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ModelAgent",
+        "description": "Generate typed report DTO and document helpers.",
+        "initial_message": "Generate only modules/reports/backend/schemas.py. Read dependency_task_outputs for task_reports_module and task_reports_persistence before emitting code.",
+        "owned_paths": [
+          "modules/reports/backend/schemas.py"
+        ],
+        "depends_on": [
+          "task_reports_module",
+          "task_reports_persistence"
+        ],
+        "acceptance_criteria": [
+          "schemas.py is canonical",
+          "removed model artifacts are absent"
+        ]
+      },
+      {
+        "task_id": "task_reports_module",
+        "task_type": "module_contract",
+        "capability_pack_id": "reports",
+        "surface_id": "reports",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Generate the reports module YAML contract.",
+        "initial_message": "Generate reports module.yaml and events.yaml. Declare python_stubs for backend/handler.py, backend/service.py, backend/repo.py, backend/policy.py, and backend/schemas.py. repo.py must use ctx.persistence.collection(\"reports\", \"reports\") and align with data_contract.",
+        "owned_paths": [
+          "modules/reports/module.yaml",
+          "modules/reports/contracts/events.yaml"
+        ],
+        "depends_on": [
+          "task_reports_persistence"
+        ],
+        "acceptance_criteria": [
+          "module.yaml declares report actions",
+          "python_stubs declares canonical backend files",
+          "no backend Python is emitted"
+        ]
+      },
+      {
+        "task_id": "task_reports_persistence",
+        "task_type": "persistence_contract",
+        "capability_pack_id": null,
+        "surface_id": "database",
+        "surface_kind": null,
+        "execution_target": "AppGenerator",
+        "initial_agent": "DatabaseAgent",
+        "description": "Stage data contract and additive index migrations for reports.",
+        "initial_message": "Create data_contract entries for reports/reports. Stage data/contract.json and optional data/migrations/001_reports_indexes.json. Keep this intent-first and additive only.",
+        "owned_paths": [
+          "data/contract.json",
+          "data/migrations/001_reports_indexes.json"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [
+          "data_contract declares reports/reports"
+        ]
+      },
+      {
+        "task_id": "task_reports_services",
+        "task_type": "business_services",
+        "capability_pack_id": "reports",
+        "surface_id": "reports",
+        "surface_kind": "module",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ServiceAgent",
+        "description": "Generate report module handler, service, repo, and policy layers.",
+        "initial_message": "Generate only modules/reports/backend/handler.py, service.py, repo.py, and policy.py. Read dependency_task_outputs for task_reports_module, task_reports_models, and task_reports_persistence. repo.py must use ctx.persistence.collection(\"reports\", \"reports\"); service.py calls repo.py; handler.py does not touch persistence.",
+        "owned_paths": [
+          "modules/reports/backend/handler.py",
+          "modules/reports/backend/service.py",
+          "modules/reports/backend/repo.py",
+          "modules/reports/backend/policy.py"
+        ],
+        "depends_on": [
+          "task_reports_module",
+          "task_reports_models",
+          "task_reports_persistence"
+        ],
+        "acceptance_criteria": [
+          "repo.py uses ctx.persistence",
+          "handler.py remains thin dispatch",
+          "service.py publishes declared domain events when present"
+        ]
+      },
+      {
+        "task_id": "task_subscription_config",
+        "task_type": "subscription_config",
+        "capability_pack_id": null,
+        "surface_id": "subscription_contract",
+        "surface_kind": "control_plane",
+        "execution_target": "AppGenerator",
+        "initial_agent": "ConfigMiddlewareAgent",
+        "description": "Generate the subscription configuration for the app.",
+        "initial_message": "Serialize the subscription contract to config/subscriptions.yaml. Ensure that the export_report action is gated by the pro plan entitlement.",
+        "owned_paths": [
+          "config/subscriptions.yaml"
+        ],
+        "depends_on": [],
+        "acceptance_criteria": [
+          "subscriptions.yaml reflects the provided contract",
+          "export_report action is gated by pro plan"
+        ]
+      }
+    ],
+    "data_contract": {
+      "version": "1",
+      "surfaces": [
+        {
+          "surface_id": "reports",
+          "surface_kind": "module",
+          "collections": [
+            {
+              "module_id": "reports",
+              "name": "reports",
+              "entity_name": "reports",
+              "indexes": [
+                {
+                  "name": "report_created_at",
+                  "keys": [
+                    {
+                      "field": "created_at",
+                      "order": -1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "pending_schema_migration": {
+      "migration_id": "001_reports_indexes",
+      "version": "1",
+      "operations": [
+        {
+          "type": "ensure_collection",
+          "module_id": "reports",
+          "entity_name": "reports"
+        },
+        {
+          "type": "ensure_index",
+          "module_id": "reports",
+          "entity_name": "reports",
+          "index": {
+            "name": "report_created_at",
+            "keys": [
+              {
+                "field": "created_at",
+                "order": -1
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "generation_order": [
+      "task_reports_persistence",
+      "task_reports_module",
+      "task_reports_models",
+      "task_reports_services",
+      "task_report_pages",
+      "task_subscription_config",
+      "task_entitlement_dispatch_module",
+      "task_entitlement_dispatch_services"
+    ],
+    "carry_forward_decisions": []
+  }
+}

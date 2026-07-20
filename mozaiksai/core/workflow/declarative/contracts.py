@@ -901,7 +901,16 @@ def parse_a2a_config(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_structured_outputs_config(raw: dict[str, Any]) -> dict[str, Any]:
-    return _validate_config(StructuredOutputsConfig, raw, "structured_outputs.yaml")
+    if not isinstance(raw, dict):
+        raise ValueError("Invalid structured_outputs.yaml configuration: root must be an object")
+    try:
+        validated = StructuredOutputsConfig.model_validate(raw)
+    except ValidationError as err:
+        raise ValueError(f"Invalid structured_outputs.yaml configuration: {err}") from err
+    # Use exclude_unset=True so StructuredOutputFieldSpec.default is absent (not null) when
+    # the YAML does not declare a default. This lets resolve_field_type distinguish
+    # "field has no default (required)" from "field has explicit default: null (optional)".
+    return validated.model_dump(by_alias=True, exclude_unset=True)
 
 
 def parse_context_variables_config(raw: dict[str, Any]) -> dict[str, Any]:

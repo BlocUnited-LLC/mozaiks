@@ -160,13 +160,23 @@ For SaaS apps that select the `mozaikspay` managed capability, the generated
 app bundle must include the portable SaaS contract, not managed provider
 internals:
 
-- `config/subscriptions.yaml` with token wallets, token allowances, and usage
-  limits
+- `config/subscriptions.yaml` with plans, gates, and only the token wallets,
+  token allowances, top-up products, and usage limits required by the app's AI
+  usage, credit, or quota model
 - `services/integrations/mozaikspay_client.py` as the app-side connector client
 - `modules/billing_portal/` as the app-owned facade module
 - billing and usage pages bound only to `/api/modules/billing_portal/*`
 - no `modules/mozaikspay/`, managed billing module, wallet module, or direct
   provider SDK ownership in the generated app
+
+Managed packs that own subscription assignment writes must declare that through
+`provides_capabilities: [subscription_write_path]` in the pack `contract.yaml`.
+The scanner uses that provider-neutral capability flag to skip
+`entitlement_dispatch`; otherwise any generated app with
+`config/subscriptions.yaml -> assignment_store` must include the
+`entitlement_dispatch` generated module so self-hosted and custom-provider apps
+still have a deterministic assignment writer. This rule is pack-driven and must
+not special-case MozaiksPay in scanner logic.
 
 The deterministic app-bundle acceptance gate enforces this boundary on the
 assembled bundle, not on isolated task output. A selected managed capability
@@ -412,9 +422,38 @@ backend Python, frontend code, pages, data contracts, service foundation files,
 or unrelated modules. After the configured attempt limit, the status becomes
 `blocked` and the workflow returns to the user.
 
+When the generated-bundle scanner fails on a file-family violation, the same
+acceptance gate writes a bundle repair contract before export can proceed:
+
+- `bundle_repair_status`
+- `bundle_repair_target`
+- `bundle_repair_attempt_count`
+- `bundle_repair_max_attempts`
+- `bundle_repair_request`
+- `bundle_repair_errors`
+- `bundle_repair_result`
+
+The target must be the narrowest owning agent: `AppSchemaAgent` for page/schema
+endpoint drift, `ConfigMiddlewareAgent` for config or managed-capability client
+drift, `ServiceAgent` for backend Python/service drift, and `FrontendStubAgent`
+for generated frontend helper drift. A repair agent may remove stale or invalid
+artifacts by emitting `deleted_files`; `AssemblyAgent`, the acceptance gate, and
+`DownloadAgent` all apply those deletions before validation or packaging.
+
+Deterministic smoke coverage:
+
+```powershell
+python scripts\smoke_appgenerator_live_acceptance.py --repair-loop
+```
+
+This smoke injects an app-local token wallet ledger, verifies that scanner
+repair routes to `ServiceAgent`, applies `deleted_files`, re-runs acceptance,
+checks the export gate, and proves packaging no longer contains the removed
+artifact.
+
 When a build/export context requests deployment output, or the generated files
 already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,
-or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral
+`.github/workflows/readiness.yml`, or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral
 deployment artifact validator. Deployment-ready bundles must include valid
 deployment artifacts such as `Dockerfile`, `env.example`, and
 `deployment.manifest.json`; missing deployment artifacts block export/promotion

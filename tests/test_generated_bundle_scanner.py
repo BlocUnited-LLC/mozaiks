@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     generate_deployment_artifacts,
 )
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import scan_generated_bundle
+
+_WORKSPACE = Path(__file__).resolve().parents[1]
+_MOZAIKSPAY_PACK_ROOT = _WORKSPACE / "factory_app" / "build_context" / "mozaikspay"
 
 
 def _data_contract(*, module_id: str = "tickets") -> str:
@@ -43,8 +47,10 @@ actions: []
 """
 
 
-def _mozaikspay_pack() -> list[dict[str, str]]:
-    return [{"id": "mozaikspay", "capability_source": "managed_capability"}]
+def _mozaikspay_pack() -> list[dict]:
+    # Include pack_source_path so _packs_providing() can load provides_capabilities
+    # from contract.yaml and correctly skip the entitlement_dispatch requirement.
+    return [{"id": "mozaikspay", "capability_source": "managed_capability", "pack_source_path": str(_MOZAIKSPAY_PACK_ROOT)}]
 
 
 def _valid_mozaikspay_saas_bundle(*, include_deployment: bool = True) -> dict[str, str]:
@@ -336,18 +342,21 @@ def test_scan_generated_bundle_rejects_app_local_wallet_and_usage_ledgers() -> N
     assert sum("app-local token wallet or usage ledger" in error for error in errors) == 2
 
 
-def test_scan_generated_bundle_rejects_direct_hosted_internal_calls() -> None:
+def test_scan_generated_bundle_rejects_direct_managed_capability_endpoint_calls() -> None:
+    """Backend service files are checked for direct calls to selected managed capability endpoints."""
     errors = scan_generated_bundle(
         {
+            "services/integrations/custompay_client.py": "class CustomPayClient: pass\n",
             "modules/billing_portal/backend/service.py": (
-                'endpoint = "/api/modules/mozaikspay/create_checkout_session"\n'
-                'other = "/api/modules/managed_billing/assign_plan"\n'
+                'endpoint = "/api/modules/custompay/create_checkout_session"\n'
+                'other = "/api/modules/custompay/assign_plan"\n'
             ),
-        }
+        },
+        capability_packs=[{"id": "custompay", "capability_source": "managed_capability"}],
     )
 
-    assert any("hosted managed-capability internals" in error for error in errors)
-    assert any("/api/modules/mozaikspay/create_checkout_session" in error for error in errors)
+    assert any("/api/modules/custompay/create_checkout_session" in error for error in errors)
+    assert any("/api/modules/custompay/assign_plan" in error for error in errors)
 
 
 def test_scan_generated_bundle_allows_managed_refund_adapter_call() -> None:
@@ -387,6 +396,44 @@ def test_scan_generated_bundle_rejects_selected_managed_capability_internals() -
     assert any("must not generate provider internals" in error for error in errors)
 
 
+def test_scan_generated_bundle_rejects_inline_pack_forbidden_output_prefixes() -> None:
+    errors = scan_generated_bundle(
+        {
+            "services/integrations/testpay_client.py": "class TestPayClient: pass\n",
+            "modules/provider_ledger/module.yaml": "module:\n  id: provider_ledger\n",
+        },
+        capability_packs=[
+            {
+                "id": "testpay",
+                "capability_source": "managed_capability",
+                "forbidden_outputs": [{"path_prefix": "modules/provider_ledger/"}],
+            }
+        ],
+    )
+
+    assert any("forbidden output prefixes" in error for error in errors)
+    assert any("modules/provider_ledger/module.yaml" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_mozaikspay_contract_forbidden_output_prefixes() -> None:
+    errors = scan_generated_bundle(
+        {
+            "services/integrations/mozaikspay_client.py": "class MozaiksPayClient: pass\n",
+            "modules/wallet/module.yaml": "module:\n  id: wallet\n",
+        },
+        capability_packs=[
+            {
+                "id": "mozaikspay",
+                "capability_source": "managed_capability",
+                "pack_source_path": str(_MOZAIKSPAY_PACK_ROOT),
+            }
+        ],
+    )
+
+    assert any("forbidden output prefixes" in error for error in errors)
+    assert any("modules/wallet/module.yaml" in error for error in errors)
+
+
 def test_scan_generated_bundle_rejects_page_binding_to_selected_managed_capability() -> None:
     errors = scan_generated_bundle(
         {
@@ -396,7 +443,7 @@ def test_scan_generated_bundle_rejects_page_binding_to_selected_managed_capabili
         capability_packs=[{"id": "mozaikspay", "capability_source": "managed_capability"}],
     )
 
-    assert any("page binds directly to managed capability endpoint" in error for error in errors)
+    assert any("calls managed capability endpoint" in error for error in errors)
 
 
 def test_scan_generated_bundle_accepts_mozaikspay_saas_contract_with_deployment_artifacts() -> None:
@@ -441,6 +488,24 @@ def test_scan_generated_bundle_accepts_authenticated_app_deploy_contract() -> No
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
     assert errors == []
+
+
+def test_scan_generated_bundle_accepts_production_profile_readiness_only_contract() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="production_container",
+        include_dockerfiles=False,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert errors == []
+    assert ".github/workflows/readiness.yml" in files
+    assert ".github/workflows/deploy.yml" not in files
 
 
 def test_scan_generated_bundle_rejects_mozaikspay_saas_without_env_handles() -> None:
@@ -580,3 +645,69 @@ def test_scan_generated_bundle_allows_mozaikspay_saas_without_deployment_artifac
     )
 
     assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Pack-capability provision mechanism
+# ---------------------------------------------------------------------------
+
+_ASSIGNMENT_STORE_SUBS_YAML = """
+schema_version: mozaiks.subscriptions.v1
+label: Plans
+default_plan_id: free
+assignment_store:
+  data_alias: billing.assignments
+  user_id_field: user_id
+  active_statuses: [active]
+plans:
+  - plan_id: free
+    label: Free
+    capabilities: []
+"""
+
+
+def test_scan_generated_bundle_skips_entitlement_dispatch_for_any_pack_providing_subscription_write_path_inline() -> None:
+    """Any managed pack with in-memory provides_capabilities: [subscription_write_path] exempts entitlement_dispatch."""
+    errors = scan_generated_bundle(
+        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML},
+        capability_packs=[{
+            "id": "custombilling",
+            "capability_source": "managed_capability",
+            "provides_capabilities": ["subscription_write_path"],
+        }],
+    )
+    assert not any("entitlement_dispatch" in error for error in errors)
+
+
+def test_scan_generated_bundle_skips_entitlement_dispatch_for_mozaikspay_via_contract_file() -> None:
+    """mozaikspay loaded with pack_source_path provides subscription_write_path via contract.yaml."""
+    errors = scan_generated_bundle(
+        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML},
+        capability_packs=_mozaikspay_pack(),
+    )
+    assert not any("entitlement_dispatch" in error for error in errors)
+
+
+def test_scan_generated_bundle_requires_entitlement_dispatch_when_no_managed_subscription_writer() -> None:
+    """assignment_store without any subscription_write_path provider requires entitlement_dispatch."""
+    errors = scan_generated_bundle(
+        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML},
+        capability_packs=[],
+    )
+    assert any("entitlement_dispatch" in error for error in errors)
+    assert any("assignment_store" in error for error in errors)
+
+
+def test_scan_generated_bundle_does_not_skip_entitlement_dispatch_for_non_managed_subscription_writer() -> None:
+    """Only selected managed_capability packs can own the subscription write path."""
+    errors = scan_generated_bundle(
+        {"config/subscriptions.yaml": _ASSIGNMENT_STORE_SUBS_YAML},
+        capability_packs=[{
+            "id": "custombilling",
+            "capability_source": "operator_pack",
+            "provides_capabilities": ["subscription_write_path"],
+        }],
+    )
+
+    assert any("entitlement_dispatch" in error for error in errors)
+    assert any("assignment_store" in error for error in errors)

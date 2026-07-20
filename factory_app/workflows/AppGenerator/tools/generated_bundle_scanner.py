@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -54,10 +54,6 @@ _PAYMENT_PROVIDER_REFUND_CALL_RE = re.compile(
     re.IGNORECASE,
 )
 _PAYMENT_PROVIDER_REFUNDS_ENDPOINT_RE = re.compile(r"['\"]?/refunds\b")
-_HOSTED_INTERNAL_ENDPOINT_RE = re.compile(
-    r"['\"]?(/api/modules/(?:mozaikspay|managed_billing|wallet)/[^'\"\s)]*)",
-    re.IGNORECASE,
-)
 _APP_LOCAL_LEDGER_PATH_RE = re.compile(
     r"(?:^|/)(?:(?:token_)?wallet|(?:token_)?usage)_ledger\.(?:py|js|ts|tsx|jsx)$"
     r"|(?:^|/)ledgers?/(?:[^/]*)(?:wallet|usage)(?:[^/]*)\.(?:py|js|ts|tsx|jsx)$",
@@ -331,8 +327,84 @@ def _selected_pack_descriptor(
     return None
 
 
+def _packs_providing(
+    capability_packs: list[dict[str, Any]] | None,
+    capability: str,
+) -> list[dict[str, Any]]:
+    """Return pack descriptors that declare they provide the given capability.
+
+    Checks the in-memory ``provides_capabilities`` list first; if absent,
+    falls back to loading ``provides_capabilities`` from
+    ``pack_source_path/contract.yaml``.  This lets operator packs declare
+    their capabilities without the OSS scanner hardcoding any pack name.
+    """
+    result: list[dict[str, Any]] = []
+    for pack in capability_packs or []:
+        if not isinstance(pack, dict):
+            continue
+        inline = pack.get("provides_capabilities")
+        if isinstance(inline, list) and capability in inline:
+            result.append(pack)
+            continue
+        raw_source_path = str(pack.get("pack_source_path") or "").strip()
+        if not raw_source_path:
+            continue
+        contract_path = Path(raw_source_path) / "contract.yaml"
+        try:
+            contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        if isinstance(contract, dict):
+            from_contract = contract.get("provides_capabilities") or []
+            if isinstance(from_contract, list) and capability in from_contract:
+                result.append(pack)
+    return result
+
+
+def _normalized_forbidden_output_prefix(value: Any) -> str:
+    raw = value
+    if isinstance(value, dict):
+        raw = value.get("path_prefix") or value.get("path") or ""
+    prefix = _normalized_path(str(raw or "")).lstrip("/")
+    if prefix.startswith("app/"):
+        prefix = prefix.removeprefix("app/")
+    return prefix.rstrip("/")
+
+
+def _forbidden_output_prefixes_from_pack(pack: dict[str, Any]) -> list[str]:
+    prefixes: list[str] = []
+
+    def add_many(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            prefix = _normalized_forbidden_output_prefix(item)
+            if prefix and prefix not in prefixes:
+                prefixes.append(prefix)
+
+    add_many(pack.get("forbidden_outputs"))
+
+    raw_source_path = str(pack.get("pack_source_path") or "").strip()
+    if raw_source_path:
+        contract_path = Path(raw_source_path) / "contract.yaml"
+        try:
+            contract = yaml.safe_load(contract_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            contract = {}
+        if isinstance(contract, dict):
+            add_many(contract.get("forbidden_outputs"))
+
+    return sorted(prefixes)
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    normalized_path = _normalized_path(path).rstrip("/")
+    normalized_prefix = _normalized_path(prefix).rstrip("/")
+    return normalized_path == normalized_prefix or normalized_path.startswith(f"{normalized_prefix}/")
+
+
 def _iter_api_endpoint_literals(content: str) -> list[str]:
-    return re.findall(r'["\'](/api/modules/[^"\']+)["\']', content)
+    return re.findall(r'(?:["\']|:\s*)(/api/modules/[^"\'\s]+)', content)
 
 
 def _scan_selected_managed_capability_boundaries(
@@ -347,6 +419,21 @@ def _scan_selected_managed_capability_boundaries(
     normalized_files = _normalized_files_map(files_map)
     errors: list[str] = []
     for pack_id in sorted(managed_capability_ids):
+        pack = _selected_pack_descriptor(capability_packs, pack_id) or {"id": pack_id}
+        forbidden_prefixes = _forbidden_output_prefixes_from_pack(pack)
+        forbidden_output_paths = {
+            path
+            for path in normalized_files
+            for prefix in forbidden_prefixes
+            if _path_matches_prefix(path, prefix)
+        }
+        if forbidden_output_paths:
+            errors.append(
+                f"Selected managed capability '{pack_id}' declares forbidden output prefixes "
+                f"{forbidden_prefixes}; generated bundle contains forbidden paths: "
+                f"{sorted(forbidden_output_paths)}."
+            )
+
         managed_capability_module_prefix = f"modules/{pack_id}/"
         managed_capability_module_paths = [
             path for path in normalized_files if path.startswith(managed_capability_module_prefix)
@@ -366,13 +453,13 @@ def _scan_selected_managed_capability_boundaries(
 
         direct_endpoint_prefix = f"/api/modules/{pack_id}/"
         for path, content in normalized_files.items():
-            if not path.startswith("ui/pages/"):
+            if not _is_scannable(path):
                 continue
             for endpoint in _iter_api_endpoint_literals(content):
                 if endpoint.startswith(direct_endpoint_prefix):
                     errors.append(
-                        f"{path}: page binds directly to managed capability endpoint "
-                        f"{endpoint}. Bind pages to an app-owned facade module instead."
+                        f"{path}: calls managed capability endpoint "
+                        f"{endpoint} directly. Use an app-owned facade module instead."
                     )
     return errors
 
@@ -408,7 +495,7 @@ def _module_actions_from_yaml(path: str, content: str) -> set[str]:
 
 
 def _page_endpoint_literals(content: str) -> list[str]:
-    return re.findall(r'["\']?(/api/modules/[^"\'\s]+)', content)
+    return re.findall(r'(?:["\']|:\s*)(/api/modules/[^"\'\s]+)', content)
 
 
 def _validate_subscriptions_contract(
@@ -610,6 +697,129 @@ def _scan_mozaikspay_saas_contract(
     return errors
 
 
+def _entitlement_gates_from_module_yaml(path: str, content: str) -> set[str]:
+    parsed, error = _load_yaml_mapping_from_file({path: content}, path)
+    if error or not isinstance(parsed, dict):
+        return set()
+    gates: set[str] = set()
+    for action in (parsed.get("actions") or []):
+        if not isinstance(action, dict):
+            continue
+        gate = str(action.get("entitlement_gate") or "").strip()
+        if gate:
+            gates.add(gate)
+    return gates
+
+
+def _capability_ids_from_subscriptions_yaml(content: str) -> set[str]:
+    try:
+        config = yaml.safe_load(content) or {}
+    except Exception:
+        return set()
+    capability_ids: set[str] = set()
+    for plan in (config.get("plans") or []):
+        if not isinstance(plan, dict):
+            continue
+        for cap in (plan.get("capabilities") or []):
+            if isinstance(cap, str) and cap.strip():
+                capability_ids.add(cap.strip())
+    return capability_ids
+
+
+def _scan_self_hosted_entitlement_dispatch_contract(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Validate the self-hosted entitlement_dispatch module contract.
+
+    Fires when config/subscriptions.yaml declares an assignment_store and
+    no selected managed-capability pack declares provides_capabilities:
+    [subscription_write_path]. In that case the generated app owns the
+    subscription assignment write path, and an entitlement_dispatch module is
+    required.
+    """
+    # Any managed capability pack that declares provides_capabilities:
+    # [subscription_write_path] owns the subscription assignment write path.
+    # entitlement_dispatch is only needed when no such pack is selected.
+    managed_writers = [
+        p for p in _packs_providing(capability_packs, "subscription_write_path")
+        if str(p.get("capability_source") or "").strip() == "managed_capability"
+    ]
+    if managed_writers:
+        return []
+
+    normalized_files = _normalized_files_map(files_map)
+    subs_content = normalized_files.get("config/subscriptions.yaml")
+    if not subs_content:
+        return []
+
+    try:
+        subs_config = yaml.safe_load(subs_content) or {}
+    except Exception:
+        return []
+
+    if not isinstance(subs_config, dict) or not subs_config.get("assignment_store"):
+        return []
+
+    errors: list[str] = []
+    dispatch_path = "modules/entitlement_dispatch/module.yaml"
+    dispatch_content = normalized_files.get(dispatch_path)
+    if not dispatch_content:
+        errors.append(
+            "config/subscriptions.yaml declares assignment_store but "
+            f"{dispatch_path} is missing. Self-hosted apps require an "
+            "entitlement_dispatch module to write subscription assignment records."
+        )
+        return errors
+
+    declared_id = _declared_module_id_from_yaml(dispatch_path, dispatch_content)
+    if declared_id != "entitlement_dispatch":
+        errors.append(
+            f"{dispatch_path}: module.id must be 'entitlement_dispatch', got {declared_id!r}."
+        )
+
+    actions = _module_actions_from_yaml(dispatch_path, dispatch_content)
+    required_actions = {"activate_subscription", "deactivate_subscription"}
+    missing_actions = sorted(required_actions - actions)
+    if missing_actions:
+        errors.append(
+            f"{dispatch_path}: entitlement_dispatch module must declare actions "
+            f"{sorted(required_actions)}; missing: {missing_actions}."
+        )
+
+    return errors
+
+
+def _scan_entitlement_gate_capability_alignment(files_map: dict[str, str]) -> list[str]:
+    """Validate that all entitlement_gate values in module.yaml files reference
+    capability_ids that appear in at least one plan in config/subscriptions.yaml.
+    """
+    normalized_files = _normalized_files_map(files_map)
+    subs_content = normalized_files.get("config/subscriptions.yaml")
+    if not subs_content:
+        return []
+
+    plan_capabilities = _capability_ids_from_subscriptions_yaml(subs_content)
+    if not plan_capabilities:
+        return []
+
+    errors: list[str] = []
+    for path, content in normalized_files.items():
+        if not path.startswith("modules/") or not path.endswith("/module.yaml"):
+            continue
+        gates = _entitlement_gates_from_module_yaml(path, content)
+        unknown = sorted(gate for gate in gates if gate not in plan_capabilities)
+        if unknown:
+            errors.append(
+                f"{path}: entitlement_gate values {unknown} do not appear in any "
+                "plan's capabilities in config/subscriptions.yaml. Each gated capability "
+                "must be listed under at least one plan."
+            )
+
+    return errors
+
+
 def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
     normalized_files = _normalized_files_map(files_map)
     deployment_artifacts: dict[str, str] = {
@@ -618,6 +828,7 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
             "Dockerfile",
             "env.example",
             "deployment.manifest.json",
+            ".github/workflows/readiness.yml",
             ".github/workflows/deploy.yml",
         )
         if path in normalized_files
@@ -628,6 +839,7 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
         deployment_errors = validate_generated_deployment_bundle(
             deployment_artifacts,
             include_dockerfiles=True,
+            include_readiness_workflow=".github/workflows/readiness.yml" in deployment_artifacts,
             include_workflow=".github/workflows/deploy.yml" in deployment_artifacts,
         )
     except Exception as exc:
@@ -732,6 +944,13 @@ def scan_generated_bundle(
             capability_packs=capability_packs,
         )
     )
+    errors.extend(
+        _scan_self_hosted_entitlement_dispatch_contract(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(_scan_entitlement_gate_capability_alignment(files_map))
     if require_deployment_artifacts:
         errors.extend(_scan_deployment_artifacts_contract(files_map))
         errors.extend(_scan_auth_deployment_contract(files_map))
@@ -772,13 +991,6 @@ def scan_generated_bundle(
                 f"{path}: references a refunds endpoint (/refunds) directly. Generated apps must "
                 "route refund mutations through an app-owned facade or managed "
                 "payment adapter."
-            )
-
-        hosted_internal_refs = sorted(set(_HOSTED_INTERNAL_ENDPOINT_RE.findall(content)))
-        if hosted_internal_refs:
-            errors.append(
-                f"{path}: calls hosted managed-capability internals directly: "
-                f"{hosted_internal_refs}. Generated apps must bind through app-owned facade modules."
             )
 
         if _APP_LOCAL_LEDGER_PATH_RE.search(_normalized_path(path)) or _APP_LOCAL_LEDGER_CODE_RE.search(content):

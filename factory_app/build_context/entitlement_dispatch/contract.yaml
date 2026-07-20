@@ -1,0 +1,108 @@
+contract_id: entitlement_dispatch
+contract_type: build_pack_instructions
+
+# entitlement_dispatch is not selected by LLM intent matching.
+# AppPlanAgent includes it automatically when:
+#   - config/subscriptions.yaml declares assignment_store
+#   - the build does NOT include a managed capability pack that owns
+#     subscription assignment writes
+# The selection rule is injected by subscription_contract_context.py.
+selection_rules:
+  - id: implicit_for_self_hosted_saas
+    when:
+      intent_any:
+        - self-hosted subscription billing
+        - entitlement dispatch
+        - subscription assignment store
+    action: select_pack
+
+recommended_domains:
+  - saas
+  - subscriptions
+  - entitlements
+  - self-hosted billing
+
+required_outputs:
+  - path: data/migrations/001_entitlement_dispatch_collections.json
+    owner: templates
+  - path: modules/entitlement_dispatch/module.yaml
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/__init__.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/handler.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/service.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/repo.py
+    owner: templates
+  - path: modules/entitlement_dispatch/backend/schemas.py
+    owner: templates
+
+forbidden_outputs:
+  - path_prefix: modules/subscriptions/
+  - path_prefix: modules/billing/
+  - path_prefix: services/billing/
+  - path_prefix: services/adapters/payments/
+  - path_prefix: app/capability_packs/
+
+managed_assignment_writer_contract:
+  purpose: >
+    entitlement_dispatch is only needed when subscription assignments do not
+    arrive through a trusted managed adapter or the OSS
+    BillingFulfillmentCommand ingress.
+  selection_mechanism: >
+    The planning system checks whether any selected managed_capability pack
+    declares provides_capabilities: [subscription_write_path] in its contract.
+    If found, that pack owns the subscription assignment write path and
+    entitlement_dispatch is not selected. The mechanism is pack-driven;
+    no specific pack name is hardcoded into the OSS planner.
+  replacement_rule: >
+    A future managed monetization pack can replace the current write-path owner
+    for this planning decision only if it explicitly declares
+    provides_capabilities: [subscription_write_path] in its contract.yaml and
+    applies provider-neutral fulfillment effects into the same configured
+    assignment_store.
+
+runtime_boundaries:
+  - id: write_path_only
+    rule: >
+      entitlement_dispatch is the app-owned write path for subscription
+      assignments. ConfiguredEntitlementAdapter is the read path. Do not
+      duplicate ledger, capability-grant, or entitlement check logic here.
+  - id: assignment_store_alias
+    rule: >
+      repo.py must write to the billing.subscriptions data alias declared in
+      data/contract.json. The assignment_store.data_alias in
+      config/subscriptions.yaml must match this alias. Do not invent a
+      separate collection or bypass the data contract alias.
+  - id: app_id_required_in_document
+    rule: >
+      Every written document must include app_id from ctx.app_id.
+      ConfiguredEntitlementAdapter queries with {app_id_field: app_id} so the
+      field must be present in the stored record.
+  - id: action_contract
+    rule: >
+      The module must declare exactly two actions — activate_subscription and
+      deactivate_subscription — with no entitlement_gate, no permissions, and
+      capabilities: []. This is an internal system module; do not add
+      user-facing queries, admin surfaces, or UI pages.
+  - id: no_provider_logic
+    rule: >
+      Do not call any payment provider SDK, billing API, or external service.
+      The module only writes MongoDB records. Payment confirmation, webhook
+      verification, and plan change policy belong in the app's billing facade
+      or a managed MozaiksPay integration — not here.
+
+facades: []
+
+cross_pack_integrations:
+  - provides_capability: subscription_write_path
+    description: >
+      Any managed capability pack that declares
+      provides_capabilities: [subscription_write_path] owns the subscription
+      assignment write path by applying verified checkout facts to
+      provider-neutral fulfillment effects. The entitlement_dispatch pack must
+      NOT be included alongside any such managed assignment writer — doing so
+      creates a duplicate write path and risks conflicting subscription state.
+    optional: false
+    integration_surface: []

@@ -8,6 +8,7 @@ Covers helpers not tested in test_module_loader_helpers.py:
     - "domain.*" prefix → accepted
     - "platform.*" prefix → accepted
     - "hosted.*" prefix → accepted
+    - "mozaikspay.*" prefix -> accepted
     - other prefix → ValidationError
 
   ModuleEventsManifest._validate_unique_events:
@@ -22,6 +23,8 @@ Covers helpers not tested in test_module_loader_helpers.py:
     - kind="capability" missing capability_id → ValidationError
     - kind="notification" with notification_id → valid
     - kind="notification" missing notification_id → ValidationError
+    - kind="service_adapter" with adapter + adapter_method -> valid
+    - kind="service_adapter" missing adapter or adapter_method -> ValidationError
 
   ModuleRuntimeExtension._entrypoint (validator):
     - valid "backend.router:get_router" → accepted
@@ -45,6 +48,7 @@ Covers helpers not tested in test_module_loader_helpers.py:
     - "domain.*" not in set → True
     - "platform.*" not in set → True
     - "hosted.*" not in set → True
+    - "mozaikspay.*" not in set -> True
     - unknown event not in set → False
 
   ModuleLoader._display_path (static):
@@ -62,6 +66,7 @@ from mozaiksai.core.runtime.app.module_loader import (
     ModuleEvent,
     ModuleEventsManifest,
     ModuleLoader,
+    ModuleReaction,
     ModuleReactionTarget,
     ModuleRuntimeExtension,
 )
@@ -90,6 +95,10 @@ class TestModuleEventCanonicalNamespace:
     def test_hosted_prefix_accepted(self):
         e = _event("hosted.billing.payment_received")
         assert e.type == "hosted.billing.payment_received"
+
+    def test_mozaikspay_prefix_accepted(self):
+        e = _event("mozaikspay.self_hosted_app_registered")
+        assert e.type == "mozaikspay.self_hosted_app_registered"
 
     def test_other_prefix_raises(self):
         with pytest.raises(ValidationError, match="domain"):
@@ -176,6 +185,43 @@ class TestModuleReactionTargetContract:
     def test_notification_missing_id_raises(self):
         with pytest.raises(ValidationError, match="notification_id"):
             ModuleReactionTarget(kind="notification")
+
+    def test_service_adapter_with_adapter_and_method_valid(self):
+        target = ModuleReactionTarget(
+            kind="service_adapter",
+            adapter="app.services.adapters.ci.managed_ci_provisioner:ManagedCIProvisioner",
+            adapter_method="handle",
+        )
+        assert target.kind == "service_adapter"
+        assert target.adapter_method == "handle"
+
+    def test_service_adapter_missing_adapter_raises(self):
+        with pytest.raises(ValidationError, match="adapter"):
+            ModuleReactionTarget(kind="service_adapter", adapter_method="handle")
+
+    def test_service_adapter_missing_method_raises(self):
+        with pytest.raises(ValidationError, match="adapter_method"):
+            ModuleReactionTarget(
+                kind="service_adapter",
+                adapter="app.services.adapters.ci.managed_ci_provisioner:ManagedCIProvisioner",
+            )
+
+    def test_service_adapter_with_handler_method_raises(self):
+        with pytest.raises(ValidationError):
+            ModuleReactionTarget(
+                kind="service_adapter",
+                adapter="app.services.adapters.ci.managed_ci_provisioner:ManagedCIProvisioner",
+                adapter_method="handle",
+                handler_method="on_event",
+            )
+
+    def test_mozaikspay_reaction_event_type_accepted(self):
+        reaction = ModuleReaction(
+            id="provision_self_hosted_registration",
+            event_type="mozaikspay.self_hosted_app_registered",
+            target=ModuleReactionTarget(kind="handler", handler_method="on_self_hosted_app_registered"),
+        )
+        assert reaction.event_type == "mozaikspay.self_hosted_app_registered"
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +325,11 @@ class TestIsKnownOrCanonicalEvent:
 
     def test_hosted_prefix_not_in_set_true(self):
         assert ModuleLoader._is_known_or_canonical_event("hosted.billing.paid", set()) is True
+
+    def test_mozaikspay_prefix_not_in_set_true(self):
+        assert ModuleLoader._is_known_or_canonical_event(
+            "mozaikspay.self_hosted_app_registered", set()
+        ) is True
 
     def test_unknown_event_not_in_declared_false(self):
         assert ModuleLoader._is_known_or_canonical_event("app.custom.event", set()) is False

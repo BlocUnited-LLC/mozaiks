@@ -9,11 +9,27 @@ global_rules:
   - Do not force a provider when the user names a different provider.
   - If a recommended pack is selected, use app-owned facade modules and thin service clients.
   - Runtime primitives such as auth, account profile, subscriptions, entitlement gates, token usage measurement, and token wallet accounting are platform-provided; generated app modules wire product-specific SaaS behavior on top of them.
+app_agnostic_rules:
+  - Default managed adapters are recommendation-only and must not become runtime requirements.
+  - A selected managed adapter must cross runtime state changes through provider-neutral commands, events, or configured records.
+  - Generated app pages must call app-owned facade modules; they must not call hosted product internals or payment provider SDKs directly.
+  - Any default managed adapter must declare an external_adapter replacement path so user-selected providers can satisfy the same app-facing contract.
 capabilities:
   - id: mozaikspay
     label: MozaiksPay Managed SaaS Billing
     capability_kind: operator_pack
     recommendation_rank: 1
+    adapter_contract:
+      role: default_managed_adapter
+      app_facing_facades:
+        - billing_portal
+      replacement_kind: external_adapter
+      runtime_effect_boundary: BillingFulfillmentCommand
+      runtime_read_boundary: EntitlementPort
+      canonical_runtime_state:
+        - app/config/subscriptions.yaml
+        - subscription assignment_store records
+        - OSS token wallet ledger
     domains:
       - billing
       - subscriptions
@@ -135,7 +151,7 @@ capabilities:
       - Select social_pack only for apps where social graph or feed behavior is part of the product concept.
       - The social pack owns friends, follows/invites, user posts, reactions, comments, and feed records.
       - Use messaging_pack for DMs only when the app also needs private conversations.
-      - Do not make governance features first-class here. Threads with voting, proposals, quorum, treasury, moderation policy, or member governance belong to an app-specific module or a future governance pack.
+      - Do not make governance features first-class here. Threads with voting, proposals, quorum, treasury, moderation policy, or member governance are app-specific — build them as app-owned modules, not as packs.
       - Dummy friend/post examples may be used in demo UI fallbacks, but persisted user social data must come from module actions.
     capabilities_provided:
       - social.friends.list

@@ -14,6 +14,7 @@ Companion manifests live under contracts/ and are optional:
     - notifications.yaml
     - settings.yaml
     - admin.yaml
+    - policy_hooks.yaml
 
 `module.yaml` declares the public module surface. `backend/handler.py`
 implements the deterministic methods referenced by `actions[].handler_method`.
@@ -35,6 +36,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from logs.logging_config import get_workflow_logger
 
 logger = get_workflow_logger("module_loader")
+
+CANONICAL_EVENT_PREFIXES = ("domain.", "platform.", "hosted.", "mozaikspay.")
+CANONICAL_EVENT_PREFIX_LABEL = "domain.*, platform.*, hosted.*, or mozaikspay.*"
 
 
 def _default_notification_channels() -> list[Literal["in_app", "email", "push", "sms"]]:
@@ -129,7 +133,16 @@ class ModuleIdentity(ModuleContractModel):
     id: str
     display_name: str | None = None
     version: str = "1.0.0"
-    type: Literal["standard", "messaging", "workflow", "event_pipeline", "transactional"] = "standard"
+    type: Literal[
+        "standard",
+        "messaging",
+        "workflow",
+        "event_pipeline",
+        "transactional",
+        "billing",
+        "membership",
+        "entitlement_dispatch",
+    ] = "standard"
     description: str | None = None
     owner: str | None = None
     visibility: str | None = None
@@ -318,9 +331,8 @@ class ModuleEvent(ModuleContractModel):
     @field_validator("type")
     @classmethod
     def _canonical_event_namespace(cls, value: str) -> str:
-        allowed = ("domain.", "platform.", "hosted.")
-        if not value.startswith(allowed):
-            raise ValueError("module-published events must use domain.*, platform.*, or hosted.*")
+        if not value.startswith(CANONICAL_EVENT_PREFIXES):
+            raise ValueError(f"module-published events must use {CANONICAL_EVENT_PREFIX_LABEL}")
         return value
 
 
@@ -341,12 +353,14 @@ class ModuleEventsManifest(ModuleContractModel):
 
 
 class ModuleReactionTarget(ModuleContractModel):
-    kind: Literal["handler", "capability", "notification"]
+    kind: Literal["handler", "capability", "notification", "service_adapter"]
     handler_method: str | None = None
     capability_id: str | None = None
     notification_id: str | None = None
+    adapter: str | None = None
+    adapter_method: str | None = None
 
-    @field_validator("handler_method", "capability_id", "notification_id", mode="before")
+    @field_validator("handler_method", "capability_id", "notification_id", "adapter", "adapter_method", mode="before")
     @classmethod
     def _optional(cls, value: Any) -> str | None:
         return _optional_text(value)
@@ -356,18 +370,31 @@ class ModuleReactionTarget(ModuleContractModel):
         if self.kind == "handler":
             if not self.handler_method:
                 raise ValueError("handler reactions must declare target.handler_method")
-            if self.capability_id or self.notification_id:
-                raise ValueError("handler reactions must not declare capability_id or notification_id")
+            if self.capability_id or self.notification_id or self.adapter or self.adapter_method:
+                raise ValueError(
+                    "handler reactions must not declare capability_id, notification_id, adapter, or adapter_method"
+                )
         elif self.kind == "capability":
             if not self.capability_id:
                 raise ValueError("capability reactions must declare target.capability_id")
-            if self.handler_method or self.notification_id:
-                raise ValueError("capability reactions must not declare handler_method or notification_id")
+            if self.handler_method or self.notification_id or self.adapter or self.adapter_method:
+                raise ValueError(
+                    "capability reactions must not declare handler_method, notification_id, adapter, or adapter_method"
+                )
         elif self.kind == "notification":
             if not self.notification_id:
                 raise ValueError("notification reactions must declare target.notification_id")
-            if self.handler_method or self.capability_id:
-                raise ValueError("notification reactions must not declare handler_method or capability_id")
+            if self.handler_method or self.capability_id or self.adapter or self.adapter_method:
+                raise ValueError(
+                    "notification reactions must not declare handler_method, capability_id, adapter, or adapter_method"
+                )
+        elif self.kind == "service_adapter":
+            if not self.adapter or not self.adapter_method:
+                raise ValueError("service_adapter reactions must declare target.adapter and target.adapter_method")
+            if self.handler_method or self.capability_id or self.notification_id:
+                raise ValueError(
+                    "service_adapter reactions must not declare handler_method, capability_id, or notification_id"
+                )
         return self
 
 
@@ -398,9 +425,10 @@ class ModuleReaction(ModuleContractModel):
     @field_validator("event_type")
     @classmethod
     def _canonical_event_namespace(cls, value: str) -> str:
-        allowed = ("domain.", "platform.", "hosted.")
-        if not value.startswith(allowed):
-            raise ValueError("module reactions must use domain.*, platform.*, or hosted.* event_type values")
+        if not value.startswith(CANONICAL_EVENT_PREFIXES):
+            raise ValueError(
+                f"module reactions must use {CANONICAL_EVENT_PREFIX_LABEL} event_type values"
+            )
         return value
 
 
@@ -815,6 +843,64 @@ class ModuleRelationshipsManifest(ModuleContractModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Policy hook contract — modules/{module}/contracts/policy_hooks.yaml
+# ---------------------------------------------------------------------------
+
+
+class ModulePolicyHookProvider(ModuleContractModel):
+    id: str
+    label: str
+    description: str | None = None
+    order: int = 100
+    hook_type: Literal["access", "classification", "decision_input", "custom"] = "custom"
+    action: str
+    resource_types: list[str] = Field(default_factory=list)
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+    deterministic: bool = True
+
+    @field_validator("id", "label", "action", mode="before")
+    @classmethod
+    def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
+        return _required_text(value, field_name=f"policy hook {info.field_name}")
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _optional(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def _order(cls, value: Any) -> int:
+        if value in (None, ""):
+            return 100
+        return int(value)
+
+    @field_validator("resource_types", mode="before")
+    @classmethod
+    def _lists(cls, value: Any) -> list[str]:
+        return _string_list(value)
+
+    @model_validator(mode="after")
+    def _validate_hook_contract(self) -> ModulePolicyHookProvider:
+        if not self.resource_types:
+            raise ValueError("policy hook providers must declare at least one resource_type")
+        return self
+
+
+class ModulePolicyHooksManifest(ModuleContractModel):
+    schema_version: Literal["mozaiks.policy_hooks.v1"] = "mozaiks.policy_hooks.v1"
+    hooks: list[ModulePolicyHookProvider] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_hook_ids(self) -> ModulePolicyHooksManifest:
+        hook_ids = [hook.id for hook in self.hooks]
+        if len(hook_ids) != len(set(hook_ids)):
+            raise ValueError("policy_hooks.yaml hooks must have unique id values")
+        return self
+
+
 class ModuleRuntimeExtension(ModuleContractModel):
     kind: Literal["api_router", "startup_service"]
     entrypoint: str
@@ -867,6 +953,7 @@ class ModuleCompanionManifests(ModuleContractModel):
     admin: ModuleAdminManifest | None = None
     profile: ModuleProfileManifest | None = None
     relationships: ModuleRelationshipsManifest | None = None
+    policy_hooks: ModulePolicyHooksManifest | None = None
     runtime_extensions: ModuleRuntimeExtensionsManifest | None = None
 
 
@@ -930,6 +1017,7 @@ class ModuleLoader:
         "admin": ("admin.yaml", ModuleAdminManifest),
         "profile": ("profile.yaml", ModuleProfileManifest),
         "relationships": ("relationships.yaml", ModuleRelationshipsManifest),
+        "policy_hooks": ("policy_hooks.yaml", ModulePolicyHooksManifest),
     }
 
     def __init__(self, base_path: str) -> None:
@@ -1209,7 +1297,7 @@ class ModuleLoader:
     def _is_known_or_canonical_event(event_type: str, declared_events: set[str]) -> bool:
         if event_type in declared_events:
             return True
-        return event_type.startswith(("domain.", "platform.", "hosted."))
+        return event_type.startswith(CANONICAL_EVENT_PREFIXES)
 
     def _import_handler(
         self,

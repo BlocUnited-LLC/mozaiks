@@ -20,3 +20,6 @@ assets:
     description: >
       Provider-neutral deployment scaffold templates emitted by InfraScaffoldAgent.
       Operator-owned after first emit; regeneration is explicit and opt-in.
+      The readiness workflow is an environment-staging gate for the promoted or
+      exported app. It is separate from Mozaiks artifact review staging, where
+      generated files wait for validation, review, and promotion.

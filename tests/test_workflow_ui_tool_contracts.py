@@ -675,10 +675,12 @@ def test_app_type_selector_emits_generic_monetization_selection_context() -> Non
     assert "revenue_model: 'auto'" in content
     assert "allowed_revenue_models" in content
     assert "'subscriptions'" in content
-    assert "'transactional'" in content
-    assert "'marketplace'" in content
-    assert "'sponsored'" in content
-    assert "surfaces: ['pricing', 'checkout', 'billing', 'usage', 'marketplace']" in content
+    assert "'usage_based'" in content
+    assert "'custom'" in content
+    assert "'hybrid'" in content
+    assert "'transactional'" not in content
+    assert "'sponsored'" not in content
+    assert "surfaces: ['pricing', 'checkout', 'billing', 'usage']" in content
     assert "monetization_enabled: true" in content
     assert "builder_options: {" in content
     assert "monetization: {" in content

@@ -251,6 +251,7 @@ class TestOptionalTaskOutputPaths:
         task = {"task_type": "module_contract", "capability_pack_id": "billing"}
         result = _optional_task_output_paths(task)
         assert "modules/billing/contracts/notifications.yaml" in result
+        assert "modules/billing/contracts/policy_hooks.yaml" in result
         assert "modules/billing/runtime_extensions.yaml" in result
 
     def test_module_contract_without_module_id_returns_empty(self):

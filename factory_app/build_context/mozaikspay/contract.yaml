@@ -1,6 +1,13 @@
 contract_id: mozaikspay
 contract_type: build_pack_instructions
 
+# Declares capabilities this pack provides to the OSS planning system.
+# subscription_write_path: this managed pack owns the subscription assignment
+# write path. AppPlanAgent must not also include entitlement_dispatch when
+# this pack is selected as managed_capability.
+provides_capabilities:
+  - subscription_write_path
+
 selection_rules:
   - id: select_for_saas_billing
     when:

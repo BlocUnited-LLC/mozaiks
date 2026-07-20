@@ -39,8 +39,9 @@ Assignment stores may declare `tenant_id_field`, `workspace_id_field`, and
 falling back to broader tenant, workspace, user, or app-level records.
 
 Plans may also declare `usage_limits` for meters such as `ai_tokens`. These
-limits are deterministic app intent used by admin, billing, and MozaiksPay
-facade surfaces. Token measurements themselves come from runtime
+limits are deterministic app intent used by admin, billing, and selected
+managed-capability facade surfaces, including the default MozaiksPay facade
+when that pack is selected. Token measurements themselves come from runtime
 AG2 1.0 beta usage middleware and `/api/me/usage` or `/api/admin/usage`; generated
 modules must not create a second usage ledger.
 
@@ -63,6 +64,12 @@ This file does not control whether the workspace is allowed to use a hosted
 operator pack such as MozaiksPay. Managed capability access is enforced by the hosted
 product that provides the pack. Generated app subscription config only controls
 the generated app's own users, plans, usage limits, and feature gates.
+When a selected managed-capability pack owns subscription assignment writes, it
+declares `provides_capabilities: [subscription_write_path]` in its pack
+contract. If no selected managed pack provides that capability and this file
+declares `assignment_store`, the generated app must include the
+`entitlement_dispatch` module so assignment writes remain deterministic without
+depending on MozaiksPay or any other hosted product.
 
 ### `app/ui/pages/`
 

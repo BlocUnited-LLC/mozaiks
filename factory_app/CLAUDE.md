@@ -36,7 +36,7 @@ and web shell behavior.
 | App-owned external clients | `app/services/integrations/<service>_client.py` |
 | App-owned provider adapters | `app/services/adapters/<area>/<provider>.py` |
 | App-specific auth provider mechanics | `app/services/adapters/auth/<provider>.py` |
-| Provider-neutral deployment artifacts | bundle-root `Dockerfile`, `docker-compose.yml`, `env.example`, `deployment.manifest.json`, optional `.github/workflows/deploy.yml` |
+| Provider-neutral deployment artifacts | bundle-root `Dockerfile`, `docker-compose.yml`, `env.example`, `deployment.manifest.json`, optional `.github/workflows/readiness.yml` and `.github/workflows/deploy.yml` |
 | App-level routes, only when needed | `app/services/routes/` |
 | Data contract and migration artifacts, only when `data/contract.json` is present | `app/data/contract.json`, `app/data/migrations/` |
 | Deterministic app capabilities | `app/modules/<module_id>/` |
@@ -53,7 +53,7 @@ and web shell behavior.
 - Do not bypass module contracts with undeclared routes or side channels.
 - Do not put business logic directly in `backend/handler.py`.
 - Do not turn provider adapters into modules or put module business state in `app/services/`.
-- Do not use `app/services/` for provider-neutral deployment artifacts; generated `Dockerfile`, `docker-compose.yml`, `env.example`, `.github/workflows/deploy.yml`, and `deployment.manifest.json` belong at the app bundle root.
+- Do not use `app/services/` for provider-neutral deployment artifacts; generated `Dockerfile`, `docker-compose.yml`, `env.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json` belong at the app bundle root.
 - Do not copy hosted platform provider adapters into this app; consume hosted deployment, DNS/domain, billing, wallet, and platform operations through hosted API clients/facade modules and host-owned records.
 - Do not copy framework runtime auth into the app; generic auth belongs in the installed `mozaiks` package.
 - Do not put raw secret values in `app/security/secrets.yaml`; it is a names-only contract.

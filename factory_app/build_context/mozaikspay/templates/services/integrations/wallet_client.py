@@ -11,7 +11,7 @@ Entitlement gates are enforced at the module action dispatcher level.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -86,7 +86,7 @@ class WalletClient:
                 params=params,
             )
             res.raise_for_status()
-            return res.json()
+            return cast(dict[str, Any], res.json())
 
     async def debit(
         self,
@@ -122,4 +122,4 @@ class WalletClient:
                 json=body,
             )
             res.raise_for_status()
-            return res.json()
+            return cast(dict[str, Any], res.json())

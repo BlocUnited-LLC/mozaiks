@@ -56,6 +56,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - policy_hooks.yaml
         - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py
@@ -87,6 +88,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - policy_hooks.yaml
         - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py
@@ -117,6 +119,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - policy_hooks.yaml
         - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py
@@ -146,7 +149,7 @@ archetypes:
       - My Apps, Portfolio, My Communities, or My Resources should list
         resources connected to the current user.
       - Vote weights, approval quorums, review authority, or other
-        time-sensitive decisions need immutable membership snapshots.
+        app-owned decision processes need deterministic class/policy inputs.
     canonical_yaml_family:
       always:
         - module.yaml
@@ -154,6 +157,7 @@ archetypes:
         - contracts/events.yaml
         - contracts/reactions.yaml
         - contracts/notifications.yaml
+        - contracts/policy_hooks.yaml
         - contracts/settings.yaml
         - contracts/admin.yaml
         - contracts/profile.yaml
@@ -190,10 +194,11 @@ archetypes:
       - list_user_relationships: >
           Return current-user resource relationship rows for
           contracts/relationships.yaml hydration.
-      - create_membership_snapshot: >
-          Create an immutable snapshot of eligible class/weight rows when a
-          proposal, approval, review, contest, or app-owned settlement process
-          opens. Later class changes must not rewrite the snapshot.
+      - evaluate_policy_hook: >
+          Return an allowlisted deterministic policy result for app-owned
+          access, classification, or decision-input requests declared in
+          contracts/policy_hooks.yaml. The response must not expose raw
+          membership records, secrets, payment data, or ledger rows.
     hard_constraints:
       - Auth identity and /api/me remain platform-owned. Do not create a
         replacement account/profile/user table to identify the signed-in user.
@@ -221,10 +226,15 @@ archetypes:
       - contracts/profile.yaml is optional and only for personal account
         panels backed by user-scoped module data. It does not replace /api/me
         identity or resource administration surfaces.
-      - If membership controls vote weights, approval quorum, judging weight,
-        or app-owned settlement allocation, create an immutable snapshot when
-        the process opens. Later membership or class changes must not mutate
-        open or closed process results.
+      - Use contracts/policy_hooks.yaml only when another module, route guard,
+        admin panel, or app-owned process needs to ask this module a generic
+        policy question. Hook actions return allowlisted eligibility,
+        class/relationship, capability, or decision-input values; consuming
+        modules own any decision records or freeze semantics they require.
+      - If the app needs configurable class labels, categories, or default
+        voting/allocation weights, put that class catalog in
+        contracts/settings.yaml. Do not hardcode class defaults in generated
+        Python constants; active membership/policy records still grant rights.
       - This archetype is host-agnostic. Do not include MozaiksPay, wallet,
         payout, hosted billing, managed hosting, growth campaign returns,
         investor marketplace policy, ownership-right claims, or hosted product
@@ -294,6 +304,7 @@ archetypes:
         - settings.yaml
         - admin.yaml
         - profile.yaml
+        - policy_hooks.yaml
         - relationships.yaml
     backend_stub_defaults:
       - backend/handler.py

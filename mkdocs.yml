@@ -151,6 +151,7 @@ nav:
           - Module Authoring Patterns: architecture/modules-systems/module-authoring-patterns.md
           - Internal Messaging: architecture/modules-systems/internal-messaging.md
           - AppGenerator Capability Planning: architecture/modules-systems/appgenerator-capability-planning.md
+          - Managed Capability Packs: architecture/modules-systems/managed-capability-packs.md
           - Framework Capability Classification: architecture/modules-systems/framework-capability-classification.md
       - Workflows:
           - architecture/workflows/index.md
@@ -188,7 +189,7 @@ nav:
               - Auto Tool Execution: architecture/mozaiksai/auto-tool-execution.md
           - Tokens and Cost Control:
               - Monetization Contract: architecture/mozaiksai/monetization-contract.md
-              - Monetization Taxonomy: architecture/mozaiksai/monetization-taxonomy.md
+              - Core Monetization Scope: architecture/mozaiksai/core-monetization-scope.md
               - Token Management: architecture/mozaiksai/token-management.md
       - Events and Data:
           - Event System: architecture/foundations/events-and-data/event-system.md

@@ -74,9 +74,10 @@ def _format_managed_capabilities(packs: list[Any]) -> str:
             label = pack.get("display_name") or pack.get("label") or pack_id
             description = pack.get("description") or ""
             caps = pack.get("capabilities") or []
+            cap_source = str(pack.get("capability_source") or "managed_capability").strip()
             line = (
                 f"  - {pack_id} ({label}) "
-                f"[capability_pack_id: {pack_id}; capability_source: managed_capability]"
+                f"[capability_pack_id: {pack_id}; capability_source: {cap_source}]"
             )
             if description:
                 line += f": {description.strip().split(chr(10))[0]}"

@@ -59,6 +59,15 @@ actions:
         current_build_run:
           type: object
           description: Active build run pointer used by Studio continue-build and control-plane re-entry.
+        app_context:
+          type: object
+          description: >
+            Arbitrary capability-pack-owned metadata attached to the app record.
+            The app_registry module does not interpret this field. Capability packs
+            that need app-scoped state (e.g. governance mode, participation policy
+            pointer, campaign config) declare their own keys under app_context via
+            their pack manifest and own the read/write contract for those keys.
+            Apps should write only keys declared by an active capability pack.
     output_schema:
       type: object
       properties:

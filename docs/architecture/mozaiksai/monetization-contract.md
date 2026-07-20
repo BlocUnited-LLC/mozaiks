@@ -15,7 +15,7 @@ generated bundle.
 
 | Concern | OSS `mozaiks` owns | Hosted/product layer owns |
 | --- | --- | --- |
-| Revenue model taxonomy | `free`, `subscriptions`, `usage_based`, `transactional`, `marketplace`, `sponsored`, `donations`, `community_funded`, `hybrid` | Which models a hosted product enables, prices, bundles, or promotes |
+| Core monetization routes | `free`, `subscriptions`, `usage_based`, `custom`, `hybrid` | Which custom money flows a hosted product enables, prices, bundles, or promotes |
 | Subscription contract | `app/config/subscriptions.yaml`, plan capabilities, usage limits, token wallets, token allowances | Paid plan packaging, checkout enablement, subscriber lifecycle policy |
 | Runtime enforcement | `EntitlementPort`, `ConfiguredEntitlementAdapter`, `actions[].entitlement_gate`, token guard | Which users receive paid assignments after commercial events |
 | Token accounting | `TokenWalletLedger`, usage ingest, `INSUFFICIENT_TOKENS` recovery metadata | Payment confirmation, refunds, chargebacks, support policy |
@@ -35,8 +35,9 @@ commercial event verified outside OSS
 
 A monetized generated app should fit this sequence:
 
-1. The factory resolves `monetization_enabled` into one concrete
-   `revenue_model`.
+1. The factory resolves `monetization_enabled` into one concrete core
+   `revenue_model`: `free`, `subscriptions`, `usage_based`, `custom`, or
+   `hybrid`.
 2. If the model needs paid access, quotas, credits, or token allowances,
    `SubscriptionContractDesigner` emits `app/config/subscriptions.yaml`.
 3. AppGenerator adds plan-gated `entitlement_gate` values to module actions.
@@ -85,7 +86,6 @@ facade actions and adapter stubs, not a second OSS payment platform.
 
 Public OSS docs and prompts may describe:
 
-- monetization taxonomy
 - subscription and entitlement contracts
 - token wallets and token allowances
 - top-up product declarations
@@ -93,6 +93,7 @@ Public OSS docs and prompts may describe:
 - managed-capability facade rules
 - MozaiksPay as the default managed adapter
 - how to swap to an explicitly selected external adapter
+- custom money-flow boundaries as app-owned or hosted-product policy hooks
 
 Public OSS docs and prompts must not describe:
 
@@ -130,7 +131,43 @@ The runtime should not care whether the command came from MozaiksPay, an
 enterprise invoice system, a custom provider adapter, or a local smoke test.
 The adapter must verify the commercial fact before it submits the command.
 
-## Revenue Models And Ownership
+A managed capability pack that owns subscription assignment writes must declare
+that role in its `contract.yaml`:
+
+```yaml
+provides_capabilities:
+  - subscription_write_path
+```
+
+`AppGenerator` and the generated bundle scanner use that capability flag, not a
+hardcoded pack name, to decide whether the generated app should include the
+`entitlement_dispatch` module. If no selected managed-capability pack provides
+`subscription_write_path` and `config/subscriptions.yaml` declares
+`assignment_store`, the generated app must include `entitlement_dispatch` so
+self-hosted or custom-provider builds still have a deterministic assignment
+write path.
+
+## OSS First-Class Scope
+
+Keep OSS monetization intentionally small. First-class OSS support is limited
+to:
+
+- subscription plans
+- seats
+- feature gates
+- quotas
+- prepaid credits
+- token wallets
+- token allowances
+- usage meters that feed those plans or wallets
+
+Everything else is a custom money-flow boundary, not a new OSS monetization
+primitive. A generated app can still sell products, collect one-time payments,
+accept contributions, run campaigns, or participate in a hosted marketplace, but
+that behavior belongs in app-owned modules, selected managed-capability facades,
+policy hooks, or hosted-product modules.
+
+## Ownership Rules
 
 Use `app/config/subscriptions.yaml` only for access and usage contracts:
 
@@ -172,6 +209,6 @@ managed route because it gives generated apps the least custom billing work.
 
 ## Related Architecture
 
-- [Monetization Taxonomy](monetization-taxonomy.md)
+- [Core Monetization Scope](core-monetization-scope.md)
 - [Token Management](token-management.md)
 - [Build Context Packs](../workflows/build-context-packs.md)

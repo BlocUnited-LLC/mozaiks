@@ -78,6 +78,12 @@ Covers pure helpers NOT tested by test_generated_bundle_scanner.py
     - non-dict item → skipped
     - multiple managed capabilities → all ids
 
+  forbidden output prefix helpers:
+    - strings and dict path_prefix values normalized
+    - generated app-root app/ prefix stripped
+    - exact and nested paths matched without partial-prefix false positives
+    - inline pack and contract.yaml forbidden_outputs collected
+
   _iter_api_endpoint_literals:
     - no match → []
     - double-quoted /api/modules/... → found
@@ -88,18 +94,23 @@ Covers pure helpers NOT tested by test_generated_bundle_scanner.py
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from factory_app.workflows.AppGenerator.tools.generated_bundle_scanner import (
     _declared_module_id_from_yaml,
     _find_raw_secret_fields,
+    _forbidden_output_prefixes_from_pack,
     _is_scannable,
     _iter_api_endpoint_literals,
     _iter_module_yaml_paths,
     _load_data_contract,
     _module_surface_ids,
     _normalized_files_map,
+    _normalized_forbidden_output_prefix,
     _normalized_path,
     _pack_id_from_descriptor,
+    _packs_providing,
+    _path_matches_prefix,
     _selected_managed_capability_ids,
 )
 from mozaiksai.core.runtime.app.paths import APP_DATA_CONTRACT_PATH
@@ -464,7 +475,59 @@ class TestSelectedManagedCapabilityIds:
 
 
 # ---------------------------------------------------------------------------
-# 11. _iter_api_endpoint_literals
+# 11. forbidden output prefix helpers
+# ---------------------------------------------------------------------------
+
+class TestForbiddenOutputPrefixHelpers:
+    def test_normalized_prefix_accepts_string(self):
+        assert _normalized_forbidden_output_prefix("modules/wallet/") == "modules/wallet"
+
+    def test_normalized_prefix_accepts_dict_path_prefix(self):
+        assert (
+            _normalized_forbidden_output_prefix({"path_prefix": "services/managed_billing/"})
+            == "services/managed_billing"
+        )
+
+    def test_normalized_prefix_strips_app_root(self):
+        assert (
+            _normalized_forbidden_output_prefix({"path_prefix": "app/capability_packs/"})
+            == "capability_packs"
+        )
+
+    def test_path_matches_exact_or_nested_prefix(self):
+        assert _path_matches_prefix("modules/wallet/module.yaml", "modules/wallet/")
+        assert _path_matches_prefix("modules/wallet", "modules/wallet/")
+        assert not _path_matches_prefix("modules/wallet_dashboard/module.yaml", "modules/wallet/")
+
+    def test_inline_forbidden_outputs_from_pack(self):
+        prefixes = _forbidden_output_prefixes_from_pack(
+            {
+                "id": "wallet",
+                "forbidden_outputs": [
+                    {"path_prefix": "modules/wallet/"},
+                    {"path_prefix": "modules/wallet/"},
+                    "services/wallet/",
+                ],
+            }
+        )
+
+        assert prefixes == ["modules/wallet", "services/wallet"]
+
+    def test_contract_forbidden_outputs_from_pack_source_path(self, tmp_path: Path):
+        (tmp_path / "contract.yaml").write_text(
+            "forbidden_outputs:\n  - path_prefix: modules/provider_internal/\n",
+            encoding="utf-8",
+        )
+
+        prefixes = _forbidden_output_prefixes_from_pack(
+            {"id": "testpay", "pack_source_path": str(tmp_path)}
+        )
+
+        assert prefixes == ["modules/provider_internal"]
+
+
+# ---------------------------------------------------------------------------
+# 12. _iter_api_endpoint_literals
 # ---------------------------------------------------------------------------
 
 class TestIterApiEndpointLiterals:
@@ -496,3 +559,77 @@ class TestIterApiEndpointLiterals:
     def test_non_api_modules_path_not_found(self):
         result = _iter_api_endpoint_literals('url = "/api/other/endpoint"')
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# 13. _packs_providing
+# ---------------------------------------------------------------------------
+
+class TestPacksProviding:
+    def test_none_returns_empty(self):
+        assert _packs_providing(None, "subscription_write_path") == []
+
+    def test_empty_list_returns_empty(self):
+        assert _packs_providing([], "subscription_write_path") == []
+
+    def test_inline_provides_capabilities_match(self):
+        pack = {"id": "custompay", "provides_capabilities": ["subscription_write_path"]}
+        result = _packs_providing([pack], "subscription_write_path")
+        assert result == [pack]
+
+    def test_inline_provides_capabilities_no_match(self):
+        pack = {"id": "custompay", "provides_capabilities": ["other_capability"]}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_inline_provides_capabilities_missing(self):
+        pack = {"id": "custompay"}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_non_dict_item_skipped(self):
+        assert _packs_providing(["string_item"], "subscription_write_path") == []
+
+    def test_pack_source_path_loads_contract(self, tmp_path: Path):
+        (tmp_path / "contract.yaml").write_text(
+            "provides_capabilities:\n  - subscription_write_path\n",
+            encoding="utf-8",
+        )
+        pack = {"id": "testpay", "pack_source_path": str(tmp_path)}
+        result = _packs_providing([pack], "subscription_write_path")
+        assert result == [pack]
+
+    def test_pack_source_path_contract_missing_capability(self, tmp_path: Path):
+        (tmp_path / "contract.yaml").write_text(
+            "provides_capabilities:\n  - other_capability\n",
+            encoding="utf-8",
+        )
+        pack = {"id": "testpay", "pack_source_path": str(tmp_path)}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_pack_source_path_missing_contract_returns_empty(self, tmp_path: Path):
+        pack = {"id": "testpay", "pack_source_path": str(tmp_path)}
+        assert _packs_providing([pack], "subscription_write_path") == []
+
+    def test_inline_takes_precedence_over_pack_source_path(self, tmp_path: Path):
+        """If inline provides_capabilities matches, pack_source_path is not consulted."""
+        pack = {
+            "id": "testpay",
+            "provides_capabilities": ["subscription_write_path"],
+            "pack_source_path": str(tmp_path),  # no contract.yaml here
+        }
+        result = _packs_providing([pack], "subscription_write_path")
+        assert result == [pack]
+
+    def test_multiple_packs_only_matching_returned(self, tmp_path: Path):
+        (tmp_path / "contract.yaml").write_text(
+            "provides_capabilities:\n  - subscription_write_path\n",
+            encoding="utf-8",
+        )
+        packs = [
+            {"id": "matching", "provides_capabilities": ["subscription_write_path"]},
+            {"id": "from_file", "pack_source_path": str(tmp_path)},
+            {"id": "no_match"},
+        ]
+        result = _packs_providing(packs, "subscription_write_path")
+        assert len(result) == 2
+        ids = {p["id"] for p in result}
+        assert ids == {"matching", "from_file"}

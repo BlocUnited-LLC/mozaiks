@@ -203,17 +203,20 @@ their own end-user feature gates.
 
 1. `contracts/events.yaml` declares the events this module may emit.
   Event types must use a valid namespace owned by the emitting layer such as
-  `domain.*`, `platform.*`, or `hosted.*`. For ordinary app modules, emitted
-  events in `module.yaml.actions[].emits` must be declared here and are
-  normally `domain.*`.
+  `domain.*`, `platform.*`, `hosted.*`, or a branded managed-capability
+  namespace such as `mozaikspay.*`. For ordinary app modules, emitted events
+  in `module.yaml.actions[].emits` must be declared here and are normally
+  `domain.*`.
 2. `contracts/reactions.yaml` is the canonical reaction contract.
   It uses `schema_version: mozaiks.reactions.v1`, root key `reactions`,
   `event_type` for the incoming event, and nested `target.kind` for routing.
-3. Reaction targets use one of three canonical kinds:
+3. Reaction targets use one of four canonical kinds:
   `handler` calls `target.handler_method` on this module's handler class;
   `capability` invokes `target.capability_id` (must be declared in the
-  receiving module's `module.yaml capabilities[]` array); and `notification`
-  links `target.notification_id` to a rule in `contracts/notifications.yaml`.
+  receiving module's `module.yaml capabilities[]` array); `notification`
+  links `target.notification_id` to a rule in `contracts/notifications.yaml`;
+  and `service_adapter` calls an app-owned service adapter declared by
+  `target.adapter` plus `target.adapter_method`.
 4. `contracts/notifications.yaml` declares notification rules derived from
   events. It is not a reaction file and should not be confused with
   `contracts/reactions.yaml`.
@@ -252,7 +255,8 @@ Add `update_project_progress` to `backend/handler.py` and delegate to
 ### `contracts/events.yaml`
 
 Declare events this module may publish. Use `domain.*` namespace for app modules.
-Hosted product modules may use `hosted.*`.
+Hosted product modules may use `hosted.*`; branded first-party managed
+capability modules may use a bounded product namespace such as `mozaikspay.*`.
 
 ```yaml
 schema_version: mozaiks.events.v1
@@ -272,7 +276,8 @@ events:
 ### `contracts/reactions.yaml`
 
 Declare reactions to events published by other modules. Each reaction routes an
-event to a handler method on this module's handler class.
+event to a typed target: module handler, workflow/page capability,
+notification rule, or app-owned service adapter.
 
 ```yaml
 schema_version: mozaiks.reactions.v1
@@ -285,6 +290,29 @@ reactions:
 ```
 
 Add the matching method to `handler.py` and delegate to service.
+
+`service_adapter` is the bounded escape hatch for provider or hosted-product
+mechanics that belong under `app/services/adapters/...`, not inside a generated
+module. It is useful when a module owns the event contract and durable state,
+but the reaction must call app-owned integration code. The adapter target must
+use `module.path:ClassName` plus a method name; the runtime instantiates the
+adapter and passes the event payload, with optional `event_type`, `envelope`,
+and `reaction` arguments when the method declares them.
+
+```yaml
+schema_version: mozaiks.reactions.v1
+reactions:
+  - id: hosting.provision_ci
+    event_type: hosted.hosting.ci_provision.requested
+    target:
+      kind: service_adapter
+      adapter: app.services.adapters.ci.managed_ci_provisioner:ManagedCIProvisioner
+      adapter_method: handle
+```
+
+Service adapters must not own durable module facts, public user actions,
+permissions, subscription state, wallet state, or hosted-product entitlement
+policy. Keep those in modules or the hosted product that owns them.
 
 ### `contracts/notifications.yaml`
 
@@ -541,6 +569,9 @@ events to workflow triggers and notification rules.
 **Event namespace rules:**
 - App modules use `domain.*` — e.g., `domain.orders.order_placed`
 - Hosted product modules use `hosted.*` — e.g., `hosted.analytics.metric_recorded`
+- First-party managed-capability modules may use a bounded product namespace
+  such as `mozaikspay.*` when the event is part of that public capability
+  contract rather than a generic app fact
 - Platform events use `platform.*` — owned by the runtime, not generated
 
 Modules must declare every event they emit in `contracts/events.yaml`. The platform
@@ -551,7 +582,7 @@ validates that emitted events match declared types on startup.
 service.py → ctx.emit(event_type, payload)
            → UnifiedEventDispatcher
            → ModuleEventRouter
-         → reactions.yaml → target.kind handler/capability/notification
+         → reactions.yaml → target.kind handler/capability/notification/service_adapter
          → notifications.yaml → notification stored in platform_notifications
                → orchestrator.yaml triggers → workflow start/resume
 ```
@@ -688,7 +719,7 @@ runtime state.
 | `contracts/reactions.yaml` | Canonical event reaction contract |
 | All companion manifests optional | Fully wired — absent files yield `None`, not empty defaults |
 | `settings.py` injected into ctx | Settings manifest data is injected into `ModuleContext.settings`; module-local Python settings hooks remain future work |
-| `contracts/reactions.yaml` handler routing | Fully wired — `ModuleEventRouter` resolves handler, capability, and notification targets from canonical reactions |
+| `contracts/reactions.yaml` target routing | Fully wired — `ModuleEventRouter` resolves handler, capability, notification, and service_adapter targets from canonical reactions |
 | `notifications.py` audience hooks | Stored but not called by `ModuleEventRouter` |
 | Module permissions enforcement | Fully wired in `ModuleExecutor` for external calls with concrete granted permissions |
 | Auth-enabled HTTP module default | Fully wired — external HTTP calls require auth unless `actions[].api_surface` is `public` or `public_readonly` |

@@ -1,0 +1,98 @@
+schema_version: mozaiks.module.v1
+module:
+  id: entitlement_dispatch
+  display_name: Entitlement Dispatch
+  version: 1.0.0
+  description: >
+    Write-side partner for ConfiguredEntitlementAdapter. Activates and
+    deactivates subscription assignment records in the billing.subscriptions
+    collection so the runtime entitlement gate can enforce plan-based
+    capability access on module actions.
+
+    Requires config/subscriptions.yaml to declare an assignment_store with
+    data_alias: billing.subscriptions.
+
+    This module is internal — it has no entitlement_gate, no permissions, and
+    no user-facing capabilities. Payment confirmation and plan change policy
+    belong in the app's billing facade; this module only writes the assignment
+    record that ConfiguredEntitlementAdapter reads.
+  owner: app
+  visibility: private
+  type: entitlement_dispatch
+  handler: backend.handler:EntitlementDispatchHandler
+
+permissions: []
+
+actions:
+  - id: activate_subscription
+    description: >
+      Write an active subscription assignment record so ConfiguredEntitlementAdapter
+      can grant the plan's declared capabilities to the user.
+      Call this after payment confirmation or explicit plan assignment.
+    handler_method: activate_subscription
+    input_schema:
+      type: object
+      required:
+        - user_id
+        - plan_id
+      properties:
+        user_id:
+          type: string
+          description: The user receiving the subscription.
+        plan_id:
+          type: string
+          description: The plan_id as declared in config/subscriptions.yaml.
+        activated_at:
+          type: string
+          nullable: true
+          description: ISO 8601 activation timestamp. Defaults to now.
+        metadata:
+          type: object
+          nullable: true
+          description: Optional provider or billing metadata. Not read by the entitlement adapter.
+    output_schema:
+      type: object
+      required:
+        - activated
+      properties:
+        activated:
+          type: boolean
+        plan_id:
+          type: string
+          nullable: true
+        error:
+          type: string
+          nullable: true
+
+  - id: deactivate_subscription
+    description: >
+      Mark the active subscription assignment as cancelled so ConfiguredEntitlementAdapter
+      stops granting the plan's capabilities.
+      Call this on subscription cancellation, expiry, or plan downgrade.
+    handler_method: deactivate_subscription
+    input_schema:
+      type: object
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: string
+          description: The user whose subscription is being cancelled.
+        plan_id:
+          type: string
+          nullable: true
+          description: >
+            Optional plan_id to target a specific plan record. When absent,
+            any active record for the user is deactivated.
+    output_schema:
+      type: object
+      required:
+        - deactivated
+      properties:
+        deactivated:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+
+capabilities: []

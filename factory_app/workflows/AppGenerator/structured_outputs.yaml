@@ -705,6 +705,7 @@ models:
         - service_foundation
         - module_contract
         - persistence_contract
+        - data_migrations
         - data_models
         - business_services
         - api_surface
@@ -728,6 +729,12 @@ models:
           `business_services` emits module backend implementation files such as
           handler.py, service.py, repo.py, policy.py, and declared hooks; it must
           start at ServiceAgent and must not own schemas.py in task-batch execution.
+          `data_migrations` emits additive data migration JSON files under
+          data/migrations/. Must start at DatabaseAgent and must declare
+          capability_pack_id. owned_paths must only contain data/migrations/*.json
+          files. Use this for capability-pack-owned collection and alias declarations
+          that extend the app data contract (e.g. entitlement_dispatch collections).
+          Use surface_kind=module for these tasks (not a separate surface_kind).
           `service_foundation` emits app-level support code at app-bundle-relative
           services/integrations/ clients, services/adapters/ provider boundaries,
           services/routes/ route files, and security/secrets.yaml when a names-only
@@ -748,10 +755,11 @@ models:
           services/adapters/, explicit services/routes/, or security/secrets.yaml, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
-          `infra_scaffold` emits Dockerfile, .github/workflows/deploy.yml, and
-          scripts/provision.sh from infra templates. Emitted once at generation
-          time; InfraScaffoldAgent owns these files and skips regeneration if
-          Dockerfile already exists unless --force-infra is set.
+          `infra_scaffold` emits Dockerfile, .github/workflows/readiness.yml,
+          .github/workflows/deploy.yml, and scripts/provision.sh from infra
+          templates. Emitted once at generation time; InfraScaffoldAgent owns
+          these files and skips regeneration if Dockerfile already exists unless
+          --force-infra is set.
           `auth_adapter` emits ui/auth/authAdapter.js from the webapp_builder
           auth template when app/config/auth.yaml declares an OIDC provider.
           Re-emitted on auth config changes. AppSchemaAgent owns this task.
@@ -822,33 +830,31 @@ models:
   AppMonetizationPlan:
     type: model
     description: >
-      Resolved monetization taxonomy for this app. "Monetized" is not a build
-      route by itself; this object records the concrete money-flow model and
-      whether the OSS subscription runtime is actually required.
+      Resolved core OSS monetization route for this app. "Monetized" is not a
+      build route by itself; this object records whether the app needs the
+      first-class subscription/usage runtime or a custom app/operator money-flow
+      boundary.
     fields:
       monetized:
         type: bool
-        description: True when the app has any revenue, payment, contribution, sponsored, or paid-access flow.
+        description: True when the app has a paid-access, usage, token, checkout, contribution, or other money-flow surface.
       revenue_model:
         type: literal
         values:
         - free
         - subscriptions
         - usage_based
-        - transactional
-        - marketplace
-        - sponsored
-        - donations
-        - community_funded
+        - custom
         - hybrid
         description: >
-          Concrete revenue route. Do not use "monetized" as the value. Use
-          subscriptions only for recurring access, seats, paid feature gates,
-          quotas, credits, or token allowances. Use transactional for product,
-          booking, download, invoice, or one-time checkout flows. Use marketplace
-          for multi-party buyer/seller flows. Use sponsored for paid placement,
-          ad, boost, or campaign visibility flows. Use community_funded for
-          campaign-style backing/funding windows with app/operator-specific policy.
+          Concrete OSS monetization route. Do not use "monetized" as the value.
+          Use subscriptions only for recurring access, seats, paid feature gates,
+          quotas, credits, or token allowances. Use usage_based for metered
+          billing, AI-token usage, prepaid credits, or quotas. Use custom for
+          ecommerce, bookings, marketplace, sponsorship, contribution, campaign
+          funding, revenue-share, or any other money flow whose policy belongs in
+          app-owned or hosted-product modules. Use hybrid only when a first-class
+          subscription/usage route and a custom money-flow route are both present.
       subscription_contract_requirement:
         type: literal
         values:
@@ -858,28 +864,28 @@ models:
         description: >
           Whether SubscriptionContractDesigner should produce config/subscriptions.yaml.
           Required only for subscriptions or usage models with plan gates, seats,
-          quotas, credits, or token allowances. Transactional, marketplace,
-          sponsored, donation, and community-funded apps set this to not_required
-          unless they also sell app access tiers or usage budgets.
+          quotas, credits, token allowances, or token wallets. Custom money-flow
+          apps set this to not_required unless they also sell app access tiers,
+          quotas, credits, or token allowances.
       primary_payer:
         type: union
         variants:
         - str
         - 'null'
-        description: User or organization expected to pay, such as customer, buyer, seller, creator, team admin, sponsor, donor, or backer.
+        description: User or organization expected to pay, such as customer, buyer, seller, creator, team admin, or account owner.
       primary_payee:
         type: union
         variants:
         - str
         - 'null'
-        description: Recipient of funds or value flow, such as app owner, seller, creator, service provider, campaign owner, or platform.
+        description: Recipient of funds or value flow, such as app owner, seller, creator, service provider, or platform.
       money_flow_summary:
         type: str
         description: One-sentence explanation of what is being paid for and when value is delivered.
       required_capability_routes:
         type: optional_list
         items: str
-        description: Capability routes required by the taxonomy, such as mozaikspay, usage_metering, commerce, marketplace, sponsored_placements, donations, or investor_marketplace.
+        description: Capability routes required by the selected model, such as mozaikspay, usage_metering, commerce, external_adapter, custom_owned, or an available managed_capability pack.
       rationale:
         type: str
         description: >
@@ -1016,15 +1022,16 @@ models:
         description: >
           Resolved revenue model for the app. "Monetized" is not a valid final
           model; it must resolve to one of:
-          free | subscriptions | usage_based | transactional | marketplace |
-          sponsored | donations | community_funded | hybrid.
+          free | subscriptions | usage_based | custom | hybrid.
 
           Aliased values are mapped: pay_per_use -> usage_based;
-          one_time_purchase -> transactional.
+          one_time_purchase -> custom.
 
-          This field drives which billing, checkout, usage, marketplace,
-          sponsored-placement, donation, campaign, entitlement, and plan-catalog
-          artifacts are required in build_tasks. Null is treated as free.
+          This field drives whether subscription, usage, entitlement, token, and
+          plan-catalog artifacts are required in build_tasks; custom money-flow
+          behavior uses domain modules, policy hooks, managed facades, or
+          external_adapter boundaries without becoming an OSS monetization
+          primitive. Null is treated as free.
       monetization_plan:
         type: union
         variants:
@@ -1032,11 +1039,10 @@ models:
         - 'null'
         default: null
         description: >
-          Detailed monetization taxonomy decision. Required when revenue_model is
+          Detailed core monetization decision. Required when revenue_model is
           not free. It records whether config/subscriptions.yaml is required or
-          whether the app should route to commerce, marketplace, sponsored,
-          donation, campaign, or custom/operator capabilities without a
-          subscription contract.
+          whether the app should route to custom app/operator capabilities
+          without a subscription contract.
       external_integrations:
         type: optional_list
         items: AppBuildIntegration
@@ -1283,7 +1289,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional named deployment profile such as generic_container or local_compose.
+        description: Optional named deployment profile such as generic_container, local_compose, or production_container. Production profiles force Dockerfile/env/manifest/readiness handoff artifacts.
       ci_secret_requirements:
         type: union
         variants:
@@ -1452,6 +1458,14 @@ models:
         type: list
         items: CodeFileEntry
         description: Generated or assembled code files.
+      deleted_files:
+        type: optional_list
+        items: str
+        default: []
+        description: >
+          Relative generated file paths to remove from the current assembled
+          bundle. Use only during bounded repair/refinement when a stale or
+          forbidden artifact must be deleted rather than overwritten.
       agent_message:
         type: union
         variants:
@@ -1620,14 +1634,14 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional provider-neutral deployment profile id.
+        description: Optional provider-neutral deployment profile id. Use production_container for production-oriented generated apps; it forces Dockerfile/env/manifest/readiness handoff artifacts.
       include_dockerfiles:
         type: bool
         description: Include deterministic Dockerfile output from deployment contract.
         default: false
       include_workflow:
         type: bool
-        description: Include deterministic CI workflow output from deployment contract.
+        description: Include deterministic deploy workflow output from deployment contract.
         default: false
       include_compose:
         type: bool
@@ -1855,8 +1869,8 @@ models:
   # CANONICAL MODULE CONTRACT MODELS
   # ConfigMiddlewareAgent emits these typed objects before serializing them to
   # modules/{module_id}/{module.yaml,contracts/events.yaml,contracts/reactions.yaml,
-  # contracts/notifications.yaml,contracts/settings.yaml,contracts/admin.yaml,
-  # contracts/profile.yaml,contracts/relationships.yaml}. YAML declares the contract; Python files
+  # contracts/notifications.yaml,contracts/policy_hooks.yaml,contracts/settings.yaml,
+  # contracts/admin.yaml,contracts/profile.yaml,contracts/relationships.yaml}. YAML declares the contract; Python files
   # implement behavior through referenced handlers/hooks.
   # ===========================================================================
 
@@ -1891,7 +1905,7 @@ models:
           event_pipeline = automated multi-step lifecycle driven by events, reactions, and optional background polling.
           transactional = append-only ledger for value movements.
           billing = plan-gated entitlements, checkout session facades, subscription lifecycle, and managed lifecycle event or fulfillment-command state transitions.
-          membership = resource-scoped user classes, collaborators, invitations, access summaries, and immutable snapshots for app-owned participation flows.
+          membership = resource-scoped user classes, collaborators, invitations, access summaries, and deterministic policy inputs for app-owned participation flows; consuming modules own any decision records or freeze semantics.
           entitlement_dispatch = self-hosted subscription grant dispatch; writes assignment records read by ConfiguredEntitlementAdapter; use only in self-hosted OSS apps, not in apps on the mozaiks-app hosted platform.
       description:
         type: str
@@ -1907,6 +1921,7 @@ models:
         description: "Canonical Python entrypoint in module-local form backend.handler:ModuleClass."
       user_data_scope:
         type: bool
+        default: false
         description: >
           Set to true when the module stores user-personally-identifiable or user-owned records (contacts, messages, profiles, interests, memberships, transactions). When true the runtime auto-registers the module with the account_data_registry and requires backend/account_data_handler.py to exist. Set false for admin-only, system, or platform-owned records.
 
@@ -2006,6 +2021,7 @@ models:
         description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
       api_surface:
         type: optional_str
+        default: null
         description: >
           External HTTP exposure posture for this action. Use public or
           public_readonly only for anonymous-safe HTTP actions. Omit it or use
@@ -2742,6 +2758,68 @@ models:
           relationship rows for resources the current user owns, administers,
           belongs to, watches, backs, or is invited to.
 
+  ModulePolicyHookProvider:
+    type: model
+    fields:
+      id:
+        type: str
+        description: Stable hook provider id unique within contracts/policy_hooks.yaml.
+      label:
+        type: str
+        description: Human-readable hook label for admin/developer surfaces.
+      description:
+        type: union
+        variants:
+          - str
+          - 'null'
+        description: Optional helper text describing what this hook evaluates.
+      order:
+        type: union
+        variants:
+          - int
+          - 'null'
+        description: Optional display/discovery order. Defaults to 100.
+      hook_type:
+        type: literal
+        values:
+          - access
+          - classification
+          - decision_input
+          - custom
+        description: Generic hook type. Do not encode hosted-product governance, wallet, billing, payout, or campaign semantics here.
+      action:
+        type: str
+        description: Module action id that evaluates this hook. Must reference an action declared in module.yaml.
+      resource_types:
+        type: list
+        items: str
+        description: Non-empty list of resource types this hook may evaluate, for example app, project, team, community, or campaign.
+      input_schema:
+        type: JsonSchemaContract
+        description: Optional JSON schema describing the hook request payload.
+      output_schema:
+        type: JsonSchemaContract
+        description: Optional JSON schema describing the hook response payload.
+      deterministic:
+        type: bool
+        description: True when this hook is deterministic for the same versioned records and request context.
+
+  ModulePolicyHooksManifest:
+    type: model
+    fields:
+      schema_version:
+        type: literal
+        values:
+          - mozaiks.policy_hooks.v1
+        description: Must be mozaiks.policy_hooks.v1.
+      hooks:
+        type: list
+        items: ModulePolicyHookProvider
+        description: >
+          Optional module-declared policy hook providers. Hooks route policy
+          questions to app-owned module actions; they do not define hosted
+          governance, wallet, payout, billing, campaign, or revenue behavior.
+
   ModuleContractBundle:
     type: model
     fields:
@@ -2785,6 +2863,16 @@ models:
           Optional contracts/relationships.yaml. Emit only when this module can
           enumerate current-user relationships to module-owned resources for a
           generic My Apps, Portfolio, or My Resources surface. Null for most modules.
+      policy_hooks_yaml:
+        type: union
+        variants:
+          - ModulePolicyHooksManifest
+          - 'null'
+        description: >
+          Optional contracts/policy_hooks.yaml. Emit only when another module,
+          route guard, admin panel, or app-owned process needs to ask this
+          module a generic policy question such as access, classification, or
+          deterministic decision input. Null for most modules.
       python_stubs:
         type: optional_list
         items: ModulePythonStub
@@ -3032,6 +3120,14 @@ models:
         type: list
         items: CodeFileEntry
         description: Serialized files. In typed modes, these mirror module_contract, service_foundation_bundle, or subscription_config_bundle.
+      deleted_files:
+        type: optional_list
+        items: str
+        default: []
+        description: >
+          Relative generated file paths to remove from the current assembled
+          bundle. Use only during bounded repair/refinement when removing a
+          stale ConfigMiddleware-owned artifact is required.
       agent_message:
         type: union
         variants:
@@ -5837,6 +5933,14 @@ models:
         description: >
           Serialized code files for the bounded API surface. The download/assembly
           path may regenerate canonical split admin files from app_backend_admin_config.
+      deleted_files:
+        type: optional_list
+        items: str
+        default: []
+        description: >
+          Relative generated file paths to remove from the current assembled
+          bundle. Use only during bounded repair/refinement when removing a
+          stale controller-owned artifact is required.
       agent_message:
         type: union
         variants:
@@ -5887,6 +5991,14 @@ models:
         type: list
         items: CodeFileEntry
         description: Serialized file mirror. Extraction may rebuild canonical files from python_files.
+      deleted_files:
+        type: optional_list
+        items: str
+        default: []
+        description: >
+          Relative generated file paths to remove from the current assembled
+          bundle. Use only during bounded repair/refinement when removing a
+          stale or forbidden ServiceAgent-owned Python artifact is required.
       agent_message:
         type: union
         variants:
@@ -5938,6 +6050,14 @@ models:
         type: list
         items: CodeFileEntry
         description: Serialized file mirror. Extraction may rebuild canonical files from js_files + registration_barrel.
+      deleted_files:
+        type: optional_list
+        items: str
+        default: []
+        description: >
+          Relative generated file paths to remove from the current assembled
+          bundle. Use only during bounded repair/refinement when removing a
+          stale FrontendStubAgent-owned JS artifact is required.
       agent_message:
         type: union
         variants:

@@ -1145,3 +1145,89 @@ def test_app_generation_strategy_docs_are_indexed_and_examples_are_grounded() ->
     assert "typed builder contracts" in builder_text
 
 
+def test_app_build_plan_tool_accepts_valid_data_migrations_task() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_data_migrations_valid",
+    )
+
+    ctx = _Context()
+    module.app_build_plan(
+        AppBuildPlan=_minimal_app_build_plan(
+            {
+                "task_id": "task_entitlement_migration",
+                "task_type": "data_migrations",
+                "capability_pack_id": "entitlement_dispatch",
+                "surface_id": "entitlement_dispatch",
+                "surface_kind": "module",
+                "execution_target": "AppGenerator",
+                "initial_agent": "DatabaseAgent",
+                "description": "Declare billing.subscriptions data alias.",
+                "initial_message": "Emit 001_entitlement_dispatch_collections.json.",
+                "owned_paths": ["data/migrations/001_entitlement_dispatch_collections.json"],
+                "depends_on": [],
+                "acceptance_criteria": ["Migration declares billing.subscriptions alias"],
+            }
+        ),
+        context_variables=ctx,
+    )
+
+    plan = ctx.get("app_build_plan")
+    task_ids = [t["task_id"] for t in plan["build_tasks"]]
+    assert "task_entitlement_migration" in task_ids
+
+
+def test_app_build_plan_tool_rejects_data_migrations_without_capability_pack_id() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_data_migrations_no_pack_id",
+    )
+
+    with pytest.raises(ValueError, match="capability_pack_id is null"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_orphan_migration",
+                    "task_type": "data_migrations",
+                    "capability_pack_id": None,
+                    "surface_id": "orphan",
+                    "surface_kind": "module",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "DatabaseAgent",
+                    "description": "Orphan migration.",
+                    "initial_message": "Emit a migration.",
+                    "owned_paths": ["data/migrations/001_orphan.json"],
+                    "depends_on": [],
+                    "acceptance_criteria": [],
+                }
+            ),
+            context_variables=_Context(),
+        )
+
+
+def test_app_build_plan_tool_rejects_data_migrations_with_non_migration_path() -> None:
+    module = _load_module(
+        "factory_app/workflows/AppGenerator/tools/app_build_plan.py",
+        "tests.app_build_plan_data_migrations_bad_path",
+    )
+
+    with pytest.raises(ValueError, match="data/migrations/"):
+        module.app_build_plan(
+            AppBuildPlan=_minimal_app_build_plan(
+                {
+                    "task_id": "task_bad_migration_path",
+                    "task_type": "data_migrations",
+                    "capability_pack_id": "some_pack",
+                    "surface_id": "some_pack",
+                    "surface_kind": "module",
+                    "execution_target": "AppGenerator",
+                    "initial_agent": "DatabaseAgent",
+                    "description": "Migration with wrong path.",
+                    "initial_message": "Emit a migration.",
+                    "owned_paths": ["modules/some_pack/module.yaml"],
+                    "depends_on": [],
+                    "acceptance_criteria": [],
+                }
+            ),
+            context_variables=_Context(),
+        )

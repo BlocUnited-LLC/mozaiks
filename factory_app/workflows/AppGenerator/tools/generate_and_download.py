@@ -23,8 +23,10 @@ from factory_app.workflows.AppGenerator.tools.app_validation import run_app_bund
 from factory_app.workflows.AppGenerator.tools.code_file_utils import (
     collect_generated_app_file_map,
     extract_code_file_map_from_payload,
+    extract_deleted_file_paths_from_payload,
 )
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
+    PRODUCTION_DEPLOYMENT_PROFILES,
     generate_deployment_artifacts,
 )
 from factory_app.workflows.AppGenerator.tools.export_app_code import (
@@ -107,6 +109,20 @@ def _discover_code_files(col: dict[str, Any]) -> dict[str, str]:
         except Exception:
             continue
     return out
+
+
+def _discover_deleted_files(col: dict[str, Any]) -> list[str]:
+    deleted: list[str] = []
+    seen: set[str] = set()
+    for _agent_name, data in (col or {}).items():
+        if not isinstance(data, dict):
+            continue
+        for path in extract_deleted_file_paths_from_payload(data):
+            if path in seen:
+                continue
+            seen.add(path)
+            deleted.append(path)
+    return deleted
 
 
 def _context_get(context_variables: Any | None, key: str) -> Any | None:
@@ -246,14 +262,45 @@ def _is_truthy(value: Any) -> bool:
 
 def _discover_context_files(context_variables: Any | None) -> dict[str, str]:
     raw = _context_get(context_variables, "generated_files")
-    if not isinstance(raw, dict):
-        return {}
     out: dict[str, str] = {}
-    for rel_path, content in raw.items():
-        safe = _safe_relpath(str(rel_path))
-        if safe:
-            out[safe] = str(content)
-    return out
+    if isinstance(raw, dict):
+        for rel_path, content in raw.items():
+            safe = _safe_relpath(str(rel_path))
+            if safe:
+                out[safe] = str(content)
+    out.update(extract_code_file_map_from_payload({"code_files": _context_get(context_variables, "code_files")}))
+    return _apply_deleted_files(out, _context_deleted_files(context_variables))
+
+
+def _context_deleted_files(context_variables: Any | None) -> list[str]:
+    return extract_deleted_file_paths_from_payload({"deleted_files": _context_get(context_variables, "deleted_files")})
+
+
+def _apply_deleted_files(files_map: dict[str, str], deleted_files: list[str]) -> dict[str, str]:
+    if not deleted_files:
+        return files_map
+    merged = dict(files_map)
+    for path in deleted_files:
+        merged.pop(path, None)
+    return merged
+
+
+def _merge_bundle_sources(
+    *,
+    context_variables: Any | None,
+    collected: dict[str, Any],
+) -> dict[str, str]:
+    files_map = _discover_context_files(context_variables)
+    persisted_files = _discover_code_files(collected)
+    if persisted_files:
+        files_map.update(persisted_files)
+    return _apply_deleted_files(
+        files_map,
+        [
+            *_context_deleted_files(context_variables),
+            *_discover_deleted_files(collected),
+        ],
+    )
 
 
 def _generated_app_auth_required(files_map: dict[str, str]) -> bool:
@@ -749,12 +796,21 @@ async def generate_and_download(
 
     pm = _ag2_persistence_manager()
     collected = await pm.gather_latest_agent_jsons(chat_id=chat_id, app_id=app_id)
-    files_map = _discover_code_files(collected)
-    if not files_map:
-        files_map = _discover_context_files(context_variables)
+    files_map = _merge_bundle_sources(
+        context_variables=context_variables,
+        collected=collected,
+    )
     if not files_map and _is_truthy(_context_get(context_variables, "app_schema_ready")):
         files_map = collect_generated_app_file_map(
             _context_get(context_variables, "generated_app_dir")
+        )
+        files_map.update(extract_code_file_map_from_payload({"code_files": _context_get(context_variables, "code_files")}))
+        files_map = _apply_deleted_files(
+            files_map,
+            [
+                *_context_deleted_files(context_variables),
+                *_discover_deleted_files(collected),
+            ],
         )
         if files_map and context_variables is not None and hasattr(context_variables, "set"):
             try:
@@ -810,7 +866,10 @@ async def generate_and_download(
         except Exception:
             pass
     deployment_profile = str(deployment_profile or "generic_container")
-    if include_dockerfiles or include_workflow or include_compose:
+    production_deployment_profile = deployment_profile.strip().lower() in PRODUCTION_DEPLOYMENT_PROFILES
+    if production_deployment_profile:
+        include_dockerfiles = True
+    if include_dockerfiles or include_workflow or include_compose or production_deployment_profile:
         deployment_contract = generate_deployment_artifacts(
             app_id=str(app_id),
             deployment_profile=deployment_profile,

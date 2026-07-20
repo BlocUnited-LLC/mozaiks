@@ -62,6 +62,33 @@ def test_capability_directory_prioritizes_mozaikspay_for_saas_monetization() -> 
     assert "Do not generate checkout, webhook handlers" in notes
 
 
+def test_managed_adapter_rules_keep_default_packs_app_agnostic() -> None:
+    directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
+    app_agnostic_rules = " ".join(directory.get("app_agnostic_rules", []))
+
+    assert "recommendation-only" in app_agnostic_rules
+    assert "runtime requirements" in app_agnostic_rules
+    assert "provider-neutral" in app_agnostic_rules
+    assert "external_adapter replacement path" in app_agnostic_rules
+
+
+def test_mozaikspay_declares_replaceable_adapter_boundary() -> None:
+    directory = _read_yaml("factory_app/build_context/AppGenerator/capability_directory.yaml")
+    by_id = {capability["id"]: capability for capability in directory["capabilities"]}
+
+    mozaikspay = by_id["mozaikspay"]
+    adapter_contract = mozaikspay["adapter_contract"]
+    alternatives = mozaikspay.get("alternatives", [])
+
+    assert adapter_contract["role"] == "default_managed_adapter"
+    assert adapter_contract["replacement_kind"] == "external_adapter"
+    assert adapter_contract["runtime_effect_boundary"] == "BillingFulfillmentCommand"
+    assert adapter_contract["runtime_read_boundary"] == "EntitlementPort"
+    assert "billing_portal" in adapter_contract["app_facing_facades"]
+    assert "app/config/subscriptions.yaml" in adapter_contract["canonical_runtime_state"]
+    assert any(alt.get("capability_kind") == "external_adapter" for alt in alternatives)
+
+
 def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
     routing = _read_yaml("factory_app/build_context/AppGenerator/capability_routing.yaml")
     entries = routing["layers"]["monetization"]["entries"]
@@ -76,7 +103,7 @@ def test_capability_routing_defaults_subscriptions_to_mozaikspay_pack() -> None:
     assert "billing provider" in rule
 
 
-@pytest.mark.parametrize("pack_id", ["messaging", "support", "social"])
+@pytest.mark.parametrize("pack_id", ["messaging", "support", "social", "entitlement_dispatch"])
 def test_pack_contexts_are_registered_for_appgenerator(pack_id: str) -> None:
     context = _read_yaml(f"factory_app/build_context/{pack_id}/context.yaml")
 
@@ -84,6 +111,78 @@ def test_pack_contexts_are_registered_for_appgenerator(pack_id: str) -> None:
     assert context["pack"]["id"] == pack_id
     assert context["pack"]["status"] == "active"
     assert {asset["kind"] for asset in context["assets"]} == {"contract", "templates"}
+
+
+def test_entitlement_dispatch_context_projects_capability_packs_and_operator_contracts() -> None:
+    context = _read_yaml("factory_app/build_context/entitlement_dispatch/context.yaml")
+    projections = context.get("projections", {}).get("context_variables", {})
+
+    assert "capability_packs" in projections, (
+        "entitlement_dispatch must project capability_packs so AppPlanAgent can see the pack descriptor"
+    )
+    assert projections["capability_packs"].get("from") == "capability_packs"
+    assert "operator_contracts" in projections, (
+        "entitlement_dispatch must project operator_contracts so the contract constraints reach the agent prompt"
+    )
+    assert projections["operator_contracts"].get("from") == "operator_contracts"
+
+
+def test_entitlement_dispatch_pack_is_generated_module_not_managed() -> None:
+    context = _read_yaml("factory_app/build_context/entitlement_dispatch/context.yaml")
+    assert context["pack"]["capability_source"] == "generated_module", (
+        "entitlement_dispatch is a generated module archetype — AppGenerator generates the files, "
+        "it is not a managed_capability that should be declared as external_integration"
+    )
+
+
+def test_entitlement_dispatch_contract_uses_capability_based_skip_mechanism() -> None:
+    contract = _read_yaml("factory_app/build_context/entitlement_dispatch/contract.yaml")
+    writer_contract = contract["managed_assignment_writer_contract"]
+    cross_pack_items = contract["cross_pack_integrations"]
+    cross_pack_notes = " ".join(item.get("description", "") for item in cross_pack_items)
+
+    # The OSS contract must NOT name a specific pack — it declares a capability flag.
+    assert "current_default_managed_adapter" not in writer_contract, (
+        "managed_assignment_writer_contract must not name a specific pack; "
+        "use selection_mechanism with provides_capabilities instead"
+    )
+    assert "selection_mechanism" in writer_contract, (
+        "managed_assignment_writer_contract must describe the pack-driven selection mechanism"
+    )
+    assert "provides_capabilities" in writer_contract["selection_mechanism"]
+    assert "subscription_write_path" in writer_contract["selection_mechanism"]
+    assert "provider-neutral fulfillment effects" in writer_contract["replacement_rule"]
+
+    # cross_pack_integrations must reference the capability flag, not a specific pack name.
+    capability_flags = [item.get("provides_capability") for item in cross_pack_items]
+    assert "subscription_write_path" in capability_flags, (
+        "cross_pack_integrations must reference provides_capability: subscription_write_path"
+    )
+    assert "NOT be included alongside" in cross_pack_notes
+
+
+def test_mozaikspay_contract_declares_subscription_write_path_capability() -> None:
+    contract = _read_yaml("factory_app/build_context/mozaikspay/contract.yaml")
+
+    assert "subscription_write_path" in contract.get("provides_capabilities", []), (
+        "The default MozaiksPay managed pack must declare the generic "
+        "subscription_write_path capability instead of relying on pack-name "
+        "special casing."
+    )
+
+
+def test_app_agnostic_monetization_docs_describe_subscription_write_path_flag() -> None:
+    doc_paths = [
+        "docs/architecture/mozaiksai/monetization-contract.md",
+        "docs/architecture/builder/appgenerator-output-assembly-contract.md",
+        "docs/architecture/app/app-bundle-declaratives.md",
+        "docs/architecture/modules-systems/managed-capability-packs.md",
+    ]
+
+    for doc_path in doc_paths:
+        text = (REPO_ROOT / doc_path).read_text(encoding="utf-8")
+        assert "provides_capabilities" in text, f"{doc_path} must document the pack capability flag."
+        assert "subscription_write_path" in text, f"{doc_path} must document the subscription writer flag."
 
 
 def test_messaging_pack_is_thread_substrate_without_contacts_or_runtime_worker() -> None:

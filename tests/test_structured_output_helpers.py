@@ -60,7 +60,7 @@ Covers:
 
   _build_field:
     - no default → Field(...) (required)
-    - default=None → Field(...) (required, no default set)
+    - default=None → Field(None, ...)
     - default="hello" → Field("hello", ...)
     - description forwarded
 
@@ -433,10 +433,9 @@ class TestBuildField:
         from pydantic_core import PydanticUndefinedType
         assert isinstance(field.default, PydanticUndefinedType)
 
-    def test_none_default_produces_required_field(self):
+    def test_none_default_set(self):
         field = _build_field({"default": None})
-        from pydantic_core import PydanticUndefinedType
-        assert isinstance(field.default, PydanticUndefinedType)
+        assert field.default is None
 
     def test_string_default_set(self):
         field = _build_field({"default": "hello"})

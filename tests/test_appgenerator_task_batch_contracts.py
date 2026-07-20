@@ -309,10 +309,14 @@ def test_appgenerator_context_exposes_app_task_batch_state() -> None:
     assert "app_task_batch_status" in definitions
     assert "app_task_batch_results" in definitions
     assert "app_task_batch_results_summary" in definitions
+    assert "code_files" in definitions
+    assert "deleted_files" in definitions
     assert "integration_needs" in definitions
     assert "integration_readiness_status" in definitions
     assert definitions["app_task_batch_items"]["source"]["type"] == "computed"
     assert "app_task_batch_items" in agents["AssemblyAgent"]["variables"]
+    assert "code_files" in agents["AssemblyAgent"]["variables"]
+    assert "deleted_files" in agents["AssemblyAgent"]["variables"]
     assert "app_task_batch_results_summary" in agents["IntegrationReadinessAgent"]["variables"]
     assert "integration_needs" in agents["IntegrationReadinessAgent"]["variables"]
 
@@ -456,6 +460,47 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
     }
     assert {item["filename"] for item in assembled["code_files"]} == set(generated_files)
     assert context.get("assembled_source") == "schema_and_task_batch_outputs"
+
+
+@pytest.mark.asyncio
+async def test_assemble_app_tasks_applies_accumulated_repair_overlay_and_deletions() -> None:
+    context = _Context()
+    context.set("app_id", "repair_app")
+    context.set(
+        "app_task_batch_results",
+        {
+            "task_service": {
+                "code_files": [
+                    {
+                        "filename": "modules/billing/backend/service.py",
+                        "content": "class BillingService:\n    pass\n",
+                    },
+                    {
+                        "filename": "modules/billing/backend/token_wallet_ledger.py",
+                        "content": "class TokenWalletLedger:\n    pass\n",
+                    },
+                ],
+            },
+        },
+    )
+    context.set(
+        "code_files",
+        [
+            {
+                "filename": "modules/billing/backend/service.py",
+                "content": "class BillingService:\n    async def list_products(self, ctx, **params):\n        return []\n",
+            },
+        ],
+    )
+    context.set("deleted_files", ["modules/billing/backend/token_wallet_ledger.py"])
+
+    assembled = await assemble_module.assemble_app_tasks(context_variables=context)
+
+    file_map = {item["filename"]: item["content"] for item in assembled["code_files"]}
+    assert file_map["modules/billing/backend/service.py"].startswith("class BillingService")
+    assert "async def list_products" in file_map["modules/billing/backend/service.py"]
+    assert "modules/billing/backend/token_wallet_ledger.py" not in file_map
+    assert context.get("generated_files") == file_map
 
 
 def test_assembly_aligns_module_handler_method_to_generated_action_method() -> None:

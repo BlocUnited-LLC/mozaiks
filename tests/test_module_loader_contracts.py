@@ -228,7 +228,19 @@ notifications:
         ModuleLoader(str(tmp_path)).load("tasks")
 
 
-@pytest.mark.parametrize("module_type", ["standard", "messaging", "workflow", "event_pipeline", "transactional"])
+@pytest.mark.parametrize(
+    "module_type",
+    [
+        "standard",
+        "messaging",
+        "workflow",
+        "event_pipeline",
+        "transactional",
+        "billing",
+        "membership",
+        "entitlement_dispatch",
+    ],
+)
 def test_module_loader_accepts_canonical_module_type(tmp_path: Path, module_type: str) -> None:
     module_dir = _write_canonical_module(tmp_path)
     module_yaml = module_dir.joinpath("module.yaml")

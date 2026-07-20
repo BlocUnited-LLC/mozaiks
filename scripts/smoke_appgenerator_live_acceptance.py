@@ -28,6 +28,7 @@ DEFAULT_APP_ID = "support-operations-live-acceptance"
 DEFAULT_WORKFLOW_NAME = "TicketBatchTriageWorkflow"
 DEFAULT_WORKFLOW_CAPABILITY_ID = "ticket-batch-triage-workflow"
 DEFAULT_TRIGGER_EVENT_TYPE = "domain.support_ticket.batch_requested"
+FORBIDDEN_APP_LOCAL_LEDGER_PATH = "modules/support_tickets/backend/token_wallet_ledger.py"
 
 
 class SmokeContext:
@@ -467,6 +468,31 @@ def _write_files(root: Path, files: dict[str, str]) -> None:
         target.write_text(content, encoding="utf-8")
 
 
+async def _load_runtime_app(files: dict[str, str], *, temp_prefix: str) -> dict[str, Any]:
+    try:
+        with tempfile.TemporaryDirectory(prefix=temp_prefix) as temp_dir:
+            app_root = Path(temp_dir) / "app"
+            _write_files(app_root, files)
+            loaded = await AppLoader.load(str(app_root))
+            reaction_capability_ids: list[str] = []
+            for module in loaded.modules:
+                reactions = module.manifests.reactions.reactions if module.manifests.reactions else []
+                reaction_capability_ids.extend(
+                    reaction.target.capability_id
+                    for reaction in reactions
+                    if reaction.target.kind == "capability"
+                )
+            return {
+                "loaded": True,
+                "app_name": loaded.definition.name,
+                "module_ids": [item.name for item in loaded.modules],
+                "page_names": [page.name for page in loaded.definition.pages],
+                "reaction_capability_ids": reaction_capability_ids,
+            }
+    except Exception as exc:
+        return {"loaded": False, "error": str(exc)}
+
+
 async def validate_appgenerator_acceptance_handoff(
     *,
     workflow_integration: dict[str, Any] | None = None,
@@ -503,27 +529,10 @@ async def validate_appgenerator_acceptance_handoff(
 
     acceptance = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
     export_gate = resolve_export_gate(context)
-    loader_result: dict[str, Any]
-    try:
-        with tempfile.TemporaryDirectory(prefix="mozaiks-appgenerator-acceptance-") as temp_dir:
-            app_root = Path(temp_dir) / "app"
-            _write_files(app_root, files)
-            loaded = await AppLoader.load(str(app_root))
-            module = loaded.modules[0]
-            reactions = module.manifests.reactions.reactions if module.manifests.reactions else []
-            loader_result = {
-                "loaded": True,
-                "app_name": loaded.definition.name,
-                "module_ids": [item.name for item in loaded.modules],
-                "page_names": [page.name for page in loaded.definition.pages],
-                "reaction_capability_ids": [
-                    reaction.target.capability_id
-                    for reaction in reactions
-                    if reaction.target.kind == "capability"
-                ],
-            }
-    except Exception as exc:
-        loader_result = {"loaded": False, "error": str(exc)}
+    loader_result = await _load_runtime_app(
+        files,
+        temp_prefix="mozaiks-appgenerator-acceptance-",
+    )
 
     errors: list[str] = []
     if not acceptance.get("passed"):
@@ -546,6 +555,105 @@ async def validate_appgenerator_acceptance_handoff(
             "acceptance": acceptance,
             "export_gate": export_gate,
             "runtime_loader": loader_result,
+            "context": context.to_dict(),
+        }
+    )
+
+
+async def run_deterministic_appgenerator_repair_loop_smoke() -> dict[str, Any]:
+    """Prove AppGenerator can repair scanner-blocking bundle drift before export."""
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    files[FORBIDDEN_APP_LOCAL_LEDGER_PATH] = (
+        "class TokenWalletLedger:\n"
+        "    pass\n"
+    )
+    context = SmokeContext(
+        {
+            "workflow_name": "AppGenerator",
+            "app_id": DEFAULT_APP_ID,
+            "chat_id": "appgenerator-repair-loop-smoke",
+            "generated_files": files,
+            "app_validation_status": "skipped",
+            "app_validation_strategy_used": "skip",
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    initial_acceptance = await run_app_bundle_acceptance_gate(
+        files=files,
+        context_variables=context,
+    )
+    context.set("deleted_files", [FORBIDDEN_APP_LOCAL_LEDGER_PATH])
+    repaired_acceptance = await run_app_bundle_acceptance_gate(context_variables=context)
+    export_gate = resolve_export_gate(context)
+
+    from factory_app.workflows.AppGenerator.tools.generate_and_download import (
+        _merge_bundle_sources,
+    )
+
+    packaged_files = _merge_bundle_sources(
+        context_variables=context,
+        collected={
+            "InfraScaffoldAgent": {
+                "code_files": [
+                    {
+                        "filename": "Dockerfile",
+                        "content": "FROM python:3.13-slim\n",
+                    }
+                ]
+            },
+            "ServiceAgent": {"deleted_files": [FORBIDDEN_APP_LOCAL_LEDGER_PATH]},
+        },
+    )
+    runtime_loader = await _load_runtime_app(
+        dict(context.get("generated_files") or {}),
+        temp_prefix="mozaiks-appgenerator-repair-",
+    )
+
+    errors: list[str] = []
+    if initial_acceptance.get("passed"):
+        errors.append("Initial bundle unexpectedly passed despite an app-local token wallet ledger.")
+    initial_repair = initial_acceptance.get("bundle_repair") or {}
+    if initial_repair.get("status") != "needs_revision":
+        errors.append("Initial scanner failure did not schedule a repair pass.")
+    if initial_repair.get("target_agent") != "ServiceAgent":
+        errors.append("Initial scanner failure did not route repair to ServiceAgent.")
+    if repaired_acceptance.get("passed") is not True:
+        errors.append("Repaired bundle acceptance did not pass.")
+    if (repaired_acceptance.get("bundle_repair") or {}).get("status") != "passed":
+        errors.append("Bundle repair status did not reset to passed.")
+    if FORBIDDEN_APP_LOCAL_LEDGER_PATH in (context.get("generated_files") or {}):
+        errors.append("Repaired generated_files still contains the deleted app-local ledger.")
+    if FORBIDDEN_APP_LOCAL_LEDGER_PATH in packaged_files:
+        errors.append("Download packaging merge still contains the deleted app-local ledger.")
+    if "Dockerfile" not in packaged_files:
+        errors.append("Download packaging merge did not preserve persisted InfraScaffoldAgent output.")
+    if not export_gate.get("allow_export"):
+        errors.extend(str(reason) for reason in export_gate.get("reasons") or [])
+    if not runtime_loader.get("loaded"):
+        errors.append(f"Runtime app loader failed after repair: {runtime_loader.get('error')}")
+
+    return _json_safe(
+        {
+            "success": not errors,
+            "validation_errors": errors,
+            "forbidden_path": FORBIDDEN_APP_LOCAL_LEDGER_PATH,
+            "initial_acceptance_status": initial_acceptance.get("status"),
+            "initial_bundle_repair": initial_repair,
+            "repaired_acceptance_status": repaired_acceptance.get("status"),
+            "repaired_bundle_repair": repaired_acceptance.get("bundle_repair"),
+            "export_gate": export_gate,
+            "packaging": {
+                "file_count": len(packaged_files),
+                "removed_forbidden_path": FORBIDDEN_APP_LOCAL_LEDGER_PATH not in packaged_files,
+                "preserved_infra_output": "Dockerfile" in packaged_files,
+            },
+            "runtime_loader": runtime_loader,
             "context": context.to_dict(),
         }
     )
@@ -638,13 +746,20 @@ def main() -> int:
         help="Run only the deterministic AppGenerator acceptance half.",
     )
     parser.add_argument(
+        "--repair-loop",
+        action="store_true",
+        help="Run the deterministic AppGenerator scanner repair and export-gate smoke.",
+    )
+    parser.add_argument(
         "--enable-telemetry",
         action="store_true",
         help="Opt into AG2 telemetry middleware during the live smoke. Disabled by default.",
     )
     args = parser.parse_args()
 
-    if args.skip_agentgenerator:
+    if args.repair_loop:
+        payload = asyncio.run(run_deterministic_appgenerator_repair_loop_smoke())
+    elif args.skip_agentgenerator:
         payload = asyncio.run(run_deterministic_appgenerator_acceptance_smoke())
     else:
         payload = asyncio.run(

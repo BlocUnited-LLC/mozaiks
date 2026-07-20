@@ -1,0 +1,18 @@
+context_id: entitlement_dispatch
+applies_to_workflows:
+  - AppGenerator
+assets:
+  - path: contract.yaml
+    kind: contract
+  - path: templates/
+    kind: templates
+pack:
+  id: entitlement_dispatch
+  status: active
+  capability_source: generated_module
+projections:
+  context_variables:
+    capability_packs:
+      from: capability_packs
+    operator_contracts:
+      from: operator_contracts

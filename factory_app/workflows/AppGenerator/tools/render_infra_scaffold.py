@@ -2,7 +2,7 @@
 
 InfraScaffoldAgent calls this tool to materialise provider-neutral deployment
 and auth files from the build-context templates stored under:
-  - factory_app/build_context/infra/           → Dockerfile, deploy.yml, provision.sh
+  - factory_app/build_context/infra/           → Dockerfile, readiness.yml, deploy.yml, provision.sh
   - factory_app/build_context/webapp_builder/  → auth/authAdapter.js
 """
 
@@ -23,11 +23,13 @@ _BUILD_CONTEXT_DIR = _FACTORY_APP_DIR / "build_context"
 _INFRA_TEMPLATES_DIR = _BUILD_CONTEXT_DIR / "infra" / "templates"
 _WEBAPP_BUILDER_TEMPLATES_DIR = _BUILD_CONTEXT_DIR / "webapp_builder" / "templates"
 
-# Infra template files → output path in the generated bundle.
-# Source paths mirror the output paths under templates/.
+# Infra template files -> output path in the generated bundle.
+# Workflow templates live under templates/workflows/ and are emitted into the
+# GitHub workflow directory for app operators to customize.
 _INFRA_TEMPLATES: list[tuple[Path, str]] = [
     (_INFRA_TEMPLATES_DIR / "Dockerfile", "Dockerfile"),
-    (_INFRA_TEMPLATES_DIR / ".github" / "workflows" / "deploy.yml", ".github/workflows/deploy.yml"),
+    (_INFRA_TEMPLATES_DIR / "workflows" / "readiness.yml", ".github/workflows/readiness.yml"),
+    (_INFRA_TEMPLATES_DIR / "workflows" / "deploy.yml", ".github/workflows/deploy.yml"),
     (_INFRA_TEMPLATES_DIR / "scripts" / "provision.sh", "scripts/provision.sh"),
 ]
 
@@ -37,7 +39,7 @@ _AUTH_ADAPTER_OUTPUT = "ui/auth/authAdapter.js"
 
 def _substitute(content: str, variables: dict[str, str]) -> str:
     """Replace {{KEY}} markers with values from variables dict."""
-    def _replace(m: re.Match) -> str:
+    def _replace(m: re.Match[str]) -> str:
         key = m.group(1)
         return variables.get(key, m.group(0))  # leave unknown markers intact
 
@@ -100,7 +102,7 @@ async def save_infra_scaffold(
     """Render infra scaffold and/or auth adapter templates and return as code_files.
 
     Args:
-        emit_infra: When True, render Dockerfile, deploy.yml, provision.sh.
+        emit_infra: When True, render Dockerfile, readiness.yml, deploy.yml, provision.sh.
         emit_auth_adapter: When True, render ui/auth/authAdapter.js.
         context_variables: Workflow session state with app_slug, oidc_client_id, etc.
     """

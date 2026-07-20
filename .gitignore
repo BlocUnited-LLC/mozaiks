@@ -69,9 +69,11 @@ node_modules/
 dist/
 .vite/
 *.local
+/package-lock.json
 
 # Runtime outputs
 .tmp/
+tmp/
 logs/logs/
 logs/agent_outputs/
 logs/workflow_converter/
@@ -100,6 +102,8 @@ nul
 *.log
 .logs/
 *_debug.txt
+.pytest_live_smoke*.txt
+test_chat.html
 
 # Build artifacts
 tmpdist/

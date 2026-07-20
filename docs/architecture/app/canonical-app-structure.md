@@ -55,6 +55,7 @@ workspace/
 ├── deployment.manifest.json    ← optional deployment artifact manifest
 ├── .github/
 │   └── workflows/
+│       ├── readiness.yml       ← optional environment staging proof
 │       └── deploy.yml          ← optional names-only CI workflow contract
 ├── workflows/
 ├── build_context/
@@ -217,6 +218,7 @@ Dockerfile
 docker-compose.yml
 env.example
 deployment.manifest.json
+.github/workflows/readiness.yml
 .github/workflows/deploy.yml
 ```
 

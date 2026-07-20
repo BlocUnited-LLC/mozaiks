@@ -2,6 +2,8 @@
 # ============================================================================
 # {{APP_NAME}} — Staging readiness workflow
 # Run this manually before promoting staging → production.
+# This is environment staging for a promoted/exported app. It is not Mozaiks
+# artifact review staging, which happens before ArtifactVersion promotion.
 # ============================================================================
 name: Staging Readiness
 
@@ -25,7 +27,7 @@ on:
         type: boolean
 
 concurrency:
-  group: staging-readiness-{{APP_NAME}}
+  group: "staging-readiness-{{APP_NAME}}"
   cancel-in-progress: false
 
 permissions:
@@ -72,6 +74,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           INTERNAL_API_KEY: ${{ secrets.INTERNAL_API_KEY }}
         run: |
+          # This validates the names expected by the generated app contract.
+          # Real secret values must live in the operator's CI/cloud secret store.
           # Add app-specific secret names to this list (read from app/security/secrets.yaml).
           required=(MONGO_URI OPENAI_API_KEY ANTHROPIC_API_KEY INTERNAL_API_KEY)
           missing=()
@@ -97,7 +101,7 @@ jobs:
           context: .
           push: false
           load: true
-          tags: {{APP_NAME}}:staging-readiness-${{ github.sha }}
+          tags: "{{APP_NAME}}:staging-readiness-${{ github.sha }}"
           build-args: |
             VITE_OIDC_AUTHORITY=${{ vars.VITE_OIDC_AUTHORITY || secrets.VITE_OIDC_AUTHORITY }}
             VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID || secrets.VITE_OIDC_CLIENT_ID || '{{APP_NAME}}' }}
@@ -163,6 +167,8 @@ jobs:
           ENTITLEMENT_SMOKE_TOKEN: ${{ secrets.ENTITLEMENT_SMOKE_TOKEN }}
           ENTITLEMENT_SMOKE_USER_ID: ${{ vars.ENTITLEMENT_SMOKE_USER_ID }}
         run: |
+          # This hook is intentionally app-owned. Hosted products may replace it
+          # with product-specific gates after consuming deployment.manifest.json.
           # Adjust this script path if you have a custom entitlement smoke script.
           if [ -f scripts/smoke_entitlement_api.py ]; then
             python scripts/smoke_entitlement_api.py --json | tee entitlement-smoke.json
@@ -175,7 +181,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: staging-readiness-{{APP_NAME}}-${{ github.run_id }}
+          name: "staging-readiness-{{APP_NAME}}-${{ github.run_id }}"
           path: |
             health.json
             readiness.json

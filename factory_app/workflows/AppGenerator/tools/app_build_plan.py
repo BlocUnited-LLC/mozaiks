@@ -43,6 +43,8 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
         "deployment.manifest.json",
         "docker-compose.yml",
         "env.example",
+        ".github/workflows/readiness.yml",
+        ".github/workflows/deploy.yml",
     }
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)
@@ -51,6 +53,7 @@ _ALLOWED_TASK_TYPES = {
     "service_foundation",
     "module_contract",
     "persistence_contract",
+    "data_migrations",
     "data_models",
     "business_services",
     "api_surface",
@@ -63,6 +66,7 @@ _CANONICAL_INITIAL_AGENTS = {
     "service_foundation": "ConfigMiddlewareAgent",
     "module_contract": "ConfigMiddlewareAgent",
     "persistence_contract": "DatabaseAgent",
+    "data_migrations": "DatabaseAgent",
     "data_models": "ModelAgent",
     "business_services": "ServiceAgent",
     "control_plane_pack": "ControlPlaneAgent",
@@ -77,6 +81,7 @@ _SURFACE_KIND_ALLOWED_TASK_TYPES: dict[str, frozenset[str]] = {
 _SHARED_OWNED_PATHS = frozenset({"app.json"})
 _WORKFLOW_SURFACE_KIND = "workflow"
 _MODULE_LOCAL_TASK_TYPES = frozenset({"module_contract", "data_models", "business_services"})
+_DATA_MIGRATIONS_PREFIX = "data/migrations/"
 
 
 def _normalize_string_list(value: Any) -> list[str]:
@@ -1210,6 +1215,26 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                         "service.py, repo.py, policy.py, and declared hooks; schemas.py belongs "
                         "to the `data_models` task."
                     )
+
+        if task_type == "data_migrations":
+            if not normalized_capability_pack_id:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type 'data_migrations' but capability_pack_id is null. "
+                    "data_migrations tasks must identify the owning capability pack."
+                )
+            invalid = [
+                path
+                for path in owned_paths
+                if not path.replace("\\", "/").startswith(_DATA_MIGRATIONS_PREFIX)
+            ]
+            if invalid:
+                raise ValueError(
+                    "Build task "
+                    f"'{task_id}' uses task_type 'data_migrations' but owns paths outside "
+                    f"'{_DATA_MIGRATIONS_PREFIX}': {invalid}. "
+                    "`data_migrations` tasks may only own data/migrations/*.json files."
+                )
 
         # Managed-capability adapter tasks must declare capability_pack_id so that template
         # expansion (resolve_managed_capability_templates) can locate the correct pack template.

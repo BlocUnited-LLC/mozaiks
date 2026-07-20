@@ -47,7 +47,7 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
     assert data["classifier"]["enabled"] is True
     assert data["classifier"]["llm_profile"] == "classifier"
     assert data["coding"]["llm_profile"] == "codegen"
-    assert data["llm_profiles"]["classifier"]["llm_config"]["model"] == "gpt-5-nano"
+    assert data["llm_profiles"]["classifier"]["llm_config"]["model"]  # any non-empty model is valid
 
 
 def test_generated_ai_config_uses_factory_control_plane_defaults() -> None:

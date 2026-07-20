@@ -84,6 +84,7 @@ _FULL_FILE_MAP: dict[str, str] = {
     "modules/projects/contracts/events.yaml": _PROJECTS_EVENTS_YAML,
     "modules/projects/contracts/reactions.yaml": "schema_version: mozaiks.reactions.v1\nreactions: []",
     "modules/projects/contracts/notifications.yaml": "schema_version: mozaiks.notifications.v1\nnotifications: []",
+    "modules/projects/contracts/policy_hooks.yaml": "schema_version: mozaiks.policy_hooks.v1\nhooks: []",
     "modules/projects/contracts/settings.yaml": "schema_version: mozaiks.settings.v1\nsettings: []",
     "modules/projects/contracts/admin.yaml": "schema_version: mozaiks.admin.v1\npanels: []",
     # profile and runtime_extensions
@@ -149,6 +150,9 @@ class TestFullModule:
     def test_has_notifications(self):
         assert self.entries[0].has_notifications is True
 
+    def test_has_policy_hooks(self):
+        assert self.entries[0].has_policy_hooks is True
+
     def test_has_settings(self):
         assert self.entries[0].has_settings is True
 
@@ -189,6 +193,7 @@ class TestFullModule:
             "modules/projects/contracts/admin.yaml",
             "modules/projects/contracts/events.yaml",
             "modules/projects/contracts/notifications.yaml",
+            "modules/projects/contracts/policy_hooks.yaml",
             "modules/projects/contracts/profile.yaml",
             "modules/projects/contracts/relationships.yaml",
             "modules/projects/contracts/reactions.yaml",

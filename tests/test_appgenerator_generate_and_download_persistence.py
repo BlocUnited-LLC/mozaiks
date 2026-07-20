@@ -62,6 +62,44 @@ class _FakeArtifactStore:
         return type("ArtifactVersion", (), {"id": "av_bundle_1"})()
 
 
+def test_generate_and_download_merges_accepted_bundle_persisted_additions_and_deletions() -> None:
+    forbidden_path = "modules/billing/backend/token_wallet_ledger.py"
+    context = _Context(
+        {
+            "generated_files": {
+                "app.json": '{"id":"billing-app"}',
+                "modules/billing/backend/service.py": "class BillingService:\n    pass\n",
+                forbidden_path: "class TokenWalletLedger:\n    pass\n",
+            },
+            "code_files": [
+                {
+                    "filename": "modules/billing/backend/service.py",
+                    "content": "class BillingService:\n    async def list_products(self, ctx, **params):\n        return []\n",
+                }
+            ],
+            "deleted_files": [forbidden_path],
+        }
+    )
+    collected = {
+        "InfraScaffoldAgent": {
+            "code_files": [
+                {"filename": "Dockerfile", "content": "FROM python:3.13-slim\n"}
+            ]
+        },
+        "ServiceAgent": {"deleted_files": [forbidden_path]},
+    }
+
+    files_map = generate_and_download_module._merge_bundle_sources(
+        context_variables=context,
+        collected=collected,
+    )
+
+    assert files_map["app.json"] == '{"id":"billing-app"}'
+    assert "async def list_products" in files_map["modules/billing/backend/service.py"]
+    assert files_map["Dockerfile"].startswith("FROM python")
+    assert forbidden_path not in files_map
+
+
 def test_persist_pending_schema_migration_records_staged_history(monkeypatch, tmp_path: Path) -> None:
     fake_store = _FakeStore()
     monkeypatch.setattr(generate_and_download_module, "BuilderArtifactStore", lambda: fake_store)

@@ -13,6 +13,13 @@ from typing import Any
 DEFAULT_RUNTIME_PORT = 8000
 DEFAULT_HEALTH_PATH = "/api/health"
 DEFAULT_PROFILE = "generic_container"
+PRODUCTION_DEPLOYMENT_PROFILES = frozenset(
+    {
+        "production",
+        "production_container",
+        "managed_production_container",
+    }
+)
 
 _TARGET_KINDS = {"container", "compose", "external_adapter"}
 _TAG_STRATEGIES = {"commit_sha", "timestamp", "manual"}
@@ -82,6 +89,27 @@ def _bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes"}
     return default
+
+
+def _is_production_deployment_profile(value: str | None) -> bool:
+    return str(value or "").strip().lower() in PRODUCTION_DEPLOYMENT_PROFILES
+
+
+def _deployment_artifact_flags(
+    *,
+    deployment_profile: str | None,
+    include_dockerfiles: bool,
+    include_workflow: bool,
+    include_readiness_workflow: bool | None,
+) -> tuple[bool, bool, bool]:
+    production_profile = _is_production_deployment_profile(deployment_profile)
+    dockerfiles = _bool(include_dockerfiles, True) or production_profile
+    deploy_workflow = _bool(include_workflow, True)
+    if include_readiness_workflow is None:
+        readiness_workflow = deploy_workflow or production_profile
+    else:
+        readiness_workflow = _bool(include_readiness_workflow, False) or production_profile
+    return dockerfiles, readiness_workflow, deploy_workflow
 
 
 def _int_or_default(value: Any, default: int = 0) -> int:
@@ -630,6 +658,7 @@ def build_deploy_target_spec(
     target_kind: str = "container",
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
+    include_readiness_workflow: bool | None = None,
     include_compose: bool = False,
     auth_required: bool = False,
     auth_provider: str = "jwt",
@@ -643,13 +672,21 @@ def build_deploy_target_spec(
     resolved_kind = str(target_kind or "container").strip() or "container"
     if resolved_kind not in _TARGET_KINDS:
         resolved_kind = "container"
+    dockerfiles, readiness_workflow, deploy_workflow = _deployment_artifact_flags(
+        deployment_profile=deployment_profile,
+        include_dockerfiles=include_dockerfiles,
+        include_workflow=include_workflow,
+        include_readiness_workflow=include_readiness_workflow,
+    )
 
     outputs = ["env.example", "deployment.manifest.json"]
-    if _bool(include_dockerfiles, True):
+    if dockerfiles:
         outputs.append("Dockerfile")
     if _bool(include_compose, False):
         outputs.append("docker-compose.yml")
-    if _bool(include_workflow, True):
+    if readiness_workflow:
+        outputs.append(".github/workflows/readiness.yml")
+    if deploy_workflow:
         outputs.append(".github/workflows/deploy.yml")
 
     auth = _auth_contract(auth_required=_bool(auth_required, False), auth_provider=auth_provider)
@@ -708,12 +745,13 @@ def build_deploy_target_spec(
             "metadata": {},
         },
         "deployment_profile": str(deployment_profile or DEFAULT_PROFILE),
+        "deployment_profile_kind": "production" if _is_production_deployment_profile(deployment_profile) else "generic",
         "deploy_environments": {
             "staging": "staging",
             "production": "production",
         },
         "ci_secret_requirements": _default_ci_secret_requirements(
-            include_workflow=_bool(include_workflow, True)
+            include_workflow=deploy_workflow
         ),
         "readiness_requirements": _default_readiness_requirements(
             auth_required=bool(auth["required"])
@@ -840,6 +878,7 @@ def build_deployment_template_manifest(
     runtime = deploy_target_spec.get("runtime") if isinstance(deploy_target_spec.get("runtime"), dict) else {}
     env = deploy_target_spec.get("environment") if isinstance(deploy_target_spec.get("environment"), dict) else {}
     has_ci_workflow = ".github/workflows/deploy.yml" in file_paths
+    has_readiness_workflow = ".github/workflows/readiness.yml" in file_paths
 
     manifest = {
         "schema_version": "mozaiks.deployment.manifest.v1",
@@ -856,6 +895,7 @@ def build_deployment_template_manifest(
             "port": int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT),  # type: ignore[union-attr]
         },
         "ci_workflow": ".github/workflows/deploy.yml" if has_ci_workflow else None,
+        "readiness_workflow": ".github/workflows/readiness.yml" if has_readiness_workflow else None,
         "ci_secret_requirements": (
             _normalize_ci_secret_requirements(deploy_target_spec.get("ci_secret_requirements"))
             if has_ci_workflow
@@ -900,6 +940,20 @@ def validate_deployment_template_manifest(manifest: dict[str, Any]) -> list[str]
         errors.append("public_env must be a list")
     if not isinstance(manifest.get("exposed_ports"), list):
         errors.append("exposed_ports must be a list")
+
+    generated_files = set(_list_of_str(manifest.get("generated_files")))
+    ci_workflow = manifest.get("ci_workflow")
+    if ci_workflow is not None:
+        if not isinstance(ci_workflow, str) or not ci_workflow.strip():
+            errors.append("ci_workflow must be a non-empty string when present")
+        elif ci_workflow not in generated_files:
+            errors.append("ci_workflow must reference a generated file")
+    readiness_workflow = manifest.get("readiness_workflow")
+    if readiness_workflow is not None:
+        if not isinstance(readiness_workflow, str) or not readiness_workflow.strip():
+            errors.append("readiness_workflow must be a non-empty string when present")
+        elif readiness_workflow not in generated_files:
+            errors.append("readiness_workflow must reference a generated file")
 
     auth = manifest.get("auth")
     if auth is not None:
@@ -974,6 +1028,8 @@ def _render_env_example(spec: dict[str, Any]) -> str:
     lines: list[str] = [
         "# Generated by Mozaiks deployment contract (provider-neutral)",
         "# Placeholder values only. Do not commit real secrets.",
+        "# Artifact review staging is handled by Mozaiks/Studio before promotion.",
+        "# Environment staging is handled by your deployment host or CI environment.",
         "",
         "# Required variables",
     ]
@@ -1189,12 +1245,174 @@ def _render_workflow(spec: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_readiness_workflow(spec: dict[str, Any]) -> str:
+    runtime = spec.get("runtime") if isinstance(spec.get("runtime"), dict) else {}
+    port = int(runtime.get("container_port") or DEFAULT_RUNTIME_PORT)  # type: ignore[union-attr]
+    health_path = str(runtime.get("health_path") or DEFAULT_HEALTH_PATH).strip() or DEFAULT_HEALTH_PATH  # type: ignore[union-attr]
+    env = spec.get("environment") if isinstance(spec.get("environment"), dict) else {}
+    required_env = _list_of_str(env.get("required_variables"))  # type: ignore[union-attr]
+    secret_env = set(_list_of_str(env.get("secret_variables")))  # type: ignore[union-attr]
+    readiness = _normalize_readiness_requirements(spec.get("readiness_requirements"))
+    required_evidence = _merge_env_names(
+        [],
+        [
+            evidence
+            for check in readiness["checks"]
+            for evidence in _list_of_str(check.get("required_evidence"))
+        ],
+    )
+
+    lines = [
+        "name: readiness",
+        "",
+        "# Provider-neutral environment staging gate for generated apps.",
+        "# Artifact review staging happens inside Mozaiks/Studio before promotion;",
+        "# this workflow proves the promoted/exported app can run in a real environment.",
+        "",
+        "on:",
+        "  workflow_dispatch:",
+        "    inputs:",
+        "      run_container_gate:",
+        "        description: \"Build and smoke the generated app image\"",
+        "        required: true",
+        "        default: true",
+        "        type: boolean",
+        "      run_remote_health:",
+        "        description: \"Check a deployed staging URL\"",
+        "        required: true",
+        "        default: false",
+        "        type: boolean",
+        "",
+        "permissions:",
+        "  contents: read",
+        "",
+        "jobs:",
+        "  readiness:",
+        "    runs-on: ubuntu-latest",
+        "    environment: staging",
+        "    env:",
+        "      APP_URL: ${{ vars.APP_URL }}",
+        f"      HEALTH_PATH: {health_path}",
+    ]
+
+    for name in required_env:
+        if name in secret_env:
+            lines.append(f"      {name}: ${{{{ secrets.{name} }}}}")
+        else:
+            lines.append(f"      {name}: ${{{{ vars.{name} }}}}")
+    for name in required_evidence:
+        lines.append(f"      {name}: ${{{{ vars.{name} }}}}")
+
+    lines.extend(
+        [
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "",
+            "      - name: Validate readiness contract",
+            "        shell: bash",
+            "        run: |",
+            "          missing=()",
+        ]
+    )
+    for name in required_env:
+        lines.extend(
+            [
+                f"          if [ -z \"${{{name}:-}}\" ]; then",
+                f"            missing+=(\"{name}\")",
+                "          fi",
+            ]
+        )
+    lines.extend(
+        [
+            "          if [ \"${#missing[@]}\" -gt 0 ]; then",
+            "            printf 'Missing required staging environment names: %s\\n' \"${missing[*]}\" >&2",
+            "            exit 1",
+            "          fi",
+            "",
+            "      - name: Build generated app image",
+            "        if: ${{ inputs.run_container_gate }}",
+            "        run: docker build -t generated-app:readiness .",
+            "",
+            "      - name: Smoke generated app image",
+            "        if: ${{ inputs.run_container_gate }}",
+            "        shell: bash",
+            "        run: |",
+            "          docker run --rm -d \\",
+            "            --name generated-app-readiness \\",
+            f"            -p {port}:{port} \\",
+        ]
+    )
+    for name in required_env:
+        lines.append(f"            -e {name}=\"${{{name}}}\" \\")
+    lines.extend(
+        [
+            "            generated-app:readiness",
+            "          cleanup() { docker stop generated-app-readiness >/dev/null 2>&1 || true; }",
+            "          trap cleanup EXIT",
+            "          for i in $(seq 1 12); do",
+            f"            if curl -sf \"http://localhost:{port}{health_path}\"; then",
+            "              date -u +%Y-%m-%dT%H:%M:%SZ > APP_IMAGE_SMOKE_VERIFIED_AT.txt",
+            "              exit 0",
+            "            fi",
+            "            sleep 10",
+            "          done",
+            "          echo \"Container smoke failed.\" >&2",
+            "          exit 1",
+            "",
+            "      - name: Check deployed staging health",
+            "        if: ${{ inputs.run_remote_health }}",
+            "        shell: bash",
+            "        run: |",
+            "          if [ -z \"${APP_URL:-}\" ]; then",
+            "            echo \"APP_URL environment variable is required for remote health.\" >&2",
+            "            exit 1",
+            "          fi",
+            "          curl --fail --show-error --silent \"${APP_URL}${HEALTH_PATH}\" | tee health.json",
+            "          date -u +%Y-%m-%dT%H:%M:%SZ > APP_HEALTHCHECK_VERIFIED_AT.txt",
+            "",
+            "      - name: Summarize readiness evidence",
+            "        if: always()",
+            "        shell: bash",
+            "        run: |",
+            "          python - <<'PY'",
+            "          import json, pathlib",
+            "          evidence = {}",
+        ]
+    )
+    for name in required_evidence:
+        lines.extend(
+            [
+                f"          path = pathlib.Path('{name}.txt')",
+                f"          evidence['{name}'] = path.read_text().strip() if path.exists() else None",
+            ]
+        )
+    lines.extend(
+        [
+            "          pathlib.Path('readiness-evidence.json').write_text(json.dumps(evidence, indent=2) + '\\n')",
+            "          PY",
+            "",
+            "      - uses: actions/upload-artifact@v4",
+            "        if: always()",
+            "        with:",
+            "          name: readiness-${{ github.run_id }}",
+            "          path: |",
+            "            health.json",
+            "            readiness-evidence.json",
+            "            *_VERIFIED_AT.txt",
+            "          if-no-files-found: ignore",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def generate_deployment_artifacts(
     *,
     app_id: str,
     deployment_profile: str = DEFAULT_PROFILE,
     include_dockerfiles: bool = True,
     include_workflow: bool = True,
+    include_readiness_workflow: bool | None = None,
     include_compose: bool = False,
     auth_required: bool = False,
     auth_provider: str = "jwt",
@@ -1204,13 +1422,20 @@ def generate_deployment_artifacts(
     extra_public_variables: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate deterministic deployment artifacts and validated manifests."""
+    dockerfiles, readiness_workflow, deploy_workflow = _deployment_artifact_flags(
+        deployment_profile=deployment_profile,
+        include_dockerfiles=include_dockerfiles,
+        include_workflow=include_workflow,
+        include_readiness_workflow=include_readiness_workflow,
+    )
     spec = build_deploy_target_spec(
         app_id=app_id,
         deployment_profile=deployment_profile,
         target_id=deployment_profile,
         target_kind="compose" if _bool(include_compose, False) else "container",
-        include_dockerfiles=include_dockerfiles,
-        include_workflow=include_workflow,
+        include_dockerfiles=dockerfiles,
+        include_workflow=deploy_workflow,
+        include_readiness_workflow=readiness_workflow,
         include_compose=include_compose,
         auth_required=auth_required,
         auth_provider=auth_provider,
@@ -1224,11 +1449,13 @@ def generate_deployment_artifacts(
     files: dict[str, str] = {
         "env.example": _render_env_example(spec),
     }
-    if _bool(include_dockerfiles, True):
+    if dockerfiles:
         files["Dockerfile"] = _render_dockerfile(spec)
     if _bool(include_compose, False):
         files["docker-compose.yml"] = _render_compose(spec)
-    if _bool(include_workflow, True):
+    if readiness_workflow:
+        files[".github/workflows/readiness.yml"] = _render_readiness_workflow(spec)
+    if deploy_workflow:
         files[".github/workflows/deploy.yml"] = _render_workflow(spec)
 
     manifest = build_deployment_template_manifest(
@@ -1241,8 +1468,9 @@ def generate_deployment_artifacts(
 
     bundle_errors = validate_generated_deployment_bundle(
         files,
-        include_dockerfiles=_bool(include_dockerfiles, True),
-        include_workflow=_bool(include_workflow, True),
+        include_dockerfiles=dockerfiles,
+        include_readiness_workflow=readiness_workflow,
+        include_workflow=deploy_workflow,
     )
 
     return {
@@ -1259,15 +1487,19 @@ def validate_generated_deployment_bundle(
     *,
     include_dockerfiles: bool,
     include_workflow: bool,
+    include_readiness_workflow: bool | None = None,
 ) -> list[str]:
     """Validate artifact presence and verify forbidden secret/provider markers are absent."""
     errors: list[str] = []
     if not isinstance(artifacts, dict):
         return ["artifacts must be a dictionary"]
+    readiness_workflow = _bool(include_readiness_workflow, _bool(include_workflow, False))
 
     required_files = {"env.example", "deployment.manifest.json"}
     if include_dockerfiles:
         required_files.add("Dockerfile")
+    if readiness_workflow:
+        required_files.add(".github/workflows/readiness.yml")
     if include_workflow:
         required_files.add(".github/workflows/deploy.yml")
 

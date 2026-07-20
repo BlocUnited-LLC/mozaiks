@@ -197,6 +197,31 @@ class TestHostedInjection:
         hook.inject_managed_capabilities_context(agent, [])
         assert agent.system_message.count("[MANAGED CAPABILITIES CONTEXT]") == 1
 
+    def test_generated_module_pack_renders_actual_capability_source(self, hook):
+        """generated_module packs must not be labeled as managed_capability in the prompt."""
+        agent = _FakeAgent("AppPlanAgent", context_variables={
+            "capability_packs": [
+                {
+                    "id": "entitlement_dispatch",
+                    "capability_source": "generated_module",
+                }
+            ],
+        })
+        hook.inject_managed_capabilities_context(agent, [])
+        msg = agent.system_message
+        assert "entitlement_dispatch" in msg
+        assert "capability_source: generated_module" in msg
+
+    def test_pack_without_capability_source_defaults_to_managed(self, hook):
+        """Packs with no capability_source fall back to managed_capability."""
+        agent = _FakeAgent("AppPlanAgent", context_variables={
+            "capability_packs": [{"id": "legacy_pack"}],
+        })
+        hook.inject_managed_capabilities_context(agent, [])
+        msg = agent.system_message
+        assert "legacy_pack" in msg
+        assert "capability_source: managed_capability" in msg
+
 
 # ---------------------------------------------------------------------------
 # middleware.yaml registration

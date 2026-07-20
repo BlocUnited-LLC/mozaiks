@@ -20,16 +20,12 @@ CANONICAL_MODELS = {
     "free",
     "subscriptions",
     "usage_based",
-    "transactional",
-    "marketplace",
-    "sponsored",
-    "donations",
-    "community_funded",
+    "custom",
     "hybrid",
 }
 
 
-def test_appgenerator_build_plan_declares_monetization_taxonomy() -> None:
+def test_appgenerator_build_plan_declares_core_monetization_scope() -> None:
     structured = _read_yaml("factory_app/workflows/AppGenerator/structured_outputs.yaml")
     models = structured["models"]
 
@@ -46,7 +42,8 @@ def test_appgenerator_build_plan_declares_monetization_taxonomy() -> None:
     assert plan_fields["monetization_plan"]["variants"] == ["AppMonetizationPlan", "null"]
     assert "Monetized" in plan_fields["revenue_model"]["description"]
     assert "pay_per_use -> usage_based" in plan_fields["revenue_model"]["description"]
-    assert "one_time_purchase -> transactional" in plan_fields["revenue_model"]["description"]
+    assert "one_time_purchase -> custom" in plan_fields["revenue_model"]["description"]
+    assert "custom money-flow behavior uses domain modules" in plan_fields["revenue_model"]["description"]
 
 
 def test_valueengine_concept_blueprint_emits_advisory_monetization_hint() -> None:
@@ -64,9 +61,9 @@ def test_valueengine_concept_blueprint_emits_advisory_monetization_hint() -> Non
 
     agents = _read("factory_app/workflows/ValueEngine/agents.yaml")
     assert "Do not treat \"monetized\" as a final model" in agents
-    assert "transactional checkout" in agents
-    assert "marketplace commercial policy" in agents
-    assert "sponsored placement" in agents
+    assert "Use likely_revenue_models from: subscriptions, usage_based, custom, hybrid" in agents
+    assert "Use custom when the concept implies purchases" in agents
+    assert "app/operator-specific money policy" in agents
 
 
 def test_capability_routing_distinguishes_money_flow_from_subscription_contract() -> None:
@@ -77,15 +74,14 @@ def test_capability_routing_distinguishes_money_flow_from_subscription_contract(
     assert set(entries) == CANONICAL_MODELS
     assert entries["subscriptions"]["subscription_contract"] == "required"
     assert entries["usage_based"]["subscription_contract"] == "conditional"
-    assert entries["transactional"]["subscription_contract"] == "not_required"
-    assert entries["marketplace"]["subscription_contract"] == "conditional"
-    assert entries["sponsored"]["subscription_contract"] == "not_required"
-    assert entries["community_funded"]["subscription_contract"] == "conditional"
+    assert entries["custom"]["subscription_contract"] == "not_required"
+    assert entries["custom"]["aliases"] == ["one_time_purchase"]
 
     rule = monetization["rule"]
     assert "monetized as \"revenue model unresolved\"" in rule
     assert "true only for subscriptions, plan gates, seats, quotas, credits, token" in rule
     assert "instead of inventing provider internals" in rule
+    assert "AppBuildPlan.revenue_model to free, subscriptions, usage_based" in rule
 
 
 def test_generator_prompts_refuse_blanket_monetized_equals_subscriptions() -> None:
@@ -94,8 +90,10 @@ def test_generator_prompts_refuse_blanket_monetized_equals_subscriptions() -> No
 
     assert "It does not mean subscriptions" in app_agents
     assert "Never set it to `monetized`" in app_agents
-    assert "Do not create `config/subscriptions.yaml` unless the app also sells access tiers or quotas" in app_agents
-    assert "Do not use `config/subscriptions.yaml` to model orders, ownership, payouts, commissions, or settlement" in app_agents
+    assert "Do not create `config/subscriptions.yaml` unless the app also sells access tiers, quotas, credits, token wallets, or token allowances" in app_agents
+    assert "Set `revenue_model` to one concrete core OSS value" in app_agents
+    assert "Use `custom` for ecommerce" in app_agents
+    assert "policy hook" in app_agents
 
     assert "\"monetized\" is only a broad intent signal" in subscription_agents
     assert "Do not emit a subscription contract for ordinary ecommerce" in subscription_agents
@@ -121,13 +119,14 @@ def test_workflow_agent_prompts_keep_monetization_inside_runtime_and_facades() -
     assert "payment provider, SendGrid" not in universal_prompt
 
 
-def test_monetization_taxonomy_doc_is_present_and_boundary_aware() -> None:
-    doc = _read("docs/architecture/mozaiksai/monetization-taxonomy.md")
+def test_core_monetization_scope_doc_is_present_and_boundary_aware() -> None:
+    doc = _read("docs/architecture/mozaiksai/core-monetization-scope.md")
 
     for model in CANONICAL_MODELS:
         assert f"`{model}`" in doc
 
     assert "`pay_per_use` -> `usage_based`" in doc
-    assert "`one_time_purchase` -> `transactional`" in doc
-    assert "Do not create `config/subscriptions.yaml` for ordinary ecommerce checkout" in doc
+    assert "`one_time_purchase` -> `custom`" in doc
+    assert "Do not create `config/subscriptions.yaml` for custom money flows" in doc
+    assert "Core Monetization Scope" in doc
     assert "Hosted product policy remains app-owned or operator-owned" in doc

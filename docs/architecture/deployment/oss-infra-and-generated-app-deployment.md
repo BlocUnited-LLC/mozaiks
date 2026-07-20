@@ -82,6 +82,7 @@ Current artifact family:
 - `docker-compose.yml`
 - `env.example`
 - `deployment.manifest.json`
+- `.github/workflows/readiness.yml`
 - `.github/workflows/deploy.yml`
 
 Those files are emitted by the AppGenerator deployment contract renderer during
@@ -159,7 +160,10 @@ Current implemented behavior:
 
 - repo infra operates the first-party Studio/builder stack
 - generated apps may emit provider-neutral deployment artifacts when requested
-- generated app deployment artifacts are optional in some build flows
+- production-oriented generated app flows use `deployment_profile=production_container`
+  to force the root Dockerfile/env/manifest/readiness handoff
+- non-production preview/export flows may still opt in to deployment artifacts
+  explicitly
 - provider-specific execution remains outside the generated app bundle
 
 ### Target
@@ -199,8 +203,9 @@ Resolved in this pass:
 
 Still open:
 
-1. generated app deployment artifacts are still optional in some AppGenerator
-   paths instead of being mandatory for a production build profile
+1. production-oriented AppGenerator paths must consistently carry
+   `deployment_profile=production_container` so the root deployment handoff is
+   deterministic
 2. the generated-app deployment contract exists, but provider-specific
    execution is intentionally outside this OSS bundle — a hosted or self-host
    operator layer that turns `deployment.manifest.json` into a real deployment

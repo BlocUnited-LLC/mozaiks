@@ -41,6 +41,7 @@ Allowed files (relative to ``modules/{module_id}/``):
 - ``contracts/events.yaml``
 - ``contracts/reactions.yaml``
 - ``contracts/notifications.yaml``
+- ``contracts/policy_hooks.yaml``
 - ``contracts/settings.yaml``
 - ``contracts/admin.yaml``
 - ``contracts/profile.yaml``
@@ -72,6 +73,7 @@ _ALLOWED_CONTRACT_FILES: frozenset[str] = frozenset({
     "contracts/events.yaml",
     "contracts/reactions.yaml",
     "contracts/notifications.yaml",
+    "contracts/policy_hooks.yaml",
     "contracts/settings.yaml",
     "contracts/admin.yaml",
     "contracts/profile.yaml",
