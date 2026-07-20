@@ -1103,6 +1103,15 @@ def _requires_deployment_artifacts(
     generated_files: dict[str, str],
     context_variables: Any | None,
 ) -> bool:
+    deployment_profile = (
+        _context_get(context_variables, "deployment_profile", None)
+        or _context_get(context_variables, "deploymentProfile", None)
+    )
+    if str(deployment_profile or "").strip():
+        return True
+    app_build_plan = _context_get(context_variables, "app_build_plan", None)
+    if isinstance(app_build_plan, dict) and str(app_build_plan.get("deployment_profile") or "").strip():
+        return True
     deployment_context_keys = (
         "require_deployment_artifacts",
         "includeDockerfiles",
@@ -1119,6 +1128,7 @@ def _requires_deployment_artifacts(
         "Dockerfile",
         "docker-compose.yml",
         "deployment.manifest.json",
+        ".github/workflows/readiness.yml",
         ".github/workflows/deploy.yml",
     }
     return bool(deployment_paths & set(generated_files))
@@ -1663,6 +1673,222 @@ def _workflow_integration_repair_request(failed_tests: list[dict[str, Any]]) -> 
     return "\n".join(lines)
 
 
+_BUNDLE_REPAIR_TARGET_LABELS = {
+    "AppSchemaAgent": "schema-driven generated app UI pages",
+    "ConfigMiddlewareAgent": "configuration, subscription, module contract, or service-foundation files",
+    "ServiceAgent": "module backend Python files",
+    "FrontendStubAgent": "frontend customization stubs or registration files",
+}
+
+_BUNDLE_REPAIR_TARGET_PRIORITY = (
+    "AppSchemaAgent",
+    "ConfigMiddlewareAgent",
+    "ServiceAgent",
+    "FrontendStubAgent",
+)
+
+
+def _bundle_repair_target_for_error(error: str) -> str | None:
+    text = str(error or "").strip()
+    lowered = text.lower()
+    path = text.split(":", 1)[0].strip().replace("\\", "/").lower()
+
+    if path.startswith("ui/pages/") or "generated saas page" in lowered:
+        return "AppSchemaAgent"
+
+    if path.startswith("ui/"):
+        return "FrontendStubAgent"
+
+    if (
+        path == "config/subscriptions.yaml"
+        or path.endswith("/module.yaml")
+        or "/contracts/" in path
+        or "config/subscriptions.yaml" in lowered
+        or "token_allowances require declared token_wallets" in lowered
+        or "top_up_products require declared token_wallets" in lowered
+        or "token_wallets must be emitted only" in lowered
+        or "assignment_store" in lowered
+        or "entitlement_dispatch" in lowered
+        or "entitlement_gate" in lowered
+        or "plan's capabilities" in lowered
+        or "modules/billing_portal/module.yaml" in lowered
+        or "module.id 'billing_portal'" in lowered
+        or "forbidden output prefixes" in lowered
+        or "must not generate provider internals" in lowered
+        or "services/integrations/" in lowered
+        or "app-owned adapter" in lowered
+        or "env.example must document" in lowered
+        or "deployment artifacts" in lowered
+        or "authenticated generated apps must document" in lowered
+    ):
+        return "ConfigMiddlewareAgent"
+
+    if (
+        "/backend/" in path
+        or path.startswith("services/")
+        or "raw provider secret key literal" in lowered
+        or "payment_provider.api_key" in lowered
+        or "refunds apis directly" in lowered
+        or "references a refunds endpoint" in lowered
+        or "app-local token wallet or usage ledger" in lowered
+        or "imports the payment provider sdk directly" in lowered
+        or "imports raw payment provider sdk" in lowered
+        or "must delegate subscription, usage" in lowered
+        or "must not expose managed billing internals" in lowered
+    ):
+        return "ServiceAgent"
+
+    return None
+
+
+def _classified_bundle_repair_errors(errors: list[str]) -> dict[str, list[str]]:
+    classified: dict[str, list[str]] = {}
+    for error in errors:
+        target = _bundle_repair_target_for_error(error)
+        if not target:
+            continue
+        classified.setdefault(target, []).append(error)
+    return classified
+
+
+def _select_bundle_repair_target(classified: dict[str, list[str]]) -> str | None:
+    for target in _BUNDLE_REPAIR_TARGET_PRIORITY:
+        if classified.get(target):
+            return target
+    return None
+
+
+def _bundle_repair_request(
+    *,
+    target: str,
+    target_errors: list[str],
+    deferred_errors: list[str],
+) -> str:
+    target_label = _BUNDLE_REPAIR_TARGET_LABELS.get(target, "generated app files")
+    lines = [
+        f"Repair generated app bundle scanner failures in {target_label} only.",
+        "Use generated_files as the current source of truth and emit only files owned by this agent's canonical output lane.",
+        "Do not introduce payment-provider SDKs, app-local ledgers, hosted internal endpoints, raw secrets, or hosted product policy.",
+    ]
+    for error in target_errors:
+        lines.append(f"- {error}")
+    if deferred_errors:
+        lines.append(
+            "Leave unrelated scanner failures for a later targeted repair pass; do not broaden this agent's scope."
+        )
+        for error in deferred_errors:
+            lines.append(f"- deferred: {error}")
+    return "\n".join(lines)
+
+
+def _prepare_bundle_repair(
+    bundle_scan_result: dict[str, Any],
+    context_variables: Any | None,
+    *,
+    max_attempts: int = 2,
+) -> dict[str, Any]:
+    errors = [
+        str(error)
+        for error in bundle_scan_result.get("errors") or []
+        if str(error or "").strip()
+    ]
+    prior_attempts = _as_int(
+        _context_get(context_variables, "bundle_repair_attempt_count", 0),
+        0,
+    )
+    max_attempts = max(0, _as_int(max_attempts, 2))
+
+    if bundle_scan_result.get("passed"):
+        result = {
+            "status": "passed",
+            "repairable": False,
+            "target_agent": None,
+            "error_count": 0,
+            "attempt": prior_attempts,
+            "max_attempts": max_attempts,
+            "repair_request": None,
+            "errors": [],
+            "target_errors": [],
+            "deferred_errors": [],
+        }
+        _context_set(context_variables, "bundle_repair_status", "passed")
+        _context_set(context_variables, "bundle_repair_target", None)
+        _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
+        _context_set(context_variables, "bundle_repair_request", None)
+        _context_set(context_variables, "bundle_repair_errors", [])
+        _context_set(context_variables, "bundle_repair_result", result)
+        return result
+
+    classified = _classified_bundle_repair_errors(errors)
+    target = _select_bundle_repair_target(classified)
+
+    if not errors or not target:
+        status = "blocked" if errors else "not_applicable"
+        result = {
+            "status": status,
+            "repairable": False,
+            "target_agent": None,
+            "error_count": len(errors),
+            "attempt": prior_attempts,
+            "max_attempts": max_attempts,
+            "repair_request": None,
+            "errors": errors,
+            "target_errors": [],
+            "deferred_errors": errors,
+        }
+        _context_set(context_variables, "bundle_repair_status", status)
+        _context_set(context_variables, "bundle_repair_target", None)
+        _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
+        _context_set(context_variables, "bundle_repair_request", None)
+        _context_set(context_variables, "bundle_repair_errors", errors)
+        _context_set(context_variables, "bundle_repair_result", result)
+        return result
+
+    target_errors = list(classified.get(target) or [])
+    deferred_errors = [
+        error
+        for error in errors
+        if error not in target_errors
+    ]
+    repair_request = _bundle_repair_request(
+        target=target,
+        target_errors=target_errors,
+        deferred_errors=deferred_errors,
+    )
+
+    if prior_attempts >= max_attempts:
+        status = "blocked"
+        attempt = prior_attempts
+        repairable = False
+        repair_target = None
+    else:
+        status = "needs_revision"
+        attempt = prior_attempts + 1
+        repairable = True
+        repair_target = target
+
+    result = {
+        "status": status,
+        "repairable": repairable,
+        "target_agent": repair_target,
+        "error_count": len(errors),
+        "attempt": attempt,
+        "max_attempts": max_attempts,
+        "repair_request": repair_request,
+        "errors": errors,
+        "target_errors": target_errors,
+        "deferred_errors": deferred_errors,
+    }
+    _context_set(context_variables, "bundle_repair_status", status)
+    _context_set(context_variables, "bundle_repair_target", repair_target)
+    _context_set(context_variables, "bundle_repair_attempt_count", attempt)
+    _context_set(context_variables, "bundle_repair_max_attempts", max_attempts)
+    _context_set(context_variables, "bundle_repair_request", repair_request)
+    _context_set(context_variables, "bundle_repair_errors", errors)
+    _context_set(context_variables, "bundle_repair_result", result)
+    return result
+
+
 def _prepare_workflow_integration_repair(
     workflow_integration_result: dict[str, Any],
     context_variables: Any | None,
@@ -1866,7 +2092,12 @@ async def run_app_bundle_acceptance_gate(
         workflow_integration_result,
         context_variables,
     )
+    bundle_repair = _prepare_bundle_repair(
+        bundle_scan_result,
+        context_variables,
+    )
     result["workflow_integration_repair"] = workflow_integration_repair
+    result["bundle_repair"] = bundle_repair
 
     _context_set(context_variables, "bundle_scan_passed", bundle_scan_result["passed"])
     _context_set(context_variables, "bundle_scan_result", bundle_scan_result)
@@ -1885,6 +2116,7 @@ async def run_app_bundle_acceptance_gate(
     _context_set(context_variables, "integration_test_result", {
         **subresults,
         "workflow_integration_repair": workflow_integration_repair,
+        "bundle_repair": bundle_repair,
         "passed": acceptance_passed,
     })
     _context_set(context_variables, "app_bundle_acceptance_status", result["status"])
@@ -2044,6 +2276,7 @@ async def validate_app_bundle_from_request(
     workflow_integration_result = acceptance_result["workflow_integration"]
     app_runtime_load_result = acceptance_result["app_runtime_load"]
     workflow_integration_repair = acceptance_result.get("workflow_integration_repair")
+    bundle_repair = acceptance_result.get("bundle_repair")
     validation_passed = str(validation.get("validation_status") or "").strip().lower() != "failed"
     combined_passed = bool(validation_passed and acceptance_result.get("passed"))
     _context_set(context_variables, "integration_tests_passed", combined_passed)
@@ -2056,6 +2289,7 @@ async def validate_app_bundle_from_request(
         "workflow_integration": workflow_integration_result,
         "app_runtime_load": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,
+        "bundle_repair": bundle_repair,
         "passed": combined_passed,
     }
     _context_set(context_variables, "integration_test_result", integration_test_result)
@@ -2073,6 +2307,7 @@ async def validate_app_bundle_from_request(
         "workflow_integration_validation_result": workflow_integration_result,
         "app_runtime_load_result": app_runtime_load_result,
         "workflow_integration_repair": workflow_integration_repair,
+        "bundle_repair": bundle_repair,
         "integration_tests_passed": combined_passed,
     }
 

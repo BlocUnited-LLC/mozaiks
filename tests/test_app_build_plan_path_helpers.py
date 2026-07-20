@@ -42,6 +42,7 @@ Covers:
   _deployment_contract_artifact_paths:
     - Dockerfile → returned
     - deployment.manifest.json → returned
+    - .github/workflows/readiness.yml → returned
     - .github/workflows/deploy.yml → returned
     - app service files → ignored
 """
@@ -270,8 +271,10 @@ class TestDeploymentContractArtifactPaths:
         ]
 
     def test_github_workflow_returned(self):
-        result = _deployment_contract_artifact_paths([".github/workflows/deploy.yml"])
-        assert result == [".github/workflows/deploy.yml"]
+        result = _deployment_contract_artifact_paths(
+            [".github/workflows/readiness.yml", ".github/workflows/deploy.yml"]
+        )
+        assert result == [".github/workflows/deploy.yml", ".github/workflows/readiness.yml"]
 
     def test_app_service_file_ignored(self):
         result = _deployment_contract_artifact_paths(["services/adapters/dns/provider.py"])

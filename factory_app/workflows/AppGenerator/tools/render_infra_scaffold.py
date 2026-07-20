@@ -2,7 +2,7 @@
 
 InfraScaffoldAgent calls this tool to materialise provider-neutral deployment
 and auth files from the build-context templates stored under:
-  - factory_app/build_context/infra/           → Dockerfile, deploy.yml, provision.sh
+  - factory_app/build_context/infra/           → Dockerfile, readiness.yml, deploy.yml, provision.sh
   - factory_app/build_context/webapp_builder/  → auth/authAdapter.js
 """
 
@@ -102,7 +102,7 @@ async def save_infra_scaffold(
     """Render infra scaffold and/or auth adapter templates and return as code_files.
 
     Args:
-        emit_infra: When True, render Dockerfile, deploy.yml, provision.sh.
+        emit_infra: When True, render Dockerfile, readiness.yml, deploy.yml, provision.sh.
         emit_auth_adapter: When True, render ui/auth/authAdapter.js.
         context_variables: Workflow session state with app_slug, oidc_client_id, etc.
     """

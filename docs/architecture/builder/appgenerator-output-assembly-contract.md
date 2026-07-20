@@ -424,7 +424,7 @@ or unrelated modules. After the configured attempt limit, the status becomes
 
 When a build/export context requests deployment output, or the generated files
 already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,
-or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral
+`.github/workflows/readiness.yml`, or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral
 deployment artifact validator. Deployment-ready bundles must include valid
 deployment artifacts such as `Dockerfile`, `env.example`, and
 `deployment.manifest.json`; missing deployment artifacts block export/promotion

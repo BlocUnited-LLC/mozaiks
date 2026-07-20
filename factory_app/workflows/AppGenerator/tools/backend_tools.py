@@ -26,7 +26,7 @@ async def generate_scaffold(
     ] = True,
     include_workflow: Annotated[
         bool,
-        Field(description="Whether scaffold output should include deterministic CI workflow artifacts."),
+        Field(description="Whether scaffold output should include deterministic deploy workflow artifacts."),
     ] = True,
     include_compose: Annotated[
         bool,
@@ -34,7 +34,12 @@ async def generate_scaffold(
     ] = False,
     deployment_profile: Annotated[
         str | None,
-        Field(description="Optional provider-neutral deployment profile id."),
+        Field(
+            description=(
+                "Optional provider-neutral deployment profile id. Production profiles such as "
+                "production_container force Dockerfile/env/manifest/readiness handoff artifacts."
+            )
+        ),
     ] = None,
     user_id: Annotated[str | None, Field(description="User ID.")] = None
 ) -> dict[str, Any]:

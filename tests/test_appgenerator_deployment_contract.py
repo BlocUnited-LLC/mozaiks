@@ -101,6 +101,40 @@ def test_generate_artifacts_include_workflow_when_requested() -> None:
     assert ".github/workflows/readiness.yml" in artifacts
 
 
+def test_production_profile_emits_readiness_handoff_without_deploy_workflow() -> None:
+    result = generate_deployment_artifacts(
+        app_id="prod_app",
+        deployment_profile="production_container",
+        include_dockerfiles=False,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )
+    artifacts = result["artifacts"]
+    manifest = result["deployment_manifest"]
+
+    assert "Dockerfile" in artifacts
+    assert "env.example" in artifacts
+    assert "deployment.manifest.json" in artifacts
+    assert ".github/workflows/readiness.yml" in artifacts
+    assert ".github/workflows/deploy.yml" not in artifacts
+    assert manifest["readiness_workflow"] == ".github/workflows/readiness.yml"
+    assert manifest["ci_workflow"] is None
+    assert manifest["deploy_target_spec"]["deployment_profile_kind"] == "production"
+    assert manifest["ci_secret_requirements"] == {
+        "required": [],
+        "optional": [],
+        "workflow_inputs": [],
+    }
+    assert result["bundle_errors"] == []
+    assert validate_generated_deployment_bundle(
+        artifacts,
+        include_dockerfiles=True,
+        include_readiness_workflow=True,
+        include_workflow=False,
+    ) == []
+
+
 def test_deployment_manifest_links_readiness_workflow_when_emitted() -> None:
     result = generate_deployment_artifacts(
         app_id="demo_app",
@@ -499,11 +533,19 @@ def test_appgenerator_guidance_mentions_provider_neutral_target_profiles() -> No
     assert "provider-neutral outputs from the deployment contract" in source
     assert "how the generated app runs" in source
     assert "provider-owned adapters" in source
+    assert "production_container" in source
     assert "deployment_profile" in source
     assert "ci_secret_requirements" in source
     assert ".github/workflows/readiness.yml" in source
     assert "ArtifactVersion promotion" in source
     assert "environment staging" in source
+
+
+def test_download_tool_forces_handoff_for_production_profiles() -> None:
+    source = _read("factory_app/workflows/AppGenerator/tools/generate_and_download.py")
+    assert "PRODUCTION_DEPLOYMENT_PROFILES" in source
+    assert "production_deployment_profile" in source
+    assert "include_dockerfiles = True" in source
 
 
 def test_self_host_docker_compose_path_is_documented() -> None:

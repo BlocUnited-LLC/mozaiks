@@ -755,10 +755,11 @@ models:
           services/adapters/, explicit services/routes/, or security/secrets.yaml, or
           `agent_backend_integration` for workflow touchpoints.
           `page_bundle` is the only valid task_type for surface_kind=ui_only.
-          `infra_scaffold` emits Dockerfile, .github/workflows/deploy.yml, and
-          scripts/provision.sh from infra templates. Emitted once at generation
-          time; InfraScaffoldAgent owns these files and skips regeneration if
-          Dockerfile already exists unless --force-infra is set.
+          `infra_scaffold` emits Dockerfile, .github/workflows/readiness.yml,
+          .github/workflows/deploy.yml, and scripts/provision.sh from infra
+          templates. Emitted once at generation time; InfraScaffoldAgent owns
+          these files and skips regeneration if Dockerfile already exists unless
+          --force-infra is set.
           `auth_adapter` emits ui/auth/authAdapter.js from the webapp_builder
           auth template when app/config/auth.yaml declares an OIDC provider.
           Re-emitted on auth config changes. AppSchemaAgent owns this task.
@@ -1288,7 +1289,7 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional named deployment profile such as generic_container or local_compose.
+        description: Optional named deployment profile such as generic_container, local_compose, or production_container. Production profiles force Dockerfile/env/manifest/readiness handoff artifacts.
       ci_secret_requirements:
         type: union
         variants:
@@ -1625,14 +1626,14 @@ models:
         variants:
         - str
         - 'null'
-        description: Optional provider-neutral deployment profile id.
+        description: Optional provider-neutral deployment profile id. Use production_container for production-oriented generated apps; it forces Dockerfile/env/manifest/readiness handoff artifacts.
       include_dockerfiles:
         type: bool
         description: Include deterministic Dockerfile output from deployment contract.
         default: false
       include_workflow:
         type: bool
-        description: Include deterministic CI workflow output from deployment contract.
+        description: Include deterministic deploy workflow output from deployment contract.
         default: false
       include_compose:
         type: bool

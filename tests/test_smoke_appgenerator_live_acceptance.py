@@ -204,6 +204,35 @@ async def test_appgenerator_acceptance_requires_deployment_artifacts_when_reques
 
 
 @pytest.mark.asyncio
+async def test_appgenerator_acceptance_requires_deployment_artifacts_for_production_profile() -> None:
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    context = SmokeContext(
+        {
+            "workflow_name": "AppGenerator",
+            "app_id": "support-operations-live-acceptance",
+            "chat_id": "test-missing-production-deployment-artifacts",
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+            "deployment_profile": "production_container",
+        }
+    )
+
+    result = await run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    assert result["passed"] is False
+    assert "bundle_scan" in result["validation_evidence"]["failed"]
+    assert any(
+        "deployment artifacts" in item["error"]
+        for item in result["failed_tests"]
+        if item.get("gate") == "bundle_scan"
+    )
+
+
+@pytest.mark.asyncio
 async def test_appgenerator_acceptance_blocks_workflow_integration_repair_after_max_attempts() -> None:
     integration = default_workflow_integration()
     files = build_appgenerator_acceptance_files(integration)

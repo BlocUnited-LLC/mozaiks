@@ -717,6 +717,52 @@ definitions:
     source:
       type: computed
       default: null
+  bundle_repair_status:
+    type: string
+    description: >
+      Bounded repair status for deterministic generated-bundle scanner failures.
+      One of not_applicable | needs_revision | passed | blocked.
+    source:
+      type: computed
+      default: null
+  bundle_repair_target:
+    type: string
+    description: >
+      Agent that owns the next generated-bundle repair pass. Null unless
+      bundle_repair_status is needs_revision.
+    source:
+      type: computed
+      default: null
+  bundle_repair_attempt_count:
+    type: integer
+    description: Number of generated-bundle scanner repair passes already scheduled.
+    source:
+      type: computed
+      default: 0
+  bundle_repair_max_attempts:
+    type: integer
+    description: Maximum automated generated-bundle scanner repair attempts before blocking.
+    source:
+      type: computed
+      default: 2
+  bundle_repair_request:
+    type: string
+    description: Focused repair instruction derived from generated-bundle scanner failures.
+    source:
+      type: computed
+      default: null
+  bundle_repair_errors:
+    type: array
+    description: Raw generated-bundle scanner errors that caused the repair pass.
+    source:
+      type: computed
+      default: []
+  bundle_repair_result:
+    type: object
+    description: Full generated-bundle scanner repair scheduling result.
+    source:
+      type: computed
+      default: null
   interview_complete:
     type: boolean
     description: True once the intake interview has gathered enough non-AI product
@@ -1302,6 +1348,11 @@ agents:
     - app_asset_manifest
     - app_custom_route_bundle
     - app_schema_ready
+    - generated_files
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
   AssemblyAgent:
     variables:
     - app_build_plan
@@ -1395,6 +1446,10 @@ agents:
     - workflow_integration_repair_status
     - workflow_integration_repair_request
     - workflow_integration_repair_failed_tests
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
   AdminRegistryAgent:
     variables:
     - app_build_plan
@@ -1440,6 +1495,11 @@ agents:
     - module_runtime_quality_status
     - module_runtime_quality_warnings
     - module_runtime_quality_revision_request
+    - generated_files
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
   ControllerAgent:
     variables:
     - app_backend_url
@@ -1476,6 +1536,19 @@ agents:
     - workflow_integration_repair_status
     - workflow_integration_repair_request
     - workflow_integration_repair_result
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_result
+    - bundle_repair_errors
+  FrontendStubAgent:
+    variables:
+    - current_build_task
+    - generated_files
+    - bundle_repair_status
+    - bundle_repair_target
+    - bundle_repair_request
+    - bundle_repair_errors
   DownloadAgent:
     variables:
     - build_registry_id

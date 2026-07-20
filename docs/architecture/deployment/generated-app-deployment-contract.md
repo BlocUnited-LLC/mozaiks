@@ -64,8 +64,8 @@ Required shape:
 - `artifact_outputs`
   - `Dockerfile` (optional)
   - `docker-compose.yml` (optional)
+  - `.github/workflows/readiness.yml` (optional; forced by production profiles)
   - `.github/workflows/deploy.yml` (optional)
-  - `.github/workflows/readiness.yml` (optional when workflow artifacts are emitted)
   - `env.example`
   - `deployment.manifest.json`
 - `environment`
@@ -123,6 +123,12 @@ Required shape:
 - `validation_status`
 - `deploy_target_spec`
 - `build_output_contract` (optional)
+
+Production-oriented generated apps should use
+`deployment_profile=production_container`. That profile forces the root
+`Dockerfile`, `env.example`, `deployment.manifest.json`, and
+`.github/workflows/readiness.yml` handoff even when the app is not asking the
+OSS generator to emit a provider-specific deploy workflow.
 
 ### Readiness Requirements
 
@@ -266,8 +272,8 @@ When deployment artifacts are requested by scaffold/export flags, AppGenerator e
 
 - `Dockerfile` (optional)
 - `docker-compose.yml` (optional)
+- `.github/workflows/readiness.yml` (optional; forced by production profiles)
 - `.github/workflows/deploy.yml` (optional)
-- `.github/workflows/readiness.yml` (optional when workflow artifacts are emitted)
 - `env.example`
 - `deployment.manifest.json`
 

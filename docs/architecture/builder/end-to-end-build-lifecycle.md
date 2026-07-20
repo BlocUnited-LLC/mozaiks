@@ -232,8 +232,8 @@ This phase may write:
 - optional `data/migrations/*.json`
 - generated module files
 - provider-neutral deployment artifacts (optional): `Dockerfile`,
-  `docker-compose.yml`, `.github/workflows/deploy.yml`, `env.example`, and
-  `deployment.manifest.json`
+  `docker-compose.yml`, `.github/workflows/readiness.yml`,
+  `.github/workflows/deploy.yml`, `env.example`, and `deployment.manifest.json`
 
 Important rule:
 

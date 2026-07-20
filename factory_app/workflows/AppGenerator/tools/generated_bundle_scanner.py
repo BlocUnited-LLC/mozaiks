@@ -404,7 +404,7 @@ def _path_matches_prefix(path: str, prefix: str) -> bool:
 
 
 def _iter_api_endpoint_literals(content: str) -> list[str]:
-    return re.findall(r'["\'](/api/modules/[^"\']+)["\']', content)
+    return re.findall(r'["\']?(/api/modules/[^"\'\s]+)', content)
 
 
 def _scan_selected_managed_capability_boundaries(
@@ -828,6 +828,7 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
             "Dockerfile",
             "env.example",
             "deployment.manifest.json",
+            ".github/workflows/readiness.yml",
             ".github/workflows/deploy.yml",
         )
         if path in normalized_files
@@ -838,6 +839,7 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
         deployment_errors = validate_generated_deployment_bundle(
             deployment_artifacts,
             include_dockerfiles=True,
+            include_readiness_workflow=".github/workflows/readiness.yml" in deployment_artifacts,
             include_workflow=".github/workflows/deploy.yml" in deployment_artifacts,
         )
     except Exception as exc:

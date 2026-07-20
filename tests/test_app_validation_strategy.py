@@ -540,6 +540,158 @@ async def test_validate_app_bundle_from_request_blocks_workflow_integration_fail
     assert context.get("integration_test_result")["workflow_integration_repair"]["status"] == "needs_revision"
 
 
+@pytest.mark.asyncio
+async def test_app_bundle_acceptance_schedules_service_agent_bundle_repair() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    files["modules/support_tickets/backend/token_wallet_ledger.py"] = (
+        "class TokenWalletLedger:\n"
+        "    pass\n"
+    )
+    context = _Context(
+        {
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    result = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    assert result["passed"] is False
+    assert result["bundle_repair"]["status"] == "needs_revision"
+    assert result["bundle_repair"]["target_agent"] == "ServiceAgent"
+    assert result["bundle_repair"]["attempt"] == 1
+    assert context.get("bundle_repair_status") == "needs_revision"
+    assert context.get("bundle_repair_target") == "ServiceAgent"
+    assert context.get("bundle_repair_attempt_count") == 1
+    assert "app-local token wallet or usage ledger" in context.get("bundle_repair_request")
+    assert context.get("integration_test_result")["bundle_repair"]["target_agent"] == "ServiceAgent"
+
+
+@pytest.mark.asyncio
+async def test_app_bundle_acceptance_schedules_app_schema_repair_for_direct_managed_endpoint() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    files["services/integrations/hosted_billing_client.py"] = "class HostedBillingClient: pass\n"
+    files["ui/pages/support_tickets.yaml"] += (
+        "\n# scanner fixture\n"
+        "api_endpoint: /api/modules/hosted_billing/open_checkout\n"
+    )
+    context = _Context(
+        {
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    result = await module.run_app_bundle_acceptance_gate(
+        files=files,
+        context_variables=context,
+        capability_packs=[
+            {"id": "hosted_billing", "capability_source": "managed_capability"},
+        ],
+    )
+
+    assert result["passed"] is False
+    assert result["bundle_repair"]["status"] == "needs_revision"
+    assert result["bundle_repair"]["target_agent"] == "AppSchemaAgent"
+    assert context.get("bundle_repair_target") == "AppSchemaAgent"
+    assert any(
+        "ui/pages/support_tickets.yaml" in error and "calls managed capability endpoint" in error
+        for error in result["bundle_repair"]["target_errors"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_app_bundle_acceptance_schedules_config_repair_for_missing_managed_client() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    context = _Context(
+        {
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+        }
+    )
+
+    result = await module.run_app_bundle_acceptance_gate(
+        files=files,
+        context_variables=context,
+        capability_packs=[
+            {"id": "hosted_billing", "capability_source": "managed_capability"},
+        ],
+    )
+
+    assert result["passed"] is False
+    assert result["bundle_repair"]["status"] == "needs_revision"
+    assert result["bundle_repair"]["target_agent"] == "ConfigMiddlewareAgent"
+    assert context.get("bundle_repair_target") == "ConfigMiddlewareAgent"
+    assert any("services/integrations/hosted_billing_client.py" in error for error in result["bundle_repair"]["target_errors"])
+
+
+@pytest.mark.asyncio
+async def test_app_bundle_acceptance_blocks_bundle_repair_after_max_attempts() -> None:
+    module = importlib.import_module("factory_app.workflows.AppGenerator.tools.app_validation")
+    from scripts.smoke_appgenerator_live_acceptance import (
+        build_appgenerator_acceptance_files,
+        default_workflow_integration,
+    )
+
+    integration = default_workflow_integration()
+    files = build_appgenerator_acceptance_files(integration)
+    files["modules/support_tickets/backend/token_wallet_ledger.py"] = (
+        "class TokenWalletLedger:\n"
+        "    pass\n"
+    )
+    context = _Context(
+        {
+            "generated_files": files,
+            "generated_workflow_name": integration["workflow_name"],
+            "generated_workflow_capability_id": integration["capability_id"],
+            "generated_workflow_startup_mode": integration["startup_mode"],
+            "generated_workflow_trigger_events": integration["trigger_events"],
+            "bundle_repair_attempt_count": 2,
+        }
+    )
+
+    result = await module.run_app_bundle_acceptance_gate(files=files, context_variables=context)
+
+    assert result["passed"] is False
+    assert result["bundle_repair"]["status"] == "blocked"
+    assert result["bundle_repair"]["repairable"] is False
+    assert result["bundle_repair"]["target_agent"] is None
+    assert result["bundle_repair"]["attempt"] == 2
+    assert context.get("bundle_repair_status") == "blocked"
+    assert context.get("bundle_repair_target") is None
+    assert context.get("bundle_repair_attempt_count") == 2
+
+
 def test_validate_wiring_tool_annotations_are_runtime_resolved() -> None:
     from factory_app.workflows.AppGenerator.tools.validate_wiring import validate_wiring
 

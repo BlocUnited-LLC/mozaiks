@@ -171,16 +171,54 @@ transition_rules:
   condition_value: true
   transition_target: TerminateTarget
 - source_agent: AppValidationAgent
-  target_agent: user
-  transition_type: after_turn
-  transition_target: RevertToUserTarget
-- source_agent: AppValidationAgent
   target_agent: ConfigMiddlewareAgent
   transition_type: condition
   condition_type: context_equals
   condition_key: workflow_integration_repair_status
   condition_value: needs_revision
   transition_target: AgentTarget
+- source_agent: AppValidationAgent
+  target_agent: AppSchemaAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: AppSchemaAgent
+  transition_target: AgentTarget
+- source_agent: AppValidationAgent
+  target_agent: ConfigMiddlewareAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: ConfigMiddlewareAgent
+  transition_target: AgentTarget
+- source_agent: AppValidationAgent
+  target_agent: ServiceAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: ServiceAgent
+  transition_target: AgentTarget
+- source_agent: AppValidationAgent
+  target_agent: FrontendStubAgent
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_target
+  condition_value: FrontendStubAgent
+  transition_target: AgentTarget
+- source_agent: AppValidationAgent
+  target_agent: user
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: bundle_repair_status
+  condition_value: blocked
+  transition_target: RevertToUserTarget
+- source_agent: AppValidationAgent
+  target_agent: user
+  transition_type: condition
+  condition_type: context_equals
+  condition_key: workflow_integration_repair_status
+  condition_value: blocked
+  transition_target: RevertToUserTarget
 - source_agent: AppValidationAgent
   target_agent: user
   transition_type: condition
@@ -195,6 +233,10 @@ transition_rules:
   condition_key: integration_tests_passed
   condition_value: true
   transition_target: AgentTarget
+- source_agent: AppValidationAgent
+  target_agent: user
+  transition_type: after_turn
+  transition_target: RevertToUserTarget
 - source_agent: InfraScaffoldAgent
   target_agent: DownloadAgent
   transition_type: after_turn

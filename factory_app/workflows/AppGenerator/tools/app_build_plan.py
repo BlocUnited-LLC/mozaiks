@@ -43,6 +43,8 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
         "deployment.manifest.json",
         "docker-compose.yml",
         "env.example",
+        ".github/workflows/readiness.yml",
+        ".github/workflows/deploy.yml",
     }
 )
 _DEPLOYMENT_CONTRACT_ARTIFACT_PREFIXES = (".github/workflows/",)

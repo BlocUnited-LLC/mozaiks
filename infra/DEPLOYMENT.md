@@ -88,6 +88,7 @@ as:
 - `docker-compose.yml`
 - `env.example`
 - `deployment.manifest.json`
+- `.github/workflows/readiness.yml`
 - `.github/workflows/deploy.yml`
 
 Those come from AppGenerator's deployment contract renderer, not from this
