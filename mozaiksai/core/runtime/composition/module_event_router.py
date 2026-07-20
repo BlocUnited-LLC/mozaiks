@@ -11,8 +11,8 @@ manifests loaded by the platform host:
 This keeps module event meaning above the runtime kernel.
 """
 
-import inspect
 import importlib
+import inspect
 import re
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterable

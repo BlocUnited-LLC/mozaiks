@@ -1346,7 +1346,7 @@ def _render_readiness_workflow(spec: dict[str, Any]) -> str:
         lines.append(f"            -e {name}=\"${{{name}}}\" \\")
     lines.extend(
         [
-            f"            generated-app:readiness",
+            "            generated-app:readiness",
             "          cleanup() { docker stop generated-app-readiness >/dev/null 2>&1 || true; }",
             "          trap cleanup EXIT",
             "          for i in $(seq 1 12); do",

@@ -475,7 +475,6 @@ async def test_entitlement_dispatch_docker_integration(
 
     finally:
         # Synchronous cleanup to avoid event-loop-closed errors in pytest-asyncio teardown
-        import motor.motor_asyncio  # noqa: PLC0415
         sync_client = __import__("pymongo").MongoClient(
             os.getenv("MONGO_URI") or os.getenv("MONGODB_URI") or "mongodb://localhost:27017"
         )

@@ -4,7 +4,6 @@ import asyncio
 import json
 from pathlib import Path
 
-from factory_app.workflows.AppGenerator.tools.render_infra_scaffold import save_infra_scaffold
 from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     _default_ci_secret_requirements,
     _render_workflow,
@@ -18,6 +17,7 @@ from factory_app.workflows.AppGenerator.tools.deployment_contract import (
     validate_generated_deployment_bundle,
     validate_readiness_requirements,
 )
+from factory_app.workflows.AppGenerator.tools.render_infra_scaffold import save_infra_scaffold
 
 
 def _workspace() -> Path:

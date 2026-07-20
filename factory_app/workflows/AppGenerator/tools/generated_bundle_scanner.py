@@ -404,7 +404,7 @@ def _path_matches_prefix(path: str, prefix: str) -> bool:
 
 
 def _iter_api_endpoint_literals(content: str) -> list[str]:
-    return re.findall(r'["\']?(/api/modules/[^"\'\s]+)', content)
+    return re.findall(r'["\'](/api/modules/[^"\'\s]+)', content)
 
 
 def _scan_selected_managed_capability_boundaries(
@@ -495,7 +495,7 @@ def _module_actions_from_yaml(path: str, content: str) -> set[str]:
 
 
 def _page_endpoint_literals(content: str) -> list[str]:
-    return re.findall(r'["\']?(/api/modules/[^"\'\s]+)', content)
+    return re.findall(r'["\'](/api/modules/[^"\'\s]+)', content)
 
 
 def _validate_subscriptions_contract(

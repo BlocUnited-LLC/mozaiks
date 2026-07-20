@@ -4037,30 +4037,6 @@ models:
         - 'null'
         description: One optional recovery/navigation action.
 
-  AppPermissionStateConfig:
-    type: model
-    fields:
-      title:
-        type: union
-        variants:
-        - str
-        - 'null'
-        description: "Optional title. Defaults to 'Access Denied' if null."
-      message:
-        type: str
-        description: >
-          User-facing message explaining why access is denied. Be specific
-          when possible (e.g. 'You need the admin role to view this section.')
-          rather than generic ('Permission denied').
-      action:
-        type: union
-        variants:
-        - AppPageAction
-        - 'null'
-        description: >
-          One optional recovery action. Use to link to an upgrade page, contact
-          support, or navigate to a permitted alternative.
-
   AppPanelConfig:
     type: model
     fields:
@@ -4225,7 +4201,6 @@ models:
     - AppInlineEmptyStateConfig
     - AppLoadingStateConfig
     - AppErrorStateConfig
-    - AppPermissionStateConfig
     - AppPanelConfig
     - AppSurfaceCardConfig
     - AppStatusPillConfig
@@ -4270,7 +4245,6 @@ models:
         - InlineEmptyState
         - LoadingState
         - ErrorState
-        - PermissionState
         - Panel
         - SurfaceCard
         - StatusPill
@@ -4358,7 +4332,6 @@ models:
     - AppInlineEmptyStateConfig
     - AppLoadingStateConfig
     - AppErrorStateConfig
-    - AppPermissionStateConfig
     - AppPanelConfig
     - AppSurfaceCardConfig
     - AppStatusPillConfig
@@ -4426,7 +4399,6 @@ models:
         - InlineEmptyState
         - LoadingState
         - ErrorState
-        - PermissionState
         - Panel
         - SurfaceCard
         - StatusPill

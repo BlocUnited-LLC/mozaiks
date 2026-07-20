@@ -6,9 +6,9 @@ from typing import Any, TypeVar
 from ag2 import Agent, MemoryStream
 from ag2.middleware.builtin import RetryMiddleware
 from ag2.observers import TokenMonitor
+from pydantic import BaseModel
 
 from mozaiksai.core.adapters.llm_fallback import llm_config_to_ag2_config
-from pydantic import BaseModel
 
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 
