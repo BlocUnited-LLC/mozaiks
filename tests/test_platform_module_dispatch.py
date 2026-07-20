@@ -30,6 +30,19 @@ class _OrdersHandler:
             "permissions": ctx.permissions,
         }
 
+    async def inspect_app_input(self, ctx, *, app_id: str):
+        return {
+            "ctx_app_id": ctx.app_id,
+            "param_app_id": app_id,
+        }
+
+    async def inspect_payload(self, ctx, **params):
+        return {
+            "ctx_app_id": ctx.app_id,
+            "ctx_user_id": ctx.user_id,
+            "params": params,
+        }
+
 
 def _client(
     *,
@@ -80,6 +93,68 @@ def test_post_dispatch_to_startup_failed_module_returns_503() -> None:
     resp = client.post("/api/modules/tasks/create", json={"params": {}})
     assert resp.status_code == 503
     assert "failed to load at startup" in resp.json().get("detail", "")
+
+
+def test_post_params_envelope_preserves_reserved_action_input(monkeypatch) -> None:
+    executor = ModuleExecutor()
+    executor.register(
+        "orders",
+        _OrdersHandler(),
+        action_schemas={
+            "inspect_app_input": {
+                "input": {
+                    "type": "object",
+                    "properties": {"app_id": {"type": "string"}},
+                    "required": ["app_id"],
+                },
+            },
+        },
+    )
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    client = _client(failed_module_names=[])
+    resp = client.post(
+        "/api/modules/orders/inspect_app_input",
+        json={
+            "params": {"app_id": "app-resource"},
+            "context": {"app_id": "app-resource"},
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "ctx_app_id": "app-resource",
+        "param_app_id": "app-resource",
+    }
+
+
+def test_post_raw_body_keeps_reserved_fields_as_legacy_context_only(monkeypatch) -> None:
+    executor = ModuleExecutor()
+    executor.register("orders", _OrdersHandler())
+    registry = ExecutorRegistry()
+    registry.register(executor)
+    monkeypatch.setattr(platform_host, "executor_registry", registry)
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    client = _client(failed_module_names=[])
+    resp = client.post(
+        "/api/modules/orders/inspect_payload",
+        json={
+            "app_id": "app-context",
+            "user_id": "user-context",
+            "label": "kept",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "ctx_app_id": "app-context",
+        "ctx_user_id": "user-context",
+        "params": {"label": "kept"},
+    }
 
 
 # ---------------------------------------------------------------------------
