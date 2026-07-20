@@ -39,7 +39,7 @@ _AUTH_ADAPTER_OUTPUT = "ui/auth/authAdapter.js"
 
 def _substitute(content: str, variables: dict[str, str]) -> str:
     """Replace {{KEY}} markers with values from variables dict."""
-    def _replace(m: re.Match) -> str:
+    def _replace(m: re.Match[str]) -> str:
         key = m.group(1)
         return variables.get(key, m.group(0))  # leave unknown markers intact
 
