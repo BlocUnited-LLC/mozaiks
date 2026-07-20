@@ -10,9 +10,11 @@ from factory_app.workflows.AppGenerator.tools.export_app_code import resolve_exp
 from scripts.smoke_appgenerator_live_acceptance import (
     DEFAULT_TRIGGER_EVENT_TYPE,
     DEFAULT_WORKFLOW_CAPABILITY_ID,
+    FORBIDDEN_APP_LOCAL_LEDGER_PATH,
     SmokeContext,
     build_appgenerator_acceptance_files,
     default_workflow_integration,
+    run_deterministic_appgenerator_repair_loop_smoke,
     run_live_agentgenerator_to_appgenerator_acceptance_smoke,
     validate_appgenerator_acceptance_handoff,
 )
@@ -35,6 +37,24 @@ async def test_appgenerator_acceptance_handoff_fixture_passes_deterministic_gate
     assert result["runtime_loader"]["loaded"] is True
     assert result["runtime_loader"]["module_ids"] == ["support_tickets"]
     assert DEFAULT_WORKFLOW_CAPABILITY_ID in result["runtime_loader"]["reaction_capability_ids"]
+
+
+@pytest.mark.asyncio
+async def test_appgenerator_repair_loop_smoke_routes_deletes_and_exports() -> None:
+    result = await run_deterministic_appgenerator_repair_loop_smoke()
+
+    assert result["success"] is True, result["validation_errors"]
+    assert result["forbidden_path"] == FORBIDDEN_APP_LOCAL_LEDGER_PATH
+    assert result["initial_acceptance_status"] == "failed"
+    assert result["initial_bundle_repair"]["status"] == "needs_revision"
+    assert result["initial_bundle_repair"]["target_agent"] == "ServiceAgent"
+    assert result["repaired_acceptance_status"] == "passed"
+    assert result["repaired_bundle_repair"]["status"] == "passed"
+    assert result["export_gate"]["allow_export"] is True
+    assert result["packaging"]["removed_forbidden_path"] is True
+    assert result["packaging"]["preserved_infra_output"] is True
+    assert result["runtime_loader"]["loaded"] is True
+    assert FORBIDDEN_APP_LOCAL_LEDGER_PATH not in result["context"]["generated_files"]
 
 
 def test_appgenerator_acceptance_fixture_wires_workflow_capability_not_raw_workflow_name() -> None:

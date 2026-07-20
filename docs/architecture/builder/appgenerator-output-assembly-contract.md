@@ -422,6 +422,35 @@ backend Python, frontend code, pages, data contracts, service foundation files,
 or unrelated modules. After the configured attempt limit, the status becomes
 `blocked` and the workflow returns to the user.
 
+When the generated-bundle scanner fails on a file-family violation, the same
+acceptance gate writes a bundle repair contract before export can proceed:
+
+- `bundle_repair_status`
+- `bundle_repair_target`
+- `bundle_repair_attempt_count`
+- `bundle_repair_max_attempts`
+- `bundle_repair_request`
+- `bundle_repair_errors`
+- `bundle_repair_result`
+
+The target must be the narrowest owning agent: `AppSchemaAgent` for page/schema
+endpoint drift, `ConfigMiddlewareAgent` for config or managed-capability client
+drift, `ServiceAgent` for backend Python/service drift, and `FrontendStubAgent`
+for generated frontend helper drift. A repair agent may remove stale or invalid
+artifacts by emitting `deleted_files`; `AssemblyAgent`, the acceptance gate, and
+`DownloadAgent` all apply those deletions before validation or packaging.
+
+Deterministic smoke coverage:
+
+```powershell
+python scripts\smoke_appgenerator_live_acceptance.py --repair-loop
+```
+
+This smoke injects an app-local token wallet ledger, verifies that scanner
+repair routes to `ServiceAgent`, applies `deleted_files`, re-runs acceptance,
+checks the export gate, and proves packaging no longer contains the removed
+artifact.
+
 When a build/export context requests deployment output, or the generated files
 already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,
 `.github/workflows/readiness.yml`, or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral

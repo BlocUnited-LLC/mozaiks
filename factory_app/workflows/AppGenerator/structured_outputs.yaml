@@ -1461,6 +1461,7 @@ models:
       deleted_files:
         type: optional_list
         items: str
+        default: []
         description: >
           Relative generated file paths to remove from the current assembled
           bundle. Use only during bounded repair/refinement when a stale or
@@ -1920,6 +1921,7 @@ models:
         description: "Canonical Python entrypoint in module-local form backend.handler:ModuleClass."
       user_data_scope:
         type: bool
+        default: false
         description: >
           Set to true when the module stores user-personally-identifiable or user-owned records (contacts, messages, profiles, interests, memberships, transactions). When true the runtime auto-registers the module with the account_data_registry and requires backend/account_data_handler.py to exist. Set false for admin-only, system, or platform-owned records.
 
@@ -2019,6 +2021,7 @@ models:
         description: Method exposed by backend/handler.py for this action. The handler may delegate to service, policy, repo, and schema layers.
       api_surface:
         type: optional_str
+        default: null
         description: >
           External HTTP exposure posture for this action. Use public or
           public_readonly only for anonymous-safe HTTP actions. Omit it or use
@@ -3120,6 +3123,7 @@ models:
       deleted_files:
         type: optional_list
         items: str
+        default: []
         description: >
           Relative generated file paths to remove from the current assembled
           bundle. Use only during bounded repair/refinement when removing a
@@ -5960,6 +5964,7 @@ models:
       deleted_files:
         type: optional_list
         items: str
+        default: []
         description: >
           Relative generated file paths to remove from the current assembled
           bundle. Use only during bounded repair/refinement when removing a
@@ -6017,6 +6022,7 @@ models:
       deleted_files:
         type: optional_list
         items: str
+        default: []
         description: >
           Relative generated file paths to remove from the current assembled
           bundle. Use only during bounded repair/refinement when removing a
@@ -6075,6 +6081,7 @@ models:
       deleted_files:
         type: optional_list
         items: str
+        default: []
         description: >
           Relative generated file paths to remove from the current assembled
           bundle. Use only during bounded repair/refinement when removing a
