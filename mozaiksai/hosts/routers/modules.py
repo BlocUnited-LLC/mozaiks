@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PUBLIC_MODULE_API_SURFACES = {"public", "public_readonly"}
 _OBSERVED_MODULES = {"messages", "workspace_support"}
+_RESERVED_CONTEXT_KEYS = ("app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token")
 # Actions with these surfaces are only reachable through the internal event bus
 # or direct ModuleExecutor calls.  HTTP dispatch is always rejected regardless
 # of authentication status so that event-pipeline internal handlers cannot be
@@ -63,6 +64,38 @@ def _is_public_module_action(request: Request, module_name: str, action_name: st
 def _is_internal_module_action(request: Request, module_name: str, action_name: str) -> bool:
     """Return True when the action surface is internal-only and must not be dispatched via HTTP."""
     return _module_action_api_surface(request, module_name, action_name) in _INTERNAL_MODULE_API_SURFACES
+
+
+def _split_post_body(body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a module POST body into action params and execution context.
+
+    The canonical module API payload is {"params": {...}, "context": {...}}.
+    Values inside "params" are action inputs, so reserved words such as app_id
+    must remain available for resource-scoped actions. Raw-body payloads
+    still treat reserved words as execution context and remove them from action
+    params to preserve the old dispatch contract.
+    """
+    params_body = body.get("params")
+    context_body = body.get("context")
+    if isinstance(params_body, dict):
+        has_params_envelope = True
+        params = dict(params_body)
+    else:
+        has_params_envelope = False
+        params = dict(body)
+    context_overrides: dict[str, Any] = dict(context_body) if isinstance(context_body, dict) else {}
+
+    for key in _RESERVED_CONTEXT_KEYS:
+        if key in params and key not in context_overrides:
+            context_overrides[key] = params[key]
+
+    if not has_params_envelope:
+        params.pop("context", None)
+        params.pop("params", None)
+        for key in _RESERVED_CONTEXT_KEYS:
+            params.pop(key, None)
+
+    return params, context_overrides
 
 
 async def _resolve_module_dispatch_scope(
@@ -301,7 +334,7 @@ async def execute_module_action_get(
     request: Request,
     principal: UserPrincipal | None = Depends(optional_user),
 ):
-    reserved_keys = {"app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token"}
+    reserved_keys = set(_RESERVED_CONTEXT_KEYS)
     params = {key: value for key, value in request.query_params.items() if key not in reserved_keys}
     return await _execute_module_action(
         module_name=module_name,
@@ -328,20 +361,7 @@ async def execute_module_action_post(
         except Exception as exc:
             raise HTTPException(status_code=400, detail="Invalid JSON payload.") from exc
 
-    params = dict(body.get("params") or {}) if isinstance(body.get("params"), dict) else dict(body)
-    context_overrides: dict[str, Any] = body.get("context") if isinstance(body.get("context"), dict) else {}  # type: ignore[assignment]
-
-    # Route reserved execution-context fields away from action params.
-    # This keeps handler signatures clean while still honoring explicit scope overrides.
-    reserved_context_keys = ("app_id", "user_id", "tenant_id", "workspace_id", "correlation_id", "auth_token")
-    for key in reserved_context_keys:
-        if key in params and key not in context_overrides:
-            context_overrides[key] = params[key]
-
-    params.pop("context", None)
-    params.pop("params", None)
-    for key in reserved_context_keys:
-        params.pop(key, None)
+    params, context_overrides = _split_post_body(body)
 
     return await _execute_module_action(
         module_name=module_name,
