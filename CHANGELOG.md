@@ -12,6 +12,8 @@ This project follows a practical pre-1.0 changelog format:
 
 ## Unreleased
 
+## 0.1.11 - 2026-07-20
+
 ### Added
 
 - Default OSS LLM provider is now free Google Gemini (gemini-2.0-flash / gemini-2.5-flash). Set `GEMINI_API_KEY` from aistudio.google.com and `LLM_PRIMARY_API_TYPE=google`. OpenAI remains available as an alternative via `LLM_PRIMARY_API_TYPE=openai`.
@@ -23,6 +25,8 @@ This project follows a practical pre-1.0 changelog format:
 ### Fixed
 
 - Removed `@stripe/stripe-js` from the OSS `web_shell` dependencies. Stripe belongs in `mozaiks-app` only; the package was unused in any source file.
+- Fixed `optional_list`, `optional_str`, `optional_dict`, and nullable union fields to correctly default to `None` in generated Pydantic models when no explicit default is declared, so they are truly optional without requiring the LLM to emit them.
+- Fixed generated bundle scanner to detect `api_endpoint: /api/modules/...` values in YAML pages (unquoted) alongside quoted string literals. Billing and usage page contract validation now works correctly for the canonical YAML page format.
 
 ### Changed
 
