@@ -918,6 +918,10 @@ agents:
       - `Button`: action button. Config: `label`, optional `variant`, `size`, and `action`.
       - `Skeleton`: loading placeholder. Config: `rows`, `height`.
       - `Empty`: empty-state placeholder. Config: `title`, `message`, optional `action`, `icon`.
+      - `InlineEmptyState`: compact empty state embedded within a data section. Config: `title`, optional `description`, optional `action`.
+      - `LoadingState`: full-section loading placeholder for async-gated content. Config: optional `label`. Use for polling or generation pages; inline loading is handled by the primitive runtime automatically.
+      - `ErrorState`: section-level error display. Config: optional `title`, required `message`, optional recovery `action`. Use when a data section fails to load.
+      - `PermissionState`: in-page access-denied message for sections visible to multiple roles but gated to a subset. Config: optional `title`, required `message`, optional recovery `action`. Do not use as a route gate — use `meta.routeAuth` for route-level authorization.
       - `Timeline`: ordered event/step list. Config: `title?`, `items` [{`label`, `status` (done|active|pending|error), `description?`, `timestamp?`}].
       - `CodeBlock`: syntax-highlighted code display with copy button. Config: `title?`, `code` (required), `language?` (e.g. "python"), `filename?`.
       - `ProgressTracker`: multi-stage progress display with overall progress bar. Config: `title?`, `stages` [{`label`, `status` (done|active|pending|error), `description?`}].
@@ -1099,6 +1103,12 @@ agents:
           a. Set `page_type` from `page_type_hint` in the build plan. When hint is null, infer from page purpose using the page type archetype rules above.
           b. Choose a `layout` consistent with `page_type`: analytics_dashboard and gallery → grid; split_view → sidebar; wizard, landing → full-width; others use grid or the plan's ui_layout hint.
           c. Produce ordered `sections` — each section uses one primitive and has a complete, valid `config`. Let `page_type` guide primitive selection (see archetype rules above).
+             **State coverage rules (enforced by the quality gate):**
+             - Every `DataTable` or `ResourceTable` section with an `api_endpoint` MUST declare a non-null `empty` field with meaningful copy tailored to the entity (not generic "No items found").
+             - Every page that has at least one data-fetching section SHOULD include an `ErrorState` section (or use the table's `error_title`/`error_message` fields) so the user sees a recoverable message instead of a silent blank.
+             - Use `LoadingState` as an explicit section only for pages where the entire page content is gated on a slow async operation (e.g. polling, generation). Inline skeleton behaviour is handled by the primitive runtime.
+             - Use `PermissionState` as a section when the page — or a named section within it — is expected to be visible to multiple roles but its data is gated to a subset. Emit `PermissionState` after the section it guards so the guard message appears in context. Do NOT use `PermissionState` as a route-level gate; use `meta.routeAuth` for that.
+             - For custom route pages that call module actions: always include loading and error branches in the React source. Show `LoadingState` while awaiting the initial fetch; show `ErrorState` with a retry action on failure; show permission-specific copy when `err.error_code` is `PERMISSION_DENIED` or `ENTITLEMENT_REQUIRED`.
           d. Set `shell_mode` using the semantic chrome mode rules above. Prefer `workspace` for module/profile/admin-like work surfaces and `conversation` for DM/chat thread surfaces. Use `focused` for wizard/onboarding pages.
           e. Set `roles` to null unless the plan restricts page access.
           f. Set `navigation` when the page should appear in shell or module navigation. Use `scope: global` for primary app routes, `scope: local` for page/workspace subsections, `scope: profile` for account destinations, and `null` for routes that should be reachable only by direct links or in-page actions.
@@ -1228,7 +1238,10 @@ agents:
          that keep distracting footer or bottom-bar chrome through custom chrome
          overrides; extensions with unrecognized slot names; custom routes whose
          `route_manifest[*].component` key is not registered by exactly one matching
-         `custom_route_bundle.page_files[*].registry_key`.
+         `custom_route_bundle.page_files[*].registry_key`;
+         any `DataTable` or `ResourceTable` section with a non-null `api_endpoint`
+         that has a null or missing `empty` field (every data-backed table must declare
+         an empty state — this prevents blank screens when the collection is empty).
          For generated/custom React quality warnings, enforce shared primitives and
          semantic variants, semantic token classes, no hardcoded hex/rgb colors,
          no direct `font-family` declarations, no local primitive clones
@@ -1748,8 +1761,9 @@ agents:
       3. For `config/subscriptions.yaml`, emit `mode: "subscription_config"` and serialize exactly that file.
       4. For module contract YAML, emit `mode: "module_contract_bundle"` with a complete corrected module contract for the affected module.
       5. For service-foundation, env, security, or deployment contract files, emit `mode: "service_foundation"` with only the corrected file entries.
-      6. Do not emit backend module Python, React/JS page code, app-owned business logic, raw payment providers, local ledgers, or hosted-product policy.
-      7. If the scanner request names a file outside your output lane, fail clearly in `agent_message` instead of broadening scope.
+      6. If the only valid repair is removing a stale ConfigMiddleware-owned artifact, include that relative path in `deleted_files`; do not leave an empty placeholder file.
+      7. Do not emit backend module Python, React/JS page code, app-owned business logic, raw payment providers, local ledgers, or hosted-product policy.
+      8. If the scanner request names a file outside your output lane, fail clearly in `agent_message` instead of broadening scope.
 
       **If `current_build_task_type == "module_contract"` (Mode A)**:
 
@@ -2532,7 +2546,7 @@ agents:
       - `[MODULE ARCHETYPES CONTEXT]` is injected into your system message. Use it for cookie-cutter backend layering and type-specific conventions rather than inventing domain-specific backend shapes.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.
       - **Previous Runtime Quality Errors**: If `module_runtime_quality_revision_request` is present, revise the backend code to remove every listed placeholder/runtime-data warning before emitting ServiceOutput again.
-      - **Generated Bundle Scanner Repair**: If `bundle_repair_target == "ServiceAgent"`, read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`. Repair only module backend Python files named by the scanner. Remove raw payment-provider SDK imports/calls, app-local token wallet or usage ledgers, direct hosted internal endpoint calls, raw secrets, and duplicate ledger behavior. Use generated facade/client boundaries and OSS runtime token/usage endpoints instead.
+      - **Generated Bundle Scanner Repair**: If `bundle_repair_target == "ServiceAgent"`, read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`. Repair only module backend Python files named by the scanner. Remove raw payment-provider SDK imports/calls, app-local token wallet or usage ledgers, direct hosted internal endpoint calls, raw secrets, and duplicate ledger behavior. Use generated facade/client boundaries and OSS runtime token/usage endpoints instead. If a forbidden Python artifact must be removed entirely, include the relative path in `deleted_files`; do not emit an empty replacement file.
       - Service implementation does not collect or request credentials. Integration
         needs must already be declared by planning, ConfigMiddlewareAgent, or
         ControllerAgent adapter tasks before ServiceAgent runs.
@@ -2588,7 +2602,7 @@ agents:
       15. Generate optional hook files only when the YAML references them and `module_contract.python_stubs` declares them.
       16. Follow proper parameter ordering and dependency injection conventions.
       17. Do not generate JS/frontend customization files here; those belong to frontend/UI generation paths.
-      18. If `bundle_repair_target == "ServiceAgent"`, repair only files named by `bundle_repair_request`; do not emit config, module contract YAML, service-foundation clients, deployment files, or UI files.
+      18. If `bundle_repair_target == "ServiceAgent"`, repair only files named by `bundle_repair_request`; do not emit config, module contract YAML, service-foundation clients, deployment files, or UI files. Use `deleted_files` for forbidden owned files that must be removed from the existing bundle.
       19. If fixing errors, ensure the fix is applied.
       20. Produce a typed `python_files` list that mirrors the implemented `module_contract.python_stubs` entries. Those typed entries are the source of truth; `code_files` is the serialized mirror.
       21. Managed capability adapter integration rule: When generating a facade module_contract that
@@ -2764,7 +2778,7 @@ agents:
       - App-backend business admin panels are a separate contract at `GET {app_backend_url}/api/admin/config` using `mozaiks.admin.app_backend.v1`. This module lane must not emit or mutate that backend response shape.
       - Existing generated files in chat history may already include `ui/index.js`; update that barrel deterministically rather than creating parallel registries.
       - **Previous Validation Errors**: If this is a retry, review the chat history for `AppValidation` errors and fix them.
-      - **Generated Bundle Scanner Repair**: If `bundle_repair_target == "FrontendStubAgent"`, read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`. Repair only declared frontend customization stubs under `ui/admin/` or `ui/pages/custom/` and the app-level `ui/index.js` registration barrel. Do not emit declarative page schemas, route manifests, module contracts, backend Python, app-owned service clients, raw payment providers, hosted internals, or local wallet/usage ledgers.
+      - **Generated Bundle Scanner Repair**: If `bundle_repair_target == "FrontendStubAgent"`, read `bundle_repair_request`, `bundle_repair_errors`, and `generated_files`. Repair only declared frontend customization stubs under `ui/admin/` or `ui/pages/custom/` and the app-level `ui/index.js` registration barrel. Do not emit declarative page schemas, route manifests, module contracts, backend Python, app-owned service clients, raw payment providers, hosted internals, or local wallet/usage ledgers. If a forbidden frontend artifact must be removed entirely, include the relative path in `deleted_files`; do not emit an empty replacement file.
 
       **Runtime contract**:
       - `app/App.jsx` imports `@platform/extensions`.
@@ -2783,7 +2797,7 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      0. If `bundle_repair_target == "FrontendStubAgent"`, repair only JS/JSX files or `ui/index.js` named by `bundle_repair_request`. Use `generated_files` as the current source of truth and keep filenames stable. If the scanner request names declarative pages, route manifest entries, backend Python, config, or service clients, fail clearly in `agent_message` instead of broadening scope.
+      0. If `bundle_repair_target == "FrontendStubAgent"`, repair only JS/JSX files or `ui/index.js` named by `bundle_repair_request`. Use `generated_files` as the current source of truth and keep filenames stable. Use `deleted_files` only for named frontend artifacts that must be removed. If the scanner request names declarative pages, route manifest entries, backend Python, config, or service clients, fail clearly in `agent_message` instead of broadening scope.
       1. Read `module_contract.js_stubs`. If it is empty, emit `{"js_files": [], "registration_barrel": null, "code_files": [], "agent_message": "No frontend stubs required."}` unless a registration barrel must be repaired.
       2. Generate exactly the declared component files. Do not invent undeclared component paths.
       3. Support only declared surfaces:
