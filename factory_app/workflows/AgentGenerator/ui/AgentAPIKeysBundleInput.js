@@ -3,8 +3,7 @@
 // DESCRIPTION: Consolidated API key intake component for multi-service collection
 // ==============================================================================
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { typography, colors, components, spacing } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
+import { useState, useMemo, useEffect } from 'react';
 import { createToolsLogger } from '@mozaiks/chat-ui/platform/workflowSurfaceRuntime.js';
 
 const toTitle = (value = '') => {
@@ -129,24 +128,24 @@ const AgentAPIKeysBundleInput = ({
   const containerClasses = 'w-full';
   const cardClasses =
     'w-full max-w-xl rounded-2xl border border-[rgba(var(--color-primary-rgb),0.18)] bg-[rgba(10,16,38,0.92)] px-6 py-5 shadow-[0_18px_38px_rgba(8,15,40,0.45)] space-y-5';
-  const headingClasses = `${typography.display.xs} ${colors.text.primary}`;
-  const descriptionClasses = `${typography.body.sm} ${colors.text.secondary}`;
+  const headingClasses = 'text-lg font-heading font-semibold text-foreground';
+  const descriptionClasses = 'text-xs font-sans text-muted-foreground';
   const inputClasses = (hasError, isDisabled, mask, visible) =>
     [
-      components.input.base,
-      mask ? components.input.withIcon : '',
-      hasError ? components.input.error : '',
-      isDisabled ? components.input.disabled : '',
+      'w-full rounded-lg border px-4 py-3 transition-colors border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary',
+      mask ? 'pr-12' : '',
+      hasError ? 'border-destructive focus:ring-destructive focus:border-destructive' : '',
+      isDisabled ? 'opacity-50 cursor-not-allowed' : '',
       visible ? 'tracking-wide' : ''
     ]
       .filter(Boolean)
       .join(' ');
-  const assistiveTextClasses = `${typography.body.sm} ${colors.text.muted}`;
-  const errorTextClasses = `${typography.body.sm} ${colors.status.error.text}`;
+  const assistiveTextClasses = 'text-xs font-sans text-muted-foreground';
+  const errorTextClasses = 'text-xs font-sans text-destructive';
   const buttonGroup = 'flex items-center gap-3';
-  const secondaryButtonClasses = `${components.button.ghost} flex-1`;
-  const primaryButtonClasses = `${components.button.primary} flex-1`;
-  const skipButtonClasses = `${(components.button.secondary || components.button.ghost || '').trim()} flex-1`.trim();
+  const secondaryButtonClasses = 'rounded-lg border border-border bg-card px-4 py-2 text-sm font-sans text-muted-foreground transition hover:border-border hover:bg-muted disabled:opacity-60 flex-1';
+  const primaryButtonClasses = 'rounded-lg bg-primary px-6 py-3 text-xs font-sans font-bold uppercase tracking-wide text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-60 flex-1';
+  const skipButtonClasses = 'rounded-lg border border-border bg-card px-6 py-3 text-xs font-sans font-bold uppercase tracking-wide text-muted-foreground transition-all hover:bg-muted disabled:opacity-60 flex-1';
 
   const heading = (() => {
     const explicit = typeof payload.heading === 'string' ? payload.heading.trim() : '';
@@ -431,22 +430,22 @@ const AgentAPIKeysBundleInput = ({
           <div className="flex-1 space-y-1.5">
             <h2 className={headingClasses}>{heading}</h2>
             <p className={descriptionClasses}>{introMessage}</p>
-            <p className={`${typography.body.xs} ${colors.text.muted}`}>
+            <p className="text-xs font-sans text-muted-foreground">
               Step {currentIndex + 1} of {services.length}
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className={`${spacing.items} pt-1`}>
+        <form onSubmit={handleSubmit} className="space-y-2 pt-1">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className={`${typography.label.md} ${colors.text.secondary}`}>
+              <label className="text-xs font-sans font-bold uppercase tracking-wide text-muted-foreground">
                 {currentService.label}
                 {currentService.required ? (
                   <span className="ml-2 text-xs uppercase tracking-wide text-[rgba(255,255,255,0.65)]">Required</span>
                 ) : null}
               </label>
-              <span className={`${typography.body.xs} ${colors.text.muted}`}>{currentService.service}</span>
+              <span className="text-xs font-sans text-muted-foreground">{currentService.service}</span>
             </div>
             <div className="relative">
               <input

@@ -3,11 +3,10 @@
 // DESCRIPTION: AppGenerator artifact canvas (files + Monaco + preview + export)
 // ==============================================================================
 
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
 import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
 import { useChatUI } from '@mozaiks/chat-ui/context/ChatUIContext.jsx';
-import { components as designComponents, typography as designTypography } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import { useSandbox } from './useSandbox';
 import BuildStatusArtifact from './BuildStatusArtifact';
@@ -99,11 +98,11 @@ const AppWorkbench = ({
     syncAndRestart,
   } = useSandbox(sandboxArtifactId);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setActiveArtifactVersionId(payload?.artifact_version_id || payload?.artifactVersionId || null);
   }, [payload?.artifact_version_id, payload?.artifactVersionId]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setArtifactReview(payload?.review || null);
   }, [payload?.review]);
 
@@ -124,7 +123,7 @@ const AppWorkbench = ({
     return 'Validation is pending. Review the bundle and wait for validation or skip explicitly.';
   }, [payload, validationStatus]);
 
-  const panelClass = [designComponents.panel.artifact, 'p-0 overflow-hidden'].join(' ');
+  const panelClass = 'rounded-2xl border border-border bg-card p-0 overflow-hidden';
 
   const toolbarBtn = (active) =>
     [
@@ -146,7 +145,7 @@ const AppWorkbench = ({
     refinementRequest.trim()
   );
 
-  React.useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     async function loadReview() {
       if (!artifactVersionId) {
@@ -333,7 +332,7 @@ const AppWorkbench = ({
       <div className="px-4 py-3 border-b border-white/10 bg-black/40">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className={['text-white font-bold', designTypography.heading].join(' ')}>{headerText}</div>
+            <div className="text-white font-bold font-heading text-sm">{headerText}</div>
             <div className="text-xs text-[var(--color-text-muted)] mt-1">{subtitle}</div>
             <div className="text-[10px] text-[var(--color-text-muted)] mt-1">
               {generatedWorkflowName || sourceWorkflowName || 'AppGenerator'} • event {toolCallId || 'n/a'}

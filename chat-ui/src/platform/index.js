@@ -198,14 +198,6 @@ export const platform = {
 
 export { createToolsLogger } from './workflowSurfaceRuntime.js';
 export {
-  colors,
-  components,
-  gradients,
-  shadows,
-  spacing,
-  typography,
-} from './workflowSurfaceStyles.js';
-export {
   useTransitionMotion,
   useTransitionChoiceMotion,
   TransitionChoicePanel,
