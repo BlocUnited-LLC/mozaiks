@@ -1309,6 +1309,19 @@ async def get_current_user_profile(
     return await _ensure_account_profile(principal, app_id=resolved_app_id, user_id=user_id)
 
 
+@app.get("/api/users/{username}")
+async def get_public_user_profile(
+    username: str,
+    app_id: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    resolved_app_id, _ = _resolve_profile_scope(principal, app_id=app_id)
+    doc = await _find_account_profile_by_username(app_id=resolved_app_id, username=username)
+    if not doc:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    return _public_profile_from_doc(doc)
+
+
 @app.put("/api/me")
 async def update_current_user_profile(
     body: ProfileUpdateRequest,
@@ -1585,6 +1598,8 @@ def _normalize_relationship_row(
 @app.get("/api/me/profile-panels")
 async def get_profile_panels(
     app_id: str | None = None,
+    user_id: str | None = None,
+    username: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     """Return module-declared profile panels, each hydrated with live action data.
@@ -1597,19 +1612,26 @@ async def get_profile_panels(
     # Keep profile hydration bound to the active app runtime. The optional
     # query app_id is contextual data for panel actions, not a persistence scope
     # override. Support links use it as the subject app id for tickets.
-    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=None)
+    requested_subject_user_id = user_id
+    resolved_app_id, viewer_user_id = _resolve_profile_scope(principal, app_id=None)
     app_root = resolve_app_root()
     raw_panels = load_profile_panels(app_root)
 
     module_executor = executor_registry.module_executor
     hydrated: list[dict[str, Any]] = []
-    action_params = {"app_id": app_id} if app_id else {}
+    subject_user_id = await _resolve_profile_subject_user_id(
+        principal,
+        app_id=resolved_app_id,
+        user_id=requested_subject_user_id,
+        username=username,
+    )
 
     logger.info(
-        "[profile-panels] load start runtime_app_id=%s requested_app_id=%s user_id=%s panel_count=%s",
+        "[profile-panels] load start runtime_app_id=%s requested_app_id=%s user_id=%s subject_user_id=%s panel_count=%s",
         resolved_app_id,
         app_id,
-        user_id,
+        viewer_user_id,
+        subject_user_id,
         len(raw_panels),
     )
 
@@ -1620,12 +1642,19 @@ async def get_profile_panels(
         if action and module_executor is not None:
             module_name = panel.get("module_id", "")
             try:
+                action_params = _profile_action_params(
+                    module_executor,
+                    module_name=module_name,
+                    action=action,
+                    app_id=app_id,
+                    subject_user_id=subject_user_id,
+                )
                 req = ModuleRequest(
                     module=module_name,
                     action=action,
                     params=action_params,
                     app_id=resolved_app_id,
-                    user_id=user_id,
+                    user_id=viewer_user_id,
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
@@ -1674,6 +1703,8 @@ async def get_profile_panels(
 @app.get("/api/me/profile-tabs")
 async def get_profile_tabs(
     app_id: str | None = None,
+    user_id: str | None = None,
+    username: str | None = None,
     principal: UserPrincipal = Depends(require_any_auth),
 ):
     """Return module-declared profile tabs, each hydrated with live action data.
@@ -1683,19 +1714,26 @@ async def get_profile_tabs(
     tab data. Tabs whose action fails are still returned with ``data: null``
     and an ``error`` string so the UI can render graceful empty states.
     """
-    resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=None)
+    requested_subject_user_id = user_id
+    resolved_app_id, viewer_user_id = _resolve_profile_scope(principal, app_id=None)
     app_root = resolve_app_root()
     raw_tabs = load_profile_tabs(app_root)
 
     module_executor = executor_registry.module_executor
     hydrated: list[dict[str, Any]] = []
-    action_params = {"app_id": app_id} if app_id else {}
+    subject_user_id = await _resolve_profile_subject_user_id(
+        principal,
+        app_id=resolved_app_id,
+        user_id=requested_subject_user_id,
+        username=username,
+    )
 
     logger.info(
-        "[profile-tabs] load start runtime_app_id=%s requested_app_id=%s user_id=%s tab_count=%s",
+        "[profile-tabs] load start runtime_app_id=%s requested_app_id=%s user_id=%s subject_user_id=%s tab_count=%s",
         resolved_app_id,
         app_id,
-        user_id,
+        viewer_user_id,
+        subject_user_id,
         len(raw_tabs),
     )
 
@@ -1706,12 +1744,19 @@ async def get_profile_tabs(
         if action and module_executor is not None:
             module_name = tab.get("module_id", "")
             try:
+                action_params = _profile_action_params(
+                    module_executor,
+                    module_name=module_name,
+                    action=action,
+                    app_id=app_id,
+                    subject_user_id=subject_user_id,
+                )
                 req = ModuleRequest(
                     module=module_name,
                     action=action,
                     params=action_params,
                     app_id=resolved_app_id,
-                    user_id=user_id,
+                    user_id=viewer_user_id,
                     tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
                     auth_token=None,
                     correlation_id=None,
@@ -2117,6 +2162,82 @@ def _resolve_profile_scope(
     )
 
 
+def _public_profile_from_doc(doc: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "app_id": doc.get("app_id"),
+        "user_id": doc.get("user_id"),
+        "username": doc.get("username"),
+        "display_name": doc.get("display_name") or doc.get("username"),
+        "avatar_url": doc.get("avatar_url"),
+        "bio": doc.get("bio"),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+    }
+
+
+async def _find_account_profile_by_username(*, app_id: str, username: str) -> dict[str, Any] | None:
+    clean_username = validate_path_id(str(username or "").strip(), "username")
+    collection = await _account_profile_collection()
+    doc = await collection.find_one({"app_id": app_id, "username": clean_username})
+    return doc if isinstance(doc, dict) else None
+
+
+async def _resolve_profile_subject_user_id(
+    principal: UserPrincipal,
+    *,
+    app_id: str,
+    user_id: str | None = None,
+    username: str | None = None,
+) -> str:
+    clean_user_id = str(user_id or "").strip()
+    if clean_user_id:
+        return validate_path_id(clean_user_id, "user_id")
+
+    clean_username = str(username or "").strip()
+    if clean_username:
+        doc = await _find_account_profile_by_username(app_id=app_id, username=clean_username)
+        if doc and doc.get("user_id"):
+            return validate_path_id(str(doc["user_id"]), "user_id")
+        raise HTTPException(status_code=404, detail="User profile not found")
+
+    _, resolved_user_id = _resolve_profile_scope(principal, app_id=app_id)
+    return resolved_user_id
+
+
+def _module_action_input_properties(module_executor: Any, module_name: str, action: str) -> dict[str, Any]:
+    action_schemas = getattr(module_executor, "_action_schemas", {})
+    if not isinstance(action_schemas, dict):
+        return {}
+    module_schemas = action_schemas.get(module_name)
+    if not isinstance(module_schemas, dict):
+        return {}
+    action_schema = module_schemas.get(action)
+    if not isinstance(action_schema, dict):
+        return {}
+    input_schema = action_schema.get("input")
+    if not isinstance(input_schema, dict):
+        return {}
+    properties = input_schema.get("properties")
+    return properties if isinstance(properties, dict) else {}
+
+
+def _profile_action_params(
+    module_executor: Any,
+    *,
+    module_name: str,
+    action: str,
+    app_id: str | None = None,
+    subject_user_id: str | None = None,
+) -> dict[str, Any]:
+    properties = _module_action_input_properties(module_executor, module_name, action)
+    params: dict[str, Any] = {}
+    if app_id and "app_id" in properties:
+        params["app_id"] = app_id
+    if subject_user_id and "user_id" in properties:
+        params["user_id"] = subject_user_id
+    return params
+
+
 def _serialize_subscription_usage_limits(config: Any) -> dict[str, Any]:
     if config is None:
         return {
@@ -2265,6 +2386,7 @@ async def _ensure_account_profile(
         "username": doc.get("username") or username,
         "display_name": doc.get("display_name") or default_display_name,
         "avatar_url": doc.get("avatar_url"),
+        "bio": doc.get("bio"),
         "subscription_tier": doc.get("subscription_tier"),
         "roles": doc.get("roles") or list(principal.roles or []),
         "created_at": doc.get("created_at"),
