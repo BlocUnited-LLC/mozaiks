@@ -144,7 +144,8 @@ Branding belongs in:
   shadows, and brand asset references
 - `app/brand/assets/` for images and icons
 - `app/brand/fonts/` for fonts
-- `app/brand/login-theme/` for Keycloak login theme assets
+- optional provider-specific login theme assets when a selected broker supports
+  checked-in theming
 
 Shell and navigation behavior belongs in `app/config/shell.json`, not in
 `app.json` and not in theme config. `shell.json` owns header/profile/footer
@@ -159,9 +160,9 @@ Do not put local dev login shortcuts into `app/app.json`.
 
 Local development convenience belongs in `.env`, for example:
 
-- `VITE_DEV_AUTH_MODE=keycloak`
+- `VITE_DEV_AUTH_MODE=mock`
 - `VITE_DEV_AUTOLOGIN=true`
-- `VITE_MOCK_MODE=false`
+- `VITE_MOCK_MODE=true`
 
 That keeps the app manifest focused on product intent.
 

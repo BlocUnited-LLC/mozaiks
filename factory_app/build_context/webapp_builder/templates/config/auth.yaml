@@ -1,6 +1,8 @@
 schema_version: mozaiks.auth.v1
 auth_required: true
 strategy: oidc
+mode: brokered_oidc
+signup_enabled: false
 
 routes:
   login: /login
@@ -29,6 +31,11 @@ runtime:
   jwks_url_env: AUTH_JWKS_URL
 
 identity_providers: []
+login_methods:
+  - id: broker
+    kind: oidc_redirect
+    label: Sign in
+    primary: true
 
 customization:
   login_theme_source: brand/theme_config.json

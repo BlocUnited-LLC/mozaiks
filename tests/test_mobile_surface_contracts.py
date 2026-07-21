@@ -80,13 +80,18 @@ def test_support_escalation_uses_profile_support_tab() -> None:
     assert "page_url:" not in widget_source
     assert "urlAppIdParam" in profile_source
     assert "/api/me/profile-panels${panelQuery" not in profile_source
-    assert "fetchWithAuth(`${backendUrl}/api/me/profile-panels`, {}, auth)" in profile_source
+    assert "const subjectSuffix = subjectQuery ? `?${subjectQuery}` : '';" in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-panels${subjectSuffix}`, {}, auth)" in profile_source
+    assert "fetchWithAuth(`${backendUrl}/api/me/profile-tabs${subjectSuffix}`, {}, auth)" in profile_source
     assert "profileTrace('tabs:profile_panels:loaded'" in profile_source
     assert "supportTrace('support_request:create:start'" in widget_source
     assert "supportTrace('support_thread:open'" in widget_source
     assert "supportPanelTrace('data:received'" in profile_panel_source
-    assert "resolved_app_id, user_id = _resolve_profile_scope(principal, app_id=None)" in platform_source
-    assert 'action_params = {"app_id": app_id} if app_id else {}' in platform_source
+    assert "resolved_app_id, viewer_user_id = _resolve_profile_scope(principal, app_id=None)" in platform_source
+    assert "requested_subject_user_id = user_id" in platform_source
+    assert "action_params = _profile_action_params(" in platform_source
+    assert 'if app_id and "app_id" in properties:' in platform_source
+    assert 'if subject_user_id and "user_id" in properties:' in platform_source
     assert "queryRequestId" in profile_panel_source
     assert "urlTabParam && tabs.some(tab => tab.id === urlTabParam)" in profile_source
     assert "return prev === urlTabParam ? prev : urlTabParam;" in profile_source

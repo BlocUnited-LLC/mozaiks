@@ -158,6 +158,37 @@ jobs:
           curl --fail --show-error --silent "$APP_URL/api/health/readiness" | tee readiness.json
           echo "Remote health checks passed."
 
+      - name: Mint OIDC smoke token
+        if: ${{ inputs.run_entitlement_gate }}
+        env:
+          OIDC_SMOKE_TOKEN_URL: ${{ vars.OIDC_SMOKE_TOKEN_URL || secrets.OIDC_SMOKE_TOKEN_URL }}
+          OIDC_SMOKE_TOKEN_SCOPE: ${{ vars.OIDC_SMOKE_TOKEN_SCOPE || secrets.OIDC_SMOKE_TOKEN_SCOPE }}
+          OIDC_SMOKE_CLIENT_ID: ${{ vars.OIDC_SMOKE_CLIENT_ID || secrets.OIDC_SMOKE_CLIENT_ID }}
+          OIDC_SMOKE_CLIENT_SECRET: ${{ secrets.OIDC_SMOKE_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OIDC_SMOKE_TOKEN_URL:-}" ] || \
+             [ -z "${OIDC_SMOKE_TOKEN_SCOPE:-}" ] || \
+             [ -z "${OIDC_SMOKE_CLIENT_ID:-}" ] || \
+             [ -z "${OIDC_SMOKE_CLIENT_SECRET:-}" ]; then
+            echo "OIDC smoke client credentials not configured; using ENTITLEMENT_SMOKE_TOKEN if supplied."
+            exit 0
+          fi
+
+          RESPONSE=$(curl -sf -X POST "$OIDC_SMOKE_TOKEN_URL" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "client_id=${OIDC_SMOKE_CLIENT_ID}" \
+            --data-urlencode "client_secret=${OIDC_SMOKE_CLIENT_SECRET}" \
+            --data-urlencode "scope=${OIDC_SMOKE_TOKEN_SCOPE}")
+          TOKEN=$(python -c "import json,sys; print(json.load(sys.stdin).get('access_token',''))" <<< "$RESPONSE")
+          if [ -z "$TOKEN" ]; then
+            echo "OIDC smoke token response did not include access_token." >&2
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "OIDC_MINTED_ENTITLEMENT_SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
       - name: Smoke subscription entitlement gates
         if: ${{ inputs.run_entitlement_gate }}
         env:
@@ -167,6 +198,9 @@ jobs:
           ENTITLEMENT_SMOKE_TOKEN: ${{ secrets.ENTITLEMENT_SMOKE_TOKEN }}
           ENTITLEMENT_SMOKE_USER_ID: ${{ vars.ENTITLEMENT_SMOKE_USER_ID }}
         run: |
+          if [ -n "${OIDC_MINTED_ENTITLEMENT_SMOKE_TOKEN:-}" ]; then
+            export ENTITLEMENT_SMOKE_TOKEN="$OIDC_MINTED_ENTITLEMENT_SMOKE_TOKEN"
+          fi
           # This hook is intentionally app-owned. Hosted products may replace it
           # with product-specific gates after consuming deployment.manifest.json.
           # Adjust this script path if you have a custom entitlement smoke script.

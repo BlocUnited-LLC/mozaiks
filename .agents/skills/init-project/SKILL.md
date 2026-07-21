@@ -51,7 +51,7 @@ mozaiks init integrated --name my-saas
 - Everything from chat
 - Operations (deterministic logic)
 - Event bus for workflow triggers
-- Keycloak authentication
+- Provider-neutral OIDC/JWT authentication
 
 ### 4. **full** - Product Builders
 **For:** Production products with admin needs

@@ -91,6 +91,23 @@ _RAW_SECRET_FIELD_KEYS = frozenset(
     }
 )
 
+_AUTH_MODES = frozenset(
+    {
+        "brokered_oidc",
+        "public_self_signup",
+        "private_workspace",
+        "enterprise_sso",
+        "multi_provider",
+    }
+)
+_AUTH_LOGIN_METHOD_KINDS = frozenset(
+    {
+        "oidc_redirect",
+        "create_account",
+        "enterprise_sso",
+    }
+)
+
 
 def _is_scannable(path: str) -> bool:
     """Return True if this file path should be scanned for forbidden patterns."""
@@ -949,10 +966,13 @@ def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
         "schema_version",
         "auth_required",
         "strategy",
+        "mode",
+        "signup_enabled",
         "routes",
         "frontend",
         "runtime",
         "identity_providers",
+        "login_methods",
         "customization",
     }
     unknown_root_keys = sorted(set(contract) - allowed_root_keys)
@@ -965,6 +985,15 @@ def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
         errors.append(f"{APP_AUTH_CONFIG_PATH}: auth_required must be true when app.json.authRequired=true.")
     if contract.get("strategy") != "oidc":
         errors.append(f"{APP_AUTH_CONFIG_PATH}: strategy must be oidc for authenticated generated apps.")
+
+    mode = contract.get("mode", "brokered_oidc")
+    if mode not in _AUTH_MODES:
+        errors.append(
+            f"{APP_AUTH_CONFIG_PATH}: mode must be one of {sorted(_AUTH_MODES)} when present."
+        )
+    signup_enabled = contract.get("signup_enabled", False)
+    if not isinstance(signup_enabled, bool):
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: signup_enabled must be a boolean when present.")
 
     routes = contract.get("routes") if isinstance(contract.get("routes"), dict) else {}
     if not isinstance(routes, dict) or not routes:
@@ -1034,6 +1063,37 @@ def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
                     f"{APP_AUTH_CONFIG_PATH}: identity_providers[{index}].provider_role "
                     "must be upstream_oidc_provider when present."
                 )
+
+    login_methods = contract.get("login_methods", [])
+    if login_methods is None:
+        login_methods = []
+    if not isinstance(login_methods, list):
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods must be a list when present.")
+    else:
+        allowed_login_fields = {"id", "kind", "label", "primary", "provider_id"}
+        for index, item in enumerate(login_methods):
+            if not isinstance(item, dict):
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}] must be an object.")
+                continue
+            unknown = sorted(set(item) - allowed_login_fields)
+            if unknown:
+                errors.append(
+                    f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}] has unsupported fields: {unknown}."
+                )
+            if not str(item.get("id") or "").strip():
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].id is required.")
+            kind = item.get("kind")
+            if kind not in _AUTH_LOGIN_METHOD_KINDS:
+                errors.append(
+                    f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].kind "
+                    f"must be one of {sorted(_AUTH_LOGIN_METHOD_KINDS)}."
+                )
+            if not str(item.get("label") or "").strip():
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].label is required.")
+            if "primary" in item and not isinstance(item.get("primary"), bool):
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].primary must be boolean.")
+            if "provider_id" in item and not str(item.get("provider_id") or "").strip():
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: login_methods[{index}].provider_id must be non-empty.")
 
     if "http://" in raw_contract or "https://" in raw_contract:
         errors.append(

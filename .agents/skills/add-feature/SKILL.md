@@ -17,7 +17,7 @@ Mozaiks features are additive. You can enable them individually or upgrade to a 
 | **chat_ui** | Frontend chat interface | - |
 | **modules** | Deterministic CRUD/action modules and module routes | - |
 | **event_bus** | Domain event bus for module↔workflow communication | - |
-| **auth** | JWT validation, Keycloak integration | Docker services |
+| **auth** | Provider-neutral OIDC/JWT validation and browser PKCE auth | OIDC provider or local mock |
 | **admin** | Admin portal with observability, token tracking | auth |
 
 ### Tier Presets
@@ -40,7 +40,7 @@ Examples:
 ```bash
 mozaiks add modules       # Add deterministic module handling
 mozaiks add event_bus     # Add event-driven automation
-mozaiks add auth          # Add Keycloak authentication
+mozaiks add auth          # Add provider-neutral OIDC/JWT authentication
 mozaiks add admin         # Add admin portal
 ```
 
@@ -96,10 +96,11 @@ Next steps:
 ### Adding **auth**
 ```
 Next steps:
-1. Start Docker services: docker compose -f infra/compose/docker-compose.yml up -d
-2. Configure .env: KEYCLOAK_* variables
-3. Update app/app.json: authRequired: true
-4. Restart backend
+1. Update app/app.json: authRequired: true
+2. Add or review app/config/auth.yaml using schema_version: mozaiks.auth.v1
+3. Configure .env with AUTH_PROVIDER=jwt plus MOZAIKS_OIDC_* / AUTH_* / VITE_OIDC_* env handles
+4. Use VITE_MOCK_MODE=true for local mock auth, or run the optional local OIDC broker from compose
+5. Restart backend
 ```
 
 ### Adding **admin**
