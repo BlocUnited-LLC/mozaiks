@@ -71,7 +71,8 @@ _APP_LOCAL_LEDGER_CODE_RE = re.compile(
 # Checked via str.endswith so compound extensions like .env.example work.
 _SCANNABLE_SUFFIXES = (
     ".py", ".js", ".jsx", ".ts", ".tsx",
-    ".yaml", ".yml", ".env.example", ".env",
+    ".yaml", ".yml", ".env.example", ".env.staging.example",
+    ".env.production.example", ".env",
 )
 
 _RAW_SECRET_FIELD_KEYS = frozenset(
@@ -593,7 +594,7 @@ def _scan_mozaikspay_saas_contract(
                 f"mozaikspay connector and env fallback; missing markers: {missing_markers}."
             )
 
-    env_example = normalized_files.get("env.example", "")
+    env_example = normalized_files.get(".env.example", "")
     if env_example:
         required_env_handles = {
             "MOZAIKS_APP_URL",
@@ -607,7 +608,7 @@ def _scan_mozaikspay_saas_contract(
         )
         if missing_env_handles:
             errors.append(
-                "env.example must document the MozaiksPay connector/env fallback handles "
+                ".env.example must document the MozaiksPay connector/env fallback handles "
                 f"for generated SaaS apps: {missing_env_handles}."
             )
 
@@ -826,7 +827,9 @@ def _scan_deployment_artifacts_contract(files_map: dict[str, str]) -> list[str]:
         path: normalized_files[path]
         for path in (
             "Dockerfile",
-            "env.example",
+            ".env.example",
+            ".env.staging.example",
+            ".env.production.example",
             "deployment.manifest.json",
             ".github/workflows/readiness.yml",
             ".github/workflows/deploy.yml",
@@ -860,7 +863,7 @@ def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
     normalized_files = _normalized_files_map(files_map)
     errors: list[str] = []
 
-    env_example = normalized_files.get("env.example", "")
+    env_example = normalized_files.get(".env.example", "")
     required_env_handles = {
         "AUTH_ENABLED",
         "AUTH_PROVIDER",
@@ -878,7 +881,7 @@ def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
     if missing_env_handles:
         errors.append(
             "Authenticated generated apps must document provider-neutral OIDC/JWT "
-            "runtime and frontend env handles in env.example: "
+            "runtime and frontend env handles in .env.example: "
             f"{missing_env_handles}."
         )
 

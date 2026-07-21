@@ -42,7 +42,9 @@ _DEPLOYMENT_CONTRACT_ARTIFACT_FILES = frozenset(
         "Dockerfile",
         "deployment.manifest.json",
         "docker-compose.yml",
-        "env.example",
+        ".env.example",
+        ".env.staging.example",
+        ".env.production.example",
         ".github/workflows/readiness.yml",
         ".github/workflows/deploy.yml",
     }
@@ -1083,7 +1085,8 @@ def _validate_build_tasks(build_tasks: list[dict[str, Any]], managed_capability_
                 "Build task "
                 f"'{task_id}' owns deployment contract artifact path(s): "
                 f"{deployment_artifact_paths}. AppBuildPlan build tasks must not own "
-                "Dockerfile, docker-compose.yml, env.example, deployment.manifest.json, "
+                "Dockerfile, docker-compose.yml, .env.example, .env.staging.example, "
+                ".env.production.example, deployment.manifest.json, "
                 "or .github/workflows/*. Deployment artifacts are emitted by the "
                 "generate_and_download deployment contract renderer through DownloadRequest "
                 "deployment_profile/include_* fields."

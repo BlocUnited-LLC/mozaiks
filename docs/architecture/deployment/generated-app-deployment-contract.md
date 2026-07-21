@@ -66,7 +66,9 @@ Required shape:
   - `docker-compose.yml` (optional)
   - `.github/workflows/readiness.yml` (optional; forced by production profiles)
   - `.github/workflows/deploy.yml` (optional)
-  - `env.example`
+  - `.env.example`
+  - `.env.staging.example`
+  - `.env.production.example`
   - `deployment.manifest.json`
 - `environment`
   - `required_variables`
@@ -126,7 +128,8 @@ Required shape:
 
 Production-oriented generated apps should use
 `deployment_profile=production_container`. That profile forces the root
-`Dockerfile`, `env.example`, `deployment.manifest.json`, and
+`Dockerfile`, `.env.example`, `.env.staging.example`,
+`.env.production.example`, `deployment.manifest.json`, and
 `.github/workflows/readiness.yml` handoff even when the app is not asking the
 OSS generator to emit a provider-specific deploy workflow.
 
@@ -274,7 +277,9 @@ When deployment artifacts are requested by scaffold/export flags, AppGenerator e
 - `docker-compose.yml` (optional)
 - `.github/workflows/readiness.yml` (optional; forced by production profiles)
 - `.github/workflows/deploy.yml` (optional)
-- `env.example`
+- `.env.example`
+- `.env.staging.example`
+- `.env.production.example`
 - `deployment.manifest.json`
 
 These artifacts live at the generated app bundle root. They are not emitted
@@ -287,17 +292,17 @@ workflow-input contract used by that generated workflow.
 
 ## Env and Secrets Rules
 
-1. `env.example` may include variable names and placeholders only.
+1. `.env.example`, `.env.staging.example`, and `.env.production.example` may include variable names and placeholders only.
 2. Secret variables are declared by name only and must not contain real values.
 3. `ci_secret_requirements` is names-only and must not contain real values.
 4. Generated workflow files may reference secret names but never secret values.
-3. Generated artifacts must not include:
+5. Generated artifacts must not include:
    - cloud tenant ids
    - provider credentials
    - registry passwords
    - GitHub tokens
    - hosted-product policy secrets
-5. Real secrets are injected by deployment adapters (CI secret stores / cloud secret stores), not committed in app repos.
+6. Real secrets are injected by deployment adapters (CI secret stores / cloud secret stores), not committed in app repos.
 
 ## AppGenerator and Adapter Split
 
@@ -353,7 +358,8 @@ Rules:
    The hosted module must handle both synchronous and asynchronous adapters uniformly.
 
 For Mozaiks-hosted apps, the generated bundle may include `Dockerfile`,
-`env.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`,
+`.env.example`, `.env.staging.example`, `.env.production.example`,
+`.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`,
 and `deployment.manifest.json`, but it must not include hosted product provider adapters
 such as DNS, registrar, cloud deployment, wallet, billing, or hosted policy implementations. The hosted product owns those adapters and consumes the
 generated contract through platform records/APIs.

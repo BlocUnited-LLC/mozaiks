@@ -641,7 +641,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
     assert "ui/pages/billing.yaml" in files
     assert "ui/pages/pricing.yaml" in files
     assert "ui/pages/usage.yaml" in files
-    assert "env.example" in files
+    assert ".env.example" in files
     assert "import payment_provider" not in files["services/integrations/mozaikspay_client.py"]
     assert not any(path.startswith("modules/mozaikspay/") for path in files)
     assert not any(path.startswith("modules/wallet/") for path in files)
@@ -656,7 +656,7 @@ async def test_mozaikspay_replay_uses_templates_and_passes_runtime_acceptance(
         "MOZAIKSPAY_CLIENT_SECRET",
         "MOZAIKSPAY_API_KEY",
     ):
-        assert f"{name}=" in files["env.example"]
+        assert f"{name}=" in files[".env.example"]
     assert scan_generated_bundle(files, capability_packs=cached_plan["capability_packs"]) == []
 
     validation = await validate_app_bundle_from_request(

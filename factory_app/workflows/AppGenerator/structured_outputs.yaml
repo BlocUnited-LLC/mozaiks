@@ -743,7 +743,8 @@ models:
           These files are not runtime modules and must not own business actions,
           events, lifecycle state, or persistence authority.
           `service_foundation` must not own provider-neutral deployment artifacts
-          such as Dockerfile, docker-compose.yml, env.example,
+          such as Dockerfile, docker-compose.yml, .env.example,
+          .env.staging.example, .env.production.example,
           deployment.manifest.json, or .github/workflows/*. Those are emitted by
           the deployment contract renderer during download/export.
           `control_plane_pack` is required for surface_kind=control_plane tasks and
@@ -1792,7 +1793,7 @@ models:
     fields:
       path:
         type: str
-        description: Concrete app-bundle-relative service foundation file path such as services/config.py, security/secrets.yaml, services/integrations/provider_client.py, services/routes/webhooks.py, or services/adapters/secrets/vault_provider.py. Physical generated workspaces place services/* under app/services/*. Do not use this model for Dockerfile, docker-compose.yml, env.example, deployment.manifest.json, or .github/workflows/* deployment artifacts.
+        description: Concrete app-bundle-relative service foundation file path such as services/config.py, security/secrets.yaml, services/integrations/provider_client.py, services/routes/webhooks.py, or services/adapters/secrets/vault_provider.py. Physical generated workspaces place services/* under app/services/*. Do not use this model for Dockerfile, docker-compose.yml, .env.example, .env.staging.example, .env.production.example, deployment.manifest.json, or .github/workflows/* deployment artifacts.
       kind:
         type: literal
         values:

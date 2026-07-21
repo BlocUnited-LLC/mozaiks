@@ -51,7 +51,9 @@ workspace/
 │       └── routes/
 ├── Dockerfile                  ← optional provider-neutral packaging artifact
 ├── docker-compose.yml          ← optional local/self-host artifact
-├── env.example                 ← optional names-only runtime env contract
+├── .env.example                ← optional local/dev env template
+├── .env.staging.example        ← optional environment-staging env template
+├── .env.production.example     ← optional production env template
 ├── deployment.manifest.json    ← optional deployment artifact manifest
 ├── .github/
 │   └── workflows/
@@ -216,7 +218,9 @@ or export flags request them:
 ```text
 Dockerfile
 docker-compose.yml
-env.example
+.env.example
+.env.staging.example
+.env.production.example
 deployment.manifest.json
 .github/workflows/readiness.yml
 .github/workflows/deploy.yml

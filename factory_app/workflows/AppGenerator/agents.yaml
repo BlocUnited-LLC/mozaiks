@@ -404,7 +404,7 @@ agents:
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract`, `data_models`, and `business_services` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no provider business logic. Use app-bundle-relative `services/integrations/{service}_client.py` for external or managed API clients. Use `services/adapters/{area}/{provider}.py` for provider-specific implementation boundaries only when the generated app itself directly owns that provider integration and modules/workflows call it. Use `services/routes/` for app-level routes only when needed. These assemble into physical `app/services/**` workspace paths. Valid adapter areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is app-owned provider mechanics rather than managed platform operations.
         - Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities. Do not generate provider adapters for those operations into a customer app bundle. The generated app consumes the managed platform through managed capability API clients/facade modules and host-owned records.
-        - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, DownloadAgent must use the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `env.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
+        - Generated app deployment packaging is not a `service_foundation` or `api_surface` task. When deployment artifacts are requested, DownloadAgent must use the provider-neutral deployment contract fields (`deployment_profile`, `include_dockerfiles`, `include_workflow`, `include_compose`) so `generate_and_download` emits `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `.github/workflows/readiness.yml`, `.github/workflows/deploy.yml`, and `deployment.manifest.json`.
         - If an app needs durable runtime secrets, plan `security/secrets.yaml` as a names-only contract for provider/vault policy, env handles, and secret names. Never put raw API keys, tokens, passwords, connection strings, private keys, or webhook secrets into generated files.
         - `surface_kind = workflow` packs describe agentic behavior and UI/workflow touchpoints, but do not generate runtime modules here.
         - `surface_kind = control_plane` packs are optional app-local harness packs. Do not invent a control-plane surface inside AppGenerator; only materialize one when DesignDocs resolved an explicit app-owned `surface_kind = control_plane` surface.
@@ -465,7 +465,7 @@ agents:
       12f. **backend helper file declaration rule**:
         - Declare every backend helper file explicitly in build task metadata with a short rationale before a downstream agent may generate it.
         - Valid helper examples include `services/integrations/analytics_provider_client.py` for external provider clients, `security/secrets.yaml` for names-only secret policy, `services/adapters/auth/oidc_provider.py`, `services/adapters/dns/cloud_provider.py`, `services/adapters/registrar/domain_provider.py`, `services/adapters/secrets/vault_provider.py` for app-owned direct provider adapters, and `services/routes/webhooks.py` for raw webhook routing.
-        - Do not declare `Dockerfile`, `docker-compose.yml`, `env.example`, `deployment.manifest.json`, or `.github/workflows/*.yml` as helper files or build task owned_paths. Those artifacts are emitted only by the deployment contract renderer during download/export.
+        - Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml` as helper files or build task owned_paths. Those artifacts are emitted only by the deployment contract renderer during download/export.
         - Do not declare helper files for arbitrary service splitting, persistence, authorization, typed shapes, or generic business logic that belongs in the canonical module layers; do not let ServiceAgent invent helper files outside AppPlanAgent declarations.
       12g. **module_interface.yaml rule** — when a workflow calls module actions via `backend_request()`:
         - Plan one `agent_backend_integration` build task per workflow that integrates with app modules.
@@ -1675,7 +1675,7 @@ agents:
       - Emit only ConfigMiddleware-owned files required by the request:
         `config/subscriptions.yaml`, module contract YAML under `modules/*/`,
         service-foundation files under `services/`, `security/secrets.yaml`,
-        `env.example`, or provider-neutral deployment contract files.
+        `.env.example`, `.env.staging.example`, `.env.production.example`, or provider-neutral deployment contract files.
       - Keep MozaiksPay as a managed facade/client boundary when selected. Do
         not add raw payment-provider SDKs, hosted internals, local wallet ledgers,
         local usage ledgers, provider secrets, payout policy, or hosted product policy.
@@ -2471,7 +2471,7 @@ agents:
       - Deployment artifacts are optional scaffold outputs for preview/export flows.
       - Deployment scaffold outputs are pre-deploy validation/preview only.
       - When enabled, includeDockerfiles/includeWorkflow/includeCompose produce deterministic provider-neutral outputs from the deployment contract.
-      - For production-oriented generated apps, set `deployment_profile=production_container`; this forces `Dockerfile`, `env.example`, `deployment.manifest.json`, and `.github/workflows/readiness.yml` even when `include_workflow=false`.
+      - For production-oriented generated apps, set `deployment_profile=production_container`; this forces `Dockerfile`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, and `.github/workflows/readiness.yml` even when `include_workflow=false`.
       - These artifacts describe how the generated app runs; they do not contain provider-owned adapters or host-specific execution policy.
       - If includeWorkflow is enabled, generated outputs include the deploy workflow as well as the readiness workflow. Readiness proves the operator's environment staging; it is not the same as Mozaiks artifact review staging or ArtifactVersion promotion.
       - When the deploy workflow is enabled, workflow secret references and workflow inputs must be declared as names-only `ci_secret_requirements` in the deployment manifest.

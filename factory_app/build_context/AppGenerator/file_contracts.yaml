@@ -89,12 +89,14 @@ task_contracts:
       - scripts/provision.sh
     optional_outputs:
       - .env.example
+      - .env.staging.example
+      - .env.production.example
     hard_constraints:
       - Emit once; do not overwrite on routine regeneration. Skip if Dockerfile already exists in the output directory unless --force-infra is passed.
       - Dockerfile must use multi-stage build with frontend-builder, py-builder, and runtime stages derived from the infra Dockerfile.template.
       - CI/CD workflows must consume secrets from GitHub environment secrets; never inline secret values or provider tenant identifiers.
       - provision.sh must read required secret names from app/security/secrets.yaml and validate all required secrets are present before syncing.
-      - .env.example must list all names from app/security/secrets.yaml with placeholder values only; never emit real secret values.
+      - .env.example, .env.staging.example, and .env.production.example must list all names from app/security/secrets.yaml with placeholder values only; never emit real secret values.
       - Do not emit VITE_ env var values (OIDC URLs, redirect URIs) into committed files; they are environment-specific and supplied at build time as Docker build args and GitHub secrets.
       - Use "artifact review staging" for generated/refined files awaiting review and "environment staging" for deploy/readiness targets such as GitHub environments or cloud preview instances.
       - Replace all template variables ({{APP_NAME}}, {{MOZAIKS_VERSION}}, {{OIDC_CLIENT_ID}}, {{REGISTRY}}, {{DEPLOY_TARGET}}) with values from the app context before emitting.
@@ -250,7 +252,7 @@ task_contracts:
       - Common services/adapters/ areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the generated app itself directly owns those provider mechanics rather than consuming a hosted platform capability.
       - Do not use service_foundation for Mozaiks-hosted deployment, DNS, domain, billing, payment processing, or platform operations. Hosted platform capabilities are consumed through hosted API clients/facade modules and host-owned records; provider adapters stay in the hosted product.
       - services/adapters/ and services/integrations/ must not own business actions, product lifecycle, user-facing actions, emitted domain events, or persistence authority. Modules own those behaviors.
-      - Do not emit Dockerfile, docker-compose.yml, env.example, deployment.manifest.json, .github/workflows/*.yml, or other deployment packaging artifacts from service_foundation.
+      - Do not emit Dockerfile, docker-compose.yml, .env.example, .env.staging.example, .env.production.example, deployment.manifest.json, .github/workflows/*.yml, or other deployment packaging artifacts from service_foundation.
       - Deployment packaging artifacts are emitted only by the generate_and_download deployment contract renderer through DownloadRequest deployment_profile/include_* fields.
       - Generated deployment artifacts must follow the provider-neutral deployment contract, must never include real secrets or provider-tenant identifiers, and generated CI workflow secret references must stay names-only through ci_secret_requirements.
 
