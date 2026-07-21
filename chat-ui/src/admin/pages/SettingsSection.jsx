@@ -25,7 +25,8 @@ export function SettingsSection({ extensionPanels }) {
   const backendUrl = config?.appBackendUrl || config?.app_backend_url || null
   const apiUrl =
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
-    'http://localhost:8000'
+    ''
+  const displayedApiUrl = apiUrl || 'same-origin'
 
   return (
     <SectionFrame
@@ -36,7 +37,7 @@ export function SettingsSection({ extensionPanels }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <ConfigRow label="App Name"    value={appName}     mono={false} />
         <ConfigRow label="App ID"      value={appId} />
-        <ConfigRow label="Runtime API" value={apiUrl} />
+        <ConfigRow label="Runtime API" value={displayedApiUrl} />
         <ConfigRow label="Backend URL" value={backendUrl} />
       </div>
 

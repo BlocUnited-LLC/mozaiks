@@ -4,6 +4,17 @@ import resolveWorkflow from '../utils/resolveWorkflow';
 import config from '../config';
 import platform from '../platform/index.js';
 
+function _firstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string') return value;
+  }
+  return undefined;
+}
+
+function _trimTrailingSlash(value) {
+  return typeof value === 'string' && value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
 /**
  * Get the current access token from storage.
  * In production, this should be provided by the auth adapter.
@@ -132,20 +143,30 @@ export class ApiAdapter {
 
   getHttpBaseUrl() {
     const fallback = typeof config?.get === 'function' ? config.get('api.baseUrl') : undefined;
-    const raw = this.config?.baseUrl
-      || this.config?.api?.baseUrl
-      || fallback
-      || platform.resolveHttpUrl({ port: '8000' });
-    return typeof raw === 'string' && raw.endsWith('/') ? raw.slice(0, -1) : raw;
+    const raw = _firstString(
+      this.config?.baseUrl,
+      this.config?.api?.baseUrl,
+      fallback,
+      platform.resolveHttpUrl()
+    );
+    return _trimTrailingSlash(raw);
   }
 
   getWsBaseUrl() {
     const fallback = typeof config?.get === 'function' ? config.get('api.wsUrl') : undefined;
-    const raw = this.config?.wsUrl
-      || this.config?.api?.wsUrl
-      || fallback
-      || platform.resolveWsUrl({ port: '8000' });
-    return typeof raw === 'string' && raw.endsWith('/') ? raw.slice(0, -1) : raw;
+    const raw = _firstString(
+      this.config?.wsUrl,
+      this.config?.api?.wsUrl,
+      fallback
+    );
+    if (raw && raw.trim()) return _trimTrailingSlash(raw);
+
+    const httpBase = this.getHttpBaseUrl();
+    if (httpBase && httpBase.trim()) {
+      return _trimTrailingSlash(httpBase.replace(/^http/, 'ws'));
+    }
+
+    return _trimTrailingSlash(platform.resolveWsUrl());
   }
 
   async sendMessage(_message, _appId, _userId) {

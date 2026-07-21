@@ -8,8 +8,8 @@ class ChatUIConfig {
 
   loadConfig() {
     const defaultAuthMode = 'token';
-    const defaultApiBaseUrl = platform.resolveHttpUrl({ port: '8000' });
-    const defaultWsBaseUrl = platform.resolveWsUrl({ port: '8000' });
+    const defaultApiBaseUrl = platform.resolveHttpUrl();
+    const defaultWsBaseUrl = platform.resolveWsUrl();
     
     const defaultConfig = {
       // API Configuration

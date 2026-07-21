@@ -18,9 +18,16 @@ register(componentRegistry.registerComponent.bind(componentRegistry));
 // ── API adapter ────────────────────────────────────────────────────────────
 // apiUrl and wsUrl come from the platform's app.json or env vars.
 // Vite proxies /api and /ws to apiUrl during dev (see vite.config.js).
+const apiBaseUrl = import.meta.env.VITE_API_URL ?? '';
+const wsBaseUrl = import.meta.env.VITE_WS_URL || (
+  apiBaseUrl ? apiBaseUrl.replace(/^http/, 'ws') : undefined
+);
+
 const apiAdapter = new WebSocketApiAdapter({
-  baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
-  wsUrl:   import.meta.env.VITE_WS_URL  || 'ws://localhost:8000',
+  // Empty string is intentional: deployed single-origin apps should call
+  // /api on the current host. Local Vite dev proxies that relative path.
+  baseUrl: apiBaseUrl,
+  ...(wsBaseUrl ? { wsUrl: wsBaseUrl } : {}),
 });
 
 // ── Auth adapter ───────────────────────────────────────────────────────────

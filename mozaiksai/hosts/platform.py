@@ -1840,13 +1840,19 @@ def _normalize_shell_page_entry(entry: dict, *, order_fallback: int) -> dict | N
         return None
 
     meta = entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+    normalized_meta = _normalize_route_requires_role_meta(meta)
+    requires_auth = (
+        entry["requiresAuth"]
+        if "requiresAuth" in entry
+        else normalized_meta.get("requiresAuth", True)
+    )
     page: dict = {
         "path": path,
         "label": entry.get("label", ""),
         "order": entry.get("order", order_fallback),
         "meta": {
-            **_normalize_route_requires_role_meta(meta),
-            "requiresAuth": entry.get("requiresAuth", True),
+            **normalized_meta,
+            "requiresAuth": requires_auth,
         },
     }
     shell_mode = _shell_mode_from_entry(entry)
