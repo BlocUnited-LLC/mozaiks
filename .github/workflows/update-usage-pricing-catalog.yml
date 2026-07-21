@@ -35,7 +35,7 @@ jobs:
         run: python scripts/update_usage_pricing_catalog.py --check
 
       - name: Open pricing catalog PR
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: automation/update-usage-pricing-catalog
           commit-message: "Update generated usage pricing catalog"
