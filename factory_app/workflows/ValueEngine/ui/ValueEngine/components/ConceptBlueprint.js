@@ -14,6 +14,7 @@ import {
   Sparkles,
   Target,
 } from 'lucide-react';
+import { workflowSurfaceStyles } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 
 const asText = (value) => (typeof value === 'string' ? value.trim() : '');
 
@@ -81,7 +82,7 @@ const ConceptBlueprint = ({ payload = {}, toolCallId, sourceWorkflowName, genera
   const capabilityPackHints = blueprint?.capability_pack_hints || blueprint?.capabilityPackHints;
   const agenticCapabilities = blueprint?.agentic_capabilities || blueprint?.agenticCapabilities;
 
-  const panelClass = 'rounded-2xl border border-primary bg-card p-0 overflow-hidden';
+  const panelClass = workflowSurfaceStyles.primaryPanel;
 
   return (
     <div className={panelClass}>

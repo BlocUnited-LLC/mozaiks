@@ -81,6 +81,9 @@ def test_factory_app_ui_barrel_registers_admin_pages_and_omits_removed_pages() -
     assert "registerComponent('WorkspaceHostingPage'" not in admin_source
     assert "registerComponent('AppHealthPage'" in admin_source
     assert "registerComponent('AppAccessPage'" in admin_source
+    assert "registerComponent('ProfilePage', ProfilePage, {" in admin_source
+    assert "User profile surface" in admin_source
+    assert "override: true" in admin_source
     assert "registerComponent('AppHostingPage'" not in admin_source
     assert "./pages/AppHealthPage.jsx" in admin_source
     assert "./pages/AppAccessPage.jsx" in admin_source

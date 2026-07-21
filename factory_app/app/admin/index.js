@@ -97,5 +97,6 @@ export function registerAdminComponents(registerComponent) {
 
   registerComponent('ProfilePage', ProfilePage, {
     description: 'User profile surface — account identity, avatar, bio, and profile preferences.',
+    override: true,
   })
 }

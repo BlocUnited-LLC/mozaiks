@@ -7,6 +7,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { Code, LayoutGrid, Monitor } from 'lucide-react';
 import { useWorkflowStart } from '@mozaiks/chat-ui/hooks/useWorkflowStart.js';
 import { useChatUI } from '@mozaiks/chat-ui/context/ChatUIContext.jsx';
+import { workflowSurfaceStyles, workflowToolbarButtonClass } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 import { useAppValidationWorkbench } from './useAppValidationWorkbench';
 import { useSandbox } from './useSandbox';
 import BuildStatusArtifact from './BuildStatusArtifact';
@@ -123,15 +124,9 @@ const AppWorkbench = ({
     return 'Validation is pending. Review the bundle and wait for validation or skip explicitly.';
   }, [payload, validationStatus]);
 
-  const panelClass = 'rounded-2xl border border-border bg-card p-0 overflow-hidden';
+  const panelClass = workflowSurfaceStyles.darkPanel;
 
-  const toolbarBtn = (active) =>
-    [
-      'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-2',
-      active
-        ? 'bg-[rgba(var(--color-primary-rgb),0.25)] border border-[rgba(var(--color-primary-rgb),0.35)] text-white'
-        : 'bg-white/5 hover:bg-white/10 border border-white/10 text-[var(--color-text-secondary)]',
-    ].join(' ');
+  const toolbarBtn = workflowToolbarButtonClass;
 
   const showSplit = view === 'split';
   const showCode = view === 'code-only';

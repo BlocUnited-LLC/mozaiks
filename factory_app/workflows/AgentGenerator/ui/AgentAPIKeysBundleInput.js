@@ -5,6 +5,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { createToolsLogger } from '@mozaiks/chat-ui/platform/workflowSurfaceRuntime.js';
+import { workflowSurfaceStyles } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
 
 const toTitle = (value = '') => {
   return value
@@ -140,12 +141,12 @@ const AgentAPIKeysBundleInput = ({
     ]
       .filter(Boolean)
       .join(' ');
-  const assistiveTextClasses = 'text-xs font-sans text-muted-foreground';
-  const errorTextClasses = 'text-xs font-sans text-destructive';
-  const buttonGroup = 'flex items-center gap-3';
-  const secondaryButtonClasses = 'rounded-lg border border-border bg-card px-4 py-2 text-sm font-sans text-muted-foreground transition hover:border-border hover:bg-muted disabled:opacity-60 flex-1';
-  const primaryButtonClasses = 'rounded-lg bg-primary px-6 py-3 text-xs font-sans font-bold uppercase tracking-wide text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-60 flex-1';
-  const skipButtonClasses = 'rounded-lg border border-border bg-card px-6 py-3 text-xs font-sans font-bold uppercase tracking-wide text-muted-foreground transition-all hover:bg-muted disabled:opacity-60 flex-1';
+  const assistiveTextClasses = workflowSurfaceStyles.assistiveText;
+  const errorTextClasses = workflowSurfaceStyles.errorText;
+  const buttonGroup = workflowSurfaceStyles.buttonGroup;
+  const secondaryButtonClasses = workflowSurfaceStyles.secondaryButton;
+  const primaryButtonClasses = workflowSurfaceStyles.primaryButton;
+  const skipButtonClasses = workflowSurfaceStyles.skipButton;
 
   const heading = (() => {
     const explicit = typeof payload.heading === 'string' ? payload.heading.trim() : '';
