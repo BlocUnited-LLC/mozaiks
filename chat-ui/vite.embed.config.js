@@ -16,6 +16,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@chat-workflows-root': fileURLToPath(new URL('./src/workflows_stub', import.meta.url)),
+      // Vite 8 stubs optional peer deps; resolve to local devDep copies so they
+      // are bundled into the self-contained embed output (host does not need React).
+      'react': fileURLToPath(new URL('./node_modules/react', import.meta.url)),
+      'react-dom': fileURLToPath(new URL('./node_modules/react-dom', import.meta.url)),
     },
   },
   build: {
@@ -39,5 +43,10 @@ export default defineConfig({
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
+  },
+  // Vite 8 treats optional peer deps as stubs by default; override for embed
+  // builds where react/react-dom must be bundled into the output.
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-dom/client'],
   },
 });

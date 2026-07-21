@@ -45,6 +45,9 @@ export default {
     './index.html',
     './*.{js,jsx}',
     '../chat-ui/src/**/*.{js,jsx,ts,tsx}',
+    // Exclude dead design-system file — its dynamic Tailwind class templates
+    // generate invalid CSS selectors that strict CSS parsers (lightningcss) reject.
+    '!../chat-ui/src/styles/artifactDesignSystem.js',
     '../mozaiks_chat_ui/src/**/*.{js,jsx,ts,tsx}',
     '../factory_app/app/ui/**/*.{js,jsx,ts,tsx}',
     '../factory_app/workflows/**/*.{js,jsx,ts,tsx}',
