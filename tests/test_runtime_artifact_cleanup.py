@@ -67,6 +67,7 @@ def test_runtime_artifact_writers_use_shared_helpers() -> None:
 def test_runtime_cleanup_scripts_are_available() -> None:
     backend = _read("scripts/run-backend.ps1")
     cleaner = _read("scripts/clean-runtime-artifacts.ps1")
+    local_cleaner = _read("scripts/clean-local-artifacts.ps1")
     env_example = _read(".env.example")
 
     assert "CleanRuntimeArtifactsOnStart" in backend
@@ -79,6 +80,15 @@ def test_runtime_cleanup_scripts_are_available() -> None:
 
     assert "logs/agent_outputs" in cleaner
     assert "logs/workflow_converter" in cleaner
+
+    assert "Dry run. Add -Apply" in local_cleaner
+    assert "Preserved .env, virtualenvs, .vscode, and node_modules" in local_cleaner
+    assert "$PreservedNames" in local_cleaner
+    assert '".env"' in local_cleaner
+    assert '".venv"' in local_cleaner
+    assert '".vscode"' in local_cleaner
+    assert '"node_modules"' in local_cleaner
+    assert "StopRepoProcesses" in local_cleaner
 
     assert "CLEAR_RUNTIME_ARTIFACTS_ON_START=0" in env_example
     assert "MOZAIKS_AGENT_OUTPUTS_DIR=logs/agent_outputs" in env_example
