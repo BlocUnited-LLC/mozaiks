@@ -1789,7 +1789,7 @@ def _bundle_repair_target_for_error(error: str) -> str | None:
         or "must not generate provider internals" in lowered
         or "services/integrations/" in lowered
         or "app-owned adapter" in lowered
-        or "env.example must document" in lowered
+        or ".env.example must document" in lowered
         or "deployment artifacts" in lowered
         or "authenticated generated apps must document" in lowered
     ):

@@ -243,7 +243,16 @@ class TestNoncanonicalAppRootPaths:
         assert not result  # both are under canonical root dirs
 
     def test_canonical_root_file_excluded(self):
-        paths = ["app.json", "Dockerfile", "package.json", "requirements.txt", "vite.config.js"]
+        paths = [
+            "app.json",
+            "Dockerfile",
+            "package.json",
+            "requirements.txt",
+            "vite.config.js",
+            ".env.example",
+            ".env.staging.example",
+            ".env.production.example",
+        ]
         result = noncanonical_app_root_paths(paths)
         assert not result
 

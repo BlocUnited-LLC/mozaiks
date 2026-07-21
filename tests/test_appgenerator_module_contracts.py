@@ -296,7 +296,7 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities" in source
     assert "Do not generate provider adapters for those operations into a customer app bundle" in source
     assert "Generated app deployment packaging is not a `service_foundation` or `api_surface` task" in source
-    assert "Do not declare `Dockerfile`, `docker-compose.yml`, `env.example`, `deployment.manifest.json`, or `.github/workflows/*.yml`" in source
+    assert "Do not declare `Dockerfile`, `docker-compose.yml`, `.env.example`, `.env.staging.example`, `.env.production.example`, `deployment.manifest.json`, or `.github/workflows/*.yml`" in source
     assert "Do not include this page merely because DownloadAgent will emit provider-neutral deployment artifacts" in source
     assert "Generated artifacts must never commit secrets" in source
     assert "ci_secret_requirements" in source

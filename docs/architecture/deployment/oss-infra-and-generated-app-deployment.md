@@ -80,7 +80,9 @@ Current artifact family:
 
 - `Dockerfile`
 - `docker-compose.yml`
-- `env.example`
+- `.env.example`
+- `.env.staging.example`
+- `.env.production.example`
 - `deployment.manifest.json`
 - `.github/workflows/readiness.yml`
 - `.github/workflows/deploy.yml`
@@ -161,7 +163,7 @@ Current implemented behavior:
 - repo infra operates the first-party Studio/builder stack
 - generated apps may emit provider-neutral deployment artifacts when requested
 - production-oriented generated app flows use `deployment_profile=production_container`
-  to force the root Dockerfile/env/manifest/readiness handoff
+  to force the root Dockerfile/env examples/manifest/readiness handoff
 - non-production preview/export flows may still opt in to deployment artifacts
   explicitly
 - provider-specific execution remains outside the generated app bundle

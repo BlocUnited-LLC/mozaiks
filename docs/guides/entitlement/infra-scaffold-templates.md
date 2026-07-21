@@ -48,12 +48,14 @@ Auth adapter templates live in `webapp_builder/templates/ui/auth/`:
 ## Usage After Generation
 
 1. Copy template files to the generated app bundle root, substituting variables.
-2. Review generated `deployment.manifest.json` and `env.example`; both carry
-   names only, never secret values.
+2. Review generated `deployment.manifest.json`, `.env.example`,
+   `.env.staging.example`, and `.env.production.example`; all
+   env examples carry names only, never secret values.
 3. Fill in deploy target–specific workflow sections such as registry login,
    deploy command, rollback, and any provider-specific secret sync.
-4. Copy `env.example` to an ignored environment file such as `.env.staging`
-   and fill values outside source control.
+4. Copy `.env.staging.example` to ignored `.env.staging` or
+   `.env.production.example` to ignored `.env.production`, then fill values
+   outside source control.
 5. Run `scripts/provision.sh staging` when the target provider uses the
    generated provision helper.
 6. Run `.github/workflows/readiness.yml` before production promotion/deploy.

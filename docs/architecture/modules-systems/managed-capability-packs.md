@@ -123,7 +123,7 @@ A selected managed capability may generate:
 - `app/modules/{facade_module}/backend/*`
 - `app/ui/pages/*.yaml`
 - names-only config such as `app/config/subscriptions.yaml`
-- env handles in `env.example`
+- env handles in `.env.example`
 
 It must not generate:
 

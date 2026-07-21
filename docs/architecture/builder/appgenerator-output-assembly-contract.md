@@ -455,8 +455,9 @@ When a build/export context requests deployment output, or the generated files
 already contain `deployment.manifest.json`, `Dockerfile`, `docker-compose.yml`,
 `.github/workflows/readiness.yml`, or `.github/workflows/deploy.yml`, the acceptance gate runs the provider-neutral
 deployment artifact validator. Deployment-ready bundles must include valid
-deployment artifacts such as `Dockerfile`, `env.example`, and
-`deployment.manifest.json`; missing deployment artifacts block export/promotion
+deployment artifacts such as `Dockerfile`, `.env.example`,
+`.env.staging.example`, `.env.production.example`, and `deployment.manifest.json`;
+missing deployment artifacts block export/promotion
 instead of being discovered by a later hosting adapter.
 
 The acceptance gate also runs `app_runtime_load`, a no-live-call runtime loader

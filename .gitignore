@@ -85,6 +85,7 @@ mozaiks-platform/
 .env
 .env.*
 !.env.example
+!.env.*.example
 
 # Private local provider-pricing overrides
 pricing/catalogs/usage-pricing.overrides.json

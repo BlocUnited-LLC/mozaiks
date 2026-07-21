@@ -261,13 +261,17 @@ class TestDeploymentContractArtifactPaths:
             "Dockerfile",
             "deployment.manifest.json",
             "docker-compose.yml",
-            "env.example",
+            ".env.example",
+            ".env.staging.example",
+            ".env.production.example",
         ])
         assert result == [
+            ".env.example",
+            ".env.production.example",
+            ".env.staging.example",
             "Dockerfile",
             "deployment.manifest.json",
             "docker-compose.yml",
-            "env.example",
         ]
 
     def test_github_workflow_returned(self):

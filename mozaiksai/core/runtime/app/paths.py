@@ -26,11 +26,13 @@ CANONICAL_APP_CONFIG_FILES = frozenset(
 CANONICAL_APP_ROOT_FILES = frozenset(
     {
         "Dockerfile",
+        ".env.example",
+        ".env.production.example",
+        ".env.staging.example",
         "__init__.py",
         "app.json",
         "deployment.manifest.json",
         "docker-compose.yml",
-        "env.example",
         "index.html",
         "package-lock.json",
         "package.json",

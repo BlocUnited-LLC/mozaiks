@@ -489,11 +489,11 @@ class TestGoldenGeneratedMozaiksPaySaasBundle:
             "config/subscriptions.yaml",
             "ui/pages/billing.yaml",
             "ui/pages/usage.yaml",
-            "env.example",
+            ".env.example",
             "deployment.manifest.json",
         } <= set(files)
 
-        env_example = files["env.example"]
+        env_example = files[".env.example"]
         for name in (
             "MOZAIKS_APP_URL",
             "MOZAIKSPAY_API_BASE",

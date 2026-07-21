@@ -106,7 +106,7 @@ def test_readiness_requirements_manifest_shape_evaluates() -> None:
                 "implemented_score": 7,
                 "required_env": ["OPENAI_API_KEY", "MONGO_URI", "MONGO_URI"],
                 "required_evidence": [],
-                "canonical_paths": ["env.example"],
+                "canonical_paths": [".env.example"],
             }
         ]
     }
@@ -131,7 +131,7 @@ def test_readiness_requirements_parser_tolerates_malformed_optional_fields() -> 
                 "implemented_score": "not-a-number",
                 "required_env": "OPENAI_API_KEY",
                 "required_evidence": None,
-                "canonical_paths": "env.example",
+                "canonical_paths": ".env.example",
             }
         ]
     }

@@ -510,7 +510,7 @@ def test_scan_generated_bundle_accepts_production_profile_readiness_only_contrac
 
 def test_scan_generated_bundle_rejects_mozaikspay_saas_without_env_handles() -> None:
     files = _valid_mozaikspay_saas_bundle(include_deployment=True)
-    files["env.example"] = "OPENAI_API_KEY=\nMONGO_URI=\n"
+    files[".env.example"] = "OPENAI_API_KEY=\nMONGO_URI=\n"
 
     errors = scan_generated_bundle(
         files,
@@ -518,7 +518,7 @@ def test_scan_generated_bundle_rejects_mozaikspay_saas_without_env_handles() -> 
         require_deployment_artifacts=True,
     )
 
-    assert any("env.example must document" in error for error in errors)
+    assert any(".env.example must document" in error for error in errors)
     assert any("MOZAIKSPAY_API_BASE" in error for error in errors)
 
 

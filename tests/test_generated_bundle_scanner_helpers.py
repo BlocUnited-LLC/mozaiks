@@ -147,6 +147,10 @@ class TestIsScannable:
     def test_env_example_is_scannable(self):
         assert _is_scannable(".env.example") is True
 
+    def test_environment_specific_env_examples_are_scannable(self):
+        assert _is_scannable(".env.staging.example") is True
+        assert _is_scannable(".env.production.example") is True
+
     def test_png_not_scannable(self):
         assert _is_scannable("assets/logo.png") is False
 

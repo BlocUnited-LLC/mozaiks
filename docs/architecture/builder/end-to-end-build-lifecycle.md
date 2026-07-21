@@ -233,7 +233,9 @@ This phase may write:
 - generated module files
 - provider-neutral deployment artifacts (optional): `Dockerfile`,
   `docker-compose.yml`, `.github/workflows/readiness.yml`,
-  `.github/workflows/deploy.yml`, `env.example`, and `deployment.manifest.json`
+  `.github/workflows/deploy.yml`, `.env.example`, `.env.staging.example`,
+  `.env.production.example`, and
+  `deployment.manifest.json`
 
 Important rule:
 

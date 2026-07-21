@@ -892,6 +892,7 @@ async def generate_and_download(
                 context_variables.set("deployment_contract_validation_errors", deployment_contract.get("bundle_errors") or [])
             except Exception:
                 pass
+        await _inject_agent_context_env(files_map=files_map, app_id=str(app_id), context_variables=context_variables)
 
     acceptance_result = await run_app_bundle_acceptance_gate(
         files=files_map,
