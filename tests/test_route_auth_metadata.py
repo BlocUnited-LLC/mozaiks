@@ -249,6 +249,29 @@ def test_route_manifest_requires_auth_still_enforced(monkeypatch, tmp_path: Path
     )
 
 
+def test_route_manifest_meta_requires_auth_false_passes_through(monkeypatch, tmp_path: Path) -> None:
+    """meta.requiresAuth: false must not be overwritten by the shell route normalizer."""
+    from mozaiksai.hosts import platform as platform_app
+
+    pages = [
+        {
+            "id": "login",
+            "label": "Sign In",
+            "path": "/login",
+            "component": "LoginPage",
+            "meta": {"requiresAuth": False, "appShell": False},
+        }
+    ]
+    app_root = _make_app_root(tmp_path, pages=pages)
+    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+
+    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+
+    matching = [p for p in shell["pages"] if p["path"] == "/login"]
+    assert matching
+    assert matching[0]["meta"].get("requiresAuth") is False
+
+
 # ---------------------------------------------------------------------------
 # 4. routeAuth is enforced by RouteWrapper
 # ---------------------------------------------------------------------------

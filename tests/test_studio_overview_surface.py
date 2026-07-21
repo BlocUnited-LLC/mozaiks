@@ -85,6 +85,23 @@ def test_app_shell_uses_single_app_ui_registration_barrel() -> None:
     assert "register(componentRegistry.registerComponent.bind(componentRegistry));" in source
 
 
+def test_app_shell_uses_same_origin_api_base_when_vite_api_url_is_unset() -> None:
+    source = _read("web_shell/App.jsx")
+    assert "apiBaseUrl = import.meta.env.VITE_API_URL ?? ''" in source
+    assert "baseUrl: apiBaseUrl" in source
+    assert "baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000'" not in source
+
+    adapter_source = _read("chat-ui/src/adapters/api.js")
+    assert "platform.resolveHttpUrl()" in adapter_source
+    assert "platform.resolveHttpUrl({ port: '8000' })" not in adapter_source
+
+    admin_source = _read("chat-ui/src/admin/components/AdminPrimitives.jsx")
+    settings_source = _read("chat-ui/src/admin/pages/SettingsSection.jsx")
+    assert "'http://localhost:8000'" not in admin_source
+    assert "'http://localhost:8000'" not in settings_source
+    assert "same-origin" in settings_source
+
+
 def test_app_overview_page_fetches_summary_endpoint() -> None:
     source = _read("factory_app/app/admin/pages/AppOverviewPage.jsx")
     chrome_source = _read("factory_app/app/admin/pages/AppStudioChrome.jsx")

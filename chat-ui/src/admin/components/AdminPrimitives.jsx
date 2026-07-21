@@ -16,7 +16,7 @@ import AdminSchemaPanel from './AdminSchemaPanel.jsx'
 
 const API_BASE =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
-  'http://localhost:8000'
+  ''
 
 // ---------------------------------------------------------------------------
 // Data hook — fetches from the mozaiksai runtime

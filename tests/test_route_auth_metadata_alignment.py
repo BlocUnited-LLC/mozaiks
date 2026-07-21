@@ -135,6 +135,32 @@ def test_build_shell_config_preserves_requiresrole_route_metadata(
     assert matching[0]["meta"]["requiresRole"] == "admin"
 
 
+def test_build_shell_config_preserves_route_manifest_meta_requiresauth_false(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from mozaiksai.hosts import platform as platform_app
+
+    app_root = _make_app_root(
+        tmp_path,
+        route_manifest_pages=[
+            {
+                "id": "login",
+                "label": "Sign In",
+                "path": "/login",
+                "component": "LoginPage",
+                "meta": {"requiresAuth": False, "appShell": False},
+            }
+        ],
+    )
+    monkeypatch.setattr(platform_app, "resolve_app_root", lambda: app_root)
+
+    shell = asyncio.run(platform_app.build_shell_config(surface="platform"))
+
+    matching = [page for page in shell["pages"] if page["path"] == "/login"]
+    assert matching
+    assert matching[0]["meta"]["requiresAuth"] is False
+
+
 def test_build_shell_config_normalizes_page_schema_roles_in_shell_output(
     monkeypatch, tmp_path: Path
 ) -> None:
