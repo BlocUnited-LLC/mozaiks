@@ -49,7 +49,7 @@
     "marked": "^13.0.3",
     "react-icons": "^5.7.0",
     "react-native-web": "^0.21.2",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
