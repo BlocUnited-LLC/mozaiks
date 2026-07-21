@@ -11,8 +11,13 @@ class _Collection:
         self.docs: dict[str, dict] = {}
 
     async def find_one(self, query, *_args, **_kwargs):
-        doc = self.docs.get(query["_id"])
-        return deepcopy(doc) if doc is not None else None
+        if "_id" in query:
+            doc = self.docs.get(query["_id"])
+            return deepcopy(doc) if doc is not None else None
+        for doc in self.docs.values():
+            if all(doc.get(key) == value for key, value in query.items()):
+                return deepcopy(doc)
+        return None
 
     async def update_one(self, query, update, upsert=False):
         doc_id = query["_id"]
@@ -90,6 +95,50 @@ async def test_platform_profile_contract_persists_display_name(monkeypatch):
     assert result["user_id"] == "user_1"
     assert result["display_name"] == "Builder"
     assert result["roles"] == ["admin"]
+
+
+@pytest.mark.asyncio
+async def test_public_user_profile_resolves_by_username_without_private_fields(monkeypatch):
+    from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.hosts import platform as platform_app
+
+    profiles = _Collection()
+    profiles.docs["app_1:user_2"] = {
+        "_id": "app_1:user_2",
+        "app_id": "app_1",
+        "user_id": "user_2",
+        "username": "alice",
+        "display_name": "Alice",
+        "email": "alice@example.com",
+        "roles": ["admin"],
+        "bio": "Profile bio",
+        "avatar_url": "https://cdn.example/avatar.png",
+    }
+
+    async def _fake_profiles():
+        return profiles
+
+    monkeypatch.setattr(platform_app, "_account_profile_collection", _fake_profiles)
+
+    principal = UserPrincipal(
+        user_id="viewer",
+        email="viewer@example.com",
+        name="Viewer",
+        roles=["member"],
+        scopes=[],
+        raw_claims={},
+        app_id="app_1",
+    )
+
+    result = await platform_app.get_public_user_profile(username="alice", app_id=None, principal=principal)
+
+    assert result["app_id"] == "app_1"
+    assert result["user_id"] == "user_2"
+    assert result["username"] == "alice"
+    assert result["display_name"] == "Alice"
+    assert result["bio"] == "Profile bio"
+    assert "email" not in result
+    assert "roles" not in result
 
 
 @pytest.mark.asyncio
@@ -579,6 +628,99 @@ panels:
     assert "service unavailable" in (panels[0]["error"] or "")
 
 
+@pytest.mark.asyncio
+async def test_profile_tabs_pass_subject_user_id_only_to_actions_that_declare_it(monkeypatch, tmp_path: Path) -> None:
+    from mozaiksai.core.auth.dependencies import UserPrincipal
+    from mozaiksai.core.runtime.composition.module_executor import ModuleResult
+    from mozaiksai.hosts import platform as platform_app
+
+    (tmp_path / "app.json").write_text('{"appName": "Test"}', encoding="utf-8")
+    posts_dir = tmp_path / "modules" / "user_posts" / "contracts"
+    messages_dir = tmp_path / "modules" / "messages" / "contracts"
+    posts_dir.mkdir(parents=True)
+    messages_dir.mkdir(parents=True)
+    (posts_dir / "profile.yaml").write_text(
+        """
+schema_version: mozaiks.profile.v1
+tabs:
+  - id: posts
+    label: Posts
+    order: 10
+    action: list_user_posts
+    component: UserPostsTab
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (messages_dir / "profile.yaml").write_text(
+        """
+schema_version: mozaiks.profile.v1
+tabs:
+  - id: messages
+    label: Messages
+    order: 20
+    action: list_threads
+    component: MessagingProfileTab
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PLATFORM_PATH", str(tmp_path))
+
+    class _FakeExecutor:
+        _action_schemas = {
+            "user_posts": {
+                "list_user_posts": {
+                    "input": {
+                        "type": "object",
+                        "properties": {"user_id": {"type": "string"}},
+                    }
+                }
+            },
+            "messages": {
+                "list_threads": {
+                    "input": {
+                        "type": "object",
+                        "properties": {"status": {"type": "string"}},
+                    }
+                }
+            },
+        }
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        async def execute(self, req, context):
+            self.requests.append(req)
+            return ModuleResult(success=True, data={"params": req.params, "viewer_user_id": req.user_id})
+
+    fake_executor = _FakeExecutor()
+
+    class _FakeRegistry:
+        @property
+        def module_executor(self):
+            return fake_executor
+
+    monkeypatch.setattr(platform_app, "executor_registry", _FakeRegistry())
+
+    principal = UserPrincipal(
+        user_id="viewer-user",
+        email="viewer@example.com",
+        name="Viewer",
+        roles=[],
+        scopes=[],
+        raw_claims={},
+        app_id="app_1",
+    )
+
+    result = await platform_app.get_profile_tabs(user_id="profile-user", app_id=None, principal=principal)
+
+    assert [tab["id"] for tab in result["tabs"]] == ["posts", "messages"]
+    by_module = {request.module: request for request in fake_executor.requests}
+    assert by_module["user_posts"].params == {"user_id": "profile-user"}
+    assert by_module["user_posts"].user_id == "viewer-user"
+    assert by_module["messages"].params == {}
+    assert by_module["messages"].user_id == "viewer-user"
+
+
 # ---------------------------------------------------------------------------
 # ProfilePage.jsx — panel contract surface check
 # ---------------------------------------------------------------------------
@@ -589,5 +731,8 @@ def test_profile_page_fetches_profile_panels() -> None:
     ).read_text(encoding="utf-8")
 
     assert "/api/me/profile-tabs" in source
+    assert "/api/me/profile-panels" in source
+    assert "/api/users/" in source
+    assert "subjectParams.set('username', username)" in source
     assert "componentRegistry" in source
 

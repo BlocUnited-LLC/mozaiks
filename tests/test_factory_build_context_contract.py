@@ -150,6 +150,7 @@ def test_messaging_pack_keeps_contacts_and_hosted_features_out_of_substrate() ->
     assert "modules/contacts/" in forbidden_prefixes
     assert "no_messaging_contacts_facade" in boundary_ids
     assert "hosted_extension_boundary" in boundary_ids
+    assert "profile_tab_composition" in boundary_ids
 
 
 def test_build_pack_contracts_are_typed_rule_contracts() -> None:

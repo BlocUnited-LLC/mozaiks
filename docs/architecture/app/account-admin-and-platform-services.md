@@ -61,6 +61,8 @@ backend may extend them with app-business admin data.
 - `GET/PUT /api/me` owns the current user's core account/profile data.
 - `GET/PUT /api/me/preferences` owns the current user's generic preference
   payload.
+- `GET /api/me/profile-panels` and `GET /api/me/profile-tabs` own module
+  profile composition for personal/account-scoped panels and tabs.
 - `GET /api/me/relationships` owns current-user resource relationship
   aggregation across module-declared relationship providers.
 - `GET /api/admin/config` owns host admin shell state, runtime panels, and
@@ -81,7 +83,7 @@ Modules can extend these deterministic systems through explicit contracts.
 - `modules/{module}/contracts/reactions.yaml` declares event reactions owned by
   the module.
 - `modules/{module}/contracts/profile.yaml` declares account-scoped profile
-  panels for user-owned personal data only.
+  panels and tabs for user-owned personal data only.
 - `modules/{module}/contracts/relationships.yaml` declares current-user
   resource relationship providers for My Apps, Portfolio, and My Resources
   surfaces.
@@ -100,7 +102,7 @@ Use the canonical `handler.py`, `service.py`, `repo.py`, `policy.py`, and
 
 | Concern | Primary UX surface | Source of truth | Extension contract | Not owned by |
 |---|---|---|---|---|
-| Account/Profile | `/me` via `ProfilePage` | `GET/PUT /api/me` | `modules/{module}/contracts/profile.yaml` for module panels | workflows, generated page bundles |
+| Account/Profile | `/me` and `/u/:username` via `ProfilePage` | `GET/PUT /api/me`, `GET /api/users/{username}` | `modules/{module}/contracts/profile.yaml` for module panels and tabs | workflows, generated page bundles |
 | Resource relationships | My Apps/Portfolio/My Resources surfaces | `GET /api/me/relationships` | `modules/{module}/contracts/relationships.yaml` | workflows, generated page bundles, admin shell |
 | Preferences | `/me` preferences section | `GET/PUT /api/me/preferences` | none for generic preferences; module-specific config uses `contracts/settings.yaml` outside Profile | workflow prompts |
 | Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/contracts/notifications.yaml` | workflows as source of truth |
@@ -119,6 +121,9 @@ Current behavior:
 - it loads and updates profile data from `/api/me`
 - it loads app/user preference data from `/api/me/preferences`
 - it loads module profile panels from `/api/me/profile-panels`
+- it loads module profile tabs from `/api/me/profile-tabs`
+- for public profile routes, it passes the viewed username so profile-subject
+  module actions can hydrate the target user's social sections
 - it uses the host API adapter rather than a custom page-local backend contract
 
 Important boundary:
@@ -126,8 +131,11 @@ Important boundary:
 - `/me` is not a generated page bundle
 - `/me` is not a workflow artifact
 - `contracts/profile.yaml` is only for module-contributed account/profile
-  panels; it does not replace identity, preferences, My Apps, Portfolio, build
-  history, billing, app access, deployment, governance, or admin operations
+  panels and tabs; it does not replace identity, preferences, My Apps,
+  Portfolio, build history, billing, app access, deployment, governance, or
+  admin operations
+- social surfaces such as friends, messages, posts, and activity feed should
+  default to profile tabs rather than shell shortcut pills or global page nav
 
 Do not overload `settings.yaml`, `reactions.yaml`, `admin.yaml`, or
 `relationships.yaml` as a proxy for account identity UI composition.
@@ -248,6 +256,10 @@ When AppGenerator is planning an app:
 - My Apps, Portfolio, and My Resources lists should use
   `contracts/relationships.yaml` plus `GET /api/me/relationships`, not custom
   generated profile/admin pages
+- friends, direct messages, user posts, and activity feeds should default to
+  `contracts/profile.yaml` tabs plus `GET /api/me/profile-tabs`, not generated
+  shell shortcuts or standalone `/friends`, `/messages`, `/posts`, or `/feed`
+  pages
 - the generated app may wire config and module manifests around these systems
 - the generated app should not scaffold replacement `/profile`, `/account`, `/me`, or `/admin`
   surfaces

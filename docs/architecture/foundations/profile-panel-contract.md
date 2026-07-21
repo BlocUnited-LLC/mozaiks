@@ -1,14 +1,15 @@
-# Profile Panel Contract
+# Profile Panel And Tab Contract
 
-The profile panel contract lets modules declare account-scoped sections they
-contribute to the user profile page. Profile is the signed-in person's surface:
-identity, personal preferences, personal relationship inventory, and safe
-personal summaries. It is not an app/workspace management surface.
+The profile contract lets modules declare account-scoped panels and profile
+tabs they contribute to the user profile page. Profile is the signed-in
+person's surface: identity, personal preferences, personal relationship
+inventory, safe personal summaries, and social sections such as friends, posts,
+activity, and messages. It is not an app/workspace management surface.
 
 Billing, subscriptions, entitlements, app access, collaborators, deployments,
 governance, build runs, and revenue participation belong in Admin Portal or
-Studio. Do not use profile panels to continue app builds or manage app/workspace
-operations.
+Studio. Do not use profile panels or tabs to continue app builds or manage
+app/workspace operations.
 
 ## Design Goals
 
@@ -51,6 +52,13 @@ panels:
       - id: digest_enabled
         label: Digest
         type: boolean
+
+tabs:
+  - id: friends
+    label: Friends
+    order: 10
+    action: list_friends_of
+    component: FriendListTab
 ```
 
 ### `kind` values
@@ -92,7 +100,37 @@ The component receives `{ panel, data }` props. `data` is the result of calling
 
 ---
 
-## Runtime Discovery — `GET /api/me/profile-panels`
+### Profile Tabs
+
+Use `tabs[]` for first-class profile sections that users expect to live on the
+person profile rather than in shell navigation. This is the default for friends,
+direct messages, user posts, and activity feed.
+
+```yaml
+schema_version: mozaiks.profile.v1
+
+tabs:
+  - id: messages
+    label: Messages
+    order: 40
+    action: list_threads
+    component: MessagingProfileTab
+```
+
+The tab component receives `{ tab, data }` props. `data` is the result of
+calling `action` if one is declared; otherwise it is `null`.
+
+Actions that render the viewed profile subject should declare an optional
+`user_id` input in `module.yaml`. The platform passes the target profile user id
+only to actions whose input schema declares `user_id`. Viewer-scoped surfaces,
+such as a signed-in user's message inbox, should omit `user_id` and read
+`ctx.user_id`.
+
+---
+
+## Runtime Discovery
+
+### `GET /api/me/profile-panels`
 
 The platform walks `app_root/modules/*/contracts/profile.yaml` at request time
 (same pattern as admin panel discovery in `mozaiksai/core/admin/router.py`).
@@ -128,18 +166,46 @@ If the action call fails, `data` is `null` and `error` contains the error
 message. The panel is still included so the UI can render a graceful empty
 state rather than silently hiding it.
 
+### `GET /api/me/profile-tabs`
+
+The platform discovers `tabs[]` from the same `contracts/profile.yaml` files.
+For `/me`, actions hydrate with the signed-in user as the profile subject. For a
+public profile route such as `/u/:username`, the shell calls
+`/api/me/profile-tabs?username=<username>` so profile-subject actions can render
+that user's public social sections while viewer-scoped actions continue to use
+the signed-in viewer.
+
+Response shape:
+
+```json
+{
+  "tabs": [
+    {
+      "id": "friends",
+      "label": "Friends",
+      "order": 10,
+      "module_id": "friends",
+      "action": "list_friends_of",
+      "component": "FriendListTab",
+      "data": { "friends": [] },
+      "error": null
+    }
+  ]
+}
+```
+
 ---
 
 ## Built-in Sections
 
 The framework-owned identity and preferences sections are rendered directly by
-`ProfilePage.jsx` and always appear regardless of module panels. They are not
+`ProfilePage.jsx` and always appear regardless of module panels or tabs. They are not
 declared in `profile.yaml` — they are platform guarantees.
 
 | Section | Order | Editable |
 |---------|-------|---------|
 | Identity (avatar, display_name, email, roles) | 0 | display_name, avatar_url |
-| *Account-scoped module panels inject here (order 1-998)* | — | — |
+| *Account-scoped module panels and tabs inject here (order 1-998)* | — | — |
 | App Preferences | 999 | settings dict |
 
 ---
@@ -148,10 +214,10 @@ declared in `profile.yaml` — they are platform guarantees.
 
 | Concern | File |
 |---------|------|
-| Contract models | `mozaiksai/core/runtime/app/module_loader.py` — `ModuleProfilePanel`, `ModuleProfileManifest` |
-| Discovery | `mozaiksai/core/profile/discovery.py` — `load_profile_panels(app_root)` |
-| API endpoint | `mozaiksai/hosts/platform.py` — `GET /api/me/profile-panels` |
-| UI renderer | `chat-ui/src/pages/ProfilePage.jsx` — `ProfilePanelSection` |
+| Contract models | `mozaiksai/core/runtime/app/module_loader.py` — `ModuleProfilePanel`, `ModuleProfileTab`, `ModuleProfileManifest` |
+| Discovery | `mozaiksai/core/profile/discovery.py` — `load_profile_panels(app_root)`, `load_profile_tabs(app_root)` |
+| API endpoint | `mozaiksai/hosts/platform.py` — `GET /api/me/profile-panels`, `GET /api/me/profile-tabs`, `GET /api/users/{username}` |
+| UI renderer | `chat-ui/src/pages/ProfilePage.jsx` — profile tab renderer |
 
 ---
 
@@ -165,6 +231,7 @@ Allowed examples:
 - personal notification preferences
 - personal invitations
 - personal community memberships
+- friends, direct messages, user posts, and activity feed as profile tabs
 - personal votes or delegations
 - personal usage summaries that do not manage an app/workspace
 
@@ -178,6 +245,11 @@ Forbidden examples:
 - app/workspace integrations or provider configuration
 
 Those belong in Admin Portal or Studio.
+
+Do not add profile-owned social surfaces to `config/shell.json` shortcuts or
+global navigation by default. Generate a separate `/feed`, `/friends`,
+`/posts`, or global `/messages` route only when the product explicitly needs an
+app-wide discovery or conversation surface outside the profile.
 
 ---
 

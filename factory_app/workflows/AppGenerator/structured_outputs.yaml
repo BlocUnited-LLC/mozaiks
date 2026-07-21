@@ -2512,12 +2512,13 @@ models:
     fields:
       path:
         type: str
-        description: Frontend stub path relative to the app bundle, e.g. ui/admin/CampaignMetricsPanel.jsx.
+        description: Frontend stub path relative to the app bundle, e.g. ui/admin/CampaignMetricsPanel.jsx or ui/components/FriendsProfileTab.jsx.
       surface:
         type: literal
         values:
         - admin_component
-        description: Declared frontend customization surface. AppGenerator emits only bounded admin custom components in this module lane; persistent pages remain declarative and app-level custom full-page routes live in AppSchemaOutput.custom_route_bundle.
+        - profile_component
+        description: Declared frontend customization surface. Admin components render in AppAdminDashboard; profile components render contracts/profile.yaml panels or tabs in ProfilePage. Persistent pages remain declarative and app-level custom full-page routes live in AppSchemaOutput.custom_route_bundle.
       registry_key:
         type: str
         description: Runtime/component registry key referenced by the YAML contract.
@@ -2882,7 +2883,7 @@ models:
       js_stubs:
         type: optional_list
         items: ModuleJsStub
-        description: Optional JS/TS frontend customization stubs required by declared admin custom components.
+        description: Optional JS/TS frontend customization stubs required by declared admin or profile custom components.
       runtime_extensions_yaml:
         type: union
         variants:
@@ -6013,11 +6014,12 @@ models:
     fields:
       path:
         type: str
-        description: Concrete frontend stub file path to write, such as ui/admin/CampaignMetricsPanel.jsx.
+        description: Concrete frontend stub file path to write, such as ui/admin/CampaignMetricsPanel.jsx or ui/components/FriendsProfileTab.jsx.
       surface:
         type: literal
         values:
         - admin_component
+        - profile_component
         description: Declared frontend customization surface. Must match the declared module_contract.js_stubs entry.
       registry_key:
         type: str

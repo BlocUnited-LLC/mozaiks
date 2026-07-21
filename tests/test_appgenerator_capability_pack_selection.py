@@ -198,9 +198,14 @@ def test_messaging_pack_is_thread_substrate_without_contacts_or_runtime_worker()
     assert "messaging.threads.list" in cap_ids
     assert "messaging.messages.send" in cap_ids
     assert any("modules/messages/module.yaml" in path for path in paths)
+    assert any("modules/messages/contracts/profile.yaml" in path for path in paths)
+    assert any("ui/components/MessagingProfileTab.jsx" in path for path in paths)
+    assert any("ui/index.js" in path for path in paths)
     assert not (_pack_path("messaging") / "templates" / "modules" / "contacts").exists()
     assert not (_pack_path("messaging") / "templates" / "modules" / "messages" / "runtime_extensions.yaml").exists()
     assert not (_pack_path("messaging") / "templates" / "modules" / "messages" / "backend" / "event_subscriber.py").exists()
+    boundaries = {boundary["id"] for boundary in contract["runtime_boundaries"]}
+    assert "profile_tab_composition" in boundaries
 
 
 def test_messaging_template_module_loads_with_domain_events() -> None:
@@ -226,6 +231,20 @@ def test_messaging_page_uses_module_actions_not_websocket_or_legacy_events() -> 
     assert "new WebSocket" not in source
     assert "app.messages" not in source
     assert "contacts" not in source.lower()
+
+
+def test_messaging_inbox_entrypoint_is_profile_tab_not_global_shell_nav() -> None:
+    profile = _read_yaml("factory_app/build_context/messaging/templates/modules/messages/contracts/profile.yaml")
+    route_manifest = _read_yaml("factory_app/build_context/messaging/templates/ui/route_manifest.json")
+
+    tab = profile["tabs"][0]
+    route = route_manifest["pages"][0]
+
+    assert tab["id"] == "messages"
+    assert tab["action"] == "list_threads"
+    assert tab["component"] == "MessagingProfileTab"
+    assert route["path"] == "/messages"
+    assert route["navigation"] == {"include": False}
 
 
 def test_support_pack_requires_messaging_and_stores_only_ticket_metadata() -> None:
@@ -283,6 +302,24 @@ def test_social_pack_owns_friends_invites_posts_and_feed() -> None:
     assert any("modules/user_posts/module.yaml" in path for path in paths)
     assert any("modules/activity_feed/module.yaml" in path for path in paths)
     assert any("ui/components/SocialProfileTabs.jsx" in path for path in paths)
+    assert not any("ui/pages/feed.yaml" in path for path in paths)
+    assert not any("ui/pages/friends.yaml" in path for path in paths)
+    assert not any("ui/pages/posts.yaml" in path for path in paths)
+    assert not (_pack_path("social") / "templates" / "ui" / "pages" / "feed.yaml").exists()
+    assert not (_pack_path("social") / "templates" / "ui" / "pages" / "friends.yaml").exists()
+    assert not (_pack_path("social") / "templates" / "ui" / "pages" / "posts.yaml").exists()
+    friends_profile = _read_yaml("factory_app/build_context/social/templates/modules/friends/contracts/profile.yaml")
+    assert friends_profile["tabs"][0]["action"] == "list_friends_of"
+    assert "profile_tab_composition" in {boundary["id"] for boundary in contract["runtime_boundaries"]}
     assert "ctx.persistence.collection(module_id, entity_name)" in " ".join(
         boundary["rule"] for boundary in contract["runtime_boundaries"]
     )
+
+
+def test_social_profile_tabs_do_not_ship_demo_profile_data() -> None:
+    source = (_pack_path("social") / "templates" / "ui" / "components" / "SocialProfileTabs.jsx").read_text(
+        encoding="utf-8"
+    )
+
+    assert "DEMO_" not in source
+    assert "demo data" not in source.lower()

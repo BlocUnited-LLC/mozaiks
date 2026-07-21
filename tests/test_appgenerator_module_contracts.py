@@ -145,6 +145,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     profile_manifest = models["ModuleProfileManifest"]["fields"]
     assert profile_manifest["schema_version"]["values"] == ["mozaiks.profile.v1"]
     assert profile_manifest["panels"]["items"] == "ModuleProfilePanel"
+    assert profile_manifest["tabs"]["items"] == "ModuleProfileTab"
     relationship_provider = models["ModuleRelationshipProvider"]["fields"]
     assert relationship_provider["resource_types"]["items"] == "str"
     assert relationship_provider["relationship_types"]["items"] == "str"
@@ -171,7 +172,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
         "null",
     ]
     assert models["ControlPlaneOutput"]["fields"]["control_plane_pack"]["type"] == "ControlPlanePackBundle"
-    assert models["ModuleJsStub"]["fields"]["surface"]["values"] == ["admin_component"]
+    assert models["ModuleJsStub"]["fields"]["surface"]["values"] == ["admin_component", "profile_component"]
     assert models["AppSchemaOutput"]["fields"]["custom_route_bundle"]["variants"] == ["AppCustomRouteBundle", "null"]
     assert models["AppManifest"]["fields"]["custom_routes"]["items"] == "str"
     assert models["AppCustomRouteBundle"]["fields"]["route_manifest"]["items"] == "AppCustomRouteEntry"
@@ -221,6 +222,7 @@ def test_appgenerator_structured_outputs_include_canonical_module_contract_model
     ]
     assert models["ServiceOutput"]["fields"]["python_files"]["items"] == "ImplementedPythonStub"
     assert models["FrontendStubOutput"]["fields"]["js_files"]["items"] == "ImplementedJsStub"
+    assert models["ImplementedJsStub"]["fields"]["surface"]["values"] == ["admin_component", "profile_component"]
     assert models["FrontendStubOutput"]["fields"]["registration_barrel"]["variants"] == ["str", "null"]
     assert models["DatabaseOutput"]["fields"]["database_files"]["items"] == "DatabaseArtifactFile"
     assert models["ModelOutput"]["fields"]["model_files"]["items"] == "ModelFile"
@@ -272,6 +274,9 @@ def test_appgenerator_prompts_emit_modules_contract_instead_of_removed_operation
     assert "\"registration_barrel\"" in source
     assert "`ui/index.js` registration barrel" in source
     assert "Persistent app pages still belong in `app.json` + `ui/pages/*.yaml`." in source
+    assert "friends, direct messages, user posts, or activity feed" in source
+    assert "surface `profile_component`" in source
+    assert "actions that render another user's public profile data must declare `input_schema.properties.user_id`" in source
     assert "`ui/route_manifest.json` + `ui/pages/custom/*.jsx`" in source
     assert "custom_route_bundle" in source
     assert "contracts/reactions.yaml" in source

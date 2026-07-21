@@ -945,6 +945,7 @@ agents:
 
       **Account, profile, preferences, and settings boundaries**:
       - The signed-in user's account/profile surface is platform-owned at `/me` through `ProfilePage`, `GET/PUT /api/me`, `GET/PUT /api/me/preferences`, and optional module-contributed `contracts/profile.yaml` panels or tabs. Do not generate replacement `/profile`, `/account`, or `/me` pages inside ordinary app UI.
+      - For social apps, default friends, direct messages, user posts, and activity feed to profile tab contributions in `contracts/profile.yaml`, not shell shortcut pills or standalone `/friends`, `/messages`, `/posts`, or `/feed` pages. Generate a separate app-wide route only when the product spec explicitly asks for discovery or browsing outside a profile.
       - `page_type: settings` means app/resource/module configuration UI, not the user's account profile. Examples: `/projects/:projectId/settings`, `/teams/:teamId/settings`, or `/billing/settings` when backed by app-owned module actions.
       - `contracts/settings.yaml` describes module-owned settings for module/admin/config surfaces. It is not the current user's personal preferences store.
       - Domain-specific profiles such as seller, creator, patient, investor, or provider profiles belong to app-owned modules and routes. Only use the platform `/me` profile surface for identity, personal preferences, and genuinely self-scoped account panels.
@@ -1803,14 +1804,18 @@ agents:
       8. **notifications.yaml**: include `schema_version: mozaiks.notifications.v1` and one rule per declared module event that warrants a user-facing notification. This is the standard deterministic path for in-app notification records, unread counts, and the notification center. Use `in_app` by default; add `email`, `push`, or `sms` only when the app plan explicitly requires external delivery and a corresponding operator pack or app-owned provider adapter is available. Use stable ids, explicit `event_type`, controlled `channels`, plain title/body templates, and static `audience.roles`/`audience.permissions` whenever possible. Use `audience.user_id_field` when the target user id is present in the event payload, such as `ticket_user_id`; use simple `condition.field` plus `equals`/`not_equals`/`in` for deterministic filtering. Use `audience.resolver` or `renderer` only when static roles/permissions, payload user ids, and plain templates are insufficient, and mirror those entrypoints in `python_stubs`. Do not create module-local notification repos, websocket workers, or custom persistence for ordinary in-app notifications.
       9. **settings.yaml**: include `schema_version: mozaiks.settings.v1`, module-local `settings[]`, and `features[]`. Settings may reference optional Python hooks (`validator`, `on_change`) but must not contain secrets. Every hook reference must be module-local and mirrored in `python_stubs`.
       9a. **profile.yaml** (optional — emit only when warranted): set `profile_yaml` to a `ModuleProfileManifest` object when the module has user-scoped data worth surfacing on the user profile page. Otherwise set `profile_yaml` to null.
-         - **When to emit**: the module owns user-facing summary data such as account stats, notification preferences, usage history, subscription status, or activity feeds.
+         - **When to emit**: the module owns user-facing summary data such as account stats, notification preferences, usage history, subscription status, friends, direct messages, user posts, or activity feeds.
          - **When to omit**: UI-only modules, framework packs, admin-only modules, modules without user-owned data, and any module where `/api/me` already covers the surface. Do not add profile.yaml to every module.
          - **Schema version**: always `mozaiks.profile.v1`.
-         - **Panel kinds**: use `metrics` for KPI or count fields, `list` for tabular user records, `component` for custom React rendering. Never emit `kind: form` — it is reserved and rejected at load time.
-         - **Action binding**: each panel's `action` field must reference an action id declared in `module.yaml`. The platform calls that action at `/api/me/profile-panels` request time and attaches the result as `data`. Omit `action` only for `kind: component` panels that render purely client-side.
+         - **Tabs vs panels**: use `tabs[]` for first-class social/profile sections such as friends, posts, activity, and messages. Use `panels[]` only for compact account summaries that should render as stacked cards.
+         - **Social navigation default**: social and messaging packs must not generate standalone `/friends`, `/posts`, `/feed`, or global `/messages` shell navigation by default. The discoverable entrypoint is the profile tab; focused conversation routes may still exist for deep links.
+         - **Panel kinds**: use `metrics` for KPI or count fields, `list` for tabular user records, `component` for custom React rendering. Never emit `kind: form` - it is reserved and rejected at load time.
+         - **Action binding**: each panel or tab `action` field must reference an action id declared in `module.yaml`. The platform calls panels at `/api/me/profile-panels` and tabs at `/api/me/profile-tabs`, then attaches the result as `data`. Omit `action` only for component-only surfaces that render purely client-side.
+         - **Target profile subject**: actions that render another user's public profile data must declare `input_schema.properties.user_id`; the platform passes the viewed profile subject only to actions that declare this field. Viewer-inbox actions such as `messages.list_threads` should not declare `user_id` and should use `ctx.user_id`.
          - **Field constraint**: `metrics` and `list` panels require a non-empty `fields[]`. `component` panels must have a `component` key and no `fields[]`.
          - **Field types**: use only `string`, `number`, `currency`, `date`, `boolean`, or `status` — unknown types are rejected at load time.
-         - **Boundaries**: profile panels must not expose admin-only actions or secrets. Profile panels do not replace `/api/me` identity — auth identity and core account data remain platform-owned.
+         - **JS stubs**: custom profile panel or tab components must be mirrored in `js_stubs` with surface `profile_component` and registered through `ui/index.js`.
+         - **Boundaries**: profile panels and tabs must not expose admin-only actions or secrets. Profile composition does not replace `/api/me` identity - auth identity and core account data remain platform-owned.
       9b. **relationships.yaml** (optional — emit only when warranted): set `relationships_yaml` to a `ModuleRelationshipsManifest` object when the module can enumerate current-user relationships to module-owned resources. Otherwise set `relationships_yaml` to null.
          - **When to emit**: owned resources, administered resources, joined memberships, watched/followed resources, invitations, or other current-user relationships that should appear in generic My Apps, Portfolio, or My Resources surfaces.
          - **When to omit**: UI-only modules, admin-only modules, modules without user/resource relationships, and modules where another module already owns the relationship.
@@ -2811,10 +2816,12 @@ agents:
       2. Generate exactly the declared component files. Do not invent undeclared component paths.
       3. Support only declared surfaces:
          - `admin_component`: generate a React component suitable for `AppAdminDashboard` custom panel rendering.
+         - `profile_component`: generate a React component suitable for `ProfilePage` panel or tab rendering.
       4. Every generated component must:
          - use the declared `registry_key`
          - align with the declared `purpose` and `contract_refs`
          - accept `{ backendUrl, auth }` props for admin components
+         - accept `{ tab, panel, data }` props for profile components and render from hydrated `data`
          - render with shipped UI primitives and semantic classes/tokens only
          - avoid product-shell routing or global side effects
       5. Generate or update `ui/index.js` as the single registration barrel for declared frontend stubs.
