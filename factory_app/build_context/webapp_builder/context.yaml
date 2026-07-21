@@ -35,8 +35,10 @@ assets:
     kind: templates
     description: >
       Web app scaffold templates emitted by InfraScaffoldAgent for generated apps.
-      Currently includes ui/auth/authAdapter.js (PKCE OIDC auth adapter).
-      Template variables: APP_SLUG, TOKEN_KEY_PREFIX, OIDC_CLIENT_ID.
+      Includes config/auth.yaml (provider-neutral auth contract) and
+      ui/auth/authAdapter.js (state-bound PKCE OIDC auth adapter).
+      Template variables: APP_SLUG, TOKEN_KEY_PREFIX, OIDC_CLIENT_ID,
+      AUTH_DEFAULT_ROUTE.
 
   - path: language_profile.yaml
     kind: catalog

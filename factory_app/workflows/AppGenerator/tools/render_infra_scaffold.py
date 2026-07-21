@@ -3,7 +3,7 @@
 InfraScaffoldAgent calls this tool to materialise provider-neutral deployment
 and auth files from the build-context templates stored under:
   - factory_app/build_context/infra/           → Dockerfile, readiness.yml, deploy.yml, provision.sh
-  - factory_app/build_context/webapp_builder/  → auth/authAdapter.js
+  - factory_app/build_context/webapp_builder/  → config/auth.yaml, ui/auth/authAdapter.js
 """
 
 from __future__ import annotations
@@ -35,6 +35,8 @@ _INFRA_TEMPLATES: list[tuple[Path, str]] = [
 
 _AUTH_ADAPTER_TEMPLATE = _WEBAPP_BUILDER_TEMPLATES_DIR / "ui" / "auth" / "authAdapter.js"
 _AUTH_ADAPTER_OUTPUT = "ui/auth/authAdapter.js"
+_AUTH_CONFIG_TEMPLATE = _WEBAPP_BUILDER_TEMPLATES_DIR / "config" / "auth.yaml"
+_AUTH_CONFIG_OUTPUT = "config/auth.yaml"
 
 
 def _substitute(content: str, variables: dict[str, str]) -> str:
@@ -57,6 +59,12 @@ def _build_variables(context_variables: dict[str, Any]) -> dict[str, str]:
         context_variables.get("oidc_client_id")
         or app_slug
     )
+    auth_default_route = _safe_route(
+        context_variables.get("default_route")
+        or context_variables.get("app_default_route")
+        or context_variables.get("landing_spot")
+        or "/"
+    )
 
     # Attempt to read the pinned mozaiks version from requirements.txt.
     mozaiks_version = _read_mozaiks_version()
@@ -66,10 +74,20 @@ def _build_variables(context_variables: dict[str, Any]) -> dict[str, str]:
         "APP_SLUG": app_slug,
         "TOKEN_KEY_PREFIX": app_slug,
         "OIDC_CLIENT_ID": oidc_client_id,
+        "AUTH_DEFAULT_ROUTE": auth_default_route,
         "MOZAIKS_VERSION": mozaiks_version,
         "REGISTRY": str(context_variables.get("container_registry") or "ghcr.io/your-org"),
         "DEPLOY_TARGET": str(context_variables.get("deploy_target") or "generic_container"),
     }
+
+
+def _safe_route(value: Any) -> str:
+    route = str(value or "/").strip()
+    if not route.startswith("/") or route.startswith("//"):
+        return "/"
+    if any(char.isspace() for char in route):
+        return "/"
+    return route
 
 
 def _read_mozaiks_version() -> str:
@@ -103,7 +121,7 @@ async def save_infra_scaffold(
 
     Args:
         emit_infra: When True, render Dockerfile, readiness.yml, deploy.yml, provision.sh.
-        emit_auth_adapter: When True, render ui/auth/authAdapter.js.
+        emit_auth_adapter: When True, render config/auth.yaml and ui/auth/authAdapter.js.
         context_variables: Workflow session state with app_slug, oidc_client_id, etc.
     """
     cv = context_variables or {}
@@ -121,6 +139,13 @@ async def save_infra_scaffold(
             code_files.append({"filename": output_path, "content": rendered})
 
     if emit_auth_adapter:
+        raw = _read_template(_AUTH_CONFIG_TEMPLATE)
+        if raw is None:
+            skipped.append(_AUTH_CONFIG_OUTPUT)
+        else:
+            rendered = _substitute(raw, variables)
+            code_files.append({"filename": _AUTH_CONFIG_OUTPUT, "content": rendered})
+
         raw = _read_template(_AUTH_ADAPTER_TEMPLATE)
         if raw is None:
             skipped.append(_AUTH_ADAPTER_OUTPUT)

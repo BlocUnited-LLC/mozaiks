@@ -273,7 +273,10 @@ what — so Mozaiks doesn't have to build any of that itself.
 
 The Docker Compose stack imports the Mozaiks realm into Keycloak automatically.
 You don't have to set up realms, clients, or redirect URIs by hand — it's all in
-`factory_app/app/brand/realm-export.json`.
+`factory_app/app/brand/realm-export.json`. That file is a repo-local Keycloak
+seed for the OSS compose stack. Generated apps should carry provider-neutral
+auth behavior in `app/config/auth.yaml`; provider-specific realm export or
+social-login setup remains an operator/host concern.
 
 For detailed Keycloak configuration (custom domains, social login, external IdPs)
 see [Auth Setup](../architecture/verified/auth-setup.md).

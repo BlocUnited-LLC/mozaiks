@@ -28,6 +28,7 @@ from typing import Any
 import yaml
 
 from mozaiksai.core.runtime.app.paths import (
+    APP_AUTH_CONFIG_PATH,
     APP_DATA_CONTRACT_PATH,
     APP_SECURITY_SECRETS_PATH,
     disallowed_legacy_app_paths,
@@ -917,6 +918,166 @@ def _scan_auth_deployment_contract(files_map: dict[str, str]) -> list[str]:
     return errors
 
 
+def _is_local_route(value: Any) -> bool:
+    route = str(value or "").strip()
+    return bool(route) and route.startswith("/") and not route.startswith("//")
+
+
+def _scan_auth_app_contract(files_map: dict[str, str]) -> list[str]:
+    """Validate the provider-neutral generated app auth contract."""
+    if not _app_manifest_auth_required(files_map):
+        return []
+
+    normalized_files = _normalized_files_map(files_map)
+    errors: list[str] = []
+    raw_contract = normalized_files.get(APP_AUTH_CONFIG_PATH)
+    if raw_contract is None:
+        return [
+            f"Authenticated generated apps must include {APP_AUTH_CONFIG_PATH} "
+            "with schema_version mozaiks.auth.v1."
+        ]
+
+    try:
+        contract = yaml.safe_load(raw_contract) or {}
+    except Exception as exc:
+        return [f"{APP_AUTH_CONFIG_PATH}: auth contract must be valid YAML: {exc}"]
+
+    if not isinstance(contract, dict):
+        return [f"{APP_AUTH_CONFIG_PATH}: auth contract must be a YAML object."]
+
+    allowed_root_keys = {
+        "schema_version",
+        "auth_required",
+        "strategy",
+        "routes",
+        "frontend",
+        "runtime",
+        "identity_providers",
+        "customization",
+    }
+    unknown_root_keys = sorted(set(contract) - allowed_root_keys)
+    if unknown_root_keys:
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: unsupported fields: {unknown_root_keys}.")
+
+    if contract.get("schema_version") != "mozaiks.auth.v1":
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: schema_version must be mozaiks.auth.v1.")
+    if contract.get("auth_required") is not True:
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: auth_required must be true when app.json.authRequired=true.")
+    if contract.get("strategy") != "oidc":
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: strategy must be oidc for authenticated generated apps.")
+
+    routes = contract.get("routes") if isinstance(contract.get("routes"), dict) else {}
+    if not isinstance(routes, dict) or not routes:
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: routes must declare login, callback, logout, and post_login_default.")
+    else:
+        route_fields = ("login", "callback", "logout", "post_login_default")
+        missing_routes = [field for field in route_fields if field not in routes]
+        if missing_routes:
+            errors.append(f"{APP_AUTH_CONFIG_PATH}: routes missing fields: {missing_routes}.")
+        for field in route_fields:
+            if field in routes and not _is_local_route(routes.get(field)):
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: routes.{field} must be an app-local route.")
+
+    frontend = contract.get("frontend") if isinstance(contract.get("frontend"), dict) else {}
+    required_frontend = {
+        "adapter": "oidc_pkce",
+        "client_id_env": "VITE_OIDC_CLIENT_ID",
+        "authority_env": "VITE_OIDC_AUTHORITY",
+        "discovery_url_env": "VITE_OIDC_DISCOVERY_URL",
+        "redirect_uri_env": "VITE_OIDC_REDIRECT_URI",
+        "scope_env": "VITE_OIDC_SCOPE",
+    }
+    if not isinstance(frontend, dict) or not frontend:
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: frontend must declare OIDC PKCE env handles.")
+    else:
+        for field, expected in required_frontend.items():
+            if frontend.get(field) != expected:
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: frontend.{field} must be {expected}.")
+        scopes = frontend.get("default_scopes")
+        if not isinstance(scopes, list) or not {"openid", "profile", "email"}.issubset(set(scopes)):
+            errors.append(f"{APP_AUTH_CONFIG_PATH}: frontend.default_scopes must include openid, profile, and email.")
+
+    runtime = contract.get("runtime") if isinstance(contract.get("runtime"), dict) else {}
+    required_runtime = {
+        "provider_env": "AUTH_PROVIDER",
+        "enabled_env": "AUTH_ENABLED",
+        "authority_env": "MOZAIKS_OIDC_AUTHORITY",
+        "discovery_url_env": "MOZAIKS_OIDC_DISCOVERY_URL",
+        "issuer_env": "AUTH_ISSUER",
+        "jwks_url_env": "AUTH_JWKS_URL",
+    }
+    if not isinstance(runtime, dict) or not runtime:
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: runtime must declare provider-neutral backend env handles.")
+    else:
+        for field, expected in required_runtime.items():
+            if runtime.get(field) != expected:
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: runtime.{field} must be {expected}.")
+
+    identity_providers = contract.get("identity_providers", [])
+    if identity_providers is None:
+        identity_providers = []
+    if not isinstance(identity_providers, list):
+        errors.append(f"{APP_AUTH_CONFIG_PATH}: identity_providers must be a list when present.")
+    else:
+        allowed_idp_fields = {"id", "label", "provider_role"}
+        for index, item in enumerate(identity_providers):
+            if not isinstance(item, dict):
+                errors.append(f"{APP_AUTH_CONFIG_PATH}: identity_providers[{index}] must be an object.")
+                continue
+            unknown = sorted(set(item) - allowed_idp_fields)
+            if unknown:
+                errors.append(
+                    f"{APP_AUTH_CONFIG_PATH}: identity_providers[{index}] has unsupported fields: {unknown}."
+                )
+            if item.get("provider_role") not in {None, "upstream_oidc_provider"}:
+                errors.append(
+                    f"{APP_AUTH_CONFIG_PATH}: identity_providers[{index}].provider_role "
+                    "must be upstream_oidc_provider when present."
+                )
+
+    if "http://" in raw_contract or "https://" in raw_contract:
+        errors.append(
+            f"{APP_AUTH_CONFIG_PATH}: provider URLs must be supplied by env handles, "
+            "not committed as literal URLs."
+        )
+
+    adapter = normalized_files.get("ui/auth/authAdapter.js", "")
+    if not adapter:
+        errors.append("Authenticated generated apps must include ui/auth/authAdapter.js.")
+    else:
+        required_markers = {
+            "TRANSACTION_KEY": "TRANSACTION_KEY",
+            "state": "state",
+            "clearStoredUserSession": "clearStoredUserSession",
+            "writeAuthTransaction": "writeAuthTransaction",
+            "readAuthTransaction": "readAuthTransaction",
+            "returnPath": "returnPath",
+        }
+        missing_markers = [label for label, marker in required_markers.items() if marker not in adapter]
+        if missing_markers:
+            errors.append(
+                "ui/auth/authAdapter.js must implement state-bound PKCE transaction handling; "
+                f"missing markers: {missing_markers}."
+            )
+        if "localStorage" in adapter:
+            errors.append("ui/auth/authAdapter.js must use sessionStorage, not localStorage, for auth state.")
+        forbidden_provider_markers = [
+            "accounts.google.com",
+            "GoogleAuthProvider",
+            "gapi.",
+            "keycloak-js",
+            "client_secret",
+        ]
+        found_provider_markers = [marker for marker in forbidden_provider_markers if marker in adapter]
+        if found_provider_markers:
+            errors.append(
+                "ui/auth/authAdapter.js must stay provider-neutral OIDC; "
+                f"found provider-specific markers: {found_provider_markers}."
+            )
+
+    return errors
+
+
 def scan_generated_bundle(
     files_map: dict[str, str],
     *,
@@ -954,6 +1115,7 @@ def scan_generated_bundle(
         )
     )
     errors.extend(_scan_entitlement_gate_capability_alignment(files_map))
+    errors.extend(_scan_auth_app_contract(files_map))
     if require_deployment_artifacts:
         errors.extend(_scan_deployment_artifacts_contract(files_map))
         errors.extend(_scan_auth_deployment_contract(files_map))

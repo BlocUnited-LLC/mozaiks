@@ -57,7 +57,7 @@ Canonical target workspace shape:
 my-app/
 ├── app/
 │   ├── app.json
-│   ├── config/
+│   ├── config/                  # Includes auth.yaml for authenticated apps
 │   ├── ui/
 │   ├── modules/
 │   ├── brand/
@@ -643,6 +643,7 @@ workspace/
 │   ├── app.json                    # App identity + startup intent + admins bootstrap
 │   ├── config/
 │   │   ├── ai.json                 # LLM provider, model, optional control_plane key
+│   │   ├── auth.yaml               # Authenticated apps: provider-neutral OIDC behavior/env contract
 │   │   ├── shell.json              # Header/footer/profile/notification chrome
 │   │   ├── integrations.yaml       # External/hosted capability requirements
 │   │   └── targets.json            # Runtime/deployment/domain target intent

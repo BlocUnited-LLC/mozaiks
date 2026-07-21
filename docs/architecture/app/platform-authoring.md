@@ -433,7 +433,9 @@ These should not be generator-authored:
 
 Current examples:
 
-- `app/brand/realm-export.json` is a generated deployment artifact
+- `factory_app/app/brand/realm-export.json` is a repo-local Keycloak compose
+  seed consumed by OSS self-hosting infra; generated apps should not author
+  realm exports directly
 - `app/brand/_system/silent-check-sso.html` is framework support
 
 ## Anti-Drift Rule

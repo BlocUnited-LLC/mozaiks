@@ -99,23 +99,31 @@ task_contracts:
       - .env.example, .env.staging.example, and .env.production.example must list all names from app/security/secrets.yaml with placeholder values only; never emit real secret values.
       - Do not emit VITE_ env var values (OIDC URLs, redirect URIs) into committed files; they are environment-specific and supplied at build time as Docker build args and GitHub secrets.
       - Use "artifact review staging" for generated/refined files awaiting review and "environment staging" for deploy/readiness targets such as GitHub environments or cloud preview instances.
-      - Replace all template variables ({{APP_NAME}}, {{MOZAIKS_VERSION}}, {{OIDC_CLIENT_ID}}, {{REGISTRY}}, {{DEPLOY_TARGET}}) with values from the app context before emitting.
+      - Replace all template variables ({{APP_NAME}}, {{MOZAIKS_VERSION}}, {{OIDC_CLIENT_ID}}, {{AUTH_DEFAULT_ROUTE}}, {{REGISTRY}}, {{DEPLOY_TARGET}}) with values from the app context before emitting.
       - Deploy target defaults to azure_container_apps; stubs for fly and render must be present as inline comments in deploy.yml.
 
   auth_adapter:
-    owner_agent: AppSchemaAgent
-    summary: Generated browser OIDC adapter consumed by ChatUIProvider. Re-emitted when app/config/auth.yaml changes.
+    owner_agent: InfraScaffoldAgent
+    summary: Provider-neutral auth contract plus generated browser OIDC adapter consumed by ChatUIProvider. Re-emitted when app/config/auth.yaml changes.
     required_outputs:
+      - config/auth.yaml
       - ui/auth/authAdapter.js
     optional_outputs:
       - ui/auth/authAdapter.mock.js
     hard_constraints:
       - Use PKCE auth-code flow via OIDC discovery endpoint. All OIDC provider URLs come from VITE_ env vars resolved at Vite build time; never hard-code provider URLs.
+      - config/auth.yaml is the canonical generated-app auth contract. Schema version must be mozaiks.auth.v1.
+      - config/auth.yaml declares behavior and env handles only: auth_required, strategy=oidc, routes, frontend VITE_OIDC_* handles, runtime AUTH_* / MOZAIKS_OIDC_* handles, optional identity_providers metadata, and customization.login_theme_source.
+      - Do not put raw provider URLs, tenant ids, client secrets, Google OAuth client secrets, Keycloak admin credentials, hosted product policy, or social-login implementation mechanics in config/auth.yaml.
+      - Google, Microsoft, GitHub, or other social login buttons are upstream identity providers behind the selected OIDC provider; generated apps still speak only OIDC.
+      - brand/theme_config.json may style the login route, but it must not own auth behavior, provider selection, callback mechanics, token storage, or secret handles.
       - Implement the authAdapter contract (getCurrentUser, onAuthStateChange, login, logout, getAccessToken, handleCallback) consumed by ChatUIProvider.
+      - login() must write a short-lived PKCE transaction keyed by OIDC state; handleCallback() must validate state before token exchange and return a safe app-local returnPath.
+      - getCurrentUser() must clear only stored user/token state on missing or expired tokens; it must not clear pending PKCE transaction state needed by /auth/callback.
       - Mock mode (VITE_MOCK_MODE=true) bypasses all OIDC redirects and returns a static user — required for local dev without an OIDC provider.
-      - Token storage must use sessionStorage only, never localStorage.
+      - Token storage and pending PKCE transaction storage must use sessionStorage only, never localStorage.
       - Re-emit when app/config/auth.yaml changes; operator must review the diff before deploying.
-      - When app/config/auth.yaml declares provider=mock or auth config is absent, emit authAdapter.mock.js only.
+      - Do not use provider=mock in config/auth.yaml. Local mock auth is controlled by VITE_MOCK_MODE=true inside the generated adapter.
       - Token key prefix is derived from app.json .slug (e.g. myapp_access_token, myapp_user).
 
   module_contract:

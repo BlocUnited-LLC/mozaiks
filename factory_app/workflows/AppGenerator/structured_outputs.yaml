@@ -761,9 +761,10 @@ models:
           templates. Emitted once at generation time; InfraScaffoldAgent owns
           these files and skips regeneration if Dockerfile already exists unless
           --force-infra is set.
-          `auth_adapter` emits ui/auth/authAdapter.js from the webapp_builder
-          auth template when app/config/auth.yaml declares an OIDC provider.
-          Re-emitted on auth config changes. AppSchemaAgent owns this task.
+          `auth_adapter` emits config/auth.yaml and ui/auth/authAdapter.js from
+          the webapp_builder auth templates when an authenticated generated app
+          needs a real OIDC provider. Re-emitted on auth config changes.
+          AppSchemaAgent owns this task.
       capability_pack_id:
         type: union
         variants:

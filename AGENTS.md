@@ -328,6 +328,11 @@ When working in or generating app services:
 - `services/integrations/{pack_id}_client.py` is the lane for managed-capability API
   clients. Pages and app actions should bind to app-owned facade modules, not
   directly to managed-capability internals.
+- Authenticated apps declare provider-neutral auth behavior in
+  `app/config/auth.yaml`. App identity and coarse `authRequired` stay in
+  `app/app.json`; visual login styling stays in `app/brand/theme_config.json`;
+  provider mechanics stay in `app/services/adapters/auth/` only when the app
+  directly owns that provider integration.
 - `services/adapters/{area}/{provider}.py` owns provider mechanics such as SDK
   calls, protocol translation, signing, retries, and response normalization.
   It must not own durable app facts, lifecycle transitions, user-facing actions,

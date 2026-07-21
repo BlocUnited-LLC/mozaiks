@@ -10,10 +10,12 @@ APP_DATA_CONTRACT_PATH = "data/contract.json"
 APP_DATA_MIGRATIONS_DIR = "data/migrations"
 APP_DATA_MIGRATIONS_GLOB = "data/migrations/*.json"
 APP_SECURITY_SECRETS_PATH = "security/secrets.yaml"
+APP_AUTH_CONFIG_PATH = "config/auth.yaml"
 
 CANONICAL_APP_CONFIG_FILES = frozenset(
     {
         "config/ai.json",
+        APP_AUTH_CONFIG_PATH,
         "config/asset_manifest.json",
         "config/integrations.json",
         "config/integrations.yaml",
@@ -162,6 +164,7 @@ __all__ = [
     "APP_DATA_CONTRACT_PATH",
     "APP_DATA_MIGRATIONS_DIR",
     "APP_DATA_MIGRATIONS_GLOB",
+    "APP_AUTH_CONFIG_PATH",
     "APP_SECURITY_SECRETS_PATH",
     "CANONICAL_APP_CONFIG_FILES",
     "CANONICAL_APP_ROOT_DIRS",

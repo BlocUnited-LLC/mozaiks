@@ -15,7 +15,7 @@ Verifies that the generated ui/lib/moduleApi.js template:
  11.  err.status is attached and equals the HTTP status code.
  12.  err.data preserves the full parsed body for inspection.
  13.  Does not propagate secret-shaped fields (tokens, api_key) as named attrs.
- 14.  getAccessToken reads from localStorage (documented pattern).
+ 14.  getAccessToken reads from window.mozaiksAuth or sessionStorage fallback keys.
  15.  authHeaders returns Authorization: Bearer when token is present.
  16.  moduleAction is injected into bundles by generate_and_download when absent.
  17.  generate_and_download does NOT overwrite an agent-provided moduleApi.js.
@@ -250,13 +250,16 @@ class TestModuleApiStructuredErrors:
 
 class TestModuleApiAuthHelpers:
 
-    def test_get_access_token_reads_localStorage(self):
-        """getAccessToken reads from localStorage as the documented token source."""
+    def test_get_access_token_reads_sessionStorage(self):
+        """getAccessToken reads from the auth adapter or sessionStorage fallback keys."""
         js = _template_js()
-        assert "localStorage" in js, "getAccessToken must read from localStorage"
+        assert "window.mozaiksAuth.getAccessToken()" in js
+        assert "sessionStorage" in js, "getAccessToken must read from sessionStorage"
+        assert "localStorage" not in js, "getAccessToken must not read from localStorage"
         assert "mozaiks_access_token" in js, (
             "getAccessToken must check mozaiks_access_token key"
         )
+        assert "key?.endsWith('_access_token')" in js
 
     def test_auth_headers_returns_authorization_bearer(self):
         """authHeaders returns { Authorization: Bearer <token> } when token is present."""
