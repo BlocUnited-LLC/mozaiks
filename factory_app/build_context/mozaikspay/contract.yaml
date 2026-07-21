@@ -188,3 +188,50 @@ inactive_surfaces:
   - checkout
   - creator_earnings
   - wallet_connection
+
+# ---------------------------------------------------------------------------
+# Platform hooks — lifecycle responsibilities owned by the hosted platform,
+# not by the generated app.  Generated apps never implement these; the
+# platform reacts to well-known events and performs the corresponding work.
+# ---------------------------------------------------------------------------
+platform_hooks:
+  # When a hosted app is deployed the platform reads the app bundle's
+  # app/config/subscriptions.yaml, provisions Stripe products and prices
+  # for each paid plan (amount > 0), and persists the resulting price_ids in
+  # hosted_billing.app_billing_plans keyed by app_id.
+  # The checkout flow looks up these price_ids at runtime.
+  # Plans without a price.amount field are treated as contact-sales and
+  # skipped — no Stripe price is created.
+  - id: billing_plan_provisioning
+    trigger_event: hosted.hosting.app.deployed
+    responsible_module: hosted_billing
+    responsible_action: provision_app_billing_plans
+    description: >
+      On deployment the platform provisions Stripe billing products and prices
+      for paid plans declared in the app bundle's app/config/subscriptions.yaml.
+      This is idempotent — existing Stripe prices are reused via lookup_key.
+      Emits hosted.billing.app_billing_plans.provisioned on success.
+      Skips silently when MozaiksPay billing is not configured or when the
+      app bundle contains no paid plans.
+    app_requirements:
+      # The app bundle's subscriptions.yaml plan entries may carry an optional
+      # price block.  When present, the platform provisions Stripe billing for
+      # that plan automatically.  When absent, the plan is free or requires
+      # manual pricing configuration through the platform admin UI.
+      subscriptions_yaml_price_block:
+        description: >
+          Optional price metadata on each plan entry in app/config/subscriptions.yaml.
+          When present on a plan, the platform will provision a Stripe product
+          and price for that plan on app deployment.
+        example: |
+          plans:
+            - plan_id: pro
+              label: Pro
+              price:
+                amount: 29        # dollars
+                currency: usd
+                interval: month   # month | year
+              billing:
+                lookup_key: my_app_pro_monthly   # optional; defaults to {app_id}_{plan_id}_{interval}
+                allow_promotion_codes: true
+              capabilities: [...]
