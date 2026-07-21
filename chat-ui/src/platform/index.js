@@ -197,6 +197,7 @@ export const platform = {
 };
 
 export { createToolsLogger } from './workflowSurfaceRuntime.js';
+export { workflowSurfaceStyles, workflowToolbarButtonClass } from './workflowSurfaceStyles.js';
 export {
   useTransitionMotion,
   useTransitionChoiceMotion,
