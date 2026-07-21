@@ -220,6 +220,7 @@ Deterministic app behavior belongs in generated app/module contracts hosted by `
 | App-owned external client | `app/services/integrations/{service}_client.py` in an app workspace |
 | App-owned provider adapter | `app/services/adapters/{area}/{provider}.py` in an app workspace |
 | App-specific auth provider mechanic | `app/services/adapters/auth/{provider}.py` in an app workspace |
+| Provider-neutral generated app auth behavior | `app/config/auth.yaml` in an authenticated app workspace |
 | Provider-neutral deployment artifacts | bundle-root `Dockerfile`, `docker-compose.yml`, `env.example`, `deployment.manifest.json`, optional `.github/workflows/deploy.yml` |
 | Secret manager provider support | OSS `mozaiksai.core.secrets`; app workspaces declare names in `app/security/secrets.yaml` |
 | Secret management contract, names only | `app/security/secrets.yaml` in an app workspace |

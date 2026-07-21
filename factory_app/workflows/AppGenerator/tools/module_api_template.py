@@ -8,7 +8,7 @@ already produce one.
 
 Behavioral contract:
   - All module action calls use POST /api/modules/{module}/{action}.
-  - Auth token is read from window.mozaiksAuth, localStorage, or env.
+  - Auth token is read from window.mozaiksAuth or sessionStorage fallback keys.
   - Successful responses return parsed JSON.
   - Non-ok responses throw an Error with structured fields preserved:
       err.error_code  — backend error code (e.g. "RECORD_NOT_FOUND")
@@ -74,11 +74,28 @@ export function getAccessToken() {
   if (typeof window !== 'undefined' && window.mozaiksAuth?.getAccessToken) {
     return window.mozaiksAuth.getAccessToken()
   }
-  if (typeof localStorage === 'undefined') return null
+  if (typeof sessionStorage === 'undefined') return null
+  const appPrefix =
+    (typeof import.meta !== 'undefined' && (
+      import.meta.env?.VITE_APP_SLUG ||
+      import.meta.env?.VITE_APP_ID
+    )) ||
+    ''
+  if (appPrefix) {
+    const appToken = sessionStorage.getItem(`${appPrefix}_access_token`)
+    if (appToken) return appToken
+  }
+  for (let i = 0; i < sessionStorage.length; i += 1) {
+    const key = sessionStorage.key(i)
+    if (key?.endsWith('_access_token')) {
+      const token = sessionStorage.getItem(key)
+      if (token) return token
+    }
+  }
   return (
-    localStorage.getItem('mozaiks_access_token') ||
-    localStorage.getItem('chatui_token') ||
-    localStorage.getItem('access_token')
+    sessionStorage.getItem('mozaiks_access_token') ||
+    sessionStorage.getItem('chatui_token') ||
+    sessionStorage.getItem('access_token')
   )
 }
 

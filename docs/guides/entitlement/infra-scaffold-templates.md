@@ -23,11 +23,12 @@ review, mutate source during generation, or provision hosted product resources.
 |----------|--------|-------------|
 | `{{APP_NAME}}` | `app/app.json .name` (or `.slug`) | Slug used in image tags, container names, nginx conf |
 | `{{MOZAIKS_VERSION}}` | `requirements.txt` or latest at generation time | Pinned mozaiks pip version |
-| `{{OIDC_CLIENT_ID}}` | `app/config/auth.yaml .oidc.client_id` | OIDC client ID baked into the Vite SPA bundle |
+| `{{OIDC_CLIENT_ID}}` | `app/config/auth.yaml frontend.client_id_env` | OIDC client ID env handle baked into the Vite SPA bundle |
 | `{{REGISTRY}}` | generator input | Container registry prefix (e.g. `ghcr.io/org`) |
 | `{{DEPLOY_TARGET}}` | generator input | `azure_container_apps` \| `fly` \| `render` \| `generic` |
 | `{{APP_SLUG}}` | `app/app.json .slug` | Lowercase slug for sessionStorage key prefix and auth adapter |
 | `{{TOKEN_KEY_PREFIX}}` | defaults to `{{APP_SLUG}}` | sessionStorage key prefix for PKCE tokens |
+| `{{AUTH_DEFAULT_ROUTE}}` | `app/config/auth.yaml routes.post_login_default` | Safe app-local route used after login when no return path is available |
 
 ## Template Files
 
@@ -38,12 +39,13 @@ review, mutate source during generation, or provision hosted product resources.
 | `templates/workflows/readiness.yml` | Pre-production gate: image smoke, remote health, entitlement smoke |
 | `templates/scripts/provision.sh` | Secret-sync: reads `app/security/secrets.yaml`, validates env file, syncs to deploy target |
 
-Auth adapter templates live in `webapp_builder/templates/ui/auth/`:
+Auth contract and adapter templates live in `webapp_builder/templates/`:
 
 | File | Purpose |
 |------|---------|
-| `authAdapter.js` | OIDC PKCE auth adapter (real identity provider) |
-| `authAdapter.mock.js` | Mock adapter for `VITE_MOCK_MODE=true` or no OIDC provider |
+| `config/auth.yaml` | Provider-neutral `mozaiks.auth.v1` behavior/env-handle contract |
+| `ui/auth/authAdapter.js` | State-bound OIDC PKCE auth adapter (real identity provider) |
+| `ui/auth/authAdapter.mock.js` | Mock adapter for `VITE_MOCK_MODE=true` or no OIDC provider |
 
 ## Usage After Generation
 

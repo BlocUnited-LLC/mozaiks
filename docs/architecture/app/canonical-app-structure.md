@@ -13,6 +13,7 @@ workspace/
 │   ├── app.json
 │   ├── config/
 │   │   ├── ai.json
+│   │   ├── auth.yaml           ← authenticated apps only
 │   │   ├── shell.json
 │   │   ├── integrations.yaml
 │   │   ├── targets.json
@@ -175,6 +176,19 @@ other operator capabilities.
 
 - `app/config/integrations.yaml` declares external services and hosted
   capability requirements.
+- `app/config/auth.yaml` (authenticated apps only) is the canonical
+  provider-neutral auth behavior contract. Schema: `mozaiks.auth.v1`. It
+  declares whether auth is required, the strategy (`oidc`), app-local login /
+  callback / logout routes, public frontend `VITE_OIDC_*` env handles, backend
+  `AUTH_*` / `MOZAIKS_OIDC_*` env handles, optional upstream identity provider
+  display metadata, and the login theme source. It must not contain provider
+  URLs, tenant ids, client secrets, Google OAuth secrets, Keycloak admin
+  credentials, hosted-product policy, or provider implementation mechanics.
+  Social login providers such as Google are upstream IdPs behind the selected
+  OIDC provider; generated apps still speak only OIDC.
+- `app/brand/theme_config.json` may style login and shell surfaces, but it does
+  not own auth behavior, provider selection, callback mechanics, token storage,
+  or secret handles.
 - `app/config/targets.json` declares deployment, runtime, domain, DNS, and
   provider target intent. Direct app-owned provider mechanics live in
   `app/services/adapters/` only when the app itself controls that provider
@@ -233,11 +247,12 @@ provider credentials, hosted product policy defaults, or customer-specific
 provider execution code.
 
 When `app.json.authRequired=true`, the deployment artifacts also declare the
-provider-neutral JWT/OIDC auth contract: backend `AUTH_*` /
-`MOZAIKS_OIDC_*` handles, public `VITE_OIDC_*` handles, `auth.required=true`
-in `deployment.manifest.json`, and an `APP_AUTH_SMOKE_VERIFIED_AT` readiness
-evidence stamp. Generated apps do not hardcode Keycloak, Entra, hosted Mozaiks
-auth, tenant ids, client secrets, or provider paths.
+provider-neutral JWT/OIDC auth contract handoff: backend `AUTH_*` / `MOZAIKS_OIDC_*`
+handles, public `VITE_OIDC_*` handles, `auth.required=true` in
+`deployment.manifest.json`, and an `APP_AUTH_SMOKE_VERIFIED_AT` readiness
+evidence stamp. `app/config/auth.yaml` is the app-bundle source of truth for
+the route and env-handle contract. Generated apps do not hardcode Keycloak,
+Entra, hosted Mozaiks auth, tenant ids, client secrets, or provider paths.
 
 AppGenerator build tasks do not own these files. They are emitted by the
 DownloadAgent through the provider-neutral deployment contract renderer in

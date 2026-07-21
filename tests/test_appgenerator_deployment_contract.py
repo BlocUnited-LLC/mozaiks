@@ -791,6 +791,30 @@ def test_infra_scaffold_emits_readiness_workflow_from_documented_template() -> N
     assert "artifact review staging" in files[".github/workflows/readiness.yml"].lower()
 
 
+def test_infra_scaffold_emits_provider_neutral_auth_contract_and_hardened_adapter() -> None:
+    result = asyncio.run(
+        save_infra_scaffold(
+            emit_infra=False,
+            emit_auth_adapter=True,
+            context_variables={"app_slug": "Demo App", "default_route": "/dashboard"},
+        )
+    )
+    files = {item["filename"]: item["content"] for item in result["code_files"]}
+
+    assert "config/auth.yaml" in files
+    assert "ui/auth/authAdapter.js" in files
+    assert "schema_version: mozaiks.auth.v1" in files["config/auth.yaml"]
+    assert "strategy: oidc" in files["config/auth.yaml"]
+    assert "post_login_default: /dashboard" in files["config/auth.yaml"]
+    assert "VITE_OIDC_DISCOVERY_URL" in files["config/auth.yaml"]
+    assert "https://" not in files["config/auth.yaml"]
+    assert "TRANSACTION_KEY" in files["ui/auth/authAdapter.js"]
+    assert "state," in files["ui/auth/authAdapter.js"]
+    assert "clearStoredUserSession" in files["ui/auth/authAdapter.js"]
+    assert "return { returnPath:" in files["ui/auth/authAdapter.js"]
+    assert "localStorage" not in files["ui/auth/authAdapter.js"]
+
+
 def test_generated_workflow_has_production_environment_on_deploy_job() -> None:
     result = generate_deployment_artifacts(
         app_id="demo_app",

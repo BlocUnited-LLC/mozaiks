@@ -47,6 +47,61 @@ actions: []
 """
 
 
+def _auth_contract_yaml() -> str:
+    return """
+schema_version: mozaiks.auth.v1
+auth_required: true
+strategy: oidc
+routes:
+  login: /login
+  callback: /auth/callback
+  logout: /login
+  post_login_default: /dashboard
+frontend:
+  adapter: oidc_pkce
+  client_id_env: VITE_OIDC_CLIENT_ID
+  authority_env: VITE_OIDC_AUTHORITY
+  discovery_url_env: VITE_OIDC_DISCOVERY_URL
+  redirect_uri_env: VITE_OIDC_REDIRECT_URI
+  scope_env: VITE_OIDC_SCOPE
+  default_scopes: [openid, profile, email]
+runtime:
+  provider_env: AUTH_PROVIDER
+  enabled_env: AUTH_ENABLED
+  authority_env: MOZAIKS_OIDC_AUTHORITY
+  discovery_url_env: MOZAIKS_OIDC_DISCOVERY_URL
+  issuer_env: AUTH_ISSUER
+  jwks_url_env: AUTH_JWKS_URL
+identity_providers:
+  - id: google
+    label: Google
+    provider_role: upstream_oidc_provider
+customization:
+  login_theme_source: brand/theme_config.json
+  upstream_provider_setup: host_or_operator
+"""
+
+
+def _auth_adapter_js() -> str:
+    return """
+const TRANSACTION_KEY = 'demo_oidc_transactions';
+function writeAuthTransaction(transaction) {
+  return transaction.state;
+}
+function readAuthTransaction(state) {
+  return state;
+}
+function clearStoredUserSession() {
+  sessionStorage.removeItem('demo_access_token');
+}
+async function handleCallback() {
+  const state = new URLSearchParams(window.location.search).get('state');
+  const transaction = readAuthTransaction(state);
+  return { returnPath: transaction?.returnPath || '/dashboard' };
+}
+"""
+
+
 def _mozaikspay_pack() -> list[dict]:
     # Include pack_source_path so _packs_providing() can load provides_capabilities
     # from contract.yaml and correctly skip the entitlement_dispatch requirement.
@@ -466,6 +521,8 @@ def test_scan_generated_bundle_rejects_authenticated_app_without_auth_deploy_con
         auth_required=False,
     )["artifacts"]
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml()
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
@@ -484,10 +541,102 @@ def test_scan_generated_bundle_accepts_authenticated_app_deploy_contract() -> No
         auth_required=True,
     )["artifacts"]
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml()
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
     assert errors == []
+
+
+def test_scan_generated_bundle_rejects_authenticated_app_without_auth_yaml() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("config/auth.yaml" in error for error in errors)
+    assert any("mozaiks.auth.v1" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_auth_yaml_with_provider_url_literal() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml() + "\nprovider_url: https://accounts.google.com\n"
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("provider URLs must be supplied by env handles" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_auth_adapter_without_stateful_pkce() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml()
+    files["ui/auth/authAdapter.js"] = "async function handleCallback() {}\n"
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("state-bound PKCE" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_auth_adapter_local_storage() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml()
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js() + "\nlocalStorage.setItem('token', token);\n"
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("must use sessionStorage, not localStorage" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_auth_adapter_provider_specific_code() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml()
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js() + "\nconst provider = 'accounts.google.com';\n"
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("must stay provider-neutral OIDC" in error for error in errors)
 
 
 def test_scan_generated_bundle_accepts_production_profile_readiness_only_contract() -> None:
@@ -500,6 +649,8 @@ def test_scan_generated_bundle_accepts_production_profile_readiness_only_contrac
         auth_required=True,
     )["artifacts"]
     files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml()
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 

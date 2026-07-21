@@ -11,28 +11,60 @@ It does not define chat startup defaults or workflow entry selection.
 
 ### `app/app.json`
 
-Owns the app-facing auth declaration and client-target manifest:
-
-- `authRequired`
-- `admins`
-- target enablement under `targets.*`
-- optional advanced `auth` overrides
-- optional advanced `mobile.auth` overrides
-
-In the current manifest shape, this means:
-
-- `authRequired` expresses whether the app requires sign-in
-- `admins` expresses the author-facing default admin list
-- `auth.*` is advanced override territory
-- `mobile.auth.*` is advanced native/mobile auth override territory
-- `targets.*` is the browser/mobile target declaration
+Owns app identity, admin bootstrap, target enablement, and the coarse
+`authRequired` signal.
 
 `app/app.json` does not own:
 
+- OIDC provider selection
+- callback mechanics
+- token storage behavior
+- social-login provider mechanics
 - `chat.chat_startup_mode`
 - `workflows.entry_point`
 
-Those belong in `app/config/ai.json`.
+AI boot settings belong in `app/config/ai.json`. Auth behavior belongs in
+`app/config/auth.yaml` for authenticated apps.
+
+### `app/config/auth.yaml`
+
+Owns the provider-neutral generated-app auth behavior contract.
+
+Authenticated generated apps use:
+
+```yaml
+schema_version: mozaiks.auth.v1
+auth_required: true
+strategy: oidc
+routes:
+  login: /login
+  callback: /auth/callback
+  logout: /login
+  post_login_default: /
+frontend:
+  adapter: oidc_pkce
+  client_id_env: VITE_OIDC_CLIENT_ID
+  authority_env: VITE_OIDC_AUTHORITY
+  discovery_url_env: VITE_OIDC_DISCOVERY_URL
+  redirect_uri_env: VITE_OIDC_REDIRECT_URI
+  scope_env: VITE_OIDC_SCOPE
+  default_scopes: [openid, profile, email]
+runtime:
+  provider_env: AUTH_PROVIDER
+  enabled_env: AUTH_ENABLED
+  authority_env: MOZAIKS_OIDC_AUTHORITY
+  discovery_url_env: MOZAIKS_OIDC_DISCOVERY_URL
+  issuer_env: AUTH_ISSUER
+  jwks_url_env: AUTH_JWKS_URL
+identity_providers: []
+customization:
+  login_theme_source: brand/theme_config.json
+  upstream_provider_setup: host_or_operator
+```
+
+This file carries names and routes only. It must not contain provider URLs,
+tenant ids, client secrets, Keycloak admin credentials, Google OAuth secrets, or
+hosted-product policy.
 
 ### `app/config/ai.json`
 
@@ -62,6 +94,9 @@ Own deployment-time backend configuration, such as:
 Owns Keycloak login-theme assets and templates.
 
 This is separate from the in-app shell assets under `app/brand/assets/`.
+`app/brand/theme_config.json` may style login surfaces, but it does not own auth
+behavior, provider selection, callback mechanics, token storage, or secret
+handles.
 
 ## Current Repo Note
 
@@ -75,10 +110,13 @@ this repo, the first-party Studio bundle follows that same contract through
 
 ```text
 app/app.json
+    -> coarse authRequired signal
+app/config/auth.yaml
+    -> provider-neutral auth behavior and env-handle contract
     -> host app boot config
-    -> web shell creates Keycloak auth adapter
-    -> user logs in through Keycloak
-    -> keycloak-js obtains tokens
+    -> web shell creates OIDC PKCE auth adapter
+    -> user logs in through the selected OIDC provider
+    -> browser adapter obtains tokens
     -> frontend passes Bearer token to backend
     -> backend validates JWT via OIDC discovery + JWKS
 ```
@@ -94,16 +132,18 @@ app/app.json
 
 ## Frontend
 
-The web shell uses:
-
-- `chat-ui/src/adapters/keycloakAuth.js`
+The web shell receives an app-owned `createAuthAdapter()` export. Generated web
+apps use the OIDC PKCE adapter scaffolded from
+`factory_app/build_context/webapp_builder/templates/ui/auth/authAdapter.js`.
 
 Key points:
 
-- config is passed in from the host app
-- no separate `auth.json` is used
-- Keycloak uses Authorization Code + PKCE flow in the browser
-- native/mobile auth selection is declared in `app/app.json -> mobile.auth`
+- config is declared in `app/config/auth.yaml` and environment variables
+- the adapter uses Authorization Code + PKCE with OIDC discovery
+- login transactions are keyed by OIDC `state`
+- startup user checks must not clear pending PKCE transaction state
+- Keycloak, hosted identity, Google, Microsoft, GitHub, or other social login
+  choices are upstream provider setup, not generated app OAuth code
 
 ## Backend
 
@@ -126,15 +166,18 @@ The backend should be configured to validate against the same Keycloak realm and
 
 Use this order of operations:
 
-1. declare app-facing auth in `app/app.json`
-2. declare app-level chat/workflow boot defaults in `app/config/ai.json`
-3. use environment variables for deployment overrides
-4. keep Keycloak login-theme assets under `app/brand/login-theme/`
+1. declare coarse app auth requirement in `app/app.json`
+2. declare provider-neutral auth behavior in `app/config/auth.yaml`
+3. declare app-level chat/workflow boot defaults in `app/config/ai.json`
+4. use environment variables for deployment-specific provider values
+5. keep Keycloak login-theme assets under `app/brand/login-theme/`
 
-Do not reintroduce:
+Do not introduce:
 
 - `auth.json`
-- split frontend/backend auth files for the same app
+- raw provider URLs or secrets in `app/config/auth.yaml`
+- direct Google OAuth implementation code in generated apps
+- split frontend/backend auth behavior files that contradict `auth.yaml`
 
 Do not move `entry_point` or `chat.chat_startup_mode` into `app/app.json`.
 
@@ -145,6 +188,41 @@ Do not move `entry_point` or `chat.chat_startup_mode` into `app/app.json`.
   "authRequired": true,
   "admins": ["owner@example.com"]
 }
+```
+
+Provider-neutral auth behavior example belongs in `app/config/auth.yaml`:
+
+```yaml
+schema_version: mozaiks.auth.v1
+auth_required: true
+strategy: oidc
+routes:
+  login: /login
+  callback: /auth/callback
+  logout: /login
+  post_login_default: /dashboard
+frontend:
+  adapter: oidc_pkce
+  client_id_env: VITE_OIDC_CLIENT_ID
+  authority_env: VITE_OIDC_AUTHORITY
+  discovery_url_env: VITE_OIDC_DISCOVERY_URL
+  redirect_uri_env: VITE_OIDC_REDIRECT_URI
+  scope_env: VITE_OIDC_SCOPE
+  default_scopes: [openid, profile, email]
+runtime:
+  provider_env: AUTH_PROVIDER
+  enabled_env: AUTH_ENABLED
+  authority_env: MOZAIKS_OIDC_AUTHORITY
+  discovery_url_env: MOZAIKS_OIDC_DISCOVERY_URL
+  issuer_env: AUTH_ISSUER
+  jwks_url_env: AUTH_JWKS_URL
+identity_providers:
+  - id: google
+    label: Google
+    provider_role: upstream_oidc_provider
+customization:
+  login_theme_source: brand/theme_config.json
+  upstream_provider_setup: host_or_operator
 ```
 
 Separate app-level boot example:
@@ -208,7 +286,9 @@ For the broader manifest model, read
 After auth changes:
 
 1. verify `app/app.json` parses
-2. verify `app/config/ai.json` still contains only app-level AI boot settings
-3. verify the web shell can initialize the Keycloak adapter
-4. verify login redirects to the intended Keycloak realm
-5. verify backend-protected routes accept the resulting token
+2. verify `app/config/auth.yaml` has schema_version `mozaiks.auth.v1`
+3. verify `app/config/ai.json` still contains only app-level AI boot settings
+4. verify the web shell can initialize the OIDC PKCE adapter
+5. verify login redirects to the intended OIDC provider
+6. verify `/auth/callback` completes token exchange and returns to an app-local route
+7. verify backend-protected routes accept the resulting token

@@ -154,6 +154,9 @@ class TestIsCanonicalAppConfigPath:
     def test_known_canonical_config_ai(self):
         assert is_canonical_app_config_path("config/ai.json") is True
 
+    def test_known_canonical_config_auth(self):
+        assert is_canonical_app_config_path("config/auth.yaml") is True
+
     def test_known_canonical_config_shell(self):
         assert is_canonical_app_config_path("config/shell.json") is True
 

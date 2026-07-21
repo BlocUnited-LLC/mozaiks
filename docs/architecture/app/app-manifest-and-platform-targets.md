@@ -127,6 +127,13 @@ They should answer one simple product question:
 That is why `authRequired` is clearer than a jargon field like `signIn` or
 `account`.
 
+When `authRequired` is true, generated apps carry the actual auth behavior
+contract in `app/config/auth.yaml` using schema version `mozaiks.auth.v1`.
+That file declares OIDC routes and env handles; it does not contain provider
+URLs, tenant ids, secrets, Keycloak admin settings, or direct Google OAuth
+implementation code. Social login choices are upstream identity-provider setup
+behind OIDC.
+
 ## Brand And Shell UI
 
 Do not overload `app.json` with brand concerns.
