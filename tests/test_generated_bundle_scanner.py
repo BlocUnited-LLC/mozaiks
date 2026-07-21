@@ -52,6 +52,8 @@ def _auth_contract_yaml() -> str:
 schema_version: mozaiks.auth.v1
 auth_required: true
 strategy: oidc
+mode: brokered_oidc
+signup_enabled: false
 routes:
   login: /login
   callback: /auth/callback
@@ -76,6 +78,11 @@ identity_providers:
   - id: google
     label: Google
     provider_role: upstream_oidc_provider
+login_methods:
+  - id: broker
+    kind: oidc_redirect
+    label: Sign in
+    primary: true
 customization:
   login_theme_source: brand/theme_config.json
   upstream_provider_setup: host_or_operator
@@ -583,6 +590,78 @@ def test_scan_generated_bundle_rejects_auth_yaml_with_provider_url_literal() -> 
     errors = scan_generated_bundle(files, require_deployment_artifacts=True)
 
     assert any("provider URLs must be supplied by env handles" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_auth_yaml_with_unknown_mode() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml().replace(
+        "mode: brokered_oidc",
+        "mode: direct_google_oauth",
+    )
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("mode must be one of" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_auth_yaml_with_direct_login_method_url() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml() + """
+login_methods:
+  - id: google
+    kind: direct_google
+    label: Sign in with Google
+    url: https://accounts.google.com
+"""
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert any("login_methods[0] has unsupported fields" in error for error in errors)
+    assert any("login_methods[0].kind" in error for error in errors)
+    assert any("provider URLs must be supplied by env handles" in error for error in errors)
+
+
+def test_scan_generated_bundle_accepts_public_signup_auth_mode() -> None:
+    files = generate_deployment_artifacts(
+        app_id="private-smoke",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=False,
+        include_compose=False,
+        auth_required=True,
+    )["artifacts"]
+    files["app.json"] = '{"name":"Private Smoke","authRequired":true}'
+    files["config/auth.yaml"] = _auth_contract_yaml().replace(
+        "mode: brokered_oidc\nsignup_enabled: false",
+        "mode: public_self_signup\nsignup_enabled: true",
+    ).replace(
+        "  - id: broker\n    kind: oidc_redirect\n    label: Sign in\n    primary: true",
+        "  - id: sign-in\n    kind: oidc_redirect\n    label: Sign in\n    primary: true\n"
+        "  - id: create-account\n    kind: create_account\n    label: Create account\n    primary: false",
+    )
+    files["ui/auth/authAdapter.js"] = _auth_adapter_js()
+
+    errors = scan_generated_bundle(files, require_deployment_artifacts=True)
+
+    assert errors == []
 
 
 def test_scan_generated_bundle_rejects_auth_adapter_without_stateful_pkce() -> None:

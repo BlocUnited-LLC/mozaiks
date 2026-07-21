@@ -225,7 +225,7 @@ nav:
               - Workflow UI Primitive Catalog: architecture/frontend/ui-system/workflow-ui-primitive-catalog.md
               - Transition UI Primitives: architecture/frontend/ui-system/transition-ui-primitives.md
               - UI System Quality Gates: architecture/frontend/ui-system/ui-system-quality-gates.md
-          - Keycloak Auth: architecture/keycloak-auth.md
+          - Brokered OIDC Auth: architecture/keycloak-auth.md
           - Mobile Client Contract: architecture/mobile-client-contract.md
           - Orchestration and Decomposition: architecture/orchestration-and-decomposition.md
   - Contributing:

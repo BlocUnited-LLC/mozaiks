@@ -179,6 +179,11 @@ def test_generated_readiness_workflow_is_environment_staging_gate() -> None:
     assert "APP_IMAGE_SMOKE_VERIFIED_AT.txt" in workflow
     assert "APP_HEALTHCHECK_VERIFIED_AT.txt" in workflow
     assert "APP_AUTH_SMOKE_VERIFIED_AT" in workflow
+    assert "run_entitlement_gate" in workflow
+    assert "OIDC_SMOKE_TOKEN_URL" in workflow
+    assert "grant_type=client_credentials" in workflow
+    assert "scripts/smoke_entitlement_api.py" in workflow
+    assert "entitlement-smoke.json" in workflow
     assert "${{ secrets.OPENAI_API_KEY }}" in workflow
     assert "${{ secrets.MONGO_URI }}" in workflow
     assert "AZURE_SUBSCRIPTION_ID" not in workflow
@@ -471,6 +476,33 @@ def test_generated_artifacts_do_not_contain_github_tokens() -> None:
     )
 
     assert errors == []
+
+
+def test_deployment_bundle_validation_allows_secret_env_refs_but_rejects_literals() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="generic_container",
+        include_dockerfiles=True,
+        include_workflow=True,
+        include_compose=False,
+    )
+    artifacts = dict(result["artifacts"])
+
+    artifacts["scripts/smoke.py"] = "client_secret=${OIDC_SMOKE_CLIENT_SECRET}\n"
+    assert validate_generated_deployment_bundle(
+        artifacts,
+        include_dockerfiles=True,
+        include_workflow=True,
+    ) == []
+
+    artifacts["scripts/smoke.py"] = "client_secret=literal-secret-value\n"
+    errors = validate_generated_deployment_bundle(
+        artifacts,
+        include_dockerfiles=True,
+        include_workflow=True,
+    )
+
+    assert any("forbidden secret/provider marker" in error for error in errors)
 
 
 def test_generated_workflow_references_ci_secret_names_without_values() -> None:
@@ -805,6 +837,9 @@ def test_infra_scaffold_emits_provider_neutral_auth_contract_and_hardened_adapte
     assert "ui/auth/authAdapter.js" in files
     assert "schema_version: mozaiks.auth.v1" in files["config/auth.yaml"]
     assert "strategy: oidc" in files["config/auth.yaml"]
+    assert "mode: brokered_oidc" in files["config/auth.yaml"]
+    assert "signup_enabled: false" in files["config/auth.yaml"]
+    assert "kind: oidc_redirect" in files["config/auth.yaml"]
     assert "post_login_default: /dashboard" in files["config/auth.yaml"]
     assert "VITE_OIDC_DISCOVERY_URL" in files["config/auth.yaml"]
     assert "https://" not in files["config/auth.yaml"]

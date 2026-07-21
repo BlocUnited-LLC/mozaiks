@@ -2408,9 +2408,24 @@ agents:
         - `config/auth.yaml`: provider-neutral mozaiks.auth.v1 behavior/env contract.
         - `ui/auth/authAdapter.js`: state-bound OIDC PKCE browser adapter.
 
+        The auth contract may declare `mode` (`brokered_oidc`, `public_self_signup`,
+        `private_workspace`, `enterprise_sso`, or `multi_provider`), `signup_enabled`,
+        and `login_methods` for UI intent. Treat those as declarative product behavior
+        and display hints only. Account creation, Google/Microsoft buttons, invite policy,
+        enterprise SSO, and provider routing are owned by the upstream OIDC provider or
+        operator configuration unless the app explicitly owns a custom auth integration.
+
         Do not emit direct Google OAuth, Keycloak admin, hosted identity, or social login
         provider mechanics into generated apps. Social login providers are upstream IdPs
         behind the selected OIDC provider; generated apps speak only OIDC.
+
+        OSS/community auth adapters or broker setup packs can add provider setup
+        options, but they must preserve the canonical app contract unless a selected
+        adapter pack explicitly declares a replacement contract with names-only env
+        and secret handles. Do not generate `services/adapters/auth/**` for ordinary
+        Keycloak, Google, Microsoft, Entra, Auth0, Okta, or brokered OIDC setup.
+        Use app-owned auth adapters only when the requested app directly owns custom
+        auth mechanics that cannot be represented by the OIDC/JWT runtime contract.
 
       When in doubt, default both to true. These files are operator-owned after first emit
       and safe to include even when not immediately needed.

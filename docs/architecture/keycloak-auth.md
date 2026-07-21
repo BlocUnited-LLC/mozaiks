@@ -1,6 +1,8 @@
-# Keycloak Authentication Architecture
+# Brokered OIDC Authentication Architecture
 
-Mozaiks ships with Keycloak as the default web authentication path.
+Mozaiks ships with provider-neutral OIDC/JWT authentication primitives for web
+apps. Generated apps use an OIDC PKCE browser adapter plus backend JWT
+validation; the selected identity provider or broker is an operator decision.
 
 This document explains the current auth model in the repo.
 
@@ -36,6 +38,8 @@ Authenticated generated apps use:
 schema_version: mozaiks.auth.v1
 auth_required: true
 strategy: oidc
+mode: brokered_oidc
+signup_enabled: false
 routes:
   login: /login
   callback: /auth/callback
@@ -57,6 +61,11 @@ runtime:
   issuer_env: AUTH_ISSUER
   jwks_url_env: AUTH_JWKS_URL
 identity_providers: []
+login_methods:
+  - id: broker
+    kind: oidc_redirect
+    label: Sign in
+    primary: true
 customization:
   login_theme_source: brand/theme_config.json
   upstream_provider_setup: host_or_operator
@@ -65,6 +74,57 @@ customization:
 This file carries names and routes only. It must not contain provider URLs,
 tenant ids, client secrets, Keycloak admin credentials, Google OAuth secrets, or
 hosted-product policy.
+
+`mode` describes the product access model, not a concrete provider:
+
+- `brokered_oidc` — default for authenticated apps; one OIDC redirect and the
+  broker handles Google, Microsoft, password, MFA, and other login choices.
+- `public_self_signup` — same OIDC flow, with account creation enabled by the
+  upstream provider or broker.
+- `private_workspace` — invite/admin controlled access; app code still validates
+  OIDC/JWT tokens and enforces app policy after login.
+- `enterprise_sso` — operator configured enterprise provider behind OIDC.
+- `multi_provider` — advanced operator-owned provider routing; do not emit
+  provider credentials or direct social login code into the app bundle.
+
+`login_methods` are declarative UI hints. They may label a sign-in, create
+account, or enterprise SSO action, but they do not carry provider endpoints,
+tenant IDs, client secrets, or OAuth implementation code.
+
+## Adapter Extension Model
+
+The default generated app path is intentionally boring:
+
+```text
+app/config/auth.yaml
+ui/auth/authAdapter.js
+deployment env handles
+```
+
+That is enough for Keycloak, Entra, Auth0, Okta, hosted identity, Google via a
+broker, Microsoft via a broker, and most enterprise SSO setups because the app
+speaks standard OIDC.
+
+OSS/community members can still add auth provider support in two ways:
+
+1. Runtime adapters in `mozaiksai/core/auth/adapters/` when the provider needs
+   backend token validation behavior beyond generic OIDC/JWT.
+2. Build-context or capability-pack setup guidance when an operator wants a
+   repeatable provider setup path, such as a Keycloak realm template, an Entra
+   External ID checklist, or an Auth0 application template.
+
+Those extensions must preserve the canonical app contract. They may add
+provider setup documentation, env-handle declarations, or optional app-owned
+`services/adapters/auth/**` code only when the generated app truly owns custom
+auth mechanics. They must not place provider admin credentials, social-provider
+secrets, tenant IDs, or hardcoded provider URLs in generated app source.
+
+Keycloak is a good example: a working Keycloak deployment requires a realm URL,
+client registration, redirect URI, web origins, optional social identity
+providers, and sometimes admin credentials. The generic factory should not
+invent those values. It should generate the OIDC contract and readiness checks;
+an operator, hosted product, or selected adapter/setup pack supplies the actual
+Keycloak URL and registered client values through environment and secret stores.
 
 ### `app/config/ai.json`
 
@@ -89,14 +149,13 @@ Own deployment-time backend configuration, such as:
 - `VITE_OIDC_AUTHORITY` — frontend: OIDC authority for the browser auth flow
 - `VITE_MOCK_MODE` — frontend: skip auth for local development
 
-### `app/brand/login-theme/`
+### Login Theme Assets
 
-Owns Keycloak login-theme assets and templates.
-
-This is separate from the in-app shell assets under `app/brand/assets/`.
-`app/brand/theme_config.json` may style login surfaces, but it does not own auth
-behavior, provider selection, callback mechanics, token storage, or secret
-handles.
+Provider/broker login-theme assets are optional and provider-specific. Keycloak,
+Entra External ID, Auth0, Okta, and similar systems all handle these assets
+differently. Generated apps may style their in-app `/login` route through
+`app/brand/theme_config.json`, but that file does not own auth behavior,
+provider selection, callback mechanics, token storage, or secret handles.
 
 ## Current Repo Note
 
@@ -160,7 +219,8 @@ Key pieces:
 - FastAPI route protection
 - WebSocket authentication
 
-The backend should be configured to validate against the same Keycloak realm and client that the frontend uses.
+The backend should be configured to validate tokens from the same OIDC
+issuer/audience that the frontend uses for login.
 
 ## Current Configuration Rule
 
@@ -170,7 +230,8 @@ Use this order of operations:
 2. declare provider-neutral auth behavior in `app/config/auth.yaml`
 3. declare app-level chat/workflow boot defaults in `app/config/ai.json`
 4. use environment variables for deployment-specific provider values
-5. keep Keycloak login-theme assets under `app/brand/login-theme/`
+5. keep provider-specific broker setup outside generated app source unless the
+   app explicitly owns a custom auth integration under `app/services/adapters/auth/`
 
 Do not introduce:
 
@@ -196,6 +257,8 @@ Provider-neutral auth behavior example belongs in `app/config/auth.yaml`:
 schema_version: mozaiks.auth.v1
 auth_required: true
 strategy: oidc
+mode: public_self_signup
+signup_enabled: true
 routes:
   login: /login
   callback: /auth/callback
@@ -220,6 +283,18 @@ identity_providers:
   - id: google
     label: Google
     provider_role: upstream_oidc_provider
+  - id: microsoft
+    label: Microsoft
+    provider_role: upstream_oidc_provider
+login_methods:
+  - id: sign-in
+    kind: oidc_redirect
+    label: Sign in
+    primary: true
+  - id: create-account
+    kind: create_account
+    label: Create account
+    primary: false
 customization:
   login_theme_source: brand/theme_config.json
   upstream_provider_setup: host_or_operator
