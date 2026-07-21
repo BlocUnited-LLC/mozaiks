@@ -74,15 +74,12 @@ app = runtime_app.app
 persistence_manager = runtime_app.persistence_manager
 logger = get_workflow_logger("platform_app")
 
-from mozaiksai.core.ports.collaboration import NoOpCollaborationAdapter  # noqa: E402
-
 executor_registry = ExecutorRegistry()
 app.state.executor_registry = executor_registry
 app.state.subscriptions_config = None
 app.state.startup_degraded = False
 app.state.startup_degraded_reason: str | None = None
 app.state.failed_module_names: list[str] = []
-app.state.collaboration = NoOpCollaborationAdapter()
 _runtime_services: list[Any] = []
 
 
@@ -144,6 +141,33 @@ def _load_entitlement_adapter(config: Any) -> EntitlementPort:
     adapter = ConfiguredEntitlementAdapter(config=config)
     logger.info("ENTITLEMENT_ADAPTER_READY: configured subscriptions adapter wired")
     return adapter  # type: ignore[return-value]
+
+
+def _warn_undeclared_entitlement_gates(
+    modules: list[Any],
+    subscriptions_config: Any,
+) -> None:
+    """Warn if any module action declares an entitlement_gate that does not
+    appear in any plan's capabilities in subscriptions.yaml.
+
+    A mismatched gate causes silent always-deny for that action, which is
+    almost always a misconfiguration rather than intentional behaviour.
+    """
+    declared_capabilities: set[str] = set()
+    for plan in subscriptions_config.plans:
+        declared_capabilities.update(plan.capabilities or [])
+
+    for loaded_module in modules:
+        for action_id, capability_id in loaded_module.action_entitlement_map.items():
+            if capability_id and capability_id not in declared_capabilities:
+                logger.warning(
+                    "ENTITLEMENT_GATE_UNDECLARED: %s.%s gates on '%s' "
+                    "but no plan in subscriptions.yaml grants that capability — "
+                    "this action will always be denied for non-trusted callers.",
+                    loaded_module.name,
+                    action_id,
+                    capability_id,
+                )
 
 
 _NON_RUNNABLE_WORKFLOW_IDS = {"extended_orchestration"}
@@ -328,6 +352,12 @@ async def _platform_startup() -> None:
             executor_registry.register(module_executor)
             app.state.module_action_surfaces = module_action_surfaces
             logger.info("MODULE_EXECUTOR_READY: %s module(s)", len(load_result.modules))
+
+            if load_result.subscriptions_config is not None:
+                _warn_undeclared_entitlement_gates(
+                    load_result.modules,
+                    load_result.subscriptions_config,
+                )
 
             if load_result.failed_module_names:
                 failed_names = sorted(load_result.failed_module_names)
