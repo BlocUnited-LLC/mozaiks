@@ -28,7 +28,7 @@ Mozaiks is a sophisticated, well-architected multi-tenant AI orchestration runti
 | Testing | 7/10 | 9/10 | 10/10 | Concurrency suite ✓, flaky test retry ✓, mypy clean (476 files) ✓, coverage threshold ✓ |
 | Operations | 6/10 | 10/10 | 10/10 | Runbooks ✓, backup ✓, secrets rotation ✓, zero-downtime ✓, Keycloak realm VC ✓ |
 | Code Quality | 7/10 | 10/10 | 10/10 | AG2 adapter ✓, full platform.py decomposition ✓, mypy 0 errors on 476 files ✓ |
-| Architecture | 8/10 | 9/10 | 10/10 | Artifact versioning ✓, OSS collaboration hooks ✓, refinement tracking ✓ |
+| Architecture | 8/10 | 9/10 | 10/10 | Artifact versioning ✓, hosted collaboration boundary clarified, refinement tracking ✓ |
 
 **Initial average: 6.6/10 → Current average: 9.4/10**
 
@@ -64,7 +64,7 @@ All items below are in `mozaiksai/core/` or `mozaiksai/hosts/routers/` and are i
 | Router decomposition — notifications, shell, modules | `mozaiksai/hosts/routers/` | Code Quality |
 | HMAC-SHA256 artifact signer | `core/runtime/persistence/artifact_signer.py` | Security |
 | Router decomposition session 2 — chat, sessions, transitions, profile, workflows | `mozaiksai/hosts/routers/` | Code Quality |
-| OSS collaboration hooks — workspace share + presence port | `core/ports/collaboration.py` | Architecture |
+| Hosted collaboration boundary | app-owned modules + platform hooks | Architecture |
 | Durable refinement event audit trail | `mozaiksai/control_plane/refinement_tracking.py` | Architecture |
 | mypy clean pass — 0 errors on 476 source files | `pyproject.toml`, CI, 12 files fixed | Code Quality |
 | Coverage threshold enforcement | `pyproject.toml` (`--cov-fail-under=30`) | Testing |
@@ -296,7 +296,7 @@ All items below are in `mozaiksai/core/` or `mozaiksai/hosts/routers/` and are i
 - Refinement HITL loop incomplete — control plane routes refinements but does not track request → decision → outcome
 - Brownfield adoption scope unclear — `AppContextVersion` defined but relationship to `app_bundle` not fully documented
 - Workflow sequence execution not scale-tested under cross-workflow composition
-- Multi-user collaboration absent — workspace sharing and presence are hosted-product-only with no OSS hook points
+- Multi-user collaboration is hosted-product-only and belongs in `mozaiks-app` modules or platform hooks; OSS should not define a generic collaboration port.
 - No conflict resolution for parallel refinements targeting the same artifact
 
 ### Action Steps
@@ -307,7 +307,7 @@ All items below are in `mozaiksai/core/` or `mozaiksai/hosts/routers/` and are i
 | AR-2 | Refinement tracking — log request → classifier decision → outcome | `mozaiksai/control_plane/refinement_tracking.py` | **Done ✓** |
 | AR-3 | Brownfield canonical scope — wire ExistingAppDiscovery outputs into AppGenerator context | `factory_app/workflows/`, docs | Remaining |
 | AR-4 | Scale-test workflow sequences — 50x cross-workflow compositions in CI | `tests/e2e/test_workflow_sequences.py` | Remaining |
-| AR-5 | OSS collaboration hook points — workspace share events + presence hooks in `core/ports/` | `core/ports/collaboration.py` | **Done ✓** |
+| AR-5 | Hosted collaboration boundary — product-owned collaboration via app modules/platform hooks, no OSS collaboration port | hosted app workspace | **Done ✓** |
 | AR-6 | Conflict resolution for parallel refinements — last-writer-wins with UI warning | `factory_app/control_plane/`, `hosts/studio.py` | Remaining |
 
 ---
@@ -360,7 +360,7 @@ All P3 hardening items resolved in session 2. Remaining items are purely operati
 | Priority | ID | Action | Status |
 |----------|----|--------|--------|
 | P3 | AR-2 | Implement refinement tracking | **Done ✓** |
-| P3 | AR-5 | OSS collaboration hook points | **Done ✓** |
+| P3 | AR-5 | Hosted collaboration boundary clarified | **Done ✓** |
 | P3 | CQ-1 | Complete platform.py decomposition | **Done ✓** |
 | P3 | CQ-3 | Enable mypy on `core/` incrementally | **Done ✓** |
 | P3 | S-4 | Sign generated artifacts | **Done ✓** |

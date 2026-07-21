@@ -59,7 +59,7 @@ Yes — at every layer, not just on paper.
 | **Auth** | Protocol-based — Keycloak, Supabase, JWKS, anonymous all swap via one adapter file, zero runtime changes. | `core/auth/adapters/` |
 | **Persistence** | Port/adapter — local filesystem, S3, MongoDB; same `ArtifactStore` interface. | `core/ports/artifact_store.py` |
 | **Event bus** | No-op, Mongo change streams, Redis pub/sub — one environment variable switches backend. | `core/ports/event_bus.py` |
-| **Collaboration** | OSS hook points defined; hosted products wire a concrete adapter at startup. | `core/ports/collaboration.py` |
+| **Collaboration** | Hosted-product capability owned by app modules and platform hooks; OSS exposes generic module dispatch and scope hooks only. | `app/modules/*`, `app/services/platform_hooks.py` in hosted workspaces |
 | **Host layers** | Runtime → Platform → Studio are independently composable. Hosted products add a layer on top without touching the OSS runtime. | `hosts/runtime.py`, `hosts/platform.py`, `hosts/studio.py` |
 | **Control plane** | Classifier, router, decision policy, and coding worker are separate implementations behind a single harness interface. | `control_plane/implementations/` |
 

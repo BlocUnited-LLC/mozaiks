@@ -16,6 +16,10 @@ This project follows a practical pre-1.0 changelog format:
 
 - Added a provider-neutral generated app auth contract (`app/config/auth.yaml`) and hardened OIDC PKCE adapter output so authenticated apps keep auth behavior deterministic while leaving provider setup to operators or hosted services.
 
+### Removed
+
+- Removed the unused OSS `CollaborationPort` placeholder and default `app.state.collaboration` wiring. Hosted collaboration remains a `mozaiks-app` product capability implemented through app-owned modules and platform hooks, not a generic OSS runtime port.
+
 ## 0.1.11 - 2026-07-20
 
 ### Added
@@ -139,9 +143,6 @@ This project follows a practical pre-1.0 changelog format:
 
 - **HMAC-SHA256 artifact signing** (`mozaiksai/core/runtime/persistence/artifact_signer.py`):
   `sign_artifact()` and `verify_artifact()` use HMAC-SHA256 with a hex-encoded 32-byte key from `ARTIFACT_SIGNING_KEY` env var. Unsigned mode degrades gracefully (returns empty string / always verifies) when no key is configured. `assert_artifact_authentic()` raises `ArtifactSignatureError` on tamper detection. `artifact_promotion.py` now signs bundles at promotion time and includes `bundle_hmac_sha256` in refinement metadata. 16 tests added.
-
-- **OSS collaboration hook points** (`mozaiksai/core/ports/collaboration.py`):
-  `CollaborationPort` Protocol with `on_workspace_shared`, `on_user_active`, `on_user_inactive`, `get_presence` methods. `NoOpCollaborationAdapter` (default — all events silently dropped) wired into `app.state.collaboration` at platform startup. Hosted products replace with a concrete adapter without touching OSS runtime.
 
 - **Durable refinement event tracking** (`mozaiksai/control_plane/refinement_tracking.py`):
   `record_refinement_event()` persists audit documents to `mozaiks.cp_refinement_events` collection with event kind, request ID, app ID, change class, workflow sequence, outcome, and timing. Fire-and-forget — never raises to callers. `get_refinement_history()` queries by app and optional request ID. `OrchestrationControlHarness` now emits `request_received`, `classified`, `completed`, and `failed` events at each decision boundary.
