@@ -34,6 +34,7 @@ task_contracts:
       - "Workflow launches from pages use action_type: workflow."
       - Prefer compact config/shell.json shortcuts for common shell chrome instead of repeating full header/profile/mobile/footer arrays.
       - Shell shortcuts may target header, profile, mobile, and footer slots using primitive ids such as home, apps, workspace, wallet, create, profile, messages, notifications, signout, signin, legal, terms, cookies, and privacy. Use dashboard only when the app declares a route/page with id dashboard; it is not a built-in shortcut. Do NOT include admin_portal in any shortcuts list — it is framework-injected automatically for admin users and must not be declared by app config or generated output.
+      - Do not put profile-owned social surfaces such as friends, direct messages, user posts, or activity feed into config/shell.json shortcuts or generated global nav by default. They belong in contracts/profile.yaml tabs unless the product explicitly asks for a separate app-wide discovery route.
       - Prefer route-level AppPageSchema.navigation for page-owned global/local/profile/footer nav contributions; keep config/shell.json focused on app-wide navigation policy and built-in chrome shortcuts.
       - Use config/shell.json navigation.policy for placement rules such as desktop global=header, desktop local=sidebar, mobile global=bottomBar, mobile local=sheet, and mobile footer=hidden.
       - Put route chrome intent on AppPageSchema.shell_mode; use config/shell.json chrome only for app-wide mode-policy overrides.
@@ -166,7 +167,8 @@ task_contracts:
       - contracts/reactions.yaml target.kind may be handler, capability, notification, or service_adapter. service_adapter targets must declare target.adapter and target.adapter_method, point only to app-owned services/adapters/* support code, and must not be used to bypass facade modules, module state ownership, or managed-provider boundaries.
       - JS stubs are allowed only for declared customization surfaces.
       - Emit contracts/profile.yaml only when a module has user-scoped data worth surfacing on the profile page (e.g. account summary, notification preferences, usage stats). Do not emit profile.yaml for every module.
-      - profile.yaml panels must bind to module actions declared in module.yaml. Do not expose admin-only actions or secrets through profile panels.
+      - profile.yaml tabs are the default for first-class social/profile sections such as friends, messages, user posts, and activity feed. Do not generate standalone /friends, /messages, /posts, or /feed routes or shell shortcuts for those surfaces by default.
+      - profile.yaml panels and tabs must bind to module actions declared in module.yaml. Actions that need the viewed profile subject must declare an optional user_id input; viewer-scoped actions should use ctx.user_id instead. Do not expose admin-only actions or secrets through profile composition.
       - Do not emit profile.yaml with kind=form — that kind is reserved and not yet implemented.
       - profile.yaml does not replace /api/me identity. Auth identity and core account data remain platform-owned.
       - Emit contracts/relationships.yaml only when a module can enumerate current-user relationships to its own resources for generic My Apps, Portfolio, or My Resources surfaces.

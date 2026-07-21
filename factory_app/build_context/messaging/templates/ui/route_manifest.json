@@ -7,9 +7,7 @@
       "component": "Messages",
       "order": 50,
       "navigation": {
-        "scope": "global",
-        "icon": "MessageCircle",
-        "order": 50
+        "include": false
       },
       "meta": {
         "title": "Messages",

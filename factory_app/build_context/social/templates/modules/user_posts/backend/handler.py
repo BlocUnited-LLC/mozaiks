@@ -7,49 +7,43 @@ _service = UserPostsService()
 
 
 class UserPostsHandler:
-    async def create_post(self, ctx, payload):
+    async def create_post(self, ctx, body: str = "", media_urls=None, visibility=None, **_params):
         return await _service.create_post(
             ctx,
-            body=payload.get("body", ""),
-            media_urls=payload.get("media_urls"),
-            visibility=payload.get("visibility"),
+            body=body,
+            media_urls=media_urls,
+            visibility=visibility,
         )
 
-    async def get_post(self, ctx, payload):
-        return await _service.get_post(ctx, post_id=payload.get("post_id", ""))
+    async def get_post(self, ctx, post_id: str = "", **_params):
+        return await _service.get_post(ctx, post_id=post_id)
 
-    async def delete_post(self, ctx, payload):
-        return await _service.delete_post(ctx, post_id=payload.get("post_id", ""))
+    async def delete_post(self, ctx, post_id: str = "", **_params):
+        return await _service.delete_post(ctx, post_id=post_id)
 
-    async def list_posts(self, ctx, payload):
+    async def list_posts(self, ctx, author_id=None, visibility=None, limit=None, before=None, **_params):
         return await _service.list_posts(
             ctx,
-            author_id=payload.get("author_id"),
-            visibility=payload.get("visibility"),
-            limit=payload.get("limit"),
-            before=payload.get("before"),
+            author_id=author_id,
+            visibility=visibility,
+            limit=limit,
+            before=before,
         )
 
-    async def list_user_posts(self, ctx, payload):
-        return await _service.list_user_posts(
-            ctx, user_id=payload.get("user_id"), limit=payload.get("limit"), before=payload.get("before")
-        )
+    async def list_user_posts(self, ctx, user_id: str | None = None, limit=None, before=None, **_params):
+        return await _service.list_user_posts(ctx, user_id=user_id, limit=limit, before=before)
 
-    async def react_to_post(self, ctx, payload):
-        return await _service.react_to_post(
-            ctx, post_id=payload.get("post_id", ""), reaction_type=payload.get("reaction_type")
-        )
+    async def react_to_post(self, ctx, post_id: str = "", reaction_type=None, **_params):
+        return await _service.react_to_post(ctx, post_id=post_id, reaction_type=reaction_type)
 
-    async def get_reaction_summary(self, ctx, payload):
-        return await _service.get_reaction_summary(ctx, post_id=payload.get("post_id", ""))
+    async def get_reaction_summary(self, ctx, post_id: str = "", **_params):
+        return await _service.get_reaction_summary(ctx, post_id=post_id)
 
-    async def add_comment(self, ctx, payload):
-        return await _service.add_comment(ctx, post_id=payload.get("post_id", ""), body=payload.get("body", ""))
+    async def add_comment(self, ctx, post_id: str = "", body: str = "", **_params):
+        return await _service.add_comment(ctx, post_id=post_id, body=body)
 
-    async def delete_comment(self, ctx, payload):
-        return await _service.delete_comment(ctx, comment_id=payload.get("comment_id", ""))
+    async def delete_comment(self, ctx, comment_id: str = "", **_params):
+        return await _service.delete_comment(ctx, comment_id=comment_id)
 
-    async def list_comments(self, ctx, payload):
-        return await _service.list_comments(
-            ctx, post_id=payload.get("post_id", ""), limit=payload.get("limit"), after=payload.get("after")
-        )
+    async def list_comments(self, ctx, post_id: str = "", limit=None, after=None, **_params):
+        return await _service.list_comments(ctx, post_id=post_id, limit=limit, after=after)

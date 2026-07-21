@@ -112,18 +112,15 @@ required_outputs:
     owner: templates
   - path: ui/components/SocialProfileTabs.jsx
     owner: templates
-  - path: ui/pages/feed.yaml
-    owner: templates
-  - path: ui/pages/friends.yaml
-    owner: templates
-  - path: ui/pages/posts.yaml
-    owner: templates
 
 forbidden_outputs:
   - path_prefix: modules/social/
   - path_prefix: modules/network/
   - path_prefix: services/social/
   - path_prefix: services/friends/
+  - path: ui/pages/feed.yaml
+  - path: ui/pages/friends.yaml
+  - path: ui/pages/posts.yaml
 
 runtime_boundaries:
   - id: persistence_layer
@@ -148,6 +145,13 @@ runtime_boundaries:
       friends and user_posts declare user_data_scope: true and ship account_data_handler.py.
       activity_feed events are derived records — purge them in account_data_handler when actor_id
       or about_user_id matches the deleted user.
+  - id: profile_tab_composition
+    rule: >
+      Friends, posts, and activity feed are profile-tab contributions declared in
+      modules/*/contracts/profile.yaml and registered through ui/index.js. Do not
+      generate standalone /friends, /posts, or /feed pages or shell shortcuts by
+      default; add separate pages only when the product spec explicitly asks for
+      an app-wide discovery feed outside the profile.
 
 facades: []
 

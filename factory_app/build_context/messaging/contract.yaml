@@ -54,6 +54,12 @@ required_outputs:
     owner: templates
   - path: modules/messages/contracts/reactions.yaml
     owner: templates
+  - path: modules/messages/contracts/profile.yaml
+    owner: templates
+  - path: ui/index.js
+    owner: templates
+  - path: ui/components/MessagingProfileTab.jsx
+    owner: templates
   - path: ui/pages/custom/Messages.jsx
     owner: templates
   - path: ui/route_manifest.json
@@ -81,6 +87,12 @@ runtime_boundaries:
     rule: Do not emit messaging.contacts.* capabilities or a contacts module as a DM roster. Select the social pack for friend/relationship rosters, or use an app-specific relationship provider with non-messaging capability ids when the product truly needs a private address book.
   - id: hosted_extension_boundary
     rule: Hosted products may add announcements, operator routing, realtime fan-out, or product-specific moderation, but they must keep core thread/message persistence on the messages module and preserve domain.messages.* lifecycle events for create_thread, send_message, and mark_thread_read.
+  - id: profile_tab_composition
+    rule: >
+      The default DM inbox entrypoint is a profile tab declared in
+      modules/messages/contracts/profile.yaml and registered through ui/index.js.
+      Keep /messages as a focused conversation route, but do not add it to global
+      shell navigation or profile shortcut pills by default.
 
 facades: []
 

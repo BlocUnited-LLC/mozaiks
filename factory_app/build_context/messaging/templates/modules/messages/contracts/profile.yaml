@@ -1,0 +1,7 @@
+schema_version: mozaiks.profile.v1
+tabs:
+  - id: messages
+    label: Messages
+    order: 40
+    action: list_threads
+    component: MessagingProfileTab

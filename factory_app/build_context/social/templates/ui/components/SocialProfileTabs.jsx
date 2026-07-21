@@ -1,9 +1,5 @@
 import { useMemo } from "react";
 
-function daysAgo(days) {
-  return new Date(Date.now() - days * 86400000).toISOString();
-}
-
 function relativeTime(value) {
   if (!value) return "";
   const diff = Date.now() - new Date(value).getTime();
@@ -53,41 +49,31 @@ function groupByApp(items) {
   return [...groups.entries()];
 }
 
-function Section({ title, isDemo, children }) {
+function Section({ title, children }) {
   return (
     <section style={{ display: "grid", gap: 12 }}>
       <header style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <h3 style={{ fontSize: 13, letterSpacing: 0, margin: 0, textTransform: "uppercase" }}>{title}</h3>
-        {isDemo && <span style={{ fontSize: 11, opacity: 0.65 }}>demo data</span>}
       </header>
       {children}
     </section>
   );
 }
 
-const DEMO_FRIENDS = [
-  { friendship_id: "friend_1", friend_user_id: "jada.kim", display_name: "Jada Kim", since: daysAgo(42) },
-  { friendship_id: "friend_2", friend_user_id: "alex.river", display_name: "Alex Rivera", since: daysAgo(18) },
-  { friendship_id: "friend_3", friend_user_id: "sam.chen", display_name: "Sam Chen", since: daysAgo(7) },
-];
-
-const DEMO_ACTIVITY = [
-  { event_id: "activity_1", app_id: "community-hub", actor_id: "alex.river", subject_label: "accepted a friend request", created_at: daysAgo(0.2) },
-  { event_id: "activity_2", app_id: "community-hub", actor_id: "jada.kim", subject_label: "published a post", created_at: daysAgo(1) },
-  { event_id: "activity_3", app_id: "creator-club", actor_id: "sam.chen", subject_label: "commented on a post", created_at: daysAgo(2) },
-];
-
-const DEMO_POSTS = [
-  { post_id: "post_1", app_id: "community-hub", author_id: "demo.user", body: "Working through a new community workflow today. The feed and friend requests are starting to feel cohesive.", reaction_count: 12, comment_count: 3, created_at: daysAgo(0.5) },
-  { post_id: "post_2", app_id: "creator-club", author_id: "demo.user", body: "Testing creator updates with comments and reactions before wiring real seed data.", reaction_count: 8, comment_count: 2, created_at: daysAgo(4) },
-];
+function EmptyState({ label }) {
+  return (
+    <div style={{ border: "1px solid var(--border-color, #d1d5db)", padding: 12, opacity: 0.75 }}>
+      {label}
+    </div>
+  );
+}
 
 export function FriendListTab({ data }) {
-  const source = Array.isArray(data?.friends) ? data.friends : DEMO_FRIENDS;
-  const isDemo = !Array.isArray(data?.friends);
+  const source = Array.isArray(data?.friends) ? data.friends : [];
 
   return (
-    <Section title="Friends" isDemo={isDemo}>
+    <Section title="Friends">
+      {source.length === 0 && <EmptyState label="No friends yet." />}
       <div style={{ display: "grid", gap: 8 }}>
         {source.map((friend) => (
           <article key={friend.friendship_id || friend.friend_user_id} style={{ alignItems: "center", border: "1px solid var(--border-color, #d1d5db)", display: "flex", gap: 12, padding: 12 }}>
@@ -105,12 +91,12 @@ export function FriendListTab({ data }) {
 }
 
 export function ActivityFeedTab({ data }) {
-  const source = Array.isArray(data?.events) ? data.events : DEMO_ACTIVITY;
-  const isDemo = !Array.isArray(data?.events);
+  const source = Array.isArray(data?.events) ? data.events : [];
   const groups = useMemo(() => groupByApp(source), [source]);
 
   return (
-    <Section title="Activity" isDemo={isDemo}>
+    <Section title="Activity">
+      {source.length === 0 && <EmptyState label="No activity yet." />}
       {groups.map(([appId, events]) => (
         <div key={appId} style={{ display: "grid", gap: 8 }}>
           <strong>{appId}</strong>
@@ -128,12 +114,12 @@ export function ActivityFeedTab({ data }) {
 }
 
 export function UserPostsTab({ data }) {
-  const source = Array.isArray(data?.posts) ? data.posts : DEMO_POSTS;
-  const isDemo = !Array.isArray(data?.posts);
+  const source = Array.isArray(data?.posts) ? data.posts : [];
   const groups = useMemo(() => groupByApp(source), [source]);
 
   return (
-    <Section title="Posts" isDemo={isDemo}>
+    <Section title="Posts">
+      {source.length === 0 && <EmptyState label="No posts yet." />}
       {groups.map(([appId, posts]) => (
         <div key={appId} style={{ display: "grid", gap: 8 }}>
           <strong>{appId}</strong>
