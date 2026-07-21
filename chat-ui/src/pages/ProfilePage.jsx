@@ -466,12 +466,19 @@ export default function ProfilePage() {
       path: location.pathname,
       urlTabParam,
       urlAppIdParam,
+      username,
       hasBackendUrl: Boolean(backendUrl),
     });
     if (backendUrl) {
+      const subjectParams = new URLSearchParams();
+      if (urlAppIdParam) subjectParams.set('app_id', urlAppIdParam);
+      if (!isOwner && username) subjectParams.set('username', username);
+      const subjectQuery = subjectParams.toString();
+      const subjectSuffix = subjectQuery ? `?${subjectQuery}` : '';
+
       // profile-panels: older panel contract (title field, workspace_support etc.)
       try {
-        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-panels`, {}, auth);
+        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-panels${subjectSuffix}`, {}, auth);
         const body = res.ok ? await res.json() : { panels: [] };
         panelTabs = (Array.isArray(body?.panels) ? body.panels : []).map(p => ({
           id:        p.id,
@@ -497,7 +504,7 @@ export default function ProfilePage() {
       }
       // profile-tabs: module tab contract (label field, custom module panels, etc.)
       try {
-        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-tabs`, {}, auth);
+        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-tabs${subjectSuffix}`, {}, auth);
         const body = res.ok ? await res.json() : { tabs: [] };
         moduleTabs = (Array.isArray(body?.tabs) ? body.tabs : []).map(t => ({
           id:        t.id,
@@ -534,7 +541,7 @@ export default function ProfilePage() {
     });
     setTabs(merged);
     setTabsLoading(false);
-  }, [backendUrl, auth, location.pathname, urlAppIdParam, urlTabParam]);
+  }, [backendUrl, auth, isOwner, location.pathname, urlAppIdParam, urlTabParam, username]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
   useEffect(() => { loadTabs(); }, [loadTabs]);
