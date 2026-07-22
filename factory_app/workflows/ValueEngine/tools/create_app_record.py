@@ -10,6 +10,7 @@ tool intentionally does not call the permissioned module action route.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from typing import Any
@@ -108,28 +109,10 @@ async def _create_studio_app(payload: dict) -> dict | None:
     return None
 
 
-async def _has_persisted_user_intent(*, app_id: str, chat_id: str) -> bool:
-    if not app_id or not chat_id:
-        return False
-    try:
-        from mozaiksai.core.data.persistence.persistence_manager import AG2PersistenceManager
-
-        manager = AG2PersistenceManager()
-        events = await manager.load_run_events(chat_id=chat_id, app_id=app_id)
-        messages = manager.project_run_events_to_messages(events)
-    except Exception as exc:
-        logger.debug("Could not inspect run stream before app registry create: %s", exc)
-        return False
-
-    for message in messages:
-        if not isinstance(message, dict):
-            continue
-        if message.get("role") != "user":
-            continue
-        content = str(message.get("content") or "").strip()
-        if content and content != ".":
-            return True
-    return False
+def _provisional_build_app_id(*, chat_app_id: str, chat_id: str, build_id: str) -> str:
+    seed = f"{chat_app_id}:{chat_id or build_id}".encode()
+    digest = hashlib.sha1(seed).hexdigest()[:12]
+    return f"draft-build-{digest}"
 
 
 async def create_app_record(context_variables: Any | None = None) -> dict:
@@ -139,16 +122,37 @@ async def create_app_record(context_variables: Any | None = None) -> dict:
 
     Intentionally does NOT pass the factory session app_id as the registry app_id,
     because all ValueEngine sessions share the same factory app_id (from MOZAIKS_APP_ID).
-    Instead, it lets the registry generate a unique app_id per build and stores the
-    factory session app_id as chat_app_id for correct chat session resume routing.
+    Instead, it reserves a deterministic provisional app_id per workflow chat and
+    stores the factory session app_id as chat_app_id for correct chat session resume
+    routing from the Apps directory.
     """
     cv = context_variables or {}
     user_id = _context_get(cv, "user_id", "anonymous")
-    factory_app_id = _context_get(cv, "app_id", "")
+    context_app_id = str(_context_get(cv, "app_id", "") or "").strip()
+    chat_app_id = str(
+        _context_get(cv, "chat_app_id")
+        or _context_get(cv, "factory_app_id")
+        or _context_get(cv, "session_app_id")
+        or context_app_id
+        or ""
+    ).strip()
     app_name = _context_get(cv, "app_name", "")
-    chat_id = _context_get(cv, "chat_id", "")
+    chat_id = str(_context_get(cv, "chat_id", "") or "").strip()
     workflow_name = _context_get(cv, "workflow_name", "ValueEngine")
-    build_id = _context_get(cv, "build_id", "") or chat_id
+    build_id = str(_context_get(cv, "build_id", "") or chat_id).strip()
+    build_registry_id = str(_context_get(cv, "build_registry_id", "") or "").strip()
+    if not chat_id:
+        return {
+            "success": False,
+            "skipped": True,
+            "reason": "No workflow chat id available for app registry tracking.",
+        }
+
+    registry_app_id = (
+        context_app_id
+        if build_registry_id and context_app_id
+        else _provisional_build_app_id(chat_app_id=chat_app_id, chat_id=chat_id, build_id=build_id)
+    )
     build_context_profile = _build_context_profile(cv)
     current_build_run = {
         "build_id": build_id,
@@ -162,8 +166,8 @@ async def create_app_record(context_variables: Any | None = None) -> dict:
         "name": app_name or None,
         "name_source": "manual" if app_name else "provisional",
         "description": "",
-        "app_id": "",  # Let the registry generate a unique app_id per build
-        "chat_app_id": factory_app_id,  # Factory session app_id needed for chat resume routing
+        "app_id": registry_app_id,
+        "chat_app_id": chat_app_id,  # Factory session app_id needed for chat resume routing
         "status": "building",
         "active_chat_id": chat_id,
         "active_workflow_id": workflow_name,
@@ -171,16 +175,6 @@ async def create_app_record(context_variables: Any | None = None) -> dict:
         "current_build_run": current_build_run,
     }
     _ = user_id
-    build_registry_id = str(_context_get(cv, "build_registry_id", "") or "").strip()
-    if not build_registry_id and not await _has_persisted_user_intent(
-        app_id=str(factory_app_id or ""),
-        chat_id=str(chat_id or ""),
-    ):
-        return {
-            "success": False,
-            "skipped": True,
-            "reason": "No persisted user build intent yet.",
-        }
 
     result = await _create_studio_app(payload)
 
@@ -200,6 +194,8 @@ async def create_app_record(context_variables: Any | None = None) -> dict:
             user_id,
         )
         _set_context_value(cv, "build_registry_id", build_registry_id)
+        if chat_app_id:
+            _set_context_value(cv, "chat_app_id", chat_app_id)
         if new_app_id:
             _set_context_value(cv, "app_id", new_app_id)
         return {

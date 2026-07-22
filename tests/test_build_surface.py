@@ -166,6 +166,8 @@ def test_apps_page_fetches_workspace_apps_endpoint() -> None:
     layout_source = _read("chat-ui/src/workspace/WorkspaceLayout.jsx")
     assert "/api/studio/apps" in hook_source
     assert "/api/studio/apps" in create_hook_source
+    assert "_provisional_build_app_id" in create_hook_source
+    assert "No persisted user build intent" not in create_hook_source
     assert "/api/modules/app_registry" not in create_hook_source
     assert "/api/studio/apps/{record_id}/status" in update_hook_source
     assert "/api/modules/app_registry" not in update_hook_source

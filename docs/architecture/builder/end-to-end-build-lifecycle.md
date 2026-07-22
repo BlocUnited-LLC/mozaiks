@@ -160,6 +160,9 @@ Responsibilities:
 - associate `app_id`, `user_id`, app name, and initial status
 - expose build status to the `Apps` directory, app Studio summaries, and the
   workflow-owned build sequence
+- create an idempotent provisional record as soon as the workflow chat starts,
+  before the user completes the ValueEngine interview, so unfinished work can be
+  resumed from `/apps`
 
 Important rule:
 

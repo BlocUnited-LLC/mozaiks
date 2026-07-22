@@ -11,6 +11,11 @@ The home page of your workspace. Shows every app you have created, its current
 state, and whether it needs attention. Apps that need your input surface at the
 top.
 
+When a new build workflow starts, the Apps page receives a provisional draft
+entry immediately. The entry uses a placeholder draft label until the workflow
+captures a real app name, and its primary action resumes the active workflow
+chat.
+
 From here you can:
 
 - **Create App** — start a new app build

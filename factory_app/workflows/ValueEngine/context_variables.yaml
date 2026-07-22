@@ -266,6 +266,15 @@ definitions:
     source:
       type: computed
       default: null
+  chat_app_id:
+    type: string
+    description: >
+      Runtime app id under which the active workflow chat was created. Preserved
+      separately from the generated build app_id so the Apps directory can route
+      back to the correct persisted workflow chat.
+    source:
+      type: computed
+      default: null
 
 # ============================================================================
 # AGENT VARIABLE INJECTION
