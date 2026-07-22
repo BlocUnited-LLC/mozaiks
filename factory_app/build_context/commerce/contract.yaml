@@ -41,8 +41,10 @@ required_outputs:
     owner: templates
   - path: modules/commerce/backend/__init__.py
     owner: templates
-  - path: modules/commerce/backend/handler.py
+  - path: modules/commerce/backend/base_handler.py
     owner: templates
+  - path: modules/commerce/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/commerce/backend/service.py
     owner: templates
   - path: modules/commerce/backend/repo.py

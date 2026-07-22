@@ -67,8 +67,10 @@ required_outputs:
     owner: templates
   - path: modules/billing_portal/module.yaml
     owner: templates
-  - path: modules/billing_portal/backend/handler.py
+  - path: modules/billing_portal/backend/base_handler.py
     owner: templates
+  - path: modules/billing_portal/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/billing_portal/backend/service.py
     owner: templates
   - path: modules/billing_portal/backend/schemas.py

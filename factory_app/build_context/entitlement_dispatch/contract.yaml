@@ -29,8 +29,10 @@ required_outputs:
     owner: templates
   - path: modules/entitlement_dispatch/backend/__init__.py
     owner: templates
-  - path: modules/entitlement_dispatch/backend/handler.py
+  - path: modules/entitlement_dispatch/backend/base_handler.py
     owner: templates
+  - path: modules/entitlement_dispatch/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/entitlement_dispatch/backend/service.py
     owner: templates
   - path: modules/entitlement_dispatch/backend/repo.py

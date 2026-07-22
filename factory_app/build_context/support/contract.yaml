@@ -37,8 +37,10 @@ required_outputs:
     owner: templates
   - path: modules/support/backend/__init__.py
     owner: templates
-  - path: modules/support/backend/handler.py
+  - path: modules/support/backend/base_handler.py
     owner: templates
+  - path: modules/support/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/support/backend/service.py
     owner: templates
   - path: modules/support/backend/repo.py
