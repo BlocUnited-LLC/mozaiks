@@ -73,7 +73,8 @@ That starts the Studio host backend and the `web_shell` frontend together.
 ### 5. Verify
 
 - Open `http://localhost:3000/apps`
-- Check backend health at `http://localhost:8000/api/health`
+- Check backend health at `http://localhost:8000/health`
+- Run `.\scripts\smoke-studio-local.ps1` for the full local Studio smoke
 - Confirm the frontend is loading the first-party builder/reference app bundle
 	from `factory_app/app`
 

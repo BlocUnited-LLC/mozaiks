@@ -18,10 +18,40 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
+function Assert-DockerAvailable {
+  $docker = Get-Command docker -ErrorAction SilentlyContinue
+  if (-not $docker) {
+    Write-Host "[infra] Docker CLI was not found on PATH." -ForegroundColor Red
+    Write-Host "[infra] Install Docker Desktop, or rerun backend startup with -SkipInfra when MongoDB is already running." -ForegroundColor Yellow
+    throw "Docker CLI is required for run-infra.ps1."
+  }
+
+  & docker info *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "[infra] Docker Desktop is not reachable." -ForegroundColor Red
+    Write-Host "[infra] Start Docker Desktop and wait until it says the engine is running, then rerun this command." -ForegroundColor Yellow
+    Write-Host "[infra] Use -SkipInfra only when MongoDB is already running on localhost:27017 or MONGO_URI points elsewhere." -ForegroundColor Yellow
+    throw "Docker daemon is not reachable."
+  }
+
+  & docker compose version *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "[infra] Docker Compose v2 is not available through 'docker compose'." -ForegroundColor Red
+    Write-Host "[infra] Update Docker Desktop or install the Compose v2 plugin." -ForegroundColor Yellow
+    throw "Docker Compose v2 is required."
+  }
+}
+
+if (-not (Test-Path $ComposeFile)) {
+  throw "Compose file not found: $ComposeFile"
+}
+
 $services = switch ($Profile) {
   "example" { @("mongo", "keycloak-db", "keycloak") }
   "mongo" { @("mongo") }
 }
+
+Assert-DockerAvailable
 
 Write-Host ("[infra] Starting profile '{0}' via docker compose..." -f $Profile) -ForegroundColor Cyan
 Write-Host ("[infra] Services: {0}" -f ($services -join ", ")) -ForegroundColor DarkGray

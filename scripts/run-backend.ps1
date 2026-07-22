@@ -106,6 +106,9 @@ function Confirm-PortAvailable {
 if (-not $SkipInfra) {
   Write-Host ("[backend] Ensuring '{0}' infra is running..." -f $InfraProfile) -ForegroundColor Cyan
   & "$PSScriptRoot/run-infra.ps1" -Profile $InfraProfile
+  if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+  }
 }
 
 Confirm-PortAvailable -LocalPort $Port -KillExisting:$ForceStop
@@ -131,6 +134,15 @@ if ($cleanLogsOnStart -or $cleanRuntimeArtifactsNow) {
 
 $venvPython = Join-Path $RepoRoot ".venv/Scripts/python.exe"
 $pythonCmd = if (Test-Path $venvPython) { $venvPython } else { "python" }
+if ($pythonCmd -eq "python") {
+  $pythonOnPath = Get-Command python -ErrorAction SilentlyContinue
+  if (-not $pythonOnPath) {
+    Write-Host "[backend] Python was not found on PATH and .venv\\Scripts\\python.exe does not exist." -ForegroundColor Red
+    Write-Host '[backend] Run: python -m venv .venv; .\.venv\Scripts\Activate.ps1; python -m pip install -e ".[dev]"' -ForegroundColor Yellow
+    throw "Python is required to start the backend."
+  }
+  Write-Host "[backend] .venv not found; using Python from PATH." -ForegroundColor Yellow
+}
 
 Write-Host "[backend] Starting uvicorn on port $Port..." -ForegroundColor Cyan
 Write-Host "[backend] Command: $pythonCmd -m uvicorn mozaiksai.hosts.studio:app --host 0.0.0.0 --port $Port" -ForegroundColor DarkGray

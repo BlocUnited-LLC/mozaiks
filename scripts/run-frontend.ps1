@@ -93,6 +93,25 @@ function Confirm-PortAvailable {
 
 Confirm-PortAvailable -LocalPort $Port -KillExisting:$ForceStop
 
+$npm = Get-Command npm -ErrorAction SilentlyContinue
+if (-not $npm) {
+  Write-Host "[frontend] npm was not found on PATH." -ForegroundColor Red
+  Write-Host "[frontend] Install Node.js 18+ and rerun this command." -ForegroundColor Yellow
+  throw "npm is required to start the frontend."
+}
+
+$webShellRoot = Join-Path $RepoRoot "web_shell"
+$packageJson = Join-Path $webShellRoot "package.json"
+$nodeModules = Join-Path $webShellRoot "node_modules"
+if (-not (Test-Path $packageJson)) {
+  throw "web_shell/package.json was not found."
+}
+if (-not (Test-Path $nodeModules)) {
+  Write-Host "[frontend] Frontend dependencies are not installed." -ForegroundColor Red
+  Write-Host "[frontend] Run: npm --prefix web_shell ci" -ForegroundColor Yellow
+  throw "web_shell/node_modules is missing."
+}
+
 Write-Host "[frontend] Starting Vite on $BindHost`:$Port (strict port)..." -ForegroundColor Cyan
 Write-Host "[frontend] Command: npm --prefix web_shell run dev -- --host $BindHost --port $Port --strictPort" -ForegroundColor DarkGray
 Write-Host "[frontend] Open: http://localhost:$Port" -ForegroundColor Yellow
