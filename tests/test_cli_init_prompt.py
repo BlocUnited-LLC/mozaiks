@@ -175,6 +175,7 @@ def test_init_command_creates_package_consumer_scaffold(tmp_path) -> None:
         "docs.md",
         "frontend.md",
         "modules.md",
+        "multi-agent-coordination.md",
         "workflows.md",
     }
     assert expected_rules == {
