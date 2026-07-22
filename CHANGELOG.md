@@ -15,6 +15,9 @@ This project follows a practical pre-1.0 changelog format:
 ### Added
 
 - Added a provider-neutral generated app auth contract (`app/config/auth.yaml`) and hardened OIDC PKCE adapter output so authenticated apps keep auth behavior deterministic while leaving provider setup to operators or hosted services.
+- Added workspace handler extension system: `workspace_extensions_contract.yaml` declares the schema for `app/build_context/{pack_id}/extensions.yaml` files that workspace apps use to express extra params, param overrides, and extra actions on top of OSS-generated base handlers without editing generated files.
+- All capability packs (social, messaging, commerce, entitlement_dispatch, mozaikspay/billing_portal, support) now ship a `base_handler.py` / `handler.py` split: the base class contains the full implementation and is always regenerated; the workspace subclass is a thin preserved subclass for app-local overrides. `contract.yaml` for each pack declares `base_handler.py` as `owner: templates` and `handler.py` as `owner: workspace`.
+- AppGenerator agents now carry the handler split rule so generated apps always scaffold both files correctly.
 
 ### Removed
 
