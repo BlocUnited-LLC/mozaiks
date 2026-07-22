@@ -181,8 +181,6 @@ const ModernChatInterface = ({
   artifactContext = null,
   overlayMode = false,
   onOverlayClose = null,
-  overlayCloseLabel = 'Close',
-  overlayCloseTitle = 'Close chat overlay',
   onArtifactAction = null,
   actionStatusMap = null,
   pendingComposerInputToolCall = null,
@@ -607,9 +605,9 @@ const ModernChatInterface = ({
               type="button"
               onClick={onOverlayClose}
               className="inline-flex items-center justify-center px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg border border-white/20 bg-black/40 text-white text-[10px] sm:text-xs font-semibold uppercase tracking-wide mr-2"
-              title={overlayCloseTitle}
+              title="Close chat overlay"
             >
-              {overlayCloseLabel}
+              Close
             </button>
           )}
 

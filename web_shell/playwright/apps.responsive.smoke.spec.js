@@ -15,9 +15,25 @@ const shellConfig = JSON.parse(
 const routeManifest = JSON.parse(
   fs.readFileSync(path.join(repoRoot, 'factory_app', 'app', 'ui', 'route_manifest.json'), 'utf8'),
 );
+const extensionRegistry = JSON.parse(
+  fs.readFileSync(
+    path.join(repoRoot, 'factory_app', 'workflows', 'extended_orchestration', 'extension_registry.json'),
+    'utf8',
+  ),
+);
+const transitionRoutes = (extensionRegistry.entrypoints || []).map((entrypoint) => ({
+  ...entrypoint,
+  meta: {
+    ...(entrypoint.meta || {}),
+    appShell: true,
+    shellMode: extensionRegistry.transitions?.find(
+      (transition) => transition.id === entrypoint.transition,
+    )?.ui?.shell_mode,
+  },
+}));
 const composedShellConfig = {
   ...shellConfig,
-  pages: routeManifest.pages || [],
+  pages: [...(routeManifest.pages || []), ...transitionRoutes],
 };
 const APP_ID = 'campaign-revision-workbench';
 const INTEGRATIONS_QA_DIR = process.env.INTEGRATIONS_UI_QA_DIR
@@ -597,6 +613,28 @@ async function mockStudioApis(page) {
     });
   });
 
+  await page.route('**/api/transitions/*', async (route) => {
+    const transitionId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop() || '');
+    if (transitionId === 'resolve') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          resolution_type: 'workflow',
+          workflow_id: 'ValueEngine',
+          chat_id: 'mock-create-chat',
+        }),
+      });
+      return;
+    }
+    const transition = (extensionRegistry.transitions || []).find((item) => item.id === transitionId);
+    await route.fulfill({
+      status: transition ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(transition || { detail: 'Transition not found' }),
+    });
+  });
+
   await page.route('**/api/studio/apps', async (route) => {
     await route.fulfill({
       status: 200,
@@ -817,14 +855,14 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   }
 });
 
-test('create app workflow exposes a return control back to Apps', async ({ page }) => {
+test('create app transition overlay can return to Apps', async ({ page }) => {
   await page.goto('/apps');
   const main = page.locator('main');
 
   await main.getByRole('button', { name: 'Create App' }).click();
 
-  await expect(page).toHaveURL(/\/chat\?(.+&)?workflow=ValueEngine(&|$)/);
-  await expect(page).toHaveURL(/return_to=%2Fapps/);
+  await expect(page).toHaveURL(/\/create$/);
+  await expect(page.getByRole('heading', { name: 'Choose Your App Journey' })).toBeVisible();
 
   const backToApps = page.getByRole('button', { name: 'Back to Apps' });
   await expect(backToApps).toBeVisible();

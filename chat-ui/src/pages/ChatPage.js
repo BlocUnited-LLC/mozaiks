@@ -69,29 +69,6 @@ import {
 // Usage: const { messages, addMessage, ... } = useConversation({ chatId, conversationMode, ... });
 // import { useConversation, useArtifacts, useChatWebSocket } from './hooks';
 
-function resolveInternalReturnPath(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-
-  let candidate = raw;
-  try {
-    candidate = decodeURIComponent(raw);
-  } catch {
-    candidate = raw;
-  }
-
-  if (!candidate.startsWith('/') || candidate.startsWith('//')) return null;
-  if (/[\r\n]/.test(candidate)) return null;
-  return candidate;
-}
-
-function getReturnControlLabel(returnPath) {
-  if (returnPath === '/apps' || returnPath.startsWith('/apps?')) {
-    return 'Back to Apps';
-  }
-  return 'Back';
-}
-
 const ChatPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -154,9 +131,6 @@ const ChatPage = () => {
   );
   const queryDeferStart = ['1', 'true', 'yes', 'on'].includes(
     String(searchParams.get('defer_start') || '').toLowerCase()
-  );
-  const queryReturnTo = resolveInternalReturnPath(
-    searchParams.get('return_to') || searchParams.get('returnTo')
   );
   const queryEmbeddedView = searchParams.get('view');
   // Gate / action / refinement context — set by useWorkflowStart
@@ -4453,11 +4427,6 @@ useEffect(() => {
     navigate('/chat');
   }, [navigate]);
 
-  const handleReturnToCaller = useCallback(() => {
-    if (!queryReturnTo) return;
-    navigate(queryReturnTo);
-  }, [navigate, queryReturnTo]);
-
   const toggleWidgetChatMinimized = useCallback(() => {
     setWidgetChatMinimized(prev => !prev);
   }, []);
@@ -4802,10 +4771,6 @@ useEffect(() => {
         pendingHarnessDecisionError={pendingHarnessDecisionError}
         onPendingHarnessDecisionAction={handlePendingHarnessDecisionAction}
         hasUnseenArtifact={hasUnseenArtifact}
-        overlayMode={Boolean(queryReturnTo)}
-        onOverlayClose={queryReturnTo ? handleReturnToCaller : null}
-        overlayCloseLabel={queryReturnTo ? getReturnControlLabel(queryReturnTo) : 'Close'}
-        overlayCloseTitle={queryReturnTo ? `${getReturnControlLabel(queryReturnTo)} and close this workflow` : 'Close workflow'}
       />
     </ErrorBoundary>
   );

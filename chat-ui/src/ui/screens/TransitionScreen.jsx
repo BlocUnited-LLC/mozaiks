@@ -23,6 +23,7 @@
  */
 
 import { useState, useEffect, useCallback, useId } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getComponent, hasComponent } from '../../registry/componentRegistry';
 import { LauncherScreen } from './LauncherScreen';
 import { ConfirmScreen } from './ConfirmScreen';
@@ -59,11 +60,26 @@ const TransitionError = ({ message, onRetry }) => (
   </div>
 );
 
+const asSafeInternalPath = (value) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || !trimmed.startsWith('/') || trimmed.startsWith('//')) return null;
+  if (/[\r\n]/.test(trimmed)) return null;
+  return trimmed;
+};
+
+const getTransitionDismissPath = (transition) => {
+  const props = transition?.ui?.props;
+  if (!props || typeof props !== 'object' || Array.isArray(props)) return null;
+  return asSafeInternalPath(props.dismiss_to ?? props.dismissTo);
+};
+
 // ---------------------------------------------------------------------------
 // TransitionScreen
 // ---------------------------------------------------------------------------
 
 export function TransitionScreen({ transitionId, onNavigate, context }) {
+  const navigate = useNavigate();
   const [transition, setTransition] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -137,10 +153,15 @@ export function TransitionScreen({ transitionId, onNavigate, context }) {
 
   const handleRetry = useCallback(() => setRetryCount((n) => n + 1), []);
   const handleDismiss = useCallback(() => {
+    const dismissPath = getTransitionDismissPath(transition);
+    if (dismissPath) {
+      navigate(dismissPath);
+      return;
+    }
     if (typeof window !== 'undefined' && window.history.length > 1) {
       window.history.back();
     }
-  }, []);
+  }, [navigate, transition]);
 
   if (loading) return <TransitionLoading />;
   if (error) return <TransitionError message={error} onRetry={handleRetry} />;

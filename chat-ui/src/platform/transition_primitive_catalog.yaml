@@ -17,6 +17,23 @@ description: |
   centered modal on desktop). The frame is injected by TransitionScreen — custom
   components do not need to handle their own overlay or backdrop.
 
+frame_props:
+  description: |
+    TransitionOverlayFrame reads these optional keys from transition.ui.props.
+    They are shell behavior, not workflow component props. Workflow-local
+    transition components should not implement their own close or backdrop logic.
+  dismissible:
+    type: boolean
+    default: false
+    description: When true, renders the shell close button and allows Escape/outside dismissal.
+  dismiss_to:
+    type: string
+    description: Optional safe internal path to navigate to when a dismissible transition closes.
+  close_label:
+    type: string
+    default: "Close transition"
+    description: Accessible label and tooltip text for the shell close button.
+
 # ---------------------------------------------------------------------------
 # Component contract
 # Every registered transition component receives these props from TransitionScreen.

@@ -105,9 +105,9 @@ def test_factory_shell_create_action_requests_fresh_build() -> None:
     data = json.loads(shell_path.read_text(encoding="utf-8"))
 
     header_actions = {item["id"]: item for item in data["header"]["actions"]}
-    assert header_actions["create-app"]["path"] == "/apps/new"
-    assert header_actions["create-app"]["path_by_role"]["admin"] == "/apps/new"
-    assert header_actions["create-app"]["path_by_role"]["default"] == "/apps/new"
+    assert header_actions["create-app"]["path"] == "/create"
+    assert header_actions["create-app"]["path_by_role"]["admin"] == "/create"
+    assert header_actions["create-app"]["path_by_role"]["default"] == "/create"
 
 
 def test_mozaiks_platform_workflow_registry_uses_shared_base_and_local_overlay() -> None:

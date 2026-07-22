@@ -160,6 +160,7 @@ def test_web_shell_has_responsive_smoke_harness() -> None:
     assert "workspace usage route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace integrations route stays responsive across desktop and mobile widths" in smoke_source
     assert "workspace support route stays responsive across desktop and mobile widths" in smoke_source
+    assert "create app transition overlay can return to Apps" in smoke_source
     assert "workspace billing route stays responsive across desktop and mobile widths" not in smoke_source
     assert "workspace hosting route stays responsive across desktop and mobile widths" not in smoke_source
     assert "app Studio root redirects to overview" in smoke_source

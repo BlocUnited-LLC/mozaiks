@@ -147,6 +147,11 @@ def test_new_app_entry_routes_into_valueengine_first() -> None:
     transition_map = {item["id"]: item for item in registry["transitions"]}
     app_type_selector = transition_map["app_type_selector"]
     assert app_type_selector["transition_type"] == "user_choice_context"
+    assert app_type_selector["ui"]["props"] == {
+        "dismissible": True,
+        "dismiss_to": "/apps",
+        "close_label": "Back to Apps",
+    }
     new_app_option = next(item for item in app_type_selector["options"] if item["id"] == "greenfield_app")
     assert new_app_option["route_to"] == "ValueEngine"
     assert new_app_option["sequence"] == "build"

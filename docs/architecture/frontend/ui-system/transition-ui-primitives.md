@@ -25,6 +25,7 @@ wrap shared transition primitives, but they do not own overlay behavior.
 - Do not create reusable transition primitive helpers under workflow folders.
 - Prefer `LauncherScreen` or `ConfirmScreen` when custom branding is not needed.
 - When custom branding is needed, compose `TransitionChoicePanel` and `TransitionChoiceCard` inside a workflow-local wrapper.
+- Use `ui.props.dismissible`, `ui.props.dismiss_to`, and `ui.props.close_label` for shell-owned close behavior. Do not add route-specific close buttons inside workflow transition components.
 
 ## Canonical Wrapper Example
 
@@ -97,6 +98,7 @@ export default function AppTypeSelector({ transition, onResolve, overlayTitleId,
 The routing contract still lives in `extended_orchestration/extension_registry.json`:
 
 - `ui.component` points to the registered wrapper component name.
+- `ui.props` may declare shell frame behavior such as `dismissible`, `dismiss_to`, and `close_label`.
 - `options[].id` stays semantic.
 - `options[].route_to` and optional `context_variables` stay in JSON, not in the wrapper layout.
 

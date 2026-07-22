@@ -227,7 +227,12 @@
       "ui": {
         "component": "AppTypeSelector",
         "mode": "screen",
-        "shell_mode": "focused"
+        "shell_mode": "focused",
+        "props": {
+          "dismissible": true,
+          "dismiss_to": "/apps",
+          "close_label": "Back to Apps"
+        }
       },
       "options": [
         {
