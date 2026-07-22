@@ -38,8 +38,10 @@ required_outputs:
     owner: templates
   - path: modules/messages/backend/__init__.py
     owner: templates
-  - path: modules/messages/backend/handler.py
+  - path: modules/messages/backend/base_handler.py
     owner: templates
+  - path: modules/messages/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/messages/backend/service.py
     owner: templates
   - path: modules/messages/backend/repo.py

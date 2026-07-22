@@ -41,8 +41,10 @@ required_outputs:
     owner: templates
   - path: modules/friends/backend/__init__.py
     owner: templates
-  - path: modules/friends/backend/handler.py
+  - path: modules/friends/backend/base_handler.py
     owner: templates
+  - path: modules/friends/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/friends/backend/service.py
     owner: templates
   - path: modules/friends/backend/repo.py
@@ -66,8 +68,10 @@ required_outputs:
     owner: templates
   - path: modules/activity_feed/backend/__init__.py
     owner: templates
-  - path: modules/activity_feed/backend/handler.py
+  - path: modules/activity_feed/backend/base_handler.py
     owner: templates
+  - path: modules/activity_feed/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/activity_feed/backend/service.py
     owner: templates
   - path: modules/activity_feed/backend/repo.py
@@ -87,8 +91,10 @@ required_outputs:
     owner: templates
   - path: modules/user_posts/backend/__init__.py
     owner: templates
-  - path: modules/user_posts/backend/handler.py
+  - path: modules/user_posts/backend/base_handler.py
     owner: templates
+  - path: modules/user_posts/backend/handler.py
+    owner: workspace  # preserved across regeneration; subclasses base_handler.py
   - path: modules/user_posts/backend/service.py
     owner: templates
   - path: modules/user_posts/backend/repo.py

@@ -418,11 +418,26 @@ backend_helper_files:
     helper contract.
 
   canonical_layers:
-    - backend/handler.py   # thin dispatch only — one method per declared action
-    - backend/service.py   # business logic and event publication
-    - backend/repo.py      # persistence queries and writes
-    - backend/policy.py    # authorization, ownership, transition checks
-    - backend/schemas.py   # typed DTOs, enums, normalization helpers
+    - backend/base_handler.py  # OSS-generated dispatch base — regenerated on upgrades, never edited
+    - backend/handler.py       # workspace subclass — preserved on regen; add app extensions here
+    - backend/service.py       # business logic and event publication
+    - backend/repo.py          # persistence queries and writes
+    - backend/policy.py        # authorization, ownership, transition checks
+    - backend/schemas.py       # typed DTOs, enums, normalization helpers
+
+  workspace_handler_split:
+    description: >
+      Pack templates that support workspace customization generate two handler files.
+      base_handler.py contains the full OSS implementation and is always regenerated.
+      handler.py is a thin subclass generated once and preserved. Workspaces declare
+      extra params, param overrides, and extra actions in app/build_context/{pack_id}/extensions.yaml.
+      See factory_app/build_context/AppGenerator/workspace_extensions_contract.yaml for the schema.
+    base_handler_class_suffix: BaseHandler
+    handler_class: "{ModuleId}Handler"
+    handler_imports_from: ".base_handler"
+    regeneration:
+      base_handler.py: always overwrite
+      handler.py: preserve (overwrite only with --force-handlers)
 
   helper_contract:
     canonical_location: backend/{helper_name}.py

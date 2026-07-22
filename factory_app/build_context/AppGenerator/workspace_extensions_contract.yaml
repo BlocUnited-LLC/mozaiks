@@ -1,0 +1,155 @@
+schema_version: 1
+
+description: >
+  Contract schema for workspace-level build context extension files.
+  Any app workspace may place an extensions.yaml beside its build context
+  pack to declare module-level customizations on top of OSS pack templates.
+
+  AppGenerator reads both the OSS pack template and the workspace extension
+  declarations to produce two handler files per module:
+
+    base_handler.py  — OSS-generated, always overwritten on regeneration.
+                       Contains the full implementation from the pack template.
+                       Never edit this file directly.
+
+    handler.py       — Workspace-owned subclass, preserved across regeneration.
+                       Subclasses the base handler. Add extra action params,
+                       overridden methods, and app-specific extra actions here.
+                       Regenerated only when --force-handlers is passed.
+
+  module.yaml continues to declare:
+    module.handler: backend.handler:ClassName
+  pointing at the subclass in handler.py. The runtime is unaffected.
+
+file_location: "app/build_context/{pack_id}/extensions.yaml"
+
+schema:
+  schema_version:
+    type: string
+    required: true
+    value: "mozaiks.workspace_extensions.v1"
+
+  module_extensions:
+    type: array
+    description: >
+      List of module-level extension declarations. One entry per module
+      that diverges from the OSS pack template.
+    items:
+      module_id:
+        type: string
+        required: true
+        description: >
+          Module directory name matching the generated app's modules/{module_id}/.
+
+      base_pack:
+        type: string
+        required: true
+        description: >
+          OSS pack and module this extends, in {pack_id}.{module_id} form.
+          Example: "messaging.messages", "social.friends".
+
+      action_extensions:
+        type: array
+        required: false
+        description: >
+          Extra params added to existing actions from the base template.
+          AppGenerator adds these to the handler.py override of that action method.
+          The base_handler.py method signature stays unchanged.
+        items:
+          action_id:
+            type: string
+            required: true
+            description: Action id from the base module.yaml.
+          extra_params:
+            type: array
+            description: Additional keyword params appended to the base method signature.
+            items:
+              name:
+                type: string
+                required: true
+              type:
+                type: string
+                required: true
+                description: Python type annotation string (e.g. "str | None", "bool").
+              default:
+                type: string
+                required: true
+                description: >
+                  Python literal default value string (e.g. "None", '"user"', "False").
+          param_overrides:
+            type: array
+            required: false
+            description: >
+              Change the default value of a param that exists in the base method.
+              Use sparingly — prefer extra_params for truly new params.
+            items:
+              name:
+                type: string
+                required: true
+              default:
+                type: string
+                required: true
+
+      extra_actions:
+        type: array
+        required: false
+        description: >
+          Fully new actions declared only by this workspace module — not in the
+          base pack template. These must also appear in the module's module.yaml
+          actions list so the runtime loader can validate dispatch methods.
+          AppGenerator adds these as new methods on the handler.py subclass.
+        items:
+          action_id:
+            type: string
+            required: true
+          handler_method:
+            type: string
+            required: true
+            description: >
+              Must match the handler_method declared in module.yaml actions[].
+          params:
+            type: array
+            items:
+              name: { type: string }
+              type: { type: string }
+              default: { type: string }
+
+regeneration_semantics:
+  base_handler.py:
+    owner: oss_template
+    on_regeneration: overwrite
+    rule: >
+      Always overwritten when the pack template changes or when mozaiks is upgraded.
+      Never edit this file. Customizations in this file will be lost on regeneration.
+
+  handler.py:
+    owner: workspace
+    on_regeneration: preserve
+    rule: >
+      Generated once from workspace extensions.yaml, then preserved.
+      Subclasses base_handler.py. Safe to add overrides and extra methods.
+      Pass --force-handlers to regenerate from extensions.yaml (overwrites manual edits).
+
+examples:
+  - description: Messages module with extra create_thread and send_message params
+    file: app/build_context/messaging/extensions.yaml
+    content: |
+      schema_version: mozaiks.workspace_extensions.v1
+
+      module_extensions:
+        - module_id: messages
+          base_pack: messaging.messages
+          action_extensions:
+            - action_id: create_thread
+              extra_params:
+                - name: listing_id
+                  type: "str | None"
+                  default: "None"
+            - action_id: send_message
+              extra_params:
+                - name: sender_role
+                  type: str
+                  default: '"user"'
+                - name: allow_nonparticipant_sender
+                  type: bool
+                  default: "False"
