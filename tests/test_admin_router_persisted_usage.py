@@ -251,6 +251,7 @@ async def test_admin_usage_endpoint_delegates_to_runtime_usage_ledger(monkeypatc
         "limit": 50,
         "totals": {"total_tokens": 123},
         "token_budget_alerts": [{"app_id": "app-1", "user_id": "user-1", "limit": 50}],
+        "wallet_totals": [],
     }
 
 
