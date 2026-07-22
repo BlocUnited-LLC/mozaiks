@@ -7,9 +7,9 @@ from mozaiksai.core.runtime.composition.module_context import ModuleContext
 from .service import MessageService
 
 
-class MessagesModule:
+class MessagesHandler:
     def __init__(self, service: MessageService | None = None) -> None:
-        self.service = service or MessageService()
+        self._service = service or MessageService()
 
     async def create_thread(
         self,
@@ -26,7 +26,7 @@ class MessagesModule:
         metadata: dict[str, Any] | None = None,
         **_: object,
     ) -> dict[str, Any]:
-        return await self.service.create_thread(
+        return await self._service.create_thread(
             ctx,
             title=title,
             participant_ids=participant_ids,
@@ -53,7 +53,7 @@ class MessagesModule:
         limit: int = 50,
         **_: object,
     ) -> dict[str, Any]:
-        return await self.service.list_threads(
+        return await self._service.list_threads(
             ctx,
             status=status,
             thread_type=thread_type,
@@ -73,7 +73,7 @@ class MessagesModule:
         message_limit: int = 50,
         **_: object,
     ) -> dict[str, Any]:
-        return await self.service.get_thread(ctx, thread_id=thread_id, message_limit=message_limit)
+        return await self._service.get_thread(ctx, thread_id=thread_id, message_limit=message_limit)
 
     async def send_message(
         self,
@@ -84,7 +84,7 @@ class MessagesModule:
         message_type: str = "text",
         **_: object,
     ) -> dict[str, Any]:
-        return await self.service.send_message(ctx, thread_id=thread_id, body=body, message_type=message_type)
+        return await self._service.send_message(ctx, thread_id=thread_id, body=body, message_type=message_type)
 
     async def mark_thread_read(
         self,
@@ -93,4 +93,4 @@ class MessagesModule:
         thread_id: str,
         **_: object,
     ) -> dict[str, Any]:
-        return await self.service.mark_thread_read(ctx, thread_id=thread_id)
+        return await self._service.mark_thread_read(ctx, thread_id=thread_id)
