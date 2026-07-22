@@ -95,7 +95,6 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Key Concepts: concepts.md
-  - CLI Reference: cli-reference.md
   - Guides:
       - guides/index.md
       - Use Studio: guides/studio/01-overview.md
@@ -120,6 +119,7 @@ nav:
       - Workspace Pages: studio/workspace-pages.md
       - App Dashboard: studio/app-dashboard.md
       - Interface Conventions: studio/ui-ux-primitives.md
+  - CLI Reference: cli-reference.md
   - Architecture:
       - architecture/index.md
       - Foundations:
