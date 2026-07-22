@@ -20,3 +20,4 @@ app manifests, app lifecycle, or app-owned service surfaces.
 | [Platform Navigation Contract](platform-navigation-contract.md) | Canonical ownership for Profile, Admin Portal, Studio, App Shell, Create, and resume |
 | [Account, Admin, and Platform Services](account-admin-and-platform-services.md) | Account/admin/platform service boundaries |
 | [User Classes and Resource Relationships](user-classes-and-resource-relationships.md) | Host-agnostic generated-app pattern for durable user classes, memberships, route authorization summaries, policy hooks, and resource relationships |
+| [Usage and Token Display](usage-and-token-display.md) | How AI token usage and wallet balance are surfaced to end users, app operators, and platform creators — and where the OSS/hosted boundary sits |
