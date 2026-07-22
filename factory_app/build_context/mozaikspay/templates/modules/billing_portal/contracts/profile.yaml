@@ -1,0 +1,17 @@
+schema_version: mozaiks.profile.v1
+
+# Declares a Tokens tab on the user profile page (/me).
+# The platform hydrates the tab by calling get_token_status and passes the
+# result as `data` to the registered TokenStatusTab component.
+#
+# The platform also injects a built-in Tokens tab for any app whose
+# subscriptions.yaml declares token_wallets. This profile.yaml overrides
+# that built-in by claiming the same id, allowing the billing_portal module
+# to own the tab and customise the component when the mozaikspay pack is used.
+
+tabs:
+  - id: tokens
+    label: Tokens
+    order: 80
+    action: get_token_status
+    component: TokenStatusTab

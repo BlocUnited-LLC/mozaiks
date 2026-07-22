@@ -1477,6 +1477,7 @@ async def get_current_user_token_ledger(
     }
 
 
+
 @app.put("/api/me/preferences")
 async def update_current_user_preferences(
     body: ProfilePreferencesUpdateRequest,
@@ -1790,6 +1791,33 @@ async def get_profile_tabs(
                 tab_out["error"] = f"Action {action!r} failed"
 
         hydrated.append(tab_out)
+
+    # Inject a built-in Tokens tab when the app declares token_wallets in
+    # subscriptions.yaml. This is provider-neutral — no MozaiksPay dependency.
+    subscriptions = getattr(app.state, "subscriptions_config", None)
+    if subscriptions is not None and getattr(subscriptions, "token_wallets", None):
+        # Only inject when no module-declared tab already claims the id "tokens".
+        if not any(t.get("id") == "tokens" for t in hydrated):
+            tokens_data = await _current_user_token_wallet_summary(
+                subscriptions,
+                app_id=resolved_app_id,
+                user_id=subject_user_id or viewer_user_id,
+                tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+                workspace_id=str(principal.workspace_id) if principal.workspace_id else None,
+                ensure_allowances=False,
+            )
+            hydrated.append(
+                {
+                    "id": "tokens",
+                    "label": "Tokens",
+                    "order": 80,
+                    "component": "TokenStatusTab",
+                    "data": tokens_data,
+                    "error": None,
+                    "source": "platform_builtin",
+                }
+            )
+            hydrated.sort(key=lambda t: t.get("order") or 100)
 
     logger.info(
         "[profile-tabs] load complete runtime_app_id=%s requested_app_id=%s hydrated_count=%s tab_ids=%s",

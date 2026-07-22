@@ -77,6 +77,10 @@ required_outputs:
     owner: templates
   - path: modules/billing_portal/contracts/reactions.yaml
     owner: templates
+  - path: modules/billing_portal/contracts/profile.yaml
+    owner: templates
+  - path: modules/billing_portal/contracts/admin.yaml
+    owner: templates
   - path: ui/pages/billing.yaml
     owner: templates
   - path: ui/pages/usage.yaml
