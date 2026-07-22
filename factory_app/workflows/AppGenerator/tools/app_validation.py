@@ -511,6 +511,52 @@ def _class_method_nodes(
     return None
 
 
+def _resolve_handler_methods(
+    handler_tree: ast.Module,
+    class_name: str,
+    module_id: str,
+    parsed_backend: dict[str, ast.Module],
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef] | None:
+    """Return method nodes for class_name, merging inherited methods from base
+    classes declared in the same module's backend directory.
+
+    Supports the base_handler.py + handler.py split pattern where the workspace
+    subclass is a thin override layer and all canonical methods live in the OSS
+    base handler.  Returns None only when the class itself is not found.
+    """
+    own = _class_method_nodes(handler_tree, class_name)
+    if own is None:
+        return None
+
+    # Collect simple base-class names from the class AST definition.
+    base_names: list[str] = []
+    for node in handler_tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    base_names.append(base.id)
+            break
+
+    if not base_names:
+        return own
+
+    # Look for base class methods in any backend file within the same module.
+    backend_prefix = f"modules/{module_id}/backend/"
+    inherited: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    for base_name in base_names:
+        for path, tree in parsed_backend.items():
+            if not path.startswith(backend_prefix):
+                continue
+            base_methods = _class_method_nodes(tree, base_name)
+            if base_methods is not None:
+                for method_name, method_node in base_methods.items():
+                    inherited.setdefault(method_name, method_node)
+
+    # Own methods take precedence over inherited ones.
+    inherited.update(own)
+    return inherited
+
+
 def _all_method_nodes(tree: ast.Module) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
     methods: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
     for node in tree.body:
@@ -760,7 +806,7 @@ def validate_module_implementation_contract(files: dict[str, str]) -> dict[str, 
             module_reports.append(module_report)
             continue
 
-        methods = _class_method_nodes(handler_tree, class_name)
+        methods = _resolve_handler_methods(handler_tree, class_name, module_id, parsed_backend)
         if methods is None:
             failed_tests.append(
                 {
