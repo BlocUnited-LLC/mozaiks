@@ -42,6 +42,7 @@ from mozaiksai.core.transport.rate_limit import (
     _path_limits,
     _rate_limit_enabled,
     _requests_per_minute,
+    _select_path_limit,
 )
 
 # ---------------------------------------------------------------------------
@@ -136,6 +137,8 @@ class TestPathLimits:
         monkeypatch.delenv("RATE_LIMIT_PATH_LIMITS", raising=False)
         limits = _path_limits()
         assert limits["/api/auth"] == 20
+        assert limits["/api/chats/exists"] == 120
+        assert limits["/api/chats/meta"] == 120
         assert limits["/api/chats"] == 10
         assert limits["/chat"] == 30
         assert limits["/api/workflows"] == 20
@@ -172,6 +175,33 @@ class TestPathLimits:
         monkeypatch.setenv("RATE_LIMIT_PATH_LIMITS", "")
         limits = _path_limits()
         assert "/api/chats" in limits
+
+
+class TestSelectPathLimit:
+    def test_uses_most_specific_matching_prefix(self):
+        marker_limits = {
+            "/api/chats": "chat-limit",
+            "/api/chats/exists": "exists-limit",
+        }
+
+        prefix, limit = _select_path_limit(
+            "/api/chats/exists/demo-app/ValueEngine/chat-1",
+            marker_limits,
+            "global-limit",
+        )
+
+        assert prefix == "/api/chats/exists"
+        assert limit == "exists-limit"
+
+    def test_falls_back_to_global_when_no_prefix_matches(self):
+        prefix, limit = _select_path_limit(
+            "/api/other",
+            {"/api/chats": "chat-limit"},
+            "global-limit",
+        )
+
+        assert prefix == "global"
+        assert limit == "global-limit"
 
 
 # ---------------------------------------------------------------------------

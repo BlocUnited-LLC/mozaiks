@@ -90,6 +90,15 @@ def _make_rate_limit_app(
     async def auth_endpoint():
         return {"token": "xyz"}
 
+    @inner_app.get("/api/chats/exists/{app_id}/{workflow_name}/{chat_id}")
+    async def chat_exists_endpoint(app_id: str, workflow_name: str, chat_id: str):
+        return {
+            "exists": True,
+            "app_id": app_id,
+            "workflow_name": workflow_name,
+            "chat_id": chat_id,
+        }
+
     @inner_app.get("/api/health")
     async def health_endpoint():
         return {"status": "ok"}
@@ -225,6 +234,26 @@ class TestPathPrefixLimits:
         for _ in range(3):
             resp = client.get("/api/data", headers={"X-Real-IP": ip})
         assert resp.status_code == 200
+
+    def test_more_specific_chat_exists_limit_wins_over_chat_prefix(self):
+        client = _make_rate_limit_app(
+            rpm=100,
+            path_limits="/api/chats:1,/api/chats/exists:3",
+        )
+        ip = "30.0.0.3"
+
+        for index in range(3):
+            resp = client.get(
+                f"/api/chats/exists/demo-app/ValueEngine/chat-{index}",
+                headers={"X-Real-IP": ip},
+            )
+            assert resp.status_code == 200
+
+        resp = client.get(
+            "/api/chats/exists/demo-app/ValueEngine/chat-4",
+            headers={"X-Real-IP": ip},
+        )
+        assert resp.status_code == 429
 
 
 # ---------------------------------------------------------------------------

@@ -156,3 +156,19 @@ def test_ask_bootstrap_sessions_do_not_count_as_workflow_runs() -> None:
     assert "body.transport_purpose = sessionOptions.transportPurpose.trim();" in api_source
     assert "askCarrierMode ? { transportPurpose: 'ask_carrier' } : {}" in chat_page_source
 
+
+def test_workflow_mode_switch_resumes_before_starting_new_workflow_run() -> None:
+    controller_source = _read("chat-ui/src/hooks/useConversationModeController.js")
+
+    assert "const validateExistingWorkflowSession = async" in controller_source
+    assert "/api/chats/exists/" in controller_source
+    assert "const candidateWorkflowChatIds = [" in controller_source
+    assert "activeChatId," in controller_source
+    assert "getStoredActiveChatId()," in controller_source
+    assert "currentChatId," in controller_source
+    assert "resumeWorkflowSession(candidateChatId, entryWorkflow)" in controller_source
+
+    resume_index = controller_source.index("resumeWorkflowSession(candidateChatId, entryWorkflow)")
+    start_index = controller_source.index("api.startChat(")
+    assert resume_index < start_index
+

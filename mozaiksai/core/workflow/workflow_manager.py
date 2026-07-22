@@ -6,6 +6,7 @@
 import importlib
 import json
 import os
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -579,8 +580,16 @@ class UnifiedWorkflowManager:
             workflow_info = self._workflows[normalized_name]
             if workflow_info.module:
                 try:
-                    importlib.reload(workflow_info.module)
-                    logger.info("Reloaded workflow module: %s", workflow_name)
+                    module_name = getattr(workflow_info.module, "__name__", "")
+                    if module_name and module_name in sys.modules:
+                        importlib.reload(workflow_info.module)
+                        logger.info("Reloaded workflow module: %s", workflow_name)
+                    else:
+                        logger.debug(
+                            "Workflow module reload skipped for %s because %s is not in sys.modules",
+                            workflow_name,
+                            module_name or "<unknown>",
+                        )
                 except Exception as e:
                     logger.error("WORKFLOW_MODULE_RELOAD_FAILED workflow=%s: %s", workflow_name, e, exc_info=True)
         

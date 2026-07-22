@@ -11,6 +11,8 @@ Reads configuration from environment variables:
 
 Built-in tighter limits on high-cost endpoints (can be overridden via RATE_LIMIT_PATH_LIMITS):
   /api/auth    → 20/minute   (token endpoints — brute-force protection)
+  /api/chats/exists → 120/minute (cheap session resume checks)
+  /api/chats/meta → 120/minute (cheap session metadata checks)
   /api/chats   → 10/minute   (workflow session starts, each spawns an LLM context)
   /chat        → 30/minute   (user message sends, primary LLM cost driver)
   /api/workflows → 20/minute (programmatic workflow triggers)
@@ -21,6 +23,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -31,6 +34,8 @@ logger = logging.getLogger(__name__)
 # Default tighter limits on expensive endpoints; env values override these.
 _DEFAULT_PATH_LIMITS: dict[str, int] = {
     "/api/auth": 20,      # auth token endpoints — brute-force protection
+    "/api/chats/exists": 120,
+    "/api/chats/meta": 120,
     "/api/chats": 10,
     "/chat": 30,
     "/api/workflows": 20,
@@ -88,6 +93,14 @@ def _get_client_key(request: Request, client_header: str) -> str:
             return val.split(",")[0].strip()
     client = request.client
     return client.host if client else "unknown"
+
+
+def _select_path_limit(path: str, parsed_limits: dict[str, Any], global_limit: Any) -> tuple[str, Any]:
+    """Return the most specific configured path-prefix limit for a request path."""
+    for prefix in sorted(parsed_limits, key=len, reverse=True):
+        if path.startswith(prefix):
+            return prefix, parsed_limits[prefix]
+    return "global", global_limit
 
 
 def _build_storage():
@@ -172,14 +185,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         client_key = _get_client_key(request, self._client_header)
 
-        # Pick the most specific matching path-prefix limit.
-        active_limit = self._global_limit
-        matched_prefix = "global"
-        for prefix, limit_item in self._path_limits_parsed.items():
-            if path.startswith(prefix):
-                active_limit = limit_item
-                matched_prefix = prefix
-                break
+        matched_prefix, active_limit = _select_path_limit(
+            path,
+            self._path_limits_parsed,
+            self._global_limit,
+        )
 
         # Namespace (client_key, matched_prefix) keeps per-path buckets independent.
         allowed = self._limiter.hit(active_limit, client_key, matched_prefix)
@@ -251,14 +261,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             client_info = scope.get("client")
             client_key = client_info[0] if client_info else "unknown"
 
-        # Find the most specific matching path-prefix limit.
-        active_limit = self._global_limit
-        matched_prefix = "global"
-        for prefix, limit_item in self._path_limits_parsed.items():
-            if path.startswith(prefix):
-                active_limit = limit_item
-                matched_prefix = prefix
-                break
+        matched_prefix, active_limit = _select_path_limit(
+            path,
+            self._path_limits_parsed,
+            self._global_limit,
+        )
 
         allowed = self._limiter.hit(active_limit, client_key, matched_prefix)
 

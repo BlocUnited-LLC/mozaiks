@@ -367,9 +367,6 @@ export function useConversationModeController({
         if (setLayoutMode) setLayoutMode('full');
         if (isMobileView) setMobileDrawerState('peek');
       } else {
-
-        ensureWorkflowMode({ sendSwitch: false, forceRestore: true });
-
         if (!workflowConfigLoaded) {
           await workflowConfig.fetchWorkflowConfigs();
           setWorkflowConfigLoaded(true);
@@ -400,6 +397,7 @@ export function useConversationModeController({
         }
 
         if (!api || typeof api.get !== 'function' || !currentAppId || !currentUserId) {
+          ensureWorkflowMode({ sendSwitch: false, forceRestore: true });
           const storedChatId = activeChatId || currentChatId || getStoredActiveChatId();
           const storedWorkflowName = canonicalWorkflowName || resolveKnownWorkflowName(getStoredActiveWorkflowName());
 
@@ -420,19 +418,68 @@ export function useConversationModeController({
           setIsInWidgetMode(false);
         }
 
+        const validateExistingWorkflowSession = async (candidateChatId, workflowName) => {
+          if (!candidateChatId || !workflowName || typeof api.getHttpBaseUrl !== 'function') {
+            return null;
+          }
+          try {
+            const response = await fetch(
+              `${api.getHttpBaseUrl()}/api/chats/exists/${currentAppId}/${workflowName}/${candidateChatId}`
+            );
+            if (!response.ok) {
+              console.warn('⚠️ [MODE_CHANGE] Workflow chat validation returned non-OK; attempting resume:', response.status);
+              return null;
+            }
+            const result = await response.json();
+            return result?.exists === true;
+          } catch (err) {
+            console.warn('⚠️ [MODE_CHANGE] Workflow chat validation failed; attempting resume:', err);
+            return null;
+          }
+        };
+
+        const entryWorkflow =
+          canonicalWorkflowName
+          || resolveKnownWorkflowName(configuredEntryWorkflow)
+          || resolveWorkflow(currentWorkflowName)
+          || resolveWorkflow(urlWorkflowName)
+          || workflowConfig.getDefaultWorkflow();
+
+        if (entryWorkflow) {
+          const candidateWorkflowChatIds = [
+            activeChatId,
+            getStoredActiveChatId(),
+            currentChatId,
+          ].filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
+
+          for (const candidateChatId of candidateWorkflowChatIds) {
+            const exists = await validateExistingWorkflowSession(candidateChatId, entryWorkflow);
+            if (exists === false) {
+              if (getStoredActiveChatId() === candidateChatId) {
+                setStoredActiveChatId(null);
+              }
+              if (activeChatId === candidateChatId) {
+                setActiveChatId(null);
+              }
+              continue;
+            }
+
+            const resumed = resumeWorkflowSession(candidateChatId, entryWorkflow);
+            if (resumed) {
+              refreshWorkflowSessions();
+              return;
+            }
+          }
+        }
+
         const startEntryWorkflowSession = async () => {
-          const entryWorkflow =
-            canonicalWorkflowName
-            || resolveKnownWorkflowName(configuredEntryWorkflow)
-            || resolveWorkflow(currentWorkflowName)
-            || resolveWorkflow(urlWorkflowName)
-            || workflowConfig.getDefaultWorkflow();
           if (!entryWorkflow) {
             console.warn('⚠️ [MODE_CHANGE] No entry_point workflow available to start');
             return false;
           }
 
           try {
+            ensureWorkflowMode({ sendSwitch: false, forceRestore: true });
             const result = await api.startChat(
               currentAppId,
               entryWorkflow,
