@@ -15,6 +15,7 @@ GUIDANCE_FILE_SPECS: tuple[tuple[Path, str, bool], ...] = (
     (Path(".claude/rules/docs.md"), "rules/docs.md", False),
     (Path(".claude/rules/frontend.md"), "rules/frontend.md", False),
     (Path(".claude/rules/modules.md"), "rules/modules.md", False),
+    (Path(".claude/rules/multi-agent-coordination.md"), "rules/multi-agent-coordination.md", False),
     (Path(".claude/rules/workflows.md"), "rules/workflows.md", False),
     (Path(".claude/skills/add-branding/SKILL.md"), "skills/add-branding/SKILL.md", False),
     (Path(".claude/skills/add-module/SKILL.md"), "skills/add-module/SKILL.md", False),
