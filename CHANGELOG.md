@@ -19,6 +19,12 @@ This project follows a practical pre-1.0 changelog format:
 - All capability packs (social, messaging, commerce, entitlement_dispatch, mozaikspay/billing_portal, support) now ship a `base_handler.py` / `handler.py` split: the base class contains the full implementation and is always regenerated; the workspace subclass is a thin preserved subclass for app-local overrides. `contract.yaml` for each pack declares `base_handler.py` as `owner: templates` and `handler.py` as `owner: workspace`.
 - AppGenerator agents now carry the handler split rule so generated apps always scaffold both files correctly.
 
+### Fixed
+
+- Fixed messaging and support pack `module.yaml` handler entrypoints: after the `base_handler.py`/`handler.py` split renamed workspace subclasses from `MessagesModule`/`SupportModule` to `MessagesHandler`/`SupportHandler`, `module.yaml` still declared the old class names, causing `ModuleLoadError` at runtime and in tests.
+- Fixed `scripts/run-infra.ps1` to propagate the `docker compose up` exit code and print an actionable error message when Docker Desktop is not running. Previously the script silently continued on failure.
+- Fixed Vite 8 dev-server startup: added `optimizeDeps.rolldownOptions.moduleTypes: { '.js': 'jsx' }` so the Rolldown pre-scan can parse first-party JSX-in-.js UI files before the transform plugin runs.
+
 ### Removed
 
 - Removed the unused OSS `CollaborationPort` placeholder and default `app.state.collaboration` wiring. Hosted collaboration remains a `mozaiks-app` product capability implemented through app-owned modules and platform hooks, not a generic OSS runtime port.
