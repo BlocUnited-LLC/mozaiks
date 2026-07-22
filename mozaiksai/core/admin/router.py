@@ -334,7 +334,13 @@ async def get_admin_usage(
     limit: int = Query(500, ge=1, le=1000, description="Max usage events to aggregate"),
     user: UserPrincipal = Depends(_require_admin),
 ):
-    """Return neutral token usage measurements from the runtime usage ledger."""
+    """Return token usage and wallet aggregate totals from the runtime ledgers.
+
+    Usage events come from the runtime usage ledger (LLM call metering).
+    wallet_totals are summed across all user/tenant scopes for the app
+    from the token wallet ledger — provider-neutral. Returns an empty list
+    when the wallet ledger is unavailable or no wallets are configured.
+    """
     try:
         from mozaiksai.core.usage import (
             get_runtime_token_budget_alert_ledger,
@@ -345,6 +351,44 @@ async def get_admin_usage(
         alert_ledger = get_runtime_token_budget_alert_ledger()
         usage = await ledger.query_usage(app_id=app_id, user_id=user_id, limit=limit)
         usage = await _enrich_usage_with_app_registry(usage)
+
+        wallet_totals: list[dict[str, Any]] = []
+        try:
+            from mozaiksai.core.tokens.wallet import get_token_wallet_ledger
+
+            token_ledger = get_token_wallet_ledger()
+            balances_coll, _ = await token_ledger._collections()
+            pipeline: list[dict[str, Any]] = [
+                *(
+                    [{"$match": {"app_id": app_id}}]
+                    if app_id
+                    else []
+                ),
+                {
+                    "$group": {
+                        "_id": "$wallet_id",
+                        "total_balance": {"$sum": "$balance"},
+                        "total_credited": {"$sum": "$total_credited"},
+                        "total_debited": {"$sum": "$total_debited"},
+                        "scope_count": {"$sum": 1},
+                    }
+                },
+            ]
+            wallet_docs = await balances_coll.aggregate(pipeline).to_list(length=100)
+            wallet_totals = [
+                {
+                    "wallet_id": doc["_id"],
+                    "label": doc["_id"],
+                    "total_balance_remaining": doc.get("total_balance", 0),
+                    "total_credited": doc.get("total_credited", 0),
+                    "total_debited": doc.get("total_debited", 0),
+                    "active_scopes": doc.get("scope_count", 0),
+                }
+                for doc in wallet_docs
+            ]
+        except Exception as wallet_exc:
+            logger.debug("[admin] wallet totals unavailable: %s", wallet_exc)
+
         return {
             **usage,
             "token_budget_alerts": await alert_ledger.query_alerts(
@@ -352,6 +396,7 @@ async def get_admin_usage(
                 user_id=user_id,
                 limit=min(limit, 100),
             ),
+            "wallet_totals": wallet_totals,
         }
     except Exception as e:
         logger.warning("[admin] usage query failed: %s", e)
