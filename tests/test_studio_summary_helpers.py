@@ -96,6 +96,7 @@ from mozaiksai.core.runtime.app.studio_summary import (
     _resolve_admins,
     _runtime_readiness,
     _summarize_control_plane,
+    build_app_list_entry,
     build_apps_metrics,
 )
 
@@ -465,7 +466,44 @@ class TestRecommendLifecycleNextStep:
 
 
 # ---------------------------------------------------------------------------
-# 13. build_apps_metrics
+# 13. build_app_list_entry
+# ---------------------------------------------------------------------------
+
+class TestBuildAppListEntry:
+    def test_building_entry_routes_to_chat_scope(self):
+        result = build_app_list_entry(
+            {
+                "build_registry_id": "appreg_1",
+                "app_id": "draft-build-abc123",
+                "chat_app_id": "demo-app",
+                "lifecycle_state": "building",
+                "active_chat_id": "chat_1",
+                "active_workflow_id": "ValueEngine",
+            }
+        )
+
+        assert result["chat_app_id"] == "demo-app"
+        assert result["active_chat_id"] == "chat_1"
+        assert result["active_workflow_id"] == "ValueEngine"
+        assert result["destination"] == "/chat?workflow=ValueEngine&mode=workflow&chat_id=chat_1&app_id=demo-app"
+
+    def test_building_entry_falls_back_to_app_id_without_chat_scope(self):
+        result = build_app_list_entry(
+            {
+                "build_registry_id": "appreg_1",
+                "app_id": "build-app",
+                "lifecycle_state": "building",
+                "active_chat_id": "chat_1",
+                "active_workflow_id": "ValueEngine",
+            }
+        )
+
+        assert result["chat_app_id"] is None
+        assert result["destination"] == "/chat?workflow=ValueEngine&mode=workflow&chat_id=chat_1&app_id=build-app"
+
+
+# ---------------------------------------------------------------------------
+# 14. build_apps_metrics
 # ---------------------------------------------------------------------------
 
 class TestBuildAppsMetrics:
@@ -498,7 +536,7 @@ class TestBuildAppsMetrics:
 
 
 # ---------------------------------------------------------------------------
-# 14. _build_connector_summary
+# 15. _build_connector_summary
 # ---------------------------------------------------------------------------
 
 class TestBuildConnectorSummary:

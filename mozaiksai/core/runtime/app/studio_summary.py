@@ -5,6 +5,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from mozaiksai.control_plane import load_control_plane_config
 from mozaiksai.core.data.persistence.connector_store import ConnectorStore
@@ -305,10 +306,18 @@ def build_build_summary(
 def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
     lifecycle_state = str(app_record.get("lifecycle_state") or "draft")
     app_id = str(app_record.get("app_id") or "")
+    chat_app_id = str(app_record.get("chat_app_id") or "").strip()
     active_chat_id = str(app_record.get("active_chat_id") or "").strip()
     active_workflow_id = str(app_record.get("active_workflow_id") or "ValueEngine").strip() or "ValueEngine"
+    chat_scope = chat_app_id or app_id
+    resume_query = {
+        "workflow": active_workflow_id,
+        "mode": "workflow",
+        "chat_id": active_chat_id,
+        **({"app_id": chat_scope} if chat_scope else {}),
+    }
     destination = (
-        f"/chat?workflow={active_workflow_id}&mode=workflow&chat_id={active_chat_id}"
+        f"/chat?{urlencode(resume_query)}"
         if lifecycle_state in APP_BUILD_CONTINUE_STATES and active_chat_id
         else (
             f"/apps/{app_id}/build"
@@ -323,6 +332,7 @@ def build_app_list_entry(app_record: dict[str, Any]) -> dict[str, Any]:
         "description": app_record.get("description") or _recommend_lifecycle_next_step(lifecycle_state),
         "status": lifecycle_state,
         "lifecycle_label": APP_LIFECYCLE_LABELS.get(lifecycle_state, lifecycle_state.title()),
+        "chat_app_id": chat_app_id or None,
         "created_at": app_record.get("created_at"),
         "updated_at": app_record.get("updated_at"),
         "active_chat_id": active_chat_id or None,

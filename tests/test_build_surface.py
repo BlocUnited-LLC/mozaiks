@@ -193,7 +193,9 @@ def test_chat_page_defers_new_app_workflow_until_first_user_message() -> None:
 
 def test_building_app_list_entry_routes_to_active_chat() -> None:
     source = _read("mozaiksai/core/runtime/app/studio_summary.py")
-    assert 'f"/chat?workflow={active_workflow_id}&mode=workflow&chat_id={active_chat_id}"' in source
+    assert '"chat_app_id": chat_app_id or None' in source
+    assert '"app_id": chat_scope' in source
+    assert 'f"/chat?{urlencode(resume_query)}"' in source
     assert '"active_chat_id": active_chat_id or None' in source
     assert '"active_workflow_id": active_workflow_id if active_chat_id else None' in source
 
