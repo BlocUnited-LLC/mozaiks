@@ -17,6 +17,7 @@ EXPECTED_APPGENERATOR_CATALOGS = {
     "module_archetypes.yaml",
     "shell_presets.yaml",
     "workflow_archetypes.yaml",
+    "workspace_extensions_contract.yaml",
 }
 
 EXPECTED_AGENTGENERATOR_PATTERNBOOKS = {
@@ -242,6 +243,71 @@ def test_appgenerator_hook_tools_use_factory_catalog_resolver() -> None:
         assert "_shared.hook_utils" in content, f"{name} must load catalogs through shared hook utilities"
         assert "workflow_context_path" in content, f"{name} must resolve factory build-context paths deterministically"
         assert "_shared.catalogs" not in content, f"{name} must not use removed _shared.catalogs"
+
+
+def test_pack_templates_with_handlers_use_base_handler_split() -> None:
+    """
+    Pack templates that have adopted the base_handler split must follow the contract.
+    A handler.py is considered adopted when a sibling base_handler.py exists.
+    Packs that have not yet been migrated (e.g. commerce) are not required to adopt
+    the split until they are explicitly migrated.
+    """
+    for handler_path in FACTORY_BUILD_CONTEXT.rglob("templates/modules/*/backend/handler.py"):
+        base_path = handler_path.parent / "base_handler.py"
+        if not base_path.exists():
+            # Not yet migrated — skip but don't fail. Add base_handler.py to migrate.
+            continue
+        source = handler_path.read_text(encoding="utf-8")
+        base_source = base_path.read_text(encoding="utf-8")
+        assert "BaseHandler" in base_source, (
+            f"{base_path} must define a *BaseHandler class"
+        )
+        assert "DO NOT EDIT" in base_source, (
+            f"{base_path} must carry the DO NOT EDIT regeneration notice"
+        )
+        assert "BaseHandler" in source, (
+            f"{handler_path} must subclass the *BaseHandler from base_handler.py"
+        )
+        assert "from .base_handler import" in source, (
+            f"{handler_path} must import its base class from .base_handler"
+        )
+
+
+def test_social_and_messaging_packs_have_adopted_base_handler_split() -> None:
+    """Social and messaging packs are the reference implementations — they must be fully migrated."""
+    expected_splits = [
+        FACTORY_BUILD_CONTEXT / "social" / "templates" / "modules" / "activity_feed" / "backend",
+        FACTORY_BUILD_CONTEXT / "social" / "templates" / "modules" / "friends" / "backend",
+        FACTORY_BUILD_CONTEXT / "social" / "templates" / "modules" / "user_posts" / "backend",
+        FACTORY_BUILD_CONTEXT / "messaging" / "templates" / "modules" / "messages" / "backend",
+    ]
+    for backend_dir in expected_splits:
+        assert (backend_dir / "base_handler.py").exists(), (
+            f"{backend_dir}/base_handler.py missing — social/messaging packs are reference implementations"
+        )
+        assert (backend_dir / "handler.py").exists(), (
+            f"{backend_dir}/handler.py missing"
+        )
+
+
+def test_workspace_extensions_contract_schema_exists() -> None:
+    schema = FACTORY_BUILD_CONTEXT / "AppGenerator" / "workspace_extensions_contract.yaml"
+    assert schema.exists(), "workspace_extensions_contract.yaml must exist in AppGenerator build context"
+    data = yaml.safe_load(schema.read_text(encoding="utf-8")) or {}
+    assert data.get("schema_version") == 1
+    assert "module_extensions" in (data.get("schema") or {})
+    assert "regeneration_semantics" in data
+    regen = data["regeneration_semantics"]
+    assert regen["base_handler.py"]["on_regeneration"] == "overwrite"
+    assert regen["handler.py"]["on_regeneration"] == "preserve"
+
+
+def test_appgenerator_agents_document_handler_split_rule() -> None:
+    agents = (FACTORY_WORKFLOWS / "AppGenerator" / "agents.yaml").read_text(encoding="utf-8")
+    assert "base_handler.py" in agents
+    assert "Handler split rule" in agents
+    assert "workspace subclass" in agents
+    assert "preserved across regeneration" in agents
 
 
 def test_ai_pack_workflow_hook_uses_current_startup_contract() -> None:
