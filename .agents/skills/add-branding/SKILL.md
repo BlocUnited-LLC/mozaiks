@@ -4,6 +4,8 @@ description: Customize app shell branding - themes, colors, navigation, logos. W
 argument-hint: "[what you want to change - theme, colors, logo, navigation]"
 ---
 
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge or branch off it instead of main.
+
 Help the user customize the Mozaiks app shell using declarative config.
 
 ## Key Files

@@ -4,6 +4,8 @@ description: Review or implement a change to the factory build workflow system, 
 argument-hint: "[change summary or file path]"
 ---
 
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge or branch off it instead of main.
+
 Use this skill when a change touches the factory build workflow system.
 
 Typical triggers:

@@ -4,6 +4,8 @@ description: Add a backend module (deterministic CRUD/action handler) to an exis
 argument-hint: "[module name or description]"
 ---
 
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge or branch off it instead of main.
+
 Help the user add a backend **module** to an existing Mozaiks application.
 
 A module is deterministic backend logic: CRUD actions, domain data, business rules.

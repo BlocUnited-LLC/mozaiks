@@ -7,6 +7,8 @@ disable-model-invocation: true
 
 Complete this branding task: $ARGUMENTS
 
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files, wait for it to merge or branch off it instead of main.
+
 1. Read `AGENTS.md`, `CLAUDE.md`, and `.claude/rules/frontend.md`.
 2. Prefer declarative config over custom React.
 3. Use `app/brand/theme_config.json` for colors, typography, spacing, density, radius, assets, and identity tokens.

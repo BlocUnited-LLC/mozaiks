@@ -54,29 +54,12 @@ not in this app workspace.
 
 ## Multi-Agent Coordination
 
-Multiple coding agents may work in this repo simultaneously. Follow these rules
-to avoid stomping on each other's in-flight changes.
+Multiple coding agents may work in this repo simultaneously. Always run
+`git fetch origin && gh pr list --state open` before starting to avoid stomping
+on in-flight changes. Use `cc/` branch prefix for Claude Code and `codex/` for
+Codex. Create a PR and immediately enable auto-merge: `gh pr merge <n> --squash --delete-branch --auto`.
 
-**Before starting any task:**
-```bash
-git fetch origin
-gh pr list --state open           # see what other agents have in flight
-git log origin/main --oneline -5  # see what recently landed
-```
-
-**Branch workflow — always use feature branches, never push directly to main:**
-```bash
-git checkout main && git reset --hard origin/main
-git checkout -b cc/<description>     # cc/ = Claude Code
-#                codex/<description> # codex/ = Codex
-git push -u origin cc/<description>
-gh pr create --title "..." --body "..."
-gh pr merge <number> --squash --delete-branch --auto
-```
-
-Auto-merge fires once CI passes. No human action needed.
-
-See `.claude/rules/multi-agent-coordination.md` for the full rule set.
+See `.claude/rules/multi-agent-coordination.md` for the full protocol.
 
 ## Development Rules
 

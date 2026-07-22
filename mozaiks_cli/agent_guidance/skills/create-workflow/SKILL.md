@@ -7,6 +7,8 @@ disable-model-invocation: true
 
 Complete this workflow task: $ARGUMENTS
 
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files, wait for it to merge or branch off it instead of main.
+
 1. Read `AGENTS.md` and `.claude/rules/workflows.md`.
 2. Create or update `workflows/<WorkflowName>/`.
 3. Keep workflow YAML structured-output-first and declarative.

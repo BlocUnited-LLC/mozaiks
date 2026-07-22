@@ -4,6 +4,8 @@ description: Add features to an existing Mozaiks project. Helps users upgrade ti
 argument-hint: "[optional: feature name or preset]"
 ---
 
+**Before starting:** `git fetch origin && gh pr list --state open && git log origin/main --oneline -3` — if another agent has an open PR touching the same files you need, wait for it to merge or branch off it instead of main.
+
 Help the user add features to an existing Mozaiks project.
 
 ## Available Features
