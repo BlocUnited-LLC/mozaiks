@@ -52,6 +52,32 @@ This repo owns app-specific behavior only:
 Framework/runtime changes belong in the upstream Mozaiks framework repository,
 not in this app workspace.
 
+## Multi-Agent Coordination
+
+Multiple coding agents may work in this repo simultaneously. Follow these rules
+to avoid stomping on each other's in-flight changes.
+
+**Before starting any task:**
+```bash
+git fetch origin
+gh pr list --state open           # see what other agents have in flight
+git log origin/main --oneline -5  # see what recently landed
+```
+
+**Branch workflow — always use feature branches, never push directly to main:**
+```bash
+git checkout main && git reset --hard origin/main
+git checkout -b cc/<description>     # cc/ = Claude Code
+#                codex/<description> # codex/ = Codex
+git push -u origin cc/<description>
+gh pr create --title "..." --body "..."
+gh pr merge <number> --squash --delete-branch --auto
+```
+
+Auto-merge fires once CI passes. No human action needed.
+
+See `.claude/rules/multi-agent-coordination.md` for the full rule set.
+
 ## Development Rules
 
 - Keep modules deterministic and contract-declared.
