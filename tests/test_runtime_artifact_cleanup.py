@@ -93,3 +93,13 @@ def test_runtime_cleanup_scripts_are_available() -> None:
     assert "CLEAR_RUNTIME_ARTIFACTS_ON_START=0" in env_example
     assert "MOZAIKS_AGENT_OUTPUTS_DIR=logs/agent_outputs" in env_example
 
+
+def test_run_infra_fails_when_docker_compose_fails() -> None:
+    run_infra = _read("scripts/run-infra.ps1")
+
+    assert "$composeExitCode = $LASTEXITCODE" in run_infra
+    assert "Docker Compose failed with exit code" in run_infra
+    assert "Start Docker Desktop and rerun this command." in run_infra
+    assert "Use -SkipInfra only when MongoDB is already running on localhost:27017." in run_infra
+    assert "Example infra started" in run_infra
+

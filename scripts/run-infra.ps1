@@ -27,6 +27,13 @@ Write-Host ("[infra] Starting profile '{0}' via docker compose..." -f $Profile) 
 Write-Host ("[infra] Services: {0}" -f ($services -join ", ")) -ForegroundColor DarkGray
 
 docker compose -f $ComposeFile up -d @services
+$composeExitCode = $LASTEXITCODE
+if ($composeExitCode -ne 0) {
+  Write-Host ("[infra] Docker Compose failed with exit code {0}." -f $composeExitCode) -ForegroundColor Red
+  Write-Host "[infra] Start Docker Desktop and rerun this command." -ForegroundColor Yellow
+  Write-Host "[infra] Use -SkipInfra only when MongoDB is already running on localhost:27017." -ForegroundColor Yellow
+  exit $composeExitCode
+}
 
 if ($Profile -eq "example") {
   Write-Host "[infra] Example infra started. Mongo: localhost:27017, Keycloak: http://localhost:8080" -ForegroundColor Green
