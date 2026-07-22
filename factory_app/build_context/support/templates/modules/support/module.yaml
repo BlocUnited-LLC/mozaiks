@@ -6,7 +6,7 @@ module:
   description: App support request metadata. Conversation bodies are stored in the messages module.
   owner: app
   visibility: private
-  handler: backend.handler:SupportModule
+  handler: backend.handler:SupportHandler
 
 permissions:
   - id: support.read

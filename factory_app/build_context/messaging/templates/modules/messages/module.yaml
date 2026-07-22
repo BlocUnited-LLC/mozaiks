@@ -6,7 +6,7 @@ module:
   description: Internal app messaging for user conversations, support threads, read state, and notification fan-out.
   owner: app
   visibility: private
-  handler: backend.handler:MessagesModule
+  handler: backend.handler:MessagesHandler
 
 permissions:
   - id: messages.read

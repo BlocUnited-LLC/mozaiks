@@ -107,6 +107,37 @@ class TestResolveDedupe:
 
 # ── resolve.alias for React ─────────────────────────────────────────────────
 
+
+class TestDependencyScannerJsx:
+    """
+    The Vite dev dependency scanner runs before the jsx-in-js transform plugin.
+
+    web_shell imports first-party source files from chat-ui, factory_app, and
+    active app workspaces. Some of those canonical UI files still use JSX inside
+    .js modules. Vite 8 scans dependencies with Rolldown, so optimizeDeps must
+    teach Rolldown to parse .js as JSX or local Studio startup fails before the
+    app is served.
+    """
+
+    def test_rolldown_dependency_scan_parses_js_files_as_jsx(self) -> None:
+        source = _vite_config()
+        optimize_deps_region = _extract_object_region(source, "optimizeDeps:")
+        assert "rolldownOptions" in optimize_deps_region, (
+            "web_shell/vite.config.js must configure optimizeDeps.rolldownOptions "
+            "for Vite 8 dependency scanning."
+        )
+        assert "moduleTypes" in optimize_deps_region, (
+            "optimizeDeps.rolldownOptions.moduleTypes must be present so the "
+            "dependency scanner can parse first-party JSX-in-.js files."
+        )
+        assert re.search(r"['\"]\.js['\"]\s*:\s*['\"]jsx['\"]", optimize_deps_region), (
+            "optimizeDeps.rolldownOptions.moduleTypes must map '.js' to 'jsx' "
+            "or Vite dev startup fails while scanning chat-ui/factory_app UI files."
+        )
+
+
+# ── resolve.alias for React ─────────────────────────────────────────────────
+
 class TestReactAlias:
     """
     The resolve.alias block must pin React and react-dom to web_shell's copy.
@@ -192,4 +223,29 @@ def _extract_dedupe_region(source: str) -> str:
     end_match = re.search(r"dedupe\s*:\s*\[([^\]]*)\]", source[idx:], re.DOTALL)
     end = idx + (end_match.end() if end_match else 100)
     return source[start:end]
+
+
+def _extract_object_region(source: str, marker: str) -> str:
+    """
+    Return the brace-delimited object region that follows a property marker.
+    This is intentionally small and source-oriented; it only supports the
+    static Vite config patterns these contract tests guard.
+    """
+    marker_idx = source.find(marker)
+    if marker_idx == -1:
+        return ""
+    brace_idx = source.find("{", marker_idx)
+    if brace_idx == -1:
+        return ""
+
+    depth = 0
+    for idx in range(brace_idx, len(source)):
+        char = source[idx]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[brace_idx : idx + 1]
+    return source[brace_idx:]
 
