@@ -364,6 +364,12 @@ export default defineConfig(({ mode }) => {
 
   optimizeDeps: {
     rolldownOptions: {
+      // Vite 8 uses Rolldown for dependency scanning before normal plugins run.
+      // Several first-party UI files intentionally use JSX in .js modules, so
+      // the scanner must parse .js the same way the jsx-in-js transform does.
+      moduleTypes: {
+        '.js': 'jsx',
+      },
       plugins: [],
     },
   },
