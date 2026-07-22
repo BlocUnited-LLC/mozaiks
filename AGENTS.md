@@ -228,6 +228,38 @@ Examples:
 - `workspace/build_context/mozaikspay/context.yaml`
 - `workspace/build_context/mozaikspay/contract.yaml`
 
+## Multi-Agent Coordination
+
+Multiple coding agents (Claude Code, Codex) operate autonomously and
+simultaneously across `mozaiks` and `mozaiks-app`. Follow these rules to avoid
+stomping on each other.
+
+**Before starting any task:**
+```bash
+git fetch origin
+gh pr list --state open           # see what other agents have in flight
+git log origin/main --oneline -5  # see what recently landed
+```
+
+**Branch workflow — always use feature branches:**
+```bash
+git checkout main && git reset --hard origin/main
+git checkout -b cc/<description>  # cc/ = Claude Code, codex/ = Codex
+# ... work, commit ...
+git push -u origin cc/<description>
+gh pr create --title "..." --body "..."
+gh pr merge <number> --squash --delete-branch --auto
+```
+
+Primary repo ownership (avoids overlap by default):
+
+| Repo | Primary agent |
+|------|--------------|
+| `mozaiks` (OSS) | Claude Code |
+| `mozaiks-app` (hosted product) | Codex |
+
+See `.claude/rules/multi-agent-coordination.md` for full rules.
+
 ## Contributor Guidance Operating System
 
 For nontrivial OSS changes:
