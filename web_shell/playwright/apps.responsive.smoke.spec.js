@@ -817,6 +817,23 @@ test('apps route stays responsive across desktop and mobile widths', async ({ pa
   }
 });
 
+test('create app workflow exposes a return control back to Apps', async ({ page }) => {
+  await page.goto('/apps');
+  const main = page.locator('main');
+
+  await main.getByRole('button', { name: 'Create App' }).click();
+
+  await expect(page).toHaveURL(/\/chat\?(.+&)?workflow=ValueEngine(&|$)/);
+  await expect(page).toHaveURL(/return_to=%2Fapps/);
+
+  const backToApps = page.getByRole('button', { name: 'Back to Apps' });
+  await expect(backToApps).toBeVisible();
+  await backToApps.click();
+
+  await expect(page).toHaveURL(/\/apps$/);
+  await expect(page.locator('main').getByRole('heading', { name: 'Apps', exact: true })).toBeVisible();
+});
+
 test('import app overlay stays within the viewport and suppresses the floating widget', async ({ page }) => {
   await page.goto('/apps');
   const main = page.locator('main');

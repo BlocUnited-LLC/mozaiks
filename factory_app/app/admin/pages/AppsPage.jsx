@@ -30,6 +30,8 @@ const FILTER_OPTIONS = [
   { label: 'Live', value: 'live' },
 ]
 
+const CREATE_APP_WORKFLOW_PATH = '/chat?workflow=ValueEngine&mode=workflow&defer_start=1&return_to=%2Fapps'
+
 function matchesFilter(row, activeFilter) {
   if (activeFilter === 'all') return true
   return row.filterBucket === activeFilter
@@ -283,7 +285,7 @@ export default function AppsPage() {
 
   function handleHeaderAction(actionId) {
     if (actionId === 'create') {
-      navigate('/chat?workflow=ValueEngine&mode=workflow&defer_start=1')
+      navigate(CREATE_APP_WORKFLOW_PATH)
     } else if (actionId === 'import') {
       setImportOpen(true)
     }
