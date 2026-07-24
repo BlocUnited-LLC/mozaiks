@@ -24,6 +24,16 @@ agents:
       - "B2B SaaS for HR teams" → users are HR managers. Do not ask "who is your target user?"
       - "Social app for runners" → users are runners. Do not ask "what type of users do you want?"
 
+      You also know standard industry monetization patterns. Do NOT ask the user how they want to make money unless the category is genuinely ambiguous. State your pricing assumption and ask only for correction:
+      - Consumer social / community → freemium (free + $5–15/mo premium)
+      - Creator platform → free creator tier + paid subscriber model (creator pays $9–29/mo for advanced tools; fan access tiered)
+      - B2B SaaS / productivity → per-seat or flat tiers (Free / Pro ~$15–30/user/mo / Team / Enterprise)
+      - Developer tools / API product → usage-based credits or free tier + paid at $29–99/mo
+      - Marketplace → take rate (10–20% per transaction) + optional premium listings
+      - AI-native product → usage credits / token packs + optional subscription with allowances
+      - Community / forum → freemium with optional paid membership or donations
+      - Event / booking → per-ticket fee or operator subscription
+
       Ask only when a gap is genuinely ambiguous AND it blocks research. Prefer to state your assumption and ask for the smallest correction needed.
   - id: how_to_open
     heading: '[OPENING THE CONVERSATION]'
@@ -194,6 +204,20 @@ agents:
       - `capability_pack_hints`: canonical product capability families implied by the concept, such as `messaging_pack`, `commerce_pack`, `marketplace_pack`, `campaigns_pack`, `billing_pack`, `crud_pack`, `ai_review_pack`, `ai_analysis_pack`, or `ai_extraction_pack`. Use `commerce_pack` for storefronts, product catalogs, carts, checkout request flows, orders, and inventory. Use AI-native packs when the concept involves: autonomous evaluation of submitted records without a human reviewer for every item (`ai_review_pack`); automatic background enrichment when records are created or updated (`ai_analysis_pack`); parallel processing of document batches or collections (`ai_extraction_pack`).
       - `monetization_intent`: advisory core monetization hint. Set this when monetization_enabled is true or the concept mentions subscriptions, paid access, usage credits, checkout, marketplace, sponsorship, contributions, campaign funding, or revenue-share. Do not treat "monetized" as a final model. Use likely_revenue_models from: subscriptions, usage_based, custom, hybrid. Set subscription_contract_likely=true only for recurring access, seats, gated features, quotas, credits, token wallets, or token allowances.
         Use custom when the concept implies purchases, reservations, orders, checkout sessions, one-time payments, marketplace flows, sponsorship, contributions, campaign funding, or app/operator-specific money policy.
+      - `pricing_recommendation`: concrete pricing model derived from industry knowledge — do NOT leave this null when the concept implies any revenue. Use your knowledge of what works in this category. Include:
+        - `model`: the primary billing mechanism (subscriptions | usage_based | take_rate | hybrid | donations | free)
+        - `tiers`: 2–4 concrete tiers with name, price_monthly (0 for free), target_persona (who this tier is for), key_gates (1–3 features or limits that drive upgrade), and conversion_hook (the one thing that makes users want to upgrade)
+        - `take_rate_pct`: for marketplace/platform models, the % fee per transaction
+        - `rationale`: one sentence explaining why this model fits the category
+        Industry pricing patterns to apply without asking:
+        - B2B SaaS → Free (limited seats/features) / Pro ($15–30/user) / Team ($10–20/user with minimums) / Enterprise (contact)
+        - Consumer social → Free / Premium ($8–15/mo) — gate analytics, highlights, advanced customization
+        - Creator platform → Free creator / Pro creator ($9–29/mo) — gate monetization tools, advanced analytics, scheduling
+        - AI product → Free (limited tokens) / Pro ($20–50/mo, token allowance) / usage top-ups available
+        - Developer / API → Free tier + Pay-as-you-go or flat plans ($29–99/mo) gating rate limits and advanced features
+        - Marketplace → 10–20% take rate; optional Premium listing fee; no subscription needed for MVP
+        - Community / forum → Free / Supporter ($5–10/mo) — gate badges, private channels, exclusive content
+        - Event / booking → Per-ticket fee (3–5%) or organizer subscription ($15–49/mo)
       - `surface_candidate_hints`: coarse realization hints for each likely surface. Each hint includes `surface_id`, `label`, `likely_surface_kind` (module/workflow/control_plane/external_integration/ui_only), `source_capability_packs`, `owner_hint` (app/hosted/platform/null), `confidence`, and `rationale`. These are planning signals for DesignDocs, not final contracts.
         - Set `owner_hint: "app"` for surfaces the generated app owns entirely (custom modules, app-specific workflows).
         - Set `owner_hint: "hosted"` for surfaces backed by framework packs provided outside the app (messaging_pack, files_pack, notifications_pack, entitlements_pack). DesignDocs will use a facade pattern for these.
@@ -282,6 +306,27 @@ agents:
           "subscription_contract_likely": false,
           "money_flow_summary": "No revenue flow is required for the single-user MVP.",
           "rationale": "The approved scope focuses on personal productivity and does not mention paid access, checkout, usage credits, or marketplace payments."
+        },
+        "pricing_recommendation": {
+          "model": "subscriptions",
+          "tiers": [
+            {
+              "name": "Free",
+              "price_monthly": 0,
+              "target_persona": "Solo users trying out the product",
+              "key_gates": ["Up to 50 tasks", "1 project", "Basic prioritization"],
+              "conversion_hook": "AI prioritization is limited — unlock full AI on Pro"
+            },
+            {
+              "name": "Pro",
+              "price_monthly": 12,
+              "target_persona": "Busy professionals managing multiple projects",
+              "key_gates": ["Unlimited tasks and projects", "Full AI prioritization", "Calendar sync"],
+              "conversion_hook": "Full context-aware AI that learns your work patterns"
+            }
+          ],
+          "take_rate_pct": null,
+          "rationale": "Productivity tools convert best with a generous free tier that hits limits naturally, then a single low-friction Pro upgrade."
         },
         "surface_candidate_hints": [
           {
