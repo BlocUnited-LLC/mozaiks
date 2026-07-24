@@ -177,6 +177,17 @@ Rules:
    bundles, then evaluate both layers with the OSS
    `mozaiksai.core.runtime.readiness` primitive.
 
+The generated environment-staging readiness workflow also runs a live
+provider-neutral runtime preflight before the container smoke:
+
+- `MONGO_URI` must authenticate and respond to a MongoDB `ping`
+- auth-enabled apps must have either reachable OIDC discovery metadata or a
+  reachable explicit `AUTH_JWKS_URL` with `AUTH_ISSUER`
+
+The workflow reports only safe metadata such as check ids, status, public host
+names, and exception type. It must not print connection strings, API keys,
+passwords, tokens, or provider secrets.
+
 ### Authenticated App Contract
 
 Generated apps declare whether their runtime requires login through

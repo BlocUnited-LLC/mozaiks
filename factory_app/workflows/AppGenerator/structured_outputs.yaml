@@ -198,9 +198,14 @@ models:
           - unknown
         description: >
           Status returned by check_workspace_integrations.
-          configured = all required env vars present — auto-wire this integration.
-          partial = some required env vars missing — flag to the user.
-          missing = no required env vars present — pass to record_integration_need.
+          configured = all required env vars are present, or a saved workspace
+          connector is ready; if the host registered a provider health check,
+          ready requires a passing provider health result. Auto-wire this
+          integration.
+          partial = some required env vars are missing or a saved connector still
+          needs validation — flag to the user.
+          missing = no required env vars or ready connector are present — pass to
+          record_integration_need.
           unknown = catalog_only mode — cannot verify; surface setup guidance.
       auto_wire:
         type: bool

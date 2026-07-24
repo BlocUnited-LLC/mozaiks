@@ -28,6 +28,14 @@ definitions:
     source:
       type: state
       default: initial
+  workflow_sequence:
+    type: string
+    description: >
+      Active workflow sequence that launched this run, such as app_revision,
+      app_surface_revision, conceptual_replan, or full_rebuild.
+    source:
+      type: state
+      default: null
   revision_scope:
     type: string
     description: >
@@ -1297,6 +1305,7 @@ agents:
     - platform_user_email
     - app_backend_url
     - build_mode
+    - workflow_sequence
     - revision_scope
     - change_request_id
     - revision_id

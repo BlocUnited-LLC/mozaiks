@@ -29,6 +29,21 @@ Mozaiks owns deterministic product and runtime contracts around AG2:
 - factory control-plane policy and deterministic decomposition contracts that
   define the typed work AG2 agents execute
 
+## Runtime Handoff
+
+AG2 network packets are the source trace for agent execution, not automatically
+user-visible chat copy. Mozaiks owns the projection from AG2 packet history into
+transport events and replayed chat history because that projection enforces
+workflow contracts such as `ui_hidden` control signals and structured-output
+artifact rendering.
+
+Control tokens such as `NEXT` may drive declarative transition/context state, but
+must not render as normal assistant messages when the matching trigger is marked
+`ui_hidden`. Structured-output JSON from registered structured-output agents
+must remain durable trace data and feed the declared artifact/tool path; it must
+not be projected as raw chat text. User-visible agent output should be narrative
+copy, Markdown, or an explicit UI artifact.
+
 ## Design Rule
 
 When a workflow feature needs agentic behavior, first ask whether AG2 already

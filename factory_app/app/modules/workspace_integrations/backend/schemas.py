@@ -63,6 +63,19 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "sendgrid",
+        "name": "SendGrid",
+        "category": "email",
+        "description": "Transactional email delivery through Twilio SendGrid.",
+        "required_secrets": ["SENDGRID_API_KEY"],
+        "optional_secrets": ["SENDGRID_FROM_EMAIL"],
+        "setup_steps": [
+            "Sign in to SendGrid → Settings → API Keys",
+            "Create an API key with Mail Send access",
+            "Verify your sender identity or sending domain before production delivery",
+        ],
+    },
+    {
         "id": "twilio",
         "name": "Twilio",
         "category": "sms",
@@ -115,6 +128,32 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "cloudinary",
+        "name": "Cloudinary",
+        "category": "storage",
+        "description": "Image and media storage, transformation, and delivery.",
+        "required_secrets": ["CLOUDINARY_URL"],
+        "optional_secrets": [],
+        "setup_steps": [
+            "Sign in to Cloudinary → Dashboard",
+            "Copy the CLOUDINARY_URL credential for the target cloud",
+            "Use a scoped product environment for production apps",
+        ],
+    },
+    {
+        "id": "mongodb",
+        "name": "MongoDB",
+        "category": "database",
+        "description": "MongoDB database used by Mozaiks runtime persistence and generated app data.",
+        "required_secrets": ["MONGO_URI"],
+        "optional_secrets": ["MONGO_DB_NAME"],
+        "setup_steps": [
+            "Provision MongoDB locally, in Atlas, or through a managed provider",
+            "Create an app-scoped database user with the minimum required database permissions",
+            "Copy the connection string as MONGO_URI and verify it with the readiness check before deploy",
+        ],
+    },
+    {
         "id": "postgres",
         "name": "PostgreSQL",
         "category": "database",
@@ -149,6 +188,19 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Go to Google Cloud Console → APIs & Services → Credentials",
             "Create an OAuth 2.0 Client ID (Web application type)",
             "Add your app's redirect URI to the Authorized redirect URIs list",
+        ],
+    },
+    {
+        "id": "microsoft_oauth",
+        "name": "Microsoft OAuth",
+        "category": "auth",
+        "description": "Sign in with Microsoft or Entra ID through OIDC/OAuth.",
+        "required_secrets": ["MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"],
+        "optional_secrets": ["MICROSOFT_TENANT_ID", "MICROSOFT_REDIRECT_URI"],
+        "setup_steps": [
+            "Create an app registration in Microsoft Entra admin center",
+            "Add the app redirect URI under Authentication",
+            "Create a client secret and store only the secret handle in the workspace connector",
         ],
     },
     {

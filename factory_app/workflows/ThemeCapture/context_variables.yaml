@@ -39,6 +39,15 @@ definitions:
       type: state
       default: false
 
+  workflow_sequence:
+    type: string
+    description: >
+      Active workflow sequence that launched this run, such as theme_revision,
+      app_surface_revision, conceptual_replan, or full_rebuild.
+    source:
+      type: state
+      default: null
+
   builder_options:
     type: object
     description: Optional app-agnostic builder UI option payload carried through workflow sequences.
@@ -150,6 +159,7 @@ agents:
       - screenshot_description
       - parent_theme_config
       - automated_workflow_run
+      - workflow_sequence
       - app_name
       - app_description
       - tech_stack
@@ -168,6 +178,7 @@ agents:
       - css_snapshot
       - screenshot_description
       - parent_theme_config
+      - workflow_sequence
       - preload_status
       - preload_summary
       - theme_capture_evidence
@@ -178,6 +189,7 @@ agents:
     variables:
       - app_name
       - parent_theme_config
+      - workflow_sequence
       - preload_summary
       - theme_capture_evidence
       - captured_theme_config

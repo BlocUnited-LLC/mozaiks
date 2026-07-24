@@ -16,9 +16,9 @@ import {
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function statusTone(status) {
-  if (status === 'configured') return 'success'
-  if (status === 'partial') return 'warning'
-  if (status === 'missing') return 'destructive'
+  if (status === 'configured' || status === 'healthy') return 'success'
+  if (status === 'partial' || status === 'pending_validation') return 'warning'
+  if (status === 'missing' || status === 'unhealthy' || status === 'not_configured') return 'destructive'
   return 'default'
 }
 
@@ -137,6 +137,16 @@ async function deleteWorkspaceConnector(service) {
   return res.json()
 }
 
+async function checkWorkspaceConnector(service) {
+  const res = await fetch(`${API_BASE}/api/modules/workspace_integrations/check_workspace_connector_health`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ service }),
+  })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  return res.json()
+}
+
 // ── SetupSlideOver ────────────────────────────────────────────────────────────
 
 function SetupSlideOver({
@@ -147,8 +157,10 @@ function SetupSlideOver({
   onClose,
   onSave,
   onDelete,
+  onCheck,
   saving,
   deleting,
+  checking,
   actionError,
 }) {
   const [note, setNote] = useState('')
@@ -190,6 +202,15 @@ function SetupSlideOver({
         )}
       </div>
       <div className="flex justify-end gap-3">
+        {hasStoredConnector && (
+          <ActionButton
+            variant="secondary"
+            onClick={() => onCheck(item.id)}
+            disabled={saving || deleting || checking}
+          >
+            {checking ? 'Checking...' : 'Check connection'}
+          </ActionButton>
+        )}
         <ActionButton variant="secondary" onClick={onClose} disabled={saving || deleting}>
           Close
         </ActionButton>
@@ -241,6 +262,13 @@ function SetupSlideOver({
           <div className="mt-1 text-sm font-medium text-foreground">
             {connectorLabel(connector, item)}
           </div>
+          {connector?.health?.status && (
+            <div className="mt-2">
+              <StatusPill tone={statusTone(connector.health.status)}>
+                {humanize(connector.health.status)}
+              </StatusPill>
+            </div>
+          )}
           {connector?.health?.message && (
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{connector.health.message}</p>
           )}
@@ -373,6 +401,7 @@ export default function WorkspaceIntegrationsPage() {
   const [activeItem, setActiveItem] = useState(null)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [checking, setChecking] = useState(false)
   const [actionError, setActionError] = useState(null)
 
   async function load() {
@@ -428,6 +457,22 @@ export default function WorkspaceIntegrationsPage() {
       setActionError(err instanceof Error ? err.message : 'Connector could not be deleted.')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handleCheckConnector(service) {
+    const connector = connectors.find((candidate) => candidate?.service === service)
+    if (!connector) return
+
+    setChecking(true)
+    setActionError(null)
+    try {
+      await checkWorkspaceConnector(service)
+      await load()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Connector health check could not run.')
+    } finally {
+      setChecking(false)
     }
   }
 
@@ -525,8 +570,10 @@ export default function WorkspaceIntegrationsPage() {
           onClose={closeSlideOver}
           onSave={handleSaveNote}
           onDelete={handleDeleteConnector}
+          onCheck={handleCheckConnector}
           saving={saving}
           deleting={deleting}
+          checking={checking}
           actionError={actionError}
         />
       </div>

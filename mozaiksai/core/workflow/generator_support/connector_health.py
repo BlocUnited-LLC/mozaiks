@@ -117,6 +117,8 @@ class ConnectorHealthContext:
     app_id: str
     service_id: str
     integration_id: str
+    scope: str = ConnectorStore.SCOPE_APP
+    scope_id: str = ""
     checked_by: str = "manual"
     safe_context: dict[str, Any] = field(default_factory=dict)
 
@@ -142,8 +144,8 @@ class SecretHandle:
 class ConnectorSecretReader:
     """Server-side secret reader passed to health providers."""
 
-    def __init__(self, *, app_id: str, service: str) -> None:
-        self.scope_id = str(app_id)
+    def __init__(self, *, service: str, scope_id: str | None = None, app_id: str | None = None) -> None:
+        self.scope_id = str(scope_id or app_id or "")
         self.service = _normalize_id(service)
 
     async def get_secret(self) -> SecretHandle:
@@ -203,8 +205,10 @@ def clear_connector_health_providers_for_tests() -> None:
 
 async def run_connector_health_check(
     *,
-    app_id: str,
+    app_id: str | None = None,
     service: str,
+    scope: str = ConnectorStore.SCOPE_APP,
+    scope_id: str | None = None,
     checked_by: str = "manual",
     safe_context: dict[str, Any] | None = None,
     store: ConnectorStore | None = None,
@@ -212,10 +216,16 @@ async def run_connector_health_check(
     """Run an explicitly requested server-side provider health check."""
 
     connector_store = store or ConnectorStore()
+    resolved_scope = _normalize_id(scope) or ConnectorStore.SCOPE_APP
+    if resolved_scope not in {ConnectorStore.SCOPE_APP, ConnectorStore.SCOPE_WORKSPACE}:
+        raise ValueError("connector health scope must be 'app' or 'workspace'")
+    resolved_scope_id = str(scope_id or app_id or "").strip()
+    if not resolved_scope_id:
+        raise ValueError("connector health scope_id or app_id is required")
     normalized_service = _normalize_id(service)
     record = await connector_store.get(
-        scope=ConnectorStore.SCOPE_APP,
-        scope_id=str(app_id),
+        scope=resolved_scope,
+        scope_id=resolved_scope_id,
         service=normalized_service,
     )
     if not isinstance(record, dict):
@@ -240,13 +250,15 @@ async def run_connector_health_check(
         }
 
     context = ConnectorHealthContext(
-        app_id=str(app_id),
+        app_id=str(app_id or (resolved_scope_id if resolved_scope == ConnectorStore.SCOPE_APP else "")),
         service_id=normalized_service,
         integration_id=integration_id,
+        scope=resolved_scope,
+        scope_id=resolved_scope_id,
         checked_by=checked_by,
         safe_context=dict(safe_context or {}),
     )
-    secret_reader = ConnectorSecretReader(app_id=str(app_id), service=normalized_service)
+    secret_reader = ConnectorSecretReader(scope_id=resolved_scope_id, service=normalized_service)
     public_config = record.get("public_config") if isinstance(record.get("public_config"), dict) else {}
 
     try:
@@ -265,8 +277,8 @@ async def run_connector_health_check(
         ).to_safe_dict()
 
     updated = await connector_store.update_health(
-        scope=ConnectorStore.SCOPE_APP,
-        scope_id=str(app_id),
+        scope=resolved_scope,
+        scope_id=resolved_scope_id,
         service=normalized_service,
         health_status=safe_result["status"],
         health_message=safe_result.get("message"),

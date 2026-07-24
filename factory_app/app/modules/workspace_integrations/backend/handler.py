@@ -172,6 +172,19 @@ class WorkspaceIntegrationsModule:
             workspace_id=_workspace_id_from_context(ctx, workspace_id),
         )
 
+    async def check_workspace_connector_health(
+        self,
+        ctx: ModuleContext,
+        *,
+        workspace_id: str | None = None,
+        service: str,
+        **_: object,
+    ) -> dict:
+        return await self.service.check_workspace_connector_health(
+            workspace_id=_workspace_id_from_context(ctx, workspace_id),
+            service=service,
+        )
+
     async def delete_workspace_connector(
         self,
         ctx: ModuleContext,

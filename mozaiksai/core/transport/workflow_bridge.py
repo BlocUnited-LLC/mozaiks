@@ -526,6 +526,13 @@ class WorkflowBridgeMixin:
             message,
             context_updates=context_updates,
         )
+        manager = getattr(self, "_derived_context_managers", {}).get(chat_id)
+        try:
+            from mozaiksai.core.workflow.outputs.structured import load_workflow_structured_outputs
+
+            _, structured_registry = load_workflow_structured_outputs(workflow_name)
+        except Exception:
+            structured_registry = {}
         await _project_ag2_wal_to_mozaiks_transport(
             runner_result=runner_result,
             transport=self,
@@ -534,6 +541,8 @@ class WorkflowBridgeMixin:
             app_id=app_id,
             agent_name_by_id=runner_result.agent_name_by_id,
             initial_sequence=0,
+            derived_context_manager=manager,
+            structured_registry=structured_registry,
         )
 
         ctx = dict(getattr(runner_result, "context_variables", {}) or {})

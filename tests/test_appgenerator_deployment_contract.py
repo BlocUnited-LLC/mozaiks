@@ -883,6 +883,35 @@ def test_generated_workflow_deploy_job_has_post_deploy_health_check() -> None:
     assert "HEALTH_PATH" in workflow
 
 
+def test_generated_readiness_workflow_preflights_runtime_dependencies() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="production_container",
+        include_readiness_workflow=True,
+    )
+    workflow = result["artifacts"][".github/workflows/readiness.yml"]
+
+    assert "Preflight runtime dependencies" in workflow
+    assert 'python -m pip install --disable-pip-version-check "pymongo>=4.5.0"' in workflow
+    assert "MongoClient(mongo_uri" in workflow
+    assert "OIDC discovery or explicit issuer/JWKS is required" in workflow
+    assert "os.getenv('AUTH_ENABLED', 'false')" in workflow
+    assert "safe_details" in workflow
+    assert "password@" not in workflow
+
+
+def test_generated_readiness_workflow_enables_auth_preflight_when_auth_required() -> None:
+    result = generate_deployment_artifacts(
+        app_id="demo_app",
+        deployment_profile="production_container",
+        include_readiness_workflow=True,
+        auth_required=True,
+    )
+    workflow = result["artifacts"][".github/workflows/readiness.yml"]
+
+    assert "os.getenv('AUTH_ENABLED', 'true')" in workflow
+
+
 def test_generated_workflow_health_check_uses_default_health_path() -> None:
     result = generate_deployment_artifacts(
         app_id="demo_app",

@@ -2093,6 +2093,29 @@ def test_app_plan_agent_receives_llm_profile() -> None:
     assert "llm_profile" in cv["agents"]["AppPlanAgent"]["variables"]
 
 
+@pytest.mark.parametrize(
+    ("workflow_name", "agent_name"),
+    [
+        ("ValueEngine", "ValueInterviewAgent"),
+        ("ThemeCapture", "ThemeInterviewAgent"),
+        ("DesignDocs", "DesignDocsAgent"),
+        ("SubscriptionContractDesigner", "ContractDesignerAgent"),
+        ("AgentGenerator", "InterviewAgent"),
+        ("AppGenerator", "AppPlanAgent"),
+    ],
+)
+def test_builder_revision_workflows_declare_workflow_sequence_context(
+    workflow_name: str,
+    agent_name: str,
+) -> None:
+    """Control-plane launches must preserve the active workflow_sequence."""
+    cv = _load_yaml(_factory_workflows_root() / workflow_name / "context_variables.yaml")
+    defn = cv["definitions"]["workflow_sequence"]
+    assert defn["source"]["type"] == "state"
+    assert defn["source"]["default"] is None
+    assert "workflow_sequence" in cv["agents"][agent_name]["variables"]
+
+
 # ---------------------------------------------------------------------------
 # Phase 3: auto-populate carry_forward_modules tests
 # ---------------------------------------------------------------------------

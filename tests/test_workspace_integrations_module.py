@@ -57,8 +57,12 @@ def test_catalog_covers_expected_integrations() -> None:
     assert "payment_provider" not in ids
     assert "openai" in ids
     assert "resend" in ids
+    assert "sendgrid" in ids
     assert "twilio" in ids
     assert "github" in ids
+    assert "cloudinary" in ids
+    assert "mongodb" in ids
+    assert "microsoft_oauth" in ids
 
 
 def test_build_context_catalog_matches_runtime_catalog() -> None:
@@ -117,6 +121,7 @@ def test_workspace_integrations_module_yaml_contract() -> None:
         "delete_app_integration_need",
         "save_workspace_connector",
         "list_workspace_connectors",
+        "check_workspace_connector_health",
         "delete_workspace_connector",
     } == action_ids
     assert (module_root / "contracts" / "events.yaml").exists()
@@ -128,6 +133,7 @@ def test_workspace_integrations_module_yaml_contract() -> None:
 
     by_id = {a["id"]: a for a in manifest["actions"]}
     assert "workspace_id" not in set(by_id["list_workspace_connectors"]["input_schema"].get("required") or [])
+    assert "workspace_id" not in set(by_id["check_workspace_connector_health"]["input_schema"].get("required") or [])
     assert "workspace_id" not in set(by_id["delete_workspace_connector"]["input_schema"].get("required") or [])
     assert "workspace_id" not in set(by_id["save_workspace_connector"]["input_schema"].get("required") or [])
 
@@ -268,6 +274,10 @@ class _FakeConnectorActionService:
         self.workspace_ids.append(workspace_id)
         return {"deleted": True, "service": service, "secret_deleted": False}
 
+    async def check_workspace_connector_health(self, *, workspace_id: str, service: str) -> dict[str, Any]:
+        self.workspace_ids.append(workspace_id)
+        return {"status": "configured", "service": service, "frontend_safe": True}
+
 
 @pytest.mark.asyncio
 async def test_handler_workspace_connector_actions_default_to_context_workspace() -> None:
@@ -277,9 +287,10 @@ async def test_handler_workspace_connector_actions_default_to_context_workspace(
     module = WorkspaceIntegrationsModule(service=service)  # type: ignore[arg-type]
 
     await module.list_workspace_connectors(ctx)
+    await module.check_workspace_connector_health(ctx, service="openai")
     await module.delete_workspace_connector(ctx, service="openai")
 
-    assert service.workspace_ids == ["workspace_123", "workspace_123"]
+    assert service.workspace_ids == ["workspace_123", "workspace_123", "workspace_123"]
 
 
 class _WrapperStyleCollection:

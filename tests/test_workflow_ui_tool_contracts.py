@@ -156,6 +156,7 @@ def test_generator_prompts_treat_connector_state_as_platform_owned() -> None:
     assert "must not be modeled as app/business collections inside `data_contract`" in design_docs
     assert "Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state." in app_generator
     assert "app connector inventory as the source of truth" in app_generator
+    assert "provider health check" in app_generator
 
 
 def test_app_generator_page_contract_stays_declarative() -> None:

@@ -238,10 +238,10 @@ agents:
              - `icon_rail` — productivity tools, SaaS dashboards, developer tools
              Choose the layout that best fits the app's primary user context and domain. Default to `top_nav` only when truly uncertain. Do NOT leave this null for apps with user profiles.
       9b. **Workspace integration check** — before finalizing `external_integrations`, call `check_workspace_integrations` with the catalog IDs of every third-party service the plan requires:
-         - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `postgres`, `redis`, `openai`, `anthropic`, `google_oauth`, `segment`.
+         - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `mongodb`, `postgres`, `redis`, `openai`, `anthropic`, `google_oauth`, `microsoft_oauth`, `segment`.
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
          - Use the result to populate `workspace_integration_status[]` in the plan:
-           - `configured` (auto_wire: true) — integration is ready; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
+           - `configured` (auto_wire: true) — integration is ready by configuration-only checks, or by a passing provider health check when the host registered one; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
            - `partial` or `missing` (auto_wire: false) — call `record_integration_need` for each so `IntegrationReadinessAgent` can collect the credential inline. Include the catalog `setup_url` in the message.
            - `unknown` — catalog-only mode (hosted deployment). Record status as `unknown`; do not call `record_integration_need`; surface the setup link in the build summary instead.
          - If no planned integrations match catalog IDs, skip the tool call and leave `workspace_integration_status` empty.
@@ -1349,7 +1349,9 @@ agents:
       - Keep integration collection agentic: only ask inline when the generated app
         actually needs a missing credential to continue validation, runtime wiring,
         or download readiness.
-      - Reuse app-scoped connectors when they are already ready.
+      - Reuse app-scoped connectors when they are already ready. If a host has
+        registered a provider health check for that connector type, ready means
+        the check has passed; pending or unhealthy connectors remain unresolved.
       - Persist any newly supplied credentials through the platform connector store
         so the app-scoped `/apps/:appId/integrations` surface reflects the result.
       - Treat integration requests as structured `integration.required` events:

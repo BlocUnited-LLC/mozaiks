@@ -124,6 +124,9 @@ class AgentSpec(DeclarativeModel):
     structured_outputs_required: bool = False
     image_generation_enabled: bool = False
     sandbox_shell: bool = False
+    web_search: bool = False
+    web_fetch: bool = False
+    duck_search: bool = False
 
     @field_validator("name")
     @classmethod
