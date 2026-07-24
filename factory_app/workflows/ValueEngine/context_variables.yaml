@@ -5,6 +5,17 @@ definitions:
 # ============================================================================
 # CONFIG - Deployment settings (env vars)
 # ============================================================================
+  platform_user_email:
+    type: string
+    description: >
+      Email of the authenticated platform user running this session.
+      Injected from the platform at session start. Null in OSS/unauthenticated contexts.
+      When non-null, agents know who they are talking to and can personalize the experience.
+    source:
+      type: config
+      env_var: PLATFORM_USER_EMAIL
+      default: null
+
   app_type:
     type: string
     description: App path for ValueEngine. Greenfield app generation defaults to "greenfield_app".
@@ -45,6 +56,15 @@ definitions:
     source:
       type: state
       default: initial
+  workflow_sequence:
+    type: string
+    description: >
+      Active workflow sequence that launched this run, such as conceptual_replan
+      or full_rebuild. Injected by the control plane so agents can distinguish
+      reroute intent from a plain workflow id.
+    source:
+      type: state
+      default: null
   revision_scope:
     type: string
     description: >
@@ -282,10 +302,12 @@ definitions:
 agents:
   ValueInterviewAgent:
     variables:
+    - platform_user_email
     - app_type
     - context_aware
     - monetization_enabled
     - build_mode
+    - workflow_sequence
     - revision_scope
     - change_request_id
     - revision_id
@@ -307,6 +329,7 @@ agents:
   ResearchAgent:
     variables:
     - build_mode
+    - workflow_sequence
     - revision_scope
     - change_request_id
     - revision_id
@@ -329,6 +352,7 @@ agents:
   GapAnalysisAgent:
     variables:
     - build_mode
+    - workflow_sequence
     - revision_scope
     - change_request_id
     - revision_id

@@ -372,6 +372,21 @@ async def create_agents(
                     wf_err,
                 )
 
+        # Inject DuckDuckSearchTool when agent declares duck_search: true.
+        # No API key required — works with any model. Good fit for interview and
+        # design agents that need quick market lookups, not deep research crawls.
+        if not auto_tool_call_enabled and agent_config.get("duck_search"):
+            try:
+                from ag2.tools import DuckDuckSearchTool
+                web_tools.append(DuckDuckSearchTool())
+                logger.debug("[AGENTS] DuckDuckSearchTool attached to '%s'", agent_name)
+            except Exception as dd_err:
+                logger.warning(
+                    "[AGENTS] duck_search requested for '%s' but DuckDuckSearchTool unavailable: %s",
+                    agent_name,
+                    dd_err,
+                )
+
         # Wrap tools to inject context_variables
         wrapped_tools: list[Any] = [
             _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns

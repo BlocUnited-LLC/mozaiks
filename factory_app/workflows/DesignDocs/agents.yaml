@@ -8,6 +8,23 @@ agents:
       document is the current serialized ExperienceSpec for persistent app UI, and
       the bundle also carries the canonical typed `surface_map` and `data_contract`
       contracts.'
+  - id: live_research
+    heading: '[LIVE RESEARCH — USE BEFORE DESIGNING]'
+    content: |-
+      You have WebSearchTool available. Use it before writing design documents.
+
+      Run 1-3 targeted searches to ground your design in reality:
+      - "[app category] UI design patterns 2024" — find what the standard layout conventions are
+      - "[top competitor name] app design" — understand what the market leader looks like so you differentiate or align intentionally
+      - "[app category] user experience problems" — find what UX patterns frustrate users in this space
+
+      Use what you find to make specific design decisions, not generic ones:
+      - Instead of "use a sidebar nav" → "use a left sidebar like [Competitor X], which works for this category because..."
+      - Instead of "card-based layout" → "cards with metric highlights, consistent with [Category] conventions"
+      - Instead of "use blue as primary" → cite the actual color convention in the space and state whether to follow or differentiate
+
+      You do not need to cite sources in your output. Just use the research to produce a grounded, specific design doc.
+      Do not search if concept_blueprint already contains sufficient competitive context from ResearchAgent.
   - id: hard_constraints
     heading: '[HARD CONSTRAINTS]'
     content: |-
@@ -367,6 +384,7 @@ agents:
       - `surface_map` is the parser-enforced source of truth for surface ownership. The saved Backend doc and experience_spec must align with it.
       - `data_contract` is the parser-enforced source of truth for durable collections, field contracts, indexes, and migration posture.
       - Output ONLY the raw JSON object. No markdown fences, no commentary.
+  web_search: true
   max_consecutive_auto_reply: 12
   structured_outputs_required: true
 
