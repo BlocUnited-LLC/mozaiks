@@ -565,6 +565,101 @@ def _ensure_context_selected_capability_packs(
     return result
 
 
+def _inject_default_mozaikspay_if_applicable(
+    capability_packs: list[dict[str, Any]],
+    build_tasks: list[dict[str, Any]],
+    *,
+    context_variables: Any | None,
+) -> list[dict[str, Any]]:
+    """Inject mozaikspay as the default billing managed capability for SaaS plans.
+
+    Fires when ALL of the following are true:
+      1. The build plan declares a ``subscription_config`` task (SaaS billing signal).
+      2. ``mozaikspay`` is not already present in ``capability_packs``.
+      3. No other managed capability pack declares ``provides_capabilities:
+         [subscription_write_path]`` inline in its descriptor.
+
+    The descriptor is taken from the context ``available_managed_capabilities``
+    when present (operator-configured deployment), falling back to the OSS
+    factory build context at ``factory_app/build_context/mozaikspay/contract.yaml``.
+    This makes MozaiksPay the OSS default billing provider for generated SaaS apps
+    without requiring an explicit operator selection.
+
+    Override paths:
+      - Include a different managed capability that declares
+        ``provides_capabilities: [subscription_write_path]`` to prevent injection.
+      - Remove ``subscription_config`` from the plan (non-SaaS apps are unaffected).
+      - Explicitly include ``mozaikspay`` in ``capability_packs`` before this runs
+        (already-selected packs are never re-added).
+    """
+    # Only inject for SaaS billing plans
+    has_subscription_config = any(
+        isinstance(task, dict) and str(task.get("task_type") or "").strip() == "subscription_config"
+        for task in build_tasks
+    )
+    if not has_subscription_config:
+        return capability_packs
+
+    # Skip if mozaikspay is already selected
+    existing_ids = {
+        str(pack.get("capability_pack_id") or pack.get("id") or pack.get("pack_id") or "").strip()
+        for pack in capability_packs
+        if isinstance(pack, dict)
+    } - {""}
+    if "mozaikspay" in existing_ids:
+        return capability_packs
+
+    # Skip if another managed capability already provides the subscription write path
+    for pack in capability_packs:
+        if not isinstance(pack, dict):
+            continue
+        if str(pack.get("capability_source") or "").strip() != "managed_capability":
+            continue
+        inline = pack.get("provides_capabilities")
+        if isinstance(inline, list) and "subscription_write_path" in inline:
+            return capability_packs
+
+    # Try context-configured descriptor first (operator deployment)
+    available_packs = _context_available_pack_map(context_variables)
+    descriptor: dict[str, Any] | None = available_packs.get("mozaikspay")
+
+    # Fall back to OSS factory pack contract for vanilla OSS deployments
+    if descriptor is None:
+        try:
+            import yaml  # type: ignore[import]
+
+            from factory_app.workflows._shared.hook_utils import workflow_context_path
+
+            contract_path = workflow_context_path("mozaikspay", "contract.yaml")
+            with open(contract_path, encoding="utf-8") as _fh:
+                contract = yaml.safe_load(_fh) or {}
+            descriptor = {
+                "id": "mozaikspay",
+                "capability_source": "managed_capability",
+                "display_name": "MozaiksPay",
+                "description": "Managed subscription billing provider for generated SaaS apps.",
+            }
+            facades = contract.get("facades")
+            if facades:
+                descriptor["facades"] = facades
+        except Exception:
+            _logger.debug("[app_build_plan] mozaikspay contract.yaml not loadable; skipping default injection")
+            return capability_packs
+
+    injected: dict[str, Any] = dict(descriptor)
+    injected.setdefault("capability_pack_id", "mozaikspay")
+    injected.setdefault("capability_source", "managed_capability")
+    injected.setdefault("surface_id", "mozaikspay_managed")
+    injected.setdefault("surface_kind", "external_integration")
+    injected.setdefault("implementation_mode", "external_integration")
+    injected.setdefault("pack_type", "managed_capability")
+    injected.setdefault("label", injected.get("display_name") or "MozaiksPay")
+    injected.setdefault("summary", injected.get("description") or "Managed subscription billing capability.")
+
+    _logger.debug("[app_build_plan] injecting default mozaikspay managed capability for SaaS plan")
+    return [*capability_packs, injected]
+
+
 def _pack_facades(descriptor: dict[str, Any]) -> list[dict[str, Any]]:
     facades = _normalize_object_list(descriptor.get("facades"))
     if facades:
@@ -1604,6 +1699,15 @@ def app_build_plan(
             build_tasks,
             managed_capability_ids=inferred_managed_capability_ids,
         )
+    capability_packs = _inject_default_mozaikspay_if_applicable(
+        capability_packs,
+        build_tasks,
+        context_variables=context_variables,
+    )
+    capability_packs = _normalize_capability_pack_sources(
+        capability_packs,
+        context_variables=context_variables,
+    )
     data_contract = AppBuildPlan.get("data_contract")
     pending_schema_migration = AppBuildPlan.get("pending_schema_migration")
     generation_order = _normalize_string_list(AppBuildPlan.get("generation_order"))
