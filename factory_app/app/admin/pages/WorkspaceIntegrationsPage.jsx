@@ -342,10 +342,7 @@ function SetupSlideOver({
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               {isConnected ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-400 ring-1 ring-inset ring-emerald-500/25">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  Connected
-                </span>
+                <StatusPill tone="success" size="md" dot>Connected</StatusPill>
               ) : (
                 <span className="text-sm font-semibold text-foreground">
                   {statusLabel(item.status, item)}
@@ -553,19 +550,13 @@ function IntegrationCard({ item, connector, onOpen }) {
       {/* Footer: status pill + action */}
       <div className="flex items-center justify-between gap-2 border-t border-border/30 pt-3 mt-auto">
         {usageLabel ? (
-          <span className="text-xs font-medium text-muted-foreground/60">{usageLabel}</span>
+          <StatusPill tone="muted">{usageLabel}</StatusPill>
         ) : isConnected ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400 ring-1 ring-inset ring-emerald-500/25">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            Connected
-          </span>
+          <StatusPill tone="success" dot>Connected</StatusPill>
         ) : isAttention ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-semibold text-amber-400 ring-1 ring-inset ring-amber-500/25">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-            Needs setup
-          </span>
+          <StatusPill tone="warning" dot>Needs setup</StatusPill>
         ) : (
-          <span className="text-xs font-medium text-muted-foreground/40">Not connected</span>
+          <StatusPill tone="default">Not connected</StatusPill>
         )}
         <ActionButton
           variant={isAttention ? 'default' : 'secondary'}
