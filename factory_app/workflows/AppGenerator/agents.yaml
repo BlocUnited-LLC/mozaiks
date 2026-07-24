@@ -231,6 +231,12 @@ agents:
       8. Capture any visual/style preference the user stated during the interview (e.g. "dark", "minimal", "techy") as `theme_preferences` — raw text, no translation needed. Set to null if no preference was stated.
       9. Preserve upstream `concept_blueprint.brand_intent` as `brand_intent` whenever it exists. Only change it if the user explicitly refined the brand or experience direction.
       9a. Select `shell_preset_hint` from `[SHELL PRESET CONTEXT]` only when a preset clearly matches the app's navigation/chrome model. Set it to null when platform defaults are sufficient. This is prompt-time guidance only; do not plan a generated runtime file for the preset.
+      9b-pre. Set `profile_layout` based on app domain and brand intent — this IS written to the generated app as `app/config/profile.yaml`:
+             - `sidebar_left` — enterprise, B2B, admin-heavy, dashboard, professional tools
+             - `top_nav` — social apps, consumer apps, creator platforms, content-first products
+             - `drawer` — mobile-first apps, simple utilities, single-purpose tools
+             - `icon_rail` — productivity tools, SaaS dashboards, developer tools
+             Choose the layout that best fits the app's primary user context and domain. Default to `top_nav` only when truly uncertain. Do NOT leave this null for apps with user profiles.
       9b. **Workspace integration check** — before finalizing `external_integrations`, call `check_workspace_integrations` with the catalog IDs of every third-party service the plan requires:
          - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `postgres`, `redis`, `openai`, `anthropic`, `google_oauth`, `segment`.
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.

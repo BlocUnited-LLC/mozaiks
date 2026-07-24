@@ -1665,6 +1665,10 @@ def app_build_plan(
     frontend_scope = _normalize_string_list(AppBuildPlan.get("frontend_scope"))
     theme_preferences = AppBuildPlan.get("theme_preferences")
     brand_intent = AppBuildPlan.get("brand_intent")
+    _valid_profile_layouts = frozenset({"sidebar_left", "top_nav", "drawer", "icon_rail"})
+    profile_layout = str(AppBuildPlan.get("profile_layout") or "").strip() or None
+    if profile_layout and profile_layout not in _valid_profile_layouts:
+        profile_layout = None
     capability_packs = _ensure_context_selected_capability_packs(
         _normalize_object_list(AppBuildPlan.get("capability_packs")),
         context_variables=context_variables,
@@ -1800,6 +1804,7 @@ def app_build_plan(
         "frontend_scope": frontend_scope,
         "theme_preferences": theme_preferences,
         "brand_intent": brand_intent if isinstance(brand_intent, dict) else None,
+        "profile_layout": profile_layout,
         "capability_packs": capability_packs,
         "external_integrations": external_integrations,
         "agent_backend_required": agent_backend_required,

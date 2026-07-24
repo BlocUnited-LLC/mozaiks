@@ -1005,6 +1005,20 @@ models:
           not a runtime artifact. AppSchemaAgent uses it to choose normal
           AppPageSchema.navigation, AppPageSchema.shell_mode, and optional
           shell_config defaults. Null when platform defaults are sufficient.
+      profile_layout:
+        type: union
+        variants:
+        - str
+        - 'null'
+        description: >
+          Profile page navigation layout for this app. Controls how /me renders
+          its section nav. Pick based on app domain and brand intent:
+            sidebar_left  — desktop-first left sidebar; enterprise, B2B, dashboards
+            top_nav       — horizontal nav below hero; social, consumer, creator apps
+            drawer        — hamburger/drawer menu; mobile-first or simple apps
+            icon_rail     — icon-only rail with hover labels; productivity/SaaS tools
+          Null defaults to top_nav at runtime. Written into app/config/profile.yaml.
+          Agents must set this — do not leave null unless genuinely uncertain.
       surface_map:
         type: union
         variants:
