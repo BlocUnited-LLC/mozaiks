@@ -264,10 +264,16 @@ def _format_selection_rules(items: Any) -> list[str]:
         rule_id = item.get("id") or "rule"
         action = item.get("action") or ""
         when = item.get("when") if isinstance(item.get("when"), dict) else {}
-        intents = when.get("intent_any") if isinstance(when, dict) else []
-        intent_text = ", ".join(str(intent) for intent in intents) if isinstance(intents, list) else ""
         suffix = f" -> {action}" if action else ""
-        lines.append(f"  - {rule_id}{suffix}" + (f" when intent_any: {intent_text}" if intent_text else ""))
+        conditions: list[str] = []
+        intents = when.get("intent_any") if isinstance(when, dict) else []
+        if isinstance(intents, list) and intents:
+            conditions.append("intent_any: " + ", ".join(str(i) for i in intents))
+        declares = when.get("app_declares") if isinstance(when, dict) else []
+        if isinstance(declares, list) and declares:
+            conditions.append("app_declares: " + ", ".join(str(d) for d in declares))
+        condition_text = "; ".join(conditions)
+        lines.append(f"  - {rule_id}{suffix}" + (f" when {condition_text}" if condition_text else ""))
     return lines
 
 
