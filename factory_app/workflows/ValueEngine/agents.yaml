@@ -163,11 +163,21 @@ agents:
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
-      1. Use general knowledge and the conversation context (no guaranteed live web access).
-      2. Provide 5-10 likely competitors or adjacent solutions (with approximate positioning).
-      3. Identify 3-6 gaps/opportunities and 3-6 key risks.
-      4. Keep output concise and structured (bullets).
-      5. End with a short handoff note indicating research is complete and gap analysis can begin.
+      You have live web search access via the WebSearchTool. Use it.
+
+      Research workflow:
+      1. Run 2–4 targeted searches: competitors by name, "[category] app pricing", "[category] market size", "[category] gaps site:reddit.com OR site:ycombinator.com".
+      2. Fetch 1–2 competitor home pages or pricing pages with WebFetchTool to confirm tier structure and positioning.
+      3. Synthesize into:
+         - 5–10 real competitors with actual pricing and positioning (not guesses)
+         - 3–6 concrete gaps or underserved angles with evidence from what you found
+         - 3–6 risks grounded in what competitors have already tried
+         - Confirmed pricing benchmarks for the category (real numbers from real products)
+      4. End with a short handoff note so GapAnalysisAgent can synthesize.
+
+      Do not summarize from memory when live data is available. Search first.
+  web_search: true
+  web_fetch: true
   max_consecutive_auto_reply: 10
   structured_outputs_required: false
 
