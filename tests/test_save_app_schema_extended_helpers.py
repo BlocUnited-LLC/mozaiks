@@ -87,9 +87,14 @@ Covers helpers not covered by the existing test_save_app_schema_helpers.py:
 """
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
+import yaml
 
 from factory_app.workflows.AppGenerator.tools.save_app_schema import (
+    _persist_to_filesystem,
     _deep_merge_dicts,
     _is_non_empty_string,
     _normalize_action_data,
@@ -539,3 +544,76 @@ class TestValidateShellStringOrList:
         # Let me check: isinstance([], list) = True, all(_is_non_empty_string(item) for item in []) = True
         # So empty list should NOT raise
         _validate_shell_string_or_list([], field="field")
+
+
+# ---------------------------------------------------------------------------
+# 14. _persist_to_filesystem — config/profile.yaml write step
+# ---------------------------------------------------------------------------
+
+def _minimal_manifest() -> dict:
+    return {
+        "app_name": "Test App",
+        "default_route": "/home",
+        "auth_strategy": "public",
+    }
+
+
+def _minimal_page() -> dict:
+    return {
+        "name": "home",
+        "route": "/home",
+        "title": "Home",
+        "schema_version": "mozaiks.page.v1",
+        "sections": [
+            {
+                "id": "main",
+                "label": "Main",
+                "components": [{"id": "c1", "primitive": "Heading", "config": {"text": "Hello"}}],
+            }
+        ],
+    }
+
+
+class TestPersistProfileLayout:
+    def test_profile_yaml_written_when_layout_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            written = _persist_to_filesystem(
+                out,
+                _minimal_manifest(),
+                [_minimal_page()],
+                None, None, None, None, None,
+                profile_layout="sidebar_left",
+            )
+            assert "config/profile.yaml" in written
+            doc = yaml.safe_load((out / "config" / "profile.yaml").read_text())
+            assert doc["layout"] == "sidebar_left"
+            assert doc["schema_version"] == "mozaiks.profile.v1"
+
+    def test_profile_yaml_not_written_when_layout_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            written = _persist_to_filesystem(
+                out,
+                _minimal_manifest(),
+                [_minimal_page()],
+                None, None, None, None, None,
+                profile_layout=None,
+            )
+            assert "config/profile.yaml" not in written
+            assert not (out / "config" / "profile.yaml").exists()
+
+    def test_all_valid_layouts_written_correctly(self):
+        for layout in ("sidebar_left", "top_nav", "drawer", "icon_rail"):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp)
+                written = _persist_to_filesystem(
+                    out,
+                    _minimal_manifest(),
+                    [_minimal_page()],
+                    None, None, None, None, None,
+                    profile_layout=layout,
+                )
+                assert "config/profile.yaml" in written
+                doc = yaml.safe_load((out / "config" / "profile.yaml").read_text())
+                assert doc["layout"] == layout
