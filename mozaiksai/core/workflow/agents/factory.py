@@ -417,13 +417,25 @@ async def create_agents(
         # Determine response schema for structured outputs
         beta_response_schema = None
         if structured_model_cls is not None:
-            # Beta response_schema is provider-enforced. Only pass models that
-            # are compatible with OpenAI strict structured outputs; models with
-            # open-ended dict fields are parsed and validated after the response.
+            # OpenAI strict structured outputs reject Dict[str, Any] fields.
+            # Anthropic (tool_use), Gemini, and Ollama have no such restriction —
+            # AG2 converts the Pydantic schema to a tool input schema internally,
+            # which handles freeform object fields. Only apply the strict-field
+            # gate for OpenAI providers; pass response_schema unconditionally for
+            # all other providers.
             try:
-                supports_strict, _ = supports_provider_response_format(structured_model_cls)
-                if supports_strict:
-                    beta_response_schema = get_provider_response_model(structured_model_cls)
+                _api_type = (
+                    ((llm_config_dict or {}).get("config_list") or [{}])[0].get("api_type") or "openai"
+                ).lower()
+                _openai_strict = _api_type in ("openai", "azure")
+                if _openai_strict:
+                    supports_strict, _ = supports_provider_response_format(structured_model_cls)
+                    if supports_strict:
+                        beta_response_schema = get_provider_response_model(structured_model_cls)
+                else:
+                    # Anthropic / Gemini / Ollama — pass the schema directly;
+                    # AG2 routes it through the provider's native mechanism.
+                    beta_response_schema = structured_model_cls
             except Exception:
                 beta_response_schema = None
 
