@@ -238,7 +238,7 @@ agents:
              - `icon_rail` — productivity tools, SaaS dashboards, developer tools
              Choose the layout that best fits the app's primary user context and domain. Default to `top_nav` only when truly uncertain. Do NOT leave this null for apps with user profiles.
       9b. **Workspace integration check** — before finalizing `external_integrations`, call `check_workspace_integrations` with the catalog IDs of every third-party service the plan requires:
-         - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `mongodb`, `postgres`, `redis`, `openai`, `anthropic`, `google_oauth`, `microsoft_oauth`, `segment`.
+         - Match each planned integration to a catalog ID where one exists: `mozaikspay`, `resend`, `sendgrid`, `twilio`, `slack`, `github`, `s3`, `cloudinary`, `mongodb`, `postgres`, `redis`, `openai`, `anthropic`, `gemini`, `google_oauth`, `microsoft_oauth`, `segment`.
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
          - Use the result to populate `workspace_integration_status[]` in the plan:
            - `configured` (auto_wire: true) — integration is ready by configuration-only checks, or by a passing provider health check when the host registered one; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.

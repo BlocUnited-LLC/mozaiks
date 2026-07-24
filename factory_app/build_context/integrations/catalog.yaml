@@ -23,6 +23,18 @@ integrations:
       - Sign in to console.anthropic.com → API Keys
       - Create a new key and copy it immediately (shown once)
 
+  - id: gemini
+    name: Gemini
+    category: ai
+    description: Google Gemini models for multimodal reasoning, code, and generation via Google AI Studio or Vertex AI.
+    required_secrets:
+      - GEMINI_API_KEY
+    optional_secrets:
+      - GOOGLE_API_KEY
+    setup_steps:
+      - Sign in to aistudio.google.com → Get API key
+      - Create or select a project and copy the API key
+
   - id: mozaikspay
     name: Mozaiks Pay
     category: payments
