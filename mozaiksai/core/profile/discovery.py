@@ -70,3 +70,51 @@ def load_profile_tabs(app_root: Path) -> list[dict[str, Any]]:
             tabs.append(entry)
     tabs.sort(key=lambda t: (t.get("order", 100), t.get("module_id", ""), t.get("id", "")))
     return tabs
+
+
+def _tab_to_page(tab: dict[str, Any], module_id: str) -> dict[str, Any]:
+    """Convert a v1 tab dict to a profile page dict for backward-compat surfacing."""
+    return {
+        "id": tab["id"],
+        "label": tab["label"],
+        "route": tab["id"],
+        "section": "overview",
+        "order": tab.get("order", 100),
+        "renderer": "custom_component",
+        "component": tab.get("component") or "",
+        "visibility": "public",
+        "action": tab.get("action"),
+        "icon": None,
+        "description": None,
+        "module_id": module_id,
+    }
+
+
+def load_profile_pages(app_root: Path) -> list[dict[str, Any]]:
+    """Walk modules/{module}/contracts/profile.yaml and return profile page dicts.
+
+    For v2 manifests (schema_version == "mozaiks.profile.v2"), native ``pages``
+    entries are collected directly.
+
+    For v1 manifests, ``tabs`` are automatically promoted to pages so that the
+    v2 endpoint surfaces them without requiring module authors to migrate.
+
+    Each returned dict includes ``module_id`` and placeholder ``data``/``error``
+    keys (both ``None``). Callers are responsible for hydrating actions.
+
+    Pages are returned sorted globally by ``order`` ascending.
+    """
+    pages: list[dict[str, Any]] = []
+    for module_id, manifest in _iter_profile_manifests(app_root):
+        if manifest.schema_version == "mozaiks.profile.v2":
+            for page in manifest.pages:
+                entry = page.model_dump(mode="python")
+                entry["module_id"] = module_id
+                pages.append(entry)
+        else:
+            # v1: promote tabs → pages so the /api/me/profile-pages endpoint
+            # surfaces all module content regardless of schema version.
+            for tab in manifest.tabs:
+                pages.append(_tab_to_page(tab.model_dump(mode="python"), module_id))
+    pages.sort(key=lambda p: (p.get("order", 100), p.get("module_id", ""), p.get("id", "")))
+    return pages

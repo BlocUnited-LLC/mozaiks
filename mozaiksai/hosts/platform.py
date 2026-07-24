@@ -39,7 +39,7 @@ from mozaiksai.core.auth.dependencies import (
 )
 from mozaiksai.core.multitenant import build_app_scope_filter
 from mozaiksai.core.ports.entitlement import EntitlementPort
-from mozaiksai.core.profile.discovery import load_profile_panels, load_profile_tabs
+from mozaiksai.core.profile.discovery import load_profile_pages, load_profile_panels, load_profile_tabs
 from mozaiksai.core.relationships.discovery import load_relationship_providers
 from mozaiksai.core.runtime.app.ai_config import resolve_runtime_ai_config
 from mozaiksai.core.runtime.app.entitlements import ConfiguredEntitlementAdapter
@@ -1827,6 +1827,206 @@ async def get_profile_tabs(
         [tab.get("id") for tab in hydrated],
     )
     return {"tabs": hydrated}
+
+
+@app.get("/api/me/profile-pages")
+async def get_profile_pages(
+    app_id: str | None = None,
+    user_id: str | None = None,
+    username: str | None = None,
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return the full ordered profile page list for the current user.
+
+    Merges:
+    - Platform built-in pages (always present)
+    - Module-contributed pages from modules/*/contracts/profile.yaml (v2 native
+      pages, or v1 tabs automatically promoted to pages)
+    - A "my-apps" page when the app registry module is available
+
+    Each module-contributed page with an ``action`` is hydrated by calling the
+    module executor. Pages whose action fails are still returned with
+    ``data: null`` and an ``error`` string.
+
+    Sections order: overview → platform → social → settings.
+    """
+    requested_subject_user_id = user_id
+    resolved_app_id, viewer_user_id = _resolve_profile_scope(principal, app_id=None)
+    app_root = resolve_app_root()
+    raw_pages = load_profile_pages(app_root)
+
+    module_executor = executor_registry.module_executor
+    subject_user_id = await _resolve_profile_subject_user_id(
+        principal,
+        app_id=resolved_app_id,
+        user_id=requested_subject_user_id,
+        username=username,
+    )
+
+    logger.info(
+        "[profile-pages] load start runtime_app_id=%s requested_app_id=%s user_id=%s subject_user_id=%s page_count=%s",
+        resolved_app_id,
+        app_id,
+        viewer_user_id,
+        subject_user_id,
+        len(raw_pages),
+    )
+
+    hydrated: list[dict[str, Any]] = []
+    for page in raw_pages:
+        action = page.get("action")
+        page_out: dict[str, Any] = {**page, "data": None, "error": None}
+
+        if action and module_executor is not None:
+            module_name = page.get("module_id", "")
+            try:
+                action_params = _profile_action_params(
+                    module_executor,
+                    module_name=module_name,
+                    action=action,
+                    app_id=app_id,
+                    subject_user_id=subject_user_id,
+                )
+                req = ModuleRequest(
+                    module=module_name,
+                    action=action,
+                    params=action_params,
+                    app_id=resolved_app_id,
+                    user_id=viewer_user_id,
+                    tenant_id=str(principal.tenant_id) if principal.tenant_id else None,
+                    auth_token=None,
+                    correlation_id=None,
+                    granted_permissions=list(principal.scopes) if principal else None,
+                )
+                result = await module_executor.execute(req, context=None)
+                if result.success:
+                    page_out["data"] = result.data
+                    logger.info(
+                        "[profile-pages] action success module=%s action=%s page_id=%s runtime_app_id=%s data_keys=%s",
+                        module_name,
+                        action,
+                        page.get("id"),
+                        resolved_app_id,
+                        sorted((result.data or {}).keys()) if isinstance(result.data, dict) else [],
+                    )
+                else:
+                    page_out["error"] = result.error or f"Action {action!r} failed"
+                    logger.warning(
+                        "[profile-pages] action failed module=%s action=%s page_id=%s runtime_app_id=%s error=%s",
+                        module_name,
+                        action,
+                        page.get("id"),
+                        resolved_app_id,
+                        page_out["error"],
+                    )
+            except Exception as exc:
+                logger.warning("[profile-pages] %s.%s failed: %s", module_name, action, exc, exc_info=True)
+                page_out["error"] = f"Action {action!r} failed"
+
+        hydrated.append(page_out)
+
+    # Inject platform built-in pages that are always present.
+    builtin_ids = {p.get("id") for p in hydrated}
+
+    if "overview" not in builtin_ids:
+        hydrated.append(
+            {
+                "id": "overview",
+                "label": "Profile",
+                "route": "",
+                "section": "overview",
+                "order": 0,
+                "renderer": "custom_component",
+                "component": "ProfileOverview",
+                "visibility": "public",
+                "data": None,
+                "error": None,
+                "source": "platform_builtin",
+            }
+        )
+
+    if "settings" not in builtin_ids:
+        hydrated.append(
+            {
+                "id": "settings",
+                "label": "Settings",
+                "route": "settings",
+                "section": "settings",
+                "order": 9999,
+                "renderer": "custom_component",
+                "component": "ProfileSettings",
+                "visibility": "owner_only",
+                "data": None,
+                "error": None,
+                "source": "platform_builtin",
+            }
+        )
+
+    # Inject "my-apps" when no module has already claimed that id and the
+    # app registry module is accessible.
+    if "my-apps" not in builtin_ids:
+        _app_registry_accessible = False
+        try:
+            if module_executor is not None:
+                module_names = getattr(module_executor, "_modules", {})
+                _app_registry_accessible = "app_registry" in module_names
+        except Exception:
+            pass
+        if _app_registry_accessible:
+            hydrated.append(
+                {
+                    "id": "my-apps",
+                    "label": "My Apps",
+                    "route": "apps",
+                    "section": "platform",
+                    "order": 50,
+                    "renderer": "custom_component",
+                    "component": "MyAppsPage",
+                    "visibility": "owner_only",
+                    "data": None,
+                    "error": None,
+                    "source": "platform_builtin",
+                }
+            )
+
+    hydrated.sort(key=lambda p: (p.get("order") if p.get("order") is not None else 100,))
+
+    logger.info(
+        "[profile-pages] load complete runtime_app_id=%s requested_app_id=%s hydrated_count=%s page_ids=%s",
+        resolved_app_id,
+        app_id,
+        len(hydrated),
+        [p.get("id") for p in hydrated],
+    )
+
+    sections = ["overview", "platform", "social", "settings"]
+    return {"pages": hydrated, "sections": sections}
+
+
+@app.get("/api/me/profile-config")
+async def get_profile_config(
+    principal: UserPrincipal = Depends(require_any_auth),
+):
+    """Return app-level profile layout configuration.
+
+    Reads ``app/config/profile.yaml`` from the active workspace root.
+    If the file is absent or the ``layout`` key is missing, defaults to
+    ``"top_nav"``.
+    """
+    layout = "top_nav"
+    try:
+        app_root = resolve_app_root()
+        profile_config_path = app_root / "config" / "profile.yaml"
+        if profile_config_path.exists():
+            raw = yaml.safe_load(profile_config_path.read_text(encoding="utf-8")) or {}
+            declared_layout = str(raw.get("layout") or "").strip()
+            if declared_layout:
+                layout = declared_layout
+    except Exception as exc:
+        logger.warning("[profile-config] failed to load app/config/profile.yaml: %s", exc)
+
+    sections = ["overview", "platform", "social", "settings"]
+    return {"layout": layout, "sections": sections}
 
 
 @app.get("/api/me/relationships")

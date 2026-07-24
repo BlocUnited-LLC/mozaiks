@@ -772,10 +772,52 @@ class ModuleProfileTab(ModuleContractModel):
         return self
 
 
+class ModuleProfilePage(ModuleContractModel):
+    """A module-declared page contribution to the profile surface (v2)."""
+
+    id: str
+    label: str
+    route: str                          # relative to /me, e.g. "messages" → /me/messages
+    section: Literal["overview", "platform", "social", "settings"] = "overview"
+    order: int = 100
+    renderer: Literal["custom_component"] = "custom_component"
+    component: str
+    visibility: Literal["owner_only", "public"] = "public"
+    action: str | None = None           # module action called to hydrate page data
+    icon: str | None = None
+    description: str | None = None
+
+    @field_validator("id", "label", "route", "component", mode="before")
+    @classmethod
+    def _required(cls, value: Any, info):  # type: ignore[no-untyped-def]
+        return _required_text(value, field_name=f"profile page {info.field_name}")
+
+    @field_validator("action", "icon", "description", mode="before")
+    @classmethod
+    def _optional(cls, value: Any) -> str | None:
+        return _optional_text(value)
+
+    @field_validator("order", mode="before")
+    @classmethod
+    def _order(cls, value: Any) -> int:
+        if value in (None, ""):
+            return 100
+        return int(value)
+
+
 class ModuleProfileManifest(ModuleContractModel):
-    schema_version: Literal["mozaiks.profile.v1"] = "mozaiks.profile.v1"
+    schema_version: Literal["mozaiks.profile.v1", "mozaiks.profile.v2"] = "mozaiks.profile.v1"
     panels: list[ModuleProfilePanel] = Field(default_factory=list)
     tabs: list[ModuleProfileTab] = Field(default_factory=list)
+    pages: list[ModuleProfilePage] = Field(default_factory=list)
+
+    @field_validator("pages", mode="after")
+    @classmethod
+    def _unique_page_ids(cls, pages: list[ModuleProfilePage]) -> list[ModuleProfilePage]:
+        page_ids = [p.id for p in pages]
+        if len(page_ids) != len(set(page_ids)):
+            raise ValueError("profile.yaml pages must have unique id values")
+        return pages
 
     @model_validator(mode="after")
     def _unique_ids(self) -> ModuleProfileManifest:
@@ -785,6 +827,10 @@ class ModuleProfileManifest(ModuleContractModel):
         tab_ids = [t.id for t in self.tabs]
         if len(tab_ids) != len(set(tab_ids)):
             raise ValueError("profile.yaml tabs must have unique id values")
+        if self.schema_version == "mozaiks.profile.v2" and not self.pages:
+            logger.warning(
+                "[profile] v2 manifest has no pages declared — consider adding at least one page"
+            )
         return self
 
 
