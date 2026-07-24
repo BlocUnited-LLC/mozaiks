@@ -500,11 +500,22 @@ export default function WorkspaceIntegrationsPage() {
   const [actionError, setActionError] = useState(null)
   const [activeCategory, setActiveCategory] = useState(ALL_TAB)
 
-  async function load() {
+  async function load(preserveCategory = false) {
     setLoading(true)
     try {
       const payload = await fetchIntegrations()
       setData(payload)
+      // Default to AI on first load — LLM config is the prerequisite for everything else.
+      if (!preserveCategory) {
+        const cats = [
+          ...new Set(
+            (Array.isArray(payload.integrations) ? payload.integrations : [])
+              .map((i) => String(i.category || '').toLowerCase())
+              .filter(Boolean),
+          ),
+        ]
+        setActiveCategory(cats.includes('ai') ? 'ai' : ALL_TAB)
+      }
       setError(null)
       try {
         const connectorPayload = await fetchWorkspaceConnectors()
@@ -529,7 +540,7 @@ export default function WorkspaceIntegrationsPage() {
     try {
       await saveNote(integrationId, note)
       setActiveItem(null)
-      await load()
+      await load(true)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Note could not be saved.')
     } finally {
@@ -548,7 +559,7 @@ export default function WorkspaceIntegrationsPage() {
     try {
       await deleteWorkspaceConnector(service)
       setActiveItem(null)
-      await load()
+      await load(true)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Connector could not be deleted.')
     } finally {
@@ -564,7 +575,7 @@ export default function WorkspaceIntegrationsPage() {
     setActionError(null)
     try {
       await checkWorkspaceConnector(service)
-      await load()
+      await load(true)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Connector health check could not run.')
     } finally {
