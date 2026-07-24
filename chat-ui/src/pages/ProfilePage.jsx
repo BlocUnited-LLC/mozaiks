@@ -2,22 +2,36 @@
  * ProfilePage — user identity surface.
  *
  * Two views from one component:
- *   /me              — your own profile, editable
- *   /u/:username     — someone else's profile, read-only
+ *   /me          — own profile, editable
+ *   /u/:username — public profile, read-only
  *
- * Layout: Hero (always framework-owned) + Tab bar (module-declared).
- * Modules contribute tabs via GET /api/me/profile-tabs.
- * Each tab declares: id, label, order, component, action.
+ * Layout driven by GET /api/me/profile-config → layout field.
+ * Pages contributed by modules via contracts/profile.yaml (v2 schema).
+ * Falls back to legacy /api/me/profile-tabs + /api/me/profile-panels (v1).
  *
+ * Supported layouts: sidebar_left | top_nav | drawer | icon_rail
  * Shell mode: social — full-width, header on, no sidebar.
  *
  * See: docs/architecture/foundations/profile-panel-contract.md
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useChatUI } from '../context/ChatUIContext';
 import componentRegistry from '../registry/componentRegistry';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const SECTION_ORDER = ['overview', 'platform', 'social', 'settings'];
+const SECTION_LABELS = {
+  overview: '',
+  platform: 'Platform',
+  social: 'Social',
+  settings: 'Settings',
+};
+const VALID_LAYOUTS = new Set(['sidebar_left', 'top_nav', 'drawer', 'icon_rail']);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,15 +73,46 @@ function formatJoined(iso) {
 }
 
 function profileTrace(event, details = {}) {
-  try {
-    console.info('[mozaiks-profile]', event, details);
-  } catch (_) {}
+  try { console.info('[mozaiks-profile]', event, details); } catch (_) {}
 }
 
 function profileWarn(event, details = {}) {
-  try {
-    console.warn('[mozaiks-profile]', event, details);
-  } catch (_) {}
+  try { console.warn('[mozaiks-profile]', event, details); } catch (_) {}
+}
+
+// ---------------------------------------------------------------------------
+// Icons
+// ---------------------------------------------------------------------------
+
+const ICON_SHAPES = {
+  user: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
+  users: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
+  'message-circle': <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+  activity: <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />,
+  grid: <><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></>,
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></>,
+  'credit-card': <><rect x="1" y="4" width="22" height="16" rx="2" ry="2" /><line x1="1" y1="10" x2="23" y2="10" /></>,
+  layout: <><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="21" x2="9" y2="9" /></>,
+  star: <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,
+  menu: <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>,
+  x: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
+};
+
+function ProfileIcon({ name, className = 'h-4 w-4' }) {
+  const shape = ICON_SHAPES[name] || <circle cx="12" cy="12" r="2" />;
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {shape}
+    </svg>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -197,13 +242,7 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
               <CameraIcon className="h-3.5 w-3.5" />
               Change cover
             </button>
-            <input
-              ref={coverInputRef}
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              onChange={handleCoverChange}
-            />
+            <input ref={coverInputRef} type="file" accept="image/*" className="sr-only" onChange={handleCoverChange} />
           </>
         )}
       </div>
@@ -211,7 +250,6 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
       <div className="px-5 sm:px-8">
         {/* Avatar + actions row */}
         <div className="flex items-end justify-between gap-4 -mt-12">
-          {/* Avatar */}
           <div className="relative group">
             <div className="h-24 w-24 rounded-full border-4 border-card overflow-hidden flex items-center justify-center bg-primary/15 shadow-lg flex-shrink-0">
               {avatarPreview ? (
@@ -230,13 +268,7 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
                 >
                   <CameraIcon className="h-6 w-6 text-white" />
                 </button>
-                <input
-                  ref={avatarInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  onChange={handleAvatarChange}
-                />
+                <input ref={avatarInputRef} type="file" accept="image/*" className="sr-only" onChange={handleAvatarChange} />
               </>
             )}
           </div>
@@ -322,62 +354,37 @@ function ProfileHero({ profile, isOwner, backendUrl, auth, onEdited }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tab bar + content
+// Page content renderer
 // ---------------------------------------------------------------------------
 
-function TabBar({ tabs, activeId, onSelect }) {
-  return (
-    <div className="border-b border-border px-5 sm:px-8 mt-6">
-      <nav className="flex gap-0 overflow-x-auto scrollbar-none">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onSelect(tab.id)}
-            className={[
-              'relative shrink-0 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
-              activeId === tab.id
-                ? 'text-foreground after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:rounded-full after:bg-primary'
-                : 'text-muted-foreground hover:text-foreground',
-            ].join(' ')}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-    </div>
-  );
-}
+function PageContent({ page, padded = true }) {
+  if (!page) return null;
 
-function TabContent({ tab }) {
-  if (!tab) return null;
+  const Component = page.component ? componentRegistry.getComponent(page.component) : null;
+  const cls = padded ? 'px-5 sm:px-8 py-6' : 'py-6';
 
-  const Component = tab.component ? componentRegistry.getComponent(tab.component) : null;
-
-  // Component tabs: always render — component handles empty/error state itself.
   if (Component) {
     return (
-      <div className="px-5 sm:px-8 py-6">
-        <Component tab={tab} data={tab.data} />
+      <div className={cls}>
+        {/* Pass both `page` and `tab` for backward compat with registered components */}
+        <Component page={page} tab={page} data={page.data} />
       </div>
     );
   }
 
-  // Non-component tab with a hard error.
-  if (tab.error) {
+  if (page.error) {
     return (
-      <div className="px-5 sm:px-8 py-8">
-        <p className="text-sm text-muted-foreground italic">Could not load {tab.label}.</p>
+      <div className={cls}>
+        <p className="text-sm text-muted-foreground italic">Could not load {page.label}.</p>
       </div>
     );
   }
 
-  // Generic fallback — render key/value data
-  if (tab.data && typeof tab.data === 'object') {
-    const entries = Object.entries(tab.data).filter(([, v]) => v !== null && v !== undefined);
+  if (page.data && typeof page.data === 'object') {
+    const entries = Object.entries(page.data).filter(([, v]) => v !== null && v !== undefined);
     if (entries.length > 0) {
       return (
-        <div className="px-5 sm:px-8 py-6">
+        <div className={cls}>
           <div className="divide-y divide-border rounded-2xl border border-border bg-card overflow-hidden">
             {entries.map(([k, v]) => (
               <div key={k} className="flex items-center justify-between px-5 py-3">
@@ -392,14 +399,232 @@ function TabContent({ tab }) {
   }
 
   return (
-    <div className="px-5 sm:px-8 py-8">
+    <div className={cls}>
       <p className="text-sm text-muted-foreground italic">Nothing here yet.</p>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Root
+// Layout: Top Nav
+// Horizontal scrollable tabs below the hero. Default layout.
+// ---------------------------------------------------------------------------
+
+function TopNavLayout({ allPages, activePage, onSelect, isOwner }) {
+  const visible = isOwner ? allPages : allPages.filter(p => p.visibility !== 'owner_only');
+  if (!visible.length) return null;
+
+  return (
+    <>
+      <div className="border-b border-border px-5 sm:px-8 mt-6">
+        <nav className="flex gap-0 overflow-x-auto scrollbar-none">
+          {visible.map(page => (
+            <button
+              key={page.id}
+              type="button"
+              onClick={() => onSelect(page.id)}
+              className={[
+                'relative shrink-0 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap',
+                activePage?.id === page.id
+                  ? 'text-foreground after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:rounded-full after:bg-primary'
+                  : 'text-muted-foreground hover:text-foreground',
+              ].join(' ')}
+            >
+              {page.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+      <PageContent page={activePage} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Layout: Sidebar Left
+// Left sidebar with section grouping. Enterprise / dashboard apps.
+// ---------------------------------------------------------------------------
+
+function SidebarLeftLayout({ pagesBySection, activePage, onSelect, isOwner }) {
+  return (
+    <div className="flex gap-6 mt-6 px-5 sm:px-8">
+      <aside className="w-52 flex-shrink-0">
+        {SECTION_ORDER.map(sectionId => {
+          const pages = (pagesBySection[sectionId] || []).filter(
+            p => isOwner || p.visibility !== 'owner_only',
+          );
+          if (!pages.length) return null;
+          const label = SECTION_LABELS[sectionId];
+          return (
+            <div key={sectionId} className="mb-5">
+              {label && (
+                <p className="px-3 mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {label}
+                </p>
+              )}
+              <div className="space-y-0.5">
+                {pages.map(page => (
+                  <button
+                    key={page.id}
+                    type="button"
+                    onClick={() => onSelect(page.id)}
+                    className={[
+                      'w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg text-left transition-colors',
+                      activePage?.id === page.id
+                        ? 'bg-muted text-foreground font-medium'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                    ].join(' ')}
+                  >
+                    {page.icon && (
+                      <ProfileIcon name={page.icon} className="h-4 w-4 flex-shrink-0 opacity-70" />
+                    )}
+                    {page.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </aside>
+      <div className="flex-1 min-w-0 py-6 border-l border-border pl-6">
+        <PageContent page={activePage} padded={false} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Layout: Drawer
+// Hamburger toggle that opens a full nav drawer. Mobile-first / simple apps.
+// ---------------------------------------------------------------------------
+
+function DrawerLayout({ allPages, pagesBySection, activePage, onSelect, isOwner }) {
+  const [open, setOpen] = useState(false);
+
+  const handleSelect = (id) => {
+    onSelect(id);
+    setOpen(false);
+  };
+
+  return (
+    <div className="mt-6">
+      {/* Trigger bar */}
+      <div className="px-5 sm:px-8 mb-5">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:border-primary/40 hover:text-primary transition-colors"
+        >
+          <ProfileIcon name="menu" className="h-4 w-4" />
+          <span>{activePage?.label || 'Menu'}</span>
+        </button>
+      </div>
+
+      {/* Drawer */}
+      {open && (
+        <div className="fixed inset-0 z-50 flex">
+          <div
+            className="absolute inset-0 bg-foreground/20 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+          />
+          <aside className="relative z-10 w-72 bg-card border-r border-border h-full overflow-y-auto shadow-xl flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3.5 border-b border-border">
+              <span className="text-sm font-semibold text-foreground">Navigation</span>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-lg p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <ProfileIcon name="x" className="h-4 w-4" />
+              </button>
+            </div>
+            <nav className="flex-1 p-3 space-y-4">
+              {SECTION_ORDER.map(sectionId => {
+                const pages = (pagesBySection[sectionId] || []).filter(
+                  p => isOwner || p.visibility !== 'owner_only',
+                );
+                if (!pages.length) return null;
+                const label = SECTION_LABELS[sectionId];
+                return (
+                  <div key={sectionId}>
+                    {label && (
+                      <p className="px-3 mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {label}
+                      </p>
+                    )}
+                    <div className="space-y-0.5">
+                      {pages.map(page => (
+                        <button
+                          key={page.id}
+                          type="button"
+                          onClick={() => handleSelect(page.id)}
+                          className={[
+                            'w-full flex items-center gap-2.5 px-3 py-2.5 text-sm rounded-lg text-left transition-colors',
+                            activePage?.id === page.id
+                              ? 'bg-muted text-foreground font-medium'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50',
+                          ].join(' ')}
+                        >
+                          {page.icon && (
+                            <ProfileIcon name={page.icon} className="h-4 w-4 flex-shrink-0 opacity-70" />
+                          )}
+                          {page.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </nav>
+          </aside>
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="px-5 sm:px-8">
+        <PageContent page={activePage} padded={false} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Layout: Icon Rail
+// Narrow icon-only sidebar with tooltips. Productivity / SaaS tools.
+// ---------------------------------------------------------------------------
+
+function IconRailLayout({ allPages, activePage, onSelect, isOwner }) {
+  const visible = isOwner ? allPages : allPages.filter(p => p.visibility !== 'owner_only');
+
+  return (
+    <div className="flex mt-6">
+      <aside className="w-14 border-r border-border flex-shrink-0 flex flex-col items-center gap-1 pt-2 pb-4">
+        {visible.map(page => (
+          <button
+            key={page.id}
+            type="button"
+            onClick={() => onSelect(page.id)}
+            title={page.label}
+            className={[
+              'h-10 w-10 flex items-center justify-center rounded-lg transition-colors',
+              activePage?.id === page.id
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted',
+            ].join(' ')}
+          >
+            <ProfileIcon name={page.icon || 'user'} className="h-5 w-5" />
+          </button>
+        ))}
+      </aside>
+      <div className="flex-1 min-w-0 px-5 sm:px-8 py-6">
+        <PageContent page={activePage} padded={false} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Demo fallback
 // ---------------------------------------------------------------------------
 
 const DEMO_PROFILE = {
@@ -411,6 +636,10 @@ const DEMO_PROFILE = {
   created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 180).toISOString(),
 };
 
+// ---------------------------------------------------------------------------
+// Root
+// ---------------------------------------------------------------------------
+
 export default function ProfilePage() {
   const params = useParams();
   const location = useLocation();
@@ -420,17 +649,21 @@ export default function ProfilePage() {
   const backendUrl = getHostApiBaseUrl(config, api);
   const isOwner = !username;
 
-  // Read ?tab from URL to support deep-linking (e.g. from EscalationCard)
-  const profileSearchParams = new URLSearchParams(location.search);
-  const urlTabParam = profileSearchParams.get('tab') || null;
-  const urlAppIdParam = profileSearchParams.get('app_id') || profileSearchParams.get('appId') || null;
+  const searchParams = new URLSearchParams(location.search);
+  const urlTabParam = searchParams.get('tab') || null;
 
+  // Profile state
   const [profile, setProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState(null);
-  const [tabs, setTabs] = useState([]);
-  const [tabsLoading, setTabsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(urlTabParam || null);
+
+  // Layout + pages state
+  const [layout, setLayout] = useState('top_nav');
+  const [pagesBySection, setPagesBySection] = useState({});
+  const [pagesLoading, setPagesLoading] = useState(true);
+  const [activePage, setActivePage] = useState(urlTabParam || null);
+
+  // --- Data loading ---
 
   const loadProfile = useCallback(async () => {
     if (!backendUrl) {
@@ -458,139 +691,156 @@ export default function ProfilePage() {
     }
   }, [backendUrl, auth, isOwner, username]);
 
-  const loadTabs = useCallback(async () => {
-    setTabsLoading(true);
-    let panelTabs = [];
-    let moduleTabs = [];
-    profileTrace('tabs:load:start', {
-      path: location.pathname,
-      urlTabParam,
-      urlAppIdParam,
-      username,
-      hasBackendUrl: Boolean(backendUrl),
-    });
+  const loadConfig = useCallback(async () => {
+    if (!backendUrl) return;
+    try {
+      const res = await fetchWithAuth(`${backendUrl}/api/me/profile-config`, {}, auth);
+      if (res.ok) {
+        const body = await res.json();
+        const lyt = body?.layout;
+        if (typeof lyt === 'string' && VALID_LAYOUTS.has(lyt)) {
+          setLayout(lyt);
+          profileTrace('config:layout', { layout: lyt });
+        }
+      }
+    } catch (_) {}
+  }, [backendUrl, auth]);
+
+  const loadPages = useCallback(async () => {
+    setPagesLoading(true);
+    let sections = {};
+
     if (backendUrl) {
       const subjectParams = new URLSearchParams();
-      if (urlAppIdParam) subjectParams.set('app_id', urlAppIdParam);
       if (!isOwner && username) subjectParams.set('username', username);
-      const subjectQuery = subjectParams.toString();
-      const subjectSuffix = subjectQuery ? `?${subjectQuery}` : '';
+      const subjectSuffix = subjectParams.toString() ? `?${subjectParams}` : '';
 
-      // profile-panels: older panel contract (title field, workspace_support etc.)
+      // v2: /api/me/profile-pages
       try {
-        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-panels${subjectSuffix}`, {}, auth);
-        const body = res.ok ? await res.json() : { panels: [] };
-        panelTabs = (Array.isArray(body?.panels) ? body.panels : []).map(p => ({
-          id:        p.id,
-          label:     p.title,
-          component: p.component || null,
-          data:      p.data || null,
-          order:     p.order ?? 50,
-          error:     p.error || null,
-        }));
-        profileTrace('tabs:profile_panels:loaded', {
-          ok: res.ok,
-          status: res.status,
-          count: panelTabs.length,
-          panelIds: panelTabs.map(panel => panel.id),
-          errors: panelTabs.filter(panel => panel.error).map(panel => ({ id: panel.id, error: panel.error })),
-          urlAppIdParam,
-        });
-      } catch {
-        profileWarn('tabs:profile_panels:failed', {
-          urlAppIdParam,
-        });
-        panelTabs = [];
+        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-pages${subjectSuffix}`, {}, auth);
+        if (res.ok) {
+          const body = await res.json();
+          if (body?.sections && typeof body.sections === 'object') {
+            sections = body.sections;
+            profileTrace('pages:v2:sections', { sectionIds: Object.keys(sections) });
+          } else if (Array.isArray(body?.pages)) {
+            for (const page of body.pages) {
+              const s = page.section || 'overview';
+              if (!sections[s]) sections[s] = [];
+              sections[s].push(page);
+            }
+            profileTrace('pages:v2:flat', { total: body.pages.length });
+          }
+        }
+      } catch (_) {
+        profileWarn('pages:v2:error', {});
       }
-      // profile-tabs: module tab contract (label field, custom module panels, etc.)
-      try {
-        const res = await fetchWithAuth(`${backendUrl}/api/me/profile-tabs${subjectSuffix}`, {}, auth);
-        const body = res.ok ? await res.json() : { tabs: [] };
-        moduleTabs = (Array.isArray(body?.tabs) ? body.tabs : []).map(t => ({
-          id:        t.id,
-          label:     t.label,
-          component: t.component || null,
-          data:      t.data || null,
-          order:     t.order ?? 100,
-          error:     t.error || null,
-        }));
-        profileTrace('tabs:profile_tabs:loaded', {
-          ok: res.ok,
-          status: res.status,
-          count: moduleTabs.length,
-          tabIds: moduleTabs.map(tab => tab.id),
-          errors: moduleTabs.filter(tab => tab.error).map(tab => ({ id: tab.id, error: tab.error })),
-          urlAppIdParam,
-        });
-      } catch {
-        profileWarn('tabs:profile_tabs:failed', {
-          urlAppIdParam,
-        });
-        moduleTabs = [];
+
+      // v1 fallback: merge profile-panels + profile-tabs
+      if (Object.keys(sections).length === 0) {
+        profileTrace('pages:v1:fallback:start', {});
+        const legacy = [];
+
+        try {
+          const res = await fetchWithAuth(`${backendUrl}/api/me/profile-panels${subjectSuffix}`, {}, auth);
+          const body = res.ok ? await res.json() : {};
+          (Array.isArray(body?.panels) ? body.panels : []).forEach(p => {
+            legacy.push({
+              id: p.id,
+              label: p.title,
+              component: p.component || null,
+              data: p.data || null,
+              order: p.order ?? 50,
+              error: p.error || null,
+              section: 'overview',
+              visibility: 'public',
+            });
+          });
+        } catch (_) {
+          profileWarn('pages:v1:panels:failed', {});
+        }
+
+        try {
+          const res = await fetchWithAuth(`${backendUrl}/api/me/profile-tabs${subjectSuffix}`, {}, auth);
+          const body = res.ok ? await res.json() : {};
+          (Array.isArray(body?.tabs) ? body.tabs : []).forEach(t => {
+            legacy.push({
+              id: t.id,
+              label: t.label,
+              component: t.component || null,
+              data: t.data || null,
+              order: t.order ?? 100,
+              error: t.error || null,
+              section: 'overview',
+              visibility: 'public',
+            });
+          });
+        } catch (_) {
+          profileWarn('pages:v1:tabs:failed', {});
+        }
+
+        if (legacy.length > 0) {
+          sections.overview = legacy.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+          profileTrace('pages:v1:fallback:complete', { count: legacy.length });
+        }
       }
     }
-    // Merge panels + module tabs sorted by order. Social, messaging, and
-    // support tabs are module-owned; the profile page does not invent them.
-    const remote = [...panelTabs, ...moduleTabs].sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
-    const merged = [...remote];
-    profileTrace('tabs:load:complete', {
-      count: merged.length,
-      tabIds: merged.map(tab => tab.id),
-      urlTabParam,
-      urlAppIdParam,
-    });
-    setTabs(merged);
-    setTabsLoading(false);
-  }, [backendUrl, auth, isOwner, location.pathname, urlAppIdParam, urlTabParam, username]);
+
+    setPagesBySection(sections);
+    setPagesLoading(false);
+  }, [backendUrl, auth, isOwner, username]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
-  useEffect(() => { loadTabs(); }, [loadTabs]);
-  useEffect(() => {
-    if (!Array.isArray(tabs) || tabs.length === 0) {
-      setActiveTab(null);
-      return;
-    }
+  useEffect(() => { loadConfig(); }, [loadConfig]);
+  useEffect(() => { loadPages(); }, [loadPages]);
 
-    setActiveTab(prev => {
-      if (urlTabParam && tabs.some(tab => tab.id === urlTabParam)) {
-        if (prev !== urlTabParam) {
-          profileTrace('tabs:active:sync_url', {
-            previous: prev,
-            next: urlTabParam,
-            urlAppIdParam,
-          });
-        }
-        return prev === urlTabParam ? prev : urlTabParam;
-      }
-      if (prev && tabs.some(tab => tab.id === prev)) {
-        return prev;
-      }
-      profileTrace('tabs:active:fallback', {
-        previous: prev,
-        next: tabs[0]?.id || null,
-        urlTabParam,
-        urlAppIdParam,
-      });
-      return tabs[0]?.id || null;
+  // --- Derived state ---
+
+  const allPages = useMemo(() => {
+    const flat = SECTION_ORDER.flatMap(s => pagesBySection[s] || []);
+    // Include any unknown sections not in SECTION_ORDER
+    for (const [s, pages] of Object.entries(pagesBySection)) {
+      if (!SECTION_ORDER.includes(s)) flat.push(...(pages || []));
+    }
+    return flat;
+  }, [pagesBySection]);
+
+  // Sync active page when pages load or URL param changes
+  useEffect(() => {
+    if (!allPages.length) { setActivePage(null); return; }
+    setActivePage(prev => {
+      if (urlTabParam && allPages.some(p => p.id === urlTabParam)) return urlTabParam;
+      if (prev && allPages.some(p => p.id === prev)) return prev;
+      profileTrace('pages:active:fallback', { next: allPages[0]?.id });
+      return allPages[0]?.id || null;
     });
-  }, [tabs, urlTabParam, urlAppIdParam]);
+  }, [allPages, urlTabParam]);
+
+  const currentPage = useMemo(
+    () => allPages.find(p => p.id === activePage) || allPages[0] || null,
+    [allPages, activePage],
+  );
+
+  const handleSelect = (id) => {
+    setActivePage(id);
+    const p = new URLSearchParams(location.search);
+    p.set('tab', id);
+    navigate(`${location.pathname}?${p.toString()}`, { replace: true });
+  };
+
+  // --- Render ---
 
   if (profileLoading) return <Spinner />;
   if (profileError && !profile) return <ErrorState message={`Could not load profile: ${profileError}`} />;
 
-  const currentTab = tabs.find(t => t.id === activeTab) || tabs[0] || null;
+  const hasSidebar = layout === 'sidebar_left' || layout === 'icon_rail';
+  const containerClass = `mx-auto pb-16 ${hasSidebar ? 'max-w-5xl' : 'max-w-3xl'}`;
 
-  const handleTabSelect = (id) => {
-    setActiveTab(id);
-    // Keep URL in sync so deep links work
-    const params = new URLSearchParams(location.search);
-    params.set('tab', id);
-    navigate(`${location.pathname}?${params.toString()}`, { replace: true });
-  };
+  const layoutProps = { allPages, pagesBySection, activePage: currentPage, onSelect: handleSelect, isOwner };
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-3xl pb-16">
+      <div className={containerClass}>
         <ProfileHero
           profile={profile}
           isOwner={isOwner}
@@ -599,11 +849,12 @@ export default function ProfilePage() {
           onEdited={loadProfile}
         />
 
-        {!tabsLoading && tabs.length > 0 && (
+        {!pagesLoading && allPages.length > 0 && (
           <>
-            <TabBar tabs={tabs} activeId={currentTab?.id} onSelect={handleTabSelect} />
-
-            <TabContent tab={currentTab} />
+            {layout === 'top_nav'      && <TopNavLayout {...layoutProps} />}
+            {layout === 'sidebar_left' && <SidebarLeftLayout {...layoutProps} />}
+            {layout === 'drawer'       && <DrawerLayout {...layoutProps} />}
+            {layout === 'icon_rail'    && <IconRailLayout {...layoutProps} />}
           </>
         )}
       </div>
