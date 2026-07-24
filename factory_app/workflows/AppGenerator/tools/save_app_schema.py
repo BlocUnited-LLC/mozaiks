@@ -1415,6 +1415,7 @@ def _persist_to_filesystem(
     asset_manifest: dict[str, Any] | None,
     data_contract: dict[str, Any] | None,
     custom_route_bundle: dict[str, Any] | None,
+    profile_layout: str | None = None,
 ) -> list[str]:
     """Write app.json, ui/pages/*.yaml, optional custom route artifacts, and optional config artifacts.
 
@@ -1533,6 +1534,21 @@ def _persist_to_filesystem(
             encoding="utf-8",
         )
         written.append("data/contract.json")
+
+    # config/profile.yaml — profile page layout variant chosen by AppPlanAgent.
+    # Written only when profile_layout is set; runtime defaults to top_nav when absent.
+    if profile_layout:
+        profile_config_path = output_dir / "config" / "profile.yaml"
+        profile_config_path.parent.mkdir(parents=True, exist_ok=True)
+        with profile_config_path.open("w", encoding="utf-8") as _fh:
+            yaml.dump(
+                {"schema_version": "mozaiks.profile.v1", "layout": profile_layout},
+                _fh,
+                allow_unicode=True,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        written.append("config/profile.yaml")
 
     return written
 
@@ -1746,6 +1762,10 @@ def save_app_schema(
     else:
         _logger.warning("context_variables not available or missing 'set' method")
 
+    # Read profile_layout from the app_build_plan stored by AppPlanAgent.
+    _build_plan = _context_get(context_variables, "app_build_plan") or {}
+    _profile_layout = str(_build_plan.get("profile_layout") or "").strip() or None
+
     # Persist to generated artifacts; promotion is explicit and separate.
     written: list[str] = []
     try:
@@ -1762,6 +1782,7 @@ def save_app_schema(
             asset_manifest,
             resolved_data_contract,
             custom_route_bundle,
+            profile_layout=_profile_layout,
         )
         _logger.info(
             "Wrote app schema to %s: %s",
@@ -1784,7 +1805,8 @@ def save_app_schema(
         f"Theme config patch: {'yes' if theme_config_patch else 'no'}\n"
         f"Shell config: {'yes' if shell_config else 'no'}\n"
         f"Asset manifest: {'yes' if asset_manifest else 'no'}\n"
-        f"Data contract: {'yes' if resolved_data_contract else 'no'}"
+        f"Data contract: {'yes' if resolved_data_contract else 'no'}\n"
+        f"Profile layout: {_profile_layout or 'none (runtime default: top_nav)'}"
         f"{files_written}"
     )
 
