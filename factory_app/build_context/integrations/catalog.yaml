@@ -2,7 +2,7 @@ schema_version: mozaiks.integrations.v1
 integrations:
   - id: openai
     name: OpenAI
-    category: ai
+    category: llms
     description: GPT models, embeddings, and assistants API.
     required_secrets:
       - OPENAI_API_KEY
@@ -14,7 +14,7 @@ integrations:
 
   - id: anthropic
     name: Anthropic
-    category: ai
+    category: llms
     description: Claude models for reasoning, analysis, and generation.
     required_secrets:
       - ANTHROPIC_API_KEY
@@ -25,7 +25,7 @@ integrations:
 
   - id: gemini
     name: Gemini
-    category: ai
+    category: llms
     description: Google Gemini models for multimodal reasoning, code, and generation via Google AI Studio or Vertex AI.
     required_secrets:
       - GEMINI_API_KEY
