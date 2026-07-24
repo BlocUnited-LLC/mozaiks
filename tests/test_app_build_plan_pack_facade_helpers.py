@@ -96,6 +96,7 @@ from factory_app.workflows.AppGenerator.tools.app_build_plan import (
     _context_get,
     _context_managed_capability_ids,
     _facade_pack_descriptor,
+    _inject_default_mozaikspay_if_applicable,
     _iter_page_api_endpoints,
     _managed_capability_backing_module_ids,
     _managed_facade_route_rules,
@@ -770,3 +771,90 @@ def test_empty_provider_actions_produces_no_rules():
     packs = [{"capability_pack_id": "billing", "capability_source": "managed_capability"}]
     rules = _managed_facade_route_rules(packs, context_variables=ctx)
     assert rules == {}
+
+
+# ---------------------------------------------------------------------------
+# 14. _inject_default_mozaikspay_if_applicable
+# ---------------------------------------------------------------------------
+
+_SUBSCRIPTION_CONFIG_TASK = {"task_type": "subscription_config", "task_id": "sub_cfg"}
+_MOZAIKSPAY_DESCRIPTOR = {
+    "id": "mozaikspay",
+    "capability_source": "managed_capability",
+    "display_name": "MozaiksPay",
+}
+
+
+class TestInjectDefaultMozaikspay:
+    def test_no_subscription_config_task_returns_unchanged(self):
+        packs = []
+        tasks = [{"task_type": "module_contract"}]
+        result = _inject_default_mozaikspay_if_applicable(packs, tasks, context_variables=None)
+        assert result == []
+
+    def test_mozaikspay_already_in_packs_returns_unchanged(self):
+        packs = [{"capability_pack_id": "mozaikspay", "capability_source": "managed_capability"}]
+        result = _inject_default_mozaikspay_if_applicable(
+            packs, [_SUBSCRIPTION_CONFIG_TASK], context_variables=None
+        )
+        assert len(result) == 1
+        assert result[0]["capability_pack_id"] == "mozaikspay"
+
+    def test_another_managed_pack_provides_subscription_write_path_skips_injection(self):
+        packs = [{
+            "capability_pack_id": "custom_billing",
+            "capability_source": "managed_capability",
+            "provides_capabilities": ["subscription_write_path"],
+        }]
+        result = _inject_default_mozaikspay_if_applicable(
+            packs, [_SUBSCRIPTION_CONFIG_TASK], context_variables=None
+        )
+        assert len(result) == 1
+        assert result[0]["capability_pack_id"] == "custom_billing"
+
+    def test_injects_from_context_when_available(self):
+        ctx = _ctx({"available_managed_capabilities": [_MOZAIKSPAY_DESCRIPTOR]})
+        result = _inject_default_mozaikspay_if_applicable(
+            [], [_SUBSCRIPTION_CONFIG_TASK], context_variables=ctx
+        )
+        assert len(result) == 1
+        assert result[0]["capability_pack_id"] == "mozaikspay"
+        assert result[0]["capability_source"] == "managed_capability"
+        assert result[0]["surface_kind"] == "external_integration"
+
+    def test_injects_from_contract_yaml_when_not_in_context(self):
+        """Falls back to factory pack contract.yaml for vanilla OSS installs."""
+        result = _inject_default_mozaikspay_if_applicable(
+            [], [_SUBSCRIPTION_CONFIG_TASK], context_variables=None
+        )
+        assert len(result) == 1
+        assert result[0]["capability_pack_id"] == "mozaikspay"
+        assert result[0]["capability_source"] == "managed_capability"
+
+    def test_context_descriptor_takes_priority_over_contract_yaml(self):
+        ctx = _ctx({"available_managed_capabilities": [{
+            **_MOZAIKSPAY_DESCRIPTOR,
+            "api_base": "https://pay.example.com",
+        }]})
+        result = _inject_default_mozaikspay_if_applicable(
+            [], [_SUBSCRIPTION_CONFIG_TASK], context_variables=ctx
+        )
+        assert result[0].get("api_base") == "https://pay.example.com"
+
+    def test_non_managed_capability_providing_sub_write_path_does_not_block_injection(self):
+        """provides_capabilities on a generated_module pack should NOT block injection."""
+        packs = [{
+            "capability_pack_id": "my_module",
+            "capability_source": "generated_module",
+            "provides_capabilities": ["subscription_write_path"],
+        }]
+        ctx = _ctx({"available_managed_capabilities": [_MOZAIKSPAY_DESCRIPTOR]})
+        result = _inject_default_mozaikspay_if_applicable(
+            packs, [_SUBSCRIPTION_CONFIG_TASK], context_variables=ctx
+        )
+        pack_ids = [p["capability_pack_id"] for p in result]
+        assert "mozaikspay" in pack_ids
+
+    def test_empty_build_tasks_list_returns_unchanged(self):
+        result = _inject_default_mozaikspay_if_applicable([], [], context_variables=None)
+        assert result == []
