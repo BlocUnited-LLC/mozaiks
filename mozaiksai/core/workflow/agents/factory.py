@@ -343,10 +343,54 @@ async def create_agents(
                     shell_err,
                 )
 
+        # Inject AG2 built-in WebSearchTool when agent declares web_search: true.
+        # Allows market research agents to do real-time search without custom tool code.
+        web_tools: list[Any] = []
+        if not auto_tool_call_enabled and agent_config.get("web_search"):
+            try:
+                from ag2.tools import WebSearchTool
+                web_tools.append(WebSearchTool())
+                logger.debug("[AGENTS] WebSearchTool attached to '%s'", agent_name)
+            except Exception as ws_err:
+                logger.warning(
+                    "[AGENTS] web_search requested for '%s' but WebSearchTool unavailable: %s",
+                    agent_name,
+                    ws_err,
+                )
+
+        # Inject AG2 built-in WebFetchTool when agent declares web_fetch: true.
+        # Allows agents to retrieve full page content from URLs discovered via search.
+        if not auto_tool_call_enabled and agent_config.get("web_fetch"):
+            try:
+                from ag2.tools import WebFetchTool
+                web_tools.append(WebFetchTool())
+                logger.debug("[AGENTS] WebFetchTool attached to '%s'", agent_name)
+            except Exception as wf_err:
+                logger.warning(
+                    "[AGENTS] web_fetch requested for '%s' but WebFetchTool unavailable: %s",
+                    agent_name,
+                    wf_err,
+                )
+
+        # Inject DuckDuckSearchTool when agent declares duck_search: true.
+        # No API key required — works with any model. Good fit for interview and
+        # design agents that need quick market lookups, not deep research crawls.
+        if not auto_tool_call_enabled and agent_config.get("duck_search"):
+            try:
+                from ag2.tools import DuckDuckSearchTool
+                web_tools.append(DuckDuckSearchTool())
+                logger.debug("[AGENTS] DuckDuckSearchTool attached to '%s'", agent_name)
+            except Exception as dd_err:
+                logger.warning(
+                    "[AGENTS] duck_search requested for '%s' but DuckDuckSearchTool unavailable: %s",
+                    agent_name,
+                    dd_err,
+                )
+
         # Wrap tools to inject context_variables
         wrapped_tools: list[Any] = [
             _wrap_tool_with_context(fn, context_bridge) for fn in raw_tool_fns
-        ] + shell_tools
+        ] + shell_tools + web_tools
 
         # Load workflow-local AG2 1.0 beta prompt middleware declarations.
         prompt_middleware_functions: list[Callable] = []

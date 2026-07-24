@@ -56,6 +56,13 @@ agents:
         - `brownfield_app`: ask only about the existing app details needed for augmentation; do not restart as a blank-slate product interview.
       6. Treat `concept_overview`, `value_manifest`, and any design docs as provisional truth. Do not ask the user to restate target users, market, or high-level scope that is already clear from context unless that ambiguity would change the generated app bundle.
       7. Prefer assumption-forward guidance over open-ended interviewing. When gaps are small, state your current assumption and ask the user to correct it instead of making them restate the whole product brief.
+      7a. **Do NOT ask about things you can infer from the category:**
+          - Do not ask about pricing model — the category implies it (B2B SaaS → per-seat, consumer → freemium, marketplace → take rate). These are resolved by AppPlanAgent using industry defaults.
+          - Do not ask about feature set table stakes — if the concept is "creator platform", drafts/analytics/monetization are implied. If it is "marketplace", listings/reviews/search are implied.
+          - Do not ask about social features — the category determines them (social app → follows/feed, B2B → teams/invites, marketplace → ratings).
+          - Do not ask about page count or navigation structure — AppPlanAgent derives this from the capability map.
+          - Do not ask about notification preferences — the runtime provides them; modules declare notification rules.
+          - Do not re-ask anything already established in `concept_overview` or `value_manifest`.
       8. Prioritize gaps in this order, but only ask categories that are still unresolved:
          - which capability packs the product actually needs
          - primary pages/screens
@@ -137,6 +144,45 @@ agents:
       - Use the existing context instead of re-interviewing.
 
       Your output becomes the shared contract for downstream generation agents. Decompose into product capability packs first, not arbitrary code tasks first.
+  - id: industry_defaults
+    heading: '[INDUSTRY DEFAULTS — APPLY WITHOUT ASKING]'
+    content: |-
+      You have deep knowledge of industry-standard product patterns. Use it. Do NOT ask the user about things you can already infer from the app category. Apply these defaults directly unless the concept or design docs say otherwise.
+
+      **Profile layout defaults** (use `profile_layout` in your AppBuildPlan):
+      - Enterprise / B2B / dashboard / professional → `sidebar_left`
+      - Social / consumer / creator / content-first → `top_nav`
+      - Mobile-first / simple utility / single-purpose → `drawer`
+      - Productivity / developer tools / SaaS dashboards → `icon_rail`
+      Default to `top_nav` only when genuinely uncertain.
+
+      **Social feature defaults** (which social features belong in which app):
+      - Consumer social / dating / community → friend requests, followers/following, activity feed, DMs, reactions, mentions
+      - Creator platform → follow/subscriber model (no mutual friends), public feed, creator analytics
+      - Professional network → connections (mutual), endorsements, professional profile, industry feed
+      - B2B SaaS → team workspaces, invitations, shared projects — NOT social follows or friend lists
+      - Marketplace → reviews/ratings, seller/buyer profiles — NOT social follows
+      - Gaming / hobby community → friend lists, leaderboards, activity feed, achievements
+
+      **Subscription tier defaults by category** (when monetization is subscriptions — use `pricing_recommendation` from ConceptBlueprint when present):
+      - B2B SaaS: Free (1–3 seats/limited features) → Pro ($15–30/seat/mo) → Team ($10–20/seat/mo, min 5) → Enterprise (contact)
+      - Consumer / social: Free (full access, limited) → Premium ($8–15/mo) — gate analytics, highlights, advanced controls
+      - Creator platform: Free creator → Pro creator ($9–29/mo) — gate monetization tools, advanced analytics, scheduling
+      - AI-native product: Free (limited tokens/runs) → Pro ($20–50/mo with token allowance) → usage top-up packs
+      - Developer tools: Free tier → Starter ($29/mo) → Growth ($99/mo) → Enterprise — gate rate limits, webhooks, team access
+      When `pricing_recommendation` is present in `concept_blueprint`, use those tier names, prices, and gates as-is. Do not re-derive them.
+
+      **Feature set defaults by category** (include these without the user asking):
+      - Creator platform → draft content, scheduled publishing, analytics dashboard, subscriber management, tipping/monetization toggle
+      - Marketplace → listing CRUD, search + filters, review/rating system, seller dashboard, order management, buyer/seller messaging
+      - B2B SaaS → team management, audit logs, role-based access (admin/member/viewer), integrations page, usage/billing dashboard
+      - Community / forum → post/thread CRUD, categories/tags, upvote/downvote, moderation queue, user reputation/badges
+      - Event platform → event listing CRUD, RSVP/ticketing, attendee list, calendar view, reminder notifications, organizer dashboard
+      - AI product → conversation/session history, file upload support, prompt library, output management, usage/credits display
+      - Developer tool → API key management, webhook configuration, request logs, playground/sandbox, documentation link
+
+      **Apply all of the above without asking. These are table stakes for the category, not optional features.**
+      When the concept implies a category, include its canonical feature set in the plan. The user does not need to enumerate every feature — your job is to know what belongs.
   - id: capability_directory
     heading: '[CAPABILITY DIRECTORY]'
     content: '{{CAPABILITY_DIRECTORY_CONTEXT}}'
@@ -200,6 +246,7 @@ agents:
          - Distinguish deterministic product behavior from optional agentic augmentation.
       4a. Resolve monetization before deriving monetization build tasks.
          - `monetization_enabled=true`, `builder_options.monetization.enabled=true`, or `builder_options.provider_backed_capabilities[].intent_id == "monetization"` means only that a revenue model is desired. It does not mean subscriptions.
+         - **When `concept_blueprint.pricing_recommendation` is present, use it as the authoritative tier structure.** Feed its `tiers[]`, `model`, and `take_rate_pct` directly into your `subscription_config` build task initial_message. Do not re-derive or simplify the tier structure — the recommendation was already validated against industry patterns.
          - Set `revenue_model` to one concrete core OSS value: `free`, `subscriptions`, `usage_based`, `custom`, or `hybrid`. Never set it to `monetized`.
          - Populate `monetization_plan` whenever `revenue_model` is not `free`. Include payer, payee, money_flow_summary, required_capability_routes, subscription_contract_requirement, and rationale.
          - Use `subscriptions` only for recurring access, seats, paid feature gates, account-level quotas, AI credits, or token allowances.
