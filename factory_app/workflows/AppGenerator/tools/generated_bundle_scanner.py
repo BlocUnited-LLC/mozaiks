@@ -562,6 +562,44 @@ def _validate_subscriptions_contract(
     return errors
 
 
+def _scan_token_wallets_require_mozaikspay(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Generated apps that declare top_up_products must select the mozaikspay pack.
+
+    top_up_products requires a hosted payment processor to create checkout sessions.
+    The OSS runtime ledger can track balances without MozaiksPay, but token top-ups
+    need a billing provider. This gate enforces the selection so the billing_portal
+    module is generated and the checkout/top-up surfaces are wired correctly.
+
+    Note: token_wallets alone without top_up_products is valid for self-hosted OSS
+    apps that use entitlement_dispatch for plan enforcement and do not sell top-ups.
+    """
+    normalized_files = _normalized_files_map(files_map)
+    subs_path = "config/subscriptions.yaml"
+    raw, _ = _load_yaml_mapping_from_file(normalized_files, subs_path)
+    if not isinstance(raw, dict):
+        return []
+
+    top_up_products = raw.get("top_up_products")
+    if not top_up_products or not isinstance(top_up_products, list) or len(top_up_products) == 0:
+        return []
+
+    # top_up_products declared — mozaikspay must be selected as a managed_capability
+    pack = _selected_pack_descriptor(capability_packs, "mozaikspay")
+    if pack and str(pack.get("capability_source") or "").strip() == "managed_capability":
+        return []
+
+    return [
+        f"{subs_path}: declares top_up_products but the mozaikspay managed capability pack "
+        "is not selected. Token top-up products require a hosted billing provider to create "
+        "checkout sessions. Add mozaikspay to AppBuildPlan.capability_packs with "
+        "capability_source: managed_capability."
+    ]
+
+
 def _scan_mozaikspay_saas_contract(
     files_map: dict[str, str],
     *,
@@ -1158,6 +1196,12 @@ def scan_generated_bundle(
     errors.extend(_scan_data_contract_module_alignment(files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(
+        _scan_token_wallets_require_mozaikspay(
             files_map,
             capability_packs=capability_packs,
         )

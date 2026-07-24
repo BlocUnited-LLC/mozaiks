@@ -9,6 +9,12 @@ provides_capabilities:
   - subscription_write_path
 
 selection_rules:
+  - id: select_for_token_wallets
+    when:
+      app_declares:
+        - token_wallets
+        - top_up_products
+    action: select_pack
   - id: select_for_saas_billing
     when:
       intent_any:
