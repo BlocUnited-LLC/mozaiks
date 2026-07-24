@@ -251,6 +251,46 @@ def _last_agent_name_from_runner_result(runner_result: Any) -> str | None:
     return None
 
 
+def _structured_agent_json_visibility_reason(
+    *,
+    agent_name: str,
+    content: str,
+    structured_registry: dict[str, Any] | None,
+) -> str | None:
+    if not structured_registry or agent_name not in structured_registry:
+        return None
+    candidate = str(content or "").strip()
+    if not candidate or candidate[0] not in "{[":
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return "malformed_structured_output"
+    if isinstance(parsed, (dict, list)):
+        return "structured_output_artifact"
+    return None
+
+
+def _agent_text_visibility_reason(
+    *,
+    agent_name: str,
+    content: str,
+    derived_context_manager: Any | None,
+    structured_registry: dict[str, Any] | None,
+) -> str | None:
+    if derived_context_manager is not None and hasattr(derived_context_manager, "is_agent_text_ui_hidden"):
+        try:
+            if derived_context_manager.is_agent_text_ui_hidden(agent_name, content):
+                return "ui_hidden_agent_text"
+        except Exception:
+            pass
+    return _structured_agent_json_visibility_reason(
+        agent_name=agent_name,
+        content=content,
+        structured_registry=structured_registry,
+    )
+
+
 async def _project_ag2_wal_to_mozaiks_transport(
     *,
     runner_result: Any,
@@ -260,6 +300,8 @@ async def _project_ag2_wal_to_mozaiks_transport(
     app_id: str,
     agent_name_by_id: dict[str, str],
     initial_sequence: int,
+    derived_context_manager: Any | None = None,
+    structured_registry: dict[str, Any] | None = None,
 ) -> int:
     """Project AG2 round-end packets into Mozaiks chat events and run storage."""
 
@@ -281,6 +323,27 @@ async def _project_ag2_wal_to_mozaiks_transport(
         if not content:
             continue
 
+        metadata = {"source": "ag2_network_wal", "channel_id": runner_result.channel_id}
+        hidden_reason = _agent_text_visibility_reason(
+            agent_name=agent_name,
+            content=content,
+            derived_context_manager=derived_context_manager,
+            structured_registry=structured_registry,
+        )
+        if hidden_reason:
+            await persistence_manager.append_run_assistant_message(
+                chat_id=chat_id,
+                app_id=app_id,
+                content=content,
+                agent_name=agent_name,
+                metadata={
+                    **metadata,
+                    "ui_visibility": "hidden",
+                    "trace_reason": hidden_reason,
+                },
+            )
+            continue
+
         await transport.send_event_to_ui(
             {
                 "kind": "chat.text",
@@ -297,7 +360,7 @@ async def _project_ag2_wal_to_mozaiks_transport(
             app_id=app_id,
             content=content,
             agent_name=agent_name,
-            metadata={"source": "ag2_network_wal", "channel_id": runner_result.channel_id},
+            metadata=metadata,
         )
         sequence += 1
     return sequence
@@ -653,6 +716,8 @@ async def run_workflow_orchestration(
                     app_id=app_id,
                     agent_name_by_id=first_phase_result.agent_name_by_id,
                     initial_sequence=projected_sequence,
+                    derived_context_manager=derived_context_manager,
+                    structured_registry=structured_registry,
                 )
                 _apply_derived_agent_text_from_runner_result(
                     runner_result=first_phase_result,
@@ -732,6 +797,8 @@ async def run_workflow_orchestration(
                 app_id=app_id,
                 agent_name_by_id=runner_result.agent_name_by_id,
                 initial_sequence=projected_sequence,
+                derived_context_manager=derived_context_manager,
+                structured_registry=structured_registry,
             )
             _apply_derived_agent_text_from_runner_result(
                 runner_result=runner_result,

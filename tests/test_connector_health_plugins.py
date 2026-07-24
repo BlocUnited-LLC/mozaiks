@@ -286,6 +286,8 @@ def test_list_connectors_does_not_invoke_provider_plugin() -> None:
     connectors = asyncio.run(list_connectors(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", store=store))
 
     assert connectors[0]["health"]["health_check_supported"] is True
+    assert connectors[0]["health"]["status"] == "pending_validation"
+    assert connectors[0]["ready"] is False
     assert provider.calls == []
 
 
@@ -320,9 +322,10 @@ def test_connector_save_does_not_invoke_provider_plugin(monkeypatch) -> None:
     assert provider.calls == []
 
 
-def test_readiness_ignores_unhealthy_provider_health_by_default() -> None:
+def test_readiness_requires_healthy_provider_health_when_check_is_registered() -> None:
     store = _store()
     _seed_configured_connector(store)
+    register_connector_health_provider(_DemoHealthProvider())
     asyncio.run(
         store.update_health(
             scope=ConnectorStore.SCOPE_APP,
@@ -339,8 +342,81 @@ def test_readiness_ignores_unhealthy_provider_health_by_default() -> None:
         get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", required_services=["analytics_provider"], store=store)
     )
 
+    assert inventory["ready_services"] == []
+    assert inventory["missing_required_services"] == ["analytics_provider"]
+
+
+def test_readiness_accepts_healthy_provider_health_when_check_is_registered() -> None:
+    store = _store()
+    _seed_configured_connector(store)
+    register_connector_health_provider(_DemoHealthProvider())
+    asyncio.run(
+        store.update_health(
+            scope=ConnectorStore.SCOPE_APP,
+            scope_id="app_1",
+            service="analytics_provider",
+            health_status="healthy",
+            health_message="Provider accepted the credential.",
+            last_checked_at="2026-05-17T12:00:00+00:00",
+            checked_by="manual",
+        )
+    )
+
+    inventory = asyncio.run(
+        get_connector_inventory(scope=ConnectorStore.SCOPE_APP, scope_id="app_1", required_services=["analytics_provider"], store=store)
+    )
+
     assert inventory["ready_services"] == ["analytics_provider"]
     assert inventory["missing_required_services"] == []
+
+
+def test_workspace_scope_health_check_updates_workspace_connector(monkeypatch) -> None:
+    store = _store()
+    vault = _FakeVaultBackend()
+    provider = _DemoHealthProvider()
+    asyncio.run(
+        store.upsert(
+            scope=ConnectorStore.SCOPE_WORKSPACE,
+            scope_id="workspace_1",
+            service="analytics_provider",
+            display_name="Hosted Analytics",
+            user_id="user_1",
+            status="active",
+            secret_storage="fake_vault",
+            secret_available=True,
+            key_length=len(SECRET_VALUE),
+            public_config={"endpoint_url": "https://analytics.example.test"},
+            required_fields=[
+                {"name": "api_key", "type": "secret", "required": True, "frontend_safe": False},
+                {"name": "endpoint_url", "type": "url", "required": True, "frontend_safe": True},
+            ],
+        )
+    )
+    vault.secrets[("workspace_1", "analytics_provider")] = SECRET_VALUE
+    monkeypatch.setattr(connector_health, "get_connector_vault_backend", lambda: vault)
+    register_connector_health_provider(provider)
+
+    result = asyncio.run(
+        run_connector_health_check(
+            scope=ConnectorStore.SCOPE_WORKSPACE,
+            scope_id="workspace_1",
+            service="analytics_provider",
+            store=store,
+        )
+    )
+    connector = asyncio.run(
+        store.get(
+            scope=ConnectorStore.SCOPE_WORKSPACE,
+            scope_id="workspace_1",
+            service="analytics_provider",
+        )
+    )
+
+    assert result["status"] == "healthy"
+    assert connector["health_status"] == "healthy"
+    assert provider.calls[0]["context"].scope == "workspace"
+    assert provider.calls[0]["context"].scope_id == "workspace_1"
+    assert provider.calls[0]["secret_available"] is True
 
 
 def test_collect_missing_connector_needs_does_not_run_provider_health(monkeypatch) -> None:

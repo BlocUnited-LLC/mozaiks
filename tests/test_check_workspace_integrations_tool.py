@@ -8,6 +8,14 @@ from factory_app.workflows.AppGenerator.tools.check_workspace_integrations impor
     check_workspace_integrations,
 )
 
+
+class _Context:
+    def __init__(self, data: dict[str, object]) -> None:
+        self.data = dict(data)
+
+    def get(self, key: str, default=None):
+        return self.data.get(key, default)
+
 # ── full catalog (no filter) ──────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -76,6 +84,79 @@ async def test_missing_status_when_no_secrets(monkeypatch: pytest.MonkeyPatch) -
     assert "missing_secrets" in twilio_entry
     assert len(twilio_entry["missing_secrets"]) > 0
     assert "setup_url" in twilio_entry
+
+
+@pytest.mark.asyncio
+async def test_workspace_connector_can_make_prechat_integration_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+
+    async def fake_inventory(*, scope, scope_id, required_services=None):
+        assert scope == "workspace"
+        assert scope_id == "workspace_1"
+        assert required_services == ["resend"]
+        return {
+            "connectors": [
+                {
+                    "service": "resend",
+                    "ready": True,
+                    "health": {"status": "healthy", "health_check_supported": True},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "factory_app.workflows.AppGenerator.tools.check_workspace_integrations.get_connector_inventory",
+        fake_inventory,
+    )
+
+    result = await check_workspace_integrations(
+        integration_ids=["resend"],
+        context_variables=_Context({"workspace_id": "workspace_1"}),
+    )
+
+    assert result["missing"] == []
+    assert result["partial"] == []
+    assert result["available"][0]["id"] == "resend"
+    assert result["available"][0]["source"] == "workspace_connector"
+    assert result["available"][0]["connector_status"] == "ready"
+    assert result["available"][0]["health_status"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_unready_workspace_connector_stays_partial_until_validated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MONGO_URI", raising=False)
+
+    async def fake_inventory(*, scope, scope_id, required_services=None):
+        del scope, scope_id, required_services
+        return {
+            "connectors": [
+                {
+                    "service": "mongodb",
+                    "ready": False,
+                    "health": {"status": "pending_validation", "health_check_supported": True},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "factory_app.workflows.AppGenerator.tools.check_workspace_integrations.get_connector_inventory",
+        fake_inventory,
+    )
+
+    result = await check_workspace_integrations(
+        integration_ids=["mongodb"],
+        context_variables={"workspace_id": "workspace_1"},
+    )
+
+    assert result["available"] == []
+    assert result["missing"] == []
+    assert result["partial"][0]["id"] == "mongodb"
+    assert result["partial"][0]["connector_status"] == "partial"
+    assert result["partial"][0]["health_status"] == "pending_validation"
 
 
 # ── catalog_only mode ─────────────────────────────────────────────────────────

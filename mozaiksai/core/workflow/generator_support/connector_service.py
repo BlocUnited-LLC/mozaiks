@@ -119,6 +119,7 @@ def compute_connector_health(
     """Compute frontend-safe connector configuration health without network calls."""
 
     now = datetime.now(UTC).isoformat()
+    health_check_supported = _health_supported_for_record(record)
     if not isinstance(record, dict):
         missing = [
             field["name"]
@@ -131,6 +132,7 @@ def compute_connector_health(
             "message": "Connector is not configured.",
             "missing_fields": missing,
             "checked_by": checked_by,
+            "health_check_supported": health_check_supported,
             "frontend_safe": True,
         }
 
@@ -157,12 +159,16 @@ def compute_connector_health(
     if missing_fields:
         status = "not_configured"
         message = "Connector is missing required configuration."
-    elif str(record.get("health_status") or "").strip() in {"healthy", "unhealthy"}:
-        status = str(record.get("health_status"))
+    elif str(record.get("health_status") or "").strip().lower() in {"healthy", "unhealthy"}:
+        status = str(record.get("health_status")).strip().lower()
         message = str(record.get("health_message") or "").strip() or None  # type: ignore[assignment]
     elif fields or record.get("secret_available") or public_config:
-        status = "configured"
-        message = "Connector has required configuration; no provider validation has run."
+        if health_check_supported:
+            status = "pending_validation"
+            message = "Connector has required configuration; run its provider health check before use."
+        else:
+            status = "configured"
+            message = "Connector has required configuration; no provider validation has run."
     else:
         status = "unknown"
         message = "Connector health has not been checked."
@@ -175,7 +181,7 @@ def compute_connector_health(
         "checked_by": checked_by,
         "safe_details": record.get("health_details") if isinstance(record.get("health_details"), dict) else {},
         "error_code": record.get("health_error_code"),
-        "health_check_supported": _health_supported_for_record(record),
+        "health_check_supported": health_check_supported,
         "frontend_safe": True,
     }
 
@@ -195,8 +201,11 @@ def _with_connector_health(
         checked_by=checked_by,
     )
     configuration_complete = enriched["health"]["status"] != "not_configured" and not enriched["health"].get("missing_fields")
+    lifecycle_status = _classify_connector_status(enriched).get("status")
+    requires_provider_validation = bool(enriched["health"].get("health_check_supported"))
+    provider_ready = not requires_provider_validation or enriched["health"].get("status") == "healthy"
     enriched["configured"] = configuration_complete
-    enriched["ready"] = _classify_connector_status(enriched).get("status") in {"active", "expiring"} and configuration_complete
+    enriched["ready"] = lifecycle_status in {"active", "expiring"} and configuration_complete and provider_ready
     return enriched
 
 

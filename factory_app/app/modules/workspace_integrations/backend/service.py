@@ -245,6 +245,21 @@ class WorkspaceIntegrationsService:
         connectors = await list_connectors(scope=ConnectorStore.SCOPE_WORKSPACE, scope_id=str(workspace_id))
         return {"connectors": connectors, "total": len(connectors)}
 
+    async def check_workspace_connector_health(
+        self,
+        *,
+        workspace_id: str,
+        service: str,
+    ) -> dict[str, Any]:
+        from mozaiksai.core.data.persistence import ConnectorStore
+        from mozaiksai.core.workflow.generator_support.connector_health import run_connector_health_check
+        return await run_connector_health_check(
+            scope=ConnectorStore.SCOPE_WORKSPACE,
+            scope_id=str(workspace_id),
+            service=service,
+            checked_by="manual",
+        )
+
     async def delete_workspace_connector(
         self,
         *,

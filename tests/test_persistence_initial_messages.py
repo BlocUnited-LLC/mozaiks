@@ -139,6 +139,67 @@ async def test_load_run_history_maps_ag2_input_and_model_events(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_load_run_history_filters_hidden_control_and_structured_projection_events(monkeypatch):
+    manager = AG2PersistenceManager()
+
+    async def _fake_load_run_events(*, chat_id: str, app_id: str):
+        assert chat_id == "chat-1"
+        assert app_id == "app-1"
+        return [
+            TextInput("build this"),
+            ModelResponse(
+                ModelMessage(
+                    "NEXT",
+                    metadata={
+                        "agent_name": "ValueInterviewAgent",
+                        "source": "ag2_network_wal",
+                    },
+                ),
+                model="mozaiks.runtime",
+            ),
+            ModelResponse(
+                ModelMessage(
+                    '{"app_name": "ContractorFlow CRM"}',
+                    metadata={
+                        "agent_name": "GapAnalysisAgent",
+                        "source": "ag2_network_wal",
+                    },
+                ),
+                model="mozaiks.runtime",
+            ),
+            ModelResponse(
+                ModelMessage(
+                    "## Competitor Landscape\n\nUseful narrative.",
+                    metadata={
+                        "agent_name": "ResearchAgent",
+                        "source": "ag2_network_wal",
+                    },
+                ),
+                model="mozaiks.runtime",
+            ),
+            ModelResponse(
+                ModelMessage(
+                    "hidden trace",
+                    metadata={
+                        "agent_name": "TraceAgent",
+                        "ui_visibility": "hidden",
+                    },
+                ),
+                model="mozaiks.runtime",
+            ),
+        ]
+
+    monkeypatch.setattr(manager, "load_run_events", _fake_load_run_events)
+
+    history = await manager.load_run_history(chat_id="chat-1", app_id="app-1")
+
+    assert [message["content"] for message in history] == [
+        "build this",
+        "## Competitor Landscape\n\nUseful narrative.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_append_run_assistant_message_persists_model_response_to_ag2_stream(monkeypatch):
     manager = AG2PersistenceManager()
     captured: dict[str, object] = {}

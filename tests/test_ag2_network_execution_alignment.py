@@ -96,6 +96,87 @@ class _ContextOperationAgent(_DeterministicAgent):
         return await super().ask(*msg, **kwargs)
 
 
+class _ProjectionTransport:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    async def send_event_to_ui(self, event: dict[str, Any], chat_id: str) -> None:
+        self.events.append({"chat_id": chat_id, "event": event})
+
+
+class _ProjectionPersistence:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    async def append_run_assistant_message(self, **kwargs: Any) -> None:
+        self.messages.append(dict(kwargs))
+
+
+class _HiddenTextManager:
+    def is_agent_text_ui_hidden(self, agent_name: str, text: str) -> bool:
+        return agent_name == "ValueInterviewAgent" and str(text).strip() == "NEXT"
+
+
+@pytest.mark.asyncio
+async def test_ag2_projection_hides_control_signal_and_structured_json() -> None:
+    runner_result = SimpleNamespace(
+        channel_id="channel-1",
+        wal=[
+            {
+                "event_type": "ag2.packet",
+                "sender_id": "agent-1",
+                "event_data": {"body": "NEXT"},
+            },
+            {
+                "event_type": "ag2.packet",
+                "sender_id": "agent-2",
+                "event_data": {"body": json.dumps({"app_name": "ContractorFlow CRM"})},
+            },
+            {
+                "event_type": "ag2.packet",
+                "sender_id": "agent-3",
+                "event_data": {"body": "## Competitor Landscape\n\nUseful narrative."},
+            },
+        ],
+    )
+    transport = _ProjectionTransport()
+    persistence = _ProjectionPersistence()
+
+    next_sequence = await orchestration_patterns_module._project_ag2_wal_to_mozaiks_transport(
+        runner_result=runner_result,
+        transport=transport,
+        persistence_manager=persistence,
+        chat_id="chat-1",
+        app_id="app-1",
+        agent_name_by_id={
+            "agent-1": "ValueInterviewAgent",
+            "agent-2": "GapAnalysisAgent",
+            "agent-3": "ResearchAgent",
+        },
+        initial_sequence=0,
+        derived_context_manager=_HiddenTextManager(),
+        structured_registry={"GapAnalysisAgent": object()},
+    )
+
+    assert next_sequence == 1
+    assert [item["event"]["content"] for item in transport.events] == [
+        "## Competitor Landscape\n\nUseful narrative."
+    ]
+    hidden = [
+        item
+        for item in persistence.messages
+        if item["metadata"].get("ui_visibility") == "hidden"
+    ]
+    assert [item["content"] for item in hidden] == [
+        "NEXT",
+        '{"app_name": "ContractorFlow CRM"}',
+    ]
+    assert [item["metadata"]["trace_reason"] for item in hidden] == [
+        "ui_hidden_agent_text",
+        "structured_output_artifact",
+    ]
+
+
 class _FailingContextMutatingAgent(Agent):
     def __init__(self, name: str, updates: dict[str, Any]) -> None:
         super().__init__(name, prompt=f"{name} failing test agent")

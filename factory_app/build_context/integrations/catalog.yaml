@@ -23,6 +23,18 @@ integrations:
       - Sign in to console.anthropic.com → API Keys
       - Create a new key and copy it immediately (shown once)
 
+  - id: gemini
+    name: Gemini
+    category: ai
+    description: Google Gemini models for multimodal reasoning, code, and generation via Google AI Studio or Vertex AI.
+    required_secrets:
+      - GEMINI_API_KEY
+    optional_secrets:
+      - GOOGLE_API_KEY
+    setup_steps:
+      - Sign in to aistudio.google.com → Get API key
+      - Create or select a project and copy the API key
+
   - id: mozaikspay
     name: Mozaiks Pay
     category: payments
@@ -58,6 +70,19 @@ integrations:
       - Sign in to resend.com → API Keys
       - Create an API key with Send access
       - Verify your sending domain under Domains
+
+  - id: sendgrid
+    name: SendGrid
+    category: email
+    description: Transactional email delivery through Twilio SendGrid.
+    required_secrets:
+      - SENDGRID_API_KEY
+    optional_secrets:
+      - SENDGRID_FROM_EMAIL
+    setup_steps:
+      - Sign in to SendGrid → Settings → API Keys
+      - Create an API key with Mail Send access
+      - Verify your sender identity or sending domain before production delivery
 
   - id: twilio
     name: Twilio
@@ -117,6 +142,31 @@ integrations:
       - Generate Access Key ID and Secret Access Key under Security Credentials
       - Create or identify the S3 bucket this app will use
 
+  - id: cloudinary
+    name: Cloudinary
+    category: storage
+    description: Image and media storage, transformation, and delivery.
+    required_secrets:
+      - CLOUDINARY_URL
+    optional_secrets: []
+    setup_steps:
+      - Sign in to Cloudinary → Dashboard
+      - Copy the CLOUDINARY_URL credential for the target cloud
+      - Use a scoped product environment for production apps
+
+  - id: mongodb
+    name: MongoDB
+    category: database
+    description: MongoDB database used by Mozaiks runtime persistence and generated app data.
+    required_secrets:
+      - MONGO_URI
+    optional_secrets:
+      - MONGO_DB_NAME
+    setup_steps:
+      - Provision MongoDB locally, in Atlas, or through a managed provider
+      - Create an app-scoped database user with the minimum required database permissions
+      - Copy the connection string as MONGO_URI and verify it with the readiness check before deploy
+
   - id: postgres
     name: PostgreSQL
     category: database
@@ -153,6 +203,21 @@ integrations:
       - Go to Google Cloud Console → APIs & Services → Credentials
       - Create an OAuth 2.0 Client ID (Web application type)
       - Add your app's redirect URI to the Authorized redirect URIs list
+
+  - id: microsoft_oauth
+    name: Microsoft OAuth
+    category: auth
+    description: Sign in with Microsoft or Entra ID through OIDC/OAuth.
+    required_secrets:
+      - MICROSOFT_CLIENT_ID
+      - MICROSOFT_CLIENT_SECRET
+    optional_secrets:
+      - MICROSOFT_TENANT_ID
+      - MICROSOFT_REDIRECT_URI
+    setup_steps:
+      - Create an app registration in Microsoft Entra admin center
+      - Add the app redirect URI under Authentication
+      - Create a client secret and store only the secret handle in the workspace connector
 
   - id: segment
     name: Segment

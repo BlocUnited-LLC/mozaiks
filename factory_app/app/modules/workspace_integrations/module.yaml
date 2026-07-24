@@ -378,6 +378,48 @@ actions:
     permissions:
       - workspace_integrations.read
 
+  - id: check_workspace_connector_health
+    description: >
+      Run the registered server-side health check for a workspace-scoped
+      connector. Returns frontend-safe status and never returns secret values.
+      If no provider health plugin is registered, returns configuration health.
+    handler_method: check_workspace_connector_health
+    input_schema:
+      type: object
+      required: [service]
+      properties:
+        workspace_id:
+          description: Optional workspace scope override. Defaults to the current request workspace.
+          type: string
+        service:
+          type: string
+    output_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy, configured, pending_validation, not_configured, unknown]
+        message:
+          type: string
+        last_checked_at:
+          type: string
+        checked_by:
+          type: string
+        missing_fields:
+          type: array
+          items:
+            type: string
+        health_details:
+          type: object
+        error_code:
+          type: string
+        health_check_supported:
+          type: boolean
+        frontend_safe:
+          type: boolean
+    permissions:
+      - workspace_integrations.manage
+
   - id: delete_workspace_connector
     description: Remove a workspace-scoped connector and its vault secret.
     handler_method: delete_workspace_connector

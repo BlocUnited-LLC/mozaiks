@@ -61,6 +61,35 @@ def test_agent_spec_sandbox_shell_defaults_false() -> None:
     assert spec.sandbox_shell is False
 
 
+def test_agent_spec_ag2_search_flags_accepted() -> None:
+    from mozaiksai.core.workflow.declarative.contracts import AgentSpec
+
+    spec = AgentSpec.model_validate({
+        "name": "ResearchAgent",
+        "system_message": "You research the market.",
+        "web_search": True,
+        "web_fetch": True,
+        "duck_search": True,
+    })
+
+    assert spec.web_search is True
+    assert spec.web_fetch is True
+    assert spec.duck_search is True
+
+
+def test_agent_spec_ag2_search_flags_default_false() -> None:
+    from mozaiksai.core.workflow.declarative.contracts import AgentSpec
+
+    spec = AgentSpec.model_validate({
+        "name": "ResearchAgent",
+        "system_message": "You research the market.",
+    })
+
+    assert spec.web_search is False
+    assert spec.web_fetch is False
+    assert spec.duck_search is False
+
+
 def test_agent_spec_unknown_field_still_rejected() -> None:
     from pydantic import ValidationError
 
@@ -143,6 +172,15 @@ def test_factory_shell_injection_gated_on_auto_tool_call() -> None:
 
     # The guard must be: only inject when NOT auto_tool_call
     assert "if not auto_tool_call_enabled and agent_config.get(\"sandbox_shell\")" in src
+
+
+def test_factory_ag2_search_tools_gated_on_auto_tool_call() -> None:
+    """AG2 search/fetch tools must only attach to interactive agents."""
+    src = (WORKSPACE / "mozaiksai" / "core" / "workflow" / "agents" / "factory.py").read_text(encoding="utf-8")
+
+    assert "if not auto_tool_call_enabled and agent_config.get(\"web_search\")" in src
+    assert "if not auto_tool_call_enabled and agent_config.get(\"web_fetch\")" in src
+    assert "if not auto_tool_call_enabled and agent_config.get(\"duck_search\")" in src
 
 
 def test_factory_shell_tools_appended_after_wrapped_tools() -> None:

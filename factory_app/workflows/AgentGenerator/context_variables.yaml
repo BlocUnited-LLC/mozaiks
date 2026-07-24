@@ -7,6 +7,14 @@ definitions:
     source:
       type: state
       default: initial
+  workflow_sequence:
+    type: string
+    description: >
+      Active workflow sequence that launched this run, such as workflow_revision,
+      app_revision, conceptual_replan, or full_rebuild.
+    source:
+      type: state
+      default: null
   task_run_mode:
     type: boolean
     description: >
@@ -638,6 +646,7 @@ agents:
   InterviewAgent:
     variables:
     - build_mode
+    - workflow_sequence
     - task_run_mode
     - revision_scope
     - change_request_id

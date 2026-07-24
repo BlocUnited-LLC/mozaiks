@@ -540,6 +540,22 @@ class DerivedContextManager:
             compiled=trigger._compiled,
         )
 
+    def is_agent_text_ui_hidden(self, agent_name: str, text: str) -> bool:
+        """Return True when a matching agent_text trigger is marked UI-hidden."""
+
+        candidate = str(text or "").strip()
+        if not candidate:
+            return False
+        for var in self.variables:
+            for trigger in var.triggers:
+                if not trigger.ui_hidden:
+                    continue
+                if trigger.agent != agent_name:
+                    continue
+                if self._matches_trigger(trigger, candidate):
+                    return True
+        return False
+
     def register_additional_provider(self, provider: Any) -> None:
         if provider and provider not in self.providers:
             self.providers.append(provider)

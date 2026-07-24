@@ -769,6 +769,33 @@ class AG2PersistenceManager:
         return list(await stream.history.get_events())
 
     @staticmethod
+    def _is_json_container_text(content: str) -> bool:
+        candidate = str(content or "").strip()
+        if not candidate or candidate[0] not in "{[":
+            return False
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(parsed, (dict, list))
+
+    @staticmethod
+    def _is_ui_hidden_run_message(content: str, metadata: dict[str, Any]) -> bool:
+        if str(metadata.get("ui_visibility") or "").strip().lower() == "hidden":
+            return True
+        if metadata.get("trace_hidden") is True:
+            return True
+
+        source = str(metadata.get("source") or "").strip()
+        if source != "ag2_network_wal":
+            return False
+
+        candidate = str(content or "").strip()
+        if candidate == "NEXT":
+            return True
+        return AG2PersistenceManager._is_json_container_text(candidate)
+
+    @staticmethod
     def _run_event_to_message(event: Any) -> dict[str, Any] | None:
         from ag2.events import ModelResponse
         from ag2.events.input_events import TextInput
@@ -782,10 +809,13 @@ class AG2PersistenceManager:
 
         if isinstance(event, ModelResponse) and event.content:
             metadata = event.metadata if isinstance(event.metadata, dict) else {}
+            content = str(event.content)
+            if AG2PersistenceManager._is_ui_hidden_run_message(content, metadata):
+                return None
             message: dict[str, Any] = {
                 "role": "assistant",
                 "name": str(metadata.get("agent_name") or metadata.get("agent") or "assistant"),
-                "content": str(event.content),
+                "content": content,
             }
             if event.model or metadata:
                 message["metadata"] = {
