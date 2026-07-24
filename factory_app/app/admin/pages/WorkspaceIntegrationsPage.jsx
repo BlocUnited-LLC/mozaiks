@@ -5,7 +5,6 @@ import { WorkspaceLayout } from '@mozaiks/chat-ui/workspace'
 import {
   ActionButton,
   API_BASE,
-  Panel,
   StatusPill,
   StudioErrorState,
   StudioInlineEmptyState,
@@ -27,7 +26,6 @@ function statusLabel(status, item = null) {
   if (resolvedStatus === 'configured') return 'Connected'
   if (resolvedStatus === 'partial') return 'Needs setup'
   if (resolvedStatus === 'missing' && Number(item?.app_usage_count || 0) > 0) return 'Needs setup'
-  if (resolvedStatus === 'missing') return 'Available'
   return 'Available'
 }
 
@@ -59,7 +57,7 @@ function appUsageLabel(item) {
   const count = Number(item?.app_usage_count || 0)
   if (count === 1) return 'Used by 1 app'
   if (count > 1) return `Used by ${count} apps`
-  return 'Not used yet'
+  return null
 }
 
 function needsAttention(item) {
@@ -93,6 +91,81 @@ function actionLabel(item, connector) {
   if (needsAttention(item)) return 'Review setup'
   if (connector || effectiveStatus(item) === 'configured') return 'Manage'
   return 'Review'
+}
+
+// ── category avatar ──────────────────────────────────────────────────────────
+
+const CATEGORY_COLORS = {
+  ai:       { bg: 'bg-violet-500/15', text: 'text-violet-400',  border: 'border-violet-500/20' },
+  database: { bg: 'bg-blue-500/15',   text: 'text-blue-400',    border: 'border-blue-500/20' },
+  email:    { bg: 'bg-emerald-500/15',text: 'text-emerald-400', border: 'border-emerald-500/20' },
+  payments: { bg: 'bg-orange-500/15', text: 'text-orange-400',  border: 'border-orange-500/20' },
+  storage:  { bg: 'bg-amber-500/15',  text: 'text-amber-400',   border: 'border-amber-500/20' },
+  sms:      { bg: 'bg-teal-500/15',   text: 'text-teal-400',    border: 'border-teal-500/20' },
+  default:  { bg: 'bg-muted/40',      text: 'text-muted-foreground', border: 'border-border/40' },
+}
+
+function categoryColors(category) {
+  return CATEGORY_COLORS[String(category || '').toLowerCase()] || CATEGORY_COLORS.default
+}
+
+function ServiceAvatar({ name, category }) {
+  const colors = categoryColors(category)
+  const initial = String(name || '?')[0].toUpperCase()
+  return (
+    <div
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border text-sm font-bold ${colors.bg} ${colors.text} ${colors.border}`}
+    >
+      {initial}
+    </div>
+  )
+}
+
+// ── status dot ───────────────────────────────────────────────────────────────
+
+const DOT_COLORS = {
+  success:     'bg-emerald-400',
+  warning:     'bg-amber-400',
+  destructive: 'bg-red-400',
+  default:     'bg-muted-foreground/30',
+}
+
+function StatusDot({ tone }) {
+  return (
+    <span className={`inline-block h-2 w-2 rounded-full ${DOT_COLORS[tone] || DOT_COLORS.default}`} />
+  )
+}
+
+// ── category filter tabs ──────────────────────────────────────────────────────
+
+const ALL_TAB = 'all'
+
+function CategoryTabs({ categories, active, onChange }) {
+  const tabs = [ALL_TAB, ...categories]
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {tabs.map((tab) => {
+        const isActive = tab === active
+        const colors = tab === ALL_TAB ? null : categoryColors(tab)
+        return (
+          <button
+            key={tab}
+            onClick={() => onChange(tab)}
+            className={[
+              'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+              isActive
+                ? colors
+                  ? `${colors.bg} ${colors.text} ${colors.border} border`
+                  : 'bg-foreground/10 text-foreground border border-border'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/40',
+            ].join(' ')}
+          >
+            {tab === ALL_TAB ? 'All' : humanize(tab)}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -183,6 +256,7 @@ function SetupSlideOver({
   const steps = Array.isArray(item.setup_steps) ? item.setup_steps : []
   const missingSecrets = secrets.filter((secret) => !secret.present)
   const hasStoredConnector = Boolean(connector?.service)
+  const tone = displayTone(item)
 
   const footer = (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -238,12 +312,13 @@ function SetupSlideOver({
           </div>
         )}
 
+        {/* Status + usage */}
         <div className="rounded-lg border border-border/55 bg-background/35 p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusPill tone={displayTone(item)}>
-              {statusLabel(item.status, item)}
-            </StatusPill>
-            <StatusPill tone="muted">{appUsageLabel(item)}</StatusPill>
+            <StatusPill tone={tone}>{statusLabel(item.status, item)}</StatusPill>
+            {appUsageLabel(item) && (
+              <StatusPill tone="muted">{appUsageLabel(item)}</StatusPill>
+            )}
           </div>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
             {connectorDescription(connector, item)}
@@ -255,6 +330,7 @@ function SetupSlideOver({
           )}
         </div>
 
+        {/* Credential source */}
         <div className="rounded-lg border border-border/55 bg-background/35 p-4">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Credential source
@@ -274,6 +350,7 @@ function SetupSlideOver({
           )}
         </div>
 
+        {/* Workspace note */}
         <div>
           <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Workspace note
@@ -286,6 +363,7 @@ function SetupSlideOver({
           />
         </div>
 
+        {/* Advanced */}
         <details className="rounded-lg border border-border/55 bg-background/25 p-4">
           <summary className="cursor-pointer text-sm font-semibold text-foreground">
             Advanced setup details
@@ -335,7 +413,7 @@ function SetupSlideOver({
                 <ol className="space-y-2">
                   {steps.map((step, i) => (
                     <li key={i} className="flex gap-3 text-sm leading-6 text-muted-foreground">
-                      <span className="flex-none text-xs font-semibold tabular-nums text-muted-foreground/60 pt-0.5">
+                      <span className="flex-none pt-0.5 text-xs font-semibold tabular-nums text-muted-foreground/60">
                         {i + 1}.
                       </span>
                       <span>{step}</span>
@@ -351,42 +429,59 @@ function SetupSlideOver({
   )
 }
 
-// ── IntegrationRow ───────────────────────────────────────────────────────────
+// ── IntegrationCard ───────────────────────────────────────────────────────────
 
-function IntegrationRow({ item, connector, onOpen }) {
+function IntegrationCard({ item, connector, onOpen }) {
+  const tone = displayTone(item)
+  const isConnected = effectiveStatus(item) === 'configured' && !needsAttention(item)
+  const isAttention = needsAttention(item)
+  const usageLabel = appUsageLabel(item)
+
+  // Left border accent communicates status without a second badge
+  const borderAccent = isConnected
+    ? 'border-l-2 border-l-emerald-500/60'
+    : isAttention
+    ? 'border-l-2 border-l-amber-500/60'
+    : 'border-l-2 border-l-transparent'
+
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border/55 bg-card/38 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-base font-semibold text-foreground">{item.name}</h3>
-          <StatusPill tone={displayTone(item)}>{statusLabel(item.status, item)}</StatusPill>
-          <StatusPill tone="muted">{humanize(item.category)}</StatusPill>
+    <div
+      className={`flex flex-col gap-3 rounded-lg border border-border/50 bg-card/40 p-4 transition-colors hover:bg-card/60 ${borderAccent}`}
+    >
+      {/* Header: avatar + name + status dot */}
+      <div className="flex items-start gap-3">
+        <ServiceAvatar name={item.name} category={item.category} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground leading-snug">{item.name}</h3>
+            <StatusDot tone={tone} />
+          </div>
+          <span className={`text-xs font-medium ${categoryColors(item.category).text}`}>
+            {humanize(item.category)}
+          </span>
         </div>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.description}</p>
-        <div className="mt-2 text-xs text-muted-foreground/70">{appUsageLabel(item)}</div>
       </div>
-      <ActionButton variant="secondary" onClick={() => onOpen(item)} className="shrink-0">
-        {actionLabel(item, connector)}
-      </ActionButton>
-    </div>
-  )
-}
 
-function IntegrationSection({ title, subtitle, items, connectorsByService, onOpen, empty = null }) {
-  if (!items.length) return empty
-  return (
-    <Panel title={title} subtitle={subtitle}>
-      <div className="space-y-3">
-        {items.map((item) => (
-          <IntegrationRow
-            key={item.id}
-            item={item}
-            connector={connectorsByService.get(item.id)}
-            onOpen={onOpen}
-          />
-        ))}
+      {/* Description */}
+      <p className="text-xs leading-5 text-muted-foreground line-clamp-2 flex-1">
+        {item.description}
+      </p>
+
+      {/* Footer: usage + action */}
+      <div className="flex items-center justify-between gap-2 border-t border-border/30 pt-3 mt-auto">
+        <span className="text-xs text-muted-foreground/60">
+          {usageLabel || (isConnected ? 'Ready for apps' : 'Not connected')}
+        </span>
+        <ActionButton
+          variant="secondary"
+          size="sm"
+          onClick={() => onOpen(item)}
+          className="shrink-0"
+        >
+          {actionLabel(item, connector)}
+        </ActionButton>
       </div>
-    </Panel>
+    </div>
   )
 }
 
@@ -403,12 +498,24 @@ export default function WorkspaceIntegrationsPage() {
   const [deleting, setDeleting] = useState(false)
   const [checking, setChecking] = useState(false)
   const [actionError, setActionError] = useState(null)
+  const [activeCategory, setActiveCategory] = useState(ALL_TAB)
 
-  async function load() {
+  async function load(preserveCategory = false) {
     setLoading(true)
     try {
       const payload = await fetchIntegrations()
       setData(payload)
+      // Default to AI on first load — LLM config is the prerequisite for everything else.
+      if (!preserveCategory) {
+        const cats = [
+          ...new Set(
+            (Array.isArray(payload.integrations) ? payload.integrations : [])
+              .map((i) => String(i.category || '').toLowerCase())
+              .filter(Boolean),
+          ),
+        ]
+        setActiveCategory(cats.includes('ai') ? 'ai' : ALL_TAB)
+      }
       setError(null)
       try {
         const connectorPayload = await fetchWorkspaceConnectors()
@@ -433,7 +540,7 @@ export default function WorkspaceIntegrationsPage() {
     try {
       await saveNote(integrationId, note)
       setActiveItem(null)
-      await load()
+      await load(true)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Note could not be saved.')
     } finally {
@@ -442,7 +549,7 @@ export default function WorkspaceIntegrationsPage() {
   }
 
   async function handleDeleteConnector(service) {
-    const connector = connectors.find((candidate) => candidate?.service === service)
+    const connector = connectors.find((c) => c?.service === service)
     if (!connector) return
     const label = connector.display_name || activeItem?.name || humanize(service)
     if (!window.confirm(`Delete the saved workspace connector for ${label}?`)) return
@@ -452,7 +559,7 @@ export default function WorkspaceIntegrationsPage() {
     try {
       await deleteWorkspaceConnector(service)
       setActiveItem(null)
-      await load()
+      await load(true)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Connector could not be deleted.')
     } finally {
@@ -461,14 +568,14 @@ export default function WorkspaceIntegrationsPage() {
   }
 
   async function handleCheckConnector(service) {
-    const connector = connectors.find((candidate) => candidate?.service === service)
+    const connector = connectors.find((c) => c?.service === service)
     if (!connector) return
 
     setChecking(true)
     setActionError(null)
     try {
       await checkWorkspaceConnector(service)
-      await load()
+      await load(true)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Connector health check could not run.')
     } finally {
@@ -488,36 +595,43 @@ export default function WorkspaceIntegrationsPage() {
   const summary = data.summary || {}
   const connectorsByService = new Map(
     connectors
-      .filter((connector) => connector?.service)
-      .map((connector) => [connector.service, connector]),
+      .filter((c) => c?.service)
+      .map((c) => [c.service, c]),
   )
-  const integrations = rawIntegrations.map((item) => withConnectorOverlay(item, connectorsByService.get(item.id)))
+  const integrations = rawIntegrations.map((item) =>
+    withConnectorOverlay(item, connectorsByService.get(item.id)),
+  )
   const activeConnector = activeItem ? connectorsByService.get(activeItem.id) : null
 
-  const attentionItems = integrations.filter(needsAttention)
-  const connectedItems = integrations.filter((item) => effectiveStatus(item) === 'configured' && !needsAttention(item))
-  const availableItems = integrations.filter((item) => !needsAttention(item) && effectiveStatus(item) !== 'configured')
-  const usedCount = integrations.filter((item) => Number(item.app_usage_count || 0) > 0).length
+  // Sort: attention first, then connected, then available
+  const sorted = [
+    ...integrations.filter(needsAttention),
+    ...integrations.filter((i) => effectiveStatus(i) === 'configured' && !needsAttention(i)),
+    ...integrations.filter((i) => !needsAttention(i) && effectiveStatus(i) !== 'configured'),
+  ]
+
+  // Derive categories in sorted order for filter tabs
+  const categories = [...new Set(sorted.map((i) => String(i.category || '').toLowerCase()).filter(Boolean))]
+  const filtered =
+    activeCategory === ALL_TAB
+      ? sorted
+      : sorted.filter((i) => String(i.category || '').toLowerCase() === activeCategory)
+
+  const attentionCount = integrations.filter(needsAttention).length
+  const connectedCount = integrations.filter(
+    (i) => effectiveStatus(i) === 'configured' && !needsAttention(i),
+  ).length
+  const usedCount = integrations.filter((i) => Number(i.app_usage_count || 0) > 0).length
 
   const summaryItems = [
-    {
-      id: 'connected',
-      label: 'Connected',
-      value: connectedItems.length,
-      detail: 'Ready for apps',
-    },
+    { id: 'connected', label: 'Connected', value: connectedCount, detail: 'Ready for apps' },
     {
       id: 'attention',
       label: 'Needs setup',
-      value: attentionItems.length,
-      detail: attentionItems.length > 0 ? 'Used by apps' : 'No blockers',
+      value: attentionCount,
+      detail: attentionCount > 0 ? 'Used by apps' : 'No blockers',
     },
-    {
-      id: 'used',
-      label: 'Used by apps',
-      value: summary.used ?? usedCount,
-      detail: 'Declared by builds',
-    },
+    { id: 'used', label: 'Used by apps', value: summary.used ?? usedCount, detail: 'Declared by builds' },
   ]
 
   return (
@@ -536,29 +650,32 @@ export default function WorkspaceIntegrationsPage() {
             description="The workspace integration catalog is empty."
           />
         ) : (
-          <div className="space-y-5">
-            <IntegrationSection
-              title="Needs attention"
-              subtitle="Services currently used by apps but missing required setup."
-              items={attentionItems}
-              connectorsByService={connectorsByService}
-              onOpen={setActiveItem}
-              empty={null}
-            />
-            <IntegrationSection
-              title="Connected"
-              subtitle="Services that are ready for apps to reuse."
-              items={connectedItems}
-              connectorsByService={connectorsByService}
-              onOpen={setActiveItem}
-            />
-            <IntegrationSection
-              title="Available"
-              subtitle="Supported services that are not blocking any app right now."
-              items={availableItems}
-              connectorsByService={connectorsByService}
-              onOpen={setActiveItem}
-            />
+          <div className="space-y-4">
+            {categories.length > 1 && (
+              <CategoryTabs
+                categories={categories}
+                active={activeCategory}
+                onChange={setActiveCategory}
+              />
+            )}
+
+            {filtered.length === 0 ? (
+              <StudioInlineEmptyState
+                title={`No ${humanize(activeCategory)} integrations`}
+                description="Try a different category filter."
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filtered.map((item) => (
+                  <IntegrationCard
+                    key={item.id}
+                    item={item}
+                    connector={connectorsByService.get(item.id)}
+                    onOpen={setActiveItem}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
