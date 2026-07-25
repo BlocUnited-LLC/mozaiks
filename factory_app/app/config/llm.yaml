@@ -1,0 +1,79 @@
+schema_version: mozaiks.control_plane.runtime
+enabled: true
+
+# ---------------------------------------------------------------------------
+# LLM Profiles
+#
+# Each profile maps to an AG2 ModelConfig via the api_type + model fields.
+# Supported api_type values: openai | google | anthropic | ollama
+#
+# Free-tier Gemini alternative (set GEMINI_API_KEY from aistudio.google.com):
+#   api_type: google
+#   model: gemini-2.0-flash        (nano-class tasks)
+#   model: gemini-2.5-pro          (standard-class tasks)
+# ---------------------------------------------------------------------------
+llm_profiles:
+  classifier:
+    purpose: Classify refinement requests into the stable control-plane change classes.
+    expected_behavior: deterministic structured classification
+    llm_config:
+      api_type: google
+      model: gemini-2.0-flash
+      # api_type: openai
+      # model: gpt-5-nano
+  impact_analyzer:
+    purpose: Support artifact impact analysis and refinement routing decisions.
+    expected_behavior: deterministic structured impact analysis
+    llm_config:
+      api_type: google
+      model: gemini-2.0-flash
+      # api_type: openai
+      # model: gpt-5-nano
+  architecture:
+    purpose: Concept-level planning for conceptual_replan and full_rebuild sequences - pivots, full rebuilds, and high-level design revisions.
+    expected_behavior: deep structured reasoning for architecture-level tasks; planning-only, no code generation or shell tools
+    llm_config:
+      api_type: google
+      model: gemini-2.5-flash
+      temperature: 0.1
+      # api_type: openai
+      # model: gpt-4o
+  planner_replanner:
+    purpose: Plan or replan higher-scope refinement work after routing.
+    expected_behavior: structured planning and replanning
+    llm_config:
+      api_type: google
+      model: gemini-2.5-flash
+      temperature: 0.1
+      # api_type: openai
+      # model: gpt-4o
+  codegen:
+    purpose: Generate scoped code or artifact patches.
+    expected_behavior: deterministic code and artifact generation
+    llm_config:
+      api_type: google
+      model: gemini-2.5-flash
+      temperature: 0.1
+      # api_type: openai
+      # model: gpt-4o
+  reviewer_validator:
+    purpose: Review generated changes and validate contract conformance.
+    expected_behavior: strict structured review and validation
+    llm_config:
+      api_type: google
+      model: gemini-2.5-flash
+      temperature: 0.1
+      # api_type: openai
+      # model: gpt-4o
+classifier:
+  enabled: true
+  llm_profile: classifier
+coding:
+  enabled: true
+  llm_profile: codegen
+contract_surface:
+  enabled: true
+  llm_profile: codegen
+scope:
+  enabled: true
+  llm_profile: codegen
