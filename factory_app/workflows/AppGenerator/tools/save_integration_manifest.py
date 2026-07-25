@@ -15,12 +15,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from factory_app.app.modules.workspace_integrations.backend.policy import derive_status
-from factory_app.app.modules.workspace_integrations.backend.repo import IntegrationDeclarationsRepo
-from factory_app.app.modules.workspace_integrations.backend.schemas import (
-    CATALOG_BY_ID,
-    build_declaration_document,
-)
+from factory_app.app.modules.workspace_integrations.backend.schemas import CATALOG_BY_ID
+from factory_app.app.modules.workspace_integrations.backend.service import WorkspaceIntegrationsService
 
 logger = logging.getLogger(__name__)
 
@@ -61,28 +57,12 @@ def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
     return default
 
 
-def _resolve_connector_status(service: str, connector_inventory: dict[str, Any]) -> str:
-    """Derive per-service connector vault status from the inventory dict."""
+def _connector_status_from_inventory(service: str, connector_inventory: dict[str, Any]) -> str:
+    """Derive per-service connector vault status from the readiness inventory."""
     ready = set(connector_inventory.get("ready_services") or [])
-    missing = set(connector_inventory.get("missing_required_services") or [])
     if service in ready:
         return "ready"
-    if service in missing:
-        return "not_configured"
-    # partial: in required_services but not in either bucket
-    required = set(connector_inventory.get("required_services") or [])
-    if service in required:
-        return "not_configured"
     return "not_configured"
-
-
-def _resolve_workspace_status(catalog_id: str | None) -> str | None:
-    """Derive current workspace catalog status for a catalog-matched service."""
-    if not catalog_id or catalog_id not in CATALOG_BY_ID:
-        return None
-    spec = CATALOG_BY_ID[catalog_id]
-    status, _ = derive_status(spec["required_secrets"])
-    return status
 
 
 def _is_truthy(value: Any) -> bool:
@@ -169,6 +149,10 @@ async def save_integration_manifest(
 ) -> dict[str, Any]:
     """Persist the resolved integration manifest from this build to the declarations store.
 
+    Routes through WorkspaceIntegrationsService.declare_app_integration_needs so that
+    catalog enrichment (setup lanes, managed defaults, workspace status) is applied
+    consistently and the service layer remains the single path to the declarations store.
+
     Reads from context_variables:
     - app_id: the app being built
     - integration_needs: list of {service, kind, purpose, required_at, optional, ...}
@@ -187,48 +171,30 @@ async def save_integration_manifest(
     connector_inventory: dict[str, Any] = _context_get(context_variables, "connector_inventory") or {}
     declared_at = datetime.now(UTC).isoformat()
 
-    declarations: list[dict[str, Any]] = []
+    # Enrich each need with its current connector vault status before handing to the service.
+    enriched: list[dict[str, Any]] = []
     for need in integration_needs:
-        if not isinstance(need, dict):
-            continue
         service = str(need.get("service") or "").strip()
         if not service:
             continue
+        enriched.append({
+            **need,
+            "connector_status": _connector_status_from_inventory(service, connector_inventory),
+        })
 
-        # Resolve catalog match — service names map directly to catalog IDs
-        # (e.g. "twilio" → catalog entry "twilio"). Unrecognized services have no catalog_id.
-        catalog_id = service if service in CATALOG_BY_ID else None
-        workspace_status = _resolve_workspace_status(catalog_id)
-        connector_status = _resolve_connector_status(service, connector_inventory)
-
-        declarations.append(
-            build_declaration_document(
-                app_id=app_id,
-                service=service,
-                catalog_id=catalog_id,
-                display_name=need.get("display_name") or need.get("provider") or service,
-                kind=str(need.get("kind") or "api_key"),
-                purpose=need.get("purpose"),
-                required_at=str(need.get("required_at") or "runtime"),
-                optional=bool(need.get("optional", False)),
-                workspace_status=workspace_status,
-                connector_status=connector_status,
-                defaulted=bool(need.get("defaulted", False)),
-                removable=bool(need.get("removable", False)),
-                source=str(need.get("source") or "build"),
-                required_fields=need.get("required_fields") if isinstance(need.get("required_fields"), list) else [],
-                declared_at=declared_at,
-            )
-        )
-
-    if not declarations:
+    if not enriched:
         return {"saved": 0, "app_id": app_id}
 
     try:
-        repo = IntegrationDeclarationsRepo()
-        saved = await repo.upsert_declarations(app_id=app_id, declarations=declarations)
-        logger.info("save_integration_manifest: saved %d declarations for app %s", len(saved), app_id)
-        return {"saved": len(saved), "app_id": app_id}
+        svc = WorkspaceIntegrationsService()
+        result = await svc.declare_app_integration_needs(
+            app_id=app_id,
+            needs=enriched,
+            declared_at=declared_at,
+        )
+        saved_count = result.get("saved", 0)
+        logger.info("save_integration_manifest: saved %d declarations for app %s", saved_count, app_id)
+        return {"saved": saved_count, "app_id": app_id}
     except Exception as exc:
         # Best-effort — never block the build pipeline over a manifest write failure.
         logger.warning("save_integration_manifest: non-fatal error for app %s: %s", app_id, exc)

@@ -22,7 +22,7 @@ def test_manual_smoke_round_trip_passes_without_secret_leak() -> None:
     rendered = json.dumps(result, sort_keys=True)
 
     assert result["success"] is True
-    assert result["blocked_status"] == "needs_configuration"
+    assert result["blocked_status"] == "blocked"
     assert result["ready_status"] == "ready"
     assert result["assertions"] == {
         "blocked_before_prompt": True,
