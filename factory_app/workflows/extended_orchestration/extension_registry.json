@@ -74,13 +74,13 @@
     },
     {
       "id": "brownfield_app_adoption",
-      "description": "Brownfield app adoption pipeline: app path context → build path intent → discovery chat → generation path selection.",
+      "description": "Brownfield app adoption pipeline: app path context → discovery intro → discovery chat → generation path selection.",
       "affected_declarative_families": ["concept", "app_bundle"],
       "steps": [
         { "transition": "app_type_selector" },
-        { "transition": "brownfield_path_selector" },
+        { "transition": "brownfield_discovery_intro" },
         { "workflows": ["ExistingAppDiscovery"] },
-        { "transition": "brownfield_generation_selector" }
+        { "transition": "brownfield_path_selector" }
       ]
     },
     {
@@ -246,7 +246,7 @@
         },
         {
           "id": "brownfield_app",
-          "route_to": "brownfield_path_selector",
+          "route_to": "brownfield_discovery_intro",
           "sequence": "brownfield_app_adoption",
           "context_variables": {
             "app_type": "brownfield_app"
@@ -287,34 +287,24 @@
       "route_to": "AppReview"
     },
     {
-      "id": "brownfield_path_selector",
+      "id": "brownfield_discovery_intro",
       "transition_type": "user_choice_context",
       "ui": {
-        "component": "BrownfieldPathSelector",
+        "component": "BrownfieldDiscoveryIntro",
         "mode": "screen",
         "shell_mode": "focused"
       },
       "options": [
         {
-          "id": "light_integration",
+          "id": "start_discovery",
           "route_to": "ExistingAppDiscovery",
           "sequence": "brownfield_app_adoption",
-          "context_variables": {
-            "brownfield_build_path": "light_integration"
-          }
-        },
-        {
-          "id": "full_migration",
-          "route_to": "ExistingAppDiscovery",
-          "sequence": "brownfield_app_adoption",
-          "context_variables": {
-            "brownfield_build_path": "full_migration"
-          }
+          "context_variables": {}
         }
       ]
     },
     {
-      "id": "brownfield_generation_selector",
+      "id": "brownfield_path_selector",
       "transition_type": "user_choice_context",
       "ui": {
         "component": "BrownfieldPathSelector",

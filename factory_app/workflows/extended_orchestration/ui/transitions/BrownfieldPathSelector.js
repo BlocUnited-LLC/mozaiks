@@ -8,16 +8,16 @@ const OPTION_VIEW = {
   light_integration: {
     label: 'Light Integration',
     description:
-      'Add AI workflows and generated surfaces alongside your existing app without changing its architecture. Best for embed and bridge adoption.',
+      'Keep your existing app running as-is. Mozaiks adds AI workflows, chat surfaces, and generated capabilities on top — without changing your backend architecture or codebase. Your app owns the data and business logic; Mozaiks augments from the outside.',
     cta: 'Choose Light Integration',
     badge: 'Fastest path',
   },
   full_migration: {
     label: 'Full Migration',
     description:
-      'Rebuild as canonical Mozaiks modules with full design, workflow, and app generation. Best for native migration and ecosystem adoption.',
+      'Rebuild as a native Mozaiks app. Your backend becomes Mozaiks modules, your frontend uses the Mozaiks app shell, and you go through the full generation pipeline — design docs, workflows, and app bundle. Best when you want Mozaiks to fully own the stack.',
     cta: 'Choose Full Migration',
-    badge: 'Recommended for Mozaiks apps',
+    badge: 'Full Mozaiks app',
   },
 };
 
@@ -34,7 +34,7 @@ export default function BrownfieldPathSelector({ transition, onResolve, overlayT
     <TransitionChoicePanel
       eyebrow="Build Path"
       title="Choose Your Integration Path"
-      subtitle="Select how deeply to integrate your existing app based on the adoption level your discovery session recommended."
+      subtitle="Based on what your discovery session found, choose how deeply to integrate with Mozaiks."
       overlayTitleId={overlayTitleId}
       overlayDescriptionId={overlayDescriptionId}
       entered={motion.entered}
