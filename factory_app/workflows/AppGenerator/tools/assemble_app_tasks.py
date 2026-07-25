@@ -201,6 +201,83 @@ def _context_deleted_files(context_variables: Any | None) -> list[str]:
     return extract_deleted_file_paths_from_payload({"deleted_files": raw})
 
 
+def _apply_entitlement_gates(
+    code_files: list[dict[str, str]],
+    *,
+    context_variables: Any,
+) -> list[dict[str, str]]:
+    """Deterministic post-pass: apply entitlement_gate values from subscription_contract.
+
+    SubscriptionContractDesigner emits module_contract_updates that map action ids to
+    entitlement_gate capability ids. Task batch agents are prompted to apply these, but
+    this pass guarantees the gates survive assembly regardless of individual agent output.
+    Only sets the field — never clears an existing entitlement_gate an agent already wrote.
+    """
+    if not context_variables:
+        return code_files
+
+    def _ctx(key: str) -> Any:
+        return context_variables.get(key) if hasattr(context_variables, "get") else None
+
+    # Build a map: {module_id: {action_id: capability_id}} from module_contract_updates
+    gates_by_module: dict[str, dict[str, str]] = {}
+    for key in ("subscription_contract", "subscription_contract_artifact"):
+        raw = _ctx(key)
+        if not isinstance(raw, dict):
+            continue
+        for update in raw.get("module_contract_updates") or []:
+            if not isinstance(update, dict):
+                continue
+            module_id = str(update.get("module_id") or "").strip()
+            action_id = str(update.get("action_id") or "").strip()
+            gate = str(update.get("entitlement_gate") or "").strip()
+            if module_id and action_id and gate:
+                gates_by_module.setdefault(module_id, {})[action_id] = gate
+        if gates_by_module:
+            break  # live contract takes priority over artifact
+
+    if not gates_by_module:
+        return code_files
+
+    file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    changed = False
+    for path, content in list(file_map.items()):
+        pure = PurePosixPath(path)
+        if len(pure.parts) != 3 or pure.parts[0] != "modules" or pure.parts[2] != "module.yaml":
+            continue
+        module_id = pure.parts[1]
+        gates = gates_by_module.get(module_id)
+        if not gates:
+            continue
+        try:
+            data = yaml.safe_load(content) or {}
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        actions = data.get("actions")
+        if not isinstance(actions, list):
+            continue
+        file_changed = False
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_id = str(action.get("id") or "").strip()
+            if not action_id or action_id not in gates:
+                continue
+            if action.get("entitlement_gate"):
+                continue  # agent already set it — don't overwrite
+            action["entitlement_gate"] = gates[action_id]
+            file_changed = True
+        if file_changed:
+            file_map[path] = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            changed = True
+
+    if not changed:
+        return code_files
+    return [{"filename": k, "content": v} for k, v in sorted(file_map.items())]
+
+
 def _apply_deleted_files(
     code_files: list[dict[str, str]],
     deleted_files: list[str],
@@ -305,6 +382,7 @@ async def assemble_app_tasks(
 
     code_files = _apply_planned_page_contracts(code_files, app_build_plan)
     code_files = _apply_module_handler_method_alignment(code_files)
+    code_files = _apply_entitlement_gates(code_files, context_variables=context_variables)
     code_files = _apply_managed_capability_templates(
         code_files,
         app_build_plan=app_build_plan,

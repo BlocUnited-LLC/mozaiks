@@ -54,6 +54,80 @@ def _safe_dict(value: Any) -> dict[str, Any]:
     return result
 
 
+def _subscriptions_config_file(context_variables: Any) -> dict[str, Any] | None:
+    """Return subscription_config_file from context, trying both the live contract and artifact."""
+    for key in ("subscription_contract", "subscription_contract_artifact"):
+        raw = _context_get(context_variables, key)
+        if isinstance(raw, dict):
+            cfg = raw.get("subscription_config_file")
+            if isinstance(cfg, dict) and cfg.get("schema_version") == "mozaiks.subscriptions.v1":
+                return cfg
+    return None
+
+
+def _materialize_subscriptions_yaml(*, context_variables: Any) -> str | None:
+    """Emit config/subscriptions.yaml from SubscriptionContractDesigner output.
+
+    Returns None when the context contains no subscriptions contract, which
+    signals that config/subscriptions.yaml should not be written (non-SaaS app).
+    The runtime wires NoOpEntitlementAdapter when the file is absent, so all
+    entitlement checks pass by default — self-hosted and non-SaaS apps are
+    unaffected.
+    """
+    cfg = _subscriptions_config_file(context_variables)
+    if cfg is None:
+        return None
+
+    # Rebuild the document deterministically so field order matches the runtime
+    # loader's expected shape (mozaiksai.core.runtime.app.subscriptions_loader).
+    doc: dict[str, Any] = {"schema_version": "mozaiks.subscriptions.v1"}
+    if cfg.get("label"):
+        doc["label"] = str(cfg["label"])
+    if cfg.get("default_plan_id"):
+        doc["default_plan_id"] = str(cfg["default_plan_id"])
+
+    assignment_store = cfg.get("assignment_store")
+    if isinstance(assignment_store, dict) and assignment_store.get("data_alias"):
+        store: dict[str, Any] = {"data_alias": str(assignment_store["data_alias"])}
+        for field in (
+            "app_id_field", "tenant_id_field", "workspace_id_field", "user_id_field",
+            "plan_id_field", "status_field", "starts_at_field", "expires_at_field",
+            "capabilities_field", "plan_snapshot_field",
+        ):
+            if assignment_store.get(field) is not None:
+                store[field] = str(assignment_store[field])
+        active_statuses = assignment_store.get("active_statuses")
+        if isinstance(active_statuses, list) and active_statuses:
+            store["active_statuses"] = [str(s) for s in active_statuses]
+        doc["assignment_store"] = store
+
+    plans = cfg.get("plans")
+    if isinstance(plans, list):
+        plan_docs: list[dict[str, Any]] = []
+        for plan in plans:
+            if not isinstance(plan, dict) or not plan.get("plan_id"):
+                continue
+            plan_doc: dict[str, Any] = {"plan_id": str(plan["plan_id"])}
+            if plan.get("label"):
+                plan_doc["label"] = str(plan["label"])
+            if plan.get("description"):
+                plan_doc["description"] = str(plan["description"])
+            capabilities = plan.get("capabilities")
+            plan_doc["capabilities"] = [str(c) for c in capabilities] if isinstance(capabilities, list) else []
+            plan_docs.append(plan_doc)
+        doc["plans"] = plan_docs
+
+    for list_key in ("token_wallets", "top_up_products", "usage_charge_policies"):
+        val = cfg.get(list_key)
+        doc[list_key] = [_safe_dict(item) if isinstance(item, dict) else _safe_scalar(item) for item in val] if isinstance(val, list) else []
+
+    pricing_catalog = cfg.get("pricing_catalog")
+    if isinstance(pricing_catalog, dict):
+        doc["pricing_catalog"] = _safe_dict(pricing_catalog)
+
+    return yaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
+
 def _materialize_integrations_yaml(*, app_id: str, context_variables: Any) -> str:
     requirements: list[dict[str, Any]] = []
     for need in collect_integration_needs(context_variables):
@@ -166,7 +240,7 @@ def materialize_app_config_contracts(
     policy defaults.
     """
 
-    return [
+    files = [
         {
             "filename": "config/integrations.yaml",
             "content": _materialize_integrations_yaml(
@@ -183,6 +257,12 @@ def materialize_app_config_contracts(
             ),
         },
     ]
+
+    subscriptions_content = _materialize_subscriptions_yaml(context_variables=context_variables)
+    if subscriptions_content is not None:
+        files.append({"filename": "config/subscriptions.yaml", "content": subscriptions_content})
+
+    return files
 
 
 __all__ = ["materialize_app_config_contracts"]
