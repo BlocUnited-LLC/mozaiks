@@ -163,6 +163,12 @@ class TestIsCanonicalAppConfigPath:
     def test_known_canonical_config_subscriptions(self):
         assert is_canonical_app_config_path("config/subscriptions.yaml") is True
 
+    def test_known_canonical_config_integrations_yaml(self):
+        assert is_canonical_app_config_path("config/integrations.yaml") is True
+
+    def test_known_canonical_config_targets_json(self):
+        assert is_canonical_app_config_path("config/targets.json") is True
+
     def test_sensitive_config_not_canonical(self):
         assert is_canonical_app_config_path("config/secrets.yaml") is False
 

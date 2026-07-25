@@ -25,6 +25,28 @@ admin config, and theme config. When an app needs durable runtime secrets,
 `app/security/secrets.yaml` declares the secret provider/vault policy, env
 handles, and secret names only. It must never contain raw credential values.
 
+`app/config/integrations.yaml` is the canonical generated-app integration
+requirement contract. AppGenerator materializes it during assembly from
+`AppBuildPlan.external_integrations`, capability-pack `required_integrations`,
+build-task `integration_needs`, and recorded task-agent needs. It contains
+service ids, provider-neutral purpose, required lifecycle point, setup lane
+metadata, frontend-safe managed defaults, required field names, and
+`required_by` references. It must never contain raw API keys, OAuth tokens,
+passwords, webhook secrets, or provider SDK state.
+
+When any requirement includes the `managed` setup lane, the generated bundle
+scanner also rejects raw payment-provider environment handles, provider webhook
+routes, and direct provider SDK mechanics. Managed setup means the app talks to
+the selected managed capability or app-owned facade, not to the underlying
+provider.
+
+`app/config/targets.json` is the canonical generated-app target intent
+contract. AppGenerator materializes it during assembly from the deployment
+profile and deployment target plan. It records runtime shape, health path,
+deployment profile, allowed deployment lanes, expected environment variable
+names, and domain intent. It does not own provider execution, hosted deployment
+state, cloud tenant ids, or secret values.
+
 `app/config/subscriptions.yaml` is the canonical generated-app SaaS plan
 catalog. Present only in apps that sell their own plans or need end-user
 feature gates. It declares each plan_id, its label, and the capability_ids it

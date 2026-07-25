@@ -410,6 +410,8 @@ async def test_assemble_app_tasks_merges_schema_artifacts_and_task_batch_outputs
     filenames = {item["filename"] for item in result["code_files"]}
     assert filenames == {
         "app.json",
+        "config/integrations.yaml",
+        "config/targets.json",
         "ui/pages/Tickets.yaml",
         "modules/tickets/module.yaml",
     }
@@ -446,9 +448,12 @@ async def test_assemble_app_tasks_accepts_task_batch_outputs_without_schema_qual
 
     result = await assemble_module.assemble_app_tasks(context_variables=context)
 
-    assert result["code_files"] == [
-        {"filename": "modules/tickets/module.yaml", "content": "id: tickets\n"}
-    ]
+    filenames = {item["filename"] for item in result["code_files"]}
+    assert filenames == {
+        "config/integrations.yaml",
+        "config/targets.json",
+        "modules/tickets/module.yaml",
+    }
     assert context.data["app_task_batch_results"]["assembled"] is True
     assert context.data["app_task_batch_results_summary"]["completed_tasks"] == ["tickets_module"]
 

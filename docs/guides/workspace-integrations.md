@@ -1,7 +1,7 @@
 # Workspace Integrations Implementation
 
 **Status:** Current implementation reference
-**Last updated:** 2026-07-13
+**Last updated:** 2026-07-24
 **Scope:** Factory workflow, workspace module, Studio workspace page, app integrations page
 
 For the user-facing guide, see
@@ -29,7 +29,7 @@ Workspace connector
   stores workspace-scoped credential metadata and vault references
 
 App integration declaration
-  records services a generated app needs
+  records services a generated app needs plus allowed setup lanes
 
 App facade/module/client
   consumes those services without exposing provider internals to app UI
@@ -67,17 +67,36 @@ AppGenerator owns the build-time flow:
 1. `check_workspace_integrations` lets planning inspect catalog status.
 2. IntegrationReadinessAgent resolves required, optional, and custom services.
 3. `save_integration_manifest` persists the app's integration declarations.
-4. Monetizable apps receive a removable Mozaiks Pay declaration unless the build
+4. AppGenerator assembly materializes `app/config/integrations.yaml` and
+   `app/config/targets.json` into generated app bundles.
+5. Monetizable apps receive a removable Mozaiks Pay declaration unless the build
    explicitly declared a different payment path.
 
 Important files:
 
 ```text
 factory_app/workflows/AppGenerator/tools/check_workspace_integrations.py
+factory_app/workflows/AppGenerator/tools/materialize_app_config_contracts.py
 factory_app/workflows/AppGenerator/tools/save_integration_manifest.py
 factory_app/workflows/AppGenerator/agents.yaml
 factory_app/workflows/AppGenerator/tools.yaml
 ```
+
+## Setup Lanes
+
+Integration requirements are not API-key-first. Each declaration may expose one
+or more setup lanes:
+
+| Lane | Meaning |
+|------|---------|
+| `managed` | A hosted or managed provider can provision the setup for the app. |
+| `connect_account` | The user connects an account through an OAuth/OIDC-style flow. |
+| `bring_your_own_key` | The user supplies their own credential values through the connector UI. |
+| `not_required` | The integration is declared for metadata or optional readiness only. |
+
+Mozaiks Pay defaults to `managed` with `bring_your_own_key` as a supported
+self-host fallback. The OSS catalog only declares those lanes. Hosted
+provisioning, billing, marketplace, and provider mechanics remain outside OSS.
 
 ## Studio UI
 
@@ -131,6 +150,10 @@ factory_app/app/modules/workspace_integrations/backend/schemas.py
 The YAML file is factory build context. The Python list is the runtime module's
 catalog. Keep both synchronized until the runtime loads the YAML through a
 strict typed catalog loader.
+
+Both catalog copies must include setup-lane metadata so Factory workflows,
+generated app config, and Studio integration screens agree on the same setup
+contract.
 
 ## Testing
 

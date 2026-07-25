@@ -32,6 +32,9 @@ required_fields:
     type: text
     required: true
     frontend_safe: true
+preferred_setup_lane: bring_your_own_key
+allowed_setup_lanes:
+  - bring_your_own_key
 permissions_required:
   - integrations.manage
 resume:
@@ -43,7 +46,9 @@ resume:
 
 The UI may render the request inline or link to
 `/apps/{appId}/integrations`. Secret fields are write-only. Non-secret fields
-marked `frontend_safe: true` may be persisted as connector metadata.
+marked `frontend_safe: true` may be persisted as connector metadata. Setup
+lanes are app-agnostic: `managed`, `connect_account`, `bring_your_own_key`,
+or `not_required`.
 
 ## Workflow Behavior
 
@@ -69,6 +74,16 @@ agent/tool discovers need
 
 Generated app code references connector ids/capabilities and reads integration
 state through server-side adapters. It never receives raw secrets.
+
+AppGenerator also materializes the app's declared integration requirements to
+`app/config/integrations.yaml`. That file is a generated-app declarative
+contract, not a secret store. It contains service ids, setup lanes, field names,
+frontend-safe metadata, and `required_by` references only.
+
+Deployment/runtime target intent is materialized to `app/config/targets.json`.
+It records app-neutral runtime/deployment facts such as health path, deployment
+profile, and expected environment variable names. Hosted products may consume
+that contract, but provider mechanics remain outside the generated app.
 
 The readiness checkpoint is the task-result merge boundary before validation/download. It
 does not require manual preflight setup; it waits until the build has a concrete
@@ -236,6 +251,8 @@ filtered defensively even if malformed connector metadata reaches the frontend.
 build-task `integration_needs`, and task-agent `record_integration_need` calls
 feed the same readiness checkpoint. Agents should declare provider-neutral
 service ids, setup fields, purpose, required lifecycle point, and whether the
-need is optional. Capability-pack `required_integrations` must be structured
-objects with `required_fields`; they should not be reduced to string service
-names when a pack declares public config and secret fields.
+need is optional. They should also declare `preferred_setup_lane` and
+`allowed_setup_lanes` when the active build context knows the viable setup
+paths. Capability-pack `required_integrations` must be structured objects with
+`required_fields`; they should not be reduced to string service names when a
+pack declares public config, secret fields, or managed setup defaults.

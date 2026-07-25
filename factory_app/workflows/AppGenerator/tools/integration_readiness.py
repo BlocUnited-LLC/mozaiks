@@ -22,6 +22,9 @@ async def record_integration_need(
     required_fields: list[dict[str, Any]] | None = None,
     required_by: dict[str, Any] | None = None,
     optional: bool = False,
+    preferred_setup_lane: str | None = None,
+    allowed_setup_lanes: list[str] | None = None,
+    managed_default: dict[str, Any] | str | None = None,
     context_variables: Any = None,
 ) -> dict[str, Any]:
     """Record an integration need discovered by an AppGenerator task agent."""
@@ -36,6 +39,9 @@ async def record_integration_need(
         required_fields=required_fields,
         required_by=required_by,
         optional=optional,
+        preferred_setup_lane=preferred_setup_lane,
+        allowed_setup_lanes=allowed_setup_lanes,
+        managed_default=managed_default,
         context_variables=context_variables,
     )
 
@@ -45,7 +51,7 @@ async def check_integration_readiness(
     prompt: bool = True,
     context_variables: Any = None,
 ) -> dict[str, Any]:
-    """Aggregate AppGenerator integration needs and collect missing credentials inline."""
+    """Aggregate AppGenerator integration needs and collect missing setup inline."""
 
     return await collect_missing_connector_needs(
         context_variables=context_variables,

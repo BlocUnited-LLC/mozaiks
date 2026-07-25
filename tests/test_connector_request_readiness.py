@@ -63,6 +63,7 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
                     "services": [
                         {
                             "service": "email_provider",
+                            "selected_setup_lane": "bring_your_own_key",
                             "fields": {
                                 "api_key": "secret-inline-value",
                                 "sender_domain": "example.test",
@@ -136,17 +137,25 @@ async def test_collect_missing_connector_needs_prompts_and_persists(monkeypatch)
     assert payload["event_type"] == "integration.required"
     assert payload["integrations_url"] == "/apps/app-test/integrations"
     assert payload["integration_requests"][0]["event_type"] == "integration.required"
+    assert payload["integration_requests"][0]["preferred_setup_lane"] == "bring_your_own_key"
+    assert payload["integration_requests"][0]["allowed_setup_lanes"] == ["bring_your_own_key"]
     assert payload["integration_requests"][0]["secret_fields"][0]["name"] == "api_key"
     assert payload["integration_requests"][0]["non_secret_fields"][0]["name"] == "sender_domain"
     assert "secret-inline-value" not in repr(payload)
     assert metadata_calls[0]["service"] == "email_provider"
     assert metadata_calls[0]["provider"] == "email_provider"
     assert metadata_calls[0]["integration_id"] == "email_provider"
-    assert metadata_calls[0]["public_config"] == {"sender_domain": "example.test"}
+    assert metadata_calls[0]["public_config"] == {
+        "sender_domain": "example.test",
+        "selected_setup_lane": "bring_your_own_key",
+    }
     assert store_calls[0]["secret_value"] == "secret-inline-value"
     assert store_calls[0]["provider"] == "email_provider"
     assert store_calls[0]["integration_id"] == "email_provider"
-    assert store_calls[0]["public_config"] == {"sender_domain": "example.test"}
+    assert store_calls[0]["public_config"] == {
+        "sender_domain": "example.test",
+        "selected_setup_lane": "bring_your_own_key",
+    }
     assert "secret-inline-value" not in repr(result)
 
 
@@ -259,6 +268,9 @@ def test_collect_integration_needs_supports_structured_managed_capability_requir
                                 "kind": "api_key",
                                 "purpose": "Connect to hosted subscriptions.",
                                 "required_at": "runtime",
+                                "preferred_setup_lane": "managed",
+                                "allowed_setup_lanes": ["managed", "bring_your_own_key"],
+                                "managed_default": '{"display_name":"MozaiksPay"}',
                                 "required_fields": [
                                     {"name": "api_base", "type": "url", "frontend_safe": True},
                                     {"name": "client_id", "type": "text", "frontend_safe": True},
@@ -278,6 +290,9 @@ def test_collect_integration_needs_supports_structured_managed_capability_requir
     need = needs[0]
     assert need["display_name"] == "MozaiksPay"
     assert need["provider"] == "mozaikspay"
+    assert need["preferred_setup_lane"] == "managed"
+    assert need["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
+    assert need["managed_default"] == {"display_name": "MozaiksPay"}
     assert {field["name"] for field in need["required_fields"]} == {
         "api_base",
         "client_id",
@@ -291,6 +306,8 @@ def test_collect_integration_needs_supports_structured_managed_capability_requir
     )[0]
     assert [field["name"] for field in payload["secret_fields"]] == ["client_secret"]
     assert {field["name"] for field in payload["non_secret_fields"]} == {"api_base", "client_id"}
+    assert payload["preferred_setup_lane"] == "managed"
+    assert payload["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
 
 
 def test_build_integration_request_payload_is_frontend_safe() -> None:

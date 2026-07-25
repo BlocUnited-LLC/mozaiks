@@ -48,6 +48,9 @@ class WorkspaceIntegrationsService:
         if workspace_status is None and catalog_spec:
             workspace_status, _ = derive_status(catalog_spec["required_secrets"])
         required_fields = need.get("required_fields") if isinstance(need.get("required_fields"), list) else []
+        allowed_setup_lanes = need.get("allowed_setup_lanes")
+        if not isinstance(allowed_setup_lanes, list) and catalog_spec:
+            allowed_setup_lanes = catalog_spec.get("allowed_setup_lanes")
         return build_declaration_document(
             app_id=app_id,
             service=service,
@@ -63,6 +66,9 @@ class WorkspaceIntegrationsService:
             removable=bool(need.get("removable", False)),
             source=str(need.get("source") or "build"),
             required_fields=required_fields,
+            preferred_setup_lane=need.get("preferred_setup_lane") or (catalog_spec or {}).get("preferred_setup_lane"),
+            allowed_setup_lanes=allowed_setup_lanes,
+            managed_default=need.get("managed_default") or (catalog_spec or {}).get("managed_default"),
             declared_at=declared_at,
         )
 

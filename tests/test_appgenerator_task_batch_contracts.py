@@ -455,6 +455,8 @@ async def test_appgenerator_task_batch_dogfood_path_executes_and_assembles() -> 
     generated_files = context.get("generated_files")
     assert isinstance(generated_files, dict)
     assert set(generated_files) == {
+        "config/integrations.yaml",
+        "config/targets.json",
         "services/config.py",
         "ui/pages/notifications.yaml",
     }

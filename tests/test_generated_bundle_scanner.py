@@ -508,6 +508,78 @@ def test_scan_generated_bundle_rejects_page_binding_to_selected_managed_capabili
     assert any("calls managed capability endpoint" in error for error in errors)
 
 
+def test_scan_generated_bundle_rejects_managed_setup_raw_provider_env_handles() -> None:
+    errors = scan_generated_bundle(
+        {
+            "config/integrations.yaml": """
+schema_version: mozaiks.integrations.v1
+requirements:
+  - integration_id: payments
+    service: mozaikspay
+    preferred_setup_lane: managed
+    allowed_setup_lanes: [managed, bring_your_own_key]
+""",
+            ".env.example": "STRIPE_SECRET_KEY=\nSTRIPE_WEBHOOK_SECRET=\n",
+        }
+    )
+
+    assert any("raw payment-provider environment handles" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_managed_setup_provider_webhook_routes() -> None:
+    errors = scan_generated_bundle(
+        {
+            "config/integrations.yaml": """
+schema_version: mozaiks.integrations.v1
+requirements:
+  - integration_id: payments
+    service: mozaikspay
+    preferred_setup_lane: managed
+    allowed_setup_lanes: [managed, bring_your_own_key]
+""",
+            "services/routes/webhooks.py": '@router.post("/webhooks/stripe")\nasync def webhook(): pass\n',
+        }
+    )
+
+    assert any("raw payment-provider webhook or checkout routes" in error for error in errors)
+
+
+def test_scan_generated_bundle_rejects_managed_setup_provider_sdk_mechanics() -> None:
+    errors = scan_generated_bundle(
+        {
+            "config/integrations.yaml": """
+schema_version: mozaiks.integrations.v1
+requirements:
+  - integration_id: payments
+    service: mozaikspay
+    preferred_setup_lane: managed
+    allowed_setup_lanes: [managed, bring_your_own_key]
+""",
+            "modules/billing/backend/service.py": "session = stripe.checkout.Session.create()\n",
+        }
+    )
+
+    assert any("raw payment-provider SDK mechanics" in error for error in errors)
+
+
+def test_scan_generated_bundle_allows_provider_env_handles_when_no_managed_setup_lane() -> None:
+    errors = scan_generated_bundle(
+        {
+            "config/integrations.yaml": """
+schema_version: mozaiks.integrations.v1
+requirements:
+  - integration_id: direct_payments
+    service: direct_payments
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes: [bring_your_own_key]
+""",
+            ".env.example": "STRIPE_SECRET_KEY=\n",
+        }
+    )
+
+    assert not any("managed setup lane" in error for error in errors)
+
+
 def test_scan_generated_bundle_accepts_mozaikspay_saas_contract_with_deployment_artifacts() -> None:
     errors = scan_generated_bundle(
         _valid_mozaikspay_saas_bundle(include_deployment=True),

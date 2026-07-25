@@ -2,9 +2,9 @@
 
 Generator agents can discover integration needs while planning or executing
 decomposed work. These helpers keep the UX agentic: check app-scoped
-connectors first, ask inline only for unresolved required credentials, then
-persist through the platform connector store so the app-scoped integrations
-surface reflects the result.
+connectors first, ask inline only for unresolved required setup, then persist
+through the platform connector store so the app-scoped integrations surface
+reflects the result.
 """
 
 from __future__ import annotations
@@ -21,9 +21,20 @@ from mozaiksai.core.workflow.generator_support.connector_service import (
     save_connector,
     save_connector_draft,
 )
+from mozaiksai.core.workflow.generator_support.connector_setup import (
+    SECRET_FIELD_TYPES,
+    normalize_required_fields,
+    normalize_setup_lane,
+    normalize_setup_lanes,
+    safe_managed_default,
+    setup_lane_ids,
+)
 from mozaiksai.core.workflow.ui_tools import UIToolError, use_ui_tool
 
-SECRET_FIELD_TYPES = {"secret", "password", "api_key", "token"}
+_normalize_required_fields = normalize_required_fields
+_normalize_setup_lane = normalize_setup_lane
+_safe_managed_default = safe_managed_default
+_setup_lane_ids = setup_lane_ids
 
 
 def _context_get(context_variables: Any, key: str, default: Any = None) -> Any:
@@ -82,6 +93,10 @@ def _append_need(
     required_fields: list[dict[str, Any]] | None = None,
     required_by: dict[str, Any] | None = None,
     optional: bool = False,
+    preferred_setup_lane: Any = None,
+    allowed_setup_lanes: Any = None,
+    setup_lanes: Any = None,
+    managed_default: Any = None,
 ) -> None:
     normalized = normalize_service(service)
     if not normalized:
@@ -92,57 +107,30 @@ def _append_need(
             "required_fields": required_fields,
         }
     )
-    needs.append(
-        {
-            "service": normalized,
-            "integration_id": normalized,
-            "provider": normalize_service(provider) or normalized,
-            "display_name": str(display_name or display_service(normalized)),
-            "kind": str(kind or "api_key"),
-            "purpose": str(purpose or "Required by generated app integration."),
-            "required_fields": required_fields,
-            "required_at": str(required_at or "runtime"),
-            "required_by": dict(required_by or {}),
-            "optional": bool(optional),
-        }
-    )
-
-
-def _normalize_required_fields(raw: dict[str, Any]) -> list[dict[str, Any]]:
-    fields = raw.get("required_fields")
-    normalized: list[dict[str, Any]] = []
-    if isinstance(fields, list):
-        for _index, field in enumerate(fields):
-            if not isinstance(field, dict):
-                continue
-            name = str(field.get("name") or "").strip()
-            if not name:
-                continue
-            field_type = str(field.get("type") or "text").strip().lower()
-            is_secret = bool(field.get("secret")) or field_type in SECRET_FIELD_TYPES
-            normalized.append(
-                {
-                    "name": name,
-                    "label": str(field.get("label") or name.replace("_", " ").title()),
-                    "type": "secret" if is_secret else field_type,
-                    "required": bool(field.get("required", True)),
-                    "frontend_safe": False if is_secret else bool(field.get("frontend_safe", True)),
-                    **({"options": field.get("options")} if isinstance(field.get("options"), list) else {}),
-                }
-            )
-    if normalized:
-        return normalized
-    kind = str(raw.get("kind") or "api_key").strip().lower()
-    secret_name = "api_key" if kind in {"api_key", "key", "secret"} else f"{kind}_secret"
-    return [
-        {
-            "name": secret_name,
-            "label": "API Key" if secret_name == "api_key" else secret_name.replace("_", " ").title(),
-            "type": "secret",
-            "required": True,
-            "frontend_safe": False,
-        }
-    ]
+    need = {
+        "service": normalized,
+        "integration_id": normalized,
+        "provider": normalize_service(provider) or normalized,
+        "display_name": str(display_name or display_service(normalized)),
+        "kind": str(kind or "api_key"),
+        "purpose": str(purpose or "Required by generated app integration."),
+        "required_fields": required_fields,
+        "required_at": str(required_at or "runtime"),
+        "required_by": dict(required_by or {}),
+        "optional": bool(optional),
+    }
+    if preferred_setup_lane is not None:
+        need["preferred_setup_lane"] = preferred_setup_lane
+    raw_lanes = allowed_setup_lanes if allowed_setup_lanes is not None else setup_lanes
+    if raw_lanes is not None:
+        need["allowed_setup_lanes"] = raw_lanes
+    safe_managed_default = _safe_managed_default(managed_default)
+    if safe_managed_default:
+        need["managed_default"] = safe_managed_default
+    lanes = normalize_setup_lanes(need)
+    need["preferred_setup_lane"] = lanes["preferred_setup_lane"]
+    need["allowed_setup_lanes"] = lanes["allowed_setup_lanes"]
+    needs.append(need)
 
 
 def _split_required_fields(fields: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -190,6 +178,10 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
             required_fields=integration.get("required_fields") if isinstance(integration.get("required_fields"), list) else None,
             optional=bool(integration.get("optional", False)),
             required_by={"source": "app_build_plan.external_integrations"},
+            preferred_setup_lane=integration.get("preferred_setup_lane"),
+            allowed_setup_lanes=integration.get("allowed_setup_lanes"),
+            setup_lanes=integration.get("setup_lanes"),
+            managed_default=integration.get("managed_default"),
         )
 
     for pack in _iter_dicts(app_build_plan.get("capability_packs")):
@@ -216,6 +208,10 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
                     ),
                     optional=bool(requirement.get("optional", False)),
                     required_by=required_by,
+                    preferred_setup_lane=requirement.get("preferred_setup_lane"),
+                    allowed_setup_lanes=requirement.get("allowed_setup_lanes"),
+                    setup_lanes=requirement.get("setup_lanes"),
+                    managed_default=requirement.get("managed_default"),
                 )
                 continue
             _append_need(
@@ -245,6 +241,10 @@ def _extract_needs_from_plan(app_build_plan: Any) -> list[dict[str, Any]]:
                 required_fields=need.get("required_fields") if isinstance(need.get("required_fields"), list) else None,
                 optional=bool(need.get("optional", False)),
                 required_by=required_by,
+                preferred_setup_lane=need.get("preferred_setup_lane"),
+                allowed_setup_lanes=need.get("allowed_setup_lanes"),
+                setup_lanes=need.get("setup_lanes"),
+                managed_default=need.get("managed_default"),
             )
     return needs
 
@@ -272,6 +272,10 @@ def _extract_needs_from_nested(value: Any, *, source: str) -> list[dict[str, Any
                     required_fields=need.get("required_fields") if isinstance(need.get("required_fields"), list) else None,
                     optional=bool(need.get("optional", False)),
                     required_by=required_by,
+                    preferred_setup_lane=need.get("preferred_setup_lane"),
+                    allowed_setup_lanes=need.get("allowed_setup_lanes"),
+                    setup_lanes=need.get("setup_lanes"),
+                    managed_default=need.get("managed_default"),
                 )
             for key, child in node.items():
                 if key in {"integration_needs", "connector_needs"}:
@@ -295,16 +299,25 @@ def dedupe_integration_needs(needs: Iterable[dict[str, Any]]) -> list[dict[str, 
             continue
         existing = by_service.get(service)
         if existing is None:
-            by_service[service] = {
+            lanes = normalize_setup_lanes(need)
+            safe_managed_default = _safe_managed_default(need.get("managed_default"))
+            normalized_need = {
                 **need,
                 "service": service,
                 "integration_id": need.get("integration_id") or service,
                 "provider": need.get("provider") or service,
                 "display_name": need.get("display_name") or display_service(service),
                 "required_fields": _normalize_required_fields(need),
+                "preferred_setup_lane": lanes["preferred_setup_lane"],
+                "allowed_setup_lanes": lanes["allowed_setup_lanes"],
                 "required_by": [need.get("required_by")] if isinstance(need.get("required_by"), dict) else [],
                 "optional": bool(need.get("optional", False)),
             }
+            if safe_managed_default:
+                normalized_need["managed_default"] = safe_managed_default
+            else:
+                normalized_need.pop("managed_default", None)
+            by_service[service] = normalized_need
             continue
         existing["optional"] = bool(existing.get("optional")) and bool(need.get("optional", False))
         if not existing.get("purpose") and need.get("purpose"):
@@ -320,6 +333,25 @@ def dedupe_integration_needs(needs: Iterable[dict[str, Any]]) -> list[dict[str, 
             existing["provider"] = need.get("provider")
         if need.get("display_name") and existing.get("display_name") in {None, "", display_service(service)}:
             existing["display_name"] = need.get("display_name")
+        existing_lanes = _setup_lane_ids(existing.get("allowed_setup_lanes"))
+        next_lanes = _setup_lane_ids(need.get("allowed_setup_lanes")) or _setup_lane_ids(need.get("setup_lanes"))
+        safe_managed_default = _safe_managed_default(need.get("managed_default"))
+        if safe_managed_default:
+            existing["managed_default"] = safe_managed_default
+            if "managed" not in next_lanes:
+                next_lanes.insert(0, "managed")
+        for lane in next_lanes:
+            if lane not in existing_lanes:
+                existing_lanes.append(lane)
+        if existing_lanes:
+            existing["allowed_setup_lanes"] = existing_lanes
+        preferred = _normalize_setup_lane(need.get("preferred_setup_lane"))
+        if preferred and preferred in existing_lanes:
+            existing["preferred_setup_lane"] = preferred
+        else:
+            lanes = normalize_setup_lanes(existing)
+            existing["preferred_setup_lane"] = lanes["preferred_setup_lane"]
+            existing["allowed_setup_lanes"] = lanes["allowed_setup_lanes"]
         if isinstance(need.get("required_by"), dict):
             existing.setdefault("required_by", []).append(need["required_by"])
         current_required_at = str(existing.get("required_at") or "runtime")
@@ -352,6 +384,10 @@ async def record_integration_need(
     required_fields: list[dict[str, Any]] | None = None,
     required_by: dict[str, Any] | None = None,
     optional: bool = False,
+    preferred_setup_lane: Any = None,
+    allowed_setup_lanes: Any = None,
+    setup_lanes: Any = None,
+    managed_default: Any = None,
     context_variables: Any = None,
 ) -> dict[str, Any]:
     """Record a discovered integration need in context for later readiness checks."""
@@ -369,6 +405,10 @@ async def record_integration_need(
         required_fields=required_fields,
         required_by=required_by,
         optional=optional,
+        preferred_setup_lane=preferred_setup_lane,
+        allowed_setup_lanes=allowed_setup_lanes,
+        setup_lanes=setup_lanes,
+        managed_default=managed_default,
     )
     deduped = dedupe_integration_needs(needs)
     _context_set(context_variables, "integration_needs", deduped)
@@ -398,6 +438,8 @@ def build_integration_request_payload(
             continue
         fields = _normalize_required_fields(raw)
         secret_fields, non_secret_fields = _split_required_fields(fields)
+        setup_lanes = normalize_setup_lanes(raw)
+        managed_default = _safe_managed_default(raw.get("managed_default"))
         requests.append(
             {
                 "event_type": "integration.required",
@@ -408,6 +450,9 @@ def build_integration_request_payload(
                 "required_fields": fields,
                 "secret_fields": secret_fields,
                 "non_secret_fields": non_secret_fields,
+                "preferred_setup_lane": setup_lanes["preferred_setup_lane"],
+                "allowed_setup_lanes": setup_lanes["allowed_setup_lanes"],
+                **({"managed_default": managed_default} if managed_default else {}),
                 "permissions_required": list(raw.get("permissions_required") or ["integrations.manage"]),
                 "resume": {
                     "workflow_name": workflow_name,
@@ -484,6 +529,8 @@ async def request_connector_bundle(
         required_fields = _normalize_required_fields(raw)
         secret_fields, non_secret_fields = _split_required_fields(required_fields)
         secret_label = secret_fields[0].get("label") if secret_fields else "Secret"
+        setup_lanes = normalize_setup_lanes(raw)
+        managed_default = _safe_managed_default(raw.get("managed_default"))
         normalized_services.append(
             {
                 "service": service,
@@ -495,8 +542,11 @@ async def request_connector_bundle(
                 "required_fields": required_fields,
                 "secret_fields": secret_fields,
                 "non_secret_fields": non_secret_fields,
-                "placeholder": raw.get("placeholder") or f"Enter your {display_name} {secret_label}...",
-                "description": raw.get("purpose") or raw.get("description") or f"API key for {display_name}",
+                "preferred_setup_lane": setup_lanes["preferred_setup_lane"],
+                "allowed_setup_lanes": setup_lanes["allowed_setup_lanes"],
+                **({"managed_default": managed_default} if managed_default else {}),
+                "placeholder": raw.get("placeholder") or f"Enter {display_name} {secret_label}...",
+                "description": raw.get("purpose") or raw.get("description") or f"Setup values for {display_name}",
                 "label": raw.get("label") or f"{display_name} {secret_label}",
                 "agent_message_id": f"{agent_message_id}:{service}:{idx}",
             }
@@ -511,8 +561,8 @@ async def request_connector_bundle(
     payload = {
         "event_type": "integration.required",
         "agent_message_id": agent_message_id,
-        "agent_message": agent_message or "Provide the missing integration credentials so the build can continue.",
-        "description": description or "Credentials are saved to the app connector store when vault storage is available.",
+        "agent_message": agent_message or "Configure the missing integrations so the build can continue.",
+        "description": description or "Setup values are saved to the app connector store when vault storage is available.",
         "integration_requests": integration_requests,
         "permissions_required": ["integrations.manage"],
         "integrations_url": integrations_url,
@@ -530,6 +580,9 @@ async def request_connector_bundle(
                 "required_fields": svc["required_fields"],
                 "secret_fields": svc["secret_fields"],
                 "non_secret_fields": svc["non_secret_fields"],
+                "preferred_setup_lane": svc["preferred_setup_lane"],
+                "allowed_setup_lanes": svc["allowed_setup_lanes"],
+                **({"managed_default": svc["managed_default"]} if isinstance(svc.get("managed_default"), dict) else {}),
                 "agent_message_id": svc["agent_message_id"],
             }
             for svc in normalized_services
@@ -575,6 +628,9 @@ async def request_connector_bundle(
         entry = submitted_lookup.get(svc["service"], {})
         trimmed_key = _extract_secret_value(entry, svc["required_fields"])
         public_config = _extract_frontend_safe_config(entry, svc["required_fields"])
+        selected_setup_lane = _normalize_setup_lane(entry.get("selected_setup_lane"))
+        if selected_setup_lane:
+            public_config["selected_setup_lane"] = selected_setup_lane
         has_key = bool(trimmed_key)
         needs_secret = any(str(field.get("type") or "").lower() in SECRET_FIELD_TYPES for field in svc["required_fields"])
         configured = has_key or (not needs_secret and bool(public_config))
@@ -642,6 +698,7 @@ async def request_connector_bundle(
                 "status": "success" if configured else ("missing" if svc["required"] else "skipped"),
                 "has_key": has_key,
                 "configured": configured,
+                "selected_setup_lane": selected_setup_lane or svc.get("preferred_setup_lane"),
                 "key_length": key_length,
                 "public_config": public_config,
                 "metadata_saved": metadata_saved,
@@ -811,6 +868,7 @@ __all__ = [
     "dedupe_integration_needs",
     "display_service",
     "normalize_service",
+    "normalize_setup_lanes",
     "record_integration_need",
     "request_connector_bundle",
 ]

@@ -49,6 +49,23 @@ _RAW_PAYMENT_PROVIDER_IMPORT_RE = re.compile(
     r"from\s+(stripe|paddle|paypal|braintree|square)\s+import\b)",
     re.IGNORECASE,
 )
+_MANAGED_SETUP_RAW_PROVIDER_ENV_RE = re.compile(
+    r"\b(?:STRIPE|PADDLE|PAYPAL|BRAINTREE|SQUARE)_[A-Z0-9_]*"
+    r"(?:SECRET|KEY|TOKEN|PRIVATE|WEBHOOK|CLIENT_ID|PUBLISHABLE)[A-Z0-9_]*\b"
+)
+_MANAGED_SETUP_PROVIDER_ROUTE_RE = re.compile(
+    r"(?:^|[\"'\s:=])/?(?:api/)?(?:webhooks/(stripe|paddle|paypal|braintree|square)\b|"
+    r"(stripe|paddle|paypal|braintree|square)/webhooks?\b|"
+    r"(stripe|paddle|paypal|braintree|square)/(?:checkout|payment|billing)\b)",
+    re.IGNORECASE,
+)
+_MANAGED_SETUP_PROVIDER_MECHANIC_RE = re.compile(
+    r"\b(?:stripe|paddle|paypal|braintree|square)\s*\.\s*"
+    r"(?:checkout|webhooks|PaymentIntent|Customer|Subscription|Refund|refunds)\b|"
+    r"\bStripe-Signature\b|"
+    r"\brequire\s*\(\s*[\"'](?:stripe|paddle|paypal|braintree|square)[\"']\s*\)",
+    re.IGNORECASE,
+)
 _PAYMENT_PROVIDER_API_KEY_RE = re.compile(r"\bpayment_provider\s*\.\s*api_key\s*=")
 _PAYMENT_PROVIDER_REFUND_CALL_RE = re.compile(
     r"\bpayment_provider\s*\.\s*(?:Refund\s*\.\s*create|refunds\s*\.\s*create)\s*\(",
@@ -424,6 +441,108 @@ def _path_matches_prefix(path: str, prefix: str) -> bool:
 
 def _iter_api_endpoint_literals(content: str) -> list[str]:
     return re.findall(r'(?:["\']|:\s*)(/api/modules/[^"\'\s]+)', content)
+
+
+def _load_integration_requirements(
+    files_map: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    normalized_files = _normalized_files_map(files_map)
+    requirements: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for path in (
+        "config/integrations.yaml",
+        "config/integrations.yml",
+        "config/integrations.json",
+        "app/config/integrations.yaml",
+        "app/config/integrations.yml",
+        "app/config/integrations.json",
+    ):
+        raw = normalized_files.get(path)
+        if raw is None:
+            continue
+        try:
+            parsed = yaml.safe_load(raw) or {}
+        except Exception as exc:
+            errors.append(f"{path}: integration contract must be valid YAML/JSON: {exc}")
+            continue
+        if not isinstance(parsed, dict):
+            errors.append(f"{path}: integration contract must be an object.")
+            continue
+        raw_requirements = parsed.get("requirements")
+        if raw_requirements is None:
+            raw_requirements = parsed.get("integrations")
+        if raw_requirements is None:
+            continue
+        if not isinstance(raw_requirements, list):
+            errors.append(f"{path}: integration requirements must be a list.")
+            continue
+        requirements.extend(item for item in raw_requirements if isinstance(item, dict))
+    return requirements, errors
+
+
+def _requirement_uses_managed_lane(requirement: dict[str, Any]) -> bool:
+    allowed = requirement.get("allowed_setup_lanes")
+    lanes: set[str] = set()
+    if isinstance(allowed, list):
+        lanes.update(str(item or "").strip() for item in allowed)
+    preferred = str(requirement.get("preferred_setup_lane") or "").strip()
+    if preferred:
+        lanes.add(preferred)
+    return "managed" in lanes
+
+
+def _managed_requirement_labels(requirements: list[dict[str, Any]]) -> list[str]:
+    labels: list[str] = []
+    for requirement in requirements:
+        if not _requirement_uses_managed_lane(requirement):
+            continue
+        label = str(
+            requirement.get("integration_id")
+            or requirement.get("service")
+            or requirement.get("provider")
+            or "<unknown>"
+        ).strip()
+        if label and label not in labels:
+            labels.append(label)
+    return sorted(labels)
+
+
+def _scan_managed_setup_provider_leaks(
+    files_map: dict[str, str],
+    *,
+    capability_packs: list[dict[str, Any]] | None,
+) -> list[str]:
+    requirements, errors = _load_integration_requirements(files_map)
+    managed_labels = _managed_requirement_labels(requirements)
+    selected_managed = sorted(_selected_managed_capability_ids(capability_packs))
+    if not managed_labels and not selected_managed:
+        return errors
+
+    context = sorted(set(managed_labels + selected_managed))
+    context_label = ", ".join(context) if context else "managed setup"
+    normalized_files = _normalized_files_map(files_map)
+    for path, content in sorted(normalized_files.items()):
+        if not isinstance(content, str):
+            continue
+        if _MANAGED_SETUP_RAW_PROVIDER_ENV_RE.search(content):
+            errors.append(
+                f"{path}: managed setup lane ({context_label}) must not expose raw "
+                "payment-provider environment handles. Use the managed capability "
+                "client contract and names-only Mozaiks-managed handles instead."
+            )
+        if _MANAGED_SETUP_PROVIDER_ROUTE_RE.search(content):
+            errors.append(
+                f"{path}: managed setup lane ({context_label}) must not generate raw "
+                "payment-provider webhook or checkout routes. Provider callbacks "
+                "belong in the managed/hosted product boundary."
+            )
+        if _MANAGED_SETUP_PROVIDER_MECHANIC_RE.search(content):
+            errors.append(
+                f"{path}: managed setup lane ({context_label}) must not contain raw "
+                "payment-provider SDK mechanics. Generated apps should call an "
+                "app-owned facade or managed capability client."
+            )
+    return errors
 
 
 def _scan_selected_managed_capability_boundaries(
@@ -1196,6 +1315,12 @@ def scan_generated_bundle(
     errors.extend(_scan_data_contract_module_alignment(files_map))
     errors.extend(
         _scan_selected_managed_capability_boundaries(
+            files_map,
+            capability_packs=capability_packs,
+        )
+    )
+    errors.extend(
+        _scan_managed_setup_provider_leaks(
             files_map,
             capability_packs=capability_packs,
         )

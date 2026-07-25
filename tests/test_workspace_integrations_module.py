@@ -42,6 +42,13 @@ def test_integrations_catalog_has_required_fields() -> None:
         assert "required_secrets" in entry
         assert isinstance(entry["required_secrets"], list)
         assert "optional_secrets" in entry
+        assert entry.get("preferred_setup_lane") in {
+            "managed",
+            "connect_account",
+            "bring_your_own_key",
+            "not_required",
+        }
+        assert isinstance(entry.get("allowed_setup_lanes"), list)
 
 
 def test_catalog_by_id_matches_catalog_list() -> None:
@@ -79,16 +86,20 @@ def test_build_context_catalog_matches_runtime_catalog() -> None:
     runtime_mozaikspay = CATALOG_BY_ID["mozaikspay"]
     assert yaml_mozaikspay["required_secrets"] == runtime_mozaikspay["required_secrets"]
     assert yaml_mozaikspay["optional_secrets"] == runtime_mozaikspay["optional_secrets"]
+    assert yaml_mozaikspay["preferred_setup_lane"] == runtime_mozaikspay["preferred_setup_lane"]
+    assert yaml_mozaikspay["allowed_setup_lanes"] == runtime_mozaikspay["allowed_setup_lanes"]
+    assert yaml_mozaikspay["managed_default"] == runtime_mozaikspay["managed_default"]
     assert [entry["id"] for entry in yaml_entries] == [entry["id"] for entry in INTEGRATIONS_CATALOG]
 
 
-def test_integrations_catalog_orders_payments_after_ai() -> None:
-    assert [entry["id"] for entry in INTEGRATIONS_CATALOG[:3]] == [
+def test_integrations_catalog_orders_payments_after_llms() -> None:
+    assert [entry["id"] for entry in INTEGRATIONS_CATALOG[:4]] == [
         "openai",
         "anthropic",
+        "gemini",
         "mozaikspay",
     ]
-    assert [entry["category"] for entry in INTEGRATIONS_CATALOG[:3]] == ["ai", "ai", "payments"]
+    assert [entry["category"] for entry in INTEGRATIONS_CATALOG[:4]] == ["llms", "llms", "llms", "payments"]
 
 
 def test_mozaikspay_catalog_is_default_removable_monetization_integration() -> None:
@@ -100,6 +111,9 @@ def test_mozaikspay_catalog_is_default_removable_monetization_integration() -> N
         "MOZAIKSPAY_API_BASE",
         "MOZAIKSPAY_API_KEY",
     }
+    assert spec["preferred_setup_lane"] == "managed"
+    assert spec["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
+    assert spec["managed_default"] == {"provider": "mozaikspay", "mode": "hosted"}
 
 
 # ── module.yaml contract ──────────────────────────────────────────────────────
@@ -215,6 +229,13 @@ def test_build_integration_response_note_included() -> None:
     spec = CATALOG_BY_ID["openai"]
     response = build_integration_response(spec, status="configured", missing_secrets=[], note="rotated 2026-06")
     assert response["note"] == "rotated 2026-06"
+
+
+def test_build_integration_response_includes_setup_lanes() -> None:
+    response = build_integration_response(CATALOG_BY_ID["mozaikspay"], status="missing", missing_secrets=[])
+    assert response["preferred_setup_lane"] == "managed"
+    assert response["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
+    assert response["managed_default"] == {"provider": "mozaikspay", "mode": "hosted"}
 
 
 def test_build_integration_response_missing_has_setup_url() -> None:
@@ -443,6 +464,8 @@ def test_build_declaration_document_shape() -> None:
     assert doc["workspace_status"] == "missing"
     assert doc["connector_status"] == "not_configured"
     assert doc["optional"] is False
+    assert doc["preferred_setup_lane"] == "bring_your_own_key"
+    assert doc["allowed_setup_lanes"] == ["bring_your_own_key"]
 
 
 def test_build_declaration_response_setup_url_only_when_missing() -> None:
@@ -504,6 +527,24 @@ def test_build_declaration_response_includes_removable_default_metadata() -> Non
     assert response["removable"] is True
     assert response["source"] == "monetization_default"
     assert response["required_fields"][0]["name"] == "client_secret"
+
+
+def test_build_declaration_response_includes_setup_lane_metadata() -> None:
+    doc = build_declaration_document(
+        app_id="app_1",
+        service="mozaikspay",
+        catalog_id="mozaikspay",
+        display_name="Mozaiks Pay",
+        kind="managed_capability",
+        preferred_setup_lane="managed",
+        allowed_setup_lanes=["managed", "bring_your_own_key"],
+        managed_default={"provider": "mozaikspay", "client_secret": "do-not-store"},
+        declared_at="2026-07-11T00:00:00Z",
+    )
+    response = build_declaration_response(doc)
+    assert response["preferred_setup_lane"] == "managed"
+    assert response["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
+    assert response["managed_default"] == {"provider": "mozaikspay"}
 
 
 def test_declarations_entity_constant_is_set() -> None:
@@ -572,6 +613,9 @@ async def test_declare_app_integration_needs_persists_docs() -> None:
     assert decl_repo.upserted is not None
     services = {d["service"] for d in decl_repo.upserted}
     assert services == {"resend", "twilio"}
+    resend = next(d for d in decl_repo.upserted if d["service"] == "resend")
+    assert resend["preferred_setup_lane"] == "bring_your_own_key"
+    assert resend["allowed_setup_lanes"] == ["bring_your_own_key"]
 
 
 @pytest.mark.asyncio
@@ -592,8 +636,10 @@ async def test_upsert_app_integration_need_persists_single_record() -> None:
     assert result["saved"] == 1
     assert result["declaration"]["service"] == "mozaikspay"
     assert result["declaration"]["defaulted"] is True
+    assert result["declaration"]["preferred_setup_lane"] == "managed"
     assert decl_repo.upserted is not None
     assert decl_repo.upserted[0]["removable"] is True
+    assert decl_repo.upserted[0]["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
 
 
 @pytest.mark.asyncio
