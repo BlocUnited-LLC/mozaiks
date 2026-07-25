@@ -218,6 +218,18 @@ models:
         description: >
           Secret names that are missing, present when workspace_status is
           "partial" or "missing". Empty for "configured" and "unknown".
+  AppIntegrationSetupLane:
+    type: literal
+    values:
+    - managed
+    - connect_account
+    - bring_your_own_key
+    - not_required
+    description: >
+      App-agnostic integration setup lane. managed = host/operator-provided
+      setup; connect_account = OAuth/provider account connection;
+      bring_your_own_key = user supplies setup fields; not_required = optional
+      integration may be skipped.
   AppBuildIntegration:
     type: model
     fields:
@@ -251,6 +263,24 @@ models:
         type: bool
         default: false
         description: Whether the app can proceed without this integration.
+      preferred_setup_lane:
+        type: union
+        variants:
+        - AppIntegrationSetupLane
+        - 'null'
+        default: null
+        description: Preferred setup lane. Use managed only when a managed setup is available through the active host or operator context.
+      allowed_setup_lanes:
+        type: optional_list
+        items: AppIntegrationSetupLane
+        description: Allowed setup lanes for this integration. Always include bring_your_own_key when direct setup fields are required.
+      managed_default:
+        type: union
+        variants:
+        - str
+        - 'null'
+        default: null
+        description: Optional JSON-encoded frontend-safe managed setup metadata. Must not contain secrets, tenant ids, or provider execution state.
       required_fields:
         type: optional_list
         items: AppIntegrationRequiredField
@@ -346,6 +376,24 @@ models:
         type: bool
         default: false
         description: Whether the build can proceed without this service.
+      preferred_setup_lane:
+        type: union
+        variants:
+        - AppIntegrationSetupLane
+        - 'null'
+        default: null
+        description: Preferred setup lane for this task-level integration need.
+      allowed_setup_lanes:
+        type: optional_list
+        items: AppIntegrationSetupLane
+        description: Allowed setup lanes for this task-level integration need.
+      managed_default:
+        type: union
+        variants:
+        - str
+        - 'null'
+        default: null
+        description: Optional JSON-encoded frontend-safe managed setup metadata. Must not contain secrets.
       required_by:
         type: union
         variants:
@@ -397,6 +445,24 @@ models:
         type: bool
         default: false
         description: Whether the capability can run without this connector.
+      preferred_setup_lane:
+        type: union
+        variants:
+        - AppIntegrationSetupLane
+        - 'null'
+        default: null
+        description: Preferred app-agnostic setup lane for this connector.
+      allowed_setup_lanes:
+        type: optional_list
+        items: AppIntegrationSetupLane
+        description: Allowed setup lanes for this connector. Managed capability packs should include managed only when the host/operator exposes a managed setup.
+      managed_default:
+        type: union
+        variants:
+        - str
+        - 'null'
+        default: null
+        description: Optional JSON-encoded frontend-safe managed setup metadata. Must not contain secrets.
       required_fields:
         type: optional_list
         items: AppIntegrationRequiredField

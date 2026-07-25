@@ -951,7 +951,7 @@ definitions:
       App-scoped third-party connector needs discovered by AppPlanAgent build
       tasks, task batch outputs, or task agents via record_integration_need.
       IntegrationReadinessAgent aggregates this list and prompts inline only for
-      unresolved required credentials.
+      unresolved required integration setup.
     source:
       type: computed
       default: []

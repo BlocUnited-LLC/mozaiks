@@ -18,6 +18,7 @@ from .code_file_utils import (
     extract_deleted_file_paths_from_payload,
 )
 from .generate_module_interface_files import generate_module_interface_files
+from .materialize_app_config_contracts import materialize_app_config_contracts
 from .resolve_managed_capability_templates import resolve_managed_capability_templates
 
 
@@ -160,6 +161,23 @@ def _apply_managed_capability_templates(
     return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
 
 
+def _apply_app_config_contracts(
+    code_files: list[dict[str, str]],
+    *,
+    app_id: str,
+    app_build_plan: Any,
+    context_variables: Any,
+) -> list[dict[str, str]]:
+    file_map = {str(f["filename"]): str(f["content"]) for f in code_files if f.get("filename")}
+    for file in materialize_app_config_contracts(
+        app_id=app_id,
+        app_build_plan=app_build_plan,
+        context_variables=context_variables,
+    ):
+        file_map[str(file["filename"])] = str(file["content"])
+    return [{"filename": path, "content": content} for path, content in sorted(file_map.items())]
+
+
 def _context_code_file_output(context_variables: Any | None) -> dict[str, list[dict[str, str]]] | None:
     if context_variables is None or not hasattr(context_variables, "get"):
         return None
@@ -293,6 +311,12 @@ async def assemble_app_tasks(
         context_variables=context_variables,
     )
     code_files = _apply_deleted_files(code_files, _context_deleted_files(context_variables))
+    code_files = _apply_app_config_contracts(
+        code_files,
+        app_id=str(app_id),
+        app_build_plan=app_build_plan,
+        context_variables=context_variables,
+    )
 
     # Write the assembled flat file map to context so the carry-forward
     # preservation resolver (which runs after AssemblyAgent's turn) can read

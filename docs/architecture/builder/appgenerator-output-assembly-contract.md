@@ -187,6 +187,13 @@ binding to provider internals, facade handlers accepting synthetic payload
 wrappers, missing app-level service packages, invalid companion manifests, or
 template files that cannot be imported by the runtime loader.
 
+When `config/integrations.yaml` declares a managed setup lane, the same scanner
+also rejects raw payment-provider env handles, provider webhook/checkout routes,
+and direct provider SDK mechanics anywhere in the generated bundle. Managed
+setup is a contract boundary: provider callbacks and processor mechanics stay
+with the managed/hosted product, while the generated app uses the managed
+capability client and app-owned facade.
+
 ### Route/component registration drift
 
 For custom full-page React routes, the route contract is complete only when all

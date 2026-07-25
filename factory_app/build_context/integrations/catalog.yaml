@@ -11,6 +11,9 @@ integrations:
     setup_steps:
       - Sign in to platform.openai.com → API Keys
       - Create a new secret key and copy it immediately (shown once)
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: anthropic
     name: Anthropic
@@ -22,6 +25,9 @@ integrations:
     setup_steps:
       - Sign in to console.anthropic.com → API Keys
       - Create a new key and copy it immediately (shown once)
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: gemini
     name: Gemini
@@ -34,6 +40,9 @@ integrations:
     setup_steps:
       - Sign in to aistudio.google.com → Get API key
       - Create or select a project and copy the API key
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: mozaikspay
     name: Mozaiks Pay
@@ -53,6 +62,13 @@ integrations:
       - subscriptions
       - usage_billing
       - billing_portal
+    preferred_setup_lane: managed
+    allowed_setup_lanes:
+      - managed
+      - bring_your_own_key
+    managed_default:
+      provider: mozaikspay
+      mode: hosted
     setup_steps:
       - Open the workspace Integrations page and select Mozaiks Pay
       - Enter the Mozaiks Pay API base URL and app-scoped API key
@@ -70,6 +86,9 @@ integrations:
       - Sign in to resend.com → API Keys
       - Create an API key with Send access
       - Verify your sending domain under Domains
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: sendgrid
     name: SendGrid
@@ -83,6 +102,9 @@ integrations:
       - Sign in to SendGrid → Settings → API Keys
       - Create an API key with Mail Send access
       - Verify your sender identity or sending domain before production delivery
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: twilio
     name: Twilio
@@ -97,6 +119,9 @@ integrations:
       - Sign in to Twilio Console → Account → API keys & tokens
       - Copy the Account SID and Auth Token
       - Purchase or verify a phone number to use as the sender
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: slack
     name: Slack
@@ -111,6 +136,10 @@ integrations:
       - Go to api.slack.com/apps → Create New App
       - Add OAuth scopes: chat:write, channels:read
       - Install the app to your workspace and copy the Bot User OAuth Token
+    preferred_setup_lane: connect_account
+    allowed_setup_lanes:
+      - connect_account
+      - bring_your_own_key
 
   - id: github
     name: GitHub
@@ -125,6 +154,10 @@ integrations:
       - Go to GitHub → Settings → Developer settings → Personal access tokens
       - Generate a token with repo and workflow scopes
       - For org-level access, use a GitHub App or fine-grained token scoped to the org
+    preferred_setup_lane: connect_account
+    allowed_setup_lanes:
+      - connect_account
+      - bring_your_own_key
 
   - id: s3
     name: AWS S3
@@ -141,6 +174,9 @@ integrations:
       - In AWS IAM, create a user with a scoped S3 policy
       - Generate Access Key ID and Secret Access Key under Security Credentials
       - Create or identify the S3 bucket this app will use
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: cloudinary
     name: Cloudinary
@@ -153,6 +189,9 @@ integrations:
       - Sign in to Cloudinary → Dashboard
       - Copy the CLOUDINARY_URL credential for the target cloud
       - Use a scoped product environment for production apps
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: mongodb
     name: MongoDB
@@ -166,6 +205,9 @@ integrations:
       - Provision MongoDB locally, in Atlas, or through a managed provider
       - Create an app-scoped database user with the minimum required database permissions
       - Copy the connection string as MONGO_URI and verify it with the readiness check before deploy
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: postgres
     name: PostgreSQL
@@ -178,6 +220,9 @@ integrations:
     setup_steps:
       - Provision a PostgreSQL instance (Supabase, Neon, RDS, or self-hosted)
       - Copy the connection string in the format postgresql://user:pass@host:port/dbname
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: redis
     name: Redis
@@ -189,6 +234,9 @@ integrations:
     setup_steps:
       - Provision a Redis instance (Upstash, Redis Cloud, or self-hosted)
       - Copy the connection URL in the format redis://user:pass@host:port
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key
 
   - id: google_oauth
     name: Google OAuth
@@ -203,6 +251,10 @@ integrations:
       - Go to Google Cloud Console → APIs & Services → Credentials
       - Create an OAuth 2.0 Client ID (Web application type)
       - Add your app's redirect URI to the Authorized redirect URIs list
+    preferred_setup_lane: connect_account
+    allowed_setup_lanes:
+      - connect_account
+      - bring_your_own_key
 
   - id: microsoft_oauth
     name: Microsoft OAuth
@@ -218,6 +270,10 @@ integrations:
       - Create an app registration in Microsoft Entra admin center
       - Add the app redirect URI under Authentication
       - Create a client secret and store only the secret handle in the workspace connector
+    preferred_setup_lane: connect_account
+    allowed_setup_lanes:
+      - connect_account
+      - bring_your_own_key
 
   - id: segment
     name: Segment
@@ -229,3 +285,6 @@ integrations:
     setup_steps:
       - Sign in to Segment → Sources → Add Source → Node.js
       - Copy the Write Key from the source settings
+    preferred_setup_lane: bring_your_own_key
+    allowed_setup_lanes:
+      - bring_your_own_key

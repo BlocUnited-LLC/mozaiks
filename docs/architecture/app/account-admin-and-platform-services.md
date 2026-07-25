@@ -102,7 +102,7 @@ Use the canonical `handler.py`, `service.py`, `repo.py`, `policy.py`, and
 
 | Concern | Primary UX surface | Source of truth | Extension contract | Not owned by |
 |---|---|---|---|---|
-| Account/Profile | `/me` and `/u/:username` via `ProfilePage` | `GET/PUT /api/me`, `GET /api/users/{username}` | `modules/{module}/contracts/profile.yaml` for module panels and tabs | workflows, generated page bundles |
+| Account/Profile | `/me` via `ProfilePage`; public profile `/u/:username` via `ProfilePage` | `GET/PUT /api/me`, `GET /api/users/{username}` | `modules/{module}/contracts/profile.yaml` for module panels and tabs | workflows, generated page bundles |
 | Resource relationships | My Apps/Portfolio/My Resources surfaces | `GET /api/me/relationships` | `modules/{module}/contracts/relationships.yaml` | workflows, generated page bundles, admin shell |
 | Preferences | `/me` preferences section | `GET/PUT /api/me/preferences` | none for generic preferences; module-specific config uses `contracts/settings.yaml` outside Profile | workflow prompts |
 | Notifications | shell notification surfaces and backend delivery rules | app backend plus module notification policy | `modules/{module}/contracts/notifications.yaml` | workflows as source of truth |

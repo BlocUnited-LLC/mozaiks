@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from mozaiksai.core.workflow.generator_support.connector_setup import (
+    normalize_required_fields,
+    normalize_setup_lanes,
+    safe_managed_default,
+)
+
 # ---------------------------------------------------------------------------
 # Integration catalog
 # Canonical source of truth for the runtime. Keep in sync with
@@ -22,6 +28,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Create a new secret key and copy it immediately (shown once)",
         ],
         "setup_url": "https://platform.openai.com/api-keys",
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "anthropic",
@@ -36,6 +44,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Create a new key and copy it immediately (shown once)",
         ],
         "setup_url": "https://console.anthropic.com/settings/keys",
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "gemini",
@@ -50,6 +60,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Create or select a project and copy the API key",
         ],
         "setup_url": "https://aistudio.google.com/apikey",
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "mozaikspay",
@@ -61,6 +73,9 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
         "default_for": ["subscription_or_usage_app"],
         "removable_default": True,
         "capabilities": ["subscriptions", "usage_billing", "billing_portal"],
+        "preferred_setup_lane": "managed",
+        "allowed_setup_lanes": ["managed", "bring_your_own_key"],
+        "managed_default": {"provider": "mozaikspay", "mode": "hosted"},
         "setup_steps": [
             "Open the workspace Integrations page and select Mozaiks Pay",
             "Enter the Mozaiks Pay API base URL and app-scoped API key",
@@ -79,6 +94,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Create an API key with Send access",
             "Verify your sending domain under Domains",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "sendgrid",
@@ -92,6 +109,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Create an API key with Mail Send access",
             "Verify your sender identity or sending domain before production delivery",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "twilio",
@@ -105,6 +124,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Copy the Account SID and Auth Token",
             "Purchase or verify a phone number to use as the sender",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "slack",
@@ -118,6 +139,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Add OAuth scopes: chat:write, channels:read",
             "Install the app to your workspace and copy the Bot User OAuth Token",
         ],
+        "preferred_setup_lane": "connect_account",
+        "allowed_setup_lanes": ["connect_account", "bring_your_own_key"],
     },
     {
         "id": "github",
@@ -131,6 +154,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Generate a token with repo and workflow scopes",
             "For org-level access, use a fine-grained token scoped to the org",
         ],
+        "preferred_setup_lane": "connect_account",
+        "allowed_setup_lanes": ["connect_account", "bring_your_own_key"],
     },
     {
         "id": "s3",
@@ -144,6 +169,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Generate Access Key ID and Secret Access Key under Security Credentials",
             "Create or identify the S3 bucket this app will use",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "cloudinary",
@@ -157,6 +184,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Copy the CLOUDINARY_URL credential for the target cloud",
             "Use a scoped product environment for production apps",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "mongodb",
@@ -170,6 +199,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Create an app-scoped database user with the minimum required database permissions",
             "Copy the connection string as MONGO_URI and verify it with the readiness check before deploy",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "postgres",
@@ -182,6 +213,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Provision a PostgreSQL instance (Supabase, Neon, RDS, or self-hosted)",
             "Copy the connection string: postgresql://user:pass@host:port/dbname",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "redis",
@@ -194,6 +227,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Provision a Redis instance (Upstash, Redis Cloud, or self-hosted)",
             "Copy the connection URL: redis://user:pass@host:port",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
     {
         "id": "google_oauth",
@@ -207,6 +242,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Create an OAuth 2.0 Client ID (Web application type)",
             "Add your app's redirect URI to the Authorized redirect URIs list",
         ],
+        "preferred_setup_lane": "connect_account",
+        "allowed_setup_lanes": ["connect_account", "bring_your_own_key"],
     },
     {
         "id": "microsoft_oauth",
@@ -220,6 +257,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Add the app redirect URI under Authentication",
             "Create a client secret and store only the secret handle in the workspace connector",
         ],
+        "preferred_setup_lane": "connect_account",
+        "allowed_setup_lanes": ["connect_account", "bring_your_own_key"],
     },
     {
         "id": "segment",
@@ -232,6 +271,8 @@ INTEGRATIONS_CATALOG: list[dict[str, Any]] = [
             "Sign in to Segment → Sources → Add Source → Node.js",
             "Copy the Write Key from the source settings",
         ],
+        "preferred_setup_lane": "bring_your_own_key",
+        "allowed_setup_lanes": ["bring_your_own_key"],
     },
 ]
 
@@ -263,7 +304,14 @@ def build_integration_response(
         "setup_steps": spec.get("setup_steps", []),
         "note": note,
     }
-    for metadata_key in ("default_for", "removable_default", "capabilities"):
+    for metadata_key in (
+        "default_for",
+        "removable_default",
+        "capabilities",
+        "preferred_setup_lane",
+        "allowed_setup_lanes",
+        "managed_default",
+    ):
         if metadata_key in spec:
             response[metadata_key] = spec[metadata_key]
     if status == "missing":
@@ -308,6 +356,9 @@ def build_declaration_document(
     removable: bool = False,
     source: str = "build",
     required_fields: list[dict[str, Any]] | None = None,
+    preferred_setup_lane: str | None = None,
+    allowed_setup_lanes: list[str] | None = None,
+    managed_default: dict[str, Any] | str | None = None,
     removed: bool = False,
     declared_at: str,
 ) -> dict[str, Any]:
@@ -317,6 +368,18 @@ def build_declaration_document(
     Connector status reflects the per-app vault inventory at build time.
     Neither field stores secret values.
     """
+
+    normalized_fields = normalize_required_fields({"kind": kind, "required_fields": required_fields or []})
+    lane_source = {
+        "kind": kind,
+        "optional": optional,
+        "required_fields": normalized_fields,
+        "preferred_setup_lane": preferred_setup_lane,
+        "allowed_setup_lanes": allowed_setup_lanes,
+        "managed_default": managed_default,
+    }
+    lanes = normalize_setup_lanes(lane_source)
+    safe_default = safe_managed_default(managed_default)
     return {
         "app_id": app_id,
         "service": service,
@@ -331,7 +394,10 @@ def build_declaration_document(
         "defaulted": defaulted,
         "removable": removable,
         "source": source,
-        "required_fields": list(required_fields or []),
+        "required_fields": normalized_fields,
+        "preferred_setup_lane": lanes["preferred_setup_lane"],
+        "allowed_setup_lanes": lanes["allowed_setup_lanes"],
+        "managed_default": safe_default,
         "removed": removed,
         "declared_at": declared_at,
     }
@@ -354,6 +420,9 @@ def build_declaration_response(doc: dict[str, Any]) -> dict[str, Any]:
         "removable": bool(doc.get("removable")),
         "source": doc.get("source"),
         "required_fields": doc.get("required_fields") if isinstance(doc.get("required_fields"), list) else [],
+        "preferred_setup_lane": doc.get("preferred_setup_lane"),
+        "allowed_setup_lanes": doc.get("allowed_setup_lanes") if isinstance(doc.get("allowed_setup_lanes"), list) else [],
+        "managed_default": doc.get("managed_default") if isinstance(doc.get("managed_default"), dict) else {},
         "declared_at": doc.get("declared_at"),
         "setup_url": f"/integrations/{doc['catalog_id']}" if doc.get("catalog_id") and doc.get("workspace_status") == "missing" else None,
     }

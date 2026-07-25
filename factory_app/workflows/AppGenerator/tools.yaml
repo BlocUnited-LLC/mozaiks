@@ -119,7 +119,7 @@ tools:
   description: >
     Aggregate integration needs from AppGenerator planning, task batch outputs,
     and discovered task context. Reuse app connectors when ready and
-    prompt inline for unresolved required credentials before validation/download.
+    prompt inline for unresolved required integration setup before validation/download.
   tool_type: UI_Tool
   auto_tool_call: true
   bind_to_agent: false
@@ -142,7 +142,7 @@ tools:
       additionalProperties: true
     actions_schema:
     - id: submit
-      label: Submit Keys
+      label: Save Setup
       variant: primary
       payload_schema:
         type: object

@@ -69,7 +69,9 @@ from mozaiksai.core.workflow.generator_support.connector_request import (
     dedupe_integration_needs,
     display_service,
     normalize_service,
+    normalize_setup_lanes,
 )
+from mozaiksai.core.workflow.generator_support.connector_setup import safe_managed_default
 
 # ---------------------------------------------------------------------------
 # 1. normalize_service
@@ -212,6 +214,44 @@ class TestNormalizeRequiredFields:
         assert result[0]["required"] is False
 
 
+class TestNormalizeSetupLanes:
+    def test_defaults_to_bring_your_own_key_for_secret_fields(self):
+        result = normalize_setup_lanes({"required_fields": [{"name": "api_key", "type": "secret"}]})
+
+        assert result == {
+            "preferred_setup_lane": "bring_your_own_key",
+            "allowed_setup_lanes": ["bring_your_own_key"],
+        }
+
+    def test_managed_default_adds_managed_lane(self):
+        result = normalize_setup_lanes(
+            {
+                "preferred_setup_lane": "managed",
+                "managed_default": '{"display_name":"MozaiksPay"}',
+                "required_fields": [{"name": "client_secret", "type": "secret"}],
+            }
+        )
+
+        assert result["preferred_setup_lane"] == "managed"
+        assert result["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
+
+    def test_safe_managed_default_drops_secret_like_keys(self):
+        result = safe_managed_default(
+            {
+                "display_name": "MozaiksPay",
+                "client_secret": "do-not-store",
+                "api_key": "do-not-store",
+            }
+        )
+
+        assert result == {"display_name": "MozaiksPay"}
+
+    def test_oauth_kind_adds_connect_account_lane(self):
+        result = normalize_setup_lanes({"kind": "oauth"})
+
+        assert "connect_account" in result["allowed_setup_lanes"]
+
+
 # ---------------------------------------------------------------------------
 # 4. _split_required_fields
 # ---------------------------------------------------------------------------
@@ -304,6 +344,9 @@ class TestExtractNeedsFromPlan:
                             "kind": "api_key",
                             "purpose": "Connect generated app facades to hosted MozaiksPay.",
                             "required_at": "runtime",
+                            "preferred_setup_lane": "managed",
+                            "allowed_setup_lanes": ["managed", "bring_your_own_key"],
+                            "managed_default": '{"display_name":"MozaiksPay"}',
                             "required_fields": [
                                 {"name": "api_base", "type": "url", "frontend_safe": True},
                                 {"name": "client_id", "type": "text", "frontend_safe": True},
@@ -323,6 +366,9 @@ class TestExtractNeedsFromPlan:
         assert need["provider"] == "mozaikspay"
         assert need["display_name"] == "MozaiksPay"
         assert need["required_at"] == "runtime"
+        assert need["preferred_setup_lane"] == "managed"
+        assert need["allowed_setup_lanes"] == ["managed", "bring_your_own_key"]
+        assert need["managed_default"] == {"display_name": "MozaiksPay"}
         assert {field["name"] for field in need["required_fields"]} == {
             "api_base",
             "client_id",

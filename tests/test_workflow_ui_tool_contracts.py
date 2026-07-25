@@ -659,14 +659,18 @@ def test_extended_orchestration_transition_components_are_file_backed() -> None:
         "DatabaseSetupSelector",
     }.issubset(transition_components)
 
-    # Transition routing stays semantic; visual copy/images live in the React stubs.
+    # Transition routing stays semantic. ui.props is allowed only for bounded
+    # transition-frame routing behavior; visual copy/images live in the React stubs.
+    allowed_transition_props = {"dismissible", "dismiss_to", "dismissTo", "close_label", "closeLabel"}
     for entry in registry.get("transitions", []):
         if not isinstance(entry, dict):
             continue
         ui = entry.get("ui")
         if not isinstance(ui, dict):
             continue
-        assert "props" not in ui
+        props = ui.get("props") or {}
+        assert isinstance(props, dict)
+        assert set(props).issubset(allowed_transition_props)
 
 
 def test_app_type_selector_emits_generic_monetization_selection_context() -> None:

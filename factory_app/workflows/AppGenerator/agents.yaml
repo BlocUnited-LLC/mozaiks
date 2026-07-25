@@ -289,7 +289,7 @@ agents:
          - Pass all matched IDs in a single `check_workspace_integrations` call. Pass only IDs that exist in the catalog; omit custom or unknown services.
          - Use the result to populate `workspace_integration_status[]` in the plan:
            - `configured` (auto_wire: true) — integration is ready by configuration-only checks, or by a passing provider health check when the host registered one; the generated app can reference it without prompting the user. Do NOT pass these to `record_integration_need`.
-           - `partial` or `missing` (auto_wire: false) — call `record_integration_need` for each so `IntegrationReadinessAgent` can collect the credential inline. Include the catalog `setup_url` in the message.
+           - `partial` or `missing` (auto_wire: false) — call `record_integration_need` for each so `IntegrationReadinessAgent` can collect the setup values inline. Include the catalog `setup_url` in the message.
            - `unknown` — catalog-only mode (hosted deployment). Record status as `unknown`; do not call `record_integration_need`; surface the setup link in the build summary instead.
          - If no planned integrations match catalog IDs, skip the tool call and leave `workspace_integration_status` empty.
          - This check is read-only and non-blocking. If the tool fails, continue planning with all integrations treated as unchecked.
@@ -453,7 +453,7 @@ agents:
         - Only capability packs with `surface_kind = module` may emit `task_type: module_contract`.
         Capability source rules:
         - `host_universal` capabilities: do NOT scaffold or plan any code — they are already in the platform runtime.
-        - `managed_capability` capabilities: Do NOT plan a `module_contract` build task for it — meaning for the managed capability id itself. The provider capability already exists outside the generated app. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: managed_capability`; `capability_source` must be present in the AppBuildPlan output and must not be replaced by `pack_type`. Preserve any pack-declared `required_integrations` as structured connector objects with `service`, `provider`, `display_name`, `kind`, `purpose`, `required_at`, and `required_fields`; do not downgrade them to string names. Secret fields must remain `type: "secret"` and `frontend_safe: false`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for managed capability template expansion during assembly. The adapter client is app-level service code; never place it under `modules/{facade_id}/services/` or `modules/{pack_id}/services/`. When pages or app-owned actions need to call the managed capability, also plan a generated facade module with its own module id, `surface_kind: module`, and `capability_source: generated_module`; pages bind to that facade module, not the managed capability id. If the selected pack declares facades, pages, required_outputs, or forbidden_outputs, use those exact typed contract values instead of inventing new facade ids or routes. Every managed-capability facade module must have the normal generated module task set: `module_contract`, `data_models`, and `business_services`, unless a pack template explicitly supplies a narrower declared output family. If you are about to emit `modules/{pack_id}/...` for a managed capability, stop: choose an app-owned facade id such as `{domain}_portal`, `{domain}_dashboard`, or `{domain}_connection` instead.
+        - `managed_capability` capabilities: Do NOT plan a `module_contract` build task for it — meaning for the managed capability id itself. The provider capability already exists outside the generated app. Include it as a capability_pack entry with `implementation_mode: external_integration` and `capability_source: managed_capability`; `capability_source` must be present in the AppBuildPlan output and must not be replaced by `pack_type`. Preserve any pack-declared `required_integrations` as structured connector objects with `service`, `provider`, `display_name`, `kind`, `purpose`, `required_at`, `required_fields`, `preferred_setup_lane`, `allowed_setup_lanes`, and `managed_default`; do not downgrade them to string names. Secret fields must remain `type: "secret"` and `frontend_safe: false`. Plan an `api_surface` adapter task (owned by ControllerAgent) to generate the thin adapter client at app-bundle-relative `services/integrations/{pack_id}_client.py` (physical workspace path `app/services/integrations/{pack_id}_client.py`). Set `capability_pack_id: "{pack_id}"` on the adapter task — this is required for managed capability template expansion during assembly. The adapter client is app-level service code; never place it under `modules/{facade_id}/services/` or `modules/{pack_id}/services/`. When pages or app-owned actions need to call the managed capability, also plan a generated facade module with its own module id, `surface_kind: module`, and `capability_source: generated_module`; pages bind to that facade module, not the managed capability id. If the selected pack declares facades, pages, required_outputs, or forbidden_outputs, use those exact typed contract values instead of inventing new facade ids or routes. Every managed-capability facade module must have the normal generated module task set: `module_contract`, `data_models`, and `business_services`, unless a pack template explicitly supplies a narrower declared output family. If you are about to emit `modules/{pack_id}/...` for a managed capability, stop: choose an app-owned facade id such as `{domain}_portal`, `{domain}_dashboard`, or `{domain}_connection` instead.
         - `generated_module` capabilities: must generate full module contracts and backend files — plan `module_contract`, `data_models`, and `business_services` build tasks for these packs.
         - `external_adapter` capabilities: generate adapter/client wiring only — no provider business logic. Use app-bundle-relative `services/integrations/{service}_client.py` for external or managed API clients. Use `services/adapters/{area}/{provider}.py` for provider-specific implementation boundaries only when the generated app itself directly owns that provider integration and modules/workflows call it. Use `services/routes/` for app-level routes only when needed. These assemble into physical `app/services/**` workspace paths. Valid adapter areas include auth, source_control, deployment, dns, registrar, cloud, storage, secrets, and payments when the code is app-owned provider mechanics rather than managed platform operations.
         - Deployment, DNS/domain, billing, wallet, and platform operations may be supplied by managed platform capabilities. Do not generate provider adapters for those operations into a customer app bundle. The generated app consumes the managed platform through managed capability API clients/facade modules and host-owned records.
@@ -473,7 +473,7 @@ agents:
         - `surface_kind = external_integration` packs should use `api_surface` for thin API clients, `service_foundation` for app-owned provider adapters under `services/adapters/**`, or `agent_backend_integration` for workflow touchpoints, not `module_contract`. Use `service_foundation` only for direct app-owned provider mechanics; do not use it for managed platform deployment/domain/billing operations or deployment packaging artifacts.
         - Connector credentials, API-key metadata, and app-scoped integration records are platform-owned integration state. Do not turn them into app-owned module entities or collections.
         - Use the app connector inventory as the source of truth for which third-party integrations are already ready. If the plan references services such as email_provider, analytics_provider, crm_provider, or storage_provider that are not ready in the connector inventory, keep the integration in the product plan but explicitly mark it as a missing configuration dependency.
-        - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, and required_by. This is task metadata for the IntegrationReadinessAgent checkpoint, not a manual preflight requirement.
+        - For each third-party service that a build task may need, populate `build_tasks[].integration_needs` with service, kind, purpose, required_at, optional, required_by, setup lanes, and required_fields. This is task metadata for the IntegrationReadinessAgent checkpoint, not a manual preflight requirement.
         - Do not force the user to configure integrations before planning. The agent that reaches a real credential boundary will request it inline through the platform connector flow.
         - `surface_kind = ui_only` packs should use `page_bundle` tasks only unless another surface owns their backend mutations.
       12c. **module_contract rule**: For every capability pack with `surface_kind = module`, include a `task_type: module_contract` build task:
@@ -1393,20 +1393,23 @@ agents:
   - id: objective
     heading: '[OBJECTIVE]'
     content: |-
-      - Keep integration collection agentic: only ask inline when the generated app
-        actually needs a missing credential to continue validation, runtime wiring,
+      - Keep integration setup agentic: only ask inline when the generated app
+        actually needs missing setup values to continue validation, runtime wiring,
         or download readiness.
       - Reuse app-scoped connectors when they are already ready. If a host has
         registered a provider health check for that connector type, ready means
         the check has passed; pending or unhealthy connectors remain unresolved.
-      - Persist any newly supplied credentials through the platform connector store
+      - Persist any newly supplied setup values through the platform connector store
         so the app-scoped `/apps/:appId/integrations` surface reflects the result.
       - Treat integration requests as structured `integration.required` events:
         include integration_id, provider/service id, purpose, required_fields,
-        secret_fields, non_secret_fields, permissions_required, and resume
+        secret_fields, non_secret_fields, preferred_setup_lane,
+        allowed_setup_lanes, permissions_required, and resume
         context. Secret fields are write-only.
-      - Do not create app-owned API-key collections, module tables, or custom
-        credential forms.
+      - Use setup lanes only as an app-agnostic abstraction:
+        managed, connect_account, bring_your_own_key, or not_required.
+      - Do not create app-owned API-key collections, module tables, hosted-product
+        logic, or custom credential forms.
   - id: context
     heading: '[CONTEXT]'
     content: |-
@@ -1420,14 +1423,14 @@ agents:
       **Downstream**:
       - Schema-only bundles continue to DownloadAgent after this checkpoint.
       - Code-generation bundles continue to AppValidationAgent after this checkpoint.
-      - If the user declines required credentials, set readiness status to blocked
+      - If the user declines required setup, set readiness status to blocked
         and return to the user with the missing services.
   - id: instructions
     heading: '[INSTRUCTIONS]'
     content: |-
       1. Call `check_integration_readiness`.
          - Use `required_at`: ["build_time", "validation_time", "runtime"].
-         - Keep `prompt` true so unresolved required credentials are requested inline.
+         - Keep `prompt` true so unresolved required setup values are requested inline.
          - Required fields must distinguish `type: secret` from frontend-safe
            non-secret fields such as URLs or account ids.
       2. If the tool returns `status = "ready"`, set `ready = true`.

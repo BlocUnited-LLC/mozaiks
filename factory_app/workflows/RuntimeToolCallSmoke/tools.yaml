@@ -39,7 +39,7 @@ tools:
 - agent: RuntimeConnectorSmokeAgent
   file: runtime_connector_readiness.py
   function: collect_runtime_connector_readiness
-  description: Exercise shared connector readiness with inline credential collection and connector persistence.
+  description: Exercise shared connector readiness with inline integration setup and connector persistence.
   tool_type: UI_Tool
   auto_tool_call: false
   ui:
@@ -61,7 +61,7 @@ tools:
       additionalProperties: true
     actions_schema:
     - id: submit
-      label: Submit Keys
+      label: Save Setup
       variant: primary
       payload_schema:
         type: object

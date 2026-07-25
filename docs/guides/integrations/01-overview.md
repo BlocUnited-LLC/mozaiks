@@ -32,12 +32,14 @@ raw secrets.
 2. During planning, AppGenerator can call `check_workspace_integrations` to see
    which services are already configured.
 3. IntegrationReadinessAgent resolves the app's required and optional services.
-4. `save_integration_manifest` persists those requirements as app integration
+4. AppGenerator assembly writes `app/config/integrations.yaml` and
+   `app/config/targets.json` into the generated app bundle.
+5. `save_integration_manifest` persists those requirements as app integration
    declarations.
-5. Studio overlays live workspace setup status when the app page loads.
-6. Users can configure shared services through workspace-level environment
-   variables or saved workspace connectors.
-7. Apps read the resulting declarations/status and show whether each required
+6. Studio overlays live workspace setup status when the app page loads.
+7. Users can configure shared services through managed setup, connected-account
+   setup, or advanced bring-your-own-key setup.
+8. Apps read the resulting declarations/status and show whether each required
    service is ready, needs setup, or is app-specific.
 
 Mozaiks Pay is the default removable payment integration for monetizable apps.
@@ -72,8 +74,9 @@ The page is app-oriented:
 - **App-specific**: services outside the workspace catalog.
 
 If a required catalog service is not ready, the app points the user back to the
-workspace Integrations page. If a service is app-specific, setup belongs in the
-app environment or a dedicated app module.
+workspace Integrations page or shows the same setup task inline during a build
+checkpoint. If a service is app-specific, setup belongs in the app environment
+or a dedicated app module.
 
 ## How Apps Know What Is Ready
 
@@ -100,6 +103,11 @@ validation aligned:
 - `factory_app/app/modules/workspace_integrations/backend/schemas.py`
 - `tests/test_workspace_integrations_module.py`
 
+Generated apps receive integration requirements in
+`app/config/integrations.yaml`. Deployment/runtime target intent is recorded in
+`app/config/targets.json`. Both files are generated declaratives and must stay
+free of raw secrets.
+
 The current implementation keeps catalog data in both YAML and Python. Keep
 them synchronized until the catalog is moved behind a single typed loader.
 
@@ -114,7 +122,7 @@ internal `messages` module and use integrations only for external delivery.
 ## Connector And Secret Rules
 
 - Secret values are never returned to the frontend.
-- API responses may include secret names and boolean presence only.
+- API responses may include secret names, setup lane, and boolean presence only.
 - Workspace connectors are scoped by workspace and can be reused by apps.
 - App-scoped connectors override workspace connectors when a generated app
   explicitly needs its own credential.

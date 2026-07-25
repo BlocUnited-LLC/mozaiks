@@ -1,11 +1,56 @@
-// ==============================================================================
-// FILE: ChatUI/src/workflows/AgentGenerator/components/AgentAPIKeysBundleInput.js
-// DESCRIPTION: Consolidated API key intake component for multi-service collection
-// ==============================================================================
-
-import { useState, useMemo, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  CheckCircle2,
+  ExternalLink,
+  KeyRound,
+  Link,
+  Plug,
+  ShieldCheck
+} from 'lucide-react';
 import { createToolsLogger } from '@mozaiks/chat-ui/platform/workflowSurfaceRuntime.js';
 import { workflowSurfaceStyles } from '@mozaiks/chat-ui/platform/workflowSurfaceStyles.js';
+
+const SECRET_TYPES = new Set(['secret', 'password', 'api_key', 'token']);
+
+const LANE_META = {
+  managed: {
+    label: 'Use managed service',
+    description: 'Let the platform provide the connection when a managed setup is available.',
+    icon: ShieldCheck
+  },
+  connect_account: {
+    label: 'Connect account',
+    description: 'Use a provider login or consent flow when the host exposes one.',
+    icon: Link
+  },
+  bring_your_own_key: {
+    label: 'Add setup values',
+    description: 'Provide the account values needed by this generated app.',
+    icon: KeyRound
+  },
+  not_required: {
+    label: 'No setup required',
+    description: 'Continue without configuring this optional integration.',
+    icon: CheckCircle2
+  }
+};
+
+const normalizeLaneId = (value) => {
+  const raw = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  const aliases = {
+    api_key: 'bring_your_own_key',
+    byok: 'bring_your_own_key',
+    credentials: 'bring_your_own_key',
+    credential: 'bring_your_own_key',
+    oauth: 'connect_account',
+    oauth_connect: 'connect_account',
+    hosted: 'managed',
+    none: 'not_required',
+    skip: 'not_required'
+  };
+  const lane = aliases[raw] || raw;
+  return LANE_META[lane] ? lane : '';
+};
 
 const toTitle = (value = '') => {
   return value
@@ -13,6 +58,151 @@ const toTitle = (value = '') => {
     .filter(Boolean)
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ');
+};
+
+const normalizeField = (field, index) => {
+  if (!field || typeof field !== 'object') {
+    return null;
+  }
+  const name = String(field.name || '').trim();
+  if (!name) {
+    return null;
+  }
+  const type = String(field.type || 'text').trim().toLowerCase();
+  const secret = Boolean(field.secret) || SECRET_TYPES.has(type);
+  return {
+    name,
+    label: field.label || toTitle(name),
+    type: secret ? 'secret' : type,
+    required: field.required === undefined ? true : Boolean(field.required),
+    frontendSafe: secret ? false : field.frontend_safe !== false,
+    options: Array.isArray(field.options) ? field.options : [],
+    order: index
+  };
+};
+
+const normalizeFields = (rawService, displayName) => {
+  const declared = Array.isArray(rawService?.required_fields)
+    ? rawService.required_fields.map(normalizeField).filter(Boolean)
+    : [];
+  if (declared.length > 0) {
+    return declared;
+  }
+  return [
+    {
+      name: 'api_key',
+      label: rawService?.label || `${displayName} API Key`,
+      type: 'secret',
+      required: rawService?.required === undefined ? true : Boolean(rawService.required),
+      frontendSafe: false,
+      options: [],
+      order: 0
+    }
+  ];
+};
+
+const normalizeLaneIds = (raw) => {
+  if (!Array.isArray(raw)) {
+    const lane = normalizeLaneId(raw);
+    return lane ? [lane] : [];
+  }
+  const lanes = [];
+  raw.forEach((entry) => {
+    const lane = normalizeLaneId(typeof entry === 'object' && entry ? entry.id : entry);
+    if (lane && !lanes.includes(lane)) {
+      lanes.push(lane);
+    }
+  });
+  return lanes;
+};
+
+const normalizeServices = (payload = {}, componentId) => {
+  if (!Array.isArray(payload.services)) {
+    return [];
+  }
+  return payload.services
+    .map((rawService, index) => {
+      const identifier = typeof rawService?.service === 'string' ? rawService.service.trim().toLowerCase() : '';
+      if (!identifier) {
+        return null;
+      }
+      const displayName =
+        rawService.service_display_name ||
+        rawService.display_name ||
+        rawService.displayName ||
+        toTitle(identifier);
+      const fields = normalizeFields(rawService, displayName);
+      const allowedLanes = normalizeLaneIds(rawService.allowed_setup_lanes);
+      const legacyLanes = normalizeLaneIds(rawService.setup_lanes);
+      const explicitLanes = allowedLanes.length > 0 ? allowedLanes : legacyLanes;
+      const lanes = explicitLanes.length > 0 ? explicitLanes : ['bring_your_own_key'];
+      const preferredLane = normalizeLaneId(rawService.preferred_setup_lane);
+      const activeLane = preferredLane && lanes.includes(preferredLane) ? preferredLane : lanes[0];
+
+      return {
+        id: `${identifier}-${index}`,
+        service: identifier,
+        integrationId: rawService.integration_id || identifier,
+        provider: rawService.provider || identifier,
+        displayName,
+        description:
+          rawService.description ||
+          rawService.purpose ||
+          `Configure ${displayName} so the generated app can use it.`,
+        required: rawService.required === undefined ? true : Boolean(rawService.required),
+        fields,
+        lanes,
+        preferredLane: activeLane,
+        managedDefault: rawService.managed_default || null,
+        integrationsUrl: payload.integrations_url || null,
+        agentMessageId:
+          rawService.agent_message_id || `${payload.agent_message_id || componentId}:${identifier}:${index}`
+      };
+    })
+    .filter(Boolean);
+};
+
+const buildInitialValues = (services) => {
+  const values = {};
+  services.forEach((svc) => {
+    values[svc.service] = {};
+    svc.fields.forEach((field) => {
+      values[svc.service][field.name] = '';
+    });
+  });
+  return values;
+};
+
+const buildInitialVisibility = (services) => {
+  const visibility = {};
+  services.forEach((svc) => {
+    visibility[svc.service] = {};
+    svc.fields.forEach((field) => {
+      visibility[svc.service][field.name] = field.type !== 'secret';
+    });
+  });
+  return visibility;
+};
+
+const buildInitialLanes = (services) => {
+  const lanes = {};
+  services.forEach((svc) => {
+    lanes[svc.service] = svc.preferredLane;
+  });
+  return lanes;
+};
+
+const fieldInputType = (field, visible) => {
+  if (field.type === 'secret') {
+    return visible ? 'text' : 'password';
+  }
+  if (field.type === 'url') {
+    return 'url';
+  }
+  if (field.type === 'number') {
+    return 'number';
+  }
+  return 'text';
 };
 
 const AgentAPIKeysBundleInput = ({
@@ -31,132 +221,59 @@ const AgentAPIKeysBundleInput = ({
     payload.workflow_name ||
     null;
 
-  const services = useMemo(() => {
-    if (!Array.isArray(payload.services)) {
-      return [];
-    }
-
-    return payload.services
-      .map((rawService, index) => {
-        const identifier = typeof rawService?.service === 'string' ? rawService.service.trim().toLowerCase() : '';
-        if (!identifier) {
-          return null;
-        }
-        const displayName =
-          rawService.service_display_name ||
-          rawService.display_name ||
-          rawService.displayName ||
-          toTitle(identifier);
-        const required = rawService.required === undefined ? true : Boolean(rawService.required);
-        const maskInput = rawService.maskInput === undefined
-          ? (rawService.mask_input === undefined ? true : Boolean(rawService.mask_input))
-          : Boolean(rawService.maskInput);
-
-        return {
-          id: `${identifier}-${index}`,
-          service: identifier,
-          displayName,
-          label: rawService.label || `${displayName} API Key`,
-          description: rawService.description || `Enter your ${displayName} API key to continue.`,
-          placeholder: rawService.placeholder || `Enter your ${displayName} API key...`,
-          required,
-          maskInput,
-          agentMessageId:
-            rawService.agent_message_id || `${payload.agent_message_id || componentId}:${identifier}:${index}`
-        };
-      })
-      .filter(Boolean);
-  }, [payload.services, payload.agent_message_id, componentId]);
-
-  const [formValues, setFormValues] = useState(() => {
-    const initial = {};
-    services.forEach((svc) => {
-      initial[svc.service] = '';
-    });
-    return initial;
-  });
-
-  const [visibility, setVisibility] = useState(() => {
-    const initial = {};
-    services.forEach((svc) => {
-      initial[svc.service] = !svc.maskInput;
-    });
-    return initial;
-  });
-
+  const services = useMemo(
+    () => normalizeServices(payload, componentId),
+    [payload, componentId]
+  );
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [formValues, setFormValues] = useState(() => buildInitialValues(services));
+  const [visibility, setVisibility] = useState(() => buildInitialVisibility(services));
+  const [selectedLanes, setSelectedLanes] = useState(() => buildInitialLanes(services));
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
     setFormValues((current) => {
-      const next = {};
+      const next = buildInitialValues(services);
       services.forEach((svc) => {
-        next[svc.service] = current[svc.service] || '';
+        svc.fields.forEach((field) => {
+          next[svc.service][field.name] = current?.[svc.service]?.[field.name] || '';
+        });
       });
       return next;
     });
     setVisibility((current) => {
-      const next = {};
+      const next = buildInitialVisibility(services);
       services.forEach((svc) => {
-        next[svc.service] = current.hasOwnProperty(svc.service) ? current[svc.service] : !svc.maskInput;
+        svc.fields.forEach((field) => {
+          if (current?.[svc.service]?.[field.name] !== undefined) {
+            next[svc.service][field.name] = current[svc.service][field.name];
+          }
+        });
       });
       return next;
     });
-    setErrors((current) => {
-      const filtered = {};
-      services.forEach((svc) => {
-        if (current[svc.service]) {
-          filtered[svc.service] = current[svc.service];
-        }
-      });
-      return filtered;
-    });
+    setSelectedLanes((current) => ({ ...buildInitialLanes(services), ...current }));
+    setErrors({});
     setCurrentIndex(0);
   }, [services]);
 
   const currentService = services[currentIndex] || null;
-
   const agentMessageId = payload.agent_message_id || null;
 
   const tlog = createToolsLogger({
     tool: toolName || componentId,
     eventId: toolCallId,
     workflowName: resolvedWorkflowName,
-    agentMessageId: agentMessageId
+    agentMessageId
   });
-
-  const containerClasses = 'w-full';
-  const cardClasses =
-    'w-full max-w-xl rounded-2xl border border-[rgba(var(--color-primary-rgb),0.18)] bg-[rgba(10,16,38,0.92)] px-6 py-5 shadow-[0_18px_38px_rgba(8,15,40,0.45)] space-y-5';
-  const headingClasses = 'text-lg font-heading font-semibold text-foreground';
-  const descriptionClasses = 'text-xs font-sans text-muted-foreground';
-  const inputClasses = (hasError, isDisabled, mask, visible) =>
-    [
-      'w-full rounded-lg border px-4 py-3 transition-colors border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary',
-      mask ? 'pr-12' : '',
-      hasError ? 'border-destructive focus:ring-destructive focus:border-destructive' : '',
-      isDisabled ? 'opacity-50 cursor-not-allowed' : '',
-      visible ? 'tracking-wide' : ''
-    ]
-      .filter(Boolean)
-      .join(' ');
-  const assistiveTextClasses = workflowSurfaceStyles.assistiveText;
-  const errorTextClasses = workflowSurfaceStyles.errorText;
-  const buttonGroup = workflowSurfaceStyles.buttonGroup;
-  const secondaryButtonClasses = workflowSurfaceStyles.secondaryButton;
-  const primaryButtonClasses = workflowSurfaceStyles.primaryButton;
-  const skipButtonClasses = workflowSurfaceStyles.skipButton;
 
   const heading = (() => {
     const explicit = typeof payload.heading === 'string' ? payload.heading.trim() : '';
     if (explicit) {
       return explicit;
     }
-    if (currentService) {
-      return `Provide ${currentService.displayName} API Key`;
-    }
-    return 'Provide Required API Keys';
+    return currentService ? `Configure ${currentService.displayName}` : 'Configure Integrations';
   })();
 
   const introMessage = (() => {
@@ -166,30 +283,61 @@ const AgentAPIKeysBundleInput = ({
     if (explicit) {
       return explicit;
     }
-    if (currentService && currentService.description) {
+    if (currentService) {
       return currentService.description;
     }
-    return 'The workflow needs the following API keys. Only metadata is recorded; secrets are never stored.';
+    return 'Choose a setup path and provide only the fields needed to continue.';
   })();
 
-  const handleChange = (service, value) => {
+  const inputClasses = (hasError, isDisabled) =>
+    [
+      'w-full rounded-lg border px-4 py-3 transition-colors border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary',
+      hasError ? 'border-destructive focus:ring-destructive focus:border-destructive' : '',
+      isDisabled ? 'opacity-50 cursor-not-allowed' : ''
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+  const cardClasses =
+    'w-full max-w-2xl rounded-lg border border-[rgba(var(--color-primary-rgb),0.18)] bg-[rgba(10,16,38,0.92)] px-6 py-5 shadow-[0_18px_38px_rgba(8,15,40,0.45)] space-y-5';
+  const headingClasses = 'text-lg font-heading font-semibold text-foreground';
+  const descriptionClasses = 'text-xs font-sans text-muted-foreground';
+  const assistiveTextClasses = workflowSurfaceStyles.assistiveText;
+  const errorTextClasses = workflowSurfaceStyles.errorText;
+  const buttonGroup = workflowSurfaceStyles.buttonGroup;
+  const secondaryButtonClasses = workflowSurfaceStyles.secondaryButton;
+  const primaryButtonClasses = workflowSurfaceStyles.primaryButton;
+  const skipButtonClasses = workflowSurfaceStyles.skipButton;
+
+  const updateField = (service, fieldName, value) => {
     setFormValues((current) => ({
       ...current,
-      [service]: value
+      [service]: {
+        ...(current[service] || {}),
+        [fieldName]: value
+      }
     }));
-    if (errors[service]) {
-      setErrors((current) => {
-        const next = { ...current };
-        delete next[service];
-        return next;
-      });
-    }
+    setErrors((current) => {
+      const next = { ...current };
+      delete next[`${service}.${fieldName}`];
+      return next;
+    });
   };
 
-  const toggleVisibility = (service) => {
+  const toggleVisibility = (service, fieldName) => {
     setVisibility((current) => ({
       ...current,
-      [service]: !current[service]
+      [service]: {
+        ...(current[service] || {}),
+        [fieldName]: !current?.[service]?.[fieldName]
+      }
+    }));
+  };
+
+  const setLane = (service, lane) => {
+    setSelectedLanes((current) => ({
+      ...current,
+      [service]: lane
     }));
   };
 
@@ -197,27 +345,40 @@ const AgentAPIKeysBundleInput = ({
     if (!currentService) {
       return {};
     }
-    const value = (formValues[currentService.service] || '').trim();
-    if (currentService.required && !value) {
-      return { [currentService.service]: 'API key is required.' };
+    if (selectedLanes[currentService.service] === 'not_required') {
+      return {};
     }
-    return {};
+    const validationErrors = {};
+    currentService.fields.forEach((field) => {
+      const value = String(formValues?.[currentService.service]?.[field.name] || '').trim();
+      if (field.required && !value) {
+        validationErrors[`${currentService.service}.${field.name}`] = 'Required setup field is missing.';
+      }
+    });
+    return validationErrors;
   };
 
   const buildSubmissionPayload = (overrides = {}) => {
     return services.map((svc) => {
-      const sourceValue = Object.prototype.hasOwnProperty.call(overrides, svc.service)
-        ? overrides[svc.service]
-        : formValues[svc.service];
-      const raw = (sourceValue || '').trim();
+      const values = { ...(formValues[svc.service] || {}), ...(overrides[svc.service] || {}) };
+      const trimmedValues = {};
+      svc.fields.forEach((field) => {
+        trimmedValues[field.name] = String(values[field.name] || '').trim();
+      });
+      const firstSecret = svc.fields.find((field) => field.type === 'secret');
+      const rawSecret = firstSecret ? trimmedValues[firstSecret.name] || '' : '';
       return {
         service: svc.service,
         serviceDisplayName: svc.displayName,
-        apiKey: raw,
-        hasApiKey: Boolean(raw),
-        keyLength: raw.length,
+        integration_id: svc.integrationId,
+        provider: svc.provider,
+        apiKey: rawSecret,
+        hasApiKey: Boolean(rawSecret),
+        keyLength: rawSecret.length,
         required: svc.required,
-        maskInput: svc.maskInput,
+        maskInput: svc.fields.some((field) => field.type === 'secret'),
+        selected_setup_lane: selectedLanes[svc.service] || svc.preferredLane,
+        fields: trimmedValues,
         agent_message_id: svc.agentMessageId
       };
     });
@@ -227,43 +388,35 @@ const AgentAPIKeysBundleInput = ({
     const submission = buildSubmissionPayload(overrides);
     try {
       tlog.event('submit', 'start', {
-        services: submission.map((item) => ({ service: item.service, provided: item.hasApiKey }))
+        services: submission.map((item) => ({
+          service: item.service,
+          lane: item.selected_setup_lane,
+          provided: item.hasApiKey
+        }))
       });
-      const responsePayload = {
-        status: 'success',
-        action: 'submit',
-        data: {
-          services: submission,
-          submissionTime: new Date().toISOString(),
-          tool_name: toolName,
-          tool_call_id: toolCallId,
-          workflowName: resolvedWorkflowName,
-          sourceWorkflowName,
-          generatedWorkflowName,
-          agent_message_id: agentMessageId
-        }
-      };
       if (onResponse) {
-        await onResponse(responsePayload);
+        await onResponse({
+          status: 'success',
+          action: 'submit',
+          data: {
+            services: submission,
+            submissionTime: new Date().toISOString(),
+            tool_name: toolName,
+            tool_call_id: toolCallId,
+            workflowName: resolvedWorkflowName,
+            sourceWorkflowName,
+            generatedWorkflowName,
+            agent_message_id: agentMessageId
+          }
+        });
       }
-      setFormValues(() => {
-        const cleared = {};
-        services.forEach((svc) => {
-          cleared[svc.service] = '';
-        });
-        return cleared;
-      });
-      setVisibility(() => {
-        const next = {};
-        services.forEach((svc) => {
-          next[svc.service] = !svc.maskInput;
-        });
-        return next;
-      });
+      setFormValues(buildInitialValues(services));
+      setVisibility(buildInitialVisibility(services));
+      setSelectedLanes(buildInitialLanes(services));
       setCurrentIndex(0);
       setErrors({});
       tlog.event('submit', 'done', {
-        provided: submission.filter((item) => item.hasApiKey).length,
+        configured: submission.filter((item) => item.hasApiKey || item.selected_setup_lane === 'not_required').length,
         requested: services.length
       });
     } catch (submitError) {
@@ -272,10 +425,10 @@ const AgentAPIKeysBundleInput = ({
         services: services.length
       });
       if (onResponse) {
-        onResponse({
+        await onResponse({
           status: 'error',
           action: 'submit',
-          error: submitError?.message || 'Unable to submit API keys.',
+          error: submitError?.message || 'Unable to save integration setup.',
           data: {
             tool_name: toolName,
             tool_call_id: toolCallId
@@ -295,96 +448,73 @@ const AgentAPIKeysBundleInput = ({
 
     const validationErrors = validateCurrentService();
     if (Object.keys(validationErrors).length > 0) {
-      setErrors((prev) => ({ ...prev, ...validationErrors }));
+      setErrors((current) => ({ ...current, ...validationErrors }));
       return;
     }
 
-    const trimmedValue = (formValues[currentService.service] || '').trim();
     setIsSubmitting(true);
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[currentService.service];
-      return next;
+    const trimmed = {};
+    currentService.fields.forEach((field) => {
+      trimmed[field.name] = String(formValues?.[currentService.service]?.[field.name] || '').trim();
     });
-    setFormValues((prev) => ({
-      ...prev,
-      [currentService.service]: trimmedValue
+    setFormValues((current) => ({
+      ...current,
+      [currentService.service]: trimmed
     }));
 
-    try {
-      tlog.event('submit_step', 'done', {
-        service: currentService.service,
-        provided: Boolean(trimmedValue),
-        step: currentIndex + 1,
-        total: services.length
-      });
+    tlog.event('submit_step', 'done', {
+      service: currentService.service,
+      lane: selectedLanes[currentService.service],
+      step: currentIndex + 1,
+      total: services.length
+    });
 
-      if (currentIndex < services.length - 1) {
-        setCurrentIndex((prev) => prev + 1);
-        setIsSubmitting(false);
-      } else {
-        await finalizeSubmission({ [currentService.service]: trimmedValue });
-      }
-    } catch (submitError) {
-      tlog.error('submit step failed', {
-        service: currentService.service,
-        error: submitError?.message
-      });
+    if (currentIndex < services.length - 1) {
+      setCurrentIndex((index) => index + 1);
       setIsSubmitting(false);
+      return;
     }
+    await finalizeSubmission({ [currentService.service]: trimmed });
   };
 
   const handleSkip = async () => {
     if (!currentService) {
       return;
     }
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[currentService.service];
-      return next;
-    });
-    setFormValues((prev) => ({
-      ...prev,
-      [currentService.service]: ''
-    }));
-    tlog.event('skip', 'done', {
-      service: currentService.service,
-      step: currentIndex + 1,
-      total: services.length
-    });
-
+    setLane(currentService.service, 'not_required');
+    setErrors({});
     if (currentIndex < services.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    } else {
-      setIsSubmitting(true);
-      await finalizeSubmission({ [currentService.service]: '' });
+      setCurrentIndex((index) => index + 1);
+      return;
     }
+    setIsSubmitting(true);
+    await finalizeSubmission({ [currentService.service]: {} });
   };
 
   const handleCancel = async () => {
     setIsSubmitting(true);
     try {
       tlog.event('cancel', 'start', { services: services.length });
-      const responsePayload = {
-        status: 'cancelled',
-        action: 'cancel',
-        data: {
-          services: buildSubmissionPayload().map((svc) => ({
-            service: svc.service,
-            required: svc.required,
-            hasApiKey: svc.hasApiKey
-          })),
-          cancelTime: new Date().toISOString(),
-          tool_name: toolName,
-          tool_call_id: toolCallId,
-          workflowName: resolvedWorkflowName,
-          sourceWorkflowName,
-          generatedWorkflowName,
-          agent_message_id: agentMessageId
-        }
-      };
       if (onResponse) {
-        await onResponse(responsePayload);
+        await onResponse({
+          status: 'cancelled',
+          action: 'cancel',
+          data: {
+            services: buildSubmissionPayload().map((svc) => ({
+              service: svc.service,
+              required: svc.required,
+              hasApiKey: svc.hasApiKey,
+              selected_setup_lane: svc.selected_setup_lane
+            })),
+            cancelTime: new Date().toISOString(),
+            tool_name: toolName,
+            tool_call_id: toolCallId,
+            workflowName: resolvedWorkflowName,
+            sourceWorkflowName,
+            generatedWorkflowName,
+            agent_message_id: agentMessageId
+          }
+        });
       }
       tlog.event('cancel', 'done', { services: services.length });
     } catch (cancelError) {
@@ -394,40 +524,32 @@ const AgentAPIKeysBundleInput = ({
     }
   };
 
-  if (services.length === 0) {
+  if (services.length === 0 || !currentService) {
     return (
-      <div className={cardClasses}>
-        <h2 className={headingClasses}>No API keys required</h2>
-        <p className={descriptionClasses}>The workflow did not declare any integrations that need configuration.</p>
-      </div>
-    );
-  }
-
-  if (!currentService) {
-    return (
-      <div className={cardClasses}>
-        <h2 className={headingClasses}>No API keys required</h2>
-        <p className={descriptionClasses}>The workflow did not declare any integrations that need configuration.</p>
-      </div>
-    );
-  }
-
-  const currentValue = formValues[currentService.service] || '';
-  const currentError = errors[currentService.service];
-  const isVisible = visibility[currentService.service];
-  const disableSubmit = isSubmitting || (currentService.required && !currentValue.trim());
-  const isLastStep = currentIndex === services.length - 1;
-
-  return (
-    <div className={containerClasses} data-agent-message-id={agentMessageId || undefined}>
       <div className={cardClasses}>
         <div className="flex items-start gap-3">
-          <span
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(255,200,0,0.12)] text-sm font-semibold"
-            aria-hidden="true"
-          >
-            {'🔑'}
-          </span>
+          <Plug className="mt-0.5 h-5 w-5 text-primary" aria-hidden="true" />
+          <div className="space-y-1">
+            <h2 className={headingClasses}>No integration setup required</h2>
+            <p className={descriptionClasses}>
+              The workflow did not declare integrations that need configuration.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentValues = formValues[currentService.service] || {};
+  const currentLane = selectedLanes[currentService.service] || currentService.preferredLane;
+  const isLastStep = currentIndex === services.length - 1;
+  const disableSubmit = isSubmitting || Object.keys(validateCurrentService()).length > 0;
+
+  return (
+    <div className="w-full" data-agent-message-id={agentMessageId || undefined}>
+      <div className={cardClasses}>
+        <div className="flex items-start gap-3">
+          <Plug className="mt-1 h-5 w-5 text-primary" aria-hidden="true" />
           <div className="flex-1 space-y-1.5">
             <h2 className={headingClasses}>{heading}</h2>
             <p className={descriptionClasses}>{introMessage}</p>
@@ -437,41 +559,113 @@ const AgentAPIKeysBundleInput = ({
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-2 pt-1">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-sans font-bold uppercase tracking-wide text-muted-foreground">
-                {currentService.label}
-                {currentService.required ? (
-                  <span className="ml-2 text-xs uppercase tracking-wide text-[rgba(255,255,255,0.65)]">Required</span>
-                ) : null}
-              </label>
-              <span className="text-xs font-sans text-muted-foreground">{currentService.service}</span>
-            </div>
-            <div className="relative">
-              <input
-                type={isVisible ? 'text' : 'password'}
-                value={currentValue}
-                onChange={(event) => handleChange(currentService.service, event.target.value)}
-                placeholder={currentService.placeholder}
-                required={currentService.required}
-                disabled={isSubmitting}
-                className={inputClasses(Boolean(currentError), isSubmitting, currentService.maskInput, isVisible)}
-              />
-              {currentService.maskInput && (
+        <div className="space-y-2">
+          <p className="text-xs font-sans font-bold uppercase text-muted-foreground">Setup path</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {currentService.lanes.map((lane) => {
+              const meta = LANE_META[lane] || LANE_META.bring_your_own_key;
+              const Icon = meta.icon;
+              const active = currentLane === lane;
+              return (
                 <button
+                  key={lane}
                   type="button"
-                  onClick={() => toggleVisibility(currentService.service)}
+                  onClick={() => setLane(currentService.service, lane)}
                   disabled={isSubmitting}
-                  className="absolute inset-y-0 right-3 flex items-center text-xs font-semibold uppercase tracking-wide text-[rgba(255,255,255,0.65)] hover:text-white transition-colors"
+                  className={[
+                    'rounded-lg border px-3 py-3 text-left transition-colors',
+                    active
+                      ? 'border-primary bg-[rgba(var(--color-primary-rgb),0.16)] text-foreground'
+                      : 'border-border bg-card/70 text-muted-foreground hover:text-foreground hover:border-primary/60',
+                    isSubmitting ? 'opacity-50 cursor-not-allowed' : ''
+                  ].filter(Boolean).join(' ')}
                 >
-                  {isVisible ? 'Hide' : 'Show'}
+                  <span className="flex items-center gap-2 text-sm font-semibold">
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                    {meta.label}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5">{meta.description}</span>
                 </button>
-              )}
-            </div>
-            {currentError ? <p className={`${errorTextClasses} mt-1`}>{currentError}</p> : null}
-            <p className={assistiveTextClasses}>{currentService.description}</p>
+              );
+            })}
           </div>
+          {currentService.integrationsUrl ? (
+            <a
+              href={currentService.integrationsUrl}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+            >
+              Open integrations
+              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+            </a>
+          ) : null}
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 pt-1">
+          {currentLane !== 'not_required' ? (
+            <div className="space-y-3">
+              {currentService.fields.map((field) => {
+                const key = `${currentService.service}.${field.name}`;
+                const currentError = errors[key];
+                const visible = visibility?.[currentService.service]?.[field.name];
+                const value = currentValues[field.name] || '';
+                return (
+                  <div key={field.name} className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="text-xs font-sans font-bold uppercase text-muted-foreground">
+                        {field.label}
+                        {field.required ? (
+                          <span className="ml-2 text-xs uppercase text-[rgba(255,255,255,0.65)]">Required</span>
+                        ) : null}
+                      </label>
+                      <span className="text-xs font-sans text-muted-foreground">{currentService.service}</span>
+                    </div>
+                    {field.type === 'select' ? (
+                      <select
+                        value={value}
+                        onChange={(event) => updateField(currentService.service, field.name, event.target.value)}
+                        disabled={isSubmitting}
+                        className={inputClasses(Boolean(currentError), isSubmitting)}
+                      >
+                        <option value="">Select {field.label}</option>
+                        {field.options.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          type={fieldInputType(field, visible)}
+                          value={value}
+                          onChange={(event) => updateField(currentService.service, field.name, event.target.value)}
+                          placeholder={`Enter ${field.label}`}
+                          disabled={isSubmitting}
+                          className={`${inputClasses(Boolean(currentError), isSubmitting)} ${field.type === 'secret' ? 'pr-14' : ''}`}
+                        />
+                        {field.type === 'secret' ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleVisibility(currentService.service, field.name)}
+                            disabled={isSubmitting}
+                            className="absolute inset-y-0 right-3 flex items-center text-xs font-semibold uppercase text-[rgba(255,255,255,0.65)] hover:text-white transition-colors"
+                          >
+                            {visible ? 'Hide' : 'Show'}
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                    {currentError ? <p className={`${errorTextClasses} mt-1`}>{currentError}</p> : null}
+                  </div>
+                );
+              })}
+              <p className={assistiveTextClasses}>
+                Secret fields are write-only. Public setup values may be saved as connector metadata.
+              </p>
+            </div>
+          ) : (
+            <p className={assistiveTextClasses}>
+              This integration is marked optional for this build. No setup values will be saved.
+            </p>
+          )}
 
           <div className={buttonGroup}>
             <button
@@ -497,15 +691,10 @@ const AgentAPIKeysBundleInput = ({
               disabled={disableSubmit}
               className={primaryButtonClasses}
             >
-              {isSubmitting ? 'Processing…' : isLastStep ? 'Submit Keys' : 'Next'}
+              {isSubmitting ? 'Saving...' : isLastStep ? 'Save Setup' : 'Next'}
             </button>
           </div>
         </form>
-
-        <div className={`${assistiveTextClasses} space-y-1`}>
-          <p>Keys are used immediately to configure your workflow. Only metadata (service + length) is logged.</p>
-          <p>Optional integrations can be skipped; required ones must be completed before proceeding.</p>
-        </div>
       </div>
     </div>
   );
