@@ -10,6 +10,7 @@ from typing import Any
 from mozaiksai.core.core_config import get_mongo_client
 from mozaiksai.core.ports.entitlement import EntitlementResult
 from mozaiksai.core.runtime.app.subscriptions_loader import (
+    ProductDef,
     SubscriptionAssignmentStoreDef,
     SubscriptionsConfig,
 )
@@ -109,6 +110,19 @@ class ConfiguredEntitlementAdapter:
         if not self._config or not capability_id or not app_id:
             return EntitlementResult(granted=False, reason="not_configured")
 
+        # v2: multi-product — union capabilities across all products
+        if self._config.products:
+            for product in self._config.products:
+                result = await self._check_product(
+                    product, capability_id,
+                    app_id=app_id, user_id=user_id,
+                    tenant_id=tenant_id, workspace_id=workspace_id,
+                )
+                if result.granted:
+                    return result
+            return EntitlementResult(granted=False, reason="no_grant")
+
+        # v1: single assignment store (existing logic preserved exactly)
         store = self._config.assignment_store
         if store is None:
             return self._check_default_plan(capability_id)
@@ -168,6 +182,41 @@ class ConfiguredEntitlementAdapter:
         app_id = str(app_id or "").strip()
         if not self._config or not app_id:
             return None
+
+        # v2: return the primary (default) product's active plan
+        if self._config.products:
+            primary_product = None
+            if self._config.default_product_id:
+                for p in self._config.products:
+                    if p.product_id == self._config.default_product_id:
+                        primary_product = p
+                        break
+            if primary_product is None and self._config.products:
+                primary_product = self._config.products[0]
+            if primary_product is None:
+                return None
+            store = primary_product.assignment_store
+            if store is None:
+                return primary_product.default_plan_id
+            try:
+                record = await self._find_assignment(
+                    store, app_id=app_id, user_id=user_id,
+                    tenant_id=tenant_id, workspace_id=workspace_id,
+                )
+                if not record:
+                    return primary_product.default_plan_id
+                status = str(_field_value(record, store.status_field, "") or "").strip().lower()
+                if status not in {s.lower() for s in store.active_statuses}:
+                    return primary_product.default_plan_id
+                parsed_expiry = _parse_datetime(self._expires_at(record, store))
+                if parsed_expiry is not None and parsed_expiry <= datetime.now(UTC):
+                    return primary_product.default_plan_id
+                plan_id = str(_field_value(record, store.plan_id_field, primary_product.default_plan_id) or "").strip()
+                return plan_id or primary_product.default_plan_id
+            except Exception:
+                return primary_product.default_plan_id
+
+        # v1: existing behavior
         store = self._config.assignment_store
         if store is None:
             return self._config.default_plan_id
@@ -203,6 +252,76 @@ class ConfiguredEntitlementAdapter:
         if capability_id in capabilities:
             return EntitlementResult(granted=True, reason="default_plan")
         return EntitlementResult(granted=False, reason="no_grant")
+
+    async def _check_product(
+        self,
+        product: "ProductDef",
+        capability_id: str,
+        *,
+        app_id: str,
+        user_id: str | None,
+        tenant_id: str | None,
+        workspace_id: str | None,
+    ) -> EntitlementResult:
+        """Check a single product's assignment store for a capability grant."""
+        store = product.assignment_store
+        if store is None:
+            # No store: grant capabilities from the product's default plan
+            caps = product.capabilities_for_plan(product.default_plan_id)
+            if capability_id in caps:
+                return EntitlementResult(granted=True, reason="default_plan")
+            return EntitlementResult(granted=False, reason="no_grant")
+
+        try:
+            record = await self._find_assignment(
+                store,
+                app_id=app_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+            )
+            if not record:
+                caps = product.capabilities_for_plan(product.default_plan_id)
+                if capability_id in caps:
+                    return EntitlementResult(granted=True, reason="default_plan")
+                return EntitlementResult(granted=False, reason="no_grant")
+
+            status = str(_field_value(record, store.status_field, "") or "").strip().lower()
+            if status not in {s.lower() for s in store.active_statuses}:
+                return EntitlementResult(
+                    granted=False,
+                    reason="inactive_subscription" if status else "subscription_status_missing",
+                    expires_at=self._expires_at(record, store),
+                )
+
+            expires_at = self._expires_at(record, store)
+            parsed_expiry = _parse_datetime(expires_at)
+            if parsed_expiry is not None and parsed_expiry <= datetime.now(UTC):
+                return EntitlementResult(granted=False, reason="expired", expires_at=expires_at)
+
+            # Check capabilities: prefer plan_snapshot, then record caps, then catalog
+            snapshot = _field_value(record, store.plan_snapshot_field)
+            if isinstance(snapshot, Mapping):
+                snap_caps = _capability_ids(snapshot.get("granted_capabilities"))
+                if snap_caps:
+                    if capability_id in snap_caps:
+                        return EntitlementResult(granted=True, reason="active_subscription", expires_at=expires_at)
+                    return EntitlementResult(granted=False, reason="no_grant", expires_at=expires_at)
+
+            record_caps = _capability_ids(_field_value(record, store.capabilities_field))
+            if record_caps:
+                if capability_id in record_caps:
+                    return EntitlementResult(granted=True, reason="active_subscription", expires_at=expires_at)
+                return EntitlementResult(granted=False, reason="no_grant", expires_at=expires_at)
+
+            plan_id = str(_field_value(record, store.plan_id_field, product.default_plan_id) or "").strip()
+            caps = product.capabilities_for_plan(plan_id or product.default_plan_id)
+            if capability_id in caps:
+                return EntitlementResult(granted=True, reason="active_subscription", expires_at=expires_at)
+            return EntitlementResult(granted=False, reason="no_grant", expires_at=expires_at)
+
+        except Exception:
+            return EntitlementResult(granted=False, reason="error")
 
     async def _collection(self, store: SubscriptionAssignmentStoreDef) -> Any:
         if self._collection_resolver is not None:

@@ -87,6 +87,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # ---------------------------------------------------------------------------
 
 _PLAN_ID_RE = re.compile(r"^[a-z0-9_-]+$")
+_PRODUCT_ID_RE = re.compile(r"^[a-z0-9_-]+$")
 _CAPABILITY_ID_RE = re.compile(r"^[a-z0-9_.]+$")
 _METER_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 _WALLET_ID_RE = re.compile(r"^[a-z0-9_.-]+$")
@@ -671,20 +672,33 @@ class SubscriptionAssignmentStoreDef(BaseModel):
         return statuses
 
 
-class SubscriptionsConfig(BaseModel):
-    """Parsed and validated contents of app/config/subscriptions.yaml."""
+class ProductDef(BaseModel):
+    """A standalone subscription product in a v2 multi-product app catalog.
 
+    Each product has its own plan catalog, optional assignment store, and
+    optional token wallets. The entitlement adapter unions capabilities across
+    all products with active subscriptions.
+    """
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.subscriptions.v1"]
+    product_id: str
     label: str
+    description: str | None = None
     default_plan_id: str
     assignment_store: SubscriptionAssignmentStoreDef | None = None
+    plans: list[PlanDef]
     token_wallets: list[TokenWalletDef] = Field(default_factory=list)
     top_up_products: list[TokenTopUpProductDef] = Field(default_factory=list)
     usage_charge_policies: list[UsageChargePolicyDef] = Field(default_factory=list)
-    pricing_catalog: PricingCatalogDef | None = None
-    plans: list[PlanDef]
+    pricing_catalog_group: PricingCatalogGroupDef | None = None
+
+    @field_validator("product_id")
+    @classmethod
+    def _validate_product_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _PRODUCT_ID_RE.match(value):
+            raise ValueError(f"product_id must match [a-z0-9_-]+, got {value!r}")
+        return value
 
     @field_validator("label")
     @classmethod
@@ -694,53 +708,215 @@ class SubscriptionsConfig(BaseModel):
             raise ValueError("label must be non-empty")
         return value
 
+    @field_validator("description")
+    @classmethod
+    def _validate_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @field_validator("default_plan_id")
+    @classmethod
+    def _validate_default_plan_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value or not _PLAN_ID_RE.match(value):
+            raise ValueError(f"default_plan_id must match [a-z0-9_-]+, got {value!r}")
+        return value
+
     @model_validator(mode="after")
-    def _validate_plan_catalog(self) -> SubscriptionsConfig:
+    def _validate_product(self) -> "ProductDef":
         if not self.plans:
-            raise ValueError("plans must be non-empty")
+            raise ValueError(f"product {self.product_id!r} must have at least one plan")
         plan_ids = [p.plan_id for p in self.plans]
         if len(plan_ids) != len(set(plan_ids)):
-            raise ValueError("plan_ids must be unique")
+            raise ValueError(f"product {self.product_id!r} plan_ids must be unique")
         if self.default_plan_id not in set(plan_ids):
             raise ValueError(
-                f"default_plan_id {self.default_plan_id!r} must reference a "
-                f"declared plan_id; known plan_ids: {plan_ids}"
+                f"product {self.product_id!r} default_plan_id {self.default_plan_id!r} "
+                f"must reference a declared plan_id; known: {plan_ids}"
             )
-        wallet_ids = [wallet.wallet_id for wallet in self.token_wallets]
+        wallet_ids = [w.wallet_id for w in self.token_wallets]
         if len(wallet_ids) != len(set(wallet_ids)):
-            raise ValueError("token_wallet wallet_ids must be unique")
-        top_up_product_ids = [product.product_id for product in self.top_up_products]
-        if len(top_up_product_ids) != len(set(top_up_product_ids)):
-            raise ValueError("top_up_products product_ids must be unique")
-        usage_charge_meter_ids = [policy.meter_id for policy in self.usage_charge_policies]
-        if len(usage_charge_meter_ids) != len(set(usage_charge_meter_ids)):
-            raise ValueError("usage_charge_policies meter_ids must be unique")
+            raise ValueError(f"product {self.product_id!r} token_wallet wallet_ids must be unique")
         declared_wallet_ids = set(wallet_ids)
-        for product in self.top_up_products:
-            if declared_wallet_ids and product.wallet_id not in declared_wallet_ids:
+        for tu in self.top_up_products:
+            if declared_wallet_ids and tu.wallet_id not in declared_wallet_ids:
                 raise ValueError(
-                    f"top_up_product wallet_id {product.wallet_id!r} must reference token_wallets"
+                    f"product {self.product_id!r} top_up_product wallet_id "
+                    f"{tu.wallet_id!r} must reference token_wallets"
                 )
         for plan in self.plans:
             for allowance in plan.token_allowances:
                 if declared_wallet_ids and allowance.wallet_id not in declared_wallet_ids:
                     raise ValueError(
+                        f"product {self.product_id!r} plan {plan.plan_id!r} "
                         f"token_allowance wallet_id {allowance.wallet_id!r} must reference token_wallets"
                     )
-        if self.pricing_catalog:
-            declared_plan_ids = set(plan_ids)
-            for group in self.pricing_catalog.groups:
-                unknown_plan_ids = [
-                    plan_id
-                    for plan_id in group.plan_ids
-                    if plan_id not in declared_plan_ids
-                ]
-                if unknown_plan_ids:
-                    raise ValueError(
-                        f"pricing_catalog group {group.group_id!r} references "
-                        f"unknown plan_ids: {unknown_plan_ids}"
-                    )
+        if self.pricing_catalog_group and self.pricing_catalog_group.plan_ids:
+            known = {p.plan_id for p in self.plans}
+            unknown = [pid for pid in self.pricing_catalog_group.plan_ids if pid not in known]
+            if unknown:
+                raise ValueError(
+                    f"product {self.product_id!r} pricing_catalog_group references unknown plan_ids: {unknown}"
+                )
         return self
+
+    def capabilities_for_plan(self, plan_id: str) -> frozenset[str]:
+        for plan in self.plans:
+            if plan.plan_id == plan_id:
+                return frozenset(plan.capabilities)
+        for plan in self.plans:
+            if plan.plan_id == self.default_plan_id:
+                return frozenset(plan.capabilities)
+        return frozenset()
+
+    def plan_by_id(self, plan_id: str | None) -> PlanDef:
+        requested = str(plan_id or "").strip()
+        for plan in self.plans:
+            if plan.plan_id == requested:
+                return plan
+        for plan in self.plans:
+            if plan.plan_id == self.default_plan_id:
+                return plan
+        return self.plans[0]
+
+
+class SubscriptionsConfig(BaseModel):
+    """Parsed and validated contents of app/config/subscriptions.yaml."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["mozaiks.subscriptions.v1", "mozaiks.subscriptions.v2"]
+    label: str
+    default_plan_id: str | None = None
+    assignment_store: SubscriptionAssignmentStoreDef | None = None
+    products: list[ProductDef] = Field(default_factory=list)
+    default_product_id: str | None = None
+    token_wallets: list[TokenWalletDef] = Field(default_factory=list)
+    top_up_products: list[TokenTopUpProductDef] = Field(default_factory=list)
+    usage_charge_policies: list[UsageChargePolicyDef] = Field(default_factory=list)
+    pricing_catalog: PricingCatalogDef | None = None
+    plans: list[PlanDef] = Field(default_factory=list)
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("label must be non-empty")
+        return value
+
+    @field_validator("default_product_id")
+    @classmethod
+    def _validate_default_product_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if not _PRODUCT_ID_RE.match(value):
+            raise ValueError(f"default_product_id must match [a-z0-9_-]+, got {value!r}")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_plan_catalog(self) -> "SubscriptionsConfig":
+        is_v2 = self.schema_version == "mozaiks.subscriptions.v2"
+
+        if is_v2:
+            if not self.products:
+                raise ValueError("v2 config must declare at least one product in products[]")
+            if self.plans:
+                raise ValueError(
+                    "v2 config must not declare root-level plans[] — use products[].plans instead"
+                )
+            if self.default_plan_id is not None:
+                raise ValueError(
+                    "v2 config must not declare root-level default_plan_id — use default_product_id and products[].default_plan_id"
+                )
+            product_ids = [p.product_id for p in self.products]
+            if len(product_ids) != len(set(product_ids)):
+                raise ValueError("product_ids must be unique")
+            if self.default_product_id and self.default_product_id not in set(product_ids):
+                raise ValueError(
+                    f"default_product_id {self.default_product_id!r} must reference a declared product_id; "
+                    f"known: {product_ids}"
+                )
+            if self.pricing_catalog:
+                all_plan_ids: set[str] = set()
+                for product in self.products:
+                    all_plan_ids.update(p.plan_id for p in product.plans)
+                for group in self.pricing_catalog.groups:
+                    unknown = [pid for pid in group.plan_ids if pid not in all_plan_ids]
+                    if unknown:
+                        raise ValueError(
+                            f"pricing_catalog group {group.group_id!r} references unknown plan_ids: {unknown}"
+                        )
+        else:
+            # v1 validation — preserve all existing logic exactly
+            if not self.plans:
+                raise ValueError("plans must be non-empty")
+            if self.products:
+                raise ValueError(
+                    "v1 config must not declare products[] — upgrade to schema_version: mozaiks.subscriptions.v2"
+                )
+            if not self.default_plan_id:
+                raise ValueError("default_plan_id is required for mozaiks.subscriptions.v1")
+            plan_ids = [p.plan_id for p in self.plans]
+            if len(plan_ids) != len(set(plan_ids)):
+                raise ValueError("plan_ids must be unique")
+            if self.default_plan_id not in set(plan_ids):
+                raise ValueError(
+                    f"default_plan_id {self.default_plan_id!r} must reference a declared plan_id; "
+                    f"known plan_ids: {plan_ids}"
+                )
+            wallet_ids = [wallet.wallet_id for wallet in self.token_wallets]
+            if len(wallet_ids) != len(set(wallet_ids)):
+                raise ValueError("token_wallet wallet_ids must be unique")
+            top_up_product_ids = [product.product_id for product in self.top_up_products]
+            if len(top_up_product_ids) != len(set(top_up_product_ids)):
+                raise ValueError("top_up_products product_ids must be unique")
+            usage_charge_meter_ids = [policy.meter_id for policy in self.usage_charge_policies]
+            if len(usage_charge_meter_ids) != len(set(usage_charge_meter_ids)):
+                raise ValueError("usage_charge_policies meter_ids must be unique")
+            declared_wallet_ids = set(wallet_ids)
+            for product in self.top_up_products:
+                if declared_wallet_ids and product.wallet_id not in declared_wallet_ids:
+                    raise ValueError(
+                        f"top_up_product wallet_id {product.wallet_id!r} must reference token_wallets"
+                    )
+            for plan in self.plans:
+                for allowance in plan.token_allowances:
+                    if declared_wallet_ids and allowance.wallet_id not in declared_wallet_ids:
+                        raise ValueError(
+                            f"token_allowance wallet_id {allowance.wallet_id!r} must reference token_wallets"
+                        )
+            if self.pricing_catalog:
+                declared_plan_ids = set(plan_ids)
+                for group in self.pricing_catalog.groups:
+                    unknown_plan_ids = [
+                        plan_id for plan_id in group.plan_ids if plan_id not in declared_plan_ids
+                    ]
+                    if unknown_plan_ids:
+                        raise ValueError(
+                            f"pricing_catalog group {group.group_id!r} references "
+                            f"unknown plan_ids: {unknown_plan_ids}"
+                        )
+        return self
+
+    @property
+    def assembled_pricing_catalog(self) -> "PricingCatalogDef | None":
+        """Return the pricing catalog, assembling it from product groups for v2."""
+        if self.pricing_catalog:
+            return self.pricing_catalog
+        if not self.products:
+            return None
+        groups = [p.pricing_catalog_group for p in self.products if p.pricing_catalog_group is not None]
+        if not groups:
+            return None
+        default_group_id = self.default_product_id or groups[0].group_id
+        if default_group_id not in {g.group_id for g in groups}:
+            default_group_id = groups[0].group_id
+        return PricingCatalogDef(groups=groups, default_group_id=default_group_id)
 
     def capabilities_for_plan(self, plan_id: str) -> frozenset[str]:
         """Return the capability_ids granted by plan_id.
@@ -749,6 +925,17 @@ class SubscriptionsConfig(BaseModel):
         Returns an empty frozenset when the default plan itself has no
         capabilities declared.
         """
+        if self.products:
+            # v2: search across all products
+            for product in self.products:
+                for plan in product.plans:
+                    if plan.plan_id == plan_id:
+                        return frozenset(plan.capabilities)
+            # fallback to first product's default
+            if self.products:
+                return self.products[0].capabilities_for_plan(self.products[0].default_plan_id)
+            return frozenset()
+        # v1: existing behavior
         for plan in self.plans:
             if plan.plan_id == plan_id:
                 return frozenset(plan.capabilities)
@@ -758,15 +945,21 @@ class SubscriptionsConfig(BaseModel):
                 return frozenset(plan.capabilities)
         return frozenset()
 
-    def plan_by_id(self, plan_id: str | None) -> PlanDef:
+    def plan_by_id(self, plan_id: str | None) -> "PlanDef":
         """Return a declared plan, falling back to the configured default."""
-
         requested = str(plan_id or "").strip()
+        if self.products:
+            for product in self.products:
+                for plan in product.plans:
+                    if plan.plan_id == requested:
+                        return plan
+            return self.products[0].plans[0]
+        # v1
         for plan in self.plans:
             if plan.plan_id == requested:
                 return plan
         for plan in self.plans:
-            if plan.plan_id == self.default_plan_id:
+            if plan.plan_id == (self.default_plan_id or ""):
                 return plan
         return self.plans[0]
 
@@ -837,6 +1030,7 @@ __all__ = [
     "PlanDef",
     "PricingCatalogDef",
     "PricingCatalogGroupDef",
+    "ProductDef",
     "SubscriptionAssignmentStoreDef",
     "SubscriptionsConfig",
     "SubscriptionsLoadError",

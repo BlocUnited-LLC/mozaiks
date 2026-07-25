@@ -59,7 +59,7 @@ actions:
                 items:
                   type: string
               note:
-                type: string
+                type: ["string", "null"]
               app_usage_count:
                 type: integer
                 description: Number of distinct apps that currently declare this catalog integration.
