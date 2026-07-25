@@ -328,7 +328,7 @@ layers:
           such as SaaS access plus ecommerce, usage credits plus marketplace
           features, or token allowances plus app/operator-specific checkout.
         build_tasks_required:
-          - surface_kind: control_plane
+          - surface_kind: app_policy
             notes: >
               Split each route into its owning capability boundary. Generate one
               config/subscriptions.yaml only for the access/quota/credit/token

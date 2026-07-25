@@ -1,4 +1,4 @@
-"""Read-only app-context summaries for control-plane planning."""
+"""Read-only app-context summaries for Refinement Engine planning."""
 
 from __future__ import annotations
 

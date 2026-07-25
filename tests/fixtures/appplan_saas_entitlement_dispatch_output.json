@@ -258,7 +258,7 @@
         "task_type": "subscription_config",
         "capability_pack_id": null,
         "surface_id": "subscription_contract",
-        "surface_kind": "control_plane",
+        "surface_kind": "app_policy",
         "execution_target": "AppGenerator",
         "initial_agent": "ConfigMiddlewareAgent",
         "description": "Generate the subscription configuration for the app.",

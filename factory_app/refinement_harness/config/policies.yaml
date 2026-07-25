@@ -1,4 +1,4 @@
-schema_version: mozaiks.control_plane.policies
+schema_version: mozaiks.refinement_harness.policies.v1
 scope:
   max_selected_paths: 3
   auto_apply_max_paths: 1

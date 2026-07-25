@@ -1,7 +1,7 @@
 """
 AG2 tool adapter: read_carry_forward_module_contract for AppPlanAgent.
 
-Thin wrapper that exposes the control-plane carry-forward module contract
+Thin wrapper that exposes the refinement harness carry-forward module contract
 reader as an AG2 callable tool with Pydantic metadata annotations.
 
 AppPlanAgent may call this tool during ``conceptual_replan`` to inspect
@@ -12,7 +12,7 @@ from a carry-forward candidate in the previous app bundle workspace.
 source. Does not modify any artifact or workspace.
 
 See full implementation at:
-``factory_app/control_plane/tools/read_carry_forward_module_contract.py``
+``factory_app/refinement_harness/tools/read_carry_forward_module_contract.py``
 """
 from typing import Annotated, Any
 

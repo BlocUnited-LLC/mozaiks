@@ -2,7 +2,7 @@
 Code generation pure helper unit tests.
 
 Covers helpers from:
-  - control_plane_pack_codegen.py: _dump_yaml, _safe_prompt_id, _safe_prompt_path
+  - refinement_harness_codegen.py: _dump_yaml, _safe_prompt_id, _safe_prompt_path
   - app_backend_admin_codegen.py: _indent_block, _render_admin_config_module
   - orchestration_patterns.py: _messages_to_network_prompt, _next_agent_after_trigger
 
@@ -19,10 +19,10 @@ Covers helpers from:
 
   _safe_prompt_path:
     - no raw path → default path constructed from prompt_id
-    - valid path under control_plane/prompts/ → returned
+    - valid path under refinement_harness/prompts/ → returned
     - absolute path → ValueError
     - path with ".." traversal → ValueError
-    - path not under control_plane/prompts/ → ValueError
+    - path not under refinement_harness/prompts/ → ValueError
     - path without .yaml suffix → ValueError
 
   _indent_block:
@@ -61,7 +61,7 @@ from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     _indent_block,
     _render_admin_config_module,
 )
-from factory_app.workflows.AppGenerator.tools.control_plane_pack_codegen import (
+from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
     _dump_yaml,
     _safe_prompt_id,
     _safe_prompt_path,
@@ -145,33 +145,33 @@ class TestSafePromptId:
 class TestSafePromptPath:
     def test_no_raw_path_uses_default(self):
         result = _safe_prompt_path(None, "my_prompt")
-        assert result == "control_plane/prompts/my_prompt.yaml"
+        assert result == "refinement_harness/prompts/my_prompt.yaml"
 
     def test_empty_raw_path_uses_default(self):
         result = _safe_prompt_path("", "my_prompt")
-        assert result == "control_plane/prompts/my_prompt.yaml"
+        assert result == "refinement_harness/prompts/my_prompt.yaml"
 
     def test_valid_path_returned(self):
         result = _safe_prompt_path(
-            "control_plane/prompts/refinement.yaml",
+            "refinement_harness/prompts/refinement.yaml",
             "refinement",
         )
-        assert result == "control_plane/prompts/refinement.yaml"
+        assert result == "refinement_harness/prompts/refinement.yaml"
 
     def test_backslash_normalized(self):
         result = _safe_prompt_path(
-            "control_plane\\prompts\\my_prompt.yaml",
+            "refinement_harness\\prompts\\my_prompt.yaml",
             "my_prompt",
         )
-        assert result == "control_plane/prompts/my_prompt.yaml"
+        assert result == "refinement_harness/prompts/my_prompt.yaml"
 
     def test_absolute_path_raises(self):
-        with pytest.raises(ValueError, match="control_plane/prompts"):
+        with pytest.raises(ValueError, match="refinement_harness/prompts"):
             _safe_prompt_path("/absolute/path.yaml", "prompt")
 
     def test_dotdot_traversal_raises(self):
         with pytest.raises(ValueError):
-            _safe_prompt_path("control_plane/prompts/../secrets.yaml", "prompt")
+            _safe_prompt_path("refinement_harness/prompts/../secrets.yaml", "prompt")
 
     def test_wrong_directory_raises(self):
         with pytest.raises(ValueError):
@@ -179,12 +179,12 @@ class TestSafePromptPath:
 
     def test_non_yaml_extension_raises(self):
         with pytest.raises(ValueError):
-            _safe_prompt_path("control_plane/prompts/my_prompt.txt", "my_prompt")
+            _safe_prompt_path("refinement_harness/prompts/my_prompt.txt", "my_prompt")
 
     def test_prompt_id_sanitized_in_default(self):
         result = _safe_prompt_path(None, "my prompt!!")
         # Should sanitize the prompt_id before using in default path
-        assert result.startswith("control_plane/prompts/")
+        assert result.startswith("refinement_harness/prompts/")
         assert result.endswith(".yaml")
 
 

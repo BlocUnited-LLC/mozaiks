@@ -27,7 +27,7 @@ routing:
         feature:
           workflow_sequence: app_revision
         core:
-                  workflow_sequence: full_rebuild
+          workflow_sequence: full_rebuild
 checkpoints:
   - event: request_submitted
     prompt_id: change_classifier_system

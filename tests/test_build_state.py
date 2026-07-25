@@ -38,10 +38,10 @@ def _build_workspace(tmp_path: Path) -> Path:
         },
     )
     (bundle_root / "app" / "config").mkdir(parents=True, exist_ok=True)
-    (bundle_root / "app" / "config" / "llm.yaml").write_text(
+    (bundle_root / "app" / "config" / "refinement_policy.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.runtime",
+                "schema_version: mozaiks.refinement.policy.v1",
                 "enabled: true",
                 "classifier:",
                 "  enabled: true",
@@ -69,7 +69,7 @@ def test_build_summary_defaults_without_saved_state(tmp_path: Path) -> None:
     assert summary["studio"]["route"] == "/apps/app/build"
     assert "journey" not in summary["app"]
     assert "first_goal" not in summary["app"]
-    assert summary["ai"]["control_plane"]["enabled"] is True
+    assert summary["ai"]["refinement_policy"]["enabled"] is True
     assert summary["build"]["plan_state"] == "not_started"
     assert summary["build"]["approval_state"] == "not_started"
     assert summary["build"]["current_request"]["text"] == ""

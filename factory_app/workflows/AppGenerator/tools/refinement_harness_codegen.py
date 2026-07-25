@@ -8,13 +8,13 @@ import yaml
 from pydantic import ValidationError
 
 from factory_app.workflows.AppGenerator.tools.default_runtime_configs import (
-    load_default_control_plane_runtime_config,
+    load_default_refinement_policy_config,
 )
 
-_CONTROL_PLANE_CONFIG = "control_plane/config/control_plane.yaml"
-_CONTROL_PLANE_RUNTIME = "app/config/llm.yaml"
-_CONTROL_PLANE_TOOLS = "control_plane/config/tools.yaml"
-_CONTROL_PLANE_POLICIES = "control_plane/config/policies.yaml"
+_HARNESS_CONFIG = "refinement_harness/config/harness.yaml"
+_REFINEMENT_POLICY = "app/config/refinement_policy.yaml"
+_HARNESS_TOOLS = "refinement_harness/config/tools.yaml"
+_HARNESS_POLICIES = "refinement_harness/config/policies.yaml"
 
 
 def _dump_yaml(data: dict[str, Any]) -> str:
@@ -24,7 +24,7 @@ def _dump_yaml(data: dict[str, Any]) -> str:
 def _safe_prompt_id(prompt_id: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", prompt_id.strip()).strip("_")
     if not cleaned:
-        raise ValueError("control-plane prompt id must contain at least one safe character")
+        raise ValueError("refinement harness prompt id must contain at least one safe character")
     return cleaned
 
 
@@ -32,22 +32,22 @@ def _safe_prompt_path(raw: Any, prompt_id: str) -> str:
     safe_id = _safe_prompt_id(prompt_id)
     candidate = str(raw or "").replace("\\", "/").strip()
     if not candidate:
-        candidate = f"control_plane/prompts/{safe_id}.yaml"
+        candidate = f"refinement_harness/prompts/{safe_id}.yaml"
     path = PurePosixPath(candidate)
     if (
         path.is_absolute()
         or any(part == ".." for part in path.parts)
-        or not candidate.startswith("control_plane/prompts/")
+        or not candidate.startswith("refinement_harness/prompts/")
         or path.suffix != ".yaml"
     ):
         raise ValueError(
-            "control-plane prompt files must live under control_plane/prompts/*.yaml"
+            "refinement harness prompt files must live under refinement_harness/prompts/*.yaml"
         )
     return str(path)
 
 
-def _validate_control_plane_manifest(manifest_dict: dict[str, Any]) -> None:
-    """Parse the generated control_plane.yaml through the runtime schema.
+def _validate_refinement_harness_manifest(manifest_dict: dict[str, Any]) -> None:
+    """Parse the generated harness.yaml through the runtime schema.
 
     This catches structural errors (extra fields, wrong field names, missing
     required fields) at generation time rather than when the app loads the pack.
@@ -55,8 +55,8 @@ def _validate_control_plane_manifest(manifest_dict: dict[str, Any]) -> None:
     deferred to the loader — the generator may run before the registry is stable.
 
     The import is deferred to avoid a circular import:
-    control_plane_pack_codegen → mozaiksai.control_plane → coding_worker →
-    app_validation → code_file_utils → control_plane_pack_codegen.
+    refinement_harness_codegen → mozaiksai.control_plane → coding_worker →
+    app_validation → code_file_utils → refinement_harness_codegen.
     """
     from mozaiksai.control_plane.schema import ControlPlaneManifest  # noqa: PLC0415
 
@@ -64,34 +64,34 @@ def _validate_control_plane_manifest(manifest_dict: dict[str, Any]) -> None:
         ControlPlaneManifest.model_validate(manifest_dict)
     except ValidationError as exc:
         raise ValueError(
-            f"Generated control_plane.yaml failed schema validation: {exc}"
+            f"Generated refinement_harness/config/harness.yaml failed schema validation: {exc}"
         ) from exc
 
 
-def build_control_plane_pack_code_files(raw: Any) -> list[dict[str, str]]:
-    """Materialize a typed ControlPlanePackBundle into bundle files."""
+def build_refinement_harness_code_files(raw: Any) -> list[dict[str, str]]:
+    """Materialize a typed RefinementHarnessBundle into bundle files."""
 
     if not isinstance(raw, dict):
         return []
 
-    control_plane_yaml = raw.get("control_plane_yaml")
+    harness_yaml = raw.get("harness_yaml")
     tools_yaml = raw.get("tools_yaml")
-    if not isinstance(control_plane_yaml, dict):
-        raise ValueError("control_plane_pack.control_plane_yaml must be an object")
+    if not isinstance(harness_yaml, dict):
+        raise ValueError("refinement_harness.harness_yaml must be an object")
     if not isinstance(tools_yaml, dict):
-        raise ValueError("control_plane_pack.tools_yaml must be an object")
+        raise ValueError("refinement_harness.tools_yaml must be an object")
 
-    _validate_control_plane_manifest(control_plane_yaml)
+    _validate_refinement_harness_manifest(harness_yaml)
 
     files: dict[str, str] = {
-        _CONTROL_PLANE_CONFIG: _dump_yaml(control_plane_yaml),
-        _CONTROL_PLANE_RUNTIME: _dump_yaml(load_default_control_plane_runtime_config()),
-        _CONTROL_PLANE_TOOLS: _dump_yaml(tools_yaml),
+        _HARNESS_CONFIG: _dump_yaml(harness_yaml),
+        _REFINEMENT_POLICY: _dump_yaml(load_default_refinement_policy_config()),
+        _HARNESS_TOOLS: _dump_yaml(tools_yaml),
     }
 
     policies_yaml = raw.get("policies_yaml")
     if isinstance(policies_yaml, dict) and policies_yaml:
-        files[_CONTROL_PLANE_POLICIES] = _dump_yaml(policies_yaml)
+        files[_HARNESS_POLICIES] = _dump_yaml(policies_yaml)
 
     prompt_files = raw.get("prompt_files")
     if isinstance(prompt_files, list):
@@ -108,5 +108,5 @@ def build_control_plane_pack_code_files(raw: Any) -> list[dict[str, str]]:
     return [{"filename": name, "content": content} for name, content in sorted(files.items())]
 
 
-__all__ = ["build_control_plane_pack_code_files"]
+__all__ = ["build_refinement_harness_code_files"]
 

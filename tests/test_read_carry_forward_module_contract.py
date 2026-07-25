@@ -91,13 +91,13 @@ def _ctx(
 class TestReturnsModuleYaml:
     @pytest.mark.asyncio
     async def test_module_yaml_content_returned(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map("notifications")
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -114,13 +114,13 @@ class TestReturnsModuleYaml:
 
     @pytest.mark.asyncio
     async def test_module_yaml_in_available_files(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map("notifications")
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -139,7 +139,7 @@ class TestReturnsModuleYaml:
 class TestSelectedContractFiles:
     @pytest.mark.asyncio
     async def test_returns_only_requested_files(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map(
@@ -151,7 +151,7 @@ class TestSelectedContractFiles:
         )
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -167,13 +167,13 @@ class TestSelectedContractFiles:
 
     @pytest.mark.asyncio
     async def test_null_files_returns_all_available(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map("notifications")
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -189,7 +189,7 @@ class TestSelectedContractFiles:
 
     @pytest.mark.asyncio
     async def test_runtime_extensions_yaml_returnable(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map(
@@ -198,7 +198,7 @@ class TestSelectedContractFiles:
         )
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -213,7 +213,7 @@ class TestSelectedContractFiles:
 
     @pytest.mark.asyncio
     async def test_profile_yaml_returnable(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map(
@@ -222,7 +222,7 @@ class TestSelectedContractFiles:
         )
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -236,7 +236,7 @@ class TestSelectedContractFiles:
 
     @pytest.mark.asyncio
     async def test_relationships_yaml_returnable(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map(
@@ -245,7 +245,7 @@ class TestSelectedContractFiles:
         )
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -260,7 +260,7 @@ class TestSelectedContractFiles:
 
     @pytest.mark.asyncio
     async def test_policy_hooks_yaml_returnable(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map(
@@ -269,7 +269,7 @@ class TestSelectedContractFiles:
         )
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -290,7 +290,7 @@ class TestSelectedContractFiles:
 class TestRejectsDisallowedFiles:
     @pytest.mark.asyncio
     async def test_backend_handler_py_rejected(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = {
@@ -299,7 +299,7 @@ class TestRejectsDisallowedFiles:
         }
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -314,13 +314,13 @@ class TestRejectsDisallowedFiles:
 
     @pytest.mark.asyncio
     async def test_backend_service_py_rejected(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = {"modules/auth/module.yaml": _MODULE_YAML_CONTENT}
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -336,13 +336,13 @@ class TestRejectsDisallowedFiles:
     @pytest.mark.asyncio
     async def test_allowed_files_not_blocked_alongside_disallowed(self) -> None:
         """Allowed files are returned even when disallowed ones are mixed in."""
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = _make_file_map("notifications")
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -364,13 +364,13 @@ class TestRejectsDisallowedFiles:
 class TestRejectsPathTraversal:
     @pytest.mark.asyncio
     async def test_path_traversal_in_files_rejected(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = {"modules/auth/module.yaml": _MODULE_YAML_CONTENT}
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -385,11 +385,11 @@ class TestRejectsPathTraversal:
 
     @pytest.mark.asyncio
     async def test_invalid_module_id_returns_empty(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
         ) as mock_load:
             result = await read_carry_forward_module_contract(
@@ -404,11 +404,11 @@ class TestRejectsPathTraversal:
 
     @pytest.mark.asyncio
     async def test_module_id_with_slash_rejected(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
         ) as mock_load:
             result = await read_carry_forward_module_contract(
@@ -421,13 +421,13 @@ class TestRejectsPathTraversal:
 
     @pytest.mark.asyncio
     async def test_arbitrary_filename_rejected(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = {"modules/auth/module.yaml": _MODULE_YAML_CONTENT}
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -450,13 +450,13 @@ class TestRejectsPathTraversal:
 class TestMissingModule:
     @pytest.mark.asyncio
     async def test_warning_when_module_not_in_workspace(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = {"modules/settings/module.yaml": _MODULE_YAML_CONTENT}
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -471,11 +471,11 @@ class TestMissingModule:
 
     @pytest.mark.asyncio
     async def test_empty_workspace_triggers_warning(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace({}),
         ):
@@ -489,11 +489,11 @@ class TestMissingModule:
 
     @pytest.mark.asyncio
     async def test_absent_workspace_returns_warning(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_absent_workspace("artifact_not_found"),
         ):
@@ -513,14 +513,14 @@ class TestMissingModule:
 class TestMissingFiles:
     @pytest.mark.asyncio
     async def test_missing_requested_file_in_missing_files(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         # Only module.yaml exists; events.yaml does not
         file_map = {"modules/notifications/module.yaml": _MODULE_YAML_CONTENT}
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -537,13 +537,13 @@ class TestMissingFiles:
 
     @pytest.mark.asyncio
     async def test_all_requested_missing_files_listed(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         file_map = {"modules/notifications/module.yaml": _MODULE_YAML_CONTENT}
 
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(file_map),
         ):
@@ -559,11 +559,11 @@ class TestMissingFiles:
 
     @pytest.mark.asyncio
     async def test_never_raises_on_missing(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace({}),
         ):
@@ -583,11 +583,11 @@ class TestMissingFiles:
 class TestDelegatesWorkspaceLoading:
     @pytest.mark.asyncio
     async def test_load_artifact_workspace_called(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(_make_file_map()),
         ) as mock_load:
@@ -600,11 +600,11 @@ class TestDelegatesWorkspaceLoading:
 
     @pytest.mark.asyncio
     async def test_workspace_called_with_correct_ids(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             return_value=_make_workspace(_make_file_map()),
         ) as mock_load:
@@ -622,11 +622,11 @@ class TestDelegatesWorkspaceLoading:
 
     @pytest.mark.asyncio
     async def test_missing_app_id_skips_load(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
         ) as mock_load:
             result = await read_carry_forward_module_contract(
@@ -639,11 +639,11 @@ class TestDelegatesWorkspaceLoading:
 
     @pytest.mark.asyncio
     async def test_missing_prev_ref_skips_load(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
         ) as mock_load:
             result = await read_carry_forward_module_contract(
@@ -656,11 +656,11 @@ class TestDelegatesWorkspaceLoading:
 
     @pytest.mark.asyncio
     async def test_load_exception_returns_warning_not_raise(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         with patch(
-            "factory_app.control_plane.tools.read_carry_forward_module_contract.load_artifact_workspace",
+            "factory_app.refinement_harness.tools.read_carry_forward_module_contract.load_artifact_workspace",
             new_callable=AsyncMock,
             side_effect=RuntimeError("simulated db failure"),
         ):
@@ -683,7 +683,7 @@ class TestReadOnly:
         module_path = (
             Path(__file__).resolve().parents[1]
             / "factory_app"
-            / "control_plane"
+            / "refinement_harness"
             / "tools"
             / "read_carry_forward_module_contract.py"
         )
@@ -707,7 +707,7 @@ class TestReadOnly:
         module_path = (
             Path(__file__).resolve().parents[1]
             / "factory_app"
-            / "control_plane"
+            / "refinement_harness"
             / "tools"
             / "read_carry_forward_module_contract.py"
         )
@@ -722,7 +722,7 @@ class TestReadOnly:
     @pytest.mark.asyncio
     async def test_result_is_always_dict(self) -> None:
         """Return type is always dict regardless of inputs."""
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         # Call with completely missing context
@@ -790,13 +790,13 @@ class TestRegistration:
         cp_tools_path = (
             Path(__file__).resolve().parents[1]
             / "factory_app"
-            / "control_plane"
+            / "refinement_harness"
             / "config"
             / "tools.yaml"
         )
         content = cp_tools_path.read_text(encoding="utf-8")
         assert "read_carry_forward_module_contract" not in content, (
-            "read_carry_forward_module_contract should not be in control_plane/config/tools.yaml "
+            "read_carry_forward_module_contract should not be in refinement_harness/config/tools.yaml "
             "(it is a workflow-level tool, not a checkpoint-level tool)"
         )
 
@@ -809,7 +809,7 @@ class TestRegistration:
 
     def test_core_module_importable(self) -> None:
         """Core control-plane module must be importable."""
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             read_carry_forward_module_contract,
         )
         assert callable(read_carry_forward_module_contract)
@@ -866,13 +866,13 @@ class TestAppPlanAgentGuidance:
 
 class TestExistingTestsUnaffected:
     def test_get_carry_forward_candidates_still_importable(self) -> None:
-        from factory_app.control_plane.tools.get_carry_forward_candidates import (
+        from factory_app.refinement_harness.tools.get_carry_forward_candidates import (
             get_carry_forward_candidates,
         )
         assert callable(get_carry_forward_candidates)
 
     def test_extract_module_inventory_still_importable(self) -> None:
-        from factory_app.control_plane.tools._module_inventory import (
+        from factory_app.refinement_harness.tools._module_inventory import (
             classify_module_carry_forward,
             extract_module_inventory,
         )
@@ -880,7 +880,7 @@ class TestExistingTestsUnaffected:
         assert callable(classify_module_carry_forward)
 
     def test_allowed_files_constant_correct(self) -> None:
-        from factory_app.control_plane.tools.read_carry_forward_module_contract import (
+        from factory_app.refinement_harness.tools.read_carry_forward_module_contract import (
             _ALLOWED_CONTRACT_FILES,
         )
         required = {

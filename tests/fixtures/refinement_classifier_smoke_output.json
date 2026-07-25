@@ -232,7 +232,7 @@
   "classifier_llm_config": {
     "model": "gpt-5-nano"
   },
-  "control_plane_profile": "mozaiks.control_plane.runtime",
+  "control_plane_profile": "mozaiks.refinement.policy.v1",
   "generated_files_unchanged": true,
   "generated_status_after": [],
   "generated_status_before": [],

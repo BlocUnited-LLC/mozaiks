@@ -52,7 +52,7 @@ Covers:
 """
 from __future__ import annotations
 
-from factory_app.control_plane.tools._module_inventory import (
+from factory_app.refinement_harness.tools._module_inventory import (
     _crud_action_count,
     _extract_action_ids,
     _extract_event_types,

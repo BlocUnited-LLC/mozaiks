@@ -11,7 +11,7 @@ Deterministic app behavior is owned by app bundles hosted by `mozaiksai.hosts.pl
 ```text
 mozaiks/                           # Canonical Mozaiks repo
 ├── mozaiksai/                     # AI workflow runtime (first-class)
-│   └── control_plane/             # Builder session harness runtime (Studio-only)
+│   └── control_plane/             # Refinement engine runtime (internal package name retained)
 ├── chat-ui/                       # Chat interface primitives (first-class)
 ├── web_shell/                     # Local Vite shell host source
 ├── factory_app/                   # First-party Studio app bundle + shared workflows
@@ -22,8 +22,8 @@ mozaiks/                           # Canonical Mozaiks repo
 │   │   ├── modules/
 │   │   └── ui/
 │   ├── build_context/             # Factory-owned build-time prompt/catalog context
-│   ├── control_plane/             # Declarative builder harness pack (Studio-owned)
-│   │   ├── config/                # control_plane.yaml, tools.yaml, policies.yaml
+│   ├── refinement_harness/        # Declarative builder refinement harness (Studio-owned)
+│   │   ├── config/                # harness.yaml, tools.yaml, policies.yaml
 │   │   ├── prompts/               # System prompt files per checkpoint
 │   │   └── tools/                 # Context-loading Python tool implementations
 │   └── workflows/
@@ -71,7 +71,7 @@ my-app/
 
 - The first-party factory layer lives under `factory_app/`
 - Hosted product workspaces consume the same self-contained app-root contract
-- `app/config/ai.json` is the canonical app-level AI boot contract, including optional `control_plane` settings for builder-session harnesses and future coding-agent refinement workers
+- `app/config/ai.json` is the canonical app-level AI boot contract for chat/workflow startup; `app/config/refinement_policy.yaml` owns app-local refinement model profiles and feature flags
 - `app/data/contract.json` is the canonical app data contract
 - `app/services/` is the canonical app-owned service implementation lane
 - `build_context/`, when present, is workspace-level declarative build-time
@@ -89,7 +89,7 @@ Most AI products treat each interaction as isolated. Mozaiks treats every intera
 This means:
 - **Workflows are execution primitives**, not the top-level product abstraction
 - **Artifacts are durable, versioned state** — not disposable chat outputs
-- **The control plane is the continuity layer** — it interprets intent against current system state and routes to the correct execution context
+- **The Refinement Engine is the continuity layer** — it interprets intent against current system state and routes to the correct execution context
 - **`factory_app` is the first-party builder/reference app workspace** — a Mozaiks app workspace that dogfoods the canonical app contract while hosting the builder experience; it does not define the limits of the runtime
 
 Mozaiks is not primarily an app builder, a group-chat framework, or a workflow engine. It is the runtime layer that lets generated systems evolve.
@@ -114,7 +114,7 @@ Customer-facing terminology follows a different layer:
 **Working modes:**
 
 1. **Framework/platform mode** — `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, `mozaiksai/`, `chat-ui/`, `web_shell/`, repo-local infrastructure/packaging
-2. **Factory mode** — `factory_app/workflows/`, `factory_app/control_plane/` — the builder/generator workflows, agent configs, structured outputs, and control plane pack
+2. **Factory mode** — `factory_app/workflows/`, `factory_app/refinement_harness/` — the builder/generator workflows, agent configs, structured outputs, and refinement harness
 3. **Studio mode** — `mozaiksai.hosts.studio`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
 4. **Hosted product contract mode** — contracts that external hosted product workspaces consume; concrete hosted-product hosts live in those product workspaces
 
@@ -148,7 +148,7 @@ The visible product model on top of those hosts is:
 ### Universal Substrate vs Framework Capabilities
 
 - **Universal substrate** — code every downstream app runtime depends on: `mozaiksai/`, `mozaiksai.hosts.runtime`, `mozaiksai.hosts.platform`, core `chat-ui/` primitives.
-- **Framework-owned optional capabilities** — first-class in the distribution but not mandatory for every downstream app at runtime: `factory_app/`, Studio, CLI, control plane.
+- **Framework-owned optional capabilities** — first-class in the distribution but not mandatory for every downstream app at runtime: `factory_app/`, Studio, CLI, Refinement Engine.
 
 See [docs/architecture/modules-systems/framework-capability-classification.md](docs/architecture/modules-systems/framework-capability-classification.md).
 
@@ -199,7 +199,7 @@ See [docs/architecture/modules-systems/framework-capability-classification.md](d
 
 ### 3. Factory Layer (Builder / Generator)
 
-**Purpose:** The builder/generator intelligence — the declarative workflows, agent configurations, control plane, and artifact assembly logic that generate app workspaces. This is not the management UI; it is what the Studio management UI executes and surfaces.
+**Purpose:** The builder/generator intelligence — the declarative workflows, agent configurations, Refinement Engine routing, and artifact assembly logic that generate app workspaces. This is not the management UI; it is what the Studio management UI executes and surfaces.
 
 **Owns:**
 - Shared builder/generator workflows: `AppGenerator`, `AgentGenerator`, `DesignDocs`, `ValueEngine`
@@ -238,10 +238,10 @@ Quality gates:
 - `factory_app/workflows/_shared/` — shared factory prompt/catalog helpers
 - `factory_app/build_context/{context_name}/context.yaml` — named build-context
   registries for static catalogs, contracts, reusable packs, and templates
-- `factory_app/control_plane/` — declarative builder harness pack
-- `mozaiksai/control_plane/` — harness runtime implementation (mounted by Studio host)
+- `factory_app/refinement_harness/` — declarative builder harness pack
+- `mozaiksai/control_plane/` — refinement engine runtime implementation (internal package name retained; mounted by Studio host)
 
-Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, `control_plane/`) with the Studio first-party app bundle (`app/`). These are separate concerns sharing a monorepo directory — `factory_app/` is not a synonym for either.
+Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, `refinement_harness/`) with the Studio first-party app bundle (`app/`). These are separate concerns sharing a monorepo directory — `factory_app/` is not a synonym for either.
 
 ### 4. Studio Layer (Shared Management Interface)
 
@@ -257,7 +257,7 @@ Note: `factory_app/` as a directory co-locates the Factory layer (`workflows/`, 
 - Workflow and module inspection
 - Platform-management surfaces including the admin portal
 - Local preview controls
-- Activating and mounting the builder session harness (control plane)
+- Activating and mounting the Refinement Engine
 
 **Must not own:**
 - The builder/generator workflow content — that belongs in the Factory layer
@@ -298,7 +298,7 @@ Shared factory workflows live in `factory_app/workflows/`. A running host resolv
 - Product/app hosts use workspace-root `workflows/` when present
 - Build is coordinated by `workflow_sequences` in `factory_app/workflows/extended_orchestration/extension_registry.json`; `ValueEngine`, `ThemeCapture`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` are individual workflows inside those sequences
 - `ExistingAppDiscovery` belongs to the brownfield adoption sequence rather than the default greenfield build path
-- Refinement today is checkpoint/control-plane re-entry driven by `app/config/ai.json` plus `factory_app/control_plane/config/control_plane.yaml`, not a dedicated `RefinementWorkflow`
+- Refinement today is checkpoint-driven re-entry through `app/config/refinement_policy.yaml` plus `factory_app/refinement_harness/config/harness.yaml`, not a dedicated `RefinementWorkflow`
 
 `AppGenerator` and `AgentGenerator` write all output into `MOZAIKS_GENERATED_ARTIFACTS_PATH` (defaults to `generated/`). Promotion is the only path from `generated/` into an active app root.
 
@@ -355,9 +355,9 @@ Key: a feature is not CLI just because it runs locally — if it's management UI
 
 ---
 
-## Control Plane (Builder Session Harness)
+## Refinement Engine
 
-The control plane is a **checkpoint-driven semantic harness** that sits above the workflow layer. Its job is to intercept natural-language user intent at defined decision points, classify what kind of change the user is requesting, and route to the correct workflow — rather than letting individual workflows guess context.
+The Refinement Engine is a **checkpoint-driven semantic runtime** that sits above the workflow layer. Its job is to intercept natural-language user intent at defined decision points, classify what kind of change the user is requesting, and route to the correct workflow — rather than letting individual workflows guess context.
 
 A core distinction the harness enforces is **refinement vs revision**:
 
@@ -366,7 +366,7 @@ A core distinction the harness enforces is **refinement vs revision**:
 
 Without this distinction, every user request either re-runs the full workflow unnecessarily or patches blindly without considering downstream impact. The harness is what makes the system behave like a coherent runtime rather than a sequence of isolated group chats.
 
-The control plane is **Studio-owned**. It is mounted by `mozaiksai.hosts.studio` at startup and is NOT loaded by generated app workspaces or `mozaiksai.hosts.platform`. An `app/config/ai.json` may declare a `control_plane` key for future support, but today only the Studio host activates the harness.
+The Refinement Engine is always available to Studio. Generated app workspaces do not copy the runtime implementation. An app may add an optional declarative **Refinement Harness** at `<workspace>/refinement_harness/` when it needs app-specific checkpoint routing. App-local model/profile policy lives in `app/config/refinement_policy.yaml`.
 
 ### How It Differs From Other Routing Mechanisms
 
@@ -375,49 +375,48 @@ The control plane is **Studio-owned**. It is mounted by `mozaiksai.hosts.studio`
 | `triggers` in `orchestrator.yaml` | Workflow | External events that start/resume a specific workflow |
 | `task_batches.yaml` | Intra-workflow | AG2 task batches for bounded parallel work inside one workflow |
 | `extension_registry.json` transitions | Pre-workflow | Static graph of build-step transitions between workflows |
-| **Control plane checkpoints** | **Above all workflows** | **Semantic classification of user intent → dynamic workflow routing** |
+| **Refinement Engine checkpoints** | **Above all workflows** | **Semantic classification of user intent → dynamic workflow routing** |
 
-The control plane does not execute business logic. It classifies intent and routes. All execution still happens inside workflows. When no checkpoint matches or the harness is not loaded, the system falls back to `extension_registry.json`.
+The Refinement Engine does not execute business logic. It classifies intent and routes. All execution still happens inside workflows. When no checkpoint matches or no app-local harness is loaded, the system falls back to `extension_registry.json`.
 
 ### Directory Structure
 
 **Declarative pack (Studio-owned):**
 
 ```text
-factory_app/control_plane/
+factory_app/refinement_harness/
 ├── config/
-│   ├── control_plane.yaml   # Checkpoints, classifier config, routing rules
+│   ├── harness.yaml   # Checkpoints, classifier config, routing rules
 │   ├── tools.yaml           # Tool bindings for context-loading tools
 │   └── policies.yaml        # Artifact-specific routing policies per change class
 ├── prompts/
-│   ├── intent_classifier.md # System prompt: classify patch|design|feature|core
-│   ├── scope_resolver.md    # System prompt: resolve scope from conversation context
-│   └── routing_advisor.md   # System prompt: recommend workflow given classification
+│   ├── change_classifier_system.yaml
+│   ├── coding_scope_selection_system.yaml
+│   ├── coding_refinement_system.yaml
+│   └── contract_surface_selection_system.yaml
 └── tools/
-    ├── load_app_context.py
-    ├── load_build_history.py
-    ├── load_active_workflow.py
-    ├── load_schema_context.py
-    ├── load_module_context.py
-    └── load_artifact_context.py
+    ├── get_artifact_summary.py
+    ├── get_artifact_workspace_catalog.py
+    ├── get_artifact_workspace_scope.py
+    ├── get_context_graph_catalog.py
+    └── get_context_graph_scope.py
 ```
 
 **Runtime implementation:**
 
 ```text
 mozaiksai/control_plane/
-├── harness.py           # ControlPlaneHarness: checkpoint evaluation + routing
-├── classifier.py        # LLM-based intent classifier (patch|design|feature|core)
-├── checkpoints.py       # Checkpoint definitions and evaluation logic
-├── router.py            # Maps (checkpoint × classification) → target workflow
-└── context_loader.py    # Aggregates context tool results for classifier prompts
+├── runtime.py           # Checkpoint runtime and handler resolution
+├── loader.py            # Refinement harness loading and validation
+├── schema.py            # Strict harness/tool/policy schemas
+└── implementations/     # Classifier, router, scope, decision, and coding workers
 ```
 
-`factory_app/app/modules/factory_control_plane/` contains a module identity plus a stub `backend/handler.py` only — no actions, capabilities, or runtime behavior. It surfaces the control plane as a named entity in the Studio module list only. Do not add logic there.
+`factory_app/app/modules/factory_control_plane/` contains a module identity plus a stub `backend/handler.py` only — no actions, capabilities, or runtime behavior. It surfaces the refinement engine as a named entity in the Studio module list only. Do not add logic there.
 
 ### Runtime Capabilities
 
-`factory_app/app/config/llm.yaml` declares which control-plane capabilities are active and which LLM profile each uses. These are loaded into `ControlPlaneConfig` at startup.
+`factory_app/app/config/refinement_policy.yaml` declares which refinement capabilities are active and which LLM profile each uses. These are loaded into `ControlPlaneConfig` at startup.
 
 | Capability | Field | Purpose | Default profile |
 |------------|-------|---------|-----------------|
@@ -426,7 +425,7 @@ mozaiksai/control_plane/
 | Contract surface | `contract_surface` | Validates and refines module/workflow contracts | `codegen` |
 | Scope proposal | `scope` | Proposes the narrowest safe file scope for a coding refinement | `codegen` (falls back to `coding` if not declared) |
 
-Each capability has `enabled: bool` and an `llm_profile` reference. Operator packs can override the LLM profile or disable individual capabilities without affecting others. The `scope` capability drives `ScopeProposer` — it resolves `scope` first, then falls back to `coding`, so existing `llm.yaml` files that predate `scope` continue to work.
+Each capability has `enabled: bool` and an `llm_profile` reference. Operator packs can override the LLM profile or disable individual capabilities without affecting others. The `scope` capability drives `ScopeProposer` — it resolves `scope` first, then falls back to `coding`, so existing `refinement_policy.yaml` files that predate `scope` continue to work.
 
 ### Checkpoints
 
@@ -453,7 +452,7 @@ The routing policy in `policies.yaml` maps each (artifact type × classification
 
 ### How the Harness Wires In
 
-`mozaiksai.hosts.studio` loads the control plane pack from `factory_app/control_plane/` at startup and registers `ControlPlaneHarness` on the session lifecycle hook. When a builder session event matches a checkpoint condition, the harness:
+`mozaiksai.hosts.studio` loads the refinement harness from `factory_app/refinement_harness/` at startup and registers `ControlPlaneHarness` on the session lifecycle hook. When a builder session event matches a checkpoint condition, the harness:
 
 1. Loads context via the declared tools
 2. Runs the classifier prompt against the loaded context
@@ -642,7 +641,7 @@ workspace/
 ├── app/
 │   ├── app.json                    # App identity + startup intent + admins bootstrap
 │   ├── config/
-│   │   ├── ai.json                 # LLM provider, model, optional control_plane key
+│   │   ├── ai.json                 # LLM provider, model, and workflow startup
 │   │   ├── auth.yaml               # Authenticated apps: provider-neutral OIDC behavior/env contract
 │   │   ├── shell.json              # Header/footer/profile/notification chrome
 │   │   ├── integrations.yaml       # External/hosted capability requirements
@@ -830,7 +829,7 @@ These invariants guide every implementation decision in this repo.
 - Don't put CRUD/user-state logic in mozaiksai
 - Don't hardcode workflow behavior in the runtime (use declarative configs)
 - Don't add duplicate interfaces or aliases (make canonical changes)
-- Don't confuse `task_batches.yaml` (workflow-local parallel task work), `triggers` (external events), `extension_registry.json` (static transitions), and control plane (semantic routing) — see the comparison table in the Control Plane section
+- Don't confuse `task_batches.yaml` (workflow-local parallel task work), `triggers` (external events), `extension_registry.json` (static transitions), and the Refinement Engine (semantic routing) — see the comparison table in the Refinement Engine section
 - Don't let generators write into active runtime paths — all output goes to `generated/`
 - Don't grow CLI into Studio concerns (management state, artifacts, run history) or Studio into CLI concerns (filesystem, scaffolding)
 
@@ -859,11 +858,13 @@ These invariants guide every implementation decision in this repo.
 | runtime ingress | boundary that accepts validated app/domain events and routes them to workflow triggers |
 | triggers | workflow start/resume declarations in `orchestrator.yaml` |
 | AppGenerator | workflow that generates deterministic app bundle artifacts: `app.json`, pages, config, brand patches, module manifest families, and backend code |
-| control plane | checkpoint-driven semantic harness above the workflow layer — classifies user intent into `patch\|design\|feature\|core` and routes to the correct workflow; Studio-only |
-| checkpoint | named decision point where the control plane intercepts before launching or resuming a workflow; has a trigger condition, context-loading step, classifier prompt, and routing policy |
-| change classification | intent class assigned by the control plane classifier: `patch` (small fix), `design` (visual/structural), `feature` (new capability), `core` (architectural) |
-| `factory_app/control_plane/` | declarative builder harness pack: checkpoint config, classifier prompts, routing policies, and context-loading tool implementations |
-| `mozaiksai/control_plane/` | runtime implementation of the control plane harness: `ControlPlaneHarness`, classifier, checkpoint evaluation, and router |
+| Refinement Engine | checkpoint-driven semantic runtime above the workflow layer — classifies user intent into `patch\|design\|feature\|core` and routes to the correct workflow |
+| Refinement Harness | optional app/factory declarative bundle under `refinement_harness/` containing routing, checkpoint, prompt, tool, and policy declarations |
+| Refinement Policy | app-local model/profile/feature policy at `app/config/refinement_policy.yaml` |
+| checkpoint | named decision point where the Refinement Engine intercepts before launching or resuming a workflow; has a trigger condition, context-loading step, classifier prompt, and routing policy |
+| change classification | intent class assigned by the refinement classifier: `patch` (small fix), `design` (visual/structural), `feature` (new capability), `core` (architectural) |
+| `factory_app/refinement_harness/` | declarative builder harness pack: checkpoint config, classifier prompts, routing policies, and context-loading tool implementations |
+| `mozaiksai/control_plane/` | runtime implementation package for the Refinement Engine; internal package name retained for compatibility |
 
 
 

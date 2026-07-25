@@ -25,8 +25,8 @@ def test_contributing_quickstart_states_repo_and_build_truth() -> None:
     assert "AppGenerator` is one workflow inside that build system, not the whole build" in quickstart
     assert "checkpoint and control-plane re-entry" in quickstart
     assert "RefinementWorkflow" in quickstart
-    assert "app/config/llm.yaml" in quickstart
-    assert "control_plane/config/control_plane.yaml" in quickstart
+    assert "app/config/refinement_policy.yaml" in quickstart
+    assert "refinement_harness/config/harness.yaml" in quickstart
 
 
 def test_contributing_quickstart_contains_common_task_map() -> None:

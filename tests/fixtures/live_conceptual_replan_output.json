@@ -9,7 +9,7 @@
   },
   "approach": {
     "live": [
-      "RefinementTriggerRouteResolver with real control-plane pack",
+      "RefinementTriggerRouteResolver with real refinement harness",
       "AppPlanAgent via OpenAI (gpt-4o-mini) with full conceptual_replan context",
       "resolve_carry_forward_preservation Phase 7A with real LLM decisions"
     ],

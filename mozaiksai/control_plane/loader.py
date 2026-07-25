@@ -21,67 +21,67 @@ from .schema import (
 
 
 class ControlPlanePackLoadError(Exception):
-    """Raised when a control-plane pack cannot be found or validated."""
+    """Raised when a refinement harness cannot be found or validated."""
 
 
 CONTROL_PLANE_TOOL_TARGETS: set[str] = {"harness", *ControlPlaneCheckpointEvent.__args__}  # type: ignore[attr-defined]
 
 
-def resolve_factory_control_plane_root() -> Path:
-    return (Path(__file__).resolve().parents[2] / "factory_app" / "control_plane").resolve()
+def resolve_factory_refinement_harness_root() -> Path:
+    return (Path(__file__).resolve().parents[2] / "factory_app" / "refinement_harness").resolve()
 
 
-def resolve_app_control_plane_root(app_root: Path | None = None) -> Path:
+def resolve_app_refinement_harness_root(app_root: Path | None = None) -> Path:
     from mozaiksai.core.workflow.paths import resolve_active_app_root
 
     root = app_root or resolve_active_app_root()
-    return (root.parent / "control_plane").resolve()
+    return (root.parent / "refinement_harness").resolve()
 
 
-def resolve_control_plane_pack_path(
+def resolve_refinement_harness_path(
     *,
     app_root: Path | None = None,
     factory_root: Path | None = None,
 ) -> Path:
-    app_candidate = resolve_app_control_plane_root(app_root)
-    if (app_candidate / "config" / "control_plane.yaml").exists():
+    app_candidate = resolve_app_refinement_harness_root(app_root)
+    if (app_candidate / "config" / "harness.yaml").exists():
         return app_candidate
 
-    factory_candidate = factory_root or resolve_factory_control_plane_root()
-    if (factory_candidate / "config" / "control_plane.yaml").exists():
+    factory_candidate = factory_root or resolve_factory_refinement_harness_root()
+    if (factory_candidate / "config" / "harness.yaml").exists():
         return factory_candidate.resolve()
 
     raise ControlPlanePackLoadError(
-        "Control-plane pack was not found in control_plane/config or factory_app/control_plane/config."
+        "Refinement harness was not found in refinement_harness/config or factory_app/refinement_harness/config."
     )
 
 
-def load_selected_control_plane_pack(
+def load_selected_refinement_harness(
     *,
     app_root: Path | None = None,
     factory_root: Path | None = None,
 ) -> LoadedControlPlanePack:
     _ = load_control_plane_config(app_root)
-    return load_control_plane_pack(app_root=app_root, factory_root=factory_root)
+    return load_refinement_harness(app_root=app_root, factory_root=factory_root)
 
 
-def load_control_plane_pack(
+def load_refinement_harness(
     *,
     app_root: Path | None = None,
     factory_root: Path | None = None,
 ) -> LoadedControlPlanePack:
-    pack_path = resolve_control_plane_pack_path(app_root=app_root, factory_root=factory_root)
+    pack_path = resolve_refinement_harness_path(app_root=app_root, factory_root=factory_root)
     try:
-        manifest = ControlPlaneManifest.model_validate(_load_yaml_file(pack_path / "config" / "control_plane.yaml"))
+        manifest = ControlPlaneManifest.model_validate(_load_yaml_file(pack_path / "config" / "harness.yaml"))
     except ValidationError as exc:
         raise ControlPlanePackLoadError(
-            f"Invalid control-plane manifest {pack_path / 'config' / 'control_plane.yaml'}: {exc}"
+            f"Invalid refinement harness manifest {pack_path / 'config' / 'harness.yaml'}: {exc}"
         ) from exc
     prompts = _load_prompt_manifest(pack_path / "prompts")
     tools = ControlPlaneToolsManifest.model_validate(_load_yaml_file(pack_path / "config" / "tools.yaml"))
     policies = ControlPlanePoliciesManifest.model_validate(
         _load_yaml_file(pack_path / "config" / "policies.yaml", required=False)
-        or {"schema_version": "mozaiks.control_plane.policies"}
+        or {"schema_version": "mozaiks.refinement_harness.policies.v1"}
     )
     _validate_pack(manifest=manifest, prompts=prompts, tools=tools, pack_path=pack_path)
     return LoadedControlPlanePack(path=pack_path, manifest=manifest, prompts=prompts, tools=tools, policies=policies)
@@ -90,20 +90,20 @@ def load_control_plane_pack(
 def _load_yaml_file(path: Path, *, required: bool = True) -> dict:
     if not path.exists():
         if required:
-            raise ControlPlanePackLoadError(f"Missing control-plane manifest: {path}")
+            raise ControlPlanePackLoadError(f"Missing refinement harness manifest: {path}")
         return {}
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise ControlPlanePackLoadError(f"Failed to parse YAML at {path}: {exc}") from exc
     if not isinstance(data, dict):
-        raise ControlPlanePackLoadError(f"Control-plane manifest must be a YAML object: {path}")
+        raise ControlPlanePackLoadError(f"Refinement harness manifest must be a YAML object: {path}")
     return data
 
 
 def _load_prompt_manifest(prompts_root: Path) -> ControlPlanePromptsManifest:
     if not prompts_root.exists() or not prompts_root.is_dir():
-        raise ControlPlanePackLoadError(f"Missing control-plane prompts directory: {prompts_root}")
+        raise ControlPlanePackLoadError(f"Missing refinement harness prompts directory: {prompts_root}")
 
     prompts: list[ControlPlanePromptDefinition] = []
     for prompt_path in sorted(prompts_root.glob("*.yaml")):
@@ -113,7 +113,7 @@ def _load_prompt_manifest(prompts_root: Path) -> ControlPlanePromptsManifest:
         prompts.append(ControlPlanePromptDefinition(id=prompt_id, content=content))
 
     return ControlPlanePromptsManifest(
-        schema_version="mozaiks.control_plane.prompts",
+        schema_version="mozaiks.refinement_harness.v1.prompts",
         prompts=prompts,
     )
 
@@ -140,23 +140,23 @@ def _validate_pack(
         expected_output = AG2_CHECKPOINT_OUTPUT_CONTRACTS.get(checkpoint.event)
         if expected_output is not None and not checkpoint.prompt_id:
             raise ControlPlanePackLoadError(
-                f"control_plane.yaml checkpoint '{checkpoint.id}' for event '{checkpoint.event}' "
+                f"harness.yaml checkpoint '{checkpoint.id}' for event '{checkpoint.event}' "
                 "must declare prompt_id"
             )
         if expected_output is None and checkpoint.prompt_id:
             raise ControlPlanePackLoadError(
-                f"control_plane.yaml checkpoint '{checkpoint.id}' for deterministic event '{checkpoint.event}' "
+                f"harness.yaml checkpoint '{checkpoint.id}' for deterministic event '{checkpoint.event}' "
                 "must not declare prompt_id"
             )
 
         if checkpoint.prompt_id and checkpoint.prompt_id not in prompt_ids:
             raise ControlPlanePackLoadError(
-                f"control_plane.yaml checkpoint '{checkpoint.id}' prompt_id '{checkpoint.prompt_id}' was not found in prompts.yaml"
+                f"harness.yaml checkpoint '{checkpoint.id}' prompt_id '{checkpoint.prompt_id}' was not found in prompts.yaml"
             )
         for tool_id in checkpoint.tool_ids:
             if tool_id not in tool_ids:
                 raise ControlPlanePackLoadError(
-                    f"control_plane.yaml checkpoint '{checkpoint.id}' tool_ids references unknown tool '{tool_id}'"
+                    f"harness.yaml checkpoint '{checkpoint.id}' tool_ids references unknown tool '{tool_id}'"
                 )
             tool = next(tool for tool in tools.tools if tool.id == tool_id)
             if checkpoint.event not in tool.available_to:
@@ -180,7 +180,7 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
     pack_graph = load_global_pack_graph()
     if pack_graph is None:
         raise ControlPlanePackLoadError(
-            "control_plane.yaml declares routing workflow_sequence values, but no "
+            "harness.yaml declares routing workflow_sequence values, but no "
             "extension_registry.json workflow graph is loaded."
         )
 
@@ -188,9 +188,9 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
         sequence = get_workflow_sequence(pack_graph, sequence_id)
         if sequence is None:
             raise ControlPlanePackLoadError(
-                "control_plane.yaml route "
+                "harness.yaml route "
                 f"{artifact_kind}.{change_class} references unknown workflow_sequence "
-                f"'{sequence_id}' in {pack_path / 'config' / 'control_plane.yaml'}"
+                f"'{sequence_id}' in {pack_path / 'config' / 'harness.yaml'}"
             )
         families = [
             str(item).strip()
@@ -200,6 +200,10 @@ def _validate_route_sequences(*, manifest: ControlPlaneManifest, pack_path: Path
         if not families:
             raise ControlPlanePackLoadError(
                 "workflow_sequence "
-                f"'{sequence_id}' used by control_plane.yaml route {artifact_kind}.{change_class} "
+                f"'{sequence_id}' used by harness.yaml route {artifact_kind}.{change_class} "
                 "must declare affected_declarative_families in extension_registry.json"
             )
+
+
+resolve_factory_control_plane_root = resolve_factory_refinement_harness_root
+resolve_app_control_plane_root = resolve_app_refinement_harness_root

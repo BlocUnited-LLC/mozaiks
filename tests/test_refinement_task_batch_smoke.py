@@ -6,11 +6,11 @@ import os
 
 import pytest
 
-from scripts import smoke_control_plane_task_batch as smoke
+from scripts import smoke_refinement_task_batch as smoke
 
 
 def _live_smoke_enabled() -> bool:
-    raw = str(os.getenv("RUN_LIVE_CONTROL_PLANE_TASK_BATCH_SMOKE") or "")
+    raw = str(os.getenv("RUN_LIVE_REFINEMENT_TASK_BATCH_SMOKE") or "")
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -31,7 +31,7 @@ def test_validate_smoke_output_accepts_minimal_valid_payload() -> None:
         "schema_version": smoke.SCHEMA_VERSION,
         "llm_profile_used": "classifier",
         "generated_files_unchanged": True,
-        "control_plane": {
+        "refinement_engine": {
             "route": {
                 "workflow_sequence": "design_revision",
                 "sequence_exists": True,
@@ -102,7 +102,7 @@ def test_validate_smoke_output_rejects_structured_output_meta_drift() -> None:
         "schema_version": smoke.SCHEMA_VERSION,
         "llm_profile_used": "classifier",
         "generated_files_unchanged": True,
-        "control_plane": {
+        "refinement_engine": {
             "route": {
                 "workflow_sequence": "app_revision",
                 "sequence_exists": True,
@@ -165,13 +165,13 @@ def test_validate_smoke_output_rejects_structured_output_meta_drift() -> None:
 
 @pytest.mark.skipif(
     not _live_smoke_enabled(),
-    reason="Set RUN_LIVE_CONTROL_PLANE_TASK_BATCH_SMOKE=1 to run the combined live smoke test",
+    reason="Set RUN_LIVE_REFINEMENT_TASK_BATCH_SMOKE=1 to run the combined live smoke test",
 )
-def test_live_control_plane_task_batch_smoke() -> None:
+def test_live_refinement_task_batch_smoke() -> None:
     payload = asyncio.run(smoke.run_smoke())
 
     assert payload["success"] is True
-    assert payload["control_plane"]["route"]["workflow_sequence"]
+    assert payload["refinement_engine"]["route"]["workflow_sequence"]
     assert payload["live_workflow"]["success"] is True
     assert payload["live_workflow"]["structured_output"]["task_batch_execution_used"] is True
 

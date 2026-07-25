@@ -1,2 +1,2 @@
-"""First-party default control-plane tool implementations."""
+"""First-party default refinement tool implementations."""
 

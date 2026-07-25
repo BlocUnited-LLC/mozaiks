@@ -61,7 +61,7 @@ prompt_middleware:
 - agent: AppSchemaAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
-- agent: ControlPlaneAgent
+- agent: RefinementHarnessAgent
   filename: hook_file_contract_context.py
   function: inject_cookie_cutter_contracts_context
 - agent: ConfigMiddlewareAgent

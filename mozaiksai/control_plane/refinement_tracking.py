@@ -1,6 +1,6 @@
 # ==============================================================================
 # FILE: mozaiksai/control_plane/refinement_tracking.py
-# DESCRIPTION: Durable audit trail for control-plane refinement events.
+# DESCRIPTION: Durable audit trail for Refinement Engine events.
 #
 #   Persists one document per event to the `cp_refinement_events` collection.
 #   Events are written fire-and-forget — failures are logged at DEBUG level
@@ -58,7 +58,7 @@ async def record_refinement_event(
     """Persist a single refinement event to the audit collection.
 
     Fire-and-forget: failures are logged at DEBUG level and never raised.
-    The control-plane critical path is never blocked by tracking failures.
+    The Refinement Engine critical path is never blocked by tracking failures.
 
     Args:
         event_kind:        One of "request_received", "classified", "routed",

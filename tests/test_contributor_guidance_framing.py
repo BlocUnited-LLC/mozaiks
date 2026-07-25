@@ -43,24 +43,24 @@ def test_build_guidance_states_workflow_sequence_truth() -> None:
 
 def test_refinement_guidance_states_checkpoint_reentry_truth() -> None:
     architecture = _read("ARCHITECTURE.md")
-    control_plane = _read("docs/architecture/workflows/control-plane-harness-architecture.md")
+    refinement_harness = _read("docs/architecture/workflows/refinement-harness-architecture.md")
 
-    assert "checkpoint/control-plane re-entry" in architecture
+    assert "checkpoint-driven re-entry" in architecture
     assert "not a dedicated `RefinementWorkflow`" in architecture
-    assert "startup declared through `app/config/ai.json`" in control_plane
-    assert "app/config/llm.yaml" in control_plane
-    assert "control_plane/config/control_plane.yaml" in control_plane
-    assert "Do not document a dedicated `RefinementWorkflow`" in control_plane
+    assert "normal chat/workflow startup comes" in refinement_harness
+    assert "app/config/refinement_policy.yaml" in refinement_harness
+    assert "refinement_harness/config/harness.yaml" in refinement_harness
+    assert "Do not document a dedicated `RefinementWorkflow`" in refinement_harness
 
 
 def test_control_plane_guide_states_runtime_split_and_generation_ownership() -> None:
     guide = _read("docs/guides/extending-ai-functionality/01-overview.md")
 
     assert "app/config/ai.json" in guide
-    assert "app/config/llm.yaml" in guide
-    assert "control_plane/config/control_plane.yaml" in guide
+    assert "app/config/refinement_policy.yaml" in guide
+    assert "refinement_harness/config/harness.yaml" in guide
     assert "`ValueEngine` may hint" in guide
-    assert "`DesignDocs` decides whether `surface_kind = control_plane`" in guide
+    assert "`DesignDocs` decides whether `surface_kind = refinement`" in guide
     assert "`AppGenerator` materializes" in guide
     assert "`AgentGenerator` stays responsible for workflow bundles" in guide
 
@@ -120,7 +120,7 @@ def test_new_rules_capture_public_framing_and_current_vs_target_guardrails() -> 
     assert "`AppGenerator` and `AgentGenerator` are individual workflows inside the build" in build_rule
     assert "`ExistingAppDiscovery` is the brownfield/existing-app adoption workflow path" in build_rule
     assert "a dedicated `RefinementWorkflow`" in build_rule
-    assert "app/config/llm.yaml" in build_rule
+    assert "app/config/refinement_policy.yaml" in build_rule
 
 
 def test_release_notes_guidance_uses_generic_hosted_product_language() -> None:

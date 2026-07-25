@@ -37,8 +37,8 @@ from mozaiksai.control_plane.schema import LoadedControlPlanePack
 def _fake_pack_dict() -> dict:
     """Minimal valid dict that satisfies LoadedControlPlanePack.model_validate."""
     # Read a real pack from the factory path to get a valid dict
-    from mozaiksai.control_plane.loader import load_control_plane_pack
-    pack = load_control_plane_pack()
+    from mozaiksai.control_plane.loader import load_refinement_harness
+    pack = load_refinement_harness()
     return pack.model_dump(mode="python")
 
 
@@ -48,16 +48,16 @@ def _fake_pack_dict() -> dict:
 
 class TestLoadPack:
     def test_callable_returning_instance_returned_unchanged(self):
-        from mozaiksai.control_plane.loader import load_control_plane_pack
-        pack = load_control_plane_pack()
+        from mozaiksai.control_plane.loader import load_refinement_harness
+        pack = load_refinement_harness()
         def loader():
             return pack
         result = _load_pack(loader)
         assert result is pack
 
     def test_callable_returning_dict_wraps_with_model_validate(self):
-        from mozaiksai.control_plane.loader import load_control_plane_pack
-        pack = load_control_plane_pack()
+        from mozaiksai.control_plane.loader import load_refinement_harness
+        pack = load_refinement_harness()
         pack_dict = pack.model_dump(mode="python")
         def loader():
             return pack_dict

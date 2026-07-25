@@ -8,16 +8,16 @@ import yaml
 
 from mozaiksai.control_plane import (
     ControlPlanePackLoadError,
-    load_control_plane_pack,
-    load_selected_control_plane_pack,
+    load_refinement_harness,
+    load_selected_refinement_harness,
 )
 
 
-def test_load_default_factory_control_plane_pack() -> None:
+def test_load_default_factory_refinement_harness() -> None:
     app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
-    pack = load_control_plane_pack(app_root=app_root)
+    pack = load_refinement_harness(app_root=app_root)
 
-    assert pack.path == (Path(__file__).resolve().parents[1] / "factory_app" / "control_plane").resolve()
+    assert pack.path == (Path(__file__).resolve().parents[1] / "factory_app" / "refinement_harness").resolve()
     assert pack.manifest.routing.default_artifact_kind == "app_bundle"
     app_bundle = pack.routing_for_artifact("app_bundle")
     assert app_bundle is not None
@@ -81,12 +81,12 @@ def test_load_default_factory_control_plane_pack() -> None:
     assert pack.prompt_by_id("contract_surface_selection_system") is not None
 
 
-def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> None:
+def test_load_selected_refinement_harness_uses_app_override(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     workspace_root = tmp_path
     (app_root / "config").mkdir(parents=True)
-    (workspace_root / "control_plane" / "config").mkdir(parents=True)
-    (workspace_root / "control_plane" / "prompts").mkdir(parents=True)
+    (workspace_root / "refinement_harness" / "config").mkdir(parents=True)
+    (workspace_root / "refinement_harness" / "prompts").mkdir(parents=True)
 
     (app_root / "config" / "ai.json").write_text(
         json.dumps(
@@ -99,10 +99,10 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
         ),
         encoding="utf-8",
     )
-    (workspace_root / "control_plane" / "config" / "control_plane.yaml").write_text(
+    (workspace_root / "refinement_harness" / "config" / "harness.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane",
+                "schema_version: mozaiks.refinement_harness.v1",
                 "checkpoints:",
                 "  - event: request_submitted",
                 "    prompt_id: classify",
@@ -110,7 +110,7 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
         ),
         encoding="utf-8",
     )
-    (workspace_root / "control_plane" / "prompts" / "classify.yaml").write_text(
+    (workspace_root / "refinement_harness" / "prompts" / "classify.yaml").write_text(
         "\n".join(
             [
                 "id: classify",
@@ -119,14 +119,14 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
         ),
         encoding="utf-8",
     )
-    (workspace_root / "control_plane" / "config" / "tools.yaml").write_text(
-        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
+    (workspace_root / "refinement_harness" / "config" / "tools.yaml").write_text(
+        "schema_version: mozaiks.refinement_harness.tools.v1\ntools: []\n",
         encoding="utf-8",
     )
-    (workspace_root / "control_plane" / "config" / "policies.yaml").write_text(
+    (workspace_root / "refinement_harness" / "config" / "policies.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.policies",
+                "schema_version: mozaiks.refinement_harness.policies.v1",
                 "scope:",
                 "  max_selected_paths: 2",
                 "  auto_apply_max_paths: 1",
@@ -136,23 +136,23 @@ def test_load_selected_control_plane_pack_uses_app_override(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    pack = load_selected_control_plane_pack(app_root=app_root)
+    pack = load_selected_refinement_harness(app_root=app_root)
 
-    assert pack.path == (workspace_root / "control_plane").resolve()
+    assert pack.path == (workspace_root / "refinement_harness").resolve()
     assert pack.policies.scope.max_selected_paths == 2
 
 
-def test_load_control_plane_pack_validates_prompt_references(tmp_path: Path) -> None:
+def test_load_refinement_harness_validates_prompt_references(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     (app_root / "config").mkdir(parents=True)
     (pack_root / "config").mkdir(parents=True)
     (pack_root / "prompts").mkdir(parents=True)
 
-    (pack_root / "config" / "control_plane.yaml").write_text(
+    (pack_root / "config" / "harness.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane",
+                "schema_version: mozaiks.refinement_harness.v1",
                 "checkpoints:",
                 "  - event: request_submitted",
                 "    prompt_id: missing_prompt",
@@ -161,25 +161,25 @@ def test_load_control_plane_pack_validates_prompt_references(tmp_path: Path) -> 
         encoding="utf-8",
     )
     (pack_root / "config" / "tools.yaml").write_text(
-        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
+        "schema_version: mozaiks.refinement_harness.tools.v1\ntools: []\n",
         encoding="utf-8",
     )
 
     with pytest.raises(ControlPlanePackLoadError, match="prompt_id"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
-def test_load_control_plane_pack_validates_component_tool_availability(tmp_path: Path) -> None:
+def test_load_refinement_harness_validates_component_tool_availability(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     (app_root / "config").mkdir(parents=True)
     (pack_root / "config").mkdir(parents=True)
     (pack_root / "prompts").mkdir(parents=True)
 
-    (pack_root / "config" / "control_plane.yaml").write_text(
+    (pack_root / "config" / "harness.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane",
+                "schema_version: mozaiks.refinement_harness.v1",
                 "checkpoints:",
                 "  - event: request_submitted",
                 "    prompt_id: classify",
@@ -201,7 +201,7 @@ def test_load_control_plane_pack_validates_component_tool_availability(tmp_path:
     (pack_root / "config" / "tools.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane.tools",
+                "schema_version: mozaiks.refinement_harness.tools.v1",
                 "tools:",
                 "  - id: router_only_tool",
                 "    kind: context_tool",
@@ -215,7 +215,7 @@ def test_load_control_plane_pack_validates_component_tool_availability(tmp_path:
     )
 
     with pytest.raises(ControlPlanePackLoadError, match="not available to 'request_submitted'"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
 def _write_checkpoint_contract_pack(
@@ -226,10 +226,10 @@ def _write_checkpoint_contract_pack(
 ) -> None:
     (pack_root / "config").mkdir(parents=True)
     (pack_root / "prompts").mkdir(parents=True)
-    (pack_root / "config" / "control_plane.yaml").write_text(
+    (pack_root / "config" / "harness.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane",
+                "schema_version: mozaiks.refinement_harness.v1",
                 "checkpoints:",
                 *checkpoint_lines,
             ]
@@ -242,15 +242,15 @@ def _write_checkpoint_contract_pack(
             encoding="utf-8",
         )
     (pack_root / "config" / "tools.yaml").write_text(
-        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
+        "schema_version: mozaiks.refinement_harness.tools.v1\ntools: []\n",
         encoding="utf-8",
     )
 
 
-def test_load_control_plane_pack_rejects_ag2_checkpoint_without_prompt(tmp_path: Path) -> None:
+def test_load_refinement_harness_rejects_ag2_checkpoint_without_prompt(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir()
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     _write_checkpoint_contract_pack(
         pack_root,
         checkpoint_lines=[
@@ -260,13 +260,13 @@ def test_load_control_plane_pack_rejects_ag2_checkpoint_without_prompt(tmp_path:
     )
 
     with pytest.raises(ControlPlanePackLoadError, match="prompt_id"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
-def test_load_control_plane_pack_rejects_deterministic_checkpoint_prompt(tmp_path: Path) -> None:
+def test_load_refinement_harness_rejects_deterministic_checkpoint_prompt(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir()
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     _write_checkpoint_contract_pack(
         pack_root,
         checkpoint_lines=[
@@ -276,13 +276,13 @@ def test_load_control_plane_pack_rejects_deterministic_checkpoint_prompt(tmp_pat
     )
 
     with pytest.raises(ControlPlanePackLoadError, match="must not declare prompt_id"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
-def test_load_control_plane_pack_rejects_runtime_wiring_fields(tmp_path: Path) -> None:
+def test_load_refinement_harness_rejects_runtime_wiring_fields(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir()
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     _write_checkpoint_contract_pack(
         pack_root,
         checkpoint_lines=[
@@ -293,19 +293,19 @@ def test_load_control_plane_pack_rejects_runtime_wiring_fields(tmp_path: Path) -
     )
 
     with pytest.raises(ControlPlanePackLoadError, match="entrypoint"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
-def test_load_control_plane_pack_rejects_top_level_harness(tmp_path: Path) -> None:
+def test_load_refinement_harness_rejects_top_level_harness(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir()
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     (pack_root / "config").mkdir(parents=True)
     (pack_root / "prompts").mkdir(parents=True)
-    (pack_root / "config" / "control_plane.yaml").write_text(
+    (pack_root / "config" / "harness.yaml").write_text(
         "\n".join(
             [
-                "schema_version: mozaiks.control_plane",
+                "schema_version: mozaiks.refinement_harness.v1",
                 "harness:",
                 "  implementation: example.harness:Harness",
                 "checkpoints: []",
@@ -314,19 +314,19 @@ def test_load_control_plane_pack_rejects_top_level_harness(tmp_path: Path) -> No
         encoding="utf-8",
     )
     (pack_root / "config" / "tools.yaml").write_text(
-        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
+        "schema_version: mozaiks.refinement_harness.tools.v1\ntools: []\n",
         encoding="utf-8",
     )
 
     with pytest.raises(ControlPlanePackLoadError, match="harness"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
-def _write_minimal_control_plane_pack(pack_root: Path, *, route_payload: dict) -> None:
+def _write_minimal_refinement_harness(pack_root: Path, *, route_payload: dict) -> None:
     (pack_root / "config").mkdir(parents=True)
     (pack_root / "prompts").mkdir(parents=True)
     manifest = {
-        "schema_version": "mozaiks.control_plane",
+        "schema_version": "mozaiks.refinement_harness.v1",
         "routing": {
             "default_artifact_kind": "app_bundle",
             "artifacts": [
@@ -343,12 +343,12 @@ def _write_minimal_control_plane_pack(pack_root: Path, *, route_payload: dict) -
         },
         "checkpoints": [],
     }
-    (pack_root / "config" / "control_plane.yaml").write_text(
+    (pack_root / "config" / "harness.yaml").write_text(
         yaml.safe_dump(manifest, sort_keys=False),
         encoding="utf-8",
     )
     (pack_root / "config" / "tools.yaml").write_text(
-        "schema_version: mozaiks.control_plane.tools\ntools: []\n",
+        "schema_version: mozaiks.refinement_harness.tools.v1\ntools: []\n",
         encoding="utf-8",
     )
 
@@ -370,10 +370,10 @@ def _write_registry(root: Path, *, sequences: list[dict]) -> None:
     )
 
 
-def test_load_control_plane_pack_rejects_unknown_workflow_sequence(tmp_path: Path, monkeypatch) -> None:
+def test_load_refinement_harness_rejects_unknown_workflow_sequence(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir()
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     workflows_root = tmp_path / "workflows"
     _write_registry(
         workflows_root,
@@ -385,17 +385,17 @@ def test_load_control_plane_pack_rejects_unknown_workflow_sequence(tmp_path: Pat
             }
         ],
     )
-    _write_minimal_control_plane_pack(pack_root, route_payload={"workflow_sequence": "missing_sequence"})
+    _write_minimal_refinement_harness(pack_root, route_payload={"workflow_sequence": "missing_sequence"})
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
 
     with pytest.raises(ControlPlanePackLoadError, match="unknown workflow_sequence 'missing_sequence'"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
-def test_load_control_plane_pack_requires_sequence_impact_metadata(tmp_path: Path, monkeypatch) -> None:
+def test_load_refinement_harness_requires_sequence_impact_metadata(tmp_path: Path, monkeypatch) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir()
-    pack_root = tmp_path / "control_plane"
+    pack_root = tmp_path / "refinement_harness"
     workflows_root = tmp_path / "workflows"
     _write_registry(
         workflows_root,
@@ -406,18 +406,18 @@ def test_load_control_plane_pack_requires_sequence_impact_metadata(tmp_path: Pat
             }
         ],
     )
-    _write_minimal_control_plane_pack(pack_root, route_payload={"workflow_sequence": "app_revision"})
+    _write_minimal_refinement_harness(pack_root, route_payload={"workflow_sequence": "app_revision"})
     monkeypatch.setenv("MOZAIKS_WORKFLOWS_PATH", str(workflows_root))
 
     with pytest.raises(ControlPlanePackLoadError, match="must declare affected_declarative_families"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)
 
 
 def test_control_plane_routes_reject_duplicated_impact_fields(tmp_path: Path) -> None:
     app_root = tmp_path / "app"
     app_root.mkdir()
-    pack_root = tmp_path / "control_plane"
-    _write_minimal_control_plane_pack(
+    pack_root = tmp_path / "refinement_harness"
+    _write_minimal_refinement_harness(
         pack_root,
         route_payload={
             "workflow_sequence": "app_revision",
@@ -426,4 +426,4 @@ def test_control_plane_routes_reject_duplicated_impact_fields(tmp_path: Path) ->
     )
 
     with pytest.raises(ControlPlanePackLoadError, match="affected_workflows"):
-        load_control_plane_pack(app_root=app_root, factory_root=pack_root)
+        load_refinement_harness(app_root=app_root, factory_root=pack_root)

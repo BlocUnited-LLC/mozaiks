@@ -1,4 +1,4 @@
-"""Control-plane helpers for planning app-context refreshes."""
+"""Refinement Engine helpers for planning app-context refreshes."""
 
 from __future__ import annotations
 

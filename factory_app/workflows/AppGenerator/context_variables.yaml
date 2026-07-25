@@ -400,7 +400,7 @@ definitions:
     description: >
       Canonical typed surface realization contract persisted by DesignDocs.
       This is the primary machine-readable source for deciding which capability
-      packs become modules, workflows, control-plane surfaces, integrations, or UI-only surfaces.
+      packs become modules, workflows, refinement surfaces, integrations, or UI-only surfaces.
     source:
       type: data_reference
       database_name: mozaiksai

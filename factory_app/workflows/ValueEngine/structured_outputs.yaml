@@ -90,7 +90,8 @@ models:
         values:
         - module
         - workflow
-        - control_plane
+        - app_policy
+        - refinement
         - external_integration
         - ui_only
         description: Coarse realization hint only. Not a final contract.
@@ -239,7 +240,7 @@ models:
         items: SurfaceCandidateHint
         description: >
           Coarse realization hints for downstream design/planning. These do not
-          finalize module, workflow, or control-plane boundaries.
+          finalize module, workflow, app-policy, or refinement boundaries.
       agentic_capabilities:
         type: optional_list
         items: str

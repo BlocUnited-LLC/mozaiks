@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from factory_app.control_plane.tools.get_context_graph_catalog import get_context_graph_catalog
+from factory_app.refinement_harness.tools.get_context_graph_catalog import get_context_graph_catalog
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.control_plane.workspace_snapshot import register_workspace_snapshot
 from mozaiksai.core.artifacts.models import (

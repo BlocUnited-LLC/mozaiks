@@ -109,13 +109,13 @@ def build_app_overview_summary(
     app_config = _read_json(app_root / "app.json")
     ai_config = _read_json(app_root / "config" / "ai.json")
     runtime_ai_config = resolve_runtime_ai_config(ai_config, app_root=app_root)
-    control_plane_config = load_control_plane_config(app_root)
+    refinement_policy_config = load_control_plane_config(app_root)
     shell_config = _read_json(app_root / "config" / "shell.json")
     theme_config = _read_json(_resolve_theme_config_path(app_root))
     ui_route_manifest = _read_json(_resolve_ui_route_manifest_path(app_root))
 
     llm = ai_config.get("llm") or {}
-    control_plane = _summarize_control_plane(control_plane_config.model_dump())
+    refinement_policy = _summarize_refinement_policy(refinement_policy_config.model_dump())
     identity = theme_config.get("identity") or {}
     workflow_names = _list_workflows(app_root)
     workflow_count = len(workflow_names)
@@ -152,7 +152,7 @@ def build_app_overview_summary(
             "provider": llm.get("provider"),
             "model": llm.get("model"),
             "api_billed": llm.get("provider") in {"anthropic", "openai"},
-            "control_plane": control_plane,
+            "refinement_policy": refinement_policy,
         },
         "theme": {
             "primary": (theme_config.get("theme") or {}).get("primary"),
@@ -183,7 +183,7 @@ def build_app_overview_summary(
                 admins=admins,
                 workflow_count=workflow_count,
                 entry_point=entry_point,
-                control_plane=control_plane,
+                refinement_policy=refinement_policy,
             )
         },
     }
@@ -794,7 +794,7 @@ def _runtime_readiness(workflow_count: int, entry_point: str | None) -> str:
     return "entry_point_configured"
 
 
-def _summarize_control_plane(raw: object) -> dict[str, Any]:
+def _summarize_refinement_policy(raw: object) -> dict[str, Any]:
     config = raw if isinstance(raw, dict) else {}
     classifier = config.get("classifier") if isinstance(config.get("classifier"), dict) else {}
     coding = config.get("coding") if isinstance(config.get("coding"), dict) else {}
@@ -817,12 +817,14 @@ def _recommend_next_step(
     admins: list[str],
     workflow_count: int,
     entry_point: str | None,
-    control_plane: dict[str, Any],
+    refinement_policy: dict[str, Any] | None = None,
+    control_plane: dict[str, Any] | None = None,
 ) -> str:
+    policy = refinement_policy if refinement_policy is not None else (control_plane or {})
     if not provider or not model:
         return "Confirm your default provider and model in app/config/ai.json before starting build work."
-    if not control_plane.get("enabled"):
-        return "Enable the control_plane block in app/config/ai.json before using Studio build and refinement flows."
+    if not policy.get("enabled"):
+        return "Enable app/config/refinement_policy.yaml before using Studio build and refinement flows."
     if not admins:
         return "Add a local admin identity in app/app.json admins before relying on admin-gated Studio surfaces."
     if workflow_count == 0:
@@ -830,9 +832,12 @@ def _recommend_next_step(
     if not entry_point:
         return (
             "Set workflows.entry_point in app/config/ai.json or in "
-            "control_plane/config/control_plane.yaml startup before starting runtime workflow sessions."
+            "refinement_harness/config/harness.yaml startup before starting runtime workflow sessions."
         )
     return "Review the current workspace state and make the next approved build request from the app overview."
+
+
+_summarize_control_plane = _summarize_refinement_policy
 
 
 def _format_studio_timestamp_label(value: object, *, fallback: str) -> str:

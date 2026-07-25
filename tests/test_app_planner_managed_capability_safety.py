@@ -1031,7 +1031,7 @@ class TestManagedAdapterSurfaceKindValidation:
             )
 
     def test_adapter_task_wrong_surface_kind_error_mentions_external_integration(self):
-        bad_task = {**_MANAGED_CAPABILITY_ADAPTER_TASK, "surface_kind": "control_plane"}
+        bad_task = {**_MANAGED_CAPABILITY_ADAPTER_TASK, "surface_kind": "refinement"}
         with pytest.raises(ValueError, match="external_integration"):
             self.mod.app_build_plan(
                 AppBuildPlan={

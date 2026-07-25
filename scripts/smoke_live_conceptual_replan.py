@@ -8,7 +8,7 @@ Usage:
     python scripts/smoke_live_conceptual_replan.py --fixture-path tests/fixtures/live_conceptual_replan_output.json
 
 What is live (real LLM + real code):
-    1. RefinementTriggerRouteResolver with real control-plane pack
+    1. RefinementTriggerRouteResolver with real refinement harness
        (deterministic classifier -- no LLM for routing)
     2. AppPlanAgent system prompt from agents.yaml + file contracts hook
        + domain catalog hook (same hooks as the main workflow)
@@ -342,10 +342,10 @@ def _build_resolver() -> Any:
     from mozaiksai.control_plane.implementations.refinement_router import (
         RefinementTriggerRouteResolver,
     )
-    from mozaiksai.control_plane.loader import load_control_plane_pack
+    from mozaiksai.control_plane.loader import load_refinement_harness
 
     def pack_loader():
-        return load_control_plane_pack(app_root=_APP_ROOT)
+        return load_refinement_harness(app_root=_APP_ROOT)
 
     return RefinementTriggerRouteResolver(
         classifier=_DeterministicChangeClassifier(change_class="core"),
@@ -513,7 +513,7 @@ async def _run_preservation(
     tmp_dir: Path,
 ) -> dict[str, Any]:
     """Run Phase 7A with the LLM's actual carry_forward_decisions."""
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
 
@@ -759,7 +759,7 @@ async def run_benchmark(*, save_fixture: bool = False, model: str = "gpt-5-nano"
         },
         "approach": {
             "live": [
-                "RefinementTriggerRouteResolver with real control-plane pack",
+                "RefinementTriggerRouteResolver with real refinement harness",
                 f"AppPlanAgent via OpenAI ({model}) with full conceptual_replan context",
                 "resolve_carry_forward_preservation Phase 7A with real LLM decisions",
             ],

@@ -24,7 +24,7 @@ from mozaiksai.control_plane.contracts import (
     FileUpdate,
 )
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
-from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts import (
@@ -49,7 +49,7 @@ _ARTIFACT_KIND_ALIASES: dict[str, str] = {
 
 
 class ScopedRefinementCodingWorker:
-    """First-party control-plane coding worker for narrow refinement loops.
+    """First-party refinement coding worker for narrow refinement loops.
 
     This worker is intentionally conservative in v1. It is only eligible for
     scoped patch-style refinements and operates on explicit file payloads.
@@ -61,7 +61,7 @@ class ScopedRefinementCodingWorker:
         agent_factory: Any = None,
         agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
-        pack_loader: Any = load_selected_control_plane_pack,
+        pack_loader: Any = load_selected_refinement_harness,
         tool_executor: Any = None,
         validation_runner: Any = validate_app_build,
         artifact_store: Any = None,
@@ -212,7 +212,7 @@ class ScopedRefinementCodingWorker:
         checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
         if checkpoint is None or not checkpoint.prompt_id:
             raise RuntimeError(
-                f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
+                f"Selected refinement harness does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
             )
         prompt = pack.prompt_by_id(checkpoint.prompt_id)
         if prompt is None:
@@ -365,7 +365,7 @@ class ScopedRefinementCodingWorker:
             "start_preview_requested": bool(request.start_preview),
             "context_seed": request.context_seed,
             "metadata": request.metadata,
-            "control_plane_context": control_plane_context,
+            "refinement_context": control_plane_context,
         }
         lines = [
             "Plan a scoped coding refinement for this Mozaiks artifact request.",

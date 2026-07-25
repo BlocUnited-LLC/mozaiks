@@ -28,9 +28,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from factory_app.control_plane.tools._artifact_workspace import load_artifact_workspace
-from factory_app.control_plane.tools.get_context_graph_catalog import get_context_graph_catalog
-from factory_app.control_plane.tools.get_context_graph_scope import get_context_graph_scope
+from factory_app.refinement_harness.tools._artifact_workspace import load_artifact_workspace
+from factory_app.refinement_harness.tools.get_context_graph_catalog import get_context_graph_catalog
+from factory_app.refinement_harness.tools.get_context_graph_scope import get_context_graph_scope
 from mozaiksai.control_plane import (
     ArtifactKind,
     ArtifactScopeProposer,
@@ -44,7 +44,7 @@ from mozaiksai.control_plane import (
     RefinementRequest,
     RefinementRoutingDecision,
     ScopedRefinementCodingWorker,
-    load_selected_control_plane_pack,
+    load_selected_refinement_harness,
 )
 from mozaiksai.control_plane.contracts import ControlPlaneToolContext
 from mozaiksai.control_plane.workspace_snapshot import register_workspace_snapshot
@@ -311,7 +311,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     proposer = ArtifactScopeProposer(
         capability_service=_ScopeService(target_path),
         config_loader=_enabled_control_plane,
-        pack_loader=load_selected_control_plane_pack,
+        pack_loader=load_selected_refinement_harness,
         tool_executor=tool_executor,
         artifact_store=store,
     )
@@ -335,7 +335,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     worker = ScopedRefinementCodingWorker(
         capability_service=_CodingService(target_path, files[target_path]),
         config_loader=_enabled_control_plane,
-        pack_loader=load_selected_control_plane_pack,
+        pack_loader=load_selected_refinement_harness,
         tool_executor=tool_executor,
         validation_runner=_validation_runner,
         artifact_store=store,

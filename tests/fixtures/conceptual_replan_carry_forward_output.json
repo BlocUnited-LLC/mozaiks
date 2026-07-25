@@ -1,7 +1,7 @@
 {
   "approach": {
     "live": [
-      "RefinementTriggerRouteResolver with real control-plane pack",
+      "RefinementTriggerRouteResolver with real refinement harness",
       "get_carry_forward_candidates (auto variant only)",
       "load_artifact_workspace with real temp dir",
       "resolve_carry_forward_preservation Phase 7A tool"

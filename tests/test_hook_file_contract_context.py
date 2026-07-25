@@ -63,7 +63,7 @@ class TestHooksYaml:
         expected_agents = {
             "AppPlanAgent",
             "AppSchemaAgent",
-            "ControlPlaneAgent",
+            "RefinementHarnessAgent",
             "ConfigMiddlewareAgent",
             "ServiceAgent",
             "FrontendStubAgent",
@@ -106,7 +106,7 @@ class TestInjectCookieCutterContractsContext:
         assert "[FILE CONTRACTS CONTEXT]" in msg
         assert "module_contract:" in msg
         assert "page_bundle:" in msg
-        assert "control_plane_pack:" in msg
+        assert "refinement_harness:" in msg
         assert "Runtime truth remains build_tasks" in msg
 
     def test_app_schema_agent_gets_page_bundle_contract(self):
@@ -135,20 +135,20 @@ class TestInjectCookieCutterContractsContext:
         assert "standard:" in msg
         assert "messaging:" in msg
 
-    def test_control_plane_agent_gets_control_plane_pack_contract(self):
+    def test_control_plane_agent_gets_refinement_harness_contract(self):
         agent = _FakeAgent(
-            name="ControlPlaneAgent",
+            name="RefinementHarnessAgent",
             context_variables={
                 "current_build_task": {
-                    "task_type": "control_plane_pack",
+                    "task_type": "refinement_harness",
                 }
             },
         )
         self.mod.inject_cookie_cutter_contracts_context(agent, [])
         msg = agent.system_message
         assert "[FILE CONTRACTS CONTEXT]" in msg
-        assert "control_plane_pack:" in msg
-        assert "control_plane/config/control_plane.yaml" in msg
+        assert "refinement_harness:" in msg
+        assert "refinement_harness/config/harness.yaml" in msg
         assert "module_contract:" not in msg
         assert "service_foundation:" not in msg
         assert "[MODULE ARCHETYPES CONTEXT]" not in msg

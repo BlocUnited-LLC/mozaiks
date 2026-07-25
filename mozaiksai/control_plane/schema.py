@@ -16,14 +16,14 @@ ControlPlaneCheckpointEvent = Literal[
     "contract_surface_requested",
     "coding_requested",
 ]
-ControlPlaneOutputContract = Literal[
+RefinementHarnessOutputContract = Literal[
     "ChangeClassifierResult",
     "ScopeProposal",
     "ContractSurfaceClassification",
     "CodingWorkerPlan",
 ]
 
-AG2_CHECKPOINT_OUTPUT_CONTRACTS: dict[ControlPlaneCheckpointEvent, ControlPlaneOutputContract] = {
+AG2_CHECKPOINT_OUTPUT_CONTRACTS: dict[ControlPlaneCheckpointEvent, RefinementHarnessOutputContract] = {
     "request_submitted": "ChangeClassifierResult",
     "scope_requested": "ScopeProposal",
     "contract_surface_requested": "ContractSurfaceClassification",
@@ -57,7 +57,7 @@ class ControlPlaneCheckpointManifest(BaseModel):
         return "ag2_structured_agent" if self.event in AG2_CHECKPOINT_OUTPUT_CONTRACTS else "deterministic_handler"
 
     @property
-    def output_contract(self) -> ControlPlaneOutputContract | None:
+    def output_contract(self) -> RefinementHarnessOutputContract | None:
         return AG2_CHECKPOINT_OUTPUT_CONTRACTS.get(self.event)
 
     @model_validator(mode="after")
@@ -79,7 +79,7 @@ class ControlPlaneChangeRouteManifest(BaseModel):
     def _normalize_workflow_sequence(cls, value: str) -> str:
         normalized = str(value or "").strip()
         if not normalized:
-            raise ValueError("control-plane route workflow_sequence must be non-empty")
+            raise ValueError("refinement harness route workflow_sequence must be non-empty")
         return normalized
 
 
@@ -126,14 +126,14 @@ class ControlPlaneRoutingManifest(BaseModel):
     def _unique_artifact_kinds(self) -> ControlPlaneRoutingManifest:
         artifact_kinds = [artifact.artifact_kind for artifact in self.artifacts]
         if len(artifact_kinds) != len(set(artifact_kinds)):
-            raise ValueError("control_plane.yaml routing.artifacts artifact_kind values must be unique")
+            raise ValueError("harness.yaml routing.artifacts artifact_kind values must be unique")
         return self
 
 
 class ControlPlaneManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane"]
+    schema_version: Literal["mozaiks.refinement_harness.v1"]
     routing: ControlPlaneRoutingManifest = Field(default_factory=ControlPlaneRoutingManifest)
     checkpoints: list[ControlPlaneCheckpointManifest] = Field(default_factory=list)
 
@@ -141,10 +141,10 @@ class ControlPlaneManifest(BaseModel):
     def _unique_checkpoints(self) -> ControlPlaneManifest:
         checkpoint_ids = [checkpoint.id for checkpoint in self.checkpoints]
         if len(checkpoint_ids) != len(set(checkpoint_ids)):
-            raise ValueError("control_plane.yaml checkpoint ids must be unique")
+            raise ValueError("harness.yaml checkpoint ids must be unique")
         checkpoint_events = [checkpoint.event for checkpoint in self.checkpoints]
         if len(checkpoint_events) != len(set(checkpoint_events)):
-            raise ValueError("control_plane.yaml checkpoint event values must be unique")
+            raise ValueError("harness.yaml checkpoint event values must be unique")
         return self
 
 
@@ -158,7 +158,7 @@ class ControlPlanePromptDefinition(BaseModel):
 class ControlPlanePromptsManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane.prompts"]
+    schema_version: Literal["mozaiks.refinement_harness.v1.prompts"]
     prompts: list[ControlPlanePromptDefinition] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -172,7 +172,7 @@ class ControlPlanePromptsManifest(BaseModel):
 class ControlPlaneToolsManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane.tools"]
+    schema_version: Literal["mozaiks.refinement_harness.tools.v1"]
     tools: list[ControlPlaneToolDefinition] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -200,7 +200,7 @@ class ControlPlaneScopePolicyManifest(BaseModel):
 class ControlPlanePoliciesManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["mozaiks.control_plane.policies"] = "mozaiks.control_plane.policies"
+    schema_version: Literal["mozaiks.refinement_harness.policies.v1"] = "mozaiks.refinement_harness.policies.v1"
     scope: ControlPlaneScopePolicyManifest = Field(default_factory=ControlPlaneScopePolicyManifest)
 
 
