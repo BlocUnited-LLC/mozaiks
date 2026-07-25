@@ -838,10 +838,8 @@ async def collect_missing_connector_needs(
     unresolved = list(inventory.get("missing_required_services") or [])
     if not unresolved:
         status = "ready"
-    elif prompt and request_result is not None:
-        status = "blocked"
     else:
-        status = "needs_configuration"
+        status = "blocked"
     result = {
         "status": status,
         "checked_at": datetime.now(UTC).isoformat(),

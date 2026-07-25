@@ -308,7 +308,7 @@ async def test_appgenerator_integration_readiness_blocks_requests_saves_and_pass
         prompt=False,
     )
 
-    assert dry_run["status"] == "needs_configuration"
+    assert dry_run["status"] == "blocked"
     assert dry_run["unresolved_required_services"] == ["analytics_provider"]
 
     result = await connector_request.collect_missing_connector_needs(context_variables=context)

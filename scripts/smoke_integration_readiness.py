@@ -307,7 +307,7 @@ async def run_smoke() -> dict[str, Any]:
         )
 
         assertions = {
-            "blocked_before_prompt": blocked.get("status") == "needs_configuration"
+            "blocked_before_prompt": blocked.get("status") == "blocked"
             and blocked.get("unresolved_required_services") == ["analytics_provider"],
             "emitted_integration_required": bool(ui_events)
             and ui_events[0]["payload"].get("event_type") == "integration.required",
