@@ -3,7 +3,7 @@ AppGenerator code file utilities.
 
 Wraps mozaiksai.core.workflow.generator_support.code_files with
 AppGenerator-specific payload expansion: app_backend_admin_config and
-control_plane_pack.
+refinement_harness.
 
 Import from here (not the runtime module) in any AppGenerator tool that
 needs full payload materialization including admin surface codegen.
@@ -16,8 +16,8 @@ from typing import Any
 from factory_app.workflows.AppGenerator.tools.app_backend_admin_codegen import (
     build_app_backend_admin_code_files,
 )
-from factory_app.workflows.AppGenerator.tools.control_plane_pack_codegen import (
-    build_control_plane_pack_code_files,
+from factory_app.workflows.AppGenerator.tools.refinement_harness_codegen import (
+    build_refinement_harness_code_files,
 )
 from mozaiksai.core.workflow.generator_support.code_files import (
     extract_code_file_map_from_payload as _base_extract,
@@ -48,9 +48,9 @@ def extract_code_file_map_from_payload(payload: Any) -> dict[str, str]:
                 continue
             file_map[safe] = str(content)
 
-    raw_control_plane = payload.get("control_plane_pack")
-    if raw_control_plane is not None:
-        for item in build_control_plane_pack_code_files(raw_control_plane):
+    raw_refinement_harness = payload.get("refinement_harness")
+    if raw_refinement_harness is not None:
+        for item in build_refinement_harness_code_files(raw_refinement_harness):
             safe = safe_relpath(str(item.get("filename") or ""))
             content = item.get("content")
             if not safe or content is None:

@@ -1,1 +1,1 @@
-"""Factory control-plane module package."""
+"""Factory Refinement Engine identity module package."""

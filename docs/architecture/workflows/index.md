@@ -20,7 +20,7 @@ handoffs, workflow routing, or session/refinement behavior.
 | [Build Context Packs](build-context-packs.md) | Targeted build-time catalogs, contracts, templates, and prompt projections |
 | [Domain-Agnostic Build Factory](domain-agnostic-build-factory.md) | Dev-pack architecture for shared harnesses and domain-specific workflow contracts |
 | [Structured Output Extraction](structured-output-extraction-contract.md) | Strict structured-output extraction contract |
-| [Refinement Control Plane](refinement-control-plane.md) | Refinement routing, classification, and scoped repair |
+| [Refinement Engine](refinement-engine.md) | Refinement routing, classification, and scoped repair |
 | [Session Router](session-router.md) | Session routing and resume contract |
-| [Control-Plane Harness Architecture](control-plane-harness-architecture.md) | Builder harness ownership and contracts |
+| [Refinement Harness Architecture](refinement-harness-architecture.md) | Builder harness ownership and contracts |
 | [Proposal-Only Workflow Pattern](proposal-only-workflow-pattern.md) | HITL planning/review workflow archetype, blocked/deferred phases, output invariants |

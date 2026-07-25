@@ -32,7 +32,7 @@ Covers helpers NOT tested in test_studio_summary_helpers.py:
   _recommend_next_step:
     - no provider → config guidance message
     - no model → config guidance message
-    - no control plane enabled → enable guidance
+    - no refinement policy enabled -> enable guidance
     - no admins → admin guidance
     - zero workflows → start build guidance
     - no entry_point → entry_point guidance
@@ -49,7 +49,7 @@ from mozaiksai.core.runtime.app.studio_summary import (
 )
 
 # ---------------------------------------------------------------------------
-# Helpers to build valid control_plane and plan state dicts
+# Helpers to build valid refinement policy and plan state dicts
 # ---------------------------------------------------------------------------
 
 def _cp(enabled: bool = True) -> dict[str, Any]:
@@ -64,7 +64,7 @@ def _valid_step_kwargs(**overrides) -> dict[str, Any]:
         "admins": ["admin@example.com"],
         "workflow_count": 1,
         "entry_point": "ValueEngine",
-        "control_plane": _cp(enabled=True),
+        "refinement_policy": _cp(enabled=True),
     }
     base.update(overrides)
     return base
@@ -218,9 +218,9 @@ class TestRecommendNextStep:
         result = _recommend_next_step(**_valid_step_kwargs(model=None))
         assert "provider" in result.lower() or "model" in result.lower()
 
-    def test_control_plane_disabled_returns_guidance(self):
-        result = _recommend_next_step(**_valid_step_kwargs(control_plane=_cp(enabled=False)))
-        assert "control_plane" in result or "enable" in result.lower()
+    def test_refinement_policy_disabled_returns_guidance(self):
+        result = _recommend_next_step(**_valid_step_kwargs(refinement_policy=_cp(enabled=False)))
+        assert "refinement_policy" in result or "enable" in result.lower()
 
     def test_no_admins_returns_admin_guidance(self):
         result = _recommend_next_step(**_valid_step_kwargs(admins=[]))
@@ -241,7 +241,7 @@ class TestRecommendNextStep:
     def test_returns_non_empty_string(self):
         for kwargs in [
             _valid_step_kwargs(provider=None),
-            _valid_step_kwargs(control_plane=_cp(enabled=False)),
+            _valid_step_kwargs(refinement_policy=_cp(enabled=False)),
             _valid_step_kwargs(admins=[]),
             _valid_step_kwargs(workflow_count=0),
             _valid_step_kwargs(entry_point=None),

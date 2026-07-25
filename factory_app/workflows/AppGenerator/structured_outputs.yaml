@@ -576,7 +576,8 @@ models:
         values:
         - module
         - workflow
-        - control_plane
+        - app_policy
+        - refinement
         - external_integration
         - ui_only
         description: Concrete realization boundary for this surface.
@@ -642,7 +643,8 @@ models:
         values:
         - module
         - workflow
-        - control_plane
+        - app_policy
+        - refinement
         - external_integration
         - ui_only
         description: Surface kind this capability pack realizes. Do not assume every pack becomes a module.
@@ -782,7 +784,7 @@ models:
         - api_surface
         - page_bundle
         - agent_backend_integration
-        - control_plane_pack
+        - refinement_harness
         - ai_disclosure_docs
         - legal_docs
         - infra_scaffold
@@ -792,7 +794,9 @@ models:
           app pages use the declarative AppSchemaAgent path. `page_bundle` means a
           declarative page/schema bundle and must be paired with AppSchemaAgent.
           `subscription_config` emits only config/subscriptions.yaml from
-          SubscriptionContractDesigner when contract_required=true.
+          SubscriptionContractDesigner when contract_required=true. Use
+          surface_kind=app_policy for this task; do not classify subscriptions
+          as refinement harness work.
           `module_contract` emits only module.yaml, contracts/*.yaml, and optional
           runtime_extensions.yaml; it must not own backend/*.py.
           `data_models` emits modules/{module_id}/backend/schemas.py and must start
@@ -818,10 +822,10 @@ models:
           .env.staging.example, .env.production.example,
           deployment.manifest.json, or .github/workflows/*. Those are emitted by
           the deployment contract renderer during download/export.
-          `control_plane_pack` is required for surface_kind=control_plane tasks and
-          emits an optional app-local control_plane/ harness pack. It must start
-          at ControlPlaneAgent — do NOT use service_foundation, api_surface, or
-          module_contract for control_plane surfaces.
+          `refinement_harness` is required for surface_kind=refinement tasks and
+          emits an optional app-local `refinement_harness/` bundle. It must start
+          at RefinementHarnessAgent — do NOT use service_foundation, api_surface, or
+          module_contract for refinement surfaces.
           surface_kind=external_integration may use `api_surface` for thin
           clients, `service_foundation` for direct app-owned provider adapters under
           services/adapters/, explicit services/routes/, or security/secrets.yaml, or
@@ -850,7 +854,8 @@ models:
         values:
         - module
         - workflow
-        - control_plane
+        - app_policy
+        - refinement
         - external_integration
         - ui_only
         description: Surface kind realized by this task.
@@ -2976,32 +2981,32 @@ models:
         - 'null'
         description: Optional runtime_extensions.yaml contract. Emit only when the module needs an api_router (webhook receiver) or startup_service (persistent background connection). Null for most modules.
 
-  ControlPlaneRouteRef:
+  RefinementHarnessRouteRef:
     type: model
     fields:
       workflow_sequence:
         type: str
         description: >
           Required workflow_sequence id from workflows/extended_orchestration/extension_registry.json.
-          This is the only route target allowed in generated control_plane.yaml routes.
+          This is the only route target allowed in generated harness.yaml routes.
 
-  ControlPlaneArtifactChangeRoutes:
+  RefinementHarnessArtifactChangeRoutes:
     type: model
     fields:
       patch:
-        type: ControlPlaneRouteRef
+        type: RefinementHarnessRouteRef
         description: Sequence selected for local patch requests.
       design:
-        type: ControlPlaneRouteRef
+        type: RefinementHarnessRouteRef
         description: Sequence selected for design/schema-level requests.
       feature:
-        type: ControlPlaneRouteRef
+        type: RefinementHarnessRouteRef
         description: Sequence selected for additive feature requests.
       core:
-        type: ControlPlaneRouteRef
+        type: RefinementHarnessRouteRef
         description: Sequence selected for core product-direction changes.
 
-  ControlPlaneArtifactRouting:
+  RefinementHarnessArtifactRouting:
     type: model
     fields:
       artifact_kind:
@@ -3011,10 +3016,10 @@ models:
         type: str
         description: Human-readable artifact label.
       routes:
-        type: ControlPlaneArtifactChangeRoutes
+        type: RefinementHarnessArtifactChangeRoutes
         description: Change-class route map. Each route contains workflow_sequence only.
 
-  ControlPlaneRoutingManifest:
+  RefinementHarnessRoutingManifest:
     type: model
     fields:
       default_artifact_kind:
@@ -3022,10 +3027,10 @@ models:
         description: Default artifact kind when a refinement request does not specify one.
       artifacts:
         type: list
-        items: ControlPlaneArtifactRouting
+        items: RefinementHarnessArtifactRouting
         description: Artifact routing policies for the harness.
 
-  ControlPlaneCheckpointManifestOutput:
+  RefinementHarnessCheckpointManifestOutput:
     type: model
     fields:
       event:
@@ -3036,36 +3041,36 @@ models:
         - contract_surface_requested
         - coding_requested
         description: >
-          LLM-backed control-plane checkpoint event. Mozaiks infers checkpoint
+          LLM-backed refinement checkpoint event. Mozaiks infers checkpoint
           id, mode, handler implementation, and structured output contract from
           this event.
       prompt_id:
         type: str
-        description: Prompt id declared in control_plane/prompts/*.yaml.
+        description: Prompt id declared in refinement_harness/prompts/*.yaml.
       tool_ids:
         type: optional_list
         items: str
-        description: Tool ids from control_plane/config/tools.yaml available to this checkpoint.
+        description: Tool ids from refinement_harness/config/tools.yaml available to this checkpoint.
 
-  ControlPlaneManifestOutput:
+  RefinementHarnessManifestOutput:
     type: model
     fields:
       schema_version:
         type: literal
         values:
-        - mozaiks.control_plane
-        description: Control-plane manifest schema version.
+        - mozaiks.refinement_harness.v1
+        description: Refinement harness manifest schema version.
       routing:
-        type: ControlPlaneRoutingManifest
+        type: RefinementHarnessRoutingManifest
         description: Artifact routing policy. Routes may contain workflow_sequence only.
       checkpoints:
         type: list
-        items: ControlPlaneCheckpointManifestOutput
+        items: RefinementHarnessCheckpointManifestOutput
         description: >
           LLM-backed checkpoint prompts/tools. Do not declare deterministic
           handler checkpoints; Mozaiks supplies them in runtime.
 
-  ControlPlaneToolDefinition:
+  RefinementHarnessToolDefinition:
     type: model
     fields:
       id:
@@ -3085,20 +3090,20 @@ models:
         items: str
         description: Checkpoint events where this tool is available.
 
-  ControlPlaneToolsManifestOutput:
+  RefinementHarnessToolsManifestOutput:
     type: model
     fields:
       schema_version:
         type: literal
         values:
-        - mozaiks.control_plane.tools
-        description: Control-plane tools manifest schema version.
+        - mozaiks.refinement_harness.tools.v1
+        description: Refinement harness tools manifest schema version.
       tools:
         type: list
-        items: ControlPlaneToolDefinition
+        items: RefinementHarnessToolDefinition
         description: Tool bindings available to checkpoints.
 
-  ControlPlaneScopePolicies:
+  RefinementHarnessScopePolicies:
     type: model
     fields:
       max_selected_paths:
@@ -3114,19 +3119,19 @@ models:
         - workflow
         description: Behavior when inferred scope exceeds max_selected_paths. Use workflow to escalate to a full workflow sequence.
 
-  ControlPlanePoliciesManifestOutput:
+  RefinementHarnessPoliciesManifestOutput:
     type: model
     fields:
       schema_version:
         type: literal
         values:
-        - mozaiks.control_plane.policies
-        description: Control-plane policies manifest schema version.
+        - mozaiks.refinement_harness.policies.v1
+        description: Refinement harness policies manifest schema version.
       scope:
-        type: ControlPlaneScopePolicies
+        type: RefinementHarnessScopePolicies
         description: Deterministic scope and auto-apply bounds for the harness.
 
-  ControlPlanePromptFile:
+  RefinementHarnessPromptFile:
     type: model
     fields:
       id:
@@ -3134,41 +3139,41 @@ models:
         description: Prompt id referenced by checkpoints.
       filename:
         type: str
-        description: Prompt file path under control_plane/prompts/, e.g. control_plane/prompts/change_classifier_system.yaml.
+        description: Prompt file path under refinement_harness/prompts/, e.g. refinement_harness/prompts/change_classifier_system.yaml.
       content:
         type: str
         description: Prompt content.
 
-  ControlPlanePackBundle:
+  RefinementHarnessBundle:
     type: model
     fields:
-      control_plane_yaml:
-        type: ControlPlaneManifestOutput
-        description: Serialized to control_plane/config/control_plane.yaml.
+      harness_yaml:
+        type: RefinementHarnessManifestOutput
+        description: Serialized to refinement_harness/config/harness.yaml.
       tools_yaml:
-        type: ControlPlaneToolsManifestOutput
-        description: Serialized to control_plane/config/tools.yaml.
+        type: RefinementHarnessToolsManifestOutput
+        description: Serialized to refinement_harness/config/tools.yaml.
       policies_yaml:
         type: union
         variants:
-        - ControlPlanePoliciesManifestOutput
+        - RefinementHarnessPoliciesManifestOutput
         - 'null'
-        description: Optional policies manifest serialized to control_plane/config/policies.yaml.
+        description: Optional policies manifest serialized to refinement_harness/config/policies.yaml.
       prompt_files:
         type: optional_list
-        items: ControlPlanePromptFile
-        description: Prompt files serialized under control_plane/prompts/.
+        items: RefinementHarnessPromptFile
+        description: Prompt files serialized under refinement_harness/prompts/.
 
-  ControlPlaneOutput:
+  RefinementHarnessOutput:
     type: model
     fields:
-      control_plane_pack:
-        type: ControlPlanePackBundle
-        description: Required typed app-local control-plane harness pack.
+      refinement_harness:
+        type: RefinementHarnessBundle
+        description: Required typed app-local refinement harness.
       code_files:
         type: list
         items: CodeFileEntry
-        description: Serialized file mirror. The typed control_plane_pack is the source of truth.
+        description: Serialized file mirror. The typed refinement_harness is the source of truth.
       agent_message:
         type: union
         variants:
@@ -6215,7 +6220,7 @@ registry:
   AdminRegistryAgent: AdminRegistryOutput
   IntegrationReadinessAgent: IntegrationReadinessOutput
   DatabaseAgent: DatabaseOutput
-  ControlPlaneAgent: ControlPlaneOutput
+  RefinementHarnessAgent: RefinementHarnessOutput
   ConfigMiddlewareAgent: ConfigMiddlewareOutput
   ModuleContractQualityAgent: ModuleContractQualityReviewRequest
   ModelAgent: ModelOutput

@@ -3,7 +3,7 @@ title: SessionRouter
 status: Authoritative - Pre-Production
 created: 2026-04-13
 depends_on:
-  - refinement-control-plane.md
+  - refinement-engine.md
   - workflow-routing-transitions.md
   - ../../architecture/mozaiksai/task-batches.md
   - ../../architecture/mozaiksai/universal-orchestrator.md
@@ -17,7 +17,7 @@ sits above `JourneyOrchestrator`, host-supplied trigger routing policy, and work
 The concrete refinement re-entry policy is framework-owned. The generic
 control-plane contracts and runtime now live under `mozaiksai/control_plane/`,
 while the first-party factory pack stays declarative under
-`factory_app/control_plane/`. The Studio/Mozaiks host injects the harness into
+`factory_app/refinement_harness/`. The Studio/Mozaiks host injects the harness into
 SessionRouter through a trigger-route resolver seam. SessionRouter does not
 import factory pack policy directly.
 

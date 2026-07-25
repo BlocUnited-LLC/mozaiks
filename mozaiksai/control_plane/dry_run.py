@@ -31,7 +31,7 @@ from mozaiksai.control_plane.implementations.refinement_router import (
     ChangeClass,
     RefinementTriggerRouteResolver,
 )
-from mozaiksai.control_plane.loader import load_control_plane_pack
+from mozaiksai.control_plane.loader import load_refinement_harness
 
 DRY_RUN_NOTICE = "No files were changed."
 VALID_CHANGE_CLASSES = {change_class.value for change_class in ChangeClass}
@@ -728,7 +728,7 @@ async def build_refinement_execution_plan(
     control_plane_config = load_control_plane_config(resolved_app_root)
 
     def pack_loader():
-        return load_control_plane_pack(app_root=resolved_app_root)
+        return load_refinement_harness(app_root=resolved_app_root)
 
     classifier = (
         LLMChangeClassifier(

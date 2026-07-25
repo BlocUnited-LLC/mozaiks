@@ -139,9 +139,9 @@ async def _skip_validation(**kwargs: Any) -> dict[str, Any]:
 
 def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
-        path=Path("factory_app/control_plane"),
+        path=Path("factory_app/refinement_harness"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             checkpoints=[
                 ControlPlaneCheckpointManifest(
                     event="coding_requested",
@@ -151,7 +151,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[
                 ControlPlanePromptDefinition(
                     id="coding_refinement_system",
@@ -160,7 +160,7 @@ def _pack() -> LoadedControlPlanePack:
             ],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools",
+            schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[
                 ControlPlaneToolDefinition(
                     id="get_revision_context",

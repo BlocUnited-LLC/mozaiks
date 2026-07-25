@@ -2,7 +2,7 @@
 title: App Context and Brownfield Adoption
 status: Active Architecture - Context Graph Refactor
 created: 2026-05-24
-depends_on: graph-authority-boundaries.md, ../workflows/refinement-control-plane.md, ../builder/artifact-staleness-and-routing.md, distribution-and-workspace-model.md
+depends_on: graph-authority-boundaries.md, ../workflows/refinement-engine.md, ../builder/artifact-staleness-and-routing.md, distribution-and-workspace-model.md
 ---
 
 # App Context And Brownfield Adoption

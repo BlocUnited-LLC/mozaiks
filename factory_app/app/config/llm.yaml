@@ -1,4 +1,4 @@
-schema_version: mozaiks.control_plane.runtime
+schema_version: mozaiks.refinement.policy.v1
 enabled: true
 
 # ---------------------------------------------------------------------------
@@ -14,7 +14,7 @@ enabled: true
 # ---------------------------------------------------------------------------
 llm_profiles:
   classifier:
-    purpose: Classify refinement requests into the stable control-plane change classes.
+    purpose: Classify refinement requests into the stable refinement change classes.
     expected_behavior: deterministic structured classification
     llm_config:
       api_type: google

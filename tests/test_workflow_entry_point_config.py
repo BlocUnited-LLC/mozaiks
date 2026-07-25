@@ -31,8 +31,8 @@ def test_factory_app_ai_config_keeps_runtime_startup_sections() -> None:
     assert sorted(data.keys()) == ["ask", "chat", "support", "workflows"]
 
 
-def test_factory_app_control_plane_defaults_are_declared() -> None:
-    runtime_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "llm.yaml"
+def test_factory_app_refinement_policy_defaults_are_declared() -> None:
+    runtime_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "refinement_policy.yaml"
     data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
 
     assert data["enabled"] is True
@@ -50,10 +50,10 @@ def test_factory_app_control_plane_defaults_are_declared() -> None:
     assert data["llm_profiles"]["classifier"]["llm_config"]["model"]  # any non-empty model is valid
 
 
-def test_generated_ai_config_uses_factory_control_plane_defaults() -> None:
+def test_generated_ai_config_uses_factory_runtime_startup_defaults() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     ai_path = repo_root / "factory_app" / "app" / "config" / "ai.json"
-    runtime_path = repo_root / "factory_app" / "app" / "config" / "llm.yaml"
+    runtime_path = repo_root / "factory_app" / "app" / "config" / "refinement_policy.yaml"
     factory_data = json.loads(ai_path.read_text(encoding="utf-8"))
     runtime_data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
     generated_data = init_command.build_default_ai_config("Generated App")
@@ -65,7 +65,7 @@ def test_generated_ai_config_uses_factory_control_plane_defaults() -> None:
     assert "app_context" not in generated_data
 
 
-def test_workflow_manager_uses_control_plane_startup_entry_point() -> None:
+def test_workflow_manager_uses_factory_startup_entry_point() -> None:
     config = _mozaiks_workflow_manager().get_config("ValueEngine")
 
     assert config.get("entry_point") is True

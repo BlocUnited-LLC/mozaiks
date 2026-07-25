@@ -270,30 +270,30 @@ task_contracts:
       - Deployment packaging artifacts are emitted only by the generate_and_download deployment contract renderer through DownloadRequest deployment_profile/include_* fields.
       - Generated deployment artifacts must follow the provider-neutral deployment contract, must never include real secrets or provider-tenant identifiers, and generated CI workflow secret references must stay names-only through ci_secret_requirements.
 
-  control_plane_pack:
-    owner_agent: ControlPlaneAgent
+  refinement_harness:
+    owner_agent: RefinementHarnessAgent
     summary: >
-      Optional app-local declarative control-plane harness pack. Use only when
+      Optional app-local declarative refinement harness. Use only when
       the app needs checkpoint/routing/refinement behavior beyond ordinary
       extension_registry.json transitions and workflow_sequences.
     required_outputs:
-      - app/config/llm.yaml
-      - control_plane/config/control_plane.yaml
-      - control_plane/config/tools.yaml
+      - app/config/refinement_policy.yaml
+      - refinement_harness/config/harness.yaml
+      - refinement_harness/config/tools.yaml
     optional_outputs:
-      - control_plane/config/policies.yaml
-      - control_plane/prompts/*.yaml
+      - refinement_harness/config/policies.yaml
+      - refinement_harness/prompts/*.yaml
     hard_constraints:
       - Generate this task only when the product explicitly needs a harnessed app lifecycle/refinement/session loop; most apps should omit it.
-      - Do NOT generate module.yaml, handler.py, service.py, repo.py, backend/control_plane/*.py, or other module/runtime files.
+      - Do NOT generate module.yaml, handler.py, service.py, repo.py, backend/refinement_harness/*.py, or other module/runtime files.
       - Do NOT register this surface as a runtime module under app/modules/.
       - Stay within current_build_task.owned_paths.
-      - app/config/llm.yaml is the app-local control-plane LLM profile seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into control_plane.yaml.
-      - control_plane.yaml routes declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
-      - Every workflow_sequence referenced by control_plane.yaml must exist in workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
+      - app/config/refinement_policy.yaml is the app-local refinement policy seed. It must carry the shipped runtime contract and must not move ask/chat/workflows startup into harness.yaml.
+      - harness.yaml routes declare workflow_sequence only; do not declare route_to, affected_workflows, affected_declarative_families, requires_replanning, requires_rebuild, or scope_summary.
+      - Every workflow_sequence referenced by harness.yaml must exist in workflows/extended_orchestration/extension_registry.json and declare affected_declarative_families there.
       - Use shipped mozaiksai.control_plane implementations and tool entrypoints unless a future custom-harness Python contract is explicitly introduced.
-      - Control-plane artifacts coordinate app-level lifecycle, refinement, or session state only — no business domain logic.
-      - Do not duplicate host-universal control-plane behavior already provided by the platform.
+      - Refinement harness artifacts coordinate app-level lifecycle, refinement, or session state only — no business domain logic.
+      - Do not duplicate host-universal refinement engine behavior already provided by the platform.
 
   api_surface:
     owner_agent: ControllerAgent

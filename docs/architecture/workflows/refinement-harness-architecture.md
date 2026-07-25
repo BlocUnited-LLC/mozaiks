@@ -1,8 +1,8 @@
-# Control-Plane Harness Architecture
+# Refinement Harness Architecture
 
-This document describes the canonical control-plane shape for Mozaiks.
+This document describes the canonical refinement engine shape for Mozaiks.
 
-The control plane is the framework layer that sits above workflow-local AG2
+The refinement engine is the framework layer that sits above workflow-local AG2
 execution and decides what should happen when a harnessed request or checkpoint
 event arrives.
 
@@ -25,10 +25,11 @@ Examples:
 - "Restart this from concept."
 - "This should become investor-facing."
 
-In the first-party builder experience today, this refinement loop is driven by
-startup declared through `app/config/ai.json`, control-plane runtime policy in
-`app/config/llm.yaml`, and the selected
-`control_plane/config/control_plane.yaml` pack. Do not document a dedicated `RefinementWorkflow` unless the runtime actually introduces one.
+In the first-party builder experience today, normal chat/workflow startup comes
+from `app/config/ai.json`, refinement model/profile policy comes from
+`app/config/refinement_policy.yaml`, and checkpoint routing comes from the
+selected `refinement_harness/config/harness.yaml`. Do not document a dedicated
+`RefinementWorkflow` unless the runtime actually introduces one.
 
 Those requests need:
 
@@ -38,13 +39,13 @@ Those requests need:
 - optional coding refinement
 - clear user-facing decisions
 
-That is the control plane.
+That is the refinement engine.
 
 ---
 
 ## Two Paths: Factory vs. Harness
 
-**First-time builds** bypass the control plane entirely. They enter through
+**First-time builds** bypass the refinement engine entirely. They enter through
 `extension_registry.json` workflow sequences directly:
 
 ```
@@ -54,11 +55,11 @@ User starts a new build
 ```
 
 **Refinements** (user already has a built artifact and wants to change it)
-enter the control plane:
+enter the refinement engine:
 
 ```
 User submits a change request on an existing artifact
-  → Control Plane
+  → Refinement Engine
   → checkpoint: classify the change
   → checkpoint: route to a workflow_sequence
   → checkpoint: decide — direct code edit or factory re-run?
@@ -74,7 +75,7 @@ User submits a change request on an existing artifact
     [AppGenerator runs as part of the sequence]
 ```
 
-The control plane does not replace the factory. It routes to it.
+The refinement engine does not replace the factory. It routes to it.
 
 ---
 
@@ -126,13 +127,13 @@ workflow re-entry        launch selected workflow_sequence from extension_regist
 
 ## Routing Table
 
-The routing table in `control_plane.yaml` maps each combination of artifact
+The routing table in `harness.yaml` maps each combination of artifact
 kind and change class to a named `workflow_sequence`. The sequence name is
-resolved from `extension_registry.json` — the control plane declares the
+resolved from `extension_registry.json` — the refinement engine declares the
 target name only; the sequence declares which workflows run and in what order.
 
 ```
-control_plane.yaml                        extension_registry.json
+harness.yaml                        extension_registry.json
 ────────────────────────────────────      ──────────────────────────────────────────
 {artifact_kind: app_bundle}
   patch   → workflow_sequence: app_revision        steps: [AppGenerator]
@@ -164,7 +165,7 @@ control_plane.yaml                        extension_registry.json
                                                    (with carry_forward context)
 ```
 
-The control plane does not declare `affected_workflows` or
+The refinement engine does not declare `affected_workflows` or
 `affected_declarative_families`. Those are owned by the sequence in
 `extension_registry.json`.
 
@@ -187,7 +188,7 @@ upstream artifacts.
 
 ### `mozaiksai/core/`
 
-Framework-wide primitives that are not specific to the control plane itself.
+Framework-wide primitives that are not specific to the refinement engine itself.
 
 Examples:
 
@@ -197,7 +198,7 @@ Examples:
 
 ### `mozaiksai/control_plane/`
 
-The canonical control-plane subsystem.
+The canonical refinement-engine subsystem.
 
 ```text
 mozaiksai/control_plane/
@@ -223,7 +224,7 @@ mozaiksai/control_plane/
 
 This layer owns:
 
-- control-plane runtime
+- refinement-engine runtime
 - checkpoint dispatch
 - config/schema/loader/contracts
 - generic tool execution boundaries
@@ -231,15 +232,15 @@ This layer owns:
 
 This is the canonical runtime package.
 
-### `factory_app/control_plane/`
+### `factory_app/refinement_harness/`
 
 First-party builder/reference app declaratives and builder-specific tools.
 
 ```text
-factory_app/control_plane/
+factory_app/refinement_harness/
   config/
-    control_plane.yaml
-    llm.yaml
+    harness.yaml
+    refinement_policy.yaml
     tools.yaml
     policies.yaml
   prompts/
@@ -270,10 +271,10 @@ feel like an authored app surface, not the owner of the framework runtime.
 
 This layer owns:
 
-- the first-party declarative control-plane pack
+- the first-party declarative refinement harness
 - first-party prompt text
 - first-party artifact/workspace context tools
-- future control-plane UI surfaces
+- future refinement-engine UI surfaces
 
 It should not own the runtime engines.
 
@@ -289,7 +290,7 @@ The harness is not:
 
 The split is:
 
-- control plane
+- refinement engine
   - interprets checkpoint events
   - decides continuation
 - extension graph
@@ -297,41 +298,30 @@ The split is:
 - AG2/workflows
   - execute once a workflow is selected
 
-## Pack Model
+## Policy And Harness Model
 
-The app-level switch lives in `app/config/ai.json`:
+The app-level refinement policy lives in `app/config/refinement_policy.yaml`:
 
-```json
-{
-  "control_plane": {
-    "enabled": true,
-    "classifier": {
-      "enabled": true,
-      "llm_config": {
-        "model": "gpt-5-nano",
-        "temperature": 0.0
-      }
-    },
-    "coding": {
-      "enabled": true,
-      "llm_config": {
-        "model": "gpt-5.2-codex",
-        "temperature": 0.1
-      }
-    }
-  }
-}
+```yaml
+schema_version: mozaiks.refinement.policy.v1
+enabled: true
+classifier:
+  enabled: true
+  llm_profile: classifier
+coding:
+  enabled: true
+  llm_profile: codegen
 ```
 
-That config only enables capabilities and provides model config. It does not
-point to Python implementation files.
+That policy enables capabilities and provides model profile selection. It does
+not point to Python implementation files.
 
-The declarative pack lives under `factory_app/control_plane/` or an app-local
-override at `<workspace>/control_plane/`.
+The declarative harness lives under `factory_app/refinement_harness/` or an app-local
+override at `<workspace>/refinement_harness/`.
 
 ## Generated App Authoring
 
-Most generated apps do not need an app-local control plane. They should use
+Most generated apps do not need an app-local refinement harness. They should use
 ordinary workflow launches, module actions, and `extension_registry.json`
 workflow sequences first.
 
@@ -339,7 +329,7 @@ AppGenerator may emit an app-local harness only when the product explicitly
 needs checkpointed lifecycle, refinement, session, or coding-control behavior
 that cannot be expressed as normal workflow transitions.
 
-See [app/control-plane-pack.md](../../architecture/app/control-plane-pack.md)
+See [app/refinement-harness.md](../../architecture/app/refinement-harness.md)
 for the full starter pack reference, annotated templates, and guidance on which
 checkpoints and tools a generated app should include.
 
@@ -348,59 +338,59 @@ checkpoints and tools a generated app should include.
 Keep startup separate from the harness pack:
 
 - `app/config/ai.json` owns `ask`, `chat`, and `workflows` startup
-- `app/config/llm.yaml` owns runtime policy (LLM profiles, feature flags)
-- `control_plane/config/control_plane.yaml` owns declarative checkpoints and routing
+- `app/config/refinement_policy.yaml` owns runtime policy (LLM profiles, feature flags)
+- `refinement_harness/config/harness.yaml` owns declarative checkpoints and routing
 
 ### AppGenerator Build Task
 
-The canonical AppGenerator build task for a control plane pack:
+The canonical AppGenerator build task for a refinement harness:
 
 ```yaml
-task_type: control_plane_pack
-surface_kind: control_plane
+task_type: refinement_harness
+surface_kind: refinement
 capability_pack_id: null
-initial_agent: ControlPlaneAgent
+initial_agent: RefinementHarnessAgent
 owned_paths:
-  - app/config/llm.yaml
-  - control_plane/config/control_plane.yaml
-  - control_plane/config/tools.yaml
+  - app/config/refinement_policy.yaml
+  - refinement_harness/config/harness.yaml
+  - refinement_harness/config/tools.yaml
 ```
 
 Optional owned paths:
 
 ```yaml
-- control_plane/config/policies.yaml
-- control_plane/prompts/*.yaml
+- refinement_harness/config/policies.yaml
+- refinement_harness/prompts/*.yaml
 ```
 
 ### Pack Constraints
 
-Generated control-plane packs are declarative only:
+Generated refinement harnesses are declarative only:
 
 - no `module.yaml`
 - no `app/modules/*`
-- no `backend/control_plane/*.py`
+- no `backend/refinement_harness/*.py`
 - no custom harness Python
 - no business-domain logic
 
 The generated pack uses shipped `mozaiksai.control_plane` implementations and
 declared tool entrypoints from `mozaiksai.control_plane.tools.*` and
-`factory_app.control_plane.tools.*`. Custom harness Python is not a v1
+`factory_app.refinement_harness.tools.*`. Custom harness Python is not a v1
 generator contract.
 
 ### Route Rules
 
-- `control_plane.yaml` routes declare `workflow_sequence` only.
+- `harness.yaml` routes declare `workflow_sequence` only.
 - each `workflow_sequence` must exist in
   `workflows/extended_orchestration/extension_registry.json`
 - sequence impact metadata, including `affected_declarative_families`, lives on
-  the sequence in `extension_registry.json`, not in `control_plane.yaml`
+  the sequence in `extension_registry.json`, not in `harness.yaml`
 - do not declare `affected_workflows`, `requires_replanning`, or
   `requires_rebuild` in route manifests; these are derived at runtime
 
 ## Declarative Files
 
-### `config/control_plane.yaml`
+### `config/harness.yaml`
 
 Declares:
 
@@ -414,13 +404,7 @@ Declares:
 Example:
 
 ```yaml
-schema_version: mozaiks.control_plane
-profile:
-  id: factory_app
-  display_name: Factory App Harness
-  description: First-party declarative control-plane pack for the Mozaiks build experience.
-harness:
-  implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
+schema_version: mozaiks.refinement_harness.v1
 routing:
   default_artifact_kind: app_bundle
   artifacts:
@@ -436,41 +420,29 @@ routing:
         core:
           workflow_sequence: full_rebuild
 checkpoints:
-  - id: request_intake
-    event: request_submitted
-    entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
+  - event: request_submitted
     prompt_id: change_classifier_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
 
-  - id: refinement_route
-    event: route_requested
-    entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
+  - event: route_requested
 
-  - id: decision
-    event: decision_requested
-    entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
+  - event: decision_requested
 
-  - id: scope_selection
-    event: scope_requested
-    entrypoint: mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer
+  - event: scope_requested
     prompt_id: coding_scope_selection_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
       - get_artifact_workspace_catalog
 
-  - id: contract_surface_planning
-    event: contract_surface_requested
-    entrypoint: mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner
+  - event: contract_surface_requested
     prompt_id: contract_surface_selection_system
     tool_ids:
       - get_contract_surface_context
 
-  - id: coding_refinement
-    event: coding_requested
-    entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
+  - event: coding_requested
     prompt_id: coding_refinement_system
     tool_ids:
       - get_revision_context
@@ -484,13 +456,13 @@ Route rules:
 - The sequence is resolved from `extension_registry.json`.
 - If a route must start at a different workflow, define a dedicated sequence
   with that workflow first.
-- Do not declare `affected_workflows` in `control_plane.yaml`; it is derived
+- Do not declare `affected_workflows` in `harness.yaml`; it is derived
   from the selected sequence.
-- Do not declare `affected_declarative_families` in `control_plane.yaml`; it is
+- Do not declare `affected_declarative_families` in `harness.yaml`; it is
   declared once on the selected sequence in `extension_registry.json`.
 - Do not declare `requires_replanning`; it is derived from the typed change
   class: `patch=false`, `design|feature|core=true`.
-- Do not declare `requires_rebuild`; control-plane rebuild decisions are
+- Do not declare `requires_rebuild`; refinement-engine rebuild decisions are
   runtime decision outputs, not route manifest inputs.
 
 ### `config/tools.yaml`
@@ -504,7 +476,7 @@ tools:
   - id: get_artifact_summary
     kind: context_tool
     description: Load artifact lineage and version metadata.
-    entrypoint: factory_app.control_plane.tools.get_artifact_summary:get_artifact_summary
+    entrypoint: factory_app.refinement_harness.tools.get_artifact_summary:get_artifact_summary
     available_to:
       - request_submitted
       - route_requested
@@ -534,7 +506,7 @@ Current first use:
 
 ## Checkpoint Model
 
-The control plane is checkpoint-driven.
+The refinement engine is checkpoint-driven.
 
 Current first-party checkpoints:
 
@@ -609,7 +581,7 @@ Current first-party handler:
 
 ## Tool Model
 
-Control-plane tools are leaf capabilities used by checkpoints.
+Refinement harness tools are leaf capabilities used by checkpoints.
 
 They are not:
 
@@ -626,7 +598,7 @@ Examples:
 
 The current first-party tools live under:
 
-- `factory_app/control_plane/tools/*`
+- `factory_app/refinement_harness/tools/*`
 
 ## AG2 Implementation Model
 
@@ -689,27 +661,26 @@ AG2 at all — they derive results from typed inputs and routing tables.
 
 LLM config flows from the declarative pack, not from workflow-local AG2 config:
 
-1. `app/config/llm.yaml` declares `llm_profiles` keyed by
+1. `app/config/refinement_policy.yaml` declares `llm_profiles` keyed by
    capability name, each with `model` and `temperature`.
 2. `ControlPlaneConfig.resolve_capability_llm_config(capability)` returns a flat
    `{"model": ..., "temperature": ...}` dict for the resolved profile.
 3. The dict maps directly to `OpenAIConfig(model=..., temperature=...)` inside
    each handler's `_make_agent()`.
 
-App-level overrides in `app/config/ai.json` under
-`control_plane.<capability>.llm_config` take precedence over the profile
-default.
+Capability-level `llm_config` values inside `app/config/refinement_policy.yaml`
+take precedence over the referenced profile default.
 
 ## Runtime Flow
 
 At runtime:
 
 1. `mozaiksai/core/runtime/app/ai_config.py` resolves startup from `app/config/ai.json`
-2. `mozaiksai/control_plane/config.py` resolves runtime policy from `app/config/llm.yaml`
-3. `mozaiksai/control_plane/loader.py` resolves the active pack from `control_plane/config/control_plane.yaml`
+2. `mozaiksai/control_plane/config.py` resolves runtime policy from `app/config/refinement_policy.yaml`
+3. `mozaiksai/control_plane/loader.py` resolves the active pack from `refinement_harness/config/harness.yaml`
 4. `mozaiksai/control_plane/runtime.py` builds a checkpoint runtime
-5. the harness entrypoint is instantiated from `harness.implementation`
-6. the harness binds and runs the checkpoints it needs
+5. checkpoint handler implementations are inferred by the refinement engine
+6. the runtime binds and runs the checkpoints it needs
 
 Current Studio refinement flow:
 
@@ -742,7 +713,7 @@ The harness depends on the workflow graph, but it is not the graph.
 
 - `extension_registry.json`
   - legal transitions and workflow movement
-- control plane
+- refinement engine
   - semantic interpretation and continuation choice
 - workflow runtime
   - actual execution
@@ -780,9 +751,9 @@ It is not the harness runtime.
 Use these paths as source of truth:
 
 - `mozaiksai/control_plane/*`
-- `factory_app/control_plane/config/*`
-- `factory_app/control_plane/prompts/*`
-- `factory_app/control_plane/tools/*`
+- `factory_app/refinement_harness/config/*`
+- `factory_app/refinement_harness/prompts/*`
+- `factory_app/refinement_harness/tools/*`
 
 Do not treat these as canonical:
 
@@ -796,9 +767,9 @@ If you are changing framework runtime behavior:
 
 If you are changing the first-party builder pack:
 
-- edit `factory_app/control_plane/config/*`
-- edit `factory_app/control_plane/prompts/*`
-- edit `factory_app/control_plane/tools/*`
+- edit `factory_app/refinement_harness/config/*`
+- edit `factory_app/refinement_harness/prompts/*`
+- edit `factory_app/refinement_harness/tools/*`
 
 If you are looking at the identity module under `app/modules/...`, you are not
 in the live harness runtime.

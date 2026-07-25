@@ -387,11 +387,11 @@ def test_extract_code_file_entries_sorts_typed_materialized_files() -> None:
     assert filenames == sorted(filenames)
 
 
-def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pack() -> None:
+def test_appgenerator_extract_code_file_map_materializes_typed_refinement_harness() -> None:
     payload = {
-        "control_plane_pack": {
-            "control_plane_yaml": {
-                "schema_version": "mozaiks.control_plane",
+        "refinement_harness": {
+            "harness_yaml": {
+                "schema_version": "mozaiks.refinement_harness.v1",
                 "routing": {
                     "default_artifact_kind": "app_bundle",
                     "artifacts": [
@@ -410,11 +410,11 @@ def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pac
                 "checkpoints": [],
             },
             "tools_yaml": {
-                "schema_version": "mozaiks.control_plane.tools",
+                "schema_version": "mozaiks.refinement_harness.tools.v1",
                 "tools": [],
             },
             "policies_yaml": {
-                "schema_version": "mozaiks.control_plane.policies",
+                "schema_version": "mozaiks.refinement_harness.policies.v1",
                 "scope": {
                     "max_selected_paths": 3,
                     "auto_apply_max_paths": 1,
@@ -431,7 +431,7 @@ def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pac
         },
         "code_files": [
             {
-                "filename": "control_plane/config/control_plane.yaml",
+                "filename": "refinement_harness/config/harness.yaml",
                 "content": "BROKEN",
             }
         ],
@@ -440,35 +440,35 @@ def test_appgenerator_extract_code_file_map_materializes_typed_control_plane_pac
     file_map = extract_appgenerator_code_file_map(payload)
 
     assert set(file_map) == {
-        "app/config/llm.yaml",
-        "control_plane/config/control_plane.yaml",
-        "control_plane/config/tools.yaml",
-        "control_plane/config/policies.yaml",
-        "control_plane/prompts/change_classifier_system.yaml",
+        "app/config/refinement_policy.yaml",
+        "refinement_harness/config/harness.yaml",
+        "refinement_harness/config/tools.yaml",
+        "refinement_harness/config/policies.yaml",
+        "refinement_harness/prompts/change_classifier_system.yaml",
     }
-    assert yaml.safe_load(file_map["control_plane/config/control_plane.yaml"])["routing"]["artifacts"][0]["routes"]["patch"] == {
+    assert yaml.safe_load(file_map["refinement_harness/config/harness.yaml"])["routing"]["artifacts"][0]["routes"]["patch"] == {
         "workflow_sequence": "app_revision",
     }
-    assert yaml.safe_load(file_map["control_plane/config/tools.yaml"]) == {
-        "schema_version": "mozaiks.control_plane.tools",
+    assert yaml.safe_load(file_map["refinement_harness/config/tools.yaml"]) == {
+        "schema_version": "mozaiks.refinement_harness.tools.v1",
         "tools": [],
     }
-    assert yaml.safe_load(file_map["control_plane/prompts/change_classifier_system.yaml"]) == {
+    assert yaml.safe_load(file_map["refinement_harness/prompts/change_classifier_system.yaml"]) == {
         "id": "change classifier system",
         "content": "Classify the refinement request.",
     }
 
 
-def test_appgenerator_control_plane_pack_rejects_prompt_paths_outside_pack() -> None:
+def test_appgenerator_refinement_harness_rejects_prompt_paths_outside_pack() -> None:
     payload = {
-        "control_plane_pack": {
-            "control_plane_yaml": {
-                "schema_version": "mozaiks.control_plane",
+        "refinement_harness": {
+            "harness_yaml": {
+                "schema_version": "mozaiks.refinement_harness.v1",
                 "routing": {"default_artifact_kind": "app_bundle", "artifacts": []},
                 "checkpoints": [],
             },
             "tools_yaml": {
-                "schema_version": "mozaiks.control_plane.tools",
+                "schema_version": "mozaiks.refinement_harness.tools.v1",
                 "tools": [],
             },
             "prompt_files": [
@@ -481,16 +481,16 @@ def test_appgenerator_control_plane_pack_rejects_prompt_paths_outside_pack() -> 
         }
     }
 
-    with pytest.raises(ValueError, match="control-plane prompt files"):
+    with pytest.raises(ValueError, match="refinement harness prompt files"):
         extract_appgenerator_code_file_map(payload)
 
 
-def test_appgenerator_control_plane_pack_rejects_schema_violations() -> None:
+def test_appgenerator_refinement_harness_rejects_schema_violations() -> None:
     """Schema round-trip in codegen catches extra fields and wrong field names at generation time."""
     payload = {
-        "control_plane_pack": {
-            "control_plane_yaml": {
-                "schema_version": "mozaiks.control_plane",
+        "refinement_harness": {
+            "harness_yaml": {
+                "schema_version": "mozaiks.refinement_harness.v1",
                 "routing": {
                     "default_artifact_kind": "app_bundle",
                     "artifacts": [
@@ -512,7 +512,7 @@ def test_appgenerator_control_plane_pack_rejects_schema_violations() -> None:
                 "checkpoints": [],
             },
             "tools_yaml": {
-                "schema_version": "mozaiks.control_plane.tools",
+                "schema_version": "mozaiks.refinement_harness.tools.v1",
                 "tools": [],
             },
         }
@@ -522,12 +522,12 @@ def test_appgenerator_control_plane_pack_rejects_schema_violations() -> None:
         extract_appgenerator_code_file_map(payload)
 
 
-def test_appgenerator_control_plane_pack_rejects_extra_route_fields() -> None:
+def test_appgenerator_refinement_harness_rejects_extra_route_fields() -> None:
     """Extra fields on route objects are rejected by the strict runtime schema."""
     payload = {
-        "control_plane_pack": {
-            "control_plane_yaml": {
-                "schema_version": "mozaiks.control_plane",
+        "refinement_harness": {
+            "harness_yaml": {
+                "schema_version": "mozaiks.refinement_harness.v1",
                 "routing": {
                     "default_artifact_kind": "app_bundle",
                     "artifacts": [
@@ -550,7 +550,7 @@ def test_appgenerator_control_plane_pack_rejects_extra_route_fields() -> None:
                 "checkpoints": [],
             },
             "tools_yaml": {
-                "schema_version": "mozaiks.control_plane.tools",
+                "schema_version": "mozaiks.refinement_harness.tools.v1",
                 "tools": [],
             },
         }

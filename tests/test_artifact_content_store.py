@@ -161,7 +161,7 @@ class TestLocalChecksum:
 
 class TestReadArtifactZipBytes:
     def test_read_bytes_matches_read_path(self, tmp_path):
-        from factory_app.control_plane.tools._artifact_workspace import (
+        from factory_app.refinement_harness.tools._artifact_workspace import (
             read_artifact_zip,
             read_artifact_zip_bytes,
         )
@@ -175,7 +175,7 @@ class TestReadArtifactZipBytes:
         assert from_path == from_bytes
 
     def test_artifact_workspace_readers_skip_sensitive_and_dependency_paths(self, tmp_path):
-        from factory_app.control_plane.tools._artifact_workspace import (
+        from factory_app.refinement_harness.tools._artifact_workspace import (
             read_artifact_zip,
             read_workspace_dir,
         )
@@ -254,7 +254,7 @@ class TestArtifactWorkspaceContentRef:
     """load_artifact_workspace third-branch: content_ref via ArtifactContentStore."""
 
     async def _call(self, metadata: dict, content_store=None, *, artifact_store=None):
-        from factory_app.control_plane.tools._artifact_workspace import load_artifact_workspace
+        from factory_app.refinement_harness.tools._artifact_workspace import load_artifact_workspace
 
         if artifact_store is None:
             artifact = _make_artifact_version(metadata)

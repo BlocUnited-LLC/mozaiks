@@ -373,8 +373,9 @@ def _mozaikspay_replay_plan() -> dict[str, Any]:
             {
                 "task_id": "subscriptions.config",
                 "task_type": "subscription_config",
-                "capability_pack_id": "subscriptions",
+                "capability_pack_id": None,
                 "surface_id": "subscriptions",
+                "surface_kind": "app_policy",
                 "execution_target": "AppGenerator",
                 "initial_agent": "ConfigMiddlewareAgent",
                 "description": "Generate SaaS subscription config.",

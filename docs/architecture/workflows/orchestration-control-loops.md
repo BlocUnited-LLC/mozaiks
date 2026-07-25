@@ -21,13 +21,13 @@ handoff settings.
 
 The first-party declarative pack for those settings lives under:
 
-- `factory_app/control_plane/config/*`
-- `factory_app/control_plane/prompts/*`
-- `factory_app/control_plane/tools/*`
+- `factory_app/refinement_harness/config/*`
+- `factory_app/refinement_harness/prompts/*`
+- `factory_app/refinement_harness/tools/*`
 
 For the target package split, declarative pack shape, and implementation
 checklist for this harness, see
-[Control-Plane Harness Architecture](control-plane-harness-architecture.md).
+[Refinement Harness Architecture](refinement-harness-architecture.md).
 
 If those loops are collapsed together, AG2 handoffs, build sequencing,
 refinement routing, and coding-agent repair all become harder to reason about.
@@ -81,7 +81,7 @@ This loop owns:
 - active build id and artifact lineage
 - current workflow sequence position
 - coarse workflow sequencing from `factory_app/workflows/extended_orchestration/extension_registry.json`
-- control-plane re-entry sequence selection from `control_plane.yaml`
+- control-plane re-entry sequence selection from `harness.yaml`
 - artifact-family impact derived from selected workflow sequence metadata
 - build-time validation gates
 - preview readiness
@@ -147,7 +147,7 @@ that can short-circuit eligible patch refinements when
 If explicit file scope is missing, the dedicated `scope_requested` checkpoint
 can propose a bounded file set from artifact workspace context before the
 coding worker runs.
-The selected control-plane pack can now bound that inferred scope
+The selected refinement harness can now bound that inferred scope
 declaratively through `policies.yaml`, and low-risk multi-file proposals can be
 confirmed through a typed `apply_proposed_scope` harness action instead of
 forcing a full workflow fallback.
@@ -387,7 +387,7 @@ That is the canonical direction for Mozaiks:
 
 - [workflow-architecture.md](workflow-architecture.md)
 - [Orchestration and Decomposition](../orchestration-and-decomposition.md)
-- [Refinement Control Plane](refinement-control-plane.md)
+- [Refinement Engine](refinement-engine.md)
 
 Relevant repo-local builder docs:
 

@@ -15,8 +15,8 @@ if str(REPO_ROOT) not in sys.path:
 from mozaiksai.control_plane import (  # noqa: E402
     LLMChangeClassifier,
     RefinementTriggerRouteResolver,
-    load_control_plane_config,
-    load_control_plane_pack,
+    load_refinement_policy_config,
+    load_refinement_harness,
 )
 from mozaiksai.core.capabilities.simple_llm import SimpleLLMCapabilityService  # noqa: E402
 from mozaiksai.core.workflow.pack.config import (  # noqa: E402
@@ -27,7 +27,7 @@ from scripts import run_live_workflow_smoke, smoke_refinement_classifier  # noqa
 
 APP_ROOT = REPO_ROOT / "factory_app" / "app"
 WORKFLOWS_ROOT = REPO_ROOT / "factory_app" / "workflows"
-SCHEMA_VERSION = "mozaiks.control_plane_task_batch_smoke.v1"
+SCHEMA_VERSION = "mozaiks.refinement_harness.v1_task_batch_smoke.v1"
 
 
 @dataclass(frozen=True)
@@ -91,9 +91,9 @@ def _request_payload(spec: CombinedSmokeSpec) -> dict[str, Any]:
         "refinement_request": {
             "artifact_kind": "app_bundle",
             "artifact_key": "app_bundle",
-            "artifact_version_id": f"av_control_plane_task_batch_{spec.id}",
+            "artifact_version_id": f"av_refinement_task_batch_{spec.id}",
             "raw_user_request": spec.request,
-            "source_surface": "manual_control_plane_task_batch_smoke",
+            "source_surface": "manual_refinement_task_batch_smoke",
             "extra": {"files_manifest": spec.files_manifest},
         }
     }
@@ -101,9 +101,9 @@ def _request_payload(spec: CombinedSmokeSpec) -> dict[str, Any]:
 
 async def _route_spec(spec: CombinedSmokeSpec) -> dict[str, Any]:
     smoke_refinement_classifier._load_dotenv()
-    control_plane_config = load_control_plane_config(APP_ROOT)
-    llm_profile_used = str(control_plane_config.classifier.llm_profile or "raw_llm_config")
-    classifier_llm_config = control_plane_config.resolve_capability_llm_config("classifier")
+    refinement_policy_config = load_refinement_policy_config(APP_ROOT)
+    llm_profile_used = str(refinement_policy_config.classifier.llm_profile or "raw_llm_config")
+    classifier_llm_config = refinement_policy_config.resolve_capability_llm_config("classifier")
     provider_ok, provider_message = await smoke_refinement_classifier._provider_available()
     if not provider_ok:
         return {
@@ -114,13 +114,13 @@ async def _route_spec(spec: CombinedSmokeSpec) -> dict[str, Any]:
         }
 
     def pack_loader():
-        return load_control_plane_pack(app_root=APP_ROOT)
+        return load_refinement_harness(app_root=APP_ROOT)
 
     service = SimpleLLMCapabilityService(timeout=60.0)
     try:
         classifier = LLMChangeClassifier(
             capability_service=service,
-            config_loader=lambda: control_plane_config,
+            config_loader=lambda: refinement_policy_config,
             pack_loader=pack_loader,
         )
         resolver = RefinementTriggerRouteResolver(classifier=classifier, pack_loader=pack_loader)
@@ -177,15 +177,15 @@ def validate_smoke_output(payload: dict[str, Any]) -> list[str]:
     if payload.get("generated_files_unchanged") is False:
         violations.append("Generated app file git status changed during smoke run")
 
-    control_plane = payload.get("control_plane") if isinstance(payload.get("control_plane"), dict) else {}
-    route = control_plane.get("route") if isinstance(control_plane.get("route"), dict) else {}
-    impact = control_plane.get("impact") if isinstance(control_plane.get("impact"), dict) else {}
+    refinement_engine = payload.get("refinement_engine") if isinstance(payload.get("refinement_engine"), dict) else {}
+    route = refinement_engine.get("route") if isinstance(refinement_engine.get("route"), dict) else {}
+    impact = refinement_engine.get("impact") if isinstance(refinement_engine.get("impact"), dict) else {}
     sequence = route.get("sequence") if isinstance(route.get("sequence"), dict) else {}
 
     if not route.get("workflow_sequence"):
-        violations.append("Control-plane route is missing workflow_sequence")
+        violations.append("Refinement route is missing workflow_sequence")
     if route.get("sequence_exists") is not True:
-        violations.append("Control-plane workflow_sequence does not resolve in the pack graph")
+        violations.append("Refinement workflow_sequence does not resolve in the pack graph")
     if int(sequence.get("step_count") or 0) < 1:
         violations.append("Resolved workflow sequence does not include any steps")
     if not list(sequence.get("workflow_ids") or []) and not list(sequence.get("transition_ids") or []):
@@ -193,7 +193,7 @@ def validate_smoke_output(payload: dict[str, Any]) -> list[str]:
 
     for path in impact.get("affected_bundle_paths") or []:
         if smoke_refinement_classifier._path_has_secret_marker(str(path)):
-            violations.append(f"Control-plane emitted a secret-bearing path: {path}")
+            violations.append(f"Refinement engine emitted a secret-bearing path: {path}")
 
     live_workflow = payload.get("live_workflow") if isinstance(payload.get("live_workflow"), dict) else {}
     structured_output = live_workflow.get("structured_output") if isinstance(live_workflow.get("structured_output"), dict) else {}
@@ -265,24 +265,24 @@ def validate_smoke_output(payload: dict[str, Any]) -> list[str]:
 
 async def run_smoke(spec: CombinedSmokeSpec = DEFAULT_SPEC) -> dict[str, Any]:
     generated_before = smoke_refinement_classifier._git_generated_status()
-    control_plane = await _route_spec(spec)
+    refinement_engine = await _route_spec(spec)
 
-    if not control_plane.get("success"):
+    if not refinement_engine.get("success"):
         payload = {
             "schema_version": SCHEMA_VERSION,
             "success": False,
             "request": spec.request,
             "workflow_prompt": spec.workflow_prompt,
             "workflow_name": spec.workflow_name,
-            "llm_profile_used": control_plane.get("llm_profile_used"),
-            "classifier_llm_config": control_plane.get("classifier_llm_config"),
-            "control_plane": control_plane,
-            "live_workflow": {"success": False, "error": "control-plane route failed"},
+            "llm_profile_used": refinement_engine.get("llm_profile_used"),
+            "classifier_llm_config": refinement_engine.get("classifier_llm_config"),
+            "refinement_engine": refinement_engine,
+            "live_workflow": {"success": False, "error": "refinement route failed"},
             "generated_status_before": generated_before,
             "generated_status_after": generated_before,
             "generated_files_unchanged": True,
             "notes": [
-                "The control-plane leg failed before the live workflow smoke could start.",
+                "The refinement routing leg failed before the live workflow smoke could start.",
             ],
         }
         payload["violations"] = validate_smoke_output(payload)
@@ -314,15 +314,15 @@ async def run_smoke(spec: CombinedSmokeSpec = DEFAULT_SPEC) -> dict[str, Any]:
         "request": spec.request,
         "workflow_prompt": spec.workflow_prompt,
         "workflow_name": spec.workflow_name,
-        "llm_profile_used": control_plane.get("llm_profile_used"),
-        "classifier_llm_config": control_plane.get("classifier_llm_config"),
-        "control_plane": control_plane,
+        "llm_profile_used": refinement_engine.get("llm_profile_used"),
+        "classifier_llm_config": refinement_engine.get("classifier_llm_config"),
+        "refinement_engine": refinement_engine,
         "live_workflow": live_payload,
         "generated_status_before": generated_before,
         "generated_status_after": generated_after,
         "generated_files_unchanged": generated_before == generated_after,
         "notes": [
-            "The control-plane route is evaluated first and recorded with its resolved workflow sequence graph.",
+            "The refinement route is evaluated first and recorded with its resolved workflow sequence graph.",
             "The live workflow leg runs RuntimeTaskBatchSmoke independently to validate AG2-native workflow-local task batch execution.",
         ],
     }
@@ -335,14 +335,14 @@ async def run_smoke(spec: CombinedSmokeSpec = DEFAULT_SPEC) -> dict[str, Any]:
 
 
 def _print_human(payload: dict[str, Any]) -> None:
-    print("Control-plane + task batch smoke:", "PASS" if payload.get("success") else "FAIL")
+    print("Refinement Engine + task batch smoke:", "PASS" if payload.get("success") else "FAIL")
     print(f"Classifier profile: {payload.get('llm_profile_used')}")
     print(f"Workflow: {payload.get('workflow_name')}")
 
-    control_plane = payload.get("control_plane") or {}
-    classifier = control_plane.get("classifier") or {}
-    route = control_plane.get("route") or {}
-    impact = control_plane.get("impact") or {}
+    refinement_engine = payload.get("refinement_engine") or {}
+    classifier = refinement_engine.get("classifier") or {}
+    route = refinement_engine.get("route") or {}
+    impact = refinement_engine.get("impact") or {}
     sequence = route.get("sequence") or {}
 
     print("")
@@ -371,7 +371,7 @@ def _print_human(payload: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run the combined control-plane and live task batch smoke harness."
+        description="Run the combined refinement and live task batch smoke harness."
     )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON only.")
     args = parser.parse_args(argv)

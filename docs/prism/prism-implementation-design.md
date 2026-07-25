@@ -41,7 +41,7 @@ live in agent code, middleware Python, or hardcoded structured output enums. If 
 domain change requires editing Python, the design is wrong.
 
 **P3: Harness stability.**
-The execution harness (task batch worker, assembly, packaging, control plane
+The execution harness (task batch worker, assembly, packaging, Refinement Engine
 routing, session management) must not change per domain. If a new domain requires
 harness changes, the harness contract is underspecified. Go back and fix the
 contract, not the harness.
@@ -79,7 +79,7 @@ factory_app/
 │   ├── AppGenerator/         → web app catalogs (web-specific content, generic structure)
 │   ├── AgentGenerator/       → AG2 patterns (domain-agnostic)
 │   └── mozaikspay/           → capability pack example (web-specific content)
-└── control_plane/
+└── refinement_harness/
     └── config/               → harness routing config (web-tinted artifact kinds)
 ```
 
@@ -137,7 +137,7 @@ factory_app/build_context/AppGenerator/capability_directory.yaml
 factory_app/build_context/AppGenerator/module_archetypes.yaml
 factory_app/build_context/AppGenerator/file_contracts.yaml
 factory_app/build_context/AppGenerator/shell_presets.yaml
-factory_app/control_plane/config/control_plane.yaml
+factory_app/refinement_harness/config/harness.yaml
 ```
 
 ### 0.2 Current domain-assumption inventory (findings from analysis)
@@ -493,7 +493,7 @@ BuildSurface:
   type: model
   fields:
     surface_id: str
-    surface_kind: str              # module | workflow | control_plane | external_integration | ui_only
+    surface_kind: str              # module | workflow | app_policy | refinement | external_integration | ui_only
     label: str
     summary: str
     implementation_mode: str       # domain_injectable — valid modes from dev pack
@@ -601,7 +601,7 @@ vs React frontend vs YAML contract). In the redesign, agents are specialized by
 
 These replace all current execution agents:
 
-**`LogicImplementationAgent`** — surface_kind: `module`, `workflow`, `control_plane`
+**`LogicImplementationAgent`** — surface_kind: `module`, `workflow`, `app_policy`, `refinement`
 - Reads: `domain_context.surface_kind`, `domain_context.logic_patterns` from
   build context, `owned_paths`
 - Writes: Logic unit files — Python for webapp, GDScript for game, Kotlin for mobile
@@ -728,7 +728,7 @@ Add `dev_pack_id` to the build sequence:
 }
 ```
 
-The control plane reads `dev_pack_id` to load the correct dev pack at sequence
+The Refinement Engine reads `dev_pack_id` to load the correct dev pack at sequence
 start.
 
 ### 5.3 Validation gate for Stage 5

@@ -57,7 +57,7 @@ control-plane policy directly.
 | `mozaiksai.core.app_context.scan_policy` | deterministic, bounded, secret-safe source selection for graph indexing |
 | `mozaiksai.control_plane.context_graph` | compact retrieval packs for scope selection and coding |
 | `mozaiksai.control_plane.workspace_snapshot` | local workspace snapshot registration for dogfooding and scoped refinement |
-| `factory_app/control_plane/tools` | first-party control-plane tools that load artifact workspaces and current app context graphs |
+| `factory_app/refinement_harness/tools` | first-party control-plane tools that load artifact workspaces and current app context graphs |
 | `factory_app/workflows/_shared/context_graph` | shared workflow prompt injection for preloaded graph packs |
 | Studio UX | inspection, impact visualization, and build-sequence surfacing |
 
@@ -425,9 +425,9 @@ or promotion.
 | context graph health gate | `mozaiksai/control_plane/context_graph/health.py` |
 | workspace snapshot registration | `mozaiksai/control_plane/workspace_snapshot.py` |
 | CLI dogfood snapshot command | `mozaiks_cli/commands/context.py` |
-| factory graph loading tools | `factory_app/control_plane/tools/_context_graph.py` |
-| scope-selection tool | `factory_app/control_plane/tools/get_context_graph_catalog.py` |
-| coding-context tool | `factory_app/control_plane/tools/get_context_graph_scope.py` |
+| factory graph loading tools | `factory_app/refinement_harness/tools/_context_graph.py` |
+| scope-selection tool | `factory_app/refinement_harness/tools/get_context_graph_catalog.py` |
+| coding-context tool | `factory_app/refinement_harness/tools/get_context_graph_scope.py` |
 | shared prompt injection hook | `factory_app/workflows/_shared/context_graph/hook_context_graph.py` |
 | boundary doc | `docs/architecture/foundations/graph-authority-boundaries.md` |
 | app-context doc | `docs/architecture/foundations/app-context-and-brownfield-adoption.md` |

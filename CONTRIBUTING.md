@@ -23,7 +23,7 @@ If scope spans layers or the right owner is unclear, start with the
 - AppGenerator-specific change: use `appgenerator-change`, then inspect `factory_app/workflows/AppGenerator/` and the nearest AppGenerator docs/tests. Add `factory-build-workflow-change` as a companion skill only when the change widens into `extension_registry.json`, sequence design, transitions, entrypoints, or cross-workflow factory composition.
 - AgentGenerator-specific change: use `agentgenerator-change`, then inspect `factory_app/workflows/AgentGenerator/` and the nearest AgentGenerator docs/tests. Add `factory-build-workflow-change` as a companion skill only when the change widens into `extension_registry.json`, sequence design, transitions, entrypoints, or cross-workflow factory composition.
 - ExistingAppDiscovery or brownfield change: use `existing-app-discovery-change`, then inspect `factory_app/workflows/ExistingAppDiscovery/` and the brownfield docs/tests. Add `factory-build-workflow-change` as a companion skill only when the change widens into `extension_registry.json`, sequence design, transitions, entrypoints, or cross-workflow factory composition.
-- Control-plane or refinement change: use `control-plane-refinement-change` plus the control-plane refinement rule. Add `factory-build-workflow-change` too when `workflow_sequence` composition or `extension_registry.json` routing changes.
+- Refinement Engine or refinement harness change: use `control-plane-refinement-change` plus the refinement rule. Add `factory-build-workflow-change` too when `workflow_sequence` composition or `extension_registry.json` routing changes.
 - Module contract change: use `add-module` for module authoring or scaffolding changes. Use `runtime-change` if module loader, executor, or runtime behavior changes. Use `appgenerator-change` if generated module output changes.
 - Add a deterministic backend module: use `add-module`.
 - Page or frontend change: use the frontend rule and `add-page` when appropriate.
@@ -42,7 +42,7 @@ If scope spans layers or the right owner is unclear, start with the
 - `AppGenerator` is one workflow inside that build system, not the whole build.
 - `ValueEngine`, `ThemeCapture`, `DesignDocs`, `AgentGenerator`, and `AppGenerator` have separate responsibilities inside those sequences.
 - `ExistingAppDiscovery` belongs to the brownfield flow.
-- Refinement today is checkpoint and control-plane re-entry driven by `app/config/ai.json` startup plus `app/config/llm.yaml` runtime policy and the selected `control_plane/config/control_plane.yaml` pack, not a dedicated `RefinementWorkflow`.
+- Refinement today is checkpoint-driven re-entry through `app/config/refinement_policy.yaml` runtime policy and the selected `refinement_harness/config/harness.yaml` pack, with normal chat/workflow startup still in `app/config/ai.json`; it is not a dedicated `RefinementWorkflow`.
 - `workflow_sequence` is not a human-in-the-loop handoff. Keep sequences, transitions, entrypoints, and workflow-local `transition_graph.yaml` separate.
 
 ## Final Report Requirements

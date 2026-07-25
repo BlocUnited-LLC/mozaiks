@@ -10,14 +10,14 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _load_control_plane_manifest() -> dict:
+def _load_refinement_harness_manifest() -> dict:
     return yaml.safe_load(
         (
             _repo_root()
             / "factory_app"
-            / "control_plane"
+            / "refinement_harness"
             / "config"
-            / "control_plane.yaml"
+            / "harness.yaml"
         ).read_text(encoding="utf-8")
     )
 
@@ -34,8 +34,8 @@ def _load_extension_registry() -> dict:
     )
 
 
-def test_control_plane_routes_reference_declared_workflow_sequences() -> None:
-    control_plane = _load_control_plane_manifest()
+def test_refinement_routes_reference_declared_workflow_sequences() -> None:
+    harness = _load_refinement_harness_manifest()
     registry = _load_extension_registry()
     sequence_ids = {
         str(sequence.get("id") or "").strip()
@@ -43,7 +43,7 @@ def test_control_plane_routes_reference_declared_workflow_sequences() -> None:
     }
 
     missing: list[str] = []
-    for artifact in control_plane["routing"]["artifacts"]:
+    for artifact in harness["routing"]["artifacts"]:
         artifact_kind = artifact["artifact_kind"]
         for change_class, route in artifact["routes"].items():
             sequence_id = str(route.get("workflow_sequence") or "").strip()
@@ -107,7 +107,7 @@ def test_refinement_docs_define_experience_spec_as_first_class_intent_artifact()
         / "docs"
         / "architecture"
         / "workflows"
-        / "refinement-control-plane.md"
+        / "refinement-engine.md"
     ).read_text(encoding="utf-8")
     normalized = " ".join(content.split())
 
@@ -127,7 +127,7 @@ def test_refinement_contract_examples_remain_provider_neutral() -> None:
                 / "docs"
                 / "architecture"
                 / "workflows"
-                / "refinement-control-plane.md"
+                / "refinement-engine.md"
             ).read_text(encoding="utf-8"),
             json.dumps(_load_extension_registry()),
         ]

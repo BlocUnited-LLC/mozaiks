@@ -59,31 +59,6 @@ def _make_app_root(tmp_path: Path, pages: list[dict]) -> Path:
     return app_root
 
 
-def _write_control_plane_startup(tmp_path: Path, *, chat_startup_mode: str, entry_point: str) -> None:
-    control_plane_root = tmp_path / "control_plane" / "config"
-    control_plane_root.mkdir(parents=True)
-    (control_plane_root / "control_plane.yaml").write_text(
-        "\n".join(
-            [
-                "schema_version: mozaiks.control_plane",
-                "profile:",
-                "  id: test",
-                "  display_name: Test",
-                "  description: Test pack",
-                "startup:",
-                "  ask:",
-                "    ask_mode_prompt: Test prompt",
-                "    ask_context_variables: null",
-                "  chat:",
-                f"    chat_startup_mode: {chat_startup_mode}",
-                "  workflows:",
-                f"    entry_point: {entry_point}",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-
 def test_appshell_auto_inferred_when_navigation_group_present(monkeypatch, tmp_path: Path) -> None:
     """A route manifest entry with navigation.group must have appShell inferred as True."""
     from mozaiksai.hosts import platform as platform_app

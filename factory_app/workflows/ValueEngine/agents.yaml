@@ -243,7 +243,7 @@ agents:
         - Marketplace → 10–20% take rate; optional Premium listing fee; no subscription needed for MVP
         - Community / forum → Free / Supporter ($5–10/mo) — gate badges, private channels, exclusive content
         - Event / booking → Per-ticket fee (3–5%) or organizer subscription ($15–49/mo)
-      - `surface_candidate_hints`: coarse realization hints for each likely surface. Each hint includes `surface_id`, `label`, `likely_surface_kind` (module/workflow/control_plane/external_integration/ui_only), `source_capability_packs`, `owner_hint` (app/hosted/platform/null), `confidence`, and `rationale`. These are planning signals for DesignDocs, not final contracts.
+      - `surface_candidate_hints`: coarse realization hints for each likely surface. Each hint includes `surface_id`, `label`, `likely_surface_kind` (module/workflow/app_policy/refinement/external_integration/ui_only), `source_capability_packs`, `owner_hint` (app/hosted/platform/null), `confidence`, and `rationale`. These are planning signals for DesignDocs, not final contracts.
         - Set `owner_hint: "app"` for surfaces the generated app owns entirely (custom modules, app-specific workflows).
         - Set `owner_hint: "hosted"` for surfaces backed by framework packs provided outside the app (messaging_pack, files_pack, notifications_pack, entitlements_pack). DesignDocs will use a facade pattern for these.
         - Set `owner_hint: "platform"` for surfaces the runtime provides unconditionally (auth, sessions, admin shell, event bus). No generation needed.
@@ -257,14 +257,14 @@ agents:
       4. only then identify where agentic behavior adds value
 
       Do not treat every feature as a workflow. Normal product surfaces such as messaging, marketplace listings, billing, dashboards, CRUD admin, or campaign management should usually be expressed as deterministic capability packs first.
-      Use `control_plane` only when the product clearly needs semantic request intake, checkpointed lifecycle/refinement/session routing, or policy-aware continuation that cannot be expressed as ordinary workflow launches, module actions, or `extension_registry.json` workflow sequences. Most apps should not receive a `control_plane` surface hint.
-      Emit a `control_plane` hint only when at least two of these signals are present, or one governance-critical signal is dominant:
+      Use `refinement` only when the product clearly needs semantic request intake, checkpointed lifecycle/refinement/session routing, or policy-aware continuation that cannot be expressed as ordinary workflow launches, module actions, or `extension_registry.json` workflow sequences. Most apps should not receive a `refinement` surface hint.
+      Emit a `refinement` hint only when at least two of these signals are present, or one governance-critical signal is dominant:
       - semantic request intake must choose among multiple valid execution paths before work begins
       - checkpointed revision continuity or session re-entry is required to preserve prior work
       - policy, approval, escalation, or risk gating must happen above workflows or modules
       - scoped coding or contract-surface planning is needed after route selection
       - artifact-family routing depends on request meaning, not just fixed `workflow_sequence` wiring
-      If the app is mostly CRUD/modules, one known workflow, or fixed transition/sequence routing, do not emit `control_plane`; prefer `module` or `workflow`.
+      If the app is mostly CRUD/modules, one known workflow, or fixed transition/sequence routing, do not emit `refinement`; prefer `module` or `workflow`.
       Use `external_integration` when the surface is mainly a third-party system boundary such as payment provider onboarding, hosting providers, ads APIs, or CRM APIs. Use `ui_only` only for purely presentational/reporting surfaces that do not own durable business state.
 
       Your structured output will automatically render as the ConceptBlueprint UI artifact.

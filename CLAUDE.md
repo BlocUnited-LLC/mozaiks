@@ -30,7 +30,7 @@ factory workflows.
 
 This repo is the canonical runtime/platform/factory repo.
 
-- `factory_app/workflows/` and `factory_app/control_plane/` are the Factory layer — the shared builder/generator workflows, agent configs, and control plane pack.
+- `factory_app/workflows/` and `factory_app/refinement_harness/` are the Factory layer — the shared builder/generator workflows, agent configs, and refinement harness.
 - Factory-owned build-time catalogs and packs live under
   `factory_app/build_context/{context_name}/` and are declared by that
   context's `context.yaml` `assets[]`. Workflow-local YAML stays under
@@ -59,7 +59,7 @@ Canonical target:
 Working modes:
 
 1. **Framework/platform mode** — work on runtime, platform host, app shell contracts, package/install flows, and repo-local infrastructure
-2. **Factory mode** — work on `factory_app/workflows/`, `factory_app/control_plane/` — builder/generator workflows, agent configs, structured outputs, control plane pack
+2. **Factory mode** — work on `factory_app/workflows/`, `factory_app/refinement_harness/` — builder/generator workflows, agent configs, structured outputs, refinement harness
 3. **Studio mode** — work on `mozaiksai/hosts/studio.py`, `factory_app/app/ui/pages/custom/studio/`, `factory_app/app/admin/`, `factory_app/app/modules/factory_control_plane/`, `chat-ui/src/admin/` — the management interface that surfaces Factory capabilities
 4. **Hosted product contract mode** — work on contracts that external hosted product workspaces consume; concrete hosted-product hosts live in those product workspaces
 
@@ -109,7 +109,7 @@ Mozaiks should own:
   artifact shapes
 - app/runtime persistence, transport integration, tenant/session boundaries,
   Studio/platform lifecycle, and artifact promotion
-- deterministic factory control-plane policy and decomposition contracts that
+- deterministic factory refinement policy and decomposition contracts that
   define what work must be executed by AG2 agents
 
 When a needed capability is missing from AG2, inspect AG2's current docs, APIs,
@@ -628,7 +628,7 @@ Exception: `README.md`, `CLAUDE.md`, `ARCHITECTURE.md`
 When adding code, decide placement in this order:
 
 1. Is this required for every runtime instance and independent of app semantics? → **Runtime**.
-2. Is this generic harness/control-plane behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
+2. Is this generic Refinement Engine behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
 3. Is this app hosting, routing, sessions, pages, modules, shell config, or app workspace composition? → **Platform**.
 4. Is this workspace management, build lifecycle, artifact review, run history, or configuration UI? → **Studio**.
 5. Is this first-party builder behavior, app generation logic, or builder-specific harness configuration? → **`factory_app`**.

@@ -59,13 +59,13 @@ def _print_app_overview(summary: dict) -> None:
     admin = summary["admin"]
     workspace = summary["workspace"]
     home = summary["home"]
-    control_plane = ai.get("control_plane") or {}
-    control_plane_state = "enabled" if control_plane.get("enabled") else "disabled"
-    control_plane_profile = control_plane.get("profile")
-    control_plane_label = (
-        f"{control_plane_state} ({control_plane_profile})"
-        if control_plane_profile
-        else control_plane_state
+    refinement_policy = ai.get("refinement_policy") or {}
+    refinement_state = "enabled" if refinement_policy.get("enabled") else "disabled"
+    refinement_profile = refinement_policy.get("profile")
+    refinement_label = (
+        f"{refinement_state} ({refinement_profile})"
+        if refinement_profile
+        else refinement_state
     )
 
     print("App Overview\n")
@@ -74,7 +74,7 @@ def _print_app_overview(summary: dict) -> None:
     print(f"Local Only:        {summary['studio']['local_only']}")
     print(f"App:               {app['name']}")
     print(f"Provider / Model:  {ai['provider'] or 'not configured'} / {ai['model'] or 'not configured'}")
-    print(f"Control Plane:     {control_plane_label}")
+    print(f"Refinement Engine: {refinement_label}")
     print(f"Theme:             {theme['primary'] or 'not configured'}")
     print(f"Tagline:           {theme['tagline'] or 'not configured'}")
     print(f"Admins:            {', '.join(admin['admins']) if admin['admins'] else 'none'}")

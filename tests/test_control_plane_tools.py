@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from factory_app.control_plane.tools.get_artifact_workspace_catalog import (
+from factory_app.refinement_harness.tools.get_artifact_workspace_catalog import (
     get_artifact_workspace_catalog,
 )
-from factory_app.control_plane.tools.get_artifact_workspace_scope import (
+from factory_app.refinement_harness.tools.get_artifact_workspace_scope import (
     get_artifact_workspace_scope,
 )
-from factory_app.control_plane.tools.get_context_graph_catalog import get_context_graph_catalog
-from factory_app.control_plane.tools.get_context_graph_scope import get_context_graph_scope
+from factory_app.refinement_harness.tools.get_context_graph_catalog import get_context_graph_catalog
+from factory_app.refinement_harness.tools.get_context_graph_scope import get_context_graph_scope
 from mozaiksai.control_plane import (
     ControlPlaneArtifactChangeRoutesManifest,
     ControlPlaneArtifactRoutingManifest,
@@ -62,14 +62,14 @@ async def test_control_plane_tool_executor_resolves_pack_declared_tool(tmp_path:
     pack = LoadedControlPlanePack(
         path=tmp_path,
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools",
+            schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[
                 ControlPlaneToolDefinition(
                     id="echo_tool",
@@ -163,9 +163,9 @@ class _FakeSessionStore:
 
 def _revision_pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
-        path=Path("control_plane"),
+        path=Path("refinement_harness"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             routing=ControlPlaneRoutingManifest(
                 default_artifact_kind="business_plan_bundle",
                 artifacts=[
@@ -192,8 +192,8 @@ def _revision_pack() -> LoadedControlPlanePack:
                 ],
             ),
         ),
-        prompts=ControlPlanePromptsManifest(schema_version="mozaiks.control_plane.prompts", prompts=[]),
-        tools=ControlPlaneToolsManifest(schema_version="mozaiks.control_plane.tools", tools=[]),
+        prompts=ControlPlanePromptsManifest(schema_version="mozaiks.refinement_harness.v1.prompts", prompts=[]),
+        tools=ControlPlaneToolsManifest(schema_version="mozaiks.refinement_harness.tools.v1", tools=[]),
     )
 
 

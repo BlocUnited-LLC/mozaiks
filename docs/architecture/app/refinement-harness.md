@@ -1,25 +1,25 @@
 ---
-title: App-Local Control Plane Pack
+title: App-Local Refinement Harness
 status: Authoritative - Pre-Production, Canonical Contract
 created: 2026-06-02
-depends_on: ../workflows/control-plane-harness-architecture.md, ../workflows/refinement-control-plane.md
+depends_on: ../workflows/refinement-harness-architecture.md, ../workflows/refinement-engine.md
 ---
 
-# App-Local Control Plane Pack
+# App-Local Refinement Harness
 
-This document defines what an app-local control plane pack looks like for a
+This document defines what an app-local refinement harness looks like for a
 generated app workspace. It is the canonical reference for AppGenerator when
-emitting a `control_plane_pack` build task.
+emitting a `refinement_harness` build task.
 
-Read [control-plane-harness-architecture.md](../workflows/control-plane-harness-architecture.md)
+Read [refinement-harness-architecture.md](../workflows/refinement-harness-architecture.md)
 first — it covers the ownership model, pack model, and AG2 implementation
 details that this document builds on.
 
 ---
 
-## When An App Needs A Control Plane Pack
+## When An App Needs A Refinement Harness
 
-Most generated apps do **not** need an app-local control plane. Default to
+Most generated apps do **not** need an app-local refinement harness. Default to
 ordinary workflow launches, module actions, and `extension_registry.json`
 workflow sequences.
 
@@ -39,13 +39,16 @@ use `extension_registry.json` sequences and transitions instead.
 
 ## File Layout
 
-A generated app control plane pack lives at the workspace root:
+A generated app refinement harness lives at the workspace root:
 
 ```text
-control_plane/
+app/
   config/
-    control_plane.yaml    required — harness manifest, routing, checkpoints
-    llm.yaml              required — LLM profiles and capability feature flags
+    refinement_policy.yaml  required — LLM profiles and feature flags
+
+refinement_harness/
+  config/
+    harness.yaml    required — harness manifest, routing, checkpoints
     tools.yaml            required — context tool declarations
     policies.yaml         optional — deterministic scope bounds
   prompts/
@@ -55,59 +58,20 @@ control_plane/
     contract_surface_selection_system.yaml  required when contract_surface_requested is declared
 ```
 
-The `app/config/ai.json` file enables the control plane at the app level. It is
-not part of the pack directory — it lives in `app/config/`.
+`app/config/refinement_policy.yaml` enables app-local refinement capabilities.
+It is not part of the harness directory; it lives with the other app config.
 
 ---
 
-## `app/config/ai.json` — Control Plane Block
+## `app/config/refinement_policy.yaml` — Refinement Policy
 
-The control plane block enables capabilities at the app level. It does not
-declare routing, checkpoints, or prompts — those belong in the pack.
-
-```json
-{
-  "control_plane": {
-    "enabled": true,
-    "classifier": {
-      "enabled": true
-    },
-    "coding": {
-      "enabled": true
-    }
-  }
-}
-```
-
-To override the LLM model for a specific capability, add `llm_config`:
-
-```json
-{
-  "control_plane": {
-    "enabled": true,
-    "classifier": {
-      "enabled": true,
-      "llm_config": {
-        "model": "gpt-5-nano",
-        "temperature": 0.0
-      }
-    }
-  }
-}
-```
-
-App-level `llm_config` overrides the profile declared in `llm.yaml`. Only
-add it when the app needs a different model than the pack default.
-
----
-
-## `app/config/llm.yaml` — Minimal Starter
-
-Declares LLM profiles for each capability. The classifier and codegen profiles
-are the two required for refinement-capable apps.
+The refinement policy enables app-local refinement capabilities and maps each
+capability to an LLM profile. It does not declare routes, checkpoints, or
+prompts; those belong in `refinement_harness/config/harness.yaml` and
+`refinement_harness/prompts/*.yaml`.
 
 ```yaml
-schema_version: mozaiks.control_plane.runtime
+schema_version: mozaiks.refinement.policy.v1
 enabled: true
 profile: default
 
@@ -135,6 +99,11 @@ coding:
   llm_profile: codegen
 ```
 
+To override the LLM model for a specific capability, add `llm_config` to that
+capability in `app/config/refinement_policy.yaml`. Capability-level
+`llm_config` overrides the referenced profile and should be used only when the
+app needs a different model than the policy default.
+
 Add `contract_surface` when `contract_surface_requested` is included:
 
 ```yaml
@@ -145,20 +114,13 @@ Add `contract_surface` when `contract_surface_requested` is included:
 
 ---
 
-## `control_plane/config/control_plane.yaml` — Minimal Starter (app_bundle only)
+## `refinement_harness/config/harness.yaml` — Minimal Starter (app_bundle only)
 
 The minimal pack for a generated app that supports `app_bundle` refinement with
 patch coding support:
 
 ```yaml
-schema_version: mozaiks.control_plane
-profile:
-  id: <app_id>
-  display_name: <AppName> Harness
-  description: App-local control-plane pack for <AppName>.
-
-harness:
-  implementation: mozaiksai.control_plane.implementations.orchestration_control:OrchestrationControlHarness
+schema_version: mozaiks.refinement_harness.v1
 
 routing:
   default_artifact_kind: app_bundle
@@ -176,34 +138,24 @@ routing:
           workflow_sequence: full_rebuild
 
 checkpoints:
-  - id: request_intake
-    event: request_submitted
-    entrypoint: mozaiksai.control_plane.implementations.change_classifier:LLMChangeClassifier
+  - event: request_submitted
     prompt_id: change_classifier_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
 
-  - id: refinement_route
-    event: route_requested
-    entrypoint: mozaiksai.control_plane.implementations.refinement_router:RefinementTriggerRouteResolver
+  - event: route_requested
 
-  - id: decision
-    event: decision_requested
-    entrypoint: mozaiksai.control_plane.implementations.harness_decision:FirstPartyHarnessDecisionPolicy
+  - event: decision_requested
 
-  - id: scope_selection
-    event: scope_requested
-    entrypoint: mozaiksai.control_plane.implementations.scope_proposer:ArtifactScopeProposer
+  - event: scope_requested
     prompt_id: coding_scope_selection_system
     tool_ids:
       - get_revision_context
       - get_artifact_summary
       - get_artifact_workspace_catalog
 
-  - id: coding_refinement
-    event: coding_requested
-    entrypoint: mozaiksai.control_plane.implementations.coding_worker:ScopedRefinementCodingWorker
+  - event: coding_requested
     prompt_id: coding_refinement_system
     tool_ids:
       - get_revision_context
@@ -211,9 +163,10 @@ checkpoints:
       - get_artifact_workspace_scope
 ```
 
-Replace `<app_id>` and `<AppName>` with the generated app's id and display
-name. The `workflow_sequence` ids must exist in the app's
+The `workflow_sequence` ids must exist in the app's
 `workflows/extended_orchestration/extension_registry.json`.
+Runtime implementation entrypoints are supplied by the refinement engine, so
+generated apps do not declare implementation classes in `harness.yaml`.
 
 ### Adding Contract Surface Planning
 
@@ -221,15 +174,13 @@ To add contract surface planning (for feature/design refinements that need
 surface-level targeting before workflow re-entry), add the checkpoint:
 
 ```yaml
-  - id: contract_surface_planning
-    event: contract_surface_requested
-    entrypoint: mozaiksai.control_plane.implementations.contract_surface_planner:ContractSurfacePlanner
+  - event: contract_surface_requested
     prompt_id: contract_surface_selection_system
     tool_ids:
       - get_contract_surface_context
 ```
 
-And add `contract_surface` to `llm.yaml` as shown above.
+And add `contract_surface` to `refinement_policy.yaml` as shown above.
 
 ### Multi-Artifact Routing
 
@@ -266,12 +217,12 @@ routing:
 
 ---
 
-## `control_plane/config/tools.yaml` — Minimal Starter
+## `refinement_harness/config/tools.yaml` — Minimal Starter
 
 Context tools used by checkpoints. The minimal set for the starter pack above:
 
 ```yaml
-schema_version: mozaiks.control_plane.tools
+schema_version: mozaiks.refinement_harness.tools.v1
 tools:
   - id: get_revision_context
     kind: context_tool
@@ -285,7 +236,7 @@ tools:
   - id: get_artifact_summary
     kind: context_tool
     description: Load artifact lineage, validation status, and recent change history.
-    entrypoint: factory_app.control_plane.tools.get_artifact_summary:get_artifact_summary
+    entrypoint: factory_app.refinement_harness.tools.get_artifact_summary:get_artifact_summary
     available_to:
       - request_submitted
       - scope_requested
@@ -294,30 +245,30 @@ tools:
   - id: get_artifact_workspace_catalog
     kind: context_tool
     description: Load workspace catalog and candidate files for scope selection.
-    entrypoint: factory_app.control_plane.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog
+    entrypoint: factory_app.refinement_harness.tools.get_artifact_workspace_catalog:get_artifact_workspace_catalog
     available_to:
       - scope_requested
 
   - id: get_artifact_workspace_scope
     kind: context_tool
     description: Load workspace tree and related-file previews for scoped coding.
-    entrypoint: factory_app.control_plane.tools.get_artifact_workspace_scope:get_artifact_workspace_scope
+    entrypoint: factory_app.refinement_harness.tools.get_artifact_workspace_scope:get_artifact_workspace_scope
     available_to:
       - coding_requested
 ```
 
 `get_revision_context` is a framework-provided tool at
 `mozaiksai.control_plane.tools.*`. The workspace and artifact tools are
-first-party builder tools at `factory_app.control_plane.tools.*`.
+first-party builder tools at `factory_app.refinement_harness.tools.*`.
 
 ---
 
-## `control_plane/config/policies.yaml` — Optional
+## `refinement_harness/config/policies.yaml` — Optional
 
 Scope size limits and overflow behavior. Omit when defaults are acceptable.
 
 ```yaml
-schema_version: mozaiks.control_plane.policies
+schema_version: mozaiks.refinement_harness.policies.v1
 scope:
   max_selected_paths: 3
   auto_apply_max_paths: 1
@@ -402,10 +353,10 @@ content: |
 
 ## Route Rules
 
-- `workflow_sequence` values in `control_plane.yaml` must exist in
+- `workflow_sequence` values in `harness.yaml` must exist in
   `workflows/extended_orchestration/extension_registry.json`.
 - `affected_declarative_families` and `affected_workflows` belong on the
-  sequence in `extension_registry.json`, not in `control_plane.yaml`.
+  sequence in `extension_registry.json`, not in `harness.yaml`.
 - Do not declare `requires_replanning` or `requires_rebuild` in route manifests;
   these are derived from the typed change class at runtime.
 - `patch` → does not require replanning; eligible for scoped coding worker.
@@ -415,11 +366,11 @@ content: |
 
 ## What Not To Generate
 
-Generated control-plane packs are declarative only:
+Generated refinement harnesses are declarative only:
 
 - no `module.yaml` — the harness is not a module
-- no `app/modules/*/backend/control_plane*.py` — no custom harness Python
+- no `app/modules/*/backend/refinement_harness*.py` — no custom harness Python
 - no business-domain logic in prompts
-- no hardcoded model names as prompt content — model config belongs in `llm.yaml`
-- no `affected_workflows` or `affected_families` in `control_plane.yaml` routes
+- no hardcoded model names as prompt content — model config belongs in `refinement_policy.yaml`
+- no `affected_workflows` or `affected_families` in `harness.yaml` routes
 - no `context_variables.yaml` — the harness is not a workflow

@@ -1,4 +1,4 @@
-"""Canonical public API for the Mozaiks control-plane subsystem."""
+"""Canonical public API for the Mozaiks refinement engine subsystem."""
 
 from .app_context_override import (
     AppContextPolicyOverride,
@@ -27,7 +27,10 @@ from .config import (
     ControlPlaneLLMProfileConfig,
     load_ai_config_json,
     load_control_plane_config,
+    load_refinement_policy_config,
+    load_refinement_policy_config_yaml,
     resolve_ai_config_path,
+    resolve_refinement_policy_config_path,
 )
 from .contracts import (
     CodingWorkerPlan,
@@ -71,11 +74,13 @@ from .implementations import (
 from .invalidation import ArtifactInvalidationService, get_artifact_invalidation_service
 from .loader import (
     ControlPlanePackLoadError,
-    load_control_plane_pack,
-    load_selected_control_plane_pack,
+    load_refinement_harness,
+    load_selected_refinement_harness,
     resolve_app_control_plane_root,
-    resolve_control_plane_pack_path,
+    resolve_app_refinement_harness_root,
+    resolve_refinement_harness_path,
     resolve_factory_control_plane_root,
+    resolve_factory_refinement_harness_root,
 )
 from .ports import (
     ChangeClassifierPort,
@@ -205,13 +210,18 @@ __all__ = [
     "launch_context_refresh_plan",
     "load_ai_config_json",
     "load_control_plane_config",
-    "load_control_plane_pack",
-    "load_selected_control_plane_pack",
+    "load_refinement_policy_config",
+    "load_refinement_policy_config_yaml",
+    "load_refinement_harness",
+    "load_selected_refinement_harness",
     "resolve_ai_config_path",
     "resolve_app_control_plane_root",
+    "resolve_app_refinement_harness_root",
     "resolve_control_plane_handler_entrypoint",
-    "resolve_control_plane_pack_path",
+    "resolve_refinement_policy_config_path",
+    "resolve_refinement_harness_path",
     "resolve_control_plane_tool_entrypoint",
     "resolve_factory_control_plane_root",
+    "resolve_factory_refinement_harness_root",
     "register_workspace_snapshot",
 ]

@@ -6,7 +6,7 @@ from importlib import import_module
 from typing import Any
 
 from .executor import ControlPlaneToolExecutor
-from .loader import load_selected_control_plane_pack
+from .loader import load_selected_refinement_harness
 from .schema import ControlPlaneCheckpointManifest, LoadedControlPlanePack
 
 CONTROL_PLANE_HARNESS_ENTRYPOINT = (
@@ -24,16 +24,16 @@ CHECKPOINT_HANDLER_ENTRYPOINTS: dict[str, str] = {
 
 
 class ControlPlaneHandlerResolutionError(RuntimeError):
-    """Raised when a declarative control-plane handler cannot be resolved."""
+    """Raised when a declarative refinement handler cannot be resolved."""
 
 
 class ControlPlaneCheckpointRuntime:
-    """Runtime loader/cache for checkpoint-declared control-plane handlers."""
+    """Runtime loader/cache for checkpoint-declared refinement handlers."""
 
     def __init__(
         self,
         *,
-        pack_loader: Any = load_selected_control_plane_pack,
+        pack_loader: Any = load_selected_refinement_harness,
         pack: LoadedControlPlanePack | dict[str, Any] | None = None,
         tool_executor: ControlPlaneToolExecutor | None = None,
     ) -> None:
@@ -71,7 +71,7 @@ class ControlPlaneCheckpointRuntime:
         entrypoint = CHECKPOINT_HANDLER_ENTRYPOINTS.get(checkpoint.event)
         if entrypoint is None:
             raise ControlPlaneHandlerResolutionError(
-                f"No runtime handler is registered for control-plane checkpoint event '{checkpoint.event}'."
+                f"No runtime handler is registered for refinement checkpoint event '{checkpoint.event}'."
             )
         instance = instantiate_control_plane_handler(
             entrypoint,
@@ -86,7 +86,7 @@ class ControlPlaneCheckpointRuntime:
     def _normalize_pack(
         pack: LoadedControlPlanePack | dict[str, Any] | None,
         *,
-        pack_loader: Any = load_selected_control_plane_pack,
+        pack_loader: Any = load_selected_refinement_harness,
     ) -> LoadedControlPlanePack:
         if isinstance(pack, LoadedControlPlanePack):
             return pack
@@ -100,23 +100,23 @@ def resolve_control_plane_handler_entrypoint(entrypoint: str) -> Callable[..., A
     module_name, separator, attr_name = str(entrypoint or "").partition(":")
     if not separator or not module_name or not attr_name:
         raise ControlPlaneHandlerResolutionError(
-            f"Invalid control-plane handler entrypoint '{entrypoint}'. Expected 'module.path:callable_name'."
+            f"Invalid refinement handler entrypoint '{entrypoint}'. Expected 'module.path:callable_name'."
         )
     try:
         module = import_module(module_name)
     except Exception as exc:
         raise ControlPlaneHandlerResolutionError(
-            f"Failed to import control-plane handler module '{module_name}': {exc}"
+            f"Failed to import refinement handler module '{module_name}': {exc}"
         ) from exc
     try:
         handler = getattr(module, attr_name)
     except AttributeError as exc:
         raise ControlPlaneHandlerResolutionError(
-            f"Control-plane handler '{attr_name}' was not found in '{module_name}'."
+            f"Refinement handler '{attr_name}' was not found in '{module_name}'."
         ) from exc
     if not callable(handler):
         raise ControlPlaneHandlerResolutionError(
-            f"Control-plane handler entrypoint '{entrypoint}' did not resolve to a callable."
+            f"Refinement handler entrypoint '{entrypoint}' did not resolve to a callable."
         )
     return handler  # type: ignore[no-any-return]
 
@@ -134,7 +134,7 @@ def instantiate_control_plane_handler(entrypoint: str, /, **dependencies: Any) -
 
 def build_selected_control_plane_harness(
     *,
-    pack_loader: Any = load_selected_control_plane_pack,
+    pack_loader: Any = load_selected_refinement_harness,
 ) -> Any:
     pack = pack_loader()
     if not isinstance(pack, LoadedControlPlanePack):

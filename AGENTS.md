@@ -120,7 +120,7 @@ Mozaiks should own deterministic product and runtime contracts around AG2:
 - canonical generated app/workflow/module artifact shapes
 - app/runtime persistence, transport integration, tenant/session boundaries,
   and Studio/platform lifecycle concerns
-- factory control-plane policies and deterministic decomposition contracts
+- factory refinement policies and deterministic decomposition contracts
   that describe what work must be done before AG2 agents execute it
 
 When AG2 does not provide a required capability, first analyze AG2's current
@@ -150,7 +150,7 @@ Canonical ownership:
 | `factory_app/workflows/{WorkflowName}/*.yaml` | Factory layer — workflow-owned runtime YAML, prompts, agents, transitions, structured outputs, tool bindings, and middleware |
 | `factory_app/workflows/_shared/` | Factory layer — shared prompt/catalog helpers consumed by multiple factory workflows |
 | `factory_app/build_context/{context_name}/context.yaml` | Factory layer — named build-context registries for static catalogs, contracts, reusable packs, and templates |
-| `factory_app/control_plane/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
+| `factory_app/refinement_harness/` | Factory layer — declarative builder harness pack: checkpoints, classifier prompts, routing policies, context tools |
 | `factory_app/app/` | Studio first-party app bundle — pages, modules, brand, config loaded by the Studio host; not a synonym for the Factory layer |
 | `factory_app/app/ui/pages/custom/studio/` | Studio management UI components |
 | `factory_app/app/admin/` | Admin portal layer — `admin_registry.yaml` declares pages, `admin/index.js` registers components, `admin/pages/` holds custom admin page React files |
@@ -584,7 +584,7 @@ For runtime, generator, orchestration, or contract changes:
 When adding code, decide placement in this order:
 
 1. Is this required for every runtime instance and independent of app semantics? → **Runtime**.
-2. Is this generic harness/control-plane behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
+2. Is this generic Refinement Engine behavior over execution contexts, state, events, and routing? → **`mozaiksai/control_plane`**.
 3. Is this app hosting, routing, sessions, pages, modules, shell config, or app workspace composition? → **Platform**.
 4. Is this workspace management, build lifecycle, artifact review, run history, or configuration UI? → **Studio**.
 5. Is this first-party builder behavior, app generation logic, or builder-specific harness configuration? → **`factory_app`**.

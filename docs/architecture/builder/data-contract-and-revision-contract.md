@@ -91,7 +91,7 @@ Use these ownership rules.
 | --- | --- |
 | Runtime/session collections | `mozaiksai` runtime |
 | Builder artifact collections | `factory_app` workflows persisted through `mozaiksai` |
-| App business collections | generated module/control-plane surfaces |
+| App business collections | generated module/refinement surfaces |
 | Migration planning | `AppGenerator` + refinement control plane |
 | Migration application | platform/backend runtime |
 
@@ -683,7 +683,7 @@ These are known inconsistencies in the current system:
   - overall builder lifecycle
 - [generated-frontend-surface-contract.md](../frontend/ui-system/generated-frontend-surface-contract.md)
   - persistent frontend surface ownership and realization boundaries
-- [refinement-control-plane.md](../workflows/refinement-control-plane.md)
+- [refinement-engine.md](../workflows/refinement-engine.md)
   - refinement routing and artifact-version control plane
 
 This document defines the missing database layer that those docs assume.

@@ -13,7 +13,7 @@ from mozaiksai.control_plane import (
     LoadedControlPlanePack,
     OrchestrationControlHarness,
     build_selected_control_plane_harness,
-    load_control_plane_pack,
+    load_refinement_harness,
 )
 
 
@@ -35,7 +35,7 @@ def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatc
     pack = LoadedControlPlanePack(
         path=tmp_path,
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             checkpoints=[
                 ControlPlaneCheckpointManifest(
                     event="route_requested",
@@ -43,11 +43,11 @@ def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatc
             ],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools",
+            schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[],
         ),
     )
@@ -72,7 +72,7 @@ def test_checkpoint_runtime_binds_and_caches_handlers(tmp_path: Path, monkeypatc
 
 def test_build_selected_control_plane_harness_uses_checkpoint_runtime_for_default_profile() -> None:
     app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
-    pack = load_control_plane_pack(app_root=app_root)
+    pack = load_refinement_harness(app_root=app_root)
 
     harness = build_selected_control_plane_harness(pack_loader=lambda: pack)
 

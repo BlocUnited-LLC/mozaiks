@@ -33,7 +33,7 @@ def test_init_command_prompts_for_name_when_missing(monkeypatch, tmp_path) -> No
     target_dir = tmp_path / "prompted-app"
     app_json = _load_json(target_dir / "app" / "app.json")
     ai_json = _load_json(target_dir / "app" / "config" / "ai.json")
-    control_plane_runtime = (target_dir / "app" / "config" / "llm.yaml").read_text(encoding="utf-8")
+    control_plane_runtime = (target_dir / "app" / "config" / "refinement_policy.yaml").read_text(encoding="utf-8")
     shell_json = _load_json(target_dir / "app" / "config" / "shell.json")
     assert app_json["appName"] == "prompted-app"
     assert ai_json["workflows"]["entry_point"] == "ValueEngine"

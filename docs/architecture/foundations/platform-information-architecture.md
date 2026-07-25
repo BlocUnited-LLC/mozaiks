@@ -159,7 +159,7 @@ mixed:
 - `mozaiksai.hosts.studio` is the management host composition
 - `factory_app/app/` is the first-party app bundle loaded by that host
 - `factory_app/workflows/` is the shared builder workflow root
-- `factory_app/control_plane/` is the first-party harness pack
+- `factory_app/refinement_harness/` is the first-party harness pack
 - `mozaiksai/control_plane/` is runtime orchestration infrastructure
 
 The IA goal is not to expose those boundaries directly. The user-visible model

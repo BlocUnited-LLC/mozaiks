@@ -275,7 +275,7 @@ def test_review_helpers_do_not_execute_workflows() -> None:
     source = (REPO_ROOT / "mozaiksai/control_plane/review.py").read_text(encoding="utf-8")
 
     assert "RefinementTriggerRouteResolver" not in source
-    assert "load_control_plane_pack" not in source
+    assert "load_refinement_harness" not in source
     assert "workflow_sequence" not in source
 
 

@@ -12,7 +12,7 @@ from mozaiksai.control_plane import (
 )
 
 
-def test_factory_app_ai_config_enables_control_plane() -> None:
+def test_factory_app_refinement_policy_enables_refinement_engine() -> None:
     app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
     config = load_control_plane_config(app_root)
 
@@ -30,9 +30,9 @@ def test_factory_app_ai_config_enables_control_plane() -> None:
     assert coding_cfg["model"]  # any non-empty model is valid
 
 
-def test_factory_control_plane_runtime_config_is_staged_under_app_config() -> None:
+def test_factory_refinement_policy_config_is_staged_under_app_config() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    runtime_path = repo_root / "factory_app" / "app" / "config" / "llm.yaml"
+    runtime_path = repo_root / "factory_app" / "app" / "config" / "refinement_policy.yaml"
     data = yaml.safe_load(runtime_path.read_text(encoding="utf-8"))
 
     assert data["enabled"] is True
@@ -41,7 +41,7 @@ def test_factory_control_plane_runtime_config_is_staged_under_app_config() -> No
     assert data["coding"]["llm_profile"] == "codegen"
 
 
-def test_control_plane_rejects_unknown_llm_profile_id() -> None:
+def test_refinement_policy_rejects_unknown_llm_profile_id() -> None:
     try:
         ControlPlaneConfig.model_validate(
             {
@@ -55,7 +55,7 @@ def test_control_plane_rejects_unknown_llm_profile_id() -> None:
             }
         )
     except ValueError as exc:
-        assert "Unknown control-plane LLM profile id" in str(exc)
+        assert "Unknown refinement policy LLM profile id" in str(exc)
     else:
         raise AssertionError("unknown profile id should fail validation")
 
@@ -63,7 +63,7 @@ def test_control_plane_rejects_unknown_llm_profile_id() -> None:
 def test_control_plane_accepts_runtime_profile_metadata() -> None:
     config = ControlPlaneConfig.model_validate(
         {
-            "schema_version": "mozaiks.control_plane.runtime",
+            "schema_version": "mozaiks.refinement.policy.v1",
             "enabled": True,
             "profile": "mozaiks_app",
         }
@@ -113,7 +113,7 @@ def test_factory_workflows_do_not_reference_undeclared_llm_profiles() -> None:
     references: list[str] = []
 
     control_plane = yaml.safe_load(
-        (repo_root / "factory_app" / "app" / "config" / "llm.yaml").read_text(encoding="utf-8")
+        (repo_root / "factory_app" / "app" / "config" / "refinement_policy.yaml").read_text(encoding="utf-8")
     )
     for value in control_plane.values():
         if isinstance(value, dict) and isinstance(value.get("llm_profile"), str):

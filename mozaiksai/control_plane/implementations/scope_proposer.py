@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from factory_app.control_plane.tools._artifact_workspace import (
+from factory_app.refinement_harness.tools._artifact_workspace import (
     load_artifact_workspace,
     safe_relpath,
 )
@@ -14,7 +14,7 @@ from mozaiksai.control_plane.contracts import (
     ScopeProposal,
 )
 from mozaiksai.control_plane.executor import ControlPlaneToolExecutor
-from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.loader import load_selected_refinement_harness
 from mozaiksai.control_plane.schema import LoadedControlPlanePack
 from mozaiksai.core.adapters.ag2_agent_runner import AG2StructuredAgentRunner
 from mozaiksai.core.artifacts.store import get_artifact_store
@@ -25,14 +25,14 @@ _CHECKPOINT_EVENT = "scope_requested"
 
 
 class ArtifactScopeProposer:
-    """First-party control-plane scope proposer for coding refinements."""
+    """First-party refinement scope proposer for coding refinements."""
 
     def __init__(
         self,
         *,
         agent_runner: AG2StructuredAgentRunner | None = None,
         config_loader: Any = load_control_plane_config,
-        pack_loader: Any = load_selected_control_plane_pack,
+        pack_loader: Any = load_selected_refinement_harness,
         tool_executor: Any = None,
         artifact_store: Any = None,
     ) -> None:
@@ -53,7 +53,7 @@ class ArtifactScopeProposer:
         checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
         if checkpoint is None or not checkpoint.prompt_id:
             raise RuntimeError(
-                f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
+                f"Selected refinement harness does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
         )
 
         config = self._load_config()
@@ -125,7 +125,7 @@ class ArtifactScopeProposer:
         checkpoint = pack.checkpoint_by_event(_CHECKPOINT_EVENT)
         if checkpoint is None or not checkpoint.prompt_id:
             raise RuntimeError(
-                f"Selected control-plane profile does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
+                f"Selected refinement harness does not declare a '{_CHECKPOINT_EVENT}' checkpoint with prompt_id"
             )
         prompt = pack.prompt_by_id(checkpoint.prompt_id)
         if prompt is None:
@@ -192,7 +192,7 @@ class ArtifactScopeProposer:
             "raw_user_request": refinement_request.raw_user_request,
             "source_surface": refinement_request.source_surface,
             "existing_selected_paths": list(payload.get("selected_file_paths") or []),
-            "control_plane_context": control_plane_context,
+            "refinement_context": control_plane_context,
         }
         return "\n".join(
             [
@@ -243,7 +243,7 @@ class ArtifactScopeProposer:
 
         available_paths = await self._available_workspace_paths(refinement_request)
         if not available_paths:
-            available_paths = _paths_from_control_plane_context(control_plane_context)
+            available_paths = _paths_from_refinement_context(control_plane_context)
         if not available_paths:
             return proposal
 
@@ -298,7 +298,7 @@ class ArtifactScopeProposer:
 
         rationale = (
             f"{proposal.rationale} The inferred scope touches {selected_count} files, "
-            f"which exceeds the configured control-plane limit of {scope_policy.max_selected_paths}."
+            f"which exceeds the configured refinement harness limit of {scope_policy.max_selected_paths}."
         ).strip()
         signals = list(proposal.signals)
         if "scope_limit_exceeded" not in signals:
@@ -326,7 +326,7 @@ class ArtifactScopeProposer:
         )
 
 
-def _paths_from_control_plane_context(value: Any) -> set[str]:
+def _paths_from_refinement_context(value: Any) -> set[str]:
     paths: set[str] = set()
 
     def visit(item: Any, parent_key: str | None = None) -> None:

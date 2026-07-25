@@ -1,5 +1,5 @@
 """
-Read-only control-plane tool: get_carry_forward_candidates.
+Read-only refinement tool: get_carry_forward_candidates.
 
 Inspects the previous app_bundle artifact workspace and returns a structured
 module inventory that the refinement router can use to populate

@@ -24,7 +24,7 @@ Both variants share the same Phase 7A preservation run and the same
 carry_forward_decisions fixture.
 
 What is live (real code exercised):
-  - RefinementTriggerRouteResolver with real control-plane pack
+  - RefinementTriggerRouteResolver with real refinement harness
   - get_carry_forward_candidates control-plane tool (auto variant only)
   - load_artifact_workspace with real temp dir
   - resolve_carry_forward_preservation Phase 7A tool
@@ -175,10 +175,10 @@ def _build_resolver():
     from mozaiksai.control_plane.implementations.refinement_router import (
         RefinementTriggerRouteResolver,
     )
-    from mozaiksai.control_plane.loader import load_control_plane_pack
+    from mozaiksai.control_plane.loader import load_refinement_harness
 
     def pack_loader():
-        return load_control_plane_pack(app_root=APP_ROOT)
+        return load_refinement_harness(app_root=APP_ROOT)
 
     return RefinementTriggerRouteResolver(
         classifier=_DeterministicChangeClassifier(change_class="core"),
@@ -279,7 +279,7 @@ async def _run_auto_variant(tmp_dir: Path) -> dict[str, Any]:
     mock_store.get_artifact_version = _tracked_get
 
     with patch(
-        "factory_app.control_plane.tools.get_carry_forward_candidates.get_artifact_store",
+        "factory_app.refinement_harness.tools.get_carry_forward_candidates.get_artifact_store",
         return_value=mock_store,
     ):
         decision = await resolver.route(request)
@@ -324,7 +324,7 @@ async def _run_auto_variant(tmp_dir: Path) -> dict[str, Any]:
 
 async def _run_preservation(tmp_dir: Path) -> dict[str, Any]:
     """Real resolve_carry_forward_preservation with CRM workspace + stubbed decisions."""
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
 
@@ -378,7 +378,7 @@ def _validate_variant(
 
     # Report safety checks (shared)
     preserved = report.get("preserved_paths", [])
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         _PHASE_7A_MODULE_ALLOWLIST,
     )
     bad_paths = [p for p in preserved if not any(p.endswith(a) for a in _PHASE_7A_MODULE_ALLOWLIST)]
@@ -489,7 +489,7 @@ async def run_smoke(mode: str = "both") -> dict[str, Any]:
         "mode": mode,
         "approach": {
             "live": [
-                "RefinementTriggerRouteResolver with real control-plane pack",
+                "RefinementTriggerRouteResolver with real refinement harness",
                 "get_carry_forward_candidates (auto variant only)",
                 "load_artifact_workspace with real temp dir",
                 "resolve_carry_forward_preservation Phase 7A tool",

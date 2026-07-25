@@ -1,4 +1,4 @@
-"""Query helpers for Context Graph control-plane tools."""
+"""Query helpers for Context Graph refinement tools."""
 
 from __future__ import annotations
 

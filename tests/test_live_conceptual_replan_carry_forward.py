@@ -91,7 +91,7 @@ _SAFETY_GENERATED = {
 
 
 def _run_preservation(tmp_path: Path) -> dict:
-    from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+    from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
         resolve_carry_forward_preservation,
     )
     from mozaiksai.core.artifacts.models import ArtifactCommitMetadata, ArtifactVersionDoc
@@ -447,7 +447,7 @@ class TestPipelineSafety:
         assert "pipeline" in report.get("dropped_modules", [])
 
     def test_preserved_paths_all_allowlisted(self, report):
-        from factory_app.control_plane.tools.resolve_carry_forward_preservation import (
+        from factory_app.refinement_harness.tools.resolve_carry_forward_preservation import (
             _PHASE_7A_MODULE_ALLOWLIST,
         )
         for p in report.get("preserved_paths", []):

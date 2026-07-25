@@ -434,7 +434,7 @@ def test_app_build_plan_accepts_subscription_config_task() -> None:
                     "task_type": "subscription_config",
                     "capability_pack_id": None,
                     "surface_id": "subscription_contract",
-                    "surface_kind": "control_plane",
+                    "surface_kind": "app_policy",
                     "execution_target": "app_bundle",
                     "initial_agent": "ConfigMiddlewareAgent",
                     "description": "Emit provider-neutral subscription config.",

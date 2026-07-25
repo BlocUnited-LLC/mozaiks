@@ -308,7 +308,7 @@ All items below are in `mozaiksai/core/` or `mozaiksai/hosts/routers/` and are i
 | AR-3 | Brownfield canonical scope — wire ExistingAppDiscovery outputs into AppGenerator context | `factory_app/workflows/`, docs | Remaining |
 | AR-4 | Scale-test workflow sequences — 50x cross-workflow compositions in CI | `tests/e2e/test_workflow_sequences.py` | Remaining |
 | AR-5 | Hosted collaboration boundary — product-owned collaboration via app modules/platform hooks, no OSS collaboration port | hosted app workspace | **Done ✓** |
-| AR-6 | Conflict resolution for parallel refinements — last-writer-wins with UI warning | `factory_app/control_plane/`, `hosts/studio.py` | Remaining |
+| AR-6 | Conflict resolution for parallel refinements — last-writer-wins with UI warning | `factory_app/refinement_harness/`, `hosts/studio.py` | Remaining |
 
 ---
 
@@ -428,7 +428,7 @@ Every app built on Mozaiks inherits enterprise capabilities automatically throug
 | O-3 | Alert threshold definitions | `docs/operations/alerting.md` + Prometheus rules | 2 days |
 | O-4 | WebSocket lifecycle logging | `hosts/runtime.py` | 1 day |
 | O-5 | Standardize all loggers | All `core/` + `hosts/` modules | 3 days |
-| AR-6 | Parallel refinement conflict resolution | `factory_app/control_plane/`, `hosts/studio.py` | 3 days |
+| AR-6 | Parallel refinement conflict resolution | `factory_app/refinement_harness/`, `hosts/studio.py` | 3 days |
 
 ### Operational Only (Per-Deployment)
 

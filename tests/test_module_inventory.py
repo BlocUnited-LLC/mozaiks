@@ -1,5 +1,5 @@
 """
-Tests for factory_app.control_plane.tools._module_inventory.
+Tests for factory_app.refinement_harness.tools._module_inventory.
 
 All tests use synthetic in-memory file_maps — no filesystem, no database,
 no network access.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import copy
 
-from factory_app.control_plane.tools._module_inventory import (
+from factory_app.refinement_harness.tools._module_inventory import (
     ModuleInventoryEntry,
     classify_module_carry_forward,
     extract_module_inventory,

@@ -23,14 +23,14 @@ _PLANNING_CONTRACT_ORDER = (
     "module_contract",
     "persistence_contract",
     "service_foundation",
-    "control_plane_pack",
+    "refinement_harness",
     "api_surface",
     "agent_backend_integration",
 )
 
 _AGENT_DEFAULT_CONTRACTS = {
     "AppSchemaAgent": ["page_bundle"],
-    "ControlPlaneAgent": ["control_plane_pack"],
+    "RefinementHarnessAgent": ["refinement_harness"],
     "ServiceAgent": ["module_contract"],
     "FrontendStubAgent": ["module_contract"],
     "ControllerAgent": ["api_surface"],
@@ -165,8 +165,8 @@ def _build_file_contracts_body(agent: Any, file_contracts: dict[str, Any]) -> st
             target_contract_names = [task_type]
         else:
             target_contract_names = ["module_contract", "service_foundation"]
-    elif agent_name == "ControlPlaneAgent":
-        target_contract_names = ["control_plane_pack"]
+    elif agent_name == "RefinementHarnessAgent":
+        target_contract_names = ["refinement_harness"]
     elif agent_name == "ControllerAgent" and task_type == "module_contract":
         target_contract_names = ["api_surface", "module_contract"]
 
@@ -309,7 +309,7 @@ def inject_cookie_cutter_contracts_context(agent: Any, messages: list[dict[str, 
     if agent_name not in {
         "AppPlanAgent",
         "AppSchemaAgent",
-        "ControlPlaneAgent",
+        "RefinementHarnessAgent",
         "ConfigMiddlewareAgent",
         "ServiceAgent",
         "FrontendStubAgent",

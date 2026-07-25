@@ -6,18 +6,18 @@ from mozaiksai.control_plane.contracts import (
     HarnessDecisionAction,
     ScopeProposal,
 )
-from mozaiksai.control_plane.loader import load_selected_control_plane_pack
+from mozaiksai.control_plane.loader import load_selected_refinement_harness
 
 from .refinement_router import ChangeClass, RefinementRoutingDecision
 
 
 class FirstPartyHarnessDecisionPolicy:
-    """Deterministic first-party UX decision policy for the control-plane harness."""
+    """Deterministic first-party UX decision policy for the refinement harness."""
 
     _AUTO_SCOPE_THRESHOLD = 0.78
     _CLARIFY_SCOPE_THRESHOLD = 0.55
 
-    def __init__(self, *, pack_loader=load_selected_control_plane_pack) -> None:
+    def __init__(self, *, pack_loader=load_selected_refinement_harness) -> None:
         self._pack_loader = pack_loader
 
     def _scope_policy(self):

@@ -18,7 +18,7 @@ from mozaiksai.control_plane import (
     ControlPlaneToolsManifest,
     LoadedControlPlanePack,
     RefinementTriggerRouteResolver,
-    load_control_plane_pack,
+    load_refinement_harness,
 )
 
 
@@ -112,9 +112,9 @@ def _write_business_plan_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 def _pack() -> LoadedControlPlanePack:
     return LoadedControlPlanePack(
-        path=Path("custom/control_plane"),
+        path=Path("custom/refinement_harness"),
         manifest=ControlPlaneManifest(
-            schema_version="mozaiks.control_plane",
+            schema_version="mozaiks.refinement_harness.v1",
             routing=ControlPlaneRoutingManifest(
                 default_artifact_kind="business_plan_bundle",
                 artifacts=[
@@ -159,11 +159,11 @@ def _pack() -> LoadedControlPlanePack:
             checkpoints=[],
         ),
         prompts=ControlPlanePromptsManifest(
-            schema_version="mozaiks.control_plane.prompts",
+            schema_version="mozaiks.refinement_harness.v1.prompts",
             prompts=[],
         ),
         tools=ControlPlaneToolsManifest(
-            schema_version="mozaiks.control_plane.tools",
+            schema_version="mozaiks.refinement_harness.tools.v1",
             tools=[],
         ),
     )
@@ -242,7 +242,7 @@ async def test_refinement_router_derives_route_from_workflow_sequence() -> None:
             change_class="design",
             rationale="The dashboard IA should be revised without changing the product concept.",
         ),
-        pack_loader=lambda: load_control_plane_pack(app_root=app_root),
+        pack_loader=lambda: load_refinement_harness(app_root=app_root),
     )
 
     request = resolver.request_from_payload(
@@ -1399,7 +1399,7 @@ def _factory_resolver(classifier=None) -> RefinementTriggerRouteResolver:
     app_root = Path(__file__).resolve().parents[1] / "factory_app" / "app"
     return RefinementTriggerRouteResolver(
         classifier=classifier or _CountingClassifier(),
-        pack_loader=lambda: load_control_plane_pack(app_root=app_root),
+        pack_loader=lambda: load_refinement_harness(app_root=app_root),
     )
 
 
@@ -1999,18 +1999,18 @@ async def test_design_route_context_seed_has_no_llm_profile() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ai.json architecture profile contract tests
+# refinement_policy.yaml architecture profile contract tests
 # ---------------------------------------------------------------------------
 
-def _load_ai_json() -> dict:
-    runtime_yaml_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "llm.yaml"
+def _load_refinement_policy_yaml() -> dict:
+    runtime_yaml_path = Path(__file__).resolve().parents[1] / "factory_app" / "app" / "config" / "refinement_policy.yaml"
     return yaml.safe_load(runtime_yaml_path.read_text(encoding="utf-8"))
 
 
-def test_ai_json_declares_architecture_llm_profile() -> None:
-    """control-plane runtime config declares an 'architecture' profile."""
-    ai = _load_ai_json()
-    profiles = ai["llm_profiles"]
+def test_refinement_policy_declares_architecture_llm_profile() -> None:
+    """Refinement Policy declares an 'architecture' profile."""
+    policy = _load_refinement_policy_yaml()
+    profiles = policy["llm_profiles"]
     assert "architecture" in profiles
     arch = profiles["architecture"]
     assert "purpose" in arch
@@ -2018,16 +2018,16 @@ def test_ai_json_declares_architecture_llm_profile() -> None:
     assert "model" in arch["llm_config"]
 
 
-def test_ai_json_classifier_profile_unchanged() -> None:
+def test_refinement_policy_classifier_profile_unchanged() -> None:
     """classifier llm_profile still points to the classifier profile (unchanged)."""
-    ai = _load_ai_json()
-    assert ai["classifier"]["llm_profile"] == "classifier"
+    policy = _load_refinement_policy_yaml()
+    assert policy["classifier"]["llm_profile"] == "classifier"
 
 
-def test_ai_json_coding_profile_unchanged() -> None:
+def test_refinement_policy_coding_profile_unchanged() -> None:
     """coding llm_profile still points to the codegen profile (unchanged)."""
-    ai = _load_ai_json()
-    assert ai["coding"]["llm_profile"] == "codegen"
+    policy = _load_refinement_policy_yaml()
+    assert policy["coding"]["llm_profile"] == "codegen"
 
 
 # ---------------------------------------------------------------------------
@@ -2108,7 +2108,7 @@ def test_builder_revision_workflows_declare_workflow_sequence_context(
     workflow_name: str,
     agent_name: str,
 ) -> None:
-    """Control-plane launches must preserve the active workflow_sequence."""
+    """Refinement launches must preserve the active workflow_sequence."""
     cv = _load_yaml(_factory_workflows_root() / workflow_name / "context_variables.yaml")
     defn = cv["definitions"]["workflow_sequence"]
     assert defn["source"]["type"] == "state"
@@ -2539,10 +2539,10 @@ async def test_auto_carry_forward_resolution_rejects_unsafe_ids(
 
 
 def test_docs_mention_phase_3_auto_population() -> None:
-    """refinement-control-plane.md documents Phase 3 auto-population behavior."""
+    """refinement-engine.md documents Phase 3 auto-population behavior."""
     doc_path = (
         Path(__file__).resolve().parents[1]
-        / "docs" / "architecture" / "workflows" / "refinement-control-plane.md"
+        / "docs" / "architecture" / "workflows" / "refinement-engine.md"
     )
     doc = doc_path.read_text(encoding="utf-8")
     assert "phase 3" in doc.lower()
@@ -2553,7 +2553,7 @@ def test_docs_do_not_say_carry_forward_is_only_manual() -> None:
     """carry_forward_modules must not be described as exclusively manually supplied."""
     doc_path = (
         Path(__file__).resolve().parents[1]
-        / "docs" / "architecture" / "workflows" / "refinement-control-plane.md"
+        / "docs" / "architecture" / "workflows" / "refinement-engine.md"
     )
     doc = doc_path.read_text(encoding="utf-8").lower()
     assert "only manually" not in doc

@@ -1,11 +1,11 @@
 ---
-title: Refinement Control Plane
+title: Refinement Engine
 status: Authoritative - Pre-Production, Canonical Contract
 created: 2026-04-13
 depends_on: workflow-routing-transitions.md, event-system.md, ../../architecture/mozaiksai/universal-orchestrator.md, ../builder/data-contract-and-revision-contract.md
 ---
 
-# Refinement Control Plane
+# Refinement Engine
 
 This document defines how Mozaiks handles post-generation changes without forcing users back through full generation workflows for every adjustment.
 
@@ -17,15 +17,17 @@ The goal is simple:
 
 - initial generation workflows create the first canonical shape
 - refinement workflows adjust that shape safely and quickly
-- the control plane decides when a change is small, scoped, design-only, or concept-breaking
+- the refinement engine decides when a change is small, scoped, design-only, or concept-breaking
 
-The refinement control plane uses `app/config/ai.json` for runtime startup,
-`app/config/llm.yaml` for control-plane runtime policy, and
-`control_plane/config/control_plane.yaml` for checkpoint and routing
-declarations. LLM-backed control-plane checkpoints do not read workflow-local
-AG2 config for this.
+The Refinement Engine is the always-available OSS subsystem that powers
+post-generation routing, impact analysis, scoped work, staging, review, and
+promotion. It uses `app/config/ai.json` for runtime startup only,
+`app/config/refinement_policy.yaml` for app-local model/profile policy, and
+`refinement_harness/config/harness.yaml` for optional app-local routing,
+checkpoint, prompt, and tool declarations. LLM-backed refinement checkpoints do
+not read workflow-local AG2 config for this.
 
-The control plane is not an AG2 Network graph and not a single AG2 agent that
+The Refinement Engine is not an AG2 Network graph and not a single AG2 agent that
 launches workflows by tool call. AG2 owns the model execution inside
 LLM-backed checkpoints. Mozaiks owns the deterministic artifact policy around
 those checkpoints: loading persisted artifact context, validating structured
@@ -33,7 +35,7 @@ checkpoint outputs, deriving route impact, choosing workflow sequence re-entry,
 and deciding whether to launch a workflow, run a scoped worker, or return a
 harness decision to Studio.
 
-LLM-backed control-plane checkpoints should run through the shared AG2 adapter
+LLM-backed refinement checkpoints should run through the shared AG2 adapter
 `mozaiksai.core.adapters.AG2StructuredAgentRunner` so AG2 execution mechanics
 stay centralized. Routing and artifact lifecycle logic must remain in
 `mozaiksai/control_plane`.
@@ -85,7 +87,9 @@ The existing platform already has the right raw ingredients:
 - `AppGenerator` already emits `build_tasks` with `owned_paths`, `depends_on`, and `acceptance_criteria`.
 - App validation and preview already run in E2B-backed tooling.
 
-That means refinement does **not** need a brand-new reasoning model. It needs a control plane and durable state model around the artifacts the generators already produce.
+That means refinement does **not** need a brand-new reasoning model. It needs a
+refinement engine and durable state model around the artifacts the generators
+already produce.
 
 Database refinements should follow the companion contract in
 [data-contract-and-revision-contract.md](../builder/data-contract-and-revision-contract.md):
@@ -140,8 +144,8 @@ They are `design` unless they imply a new target market or value proposition.
 
 ### Refinement Lanes
 
-`ChangeClass` is the high-level routing superclass used by current
-control-plane routes:
+`ChangeClass` is the high-level routing superclass used by current refinement
+routes:
 
 - `patch`
 - `design`
@@ -343,10 +347,10 @@ document does not change model names, temperatures, or per-agent AG2 settings.
 
 ### LLM Profile Indirection
 
-Control-plane and refinement agents must reference named LLM profiles instead
-of scattering raw AG2 `llm_config` objects across individual capabilities.
-`app/config/ai.json` owns the profile registry under
-`control_plane.llm_profiles`.
+Refinement Engine checkpoints and refinement agents must reference named LLM
+profiles instead of scattering raw AG2 `llm_config` objects across individual
+capabilities. `app/config/refinement_policy.yaml` owns the profile registry
+under `llm_profiles`.
 
 Allowed profile ids:
 
@@ -360,39 +364,32 @@ Allowed profile ids:
 
 Capabilities reference profiles by id:
 
-```json
-{
-  "control_plane": {
-    "llm_profiles": {
-      "classifier": {
-        "purpose": "Classify refinement requests.",
-        "default_temperature": 0,
-        "expected_behavior": "deterministic structured classification",
-        "llm_config": {
-          "model": "<configured-model>",
-          "temperature": 0
-        }
-      }
-    },
-    "classifier": {
-      "enabled": true,
-      "llm_profile": "classifier"
-    }
-  }
-}
+```yaml
+schema_version: mozaiks.refinement.policy.v1
+enabled: true
+llm_profiles:
+  classifier:
+    purpose: Classify refinement requests.
+    expected_behavior: deterministic structured classification
+    llm_config:
+      model: <configured-model>
+      temperature: 0
+classifier:
+  enabled: true
+  llm_profile: classifier
 ```
 
 This is an indirection layer only. It does not tune models, change AG2
 execution semantics, or introduce a new workflow. Existing raw
 `classifier.llm_config` and `coding.llm_config` fallback remains valid for
-workspaces that have not moved to profile references, but new control-plane
+workspaces that have not moved to profile references, but new Refinement Policy
 configuration should prefer `llm_profile`.
 
 Rules:
 
 - unknown profile ids fail configuration validation
 - capability references to undeclared profiles fail resolution clearly
-- no per-agent hidden model overrides should be added for control-plane or
+- no per-agent hidden model overrides should be added for Refinement Engine or
   refinement lanes
 - raw provider/model config may live inside the central profile registry, but
   code should pass the resolved `llm_config` to AG2 checkpoint runners
@@ -400,11 +397,11 @@ Rules:
 
 ### Refinement Smoke Coverage
 
-The OSS test suite includes a deterministic refinement control-plane smoke that
+The OSS test suite includes a deterministic Refinement Engine smoke that
 validates routing, impacted declarative families, `affected_bundle_paths`, and
 LLM profile resolution without calling a live LLM and without mutating generated
 app files. The smoke uses neutral app bundle manifests and fake classifier
-outputs so it exercises the control-plane resolver and config contracts only.
+outputs so it exercises the refinement resolver and config contracts only.
 
 This smoke does not execute AppGenerator, run a refinement worker, create
 migration files, or promote artifacts. Live classifier behavior, profile tuning,
@@ -416,12 +413,12 @@ and end-to-end refinement execution remain separate validation layers.
 
 Natural-language refinement requests should not go straight into `InterviewAgent`, `PatternAgent`, or `AppPlanAgent`.
 
-They should go through a control-plane classifier:
+They should go through the refinement classifier:
 
 ```text
 user request
   -> refinement classifier
-  -> emit control-plane event
+  -> emit refinement event
   -> router selects re-entry point
   -> refinement or rebuild flow runs
 ```
@@ -461,21 +458,21 @@ Studio /api/workflows/trigger
 Runtime note:
 
 - core now constructs a generic checkpoint runtime from the selected
-  `control_plane.yaml`
+  `harness.yaml`
 - the first-party harness binds `request_submitted`, `route_requested`,
   `decision_requested`, `scope_requested`, and `coding_requested` through that
   runtime
 - this keeps the checkpoint taxonomy declarative while still allowing the
   harness to compose checkpoint handlers deterministically
 - refinement re-entry routing is no longer hardcoded to builder workflows in
-  Python; the selected control-plane pack declares app-owned artifact kinds and
-  `workflow_sequence` targets per change class inside `control_plane.yaml`
+  Python; the selected refinement harness declares app-owned artifact kinds and
+  `workflow_sequence` targets per change class inside `harness.yaml`
 - that keeps the harness runtime-owned while letting future apps declare their
   own artifact/output topology without becoming `factory_app` clones
 
 Current simplified pack taxonomy:
 
-- `config/control_plane.yaml`
+- `config/harness.yaml`
   - top-level `harness`
   - top-level `routing`
   - inline `checkpoints[]`
@@ -492,7 +489,7 @@ Each checkpoint declares:
 - `output_contract` for AG2 structured-agent checkpoints; null for deterministic handlers
 - optional `tool_ids`
 
-There is no extra user-facing control-plane `components` layer. The pack
+There is no extra user-facing refinement `components` layer. The harness
 declares what should run at each checkpoint.
 
 The `routing` section is the canonical app-local declaration for harness
@@ -504,10 +501,10 @@ ownership:
   - optional `label`
   - `routes.patch|design|feature|core.workflow_sequence`
 
-The control plane derives affected workflows and artifact-family impact from
+The Refinement Engine derives affected workflows and artifact-family impact from
 the referenced `workflow_sequence` in `extension_registry.json`. Do not
 duplicate downstream workflow lists or artifact-family lists in
-`control_plane.yaml`.
+`harness.yaml`.
 
 This keeps the runtime generic:
 
@@ -515,66 +512,68 @@ This keeps the runtime generic:
   `design_docs`, `workflow_bundle`, and `app_bundle`
 - a future memo/planning app can declare artifacts like `market_research`,
   `financial_model`, or `executive_summary`
-- the harness logic stays in `mozaiksai/control_plane`, while artifact
+- the engine implementation stays in `mozaiksai/control_plane`, while artifact
   ownership stays in the selected pack
 
-Current app-level config contract:
+Current app-level Refinement Policy contract:
 
-```json
-{
-  "control_plane": {
-    "enabled": true,
-    "classifier": {
-      "enabled": true,
-      "llm_config": {
-        "model": "gpt-5-nano",
-        "temperature": 0.0
-      }
-    },
-    "coding": {
-      "enabled": false,
-      "llm_config": {
-        "model": "gpt-5.2-codex",
-        "temperature": 0.1
-      }
-    }
-  }
-}
+```yaml
+schema_version: mozaiks.refinement.policy.v1
+enabled: true
+llm_profiles:
+  classifier:
+    purpose: Classify refinement requests.
+    expected_behavior: deterministic structured classification
+    llm_config:
+      model: gpt-5-nano
+      temperature: 0.0
+  codegen:
+    purpose: Generate scoped code or artifact patches.
+    expected_behavior: deterministic code and artifact generation
+    llm_config:
+      model: gpt-5.2-codex
+      temperature: 0.1
+classifier:
+  enabled: true
+  llm_profile: classifier
+coding:
+  enabled: false
+  llm_profile: codegen
 ```
 
 Rules:
 
-- `control_plane.enabled` gates the harness as a whole
-- `classifier.llm_config` selects the authoritative refinement-classification model
-- `coding.llm_config` is reserved for the refinement worker loop, not for workflow-local AG2 execution
+- `enabled` gates app-local Refinement Policy use as a whole
+- `classifier.llm_profile` selects the authoritative refinement-classification profile
+- `coding.llm_profile` is reserved for the refinement worker loop, not for workflow-local AG2 execution
 
 Current first-party pack paths:
 
-- `factory_app/control_plane/config/control_plane.yaml`
-- `factory_app/control_plane/config/tools.yaml`
-- `factory_app/control_plane/config/policies.yaml`
-- `factory_app/control_plane/prompts/*.yaml`
-- `factory_app/control_plane/tools/*.py`
+- `factory_app/refinement_harness/config/harness.yaml`
+- `factory_app/refinement_harness/config/tools.yaml`
+- `factory_app/refinement_harness/config/policies.yaml`
+- `factory_app/refinement_harness/prompts/*.yaml`
+- `factory_app/refinement_harness/tools/*.py`
 
 Current default classifier grounding:
 
-- the selected control-plane pack declares a `request_submitted` checkpoint
-  with its own prompt and tool ids inline in `control_plane.yaml`
+- the selected refinement harness declares a `request_submitted` checkpoint
+  with its own prompt and tool ids inline in `harness.yaml`
 - the runtime now provides a generic `get_revision_context` tool that assembles:
   - persisted `SessionState`
-  - app-declared routing metadata from the selected control-plane pack
+  - app-declared routing metadata from the selected refinement harness
   - tracked artifact refs and latest artifact lineage
   - active change-request lineage when present
   - persisted summary payloads for runtime-owned summary artifacts such as
     `concept`, `build_plan`, `design_docs`, and `theme_capture`
   - one-level resolved `canonical_inputs_version` lineage so downstream bundle
     artifacts can expose the upstream artifacts they were built from
-- when a `ChangeRequest` is persisted, the control plane marks the affected
+- when a `ChangeRequest` is persisted, the Refinement Engine marks the affected
   persisted artifact versions `stale` using the change-request id as the
   invalidation reason; it also propagates staleness transitively to all
   downstream artifact families using the declared `artifact_dependency_graph`
   (see [Artifact Staleness and Routing](../builder/artifact-staleness-and-routing.md))
-- the `get_stale_artifact_families` control plane tool surfaces that stale set
+- the `get_stale_artifact_families` refinement tool surfaces that stale set
   to the classifier at `request_submitted` so routing upgrades to the minimal
   necessary sequence automatically
 - the first-party factory pack pairs that runtime context with
@@ -597,11 +596,11 @@ Current AG2 checkpoint execution boundary:
   call, route selection, deterministic scope policies, surface dependency
   ordering, artifact persistence, and workflow launch decisions
 - checkpoint prompts and tool ids remain declared in
-  `factory_app/control_plane/config/control_plane.yaml`
+  `factory_app/refinement_harness/config/harness.yaml`
 
 Current first-party coding worker path:
 
-- `control_plane.coding.enabled` gates the worker independently from the
+- `coding.enabled` gates the worker independently from the
   classifier
 - the first-party factory pack declares a `coding_requested` checkpoint with its own
   prompt and tool access
@@ -632,14 +631,14 @@ Current first-party coding worker path:
 - `promote` restores an accepted/current artifact bundle into the runnable app
   root or workflow target and marks the linked refinement session as
   `promoted`
-- the worker stays subordinate to control-plane routing and does not masquerade
+- the worker stays subordinate to refinement routing and does not masquerade
   as an AG2 workflow
 - explicit file scope can now come from persisted artifact-bundle workbenches,
   not only from an in-flight workflow surface
 - when explicit file scope is missing, the default scope selector uses
   `get_artifact_workspace_catalog` plus routing metadata to choose the
   narrowest safe files before the worker runs
-- the selected control-plane pack now also declares `policies.yaml`, which
+- the selected refinement harness now also declares `policies.yaml`, which
   currently bounds inferred scope with:
   - `scope.max_selected_paths`
   - `scope.auto_apply_max_paths`
@@ -689,8 +688,8 @@ Current first-party harness decision layer:
   - `trigger_payload`
   - `selected_paths`
   - `clarification_question`
-- the default control-plane pack now declares this behavior as a dedicated
-  `decision_requested` checkpoint in `control_plane.yaml`
+- the default refinement harness now declares this behavior as a dedicated
+  `decision_requested` checkpoint in `harness.yaml`
 
 Current first-party artifact workbench bridge:
 
@@ -701,7 +700,7 @@ Current first-party artifact workbench bridge:
 - the Build history surface can open that bundle in `AppWorkbench`
 - `AppWorkbench` can launch a scoped refinement request with
   `coding_request.files` sourced from the selected file editor state
-- when no file is selected in `AppWorkbench`, the control-plane harness can
+- when no file is selected in `AppWorkbench`, the refinement harness can
   now fall back to scope proposal instead of forcing file selection first
 
 Target workflow revision context contract:
@@ -725,7 +724,7 @@ Target workflow revision context contract:
   - `sequence_status`
   - `revision_origin_workflow`
 - this is what lets a confirmed `core_restart` into `ValueEngine` preserve the
-  request and typed control-plane rationale without tripping
+  request and typed refinement rationale without tripping
   `SESSION_LAUNCH_CONTEXT_KEY_REJECTED`
 - important: a reroute into `ValueEngine` for `core` does **not** mean "treat
   this like a blank greenfield intake again." It is still a revision entry with
@@ -746,8 +745,8 @@ code-context subsystem:
   files for the coding worker, including symbols, call edges, contract roles,
   and bounded semantic annotation requests
 
-These control-plane tool payloads stay inside the control-plane checkpoint
-request. They are not automatically copied into downstream workflow
+These refinement tool payloads stay inside the refinement checkpoint request.
+They are not automatically copied into downstream workflow
 `context_variables`. When a workflow needs graph-aware prompt context, its own
 `before_chat` lifecycle loader rebuilds a compact `context_graph_pack` from the
 seeded `artifact_version_id` and current `AppContextGraph`. The workflow
@@ -761,7 +760,7 @@ prompt pack with `status: unavailable` and a reason such as `missing_app_id` or
 ## Staged Execution Plan
 
 Classification, routing, and impact analysis do not mutate app artifacts. Their
-first executable output is a `RefinementExecutionPlan`: a control-plane plan
+first executable output is a `RefinementExecutionPlan`: a refinement plan
 that names the request, app, artifact kind, `ChangeClass`, `refinement_lane`,
 workflow sequence, affected declarative families, affected bundle paths, named
 LLM profiles, validation checks, warnings, and review gates.
@@ -775,7 +774,7 @@ Initial execution plans are non-mutating by default:
 - no source app bundle writes
 - no promotion of refined output
 
-`execution_mode: staged` may be materialized through the control-plane staging
+`execution_mode: staged` may be materialized through the refinement staging
 helper. The helper creates an isolated staging workspace at the plan's
 `staging_area`/`output_workspace` path, or `.refinement_staging/{request_id}`
 when no explicit path exists. It writes a plan snapshot, affected-path status
@@ -1096,16 +1095,16 @@ live workflow routing. The source bundle remains the source of truth until the
 accepted `CURRENT` `app_bundle` is explicitly restored into the runnable app
 root.
 
-The plan is a handoff contract between the control plane and later execution
+The plan is a handoff contract between the Refinement Engine and later execution
 layers. It is not runtime authority and does not replace workflow routing,
 module dispatch, event routing, permissions, connector storage, or generated app
 database access.
 
 ---
 
-## Current Typed Control-Plane Contracts
+## Current Typed Refinement Contracts
 
-The control plane should operate on six typed artifacts:
+The Refinement Engine should operate on six typed artifacts:
 
 | Contract | Purpose |
 |---|---|
@@ -1125,10 +1124,10 @@ The runtime may still seed workflow context with convenience fields such as:
 - `artifact_version_id`
 - `refinement_request`
 
-But the control plane itself should reason from the typed contracts, not from a
+But the Refinement Engine itself should reason from the typed contracts, not from a
 loose bundle of free-form strings.
 
-`HarnessDecision` is the bridge between control-plane reasoning and builder UX.
+`HarnessDecision` is the bridge between refinement reasoning and builder UX.
 It is what lets the platform render a structured decision card instead of
 falling back to:
 
@@ -1139,7 +1138,7 @@ falling back to:
 `declared_change_class` inside `RefinementRequest` is advisory only.
 
 It may be supplied by UI as a route hint, but the authoritative classification
-comes from the backend control-plane model call.
+comes from the backend refinement model call.
 
 `ChangeIntent.source` should stay explicit:
 
@@ -1206,7 +1205,7 @@ Important:
 - selected workflow sequence metadata supplies declared execution and artifact
   impact after classification
 - transitions do **not** decide rebuild scope
-- AG2 handoffs do **not** own control-plane routing
+- AG2 handoffs do **not** own refinement routing
 
 Those are all downstream consumers of the routing decision.
 
@@ -1329,7 +1328,7 @@ That means:
 
 ## Persistence Model
 
-The control plane needs durable records.
+The Refinement Engine needs durable records.
 
 Minimum records:
 
@@ -1379,13 +1378,13 @@ Nothing should rely on transcript scraping to reconstruct this.
 
 ## Sequence Interaction
 
-Workflow sequences still matter, but only after the control plane decides re-entry.
+Workflow sequences still matter, but only after the Refinement Engine decides re-entry.
 
 Correct split:
 
 - workflow sequences define major phase order
 - transitions define entry or inter-phase user decisions
-- refinement control plane decides what phase to re-enter
+- the Refinement Engine decides what phase to re-enter
 
 Example:
 
@@ -1405,7 +1404,7 @@ So the answer to "does this belong in journey sequencing?" is:
 
 ## Required Cleanups In The Current Platform Flows
 
-These current behaviors should be removed when the refinement control plane lands:
+These current behaviors should be removed when the Refinement Engine contract lands:
 
 - user-change loops that send delivered bundles back to `InterviewAgent`
 - post-delivery change routing that depends on ordinary string handoff logic
@@ -1557,8 +1556,8 @@ receive it directly; carry-forward file preservation is driven instead by
 
 #### Carry-forward module inventory (Phase 2 + Phase 3)
 
-`get_carry_forward_candidates` is a registered read-only control-plane tool at
-`factory_app/control_plane/tools/get_carry_forward_candidates.py`.
+`get_carry_forward_candidates` is a registered read-only refinement tool at
+`factory_app/refinement_harness/tools/get_carry_forward_candidates.py`.
 
 It is available at the `route_requested` checkpoint — where `conceptual_replan`
 routing is determined and `_build_context_seed()` runs.
@@ -1688,7 +1687,7 @@ AppPlanAgent records its carry-forward planning intent in a structured field
 `factory_app/workflows/AppGenerator/tools.yaml` under AppPlanAgent.
 
 Core implementation lives at
-`factory_app/control_plane/tools/read_carry_forward_module_contract.py`.
+`factory_app/refinement_harness/tools/read_carry_forward_module_contract.py`.
 The AppGenerator entry point is a thin wrapper at
 `factory_app/workflows/AppGenerator/tools/read_carry_forward_module_contract.py`.
 
@@ -1748,7 +1747,7 @@ Output:
 - Contract content returned to AppPlanAgent is advisory context only.
 
 **Registration:** AppPlanAgent only (`auto_tool_call: false`). Not registered
-as a control-plane checkpoint tool. Not available to any other workflow agent.
+as a refinement checkpoint tool. Not available to any other workflow agent.
 
 **AppPlanAgent advisory use:**
 
@@ -1780,7 +1779,7 @@ classification for every module returned by `get_carry_forward_candidates`.
 | `regenerate` | Module id contains a domain-specific fragment (e.g. project, task, order, lead, pipeline, invoice, campaign, booking) strongly implying it was built for the old concept. Prefer regeneration. |
 
 **Classification logic** (`classify_module_carry_forward` in
-`factory_app/control_plane/tools/_module_inventory.py`):
+`factory_app/refinement_harness/tools/_module_inventory.py`):
 
 Priority (highest to lowest):
 
@@ -1811,14 +1810,15 @@ an additional field into the context seed:
 |---|---|---|---|
 | `llm_profile` | `"architecture"` | `conceptual_replan`, `full_rebuild` | Advisory signal requesting a stronger reasoning model. All other sequences receive no `llm_profile`. |
 
-The `architecture` profile is declared in `factory_app/app/config/ai.json`
-`control_plane.llm_profiles.architecture`. Its `llm_config` names a capable
-general reasoning model at low temperature for planning work.
+The `architecture` profile is declared in
+`factory_app/app/config/refinement_policy.yaml` under
+`llm_profiles.architecture`. Its `llm_config` names a capable general reasoning
+model at low temperature for planning work.
 
 **Advisory semantics.** The runner does not yet consume `llm_profile`
 automatically. The field is context plumbing — when a runner consumer is wired
-up, it will look up the named profile from `ai.json` and build an appropriate
-LLM config for the launched workflow session.
+up, it will look up the named profile from `refinement_policy.yaml` and build
+an appropriate LLM config for the launched workflow session.
 
 **What does not change:**
 
@@ -1837,7 +1837,7 @@ and `AppGenerator/context_variables.yaml`.
 ### Declaration Model
 
 The re-entry policy is declared by artifact kind in the selected
-`control_plane.yaml` pack.
+`harness.yaml` pack.
 
 Each route chooses a `workflow_sequence` from
 `extended_orchestration/extension_registry.json`. The sequence is the source of
@@ -1866,14 +1866,14 @@ routing:
 
 Rules:
 
-- `workflow_sequence` is canonical for control-plane routes.
-- Do not declare `affected_workflows` in `control_plane.yaml`; it is derived
+- `workflow_sequence` is canonical for refinement routes.
+- Do not declare `affected_workflows` in `harness.yaml`; it is derived
   from the selected sequence.
-- Do not declare `affected_declarative_families` in `control_plane.yaml`; it is
+- Do not declare `affected_declarative_families` in `harness.yaml`; it is
   declared once on the selected sequence in `extension_registry.json`.
 - Do not declare `requires_replanning`; it is derived from the typed change
   class: `patch=false`, `design|feature|core=true`.
-- Do not declare `requires_rebuild`; control-plane rebuild decisions are
+- Do not declare `requires_rebuild`; refinement rebuild decisions are
   runtime decision outputs, not route manifest inputs.
 
 ### Backend Intake
@@ -2049,7 +2049,7 @@ No Pydantic schema migration is required — `metadata` is already `dict[str, An
 
 ### Three-branch lookup in `load_artifact_workspace()`
 
-`factory_app/control_plane/tools/_artifact_workspace.py` resolves workspace
+`factory_app/refinement_harness/tools/_artifact_workspace.py` resolves workspace
 content in this priority order:
 
 1. **`workspace_dir`** — if path exists on disk, read files directly.
@@ -2205,7 +2205,7 @@ that have no `conceptual_replan` carry-forward context are unaffected.
 
 | File | Role |
 |---|---|
-| `factory_app/control_plane/tools/resolve_carry_forward_preservation.py` | Core resolver |
+| `factory_app/refinement_harness/tools/resolve_carry_forward_preservation.py` | Core resolver |
 | `factory_app/workflows/AppGenerator/tools/resolve_carry_forward_preservation.py` | Thin AG2 wrapper with `Annotated[..., Field(...)]` DI |
 | `factory_app/workflows/AppGenerator/tools.yaml` | `AssemblyAgent` entry, `auto_tool_call: true` |
 | `factory_app/workflows/AppGenerator/tools/assemble_app_tasks.py` | Writes `generated_files` to context on both schema and task batch paths |
@@ -2301,8 +2301,8 @@ router's. This is current truthful behavior, documented by the smoke.
 
 **What is live (real code exercised):**
 
-- `RefinementTriggerRouteResolver` with the real control-plane pack
-- `get_carry_forward_candidates` control-plane tool (auto variant only)
+- `RefinementTriggerRouteResolver` with the real refinement harness
+- `get_carry_forward_candidates` refinement tool (auto variant only)
 - `load_artifact_workspace` with a real temp dir
 - `resolve_carry_forward_preservation` Phase 7A tool
 
@@ -2326,7 +2326,7 @@ for a conceptual_replan scenario using a real OpenAI model.
 
 **What is live:**
 
-- `RefinementTriggerRouteResolver` with real control-plane pack (routing deterministic, no LLM)
+- `RefinementTriggerRouteResolver` with real refinement harness (routing deterministic, no LLM)
 - `AppPlanAgent` called directly via OpenAI with conceptual_replan context injected
 - `resolve_carry_forward_preservation` Phase 7A with the LLM's actual `carry_forward_decisions`
 

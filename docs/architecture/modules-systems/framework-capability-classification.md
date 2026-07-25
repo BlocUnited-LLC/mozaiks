@@ -71,7 +71,7 @@ Current examples:
 Important clarification:
 
 - `factory_app/` is the first-party factory workspace, not universal substrate
-- Studio is a control-plane surface, not a universal app-runtime primitive
+- Studio is a refinement surface, not a universal app-runtime primitive
 - CLI and Studio are framework interfaces over shared system capabilities, not
   substrate
 
