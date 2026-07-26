@@ -112,6 +112,8 @@ class ConfiguredEntitlementAdapter:
 
         # v2: multi-product — union capabilities across all products
         if self._config.products:
+            best_reason = "no_grant"
+            best_expires_at = None
             for product in self._config.products:
                 result = await self._check_product(
                     product, capability_id,
@@ -120,7 +122,11 @@ class ConfiguredEntitlementAdapter:
                 )
                 if result.granted:
                     return result
-            return EntitlementResult(granted=False, reason="no_grant")
+                # Prefer "expired" over generic "no_grant" so callers can surface expiry UI.
+                if result.reason == "expired" and best_reason != "expired":
+                    best_reason = "expired"
+                    best_expires_at = result.expires_at
+            return EntitlementResult(granted=False, reason=best_reason, expires_at=best_expires_at)
 
         # v1: single assignment store (existing logic preserved exactly)
         store = self._config.assignment_store
