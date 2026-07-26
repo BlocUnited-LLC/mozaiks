@@ -1,7 +1,7 @@
-# Control-Plane Runtime Policy
+# Refinement Policy
 
-`app/config/llm.yaml` is the app-local runtime policy for the
-control plane. It decides whether the harness is enabled and which model
+`app/config/refinement_policy.yaml` is the app-local runtime policy for the
+refinement engine. It decides whether the harness is enabled and which model
 profiles its capabilities use.
 
 Use it for:
@@ -15,7 +15,7 @@ Use it for:
 Example:
 
 ```yaml
-schema_version: mozaiks.control_plane.runtime
+schema_version: mozaiks.refinement.policy.v1
 enabled: true
 llm_profiles:
   classifier:

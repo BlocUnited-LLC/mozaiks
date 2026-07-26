@@ -27,7 +27,7 @@ modules: curated generation intelligence, not runtime authority.
 | Patternbook YAML | Pattern taxonomy, intent signals, required context/tools, handoff-generation strategy |
 | AgentGenerator | Reads the patternbook to select patterns and generate workflow YAML |
 | Runtime compiler | Validates workflow YAML, compiles handoffs into AG2 1.0 beta `TransitionGraph` objects, and resolves turns through `WorkflowAdapter` |
-| Control plane | Classifies user/refinement intent before workflow launch or resume |
+| Refinement Engine | Classifies user/refinement intent before workflow launch or resume |
 
 The runtime does not route from the patternbook directly. It routes from the
 generated workflow contract.

@@ -233,7 +233,7 @@ Task batches are not global workflow sequencing. Cross-workflow build order
 belongs in `extension_registry.json` and `workflow_sequences[]`.
 
 Task batches are not semantic routing. Intent classification and re-entry belong
-to the control-plane harness.
+to the refinement harness.
 
 Task batches are not a persistence authority. They operate over workflow context
 and artifact outputs; persistence remains owned by the runtime and artifact

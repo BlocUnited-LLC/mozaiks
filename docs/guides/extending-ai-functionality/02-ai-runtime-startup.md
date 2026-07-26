@@ -1,7 +1,7 @@
 # AI Runtime Startup
 
 `app/config/ai.json` owns runtime startup for `ask`, `chat`, and `workflows`.
-It does not carry control-plane policy.
+It does not carry refinement policy.
 
 Use it for:
 
@@ -30,4 +30,4 @@ Example:
 Keep `ask`, `chat`, and workflow startup here. Continuing a previous workflow
 requires an explicit `chat_id` or a session selected from `/api/sessions/list`;
 new app creation must not infer an older session from this config. Do not move
-startup behavior into `control_plane/config/control_plane.yaml`.
+startup behavior into `refinement_harness/config/harness.yaml`.

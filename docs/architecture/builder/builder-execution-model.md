@@ -115,7 +115,7 @@ That is compatible with this model only if:
 The builder therefore needs three separate execution concerns:
 
 - workflow execution loop: one AG2 workflow run such as `ValueEngine` or `AppGenerator`
-- builder session loop: the control plane that sequences workflows, validates staged artifacts, and decides re-entry
+- builder session loop: the Refinement Engine that sequences workflows, validates staged artifacts, and decides re-entry
 - refinement worker loop: scoped repair or regeneration after the first pass
 
 Do not collapse those concerns into one global handoff mesh.

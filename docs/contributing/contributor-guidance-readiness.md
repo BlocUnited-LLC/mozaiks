@@ -17,7 +17,7 @@ Primary covered surfaces today:
 
 - Runtime and platform: `runtime-change`
 - Factory build workflow sequence and cross-workflow routing: `factory-build-workflow-change`
-- Control-plane and refinement: `control-plane-refinement-change`
+- Refinement Engine and refinement: use the refinement-specific change workflow.
 - ExistingAppDiscovery and brownfield discovery: `existing-app-discovery-change`
 - AppGenerator workflow-local changes: `appgenerator-change`
 - AgentGenerator workflow-local changes: `agentgenerator-change`
@@ -41,7 +41,7 @@ docs, release notes, architecture placement, and final-report expectations.
 | AgentGenerator-local | `agentgenerator-change` | add `factory-build-workflow-change` only for `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow routing changes |
 | ExistingAppDiscovery-local | `existing-app-discovery-change` | add `factory-build-workflow-change` only for `extension_registry.json`, `workflow_sequence`, `transitions[]`, `entrypoints[]`, or cross-workflow routing changes |
 | Sequence/routing | `factory-build-workflow-change` | `build-sequence-change` for narrow journey-composition review |
-| Control-plane/refinement | `control-plane-refinement-change` | add `factory-build-workflow-change` when `workflow_sequence` composition or `extension_registry.json` routing also changes |
+| Refinement Engine/refinement | refinement-specific change workflow | add `factory-build-workflow-change` when `workflow_sequence` composition or `extension_registry.json` routing also changes |
 | Module contract | `add-module` | use `runtime-change` for loader or runtime behavior changes; use `appgenerator-change` for generated module output changes |
 | Frontend/admin UI | `add-page` | use the frontend rule; add `runtime-change` if platform or admin shell behavior changes |
 | Persistence/data contract | `persistence-change` | add `runtime-change` for runtime persistence behavior; add `appgenerator-change` for generated persistence output |

@@ -33,7 +33,7 @@ Typical characteristics:
 
 - required to run app bundles
 - workflow-agnostic at the substrate level
-- not specific to building apps, hosting Mozaiks, or operating a control plane
+- not specific to building apps, hosting Mozaiks, or operating a Refinement Engine
 
 Current examples:
 
@@ -71,7 +71,7 @@ Current examples:
 Important clarification:
 
 - `factory_app/` is the first-party factory workspace, not universal substrate
-- Studio is a control-plane surface, not a universal app-runtime primitive
+- Studio is a Refinement Engine surface, not a universal app-runtime primitive
 - CLI and Studio are framework interfaces over shared system capabilities, not
   substrate
 
@@ -120,7 +120,7 @@ Rule:
 | `mozaiksai/hosts/platform.py` | Universal substrate | app host and shell/page/module composition |
 | core `chat-ui/` primitives | Universal substrate | reusable shell/UI substrate |
 | `factory_app/` | Framework-owned optional capability | first-party factory workspace |
-| `mozaiksai/hosts/studio.py` | Framework-owned optional capability | control-plane host |
+| `mozaiksai/hosts/studio.py` | Framework-owned optional capability | Refinement Engine host |
 | `factory_app/app/admin/pages/` | Framework-owned optional capability | Workspace Studio UI |
 | `chat-ui/src/admin/` | Framework-owned optional capability | platform-management UI owned by Studio |
 | `mozaiks_cli/` | Framework-owned optional capability | developer interface |
@@ -174,7 +174,7 @@ That is the intended model:
 
 - runtime and app host stay workflow-agnostic
 - shared factory workflows remain a builder/factory capability
-- Studio remains a control-plane capability
+- Studio remains a Refinement Engine capability
 - generated apps may consume none, one, or both of those higher-layer
   capabilities depending on deployment and product needs
 

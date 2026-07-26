@@ -26,7 +26,7 @@ Most people will try to fit Mozaiks into a category they already know. None of t
 | What people think it is | What it actually is |
 |------------------------|-------------------|
 | A chatbot builder | An app generation and orchestration runtime |
-| A LangChain alternative | A structured multi-agent platform with a control plane above the LLM layer |
+| A LangChain alternative | A structured multi-agent platform with a Refinement Engine above the LLM layer |
 | A no-code tool | A declarative-first framework that generates real, runnable code |
 | A workflow automator | A complete application lifecycle system — build, run, refine, promote |
 
@@ -37,7 +37,7 @@ The cleanest description: **Mozaiks is a platform where AI is the developer, not
 Mozaiks operates at two distinct layers simultaneously:
 
 **Layer 1 — The Factory (build time)**
-A multi-agent pipeline that interviews the user, generates an entire application bundle — modules, pages, workflows, backend code, database schema, deployment config — and stages it for review and promotion. The control plane classifies subsequent change requests (patch / design / feature / architectural rebuild) and routes them to the correct regeneration workflow without blowing up work that doesn't need to change.
+A multi-agent pipeline that interviews the user, generates an entire application bundle — modules, pages, workflows, backend code, database schema, deployment config — and stages it for review and promotion. The Refinement Engine classifies subsequent change requests (patch / design / feature / architectural rebuild) and routes them to the correct regeneration workflow without blowing up work that doesn't need to change.
 
 **Layer 2 — The Runtime (run time)**
 A layered FastAPI host that runs the generated application: module action dispatch, session management, WebSocket transport for live AI chat, entitlement gating, audit logging, event bus, multi-tenant persistence, and the Studio management interface. Every app built on Mozaiks inherits all of this automatically.
@@ -61,7 +61,7 @@ Yes — at every layer, not just on paper.
 | **Event bus** | No-op, Mongo change streams, Redis pub/sub — one environment variable switches backend. | `core/ports/event_bus.py` |
 | **Collaboration** | Hosted-product capability owned by app modules and platform hooks; OSS exposes generic module dispatch and scope hooks only. | `app/modules/*`, `app/services/platform_hooks.py` in hosted workspaces |
 | **Host layers** | Runtime → Platform → Studio are independently composable. Hosted products add a layer on top without touching the OSS runtime. | `hosts/runtime.py`, `hosts/platform.py`, `hosts/studio.py` |
-| **Control plane** | Classifier, router, decision policy, and coding worker are separate implementations behind a single harness interface. | `control_plane/implementations/` |
+| **Refinement Engine** | Classifier, router, decision policy, and coding worker are separate implementations behind a single harness interface. | `control_plane/implementations/` |
 
 The architecture follows clean separation: **ports define contracts, adapters implement them, the runtime never hardcodes provider behavior**.
 
@@ -94,7 +94,7 @@ Mozaiks does not fit cleanly in any of these clusters. It competes with elements
 | **Full app generation** | Yes — pages, modules, backend, schema, workflows | No | No | No | No | No |
 | **Multi-tenant native** | Yes — enforced at every query | No | No | Workspace-based | No | No |
 | **Declarative workflow contracts** | Yes — strict YAML-first, structured outputs | Partial | No | Visual config | No | Code-first |
-| **Control plane (intent routing)** | Yes — classify → route → re-enter | No | No | No | No | No |
+| **Refinement Engine (intent routing)** | Yes — classify → route → re-enter | No | No | No | No | No |
 | **Deterministic module system** | Yes — handler/service/repo/policy | No | No | Plugin-based | Node-based | Activity-based |
 | **Auth out of the box** | Yes — OIDC/JWT/Keycloak/Supabase | No | No | Basic | Plugin | No |
 | **Entitlement gating (SaaS plans)** | Yes — `subscriptions.yaml` + runtime enforcement | No | No | No | No | No |
@@ -132,9 +132,9 @@ When Mozaiks generates an app, the output includes:
 
 That is an entire product foundation, not a config file.
 
-### 5.2 — Control Plane is a Unique Capability
+### 5.2 — Refinement Engine is a Unique Capability
 
-Every other framework re-runs everything when you change something. Mozaiks' control plane classifies the change:
+Every other framework re-runs everything when you change something. Mozaiks' Refinement Engine classifies the change:
 
 - **patch** → fix the specific file, nothing else touches
 - **design** → re-run UI/page surfaces only
@@ -206,7 +206,7 @@ The architecture is powerful but the onboarding experience is not there yet. The
 - Interactive quickstart that proves value before requiring understanding
 - Template library of common app patterns
 
-A developer evaluating Mozaiks vs. Dify today will pick Dify because they can be productive in 15 minutes. With Mozaiks they need to understand runtime → platform → studio → factory → control plane before anything runs.
+A developer evaluating Mozaiks vs. Dify today will pick Dify because they can be productive in 15 minutes. With Mozaiks they need to understand runtime → platform → studio → factory → Refinement Engine before anything runs.
 
 **Mitigation:** One well-crafted quickstart tutorial and one starter template (e.g., "SaaS onboarding app") would change this completely.
 
@@ -263,7 +263,7 @@ For the target use case (AI app generation and orchestration), this is not a blo
 | Dimension | Score | Notes |
 |---|---|---|
 | **Technical architecture** | 9/10 | Enterprise-grade, clean, modular. Minor gaps: durable execution, visual builder. |
-| **Differentiation** | 9/10 | Build + run in one framework is unique. Control plane has no equivalent. |
+| **Differentiation** | 9/10 | Build + run in one framework is unique. Refinement Engine has no equivalent. |
 | **Production readiness** | 7/10 | Framework is ready. Real deployments are zero. |
 | **Developer experience** | 5/10 | Powerful but no quickstart, no templates, steep curve. |
 | **Ecosystem** | 2/10 | Pre-release. No community, no tutorials, no integrations directory. |
@@ -275,7 +275,7 @@ For the target use case (AI app generation and orchestration), this is not a blo
 
 The framework is done enough. Continued hardening without a real user is diminishing returns.
 
-The single highest-leverage move is a production deployment that proves the full loop: **user describes an app → Mozaiks generates it → it runs → the user refines it → the control plane routes the change correctly**.
+The single highest-leverage move is a production deployment that proves the full loop: **user describes an app → Mozaiks generates it → it runs → the user refines it → the Refinement Engine routes the change correctly**.
 
 ### Immediate Priority — Ship One Real App
 
@@ -285,7 +285,7 @@ The single highest-leverage move is a production deployment that proves the full
 1. `mozaiks init` scaffolds a working app in under 5 minutes
 2. AppGenerator produces a complete bundle with real business logic (not placeholder)
 3. The app runs on Studio with real auth and at least one working module action
-4. A non-technical user can describe a change and the control plane routes it correctly
+4. A non-technical user can describe a change and the Refinement Engine routes it correctly
 5. The refinement loop completes without full regeneration
 
 **What breaks first will tell you exactly where to invest next.** Nothing else will.
@@ -323,14 +323,14 @@ The framework validates contracts. It does not validate quality. Quality needs r
 
 - Do not add more framework features. The framework is ready.
 - Do not build the visual workflow designer yet. Validate the YAML-driven path first.
-- Do not optimize the control plane routing until real users are triggering it with real requests.
+- Do not optimize Refinement Engine routing until real users are triggering it with real requests.
 - Do not lift the release hold until Track 1 (quickstart) is done. A first impression with no onboarding path wastes the release moment.
 
 ---
 
 ## 10. Summary
 
-Mozaiks is technically differentiated, architecturally clean, and positioned in the right market at the right time. The build-and-run combination, the control plane, and the multi-tenant module system have no direct equivalent in any comparable framework.
+Mozaiks is technically differentiated, architecturally clean, and positioned in the right market at the right time. The build-and-run combination, the Refinement Engine, and the multi-tenant module system have no direct equivalent in any comparable framework.
 
 The gap is not in the framework. The gap is in the evidence.
 

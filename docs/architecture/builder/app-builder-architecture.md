@@ -134,7 +134,7 @@ That is acceptable only if they stay behind typed builder contracts such as:
 - `ImpactSet`
 
 Those AG2 workflows are only one control loop in the system. The builder still
-needs a separate session-level control plane above them and a scoped refinement
+needs a separate session-level Refinement Engine above them and a scoped refinement
 worker loop below them for localized repair.
 
 ## Required Review Artifacts

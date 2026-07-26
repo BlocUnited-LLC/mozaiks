@@ -57,7 +57,7 @@ Runtime usage surfaces:
 - OSS app creators query `/api/admin/usage` in Studio/Admin for app-scoped or
   workspace-scoped token totals.
 - Hosted products such as Mozaiks App use the same `/api/admin/usage` route and
-  may also forward summary events to their control plane.
+  may also forward summary events to their Refinement Engine.
 - Generated app end users query `/api/me/usage` from the profile surface. The
   response combines measured runtime usage with usage-limit metadata declared
   in `app/config/subscriptions.yaml` when the app is a SaaS app.

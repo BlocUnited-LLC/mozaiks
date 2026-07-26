@@ -20,7 +20,8 @@ generated bundle.
 | Runtime enforcement | `EntitlementPort`, `ConfiguredEntitlementAdapter`, `actions[].entitlement_gate`, token guard | Which users receive paid assignments after commercial events |
 | Token accounting | `TokenWalletLedger`, usage ingest, `INSUFFICIENT_TOKENS` recovery metadata | Payment confirmation, refunds, chargebacks, support policy |
 | Fulfillment bridge | `BillingFulfillmentCommand` and deterministic effect application | Adapter verification, webhook validation, provider customer mapping |
-| Managed adapter wiring | Build-context pack, generated facade module, generated integration client, env names | Hosted API implementation, API-key issuance, commercial policy, payouts, settlement |
+| Managed adapter wiring | Build-context pack, generated facade module, generated integration client, env names, optional module-owned `contracts/service.yaml` handoff metadata | Hosted API implementation, API-key issuance, commercial policy, payouts, settlement |
+| Module commercial metadata | Optional `contracts/commercial.yaml` for module-owned display, fee, usage-policy, service-terms, or custom money-flow metadata outside `subscriptions.yaml` | Pricing strategy, margins, provider configuration, settlement operations, legal/compliance decisions |
 
 The invariant is:
 
@@ -165,7 +166,8 @@ Everything else is a custom money-flow boundary, not a new OSS monetization
 primitive. A generated app can still sell products, collect one-time payments,
 accept contributions, run campaigns, or participate in a hosted marketplace, but
 that behavior belongs in app-owned modules, selected managed-capability facades,
-policy hooks, or hosted-product modules.
+policy hooks, optional module-owned `contracts/service.yaml` /
+`contracts/commercial.yaml`, or hosted-product modules.
 
 ## Ownership Rules
 
@@ -194,6 +196,12 @@ Those flows can still be modular Mozaiks apps, but their business state belongs
 in app-owned or hosted-product modules. If they need payment collection, they
 call a selected checkout facade. If payment confirmation should affect runtime
 entitlements or token balances, they emit a fulfillment command.
+
+Module-owned `contracts/commercial.yaml` may describe safe commercial metadata
+for those flows, such as display pricing, a fee percentage, service terms, or a
+custom money-flow label. It must not replace `subscriptions.yaml` for plan
+grants and must not expose provider identifiers, credentials, payout internals,
+or private settlement policy.
 
 ## Self-Hosted Posture
 

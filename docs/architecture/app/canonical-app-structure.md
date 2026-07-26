@@ -1,7 +1,7 @@
 # Canonical App Structure
 
-Mozaiks apps use one workspace shape across generated apps, hosted product apps,
-and first-party dogfood apps. The structure is app-agnostic: app behavior lives
+Mozaiks apps use one workspace shape across generated apps,
+operator/managed-service apps, and first-party dogfood apps. The structure is app-agnostic: app behavior lives
 in modules, app runtime preferences live in config, data and security are
 first-class app planes, implementation support lives in `app/services`, deploy
 packaging artifacts live at the app bundle root when requested, and AI
@@ -17,6 +17,7 @@ workspace/
 │   │   ├── shell.json
 │   │   ├── integrations.yaml
 │   │   ├── targets.json
+│   │   ├── refinement_policy.yaml ← apps with app-local refinement policy
 │   │   └── subscriptions.yaml   ← SaaS apps only
 │   ├── data/
 │   │   ├── contract.json
@@ -27,6 +28,8 @@ workspace/
 │   │   └── {module_id}/
 │   │       ├── module.yaml
 │   │       ├── contracts/
+│   │       │   ├── service.yaml      ← optional module service boundary
+│   │       │   └── commercial.yaml   ← optional module commercial metadata
 │   │       ├── runtime_extensions.yaml
 │   │       ├── backend/
 │   │       │   ├── handler.py
@@ -82,9 +85,10 @@ workspace/
 - `app/data/` declares data ownership, indexes, and additive migrations.
 - `app/security/` declares names-only secret requirements and vault/provider
   policy.
-- `app/config/` declares runtime preferences such as AI, shell, integrations,
-  targets, and deployment/domain target intent. It does not execute deployment
-  operations.
+- `app/config/` declares runtime preferences such as AI, auth, shell,
+  integrations, targets, refinement policy, and deployment/domain target
+  intent. It does not execute deployment operations and is not the primary
+  source of truth for module-owned service or commercial behavior.
 - Root deployment artifacts declare how the app runs and is packaged. They are
   provider-neutral handoff artifacts, not provider-owned adapters or product
   operations code.
@@ -109,7 +113,10 @@ app/modules/{module_id}/
 │   ├── notifications.yaml
 │   ├── settings.yaml
 │   ├── admin.yaml
-│   └── profile.yaml
+│   ├── profile.yaml
+│   ├── relationships.yaml
+│   ├── service.yaml
+│   └── commercial.yaml
 ├── runtime_extensions.yaml
 └── backend/
     ├── handler.py
@@ -123,6 +130,19 @@ app/modules/{module_id}/
 after state commits. `repo.py` owns persistence operations through
 `ctx.persistence.collection(module_id, entity_name)`. `policy.py` owns scope
 query helpers. `schemas.py` owns typed request, response, and document shapes.
+
+`contracts/service.yaml` is optional. Add it only when the module exposes a
+stable service boundary to generated apps, external clients, operators, or
+other modules. It is names-only metadata for routes, module actions, auth
+posture, generated-app handoff, forbidden generated outputs, provider-mechanics
+refs, and validation refs. It must not contain raw credentials or provider
+execution code.
+
+`contracts/commercial.yaml` is optional. Add it only when the module owns
+commercial display metadata, fee policy, service terms, or custom money-flow
+metadata outside the core `app/config/subscriptions.yaml` contract. It does not
+grant entitlements, write subscription assignments, process payments, or
+replace `subscriptions.yaml`.
 
 ## Service Contract
 
@@ -193,6 +213,9 @@ other operator capabilities.
   provider target intent. Direct app-owned provider mechanics live in
   `app/services/adapters/` only when the app itself controls that provider
   integration. Hosted platform mechanics live in the hosted product.
+- `app/config/refinement_policy.yaml` (apps with app-local refinement policy)
+  declares bounded app-specific preferences for the refinement harness. It is
+  canonical and optional at the app-structure level; it is not required for every app.
 - `app/config/subscriptions.yaml` (SaaS apps only) — the canonical generated-app
   plan catalog. Declares plan_ids and the capability_ids each plan grants.
   When `assignment_store` is declared, the OSS `ConfiguredEntitlementAdapter`
@@ -201,6 +224,10 @@ other operator capabilities.
   `NoOpEntitlementAdapter` grants all entitlement gates unconditionally.
   Schema: `mozaiks.subscriptions.v1`. This controls the generated app's own
   end-user feature gates, not hosted product pack access.
+- App-level commercial/service registry files are not canonical generated-app
+  source of truth. If an operator app keeps a central registry for convenience,
+  it should be a derived or compatibility summary of module-owned
+  `contracts/service.yaml` and `contracts/commercial.yaml` files.
 
 ## Workflow Contract
 

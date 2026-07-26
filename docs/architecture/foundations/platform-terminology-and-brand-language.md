@@ -113,7 +113,7 @@ implementation contracts.
 | --- | --- |
 | `factory_app` | first-party workspace that co-locates the app bundle, builder workflows, and first-party harness pack |
 | `Studio host` | `mozaiksai.hosts.studio` runtime composition |
-| `Control Plane` | runtime orchestration and refinement routing subsystem |
+| `Refinement Engine` | runtime orchestration and refinement routing subsystem |
 | `workflow_sequence` | internal workflow-sequencing contract |
 | `journey` | internal workflow/router execution unit |
 | `artifact_store` / `artifact_version` | runtime persistence concepts |
@@ -124,7 +124,7 @@ implementation contracts.
 These terms are correct inside logs, observability, internal admin diagnostics,
 and runtime docs, but should not become general product IA.
 
-- control plane
+- Refinement Engine
 - session router
 - workflow trigger
 - orchestration runtime
@@ -135,7 +135,7 @@ and runtime docs, but should not become general product IA.
 
 If one of these concepts must become user-visible, translate it first into a
 product term. Example: expose `Build review` or `Needs revision`, not
-`control-plane decision`.
+`Refinement Engine decision`.
 
 ## Terms To Retire From UX
 
@@ -143,7 +143,7 @@ Do not use these as visible product concepts:
 
 - `Hub`
 - `Factory App`
-- `Control Plane`
+- `Refinement Engine`
 - `workflow_sequence`
 - `Adapters`
 
@@ -162,7 +162,7 @@ Examples:
 
 - "Studio is the browser product; Studio host is the runtime composition term."
 - "Hosting is the customer-facing surface for managed rollout posture."
-- "Control Plane is runtime infrastructure, not a customer-facing dashboard."
+- "Refinement Engine is runtime infrastructure, not a customer-facing dashboard."
 
 ## Product Copy Rule
 

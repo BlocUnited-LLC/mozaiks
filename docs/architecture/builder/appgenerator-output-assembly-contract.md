@@ -27,7 +27,7 @@ The artifact split is strict:
 
 AppGenerator does not own the full build lifecycle, agent workflows, agent UI
 tools, or workflow transition surfaces. AgentGenerator produces workflow/agent
-artifacts, and the control plane governs AppContextVersion selection,
+artifacts, and the Refinement Engine governs AppContextVersion selection,
 validation, review, and ArtifactVersion acceptance/promotion. Generated bundle
 files become source of truth only through artifact acceptance and promotion.
 

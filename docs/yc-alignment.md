@@ -57,7 +57,7 @@ maps directly to what Mozaiks already ships:
 **Artifacts legible to AI by default.** The Mozaiks Context Graph is a
 queryable runtime artifact — nodes for modules, pages, workflows, agents, tools,
 schemas, and configs; edges for imports, declarations, action bindings, workflow
-handoffs, and data dependencies. The control-plane harness reads this graph to
+handoffs, and data dependencies. The refinement harness reads this graph to
 make targeted code changes without ever reading a README.
 
 **A self-improving loop.** The refinement loop is exactly what Hu describes:
@@ -156,7 +156,7 @@ operates.
 
 **What Mozaiks delivers today:** The Context Graph is a living map of how a
 generated app works. It is not documentation. It is a queryable runtime artifact
-updated with every build. The same infrastructure that lets the control-plane
+updated with every build. The same infrastructure that lets the Refinement Engine
 harness make targeted code changes — without ever reading a README — is the
 infrastructure that lets agents understand and operate a company's software
 without reverse-engineering it.

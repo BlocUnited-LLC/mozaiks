@@ -88,9 +88,9 @@ replay tests skip.
 
 ## Failure Meaning
 
-- Invalid `change_class`: the classifier output drifted from the control-plane
+- Invalid `change_class`: the classifier output drifted from the Refinement Engine
   contract.
-- Missing route or sequence: `control_plane.yaml` and
+- Missing route or sequence: `harness.yaml` and
   `extension_registry.json` are out of alignment.
 - Missing path family: deterministic impact derivation no longer recognizes the
   neutral refinement surface.

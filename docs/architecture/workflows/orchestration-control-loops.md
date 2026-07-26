@@ -8,26 +8,27 @@ The core rule is simple:
 - Mozaiks has three separate control loops.
 - Each loop owns different state, limits, resume behavior, and routing decisions.
 
-The builder-session loop is app-configurable through `app/config/ai.json`:
+The builder-session loop is app-configurable through `app/config/refinement_policy.yaml`:
 
-- `control_plane.enabled`
-- `control_plane.classifier.enabled`
-- `control_plane.classifier.llm_config`
-- `control_plane.coding.enabled`
-- `control_plane.coding.llm_config`
+- `enabled`
+- `classifier.enabled`
+- `classifier.llm_profile`
+- `coding.enabled`
+- `coding.llm_profile`
+- `llm_profiles`
 
-Those settings belong to the control plane. They are not workflow-local AG2
+Those settings belong to the Refinement Engine. They are not workflow-local AG2
 handoff settings.
 
 The first-party declarative pack for those settings lives under:
 
-- `factory_app/control_plane/config/*`
-- `factory_app/control_plane/prompts/*`
-- `factory_app/control_plane/tools/*`
+- `factory_app/refinement_harness/config/*`
+- `factory_app/refinement_harness/prompts/*`
+- `factory_app/refinement_harness/tools/*`
 
 For the target package split, declarative pack shape, and implementation
 checklist for this harness, see
-[Control-Plane Harness Architecture](control-plane-harness-architecture.md).
+[Refinement Harness Architecture](refinement-harness-architecture.md).
 
 If those loops are collapsed together, AG2 handoffs, build sequencing,
 refinement routing, and coding-agent repair all become harder to reason about.
@@ -70,7 +71,7 @@ This loop does not own:
 
 ### 2. Builder session loop
 
-This is the Mozaiks-owned control-plane loop that sits above workflow runs.
+This is the Mozaiks-owned Refinement Engine loop that sits above workflow runs.
 
 The user experiences one builder session even when the system internally starts,
 pauses, resumes, or switches multiple workflows.
@@ -81,7 +82,7 @@ This loop owns:
 - active build id and artifact lineage
 - current workflow sequence position
 - coarse workflow sequencing from `factory_app/workflows/extended_orchestration/extension_registry.json`
-- control-plane re-entry sequence selection from `control_plane.yaml`
+- Refinement Engine re-entry sequence selection from `harness.yaml`
 - artifact-family impact derived from selected workflow sequence metadata
 - build-time validation gates
 - preview readiness
@@ -95,7 +96,7 @@ This loop consumes:
 - workflow outcomes such as `completed`, `paused`, `failed`, or `invalid`
 - typed planning artifacts such as `BuildGraph`, `ChangeIntent`, and `ImpactSet`
 - active artifact versions under `generated/...`
-- control-plane tool summaries gathered from canonical concept, design, build,
+- Refinement Engine tool summaries gathered from canonical concept, design, build,
   and artifact stores
 - user requests that may mutate generated artifacts
 
@@ -107,7 +108,7 @@ This loop does not own:
 
 #### Current builder-session harness binding
 
-Today this loop enters the runtime through a control-plane harness, not through
+Today this loop enters the runtime through a refinement harness, not through
 one global AG2 prompt:
 
 - Studio `/api/workflows/trigger`
@@ -126,7 +127,7 @@ Important:
 - ordinary workflow chat stays in the workflow execution loop
 - the harness can now return `execution_mode="harness_decision"` when the
   correct next step is confirmation, clarification, or workflow fallback
-- refinement routes bind to named `workflow_sequences[]`; the control-plane
+- refinement routes bind to named `workflow_sequences[]`; the Refinement Engine
   pack should not duplicate downstream workflow lists already declared in the
   sequence graph
 
@@ -141,13 +142,13 @@ This loop may be implemented by:
 - a bounded `AgentGenerator` or `AppGenerator` re-entry
 - a coding-agent provider behind a Mozaiks-owned interface
 
-Current first-party support includes a conservative control-plane coding worker
+Current first-party support includes a conservative Refinement Engine coding worker
 that can short-circuit eligible patch refinements when
-`control_plane.coding.enabled=true`.
+`coding.enabled: true` in `app/config/refinement_policy.yaml`.
 If explicit file scope is missing, the dedicated `scope_requested` checkpoint
 can propose a bounded file set from artifact workspace context before the
 coding worker runs.
-The selected control-plane pack can now bound that inferred scope
+The selected refinement harness can now bound that inferred scope
 declaratively through `policies.yaml`, and low-risk multi-file proposals can be
 confirmed through a typed `apply_proposed_scope` harness action instead of
 forcing a full workflow fallback.
@@ -387,7 +388,7 @@ That is the canonical direction for Mozaiks:
 
 - [workflow-architecture.md](workflow-architecture.md)
 - [Orchestration and Decomposition](../orchestration-and-decomposition.md)
-- [Refinement Control Plane](refinement-control-plane.md)
+- [Refinement Engine](refinement-engine.md)
 
 Relevant repo-local builder docs:
 

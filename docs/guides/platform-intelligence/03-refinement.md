@@ -34,7 +34,7 @@ keeps the rest of the app stable.
 
 The classifier is backed by `ag2.Agent.ask()` with a `response_schema`
 that enforces the `ChangeClassifierResult` shape at the provider level. It reads
-persisted builder state from the control-plane context tools before calling the
+persisted builder state from the Refinement Engine context tools before calling the
 LLM, so it can take staleness into account:
 
 - if an upstream artifact family is stale, the classifier upgrades the change
@@ -43,7 +43,7 @@ LLM, so it can take staleness into account:
 
 ## How Patch Coding Works
 
-For `patch` requests, the control plane runs a scoped coding worker backed by
+For `patch` requests, the Refinement Engine runs a scoped coding worker backed by
 `ScopedRefinementCodingWorker` (also using `agent.ask()`). The coding worker:
 
 1. proposes file scope from the workspace catalog if none is provided
@@ -55,20 +55,18 @@ in scope and escalates to a full workflow if the request is broader than a patch
 
 ## For Builders: Opting In
 
-An app opts into the control plane through its `app/config/ai.json`:
+An app opts into app-local refinement by adding a refinement policy and, when
+needed, a refinement harness:
 
-```json
-{
-  "control_plane": {
-    "enabled": true,
-    "classifier": { "enabled": true },
-    "coding": { "enabled": true }
-  }
-}
+```text
+app/config/refinement_policy.yaml
+refinement_harness/config/harness.yaml
 ```
 
-LLM profiles and checkpoint declarations live in `control_plane/config/`. See
-[App-Local Control Plane Pack](../../architecture/app/control-plane-pack.md)
+`app/config/ai.json` still owns ask/chat/workflow startup only. LLM profiles live
+in `app/config/refinement_policy.yaml`; checkpoint declarations live in
+`refinement_harness/config/`. See
+[App-Local Refinement Harness](../../architecture/app/refinement-harness.md)
 for the full generated app starter pack template.
 
-For the full runtime behavior, see [Refinement Control Plane](../../architecture/workflows/refinement-control-plane.md).
+For the full runtime behavior, see [Refinement Engine](../../architecture/workflows/refinement-engine.md).

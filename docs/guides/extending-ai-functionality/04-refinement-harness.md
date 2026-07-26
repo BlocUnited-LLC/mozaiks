@@ -1,6 +1,6 @@
-# Control-Plane Manifest
+# Refinement Harness
 
-`control_plane/config/control_plane.yaml` declares the app-local harness pack:
+`refinement_harness/config/harness.yaml` declares the app-local harness pack:
 artifact routing, LLM-backed checkpoint events, prompt ids, and tool ids.
 
 Routes point to `workflow_sequence` ids only. Workflow
@@ -14,7 +14,7 @@ contract names in this file.
 Example:
 
 ```yaml
-schema_version: mozaiks.control_plane
+schema_version: mozaiks.refinement_harness.v1
 routing:
   default_artifact_kind: app_bundle
   artifacts:
@@ -67,7 +67,7 @@ For each artifact kind, define all four route classes:
 Each route value is only a `workflow_sequence` id. That id must exist in
 `workflows/extended_orchestration/extension_registry.json`.
 
-Use `checkpoints` only for LLM-backed control-plane events that need
+Use `checkpoints` only for LLM-backed refinement events that need
 app-specific prompts or tools:
 
 - `request_submitted` classifies the user's change request.
@@ -82,8 +82,8 @@ deterministic runtime checkpoints supplied by Mozaiks.
 For each checkpoint, choose:
 
 - `event`: one of the LLM-backed events above.
-- `prompt_id`: the id of a file in `control_plane/prompts/*.yaml`.
-- `tool_ids`: optional ids from `control_plane/config/tools.yaml`.
+- `prompt_id`: the id of a file in `refinement_harness/prompts/*.yaml`.
+- `tool_ids`: optional ids from `refinement_harness/config/tools.yaml`.
 
 Mozaiks infers:
 
@@ -94,7 +94,7 @@ Mozaiks infers:
 
 ## Boundaries
 
-Do not put generated Python handlers in an app-local control-plane pack. Use the
+Do not put generated Python handlers in an app-local refinement harness. Use the
 canonical runtime handlers supplied by `mozaiksai.control_plane` and declared
 context tools.
 
@@ -109,5 +109,5 @@ Do not add these fields:
 
 Do not duplicate route impact fields such as `affected_workflows`,
 `affected_declarative_families`, `requires_replanning`, `requires_rebuild`, or
-`scope_summary` in `control_plane.yaml`. They are derived from workflow sequence
+`scope_summary` in `harness.yaml`. They are derived from workflow sequence
 metadata.

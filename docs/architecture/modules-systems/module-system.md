@@ -29,7 +29,10 @@ app/modules/{module_id}/
 │   ├── notifications.yaml   # Notification rules per event
 │   ├── settings.yaml        # User/app settings schema
 │   ├── admin.yaml           # Admin panels mounted into /admin/*
-│   └── profile.yaml         # User profile page panels (optional)
+│   ├── profile.yaml         # User profile page panels (optional)
+│   ├── relationships.yaml   # Current-user resource relationship providers
+│   ├── service.yaml         # Optional module service boundary
+│   └── commercial.yaml      # Optional module commercial metadata/policy
 ├── runtime_extensions.yaml  # Optional: api_router / startup_service host hooks
 └── backend/
     ├── __init__.py
@@ -341,6 +344,92 @@ Omit the file when the module has no settings.
 schema_version: mozaiks.settings.v1
 settings: []
 ```
+
+### `contracts/service.yaml`
+
+Declare a stable service boundary owned by this module. Add this file only when
+another generated app, external client, operator surface, or module needs to
+discover and consume the module as a service.
+
+This is names-only contract metadata. It may declare service ids, service class,
+safe public API routes, module actions, auth posture, generated-app handoff,
+required env handle names, forbidden generated outputs, provider-mechanics
+references, and validation references. It must not contain raw credentials,
+provider customer/account ids, provider price ids, webhook secrets, settlement
+rules, or executable provider code.
+
+```yaml
+schema_version: mozaiks.service.v1
+service_id: payments_api
+status: active
+service_class: app_api
+label: Payments API
+purpose: Expose payment status and checkout initiation through module actions.
+owner_modules: [payments]
+public_surfaces:
+  api_routes: []
+  module_actions:
+    - payments.create_checkout
+    - payments.get_checkout_status
+auth:
+  method: app_api_key
+  issuer: payments
+  secret_delivery: env_handle
+  notes: Credentials are referenced by env handle only.
+generated_app_handoff:
+  build_context: null
+  capability_pack_id: null
+  client_path: services/integrations/payments_client.py
+  facade_modules: [billing_portal]
+  required_env_handles: [PAYMENTS_API_BASE, PAYMENTS_API_KEY]
+  forbidden_generated_outputs: [services/adapters/payments/]
+provider_mechanics_refs: []
+validation_refs:
+  - tests/test_payments_service_contract.py
+```
+
+`service.yaml` does not make `app/services/` a product layer. Provider
+mechanics still belong in `app/services/adapters/` only when the app directly
+owns that provider integration, and durable facts still belong in modules.
+
+### `contracts/commercial.yaml`
+
+Declare module-owned commercial metadata outside the core OSS subscription
+contract. Add this file only when the module owns safe price display, a module
+fee policy, service terms, usage-policy display, revenue-share metadata, or a
+custom money-flow boundary.
+
+This file does not grant entitlements, write subscription assignments, process
+payments, or replace `app/config/subscriptions.yaml`. Core OSS monetization
+remains intentionally small: subscriptions, seats, feature gates, quotas,
+prepaid credits, token wallets, token allowances, and usage meters.
+
+```yaml
+schema_version: mozaiks.commercial.v1
+scope: module
+summary: Commercial terms for checkout sessions owned by this module.
+runtime_authority: module
+items:
+  - id: marketplace_fee
+    label: Marketplace fee
+    status: active
+    kind: fee
+    display: 3.5%
+    amount_cents: null
+    currency: null
+    percentage_bps: 350
+    applies_to: [checkout_session]
+    source_refs:
+      - modules/payments/module.yaml
+    notes: Fee calculation happens in module service code after payment confirmation.
+public_disclosure: Fees are shown before payment.
+```
+
+Use `app/config/subscriptions.yaml` for recurring plans, paid feature gates,
+quotas, token wallets, and entitlement grants. Use module-owned
+`commercial.yaml` for commercial metadata that belongs to a specific module or
+service. Central app-level registries, if present in an operator app, should be
+derived or compatibility summaries rather than the source of truth.
 
 ### `contracts/admin.yaml`
 
@@ -694,7 +783,9 @@ AppGenerator generates `generated_module` class capabilities. For each module in
 3. Outputs `contracts/reactions.yaml` — reactions to events from other modules (if any)
 4. Outputs `contracts/notifications.yaml` — notification rules (if any)
 5. Outputs `contracts/profile.yaml` — user profile page panels, when the module has user-scoped account data worth surfacing (activity summaries, usage stats, notification preferences). Do not emit for every module.
-6. Outputs `backend/handler.py`, `backend/service.py`, `backend/repo.py`,
+6. Outputs `contracts/service.yaml` — service boundary metadata, when the module exposes a stable service to generated apps, external clients, operators, or other modules. Do not emit for every module.
+7. Outputs `contracts/commercial.yaml` — module-owned commercial metadata, when the module owns commercial display, fee policy, service terms, or custom money-flow metadata outside `app/config/subscriptions.yaml`. Do not emit for every module.
+8. Outputs `backend/handler.py`, `backend/service.py`, `backend/repo.py`,
    `backend/policy.py`, `backend/schemas.py` — backend stubs
 
 AppGenerator does **not** generate:
@@ -704,6 +795,9 @@ AppGenerator does **not** generate:
 - pack internals for framework packs → `framework_pack`
 - hosted service engines or external systems → `managed_capability` / `external_adapter`
 - `contracts/profile.yaml` with `kind: form` — `form` is reserved and rejected by the validator
+- app-level hosted service or monetization registries as primary truth — service
+  and commercial metadata belongs in module-owned contracts when it is durable
+  app behavior
 
 ---
 
