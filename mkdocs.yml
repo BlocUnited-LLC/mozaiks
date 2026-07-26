@@ -98,15 +98,7 @@ nav:
   - Guides:
       - guides/index.md
       - Use Studio: guides/studio/01-overview.md
-      - Configs:
-          - guides/configs/index.md
-          - App Identity: guides/configs/app-identity.md
-          - AI Startup: guides/configs/ai-startup.md
-          - Shell and Navigation: guides/configs/shell-navigation.md
-          - Integrations and Targets: guides/configs/integrations-targets.md
-          - Subscriptions: guides/configs/subscriptions.md
-          - Secrets and Data: guides/configs/secrets-data.md
-          - Refinement: guides/configs/refinement.md
+      - Config Files: guides/configs/index.md
       - Integrations: guides/integrations/01-overview.md
       - Add Workflows: guides/adding-workflows/01-overview.md
       - Add a Module: guides/adding-modules/01-overview.md
