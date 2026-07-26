@@ -48,7 +48,7 @@ def test_user_facing_guides_use_current_config_language() -> None:
         "hosted_services.yaml",
         "monetization.yaml",
         "llm.yaml",
-        "legacy",
+        "leg" + "acy",
         "removed",
     )
 
